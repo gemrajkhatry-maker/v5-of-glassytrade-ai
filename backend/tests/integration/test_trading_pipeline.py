@@ -1,0 +1,98 @@
+"""Integration tests — end-to-end pipeline through TradingSessionService."""
+
+import pytest
+from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
+from app.infrastructure.event_bus import InMemoryEventBus
+from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
+from app.infrastructure.adapters.data_generator import generate_market_data
+from app.application.services.trading_session import TradingSessionService
+
+
+class TestTradingSessionPipeline:
+    """Integration: tick → analysis → signal → risk → broker → portfolio."""
+
+    def setup_method(self):
+        self.bus = InMemoryEventBus()
+        self.broker = PaperBrokerAdapter()
+        self.session = TradingSessionService(
+            event_bus=self.bus, broker=self.broker,
+        )
+
+    def test_process_tick_returns_state(self):
+        tick = OHLC(time="t", open=100, high=101, low=99, close=100,
+                    volume=1000, vwap=100, taker_buy_volume=600, delta=200)
+        state = self.session.process_tick("BTCUSDT", tick)
+        assert "portfolio" in state
+        assert "amt" in state
+        assert "prediction" in state
+        assert "footprint" in state
+        assert "stats" in state
+
+    def test_pipeline_with_history(self):
+        """Feed 100 candles and verify state snapshot."""
+        data = generate_market_data(100, 100, "bullish")
+        state = None
+        for tick in data:
+            state = self.session.process_tick("BTCUSDT", tick)
+        assert state is not None
+        assert state["portfolio"]["balance"] > 0
+        assert state["amt"] is not None
+        assert state["prediction"] is not None
+
+    def test_session_state_persists(self):
+        data = generate_market_data(10, 100, "sideways")
+        for tick in data:
+            self.session.process_tick("BTCUSDT", tick)
+
+        session = self.session.get_or_create_session("BTCUSDT")
+        assert len(session.data) == 10
+
+    def test_multiple_symbols(self):
+        tick1 = OHLC(time="t", open=100, high=101, low=99, close=100,
+                     volume=1000, vwap=100)
+        tick2 = OHLC(time="t", open=50, high=51, low=49, close=50,
+                     volume=500, vwap=50)
+
+        self.session.process_tick("BTCUSDT", tick1)
+        self.session.process_tick("ETHUSDT", tick2)
+
+        btc_session = self.session.get_or_create_session("BTCUSDT")
+        eth_session = self.session.get_or_create_session("ETHUSDT")
+        assert len(btc_session.data) == 1
+        assert len(eth_session.data) == 1
+
+    def test_portfolio_survives_full_pipeline(self):
+        """Feed enough data that the pipeline should trigger analysis."""
+        data = generate_market_data(200, 50000, "volatile")
+        for tick in data:
+            state = self.session.process_tick("BTCUSDT", tick)
+
+        portfolio = state["portfolio"]
+        assert isinstance(portfolio["balance"], (int, float))
+        assert isinstance(portfolio["equity"], (int, float))
+
+    def test_data_capped_at_1000(self):
+        """Data buffer should not grow past 1000 entries."""
+        data = generate_market_data(500, 100, "sideways")
+        for tick in data:
+            self.session.process_tick("BTCUSDT", tick)
+
+        session = self.session.get_or_create_session("BTCUSDT")
+        assert len(session.data) == 500
+
+        # Add 600 more
+        data2 = generate_market_data(600, 100, "sideways")
+        for tick in data2:
+            self.session.process_tick("BTCUSDT", tick)
+
+        assert len(session.data) == 1000
+
+    def test_with_order_book(self):
+        tick = OHLC(time="t", open=100, high=101, low=99, close=100,
+                    volume=1000, vwap=100, taker_buy_volume=600, delta=200)
+        ob = OrderBook(
+            bids=(OrderBookLevel(price=99, quantity=1000),),
+            asks=(OrderBookLevel(price=101, quantity=500),),
+        )
+        state = self.session.process_tick("BTCUSDT", tick, ob)
+        assert state["portfolio"] is not None
