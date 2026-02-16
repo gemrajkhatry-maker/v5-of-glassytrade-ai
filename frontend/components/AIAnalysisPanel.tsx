@@ -1,14 +1,16 @@
-import React from 'react';
-import { GenAIAnalysis, AMTAnalysis, Portfolio } from '../types';
-import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Settings, Zap } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry } from '../types';
+import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Settings, Zap, AlertTriangle, Clock } from 'lucide-react';
 
 interface AIAnalysisPanelProps {
     analysis: GenAIAnalysis | null;
     amtResult: AMTAnalysis | null;
     portfolio: Portfolio;
+    riskState?: RiskState | null;
+    llmHistory?: LLMHistoryEntry[];
 }
 
-export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio }) => {
+export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, llmHistory = [] }) => {
     // 1. Fallback: If both are missing -> Initializing
     if (!analysis && !amtResult) {
         return (
@@ -31,31 +33,47 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
 
     // 2. Monitoring Mode: AMT ready, but no GenAI signal yet
     // We construct a "dummy" analysis object from AMT data to render the panel in "Monitoring" mode
-    const effectiveAnalysis: GenAIAnalysis = analysis || {
+    const effectiveAnalysis = useMemo<GenAIAnalysis>(() => analysis || {
         direction: 'FLAT',
         rationale: "Monitoring market state and order flow. Waiting for Fabio Playbook setup.",
         confidence: 'Low',
         marketState: amtResult?.marketState || 'BALANCED',
         aggression: `Score:${amtResult?.aggression?.toFixed(2) || "0.00"}`
-    };
+    }, [analysis, amtResult?.marketState, amtResult?.aggression]);
 
-    const displayAnalysis = effectiveAnalysis;
+    // Always prefer AMT data for market state and aggression (real market data > LLM defaults)
+    const displayAnalysis = useMemo(() => ({
+        ...effectiveAnalysis,
+        marketState: amtResult?.marketState || effectiveAnalysis.marketState || 'BALANCED',
+        aggression: effectiveAnalysis.aggression && effectiveAnalysis.aggression !== ''
+            ? effectiveAnalysis.aggression
+            : `Score:${amtResult?.aggression?.toFixed(2) || "0.00"}`,
+    }), [effectiveAnalysis, amtResult?.marketState, amtResult?.aggression]);
 
-    // --- Helper: Format Logic ---
-    const isLong = displayAnalysis.direction === 'LONG';
-    const isShort = displayAnalysis.direction === 'SHORT';
+    // Memoize open PnL calculation (used 3 times in render)
+    const openPnl = useMemo(() =>
+        portfolio.positions.reduce((acc, p) => acc + p.pnl, 0),
+        [portfolio.positions]
+    );
 
-    // Parse aggression
-    const aggScore = parseFloat(displayAnalysis.aggression?.split(':')[1] || "0.00");
+    // Parse aggression — prefer live AMT aggression over LLM's stale value
+    const aggScore = useMemo(() => {
+        const liveAggression = amtResult?.aggression ?? 0;
+        return typeof liveAggression === 'number' ? liveAggression : parseFloat(displayAnalysis.aggression?.split(':')[1] || "0.00");
+    }, [amtResult?.aggression, displayAnalysis.aggression]);
 
-    // Determine Status Color
-    const statusColor = isLong ? "text-green-400" : isShort ? "text-red-400" : "text-blue-300";
-    const statusBg = isLong ? "bg-green-500/20" : isShort ? "bg-red-500/20" : "bg-blue-500/20";
+    // Market state from AMT (real-time) not LLM (stale)
+    const liveMarketState = amtResult?.marketState || displayAnalysis.marketState || 'BALANCED';
+    const isImbalanced = liveMarketState === 'IMBALANCED';
+
+    // Determine Status Color based on market state (not LLM direction)
+    const statusColor = isImbalanced ? "text-orange-400" : "text-blue-300";
+    const statusBg = isImbalanced ? "bg-orange-500/20" : "bg-blue-500/20";
 
     // Location Data
-    const vah = amtResult?.valueAreaHigh?.toFixed(2) || "---";
-    const val = amtResult?.valueAreaLow?.toFixed(2) || "---";
-    const poc = amtResult?.poc?.toFixed(2) || "---";
+    const vah = useMemo(() => amtResult?.valueAreaHigh?.toFixed(2) || "---", [amtResult?.valueAreaHigh]);
+    const val = useMemo(() => amtResult?.valueAreaLow?.toFixed(2) || "---", [amtResult?.valueAreaLow]);
+    const poc = useMemo(() => amtResult?.poc?.toFixed(2) || "---", [amtResult?.poc]);
 
     return (
         <div className="bg-[#131722] border border-white/10 rounded-xl p-4 flex flex-col gap-4 font-sans text-slate-200 shadow-xl">
@@ -84,12 +102,29 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                 </div>
                 <div className="text-right">
                     <div className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Open PNL</div>
-                    <div className={`text-sm font-bold font-mono ${portfolio.positions.reduce((acc, p) => acc + p.pnl, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {portfolio.positions.reduce((acc, p) => acc + p.pnl, 0) >= 0 ? '+' : ''}
-                        ${portfolio.positions.reduce((acc, p) => acc + p.pnl, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    <div className={`text-sm font-bold font-mono ${openPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                        {openPnl >= 0 ? '+' : ''}
+                        ${openPnl.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </div>
                 </div>
             </div>
+
+            {/* Risk State Warning */}
+            {riskState?.halted && (
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                    <div>
+                        <div className="text-[10px] uppercase tracking-widest text-red-400 font-bold">Trading Halted</div>
+                        <div className="text-[10px] text-red-300/70">{riskState.haltReason}</div>
+                    </div>
+                </div>
+            )}
+            {riskState && !riskState.halted && riskState.consecutiveLosses > 0 && (
+                <div className="flex justify-between text-[10px] px-1">
+                    <span className="text-white/40">Consecutive Losses: <span className="text-yellow-400 font-bold">{riskState.consecutiveLosses}</span></span>
+                    <span className="text-white/40">Daily P&L: <span className={riskState.dailyPnl >= 0 ? 'text-green-400' : 'text-red-400'}>${riskState.dailyPnl.toFixed(2)}</span></span>
+                </div>
+            )}
 
             {/* 01. STATE */}
             <div className="flex flex-col gap-2">
@@ -100,13 +135,13 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                 <div className={`p-3 rounded-lg bg-white/5 border border-white/5 flex justify-between items-center ${statusBg}`}>
                     <div>
                         <div className={`text-sm font-bold ${statusColor} tracking-wide`}>
-                            {displayAnalysis.marketState?.toUpperCase() || "BALANCED"}
+                            {liveMarketState.toUpperCase()}
                         </div>
                         <div className="text-[10px] text-white/50">
-                            {displayAnalysis.marketState?.includes('Trend') ? 'Trend Mode' : 'Range Mode'}
+                            {isImbalanced ? 'Trend Mode' : 'Range Mode'}
                         </div>
                     </div>
-                    {displayAnalysis.confidence === 'High' && <div className="h-2 w-2 rounded-full bg-blue-400 animate-pulse"></div>}
+                    <div className="h-2 w-2 rounded-full bg-green-400 animate-pulse" title="Live"></div>
                 </div>
             </div>
 
@@ -129,6 +164,14 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                         <span className="text-[10px] text-white/40">VA Low</span>
                         <span className="text-xs font-mono text-blue-300">{val}</span>
                     </div>
+                    {amtResult?.poc && amtResult.poc > 0 && (
+                        <div className="flex justify-between items-baseline pt-1 border-t border-white/5">
+                            <span className="text-[10px] text-white/40">LVNs</span>
+                            <span className="text-[10px] font-mono text-white/30">
+                                {amtResult.lvns?.length ? amtResult.lvns.map(l => l.toFixed(0)).join(', ') : 'None'}
+                            </span>
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -161,35 +204,77 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
             {/* Footer Status */}
             <div className="mt-2 text-xs text-white/40 flex items-start gap-2 pt-2 border-t border-white/5">
                 <div className={`mt-1 h-2 w-2 rounded-full ${displayAnalysis.direction !== 'FLAT' ? 'bg-green-500 animate-ping' : 'bg-slate-600'}`}></div>
-                <div>
+                <div className="flex-1 min-w-0">
                     <div className="font-bold text-white/80 uppercase tracking-wider mb-1">
                         {displayAnalysis.direction === 'FLAT' ? "MONITORING MARKET" : `ENTRY SIGNAL: ${displayAnalysis.direction}`}
                     </div>
                     <p className="leading-relaxed font-light text-[10px] line-clamp-3">
                         {displayAnalysis.rationale.split('Trigger:')[0].trim() || "Analyzing order flow and market structure for Fabio Playbook setups."}
                     </p>
-                    {displayAnalysis.inputPrompt && (
-                        <div className="mt-2 space-y-1">
-                            <details className="group">
-                                <summary className="text-[9px] text-white/20 cursor-pointer hover:text-white/40 uppercase list-none flex items-center gap-1">
-                                    <span>▶</span> Debug Input
-                                </summary>
-                                <div className="mt-1 p-1 bg-black/20 rounded text-[9px] font-mono text-white/40 max-w-[250px] overflow-hidden truncate">
-                                    {analysis.inputPrompt.slice(0, 150)}...
-                                </div>
-                            </details>
-                            <details className="group">
-                                <summary className="text-[9px] text-white/20 cursor-pointer hover:text-white/40 uppercase list-none flex items-center gap-1">
-                                    <span>▶</span> Debug Output
-                                </summary>
-                                <div className="mt-1 p-1 bg-black/20 rounded text-[9px] font-mono text-white/40 leading-relaxed whitespace-pre-wrap">
-                                    {analysis.rawOutput || "No output captured."}
-                                </div>
-                            </details>
-                        </div>
-                    )}
                 </div>
             </div>
+
+            {/* 04. MODEL I/O LOG */}
+            <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
+                <div className="text-[10px] text-white/40 uppercase tracking-widest">04. Model I/O</div>
+                <div className="p-2 rounded-lg bg-black/30 border border-white/5 space-y-2 max-h-[200px] overflow-y-auto">
+                    <div>
+                        <div className="text-[9px] text-cyan-400/60 uppercase font-bold mb-1">Prompt → Model</div>
+                        <div className="text-[9px] font-mono text-white/50 leading-relaxed whitespace-pre-wrap break-words">
+                            {displayAnalysis.inputPrompt || "Waiting for first LLM call..."}
+                        </div>
+                    </div>
+                    <div className="border-t border-white/5 pt-2">
+                        <div className="text-[9px] text-amber-400/60 uppercase font-bold mb-1">Model → Output</div>
+                        <div className="text-[9px] font-mono text-white/50 leading-relaxed whitespace-pre-wrap break-words">
+                            {displayAnalysis.rawOutput || "No output yet."}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* 05. LLM DECISION HISTORY */}
+            {llmHistory.length > 0 && (
+                <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
+                    <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
+                        <span>05. Decision History ({llmHistory.length})</span>
+                        <Clock className="w-3 h-3" />
+                    </div>
+                    <div className="space-y-1 max-h-[250px] overflow-y-auto">
+                        {[...llmHistory].reverse().map((entry, i) => {
+                            const dirColor = entry.direction === 'LONG' ? 'text-green-400' : entry.direction === 'SHORT' ? 'text-red-400' : 'text-blue-300';
+                            const dirBg = entry.direction === 'LONG' ? 'border-green-500/20' : entry.direction === 'SHORT' ? 'border-red-500/20' : 'border-white/5';
+                            const timeStr = new Date(entry.timestamp).toLocaleTimeString();
+                            return (
+                                <details key={i} className={`p-2 rounded-lg bg-black/20 border ${dirBg} cursor-pointer`}>
+                                    <summary className="flex justify-between items-center text-[10px]">
+                                        <div className="flex items-center gap-2">
+                                            <span className={`font-bold ${dirColor}`}>{entry.direction}</span>
+                                            <span className="text-white/30">{entry.confidence}</span>
+                                        </div>
+                                        <span className="text-white/30 font-mono">{timeStr}</span>
+                                    </summary>
+                                    <div className="mt-2 space-y-2">
+                                        <div className="text-[9px] text-white/50 leading-relaxed">{entry.rationale}</div>
+                                        {entry.inputPrompt && (
+                                            <div>
+                                                <div className="text-[9px] text-cyan-400/60 uppercase font-bold mb-1">Prompt</div>
+                                                <div className="text-[9px] font-mono text-white/40 whitespace-pre-wrap break-words max-h-[100px] overflow-y-auto">{entry.inputPrompt}</div>
+                                            </div>
+                                        )}
+                                        {entry.rawOutput && (
+                                            <div>
+                                                <div className="text-[9px] text-amber-400/60 uppercase font-bold mb-1">Output</div>
+                                                <div className="text-[9px] font-mono text-white/40 whitespace-pre-wrap break-words max-h-[100px] overflow-y-auto">{entry.rawOutput}</div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </details>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
 
         </div>
     );

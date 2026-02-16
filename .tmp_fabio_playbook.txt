@@ -159,3 +159,4 @@ Aggression
 Risk/Stops/Targets
 - Keep the default target-at-POC behavior
 - Only trail on rare strong-trend days with continued displacement confirmation
+

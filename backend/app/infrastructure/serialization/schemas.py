@@ -330,8 +330,8 @@ def portfolio_to_dto(p) -> dict:
         "balance": p.balance, "equity": p.equity,
         "leverage": p.leverage,
         "positions": [position_to_dto(pos) for pos in p.positions],
-        "closedTrades": [position_to_dto(ct) for ct in p.closed_trades],
-        "history": p.history,
+        "closedTrades": [position_to_dto(ct) for ct in p.closed_trades[-50:]],
+        "history": p.history[-100:],
     }
 
 

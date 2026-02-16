@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import {
   createChart,
   ColorType,
@@ -228,15 +228,16 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       }
     };
 
-    let animationId: number;
-    const animate = () => {
-      if (isHidden) return;
-      drawOverlay();
-      animationId = requestAnimationFrame(animate);
-    };
-    animate();
+    // Draw once immediately when data changes
+    drawOverlay();
 
-    return () => cancelAnimationFrame(animationId);
+    // Subscribe to chart pan/zoom events to redraw
+    const onVisibleRangeChange = () => drawOverlay();
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRangeChange);
+
+    return () => {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRangeChange);
+    };
 
   }, [amtAnalysis, data, footprintData, cumulativeDeltas, config, mode, isHidden]);
 
@@ -716,4 +717,4 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   );
 };
 
-export default ChartScene;
+export default React.memo(ChartScene);

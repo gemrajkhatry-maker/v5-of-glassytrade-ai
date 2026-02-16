@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import ChartScene from './components/ChartScene';
 import AIControls from './components/AIControls';
 import { AIAnalysisPanel } from './components/AIAnalysisPanel';
@@ -72,6 +72,38 @@ function App() {
         }
     };
 
+    // Memoized derived state — must be before early returns (Rules of Hooks)
+    const aiStats = useMemo<StrategyStats>(() => {
+        if (!activeInstrument) return { totalTrades: 0, wins: 0, losses: 0, winRate: 0, netProfit: 0, avgProfit: 0, largestWin: 0, largestLoss: 0 };
+        const predTrades = activeInstrument.portfolio.closedTrades.filter((t: TradePosition) => t.source === 'PREDICTION');
+        const wins = predTrades.filter((t: TradePosition) => t.pnl > 0);
+        const losses = predTrades.filter((t: TradePosition) => t.pnl <= 0);
+        const netProfit = predTrades.reduce((s: number, t: TradePosition) => s + t.pnl, 0);
+        return {
+            totalTrades: predTrades.length,
+            wins: wins.length,
+            losses: losses.length,
+            winRate: predTrades.length > 0 ? (wins.length / predTrades.length) * 100 : 0,
+            netProfit,
+            avgProfit: predTrades.length > 0 ? netProfit / predTrades.length : 0,
+            largestWin: wins.reduce((max: number, t: TradePosition) => Math.max(max, t.pnl), 0),
+            largestLoss: losses.reduce((min: number, t: TradePosition) => Math.min(min, t.pnl), 0),
+        };
+    }, [activeInstrument?.portfolio.closedTrades]);
+
+    const amtPortfolio = useMemo(() => {
+        if (!activeInstrument) return null;
+        return {
+            ...activeInstrument.portfolio,
+            positions: activeInstrument.portfolio.positions.filter(p => p.source === 'AMT'),
+        };
+    }, [activeInstrument?.portfolio]);
+
+    const effectiveConfig = useMemo<ChartConfig>(() => ({
+        ...config,
+        symbol: activeInstrument?.symbol || config.symbol,
+    }), [config, activeInstrument?.symbol]);
+
     // --- Rendering ---
 
     if (marketData.isScanning) {
@@ -87,28 +119,6 @@ function App() {
     }
 
     if (!activeInstrument) return null;
-
-    // Compute stats inline (pure computation — no business logic import needed)
-    const predTrades = activeInstrument.portfolio.closedTrades.filter((t: TradePosition) => t.source === 'PREDICTION');
-    const wins = predTrades.filter((t: TradePosition) => t.pnl > 0);
-    const losses = predTrades.filter((t: TradePosition) => t.pnl <= 0);
-    const netProfit = predTrades.reduce((s: number, t: TradePosition) => s + t.pnl, 0);
-    const aiStats: StrategyStats = {
-        totalTrades: predTrades.length,
-        wins: wins.length,
-        losses: losses.length,
-        winRate: predTrades.length > 0 ? (wins.length / predTrades.length) * 100 : 0,
-        netProfit,
-        avgProfit: predTrades.length > 0 ? netProfit / predTrades.length : 0,
-        largestWin: wins.reduce((max: number, t: TradePosition) => Math.max(max, t.pnl), 0),
-        largestLoss: losses.reduce((min: number, t: TradePosition) => Math.min(min, t.pnl), 0),
-    };
-    const amtPortfolio = { ...activeInstrument.portfolio, positions: activeInstrument.portfolio.positions.filter(p => p.source === 'AMT') };
-
-    const effectiveConfig: ChartConfig = {
-        ...config,
-        symbol: activeInstrument.symbol,
-    };
 
     return (
         <div className="relative w-screen h-screen overflow-hidden bg-slate-900 flex">
@@ -276,6 +286,8 @@ function App() {
                         analysis={activeInstrument.genAIAnalysis}
                         amtResult={activeInstrument.amtAnalysis}
                         portfolio={activeInstrument.portfolio}
+                        riskState={activeInstrument.riskState}
+                        llmHistory={activeInstrument.llmHistory}
                     />
 
                     {/* 

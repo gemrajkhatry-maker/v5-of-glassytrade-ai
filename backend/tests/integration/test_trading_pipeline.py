@@ -14,8 +14,18 @@ class TestTradingSessionPipeline:
     def setup_method(self):
         self.bus = InMemoryEventBus()
         self.broker = PaperBrokerAdapter()
+        from app.domain.ports.llm_inference import LLMInferencePort
+
+        class _StubLLM(LLMInferencePort):
+            def predict(self, instruction, input_text):
+                return "Trigger: **Stay Flat**"
+            def is_ready(self):
+                return True
+
+        from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+        gen_ai = GenerativeAIService(llm_adapter=_StubLLM())
         self.session = TradingSessionService(
-            event_bus=self.bus, broker=self.broker,
+            event_bus=self.bus, broker=self.broker, gen_ai_service=gen_ai,
         )
 
     def test_process_tick_returns_state(self):

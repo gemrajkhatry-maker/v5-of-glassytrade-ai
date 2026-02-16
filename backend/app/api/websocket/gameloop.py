@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import traceback
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
@@ -18,6 +19,19 @@ from app.application.services.trading_session import TradingSessionService
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
 
 router = APIRouter(prefix="/trading", tags=["trading"])
+
+
+def _validate_tick(tick: OHLC) -> str | None:
+    """Return an error string if tick data is invalid, else None."""
+    for name, val in [("open", tick.open), ("high", tick.high),
+                      ("low", tick.low), ("close", tick.close)]:
+        if math.isnan(val) or math.isinf(val) or val <= 0:
+            return f"Invalid tick: {name}={val}, must be > 0 and finite"
+    if math.isnan(tick.volume) or math.isinf(tick.volume) or tick.volume < 0:
+        return f"Invalid tick: volume={tick.volume}, must be >= 0 and finite"
+    if tick.high < tick.low:
+        return f"Invalid tick: high ({tick.high}) < low ({tick.low})"
+    return None
 
 
 @router.websocket("/ws/gameloop")
@@ -36,19 +50,28 @@ async def gameloop_ws(ws: WebSocket):
 
             symbol = data.get("symbol", "BTCUSDT")
 
-            # Parse tick
+            # Parse tick with validation
             tick_raw = data.get("tick", {})
-            tick = OHLC(
-                time=tick_raw.get("time", ""),
-                open=float(tick_raw.get("open", 0)),
-                high=float(tick_raw.get("high", 0)),
-                low=float(tick_raw.get("low", 0)),
-                close=float(tick_raw.get("close", 0)),
-                volume=float(tick_raw.get("volume", 0)),
-                vwap=float(tick_raw.get("vwap", 0)),
-                taker_buy_volume=float(tick_raw.get("takerBuyVolume", 0)),
-                delta=float(tick_raw.get("delta", 0)),
-            )
+            try:
+                tick = OHLC(
+                    time=tick_raw.get("time", ""),
+                    open=float(tick_raw.get("open", 0)),
+                    high=float(tick_raw.get("high", 0)),
+                    low=float(tick_raw.get("low", 0)),
+                    close=float(tick_raw.get("close", 0)),
+                    volume=float(tick_raw.get("volume", 0)),
+                    vwap=float(tick_raw.get("vwap", 0)),
+                    taker_buy_volume=float(tick_raw.get("takerBuyVolume", 0)),
+                    delta=float(tick_raw.get("delta", 0)),
+                )
+            except (TypeError, ValueError) as e:
+                await ws.send_json({"error": f"Invalid tick data: {e}"})
+                continue
+
+            error = _validate_tick(tick)
+            if error:
+                await ws.send_json({"error": error})
+                continue
 
             # Parse optional order book
             ob_raw = data.get("orderBook")

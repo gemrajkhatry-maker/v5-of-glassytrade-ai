@@ -10,6 +10,8 @@ import {
     AMTAnalysis,
     AIAnalysis,
     ModelWeights,
+    RiskState,
+    LLMHistoryEntry,
 } from '../types';
 import { normalizeSymbol } from '../services/binanceService';
 
@@ -46,6 +48,8 @@ const createInstrumentState = (
     aiAnalysis: null,
     genAIAnalysis: null,
     amtAnalysis: null,
+    riskState: null,
+    llmHistory: [],
     predictions: [],
     lastUpdate: Date.now(),
 });
@@ -122,7 +126,7 @@ export const useServerTradingSystem = (
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const ws = new WebSocket(`${protocol}://localhost:8000/api/trading/ws/gameloop`);
+        const ws = new WebSocket(`${protocol}://${window.location.host}/api/trading/ws/gameloop`);
 
         ws.onopen = () => {
             console.log('[ServerTradingSystem] WS connected');
@@ -139,17 +143,55 @@ export const useServerTradingSystem = (
                     const inst = prev[symbol];
                     if (!inst) return prev;
 
+                    // Resolve new values, falling back to existing if not provided
+                    const newPortfolio = state.portfolio ?? inst.portfolio;
+                    const newAmtAnalysis = state.amt ?? inst.amtAnalysis;
+                    const newAiAnalysis = state.prediction?.analysis ?? inst.aiAnalysis;
+                    const newGenAIAnalysis = state.genAIAnalysis ?? inst.genAIAnalysis;
+                    const newPredictions = state.prediction?.predictions ?? inst.predictions;
+                    const newModelWeights = state.modelWeights ?? inst.modelWeights;
+                    const newGeneration = state.generation ?? inst.generation;
+                    const newRiskState = state.riskState ?? inst.riskState;
+
+                    // Skip update if nothing changed (reference equality)
+                    if (newPortfolio === inst.portfolio &&
+                        newAmtAnalysis === inst.amtAnalysis &&
+                        newAiAnalysis === inst.aiAnalysis &&
+                        newGenAIAnalysis === inst.genAIAnalysis &&
+                        newPredictions === inst.predictions &&
+                        newModelWeights === inst.modelWeights &&
+                        newGeneration === inst.generation &&
+                        newRiskState === inst.riskState) {
+                        return prev;
+                    }
+
                     return {
                         ...prev,
                         [symbol]: {
                             ...inst,
-                            portfolio: state.portfolio ?? inst.portfolio,
-                            amtAnalysis: state.amt ?? inst.amtAnalysis,
-                            aiAnalysis: state.prediction?.analysis ?? inst.aiAnalysis,
-                            genAIAnalysis: state.genAIAnalysis ?? inst.genAIAnalysis,
-                            predictions: state.prediction?.predictions ?? inst.predictions,
-                            modelWeights: state.modelWeights ?? inst.modelWeights,
-                            generation: state.generation ?? inst.generation,
+                            portfolio: newPortfolio,
+                            amtAnalysis: newAmtAnalysis,
+                            aiAnalysis: newAiAnalysis,
+                            genAIAnalysis: newGenAIAnalysis,
+                            llmHistory: (() => {
+                                const newAi = state.genAIAnalysis;
+                                if (!newAi || !newAi.inputPrompt) return inst.llmHistory;
+                                const lastEntry = inst.llmHistory[inst.llmHistory.length - 1];
+                                if (lastEntry && lastEntry.inputPrompt === newAi.inputPrompt) return inst.llmHistory;
+                                const entry: LLMHistoryEntry = {
+                                    timestamp: Date.now(),
+                                    direction: newAi.direction,
+                                    confidence: newAi.confidence,
+                                    rationale: newAi.rationale,
+                                    inputPrompt: newAi.inputPrompt,
+                                    rawOutput: newAi.rawOutput,
+                                };
+                                return [...inst.llmHistory, entry].slice(-20);
+                            })(),
+                            predictions: newPredictions,
+                            modelWeights: newModelWeights,
+                            generation: newGeneration,
+                            riskState: newRiskState,
                             lastUpdate: Date.now(),
                         },
                     };

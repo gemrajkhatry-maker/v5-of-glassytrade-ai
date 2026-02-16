@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from app.domain.trading.models.enums import SignalType, Source, SetupType, Sentiment
 from app.domain.trading.models.entities import Signal
-from app.domain.trading.models.value_objects import AMTResult, OHLC
-from app.domain.fabio_ai.models.predictions import AIAnalysisResult
+from app.domain.trading.models.value_objects import AMTResult, OHLC, AIAnalysisResult
 
 
 class SignalGenerator:

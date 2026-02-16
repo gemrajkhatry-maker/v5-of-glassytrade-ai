@@ -75,6 +75,7 @@ class AMTResult:
     setup: str | None = None
     profile: tuple[VolumeProfileLevel, ...] = ()
     aggressive_prints: tuple[AggressivePrint, ...] = ()
+    profile_shape: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +125,43 @@ class AICommandResponse:
     message: str
     config_updates: dict | None = None
     action: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# AI/ML Prediction Value Objects (shared across domains)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ModelWeights:
+    """Adaptive weights for multi-factor prediction model."""
+    trend: float = 0.40
+    momentum: float = 0.25
+    delta: float = 0.15
+    order_book: float = 0.15
+    volatility: float = 0.05
+
+
+@dataclass(frozen=True)
+class FactorBreakdown:
+    """Individual factor contributions to AI analysis."""
+    trend: float = 0.0
+    momentum: float = 0.0
+    delta: float = 0.0
+    order_book: float = 0.0
+    volatility: float = 0.0
+
+
+@dataclass(frozen=True)
+class AIAnalysisResult:
+    """Result of AI-driven market analysis (prediction engine output)."""
+    sentiment: str  # Sentiment enum value
+    confidence: float
+    long_term_trend: str  # TrendDirection enum value
+    volatility_score: float
+    quant_score: float
+    projected_price: float
+    reasoning: tuple[str, ...] = ()
+    factor_breakdown: FactorBreakdown = field(default_factory=FactorBreakdown)
 
 
 # Avoid circular imports — Signal is defined in entities.py

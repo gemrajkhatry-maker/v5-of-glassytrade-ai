@@ -11,8 +11,6 @@ from typing import Any
 
 from app.domain.trading.models.value_objects import (
     OHLC, OrderBook, AMTResult,
-)
-from app.domain.fabio_ai.models.predictions import (
     ModelWeights, AIAnalysisResult, FactorBreakdown,
 )
 from app.domain.trading.models.entities import Signal, Position

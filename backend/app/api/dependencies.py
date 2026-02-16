@@ -13,10 +13,13 @@ from app.infrastructure.event_bus import InMemoryEventBus
 from app.infrastructure.adapters.binance_adapter import BinanceMarketDataAdapter
 from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 from app.infrastructure.adapters.gemini_adapter import GeminiAIAdapter
-from app.application.services.trading_session import TradingSessionService
+from app.infrastructure.adapters.llm_inference_adapter import LLMInferenceAdapter
+from app.infrastructure.adapters.mlx_inference_adapter import MLXInferenceAdapter
+from app.infrastructure.storage.database import SQLiteStorageAdapter
 from app.application.services.trading_session import TradingSessionService
 from app.domain.ports.market_data import MarketDataPort
 from app.domain.ports.ai_model import AIModelPort
+from app.domain.ports.llm_inference import LLMInferencePort
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 
 
@@ -32,11 +35,17 @@ class ServiceGraph:
         self.ai_model: AIModelPort = GeminiAIAdapter(
             api_key=settings.GEMINI_API_KEY,
         )
-        self.gen_ai_service = GenerativeAIService()
+        if settings.LLM_BACKEND == "mlx":
+            self.llm_inference: LLMInferencePort = MLXInferenceAdapter()
+        else:
+            self.llm_inference: LLMInferencePort = LLMInferenceAdapter()
+        self.gen_ai_service = GenerativeAIService(llm_adapter=self.llm_inference)
+        self.storage = SQLiteStorageAdapter()
         self.trading_session = TradingSessionService(
             event_bus=self.event_bus,
             broker=self.broker,
             gen_ai_service=self.gen_ai_service,
+            storage=self.storage,
         )
 
 

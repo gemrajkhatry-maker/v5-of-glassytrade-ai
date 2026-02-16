@@ -47,11 +47,27 @@ export interface GenAIAnalysis {
   aggression?: string;
 }
 
+export interface RiskState {
+  halted: boolean;
+  haltReason: string;
+  consecutiveLosses: number;
+  dailyPnl: number;
+}
+
+export interface LLMHistoryEntry {
+  timestamp: number;
+  direction: 'LONG' | 'SHORT' | 'FLAT';
+  confidence: string;
+  rationale: string;
+  inputPrompt?: string;
+  rawOutput?: string;
+}
+
 export interface TradePosition {
   id: string;
   symbol: string;
   side: 'LONG' | 'SHORT';
-  source: 'AMT' | 'PREDICTION';
+  source: 'AMT' | 'PREDICTION' | 'LLM';
   entryPrice: number;
   size: number;
   stopLoss: number;
@@ -90,6 +106,8 @@ export interface InstrumentState {
   aiAnalysis: AIAnalysis | null; // This refers to the numeric prediction model
   genAIAnalysis: GenAIAnalysis | null; // This refers to the Fabio Logic LLM
   amtAnalysis: AMTAnalysis | null;
+  riskState: RiskState | null;
+  llmHistory: LLMHistoryEntry[];
   predictions: OHLCData[];
   lastUpdate: number;
 }
@@ -150,7 +168,7 @@ export interface TradeSignal {
   takeProfit: number;
   timestamp: string;
   setup: 'TREND_MODEL' | 'MEAN_REVERSION' | 'PREDICTION_ENTRY';
-  source: 'AMT' | 'PREDICTION';
+  source: 'AMT' | 'PREDICTION' | 'LLM';
   metadata?: any;
 }
 

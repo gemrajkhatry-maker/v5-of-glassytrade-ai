@@ -7,7 +7,11 @@ import random
 import statistics
 
 # Re-use generation logic from generate_fabio_data.py for consistency but strictly for testing
-from generate_fabio_data import generate_aaa_setup, generate_momentum_setup, generate_failed_auction_setup, generate_risk_management_scenario
+from generate_fabio_data import (
+    generate_aaa_long, generate_aaa_short, generate_momentum_long,
+    generate_momentum_short, generate_failed_auction, generate_risk_management,
+    generate_poc_scenario, generate_edge_case,
+)
 
 # Configuration
 BASE_MODEL = "./models/Nanbeige4.1-3B"
@@ -30,27 +34,36 @@ def load_model():
 def generate_test_case():
     """Generates a single test case with ground truth."""
     r = random.random()
-    if r < 0.3:
-        data = generate_aaa_setup()
-        setup_type = "AAA Setup"
-        expected_action = "Long" # Simplified for this specific logic
-    elif r < 0.6:
-        data = generate_momentum_setup()
-        setup_type = "Momentum"
+    if r < 0.15:
+        data = generate_aaa_long()
+        setup_type = "AAA Long"
         expected_action = "Long"
-    elif r < 0.8:
-        data = generate_failed_auction_setup()
+    elif r < 0.30:
+        data = generate_aaa_short()
+        setup_type = "AAA Short"
+        expected_action = "Short"
+    elif r < 0.45:
+        data = generate_momentum_long()
+        setup_type = "Momentum Long"
+        expected_action = "Long"
+    elif r < 0.55:
+        data = generate_momentum_short()
+        setup_type = "Momentum Short"
+        expected_action = "Short"
+    elif r < 0.70:
+        data = generate_failed_auction()
         setup_type = "Failed Auction"
         expected_action = "Short"
-    else:
-        data = generate_risk_management_scenario()
+    elif r < 0.85:
+        data = generate_risk_management()
         setup_type = "Risk Mgmt"
-        expected_action = "Flat" # Or Close
+        expected_action = "Flat"
+    else:
+        data = generate_edge_case()
+        setup_type = "Edge Case"
+        expected_action = "Flat"
 
-    # Assign Outcome based on "Ground Truth" logic assumption
-    # In a real backtest, this would be the actual market move. 
-    # Here, we assume the specific setups defined *should* work if identified correctly.
-    if setup_type == "Risk Mgmt":
+    if expected_action == "Flat":
         pnl_if_correct = 0
     else:
         pnl_if_correct = RISK_PER_TRADE * REWARD_RATIO
@@ -63,7 +76,7 @@ def generate_test_case():
     }
 
 def run_inference(model, tokenizer, device, input_text):
-    instruction = "Analyze the trading scenario based on Fabio Valentini's methodology. Provide a Trigger: Enter Long, Enter Short, or Stay Flat."
+    instruction = "Analyze the trading scenario based on Fabio Valentini's methodology (Orderflow, Auction Market Theory)."
     alpaca_prompt = f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
 ### Instruction:
@@ -94,12 +107,30 @@ def run_inference(model, tokenizer, device, input_text):
     return clean_response, latency, tps
 
 def parse_decision(response_text):
-    if "Enter Long" in response_text or "**Long**" in response_text:
-        return "Long"
-    elif "Enter Short" in response_text or "**Short**" in response_text:
-        return "Short"
-    elif "Stay Flat" in response_text or "Walk away" in response_text or "Close" in response_text:
-        return "Flat"
+    """Use same keywords as production parser."""
+    lower = response_text.lower()
+    # Check trigger line first
+    import re
+    trigger_match = re.search(r'trigger:\s*(.+?)(?:\.\s|$)', lower, re.IGNORECASE)
+    if trigger_match:
+        trigger = trigger_match.group(1).strip()
+        long_kw = ["enter long", "long with size", "long on pullback", "long on any dip",
+                    "long on re-entry", "long into", "add to longs", "re-enter long",
+                    "long with target", "long with full"]
+        short_kw = ["enter short", "short on confirmation", "short with target",
+                     "short or", "short with"]
+        for kw in short_kw:
+            if kw in trigger: return "Short"
+        for kw in long_kw:
+            if kw in trigger: return "Long"
+    # Flat keywords
+    flat_kw = ["walk away", "stay flat", "bank profit", "stop trading",
+               "reduce size", "take profit", "exit long", "risk management", "discipline"]
+    for kw in flat_kw:
+        if kw in lower: return "Flat"
+    # Broad scan
+    if "enter long" in lower or "**long**" in lower: return "Long"
+    if "enter short" in lower or "**short**" in lower: return "Short"
     return "Unknown"
 
 def main():

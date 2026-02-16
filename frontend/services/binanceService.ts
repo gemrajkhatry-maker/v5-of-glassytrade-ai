@@ -6,6 +6,10 @@ const BASE_URL = 'https://api.binance.com';
 const WS_URL = 'wss://stream.binance.com:9443/ws';
 const STREAM_URL = 'wss://stream.binance.com:9443/stream';
 
+/** Calculate delta from volume and taker buy volume: (2 * takerBuyVolume) - volume */
+const calculateDelta = (volume: number, takerBuyVolume: number): number =>
+    (2 * takerBuyVolume) - volume;
+
 // Normalize symbol to Binance format (e.g. "BTC" -> "BTCUSDT")
 export const normalizeSymbol = (symbol: string): string => {
   // Remove slash and spaces, uppercase
@@ -24,31 +28,9 @@ export const normalizeSymbol = (symbol: string): string => {
   return s;
 };
 
-export const scanMarketCandidates = async (limit: number = 6): Promise<string[]> => {
-  try {
-    const res = await fetch(`${BASE_URL}/api/v3/ticker/24hr`);
-    if (!res.ok) throw new Error('Failed to scan market');
-    
-    const data = await res.json();
-    
-    // Filter for USDT pairs, exclude UP/DOWN tokens, stablecoins
-    const candidates = data
-      .filter((t: any) => {
-        const s = t.symbol;
-        return s.endsWith('USDT') && 
-               !s.includes('UPUSDT') && 
-               !s.includes('DOWNUSDT') &&
-               !['USDCUSDT', 'FDUSDUSDT', 'TUSDUSDT'].includes(s);
-      })
-      .sort((a: any, b: any) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume)) // Sort by 24h Volume (Liquidity)
-      .slice(0, limit)
-      .map((t: any) => t.symbol);
-
-    return candidates.length > 0 ? candidates : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT'];
-  } catch (e) {
-    console.error("Scanner Error:", e);
-    return ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']; // Fallback
-  }
+export const scanMarketCandidates = async (_limit: number = 6): Promise<string[]> => {
+  // Locked to BTCUSDT only for focused LLM testing
+  return ['BTCUSDT'];
 };
 
 export const fetchHistoricalData = async (symbol: string, interval: string = '1h', limit: number = 1000): Promise<OHLCData[]> => {
@@ -69,7 +51,7 @@ export const fetchHistoricalData = async (symbol: string, interval: string = '1h
         const vwap = volume > 0 ? quoteVolume / volume : (parseFloat(d[1]) + parseFloat(d[4])) / 2;
         
         // Delta Approximation
-        const delta = (2 * takerBuyVolume) - volume;
+        const delta = calculateDelta(volume, takerBuyVolume);
 
         return {
             time: new Date(d[0]).toISOString(),
@@ -134,7 +116,7 @@ export const subscribeToCombinedTicker = (
         const quoteVolume = parseFloat(q);
         const takerBuyVolume = parseFloat(V);
         const vwap = volume > 0 ? quoteVolume / volume : (parseFloat(o) + parseFloat(c)) / 2;
-        const delta = (2 * takerBuyVolume) - volume;
+        const delta = calculateDelta(volume, takerBuyVolume);
 
         onUpdate(s, {
           time: new Date(t).toISOString(),
@@ -183,7 +165,7 @@ export const subscribeToTicker = (symbol: string, interval: string = '1h', onUpd
             volume: parseFloat(v),
             vwap: (parseFloat(o) + parseFloat(c)) / 2, // simplified
             takerBuyVolume: parseFloat(V),
-            delta: (2 * parseFloat(V)) - parseFloat(v)
+            delta: calculateDelta(parseFloat(v), parseFloat(V))
         });
       }
     } catch (e) { console.error(e); }

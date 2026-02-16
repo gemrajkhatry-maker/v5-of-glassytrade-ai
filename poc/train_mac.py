@@ -10,7 +10,7 @@ from trl import SFTTrainer, SFTConfig
 # Configuration
 MODEL_NAME = "./models/Nanbeige4.1-3B"
 OUTPUT_DIR = "./lora_adapter_mac"
-MAX_STEPS = 100 # Increased for better learning
+MAX_STEPS = 400  # 4x data → 4x steps
 BATCH_SIZE = 1
 
 def train():
@@ -38,7 +38,7 @@ def train():
         r=16, # Increased rank
         lora_alpha=32, 
         lora_dropout=0.05,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"]
+        target_modules=["q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
     )
     # model = get_peft_model(model, peft_config) # SFTTrainer handles this if peft_config is passed
     # model.print_trainable_parameters()
@@ -67,7 +67,7 @@ def train():
         output_dir=OUTPUT_DIR,
         per_device_train_batch_size=BATCH_SIZE,
         gradient_accumulation_steps=4,
-        warmup_steps=10,
+        warmup_steps=20,
         max_steps=MAX_STEPS,
         learning_rate=2e-4,
         fp16=False, 
@@ -75,7 +75,6 @@ def train():
         logging_steps=5,
         optim="adamw_torch",
         save_strategy="no",
-        use_mps_device=True,
         max_length=1024,
         packing=False,
         dataset_text_field="text"
