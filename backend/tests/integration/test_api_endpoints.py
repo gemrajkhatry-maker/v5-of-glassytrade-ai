@@ -91,14 +91,3 @@ class TestAnalysisEndpoints:
         )
         # Should still return 200 with default/empty analysis
         assert r.status_code == 200
-
-
-class TestAIEndpoint:
-    def test_command_without_api_key(self):
-        """Without a Gemini API key, should return 500 or handle gracefully."""
-        r = client.post(
-            "/api/ai/command",
-            json={"prompt": "hello", "currentConfig": {}},
-        )
-        # Without a valid API key, expect either 500 or a handled error
-        assert r.status_code in (200, 500)

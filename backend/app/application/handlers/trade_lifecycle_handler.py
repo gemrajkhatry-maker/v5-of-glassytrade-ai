@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from app.domain.fabio_ai.services.trade_manager import TradeManager
+from app.domain.fabio_ai.services.trade_manager import TradeManager, ExitReason
 from app.domain.trading.models.enums import SignalType, Source
 
 if TYPE_CHECKING:
@@ -21,11 +21,16 @@ class TradeLifecycleHandler:
     def __init__(self) -> None:
         self._trade_manager = TradeManager()
 
-    def check_exits(self, portfolio: Portfolio, current_price: float) -> bool:
+    @property
+    def trade_manager(self) -> TradeManager:
+        """Expose trade manager for RR filter and daily limit checks."""
+        return self._trade_manager
+
+    def check_exits(self, portfolio: Portfolio, current_price: float, cvd_divergence: str = "") -> bool:
         """Check all open positions for exit conditions.
 
         Returns:
-            True if a position was closed (so caller knows the slot is free).
+            True if a position was fully closed (so caller knows the slot is free).
         """
         open_positions = [p for p in portfolio.positions if p.status == "OPEN"]
 
@@ -33,21 +38,60 @@ class TradeLifecycleHandler:
             # Skip positions already closed (e.g. by Portfolio.process_tick SL/TP)
             if pos.status != "OPEN":
                 continue
+            # CVD kill signal check (Fabio: exit when CVD diverges against position)
+            if cvd_divergence:
+                cvd_exit = self._trade_manager.apply_cvd_kill_signal(
+                    pos.id, cvd_divergence, current_price
+                )
+                if cvd_exit:
+                    portfolio.close_position(pos.id, cvd_exit.exit_price, cvd_exit.reason)
+                    self._trade_manager.unregister_position(pos.id)
+                    logger.info(f"Position {pos.id} closed: CVD kill signal at {cvd_exit.exit_price:.2f}")
+                    return True
+
             exit_sig = self._trade_manager.check_position(pos.id, current_price)
             if exit_sig:
-                portfolio.close_position(pos.id, exit_sig.exit_price, exit_sig.reason)
-                self._trade_manager.unregister_position(pos.id)
-                logger.info(
-                    f"Position {pos.id} closed: {exit_sig.reason} "
-                    f"at {exit_sig.exit_price:.2f}"
-                )
-                return True
+                if exit_sig.reason == ExitReason.PARTIAL_TAKE_PROFIT:
+                    # Runner mode: close 75% at target, keep 25% trailing
+                    # Standard partial: close 50%
+                    mp = self._trade_manager._positions.get(pos.id)
+                    if mp and mp.runner_active:
+                        partial_pct = self._trade_manager.config.runner_close_pct
+                    else:
+                        partial_pct = self._trade_manager.config.partial_size_pct
+                    realized_pnl = portfolio.partial_close_position(
+                        pos.id, partial_pct, exit_sig.exit_price, exit_sig.reason
+                    )
+                    logger.info(
+                        f"Position {pos.id} partial close: {exit_sig.reason} "
+                        f"at {exit_sig.exit_price:.2f}, realized PnL={realized_pnl:.2f}"
+                    )
+                    # Do NOT unregister — position is still open with remaining size
+                    return False
+                else:
+                    # Full close
+                    portfolio.close_position(pos.id, exit_sig.exit_price, exit_sig.reason)
+                    self._trade_manager.unregister_position(pos.id)
+                    # Track daily losses on stop loss exits
+                    if exit_sig.reason == ExitReason.STOP_LOSS:
+                        self._trade_manager.record_loss()
+                    logger.info(
+                        f"Position {pos.id} closed: {exit_sig.reason} "
+                        f"at {exit_sig.exit_price:.2f}"
+                    )
+                    return True
         return False
 
     def register_position(self, position: Position, signal: Signal) -> None:
         """Register a new position with TradeManager for exit monitoring."""
         if signal.source == Source.LLM:
             allow_trail = (signal.metadata or {}).get("allow_trail", False)
+            market_state = (signal.metadata or {}).get("market_state_model", "BALANCED")
+            # Normalize: "Trending" → "IMBALANCED"
+            if "trend" in market_state.lower() or "imbalance" in market_state.lower():
+                market_state = "IMBALANCED"
+            else:
+                market_state = "BALANCED"
             self._trade_manager.register_position(
                 position_id=position.id,
                 side="LONG" if signal.type == SignalType.BUY else "SHORT",
@@ -55,6 +99,7 @@ class TradeLifecycleHandler:
                 stop_loss=signal.stop_loss,
                 take_profit=signal.take_profit,
                 allow_trail=allow_trail,
+                market_state=market_state,
             )
 
     @property

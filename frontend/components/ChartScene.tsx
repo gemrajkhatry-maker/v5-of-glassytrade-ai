@@ -639,6 +639,30 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         axisLabelVisible: true,
         title: 'VAL',
       }));
+
+      // LVN lines (orange dotted)
+      amtAnalysis.lvns?.forEach((lvn: number) => {
+        amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
+          price: lvn,
+          color: '#f97316',
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: false,
+          title: 'LVN',
+        }));
+      });
+
+      // HVN lines (green dotted)
+      amtAnalysis.hvns?.forEach((hvn: number) => {
+        amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
+          price: hvn,
+          color: '#22c55e',
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: false,
+          title: 'HVN',
+        }));
+      });
     }
 
     if (mode === 'STANDARD') {

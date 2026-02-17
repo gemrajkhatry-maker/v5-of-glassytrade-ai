@@ -76,6 +76,14 @@ class AMTResult:
     profile: tuple[VolumeProfileLevel, ...] = ()
     aggressive_prints: tuple[AggressivePrint, ...] = ()
     profile_shape: str = ""
+    cvd_slope: float = 0.0
+    cvd_divergence: str = ""  # "BULLISH_DIV", "BEARISH_DIV", or ""
+    session_vwap: float = 0.0  # Rolling session VWAP
+    vwap_upper_1: float = 0.0  # VWAP + 1σ
+    vwap_lower_1: float = 0.0  # VWAP - 1σ
+    vwap_upper_2: float = 0.0  # VWAP + 2σ
+    vwap_lower_2: float = 0.0  # VWAP - 2σ
+    balance_ratio: float = 0.0  # fraction of recent candles inside VA
 
 
 # ---------------------------------------------------------------------------

@@ -11,19 +11,11 @@ from __future__ import annotations
 
 from app.domain.trading.models.enums import SignalType, Source, SetupType, Sentiment
 from app.domain.trading.models.entities import Signal
-from app.domain.trading.models.value_objects import AMTResult, OHLC, AIAnalysisResult
+from app.domain.trading.models.value_objects import OHLC, AIAnalysisResult
 
 
 class SignalGenerator:
     """Evaluates analysis output and generates trade signals."""
-
-    def evaluate_amt(self, result: AMTResult) -> Signal | None:
-        """Extract the signal from an AMT analysis result (if any).
-
-        The AMTAnalyzer already computes the signal internally;
-        this method simply extracts it for the event chain.
-        """
-        return result.signal
 
     def evaluate_prediction(
         self, analysis: AIAnalysisResult, tick: OHLC, generation: int

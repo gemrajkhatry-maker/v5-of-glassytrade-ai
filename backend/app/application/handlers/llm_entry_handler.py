@@ -12,7 +12,15 @@ from app.domain.trading.models.enums import SignalType, Source, SetupType
 from app.domain.trading.models.entities import Signal
 from app.domain.fabio_ai.services.amt_analyzer import compute_aggression_sigma
 from app.domain.fabio_ai.services.regime_detector import RegimeDetector
+from app.domain.fabio_ai.services.trade_manager import TradeManager
 from app.domain.trading.events import AIAnalysisCompleted, SignalGenerated
+from app.domain.fabio_ai.services.session_context import get_session_info
+from app.domain.fabio_ai.services.entry_gate import (
+    three_align_check,
+    check_confirmation_bundle,
+    check_volatility_filter,
+    build_entry_signal,
+)
 
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
@@ -31,10 +39,12 @@ class LLMEntryHandler:
         gen_ai_service: GenerativeAIService,
         event_bus: EventBusPort,
         storage: StoragePort | None = None,
+        trade_manager: TradeManager | None = None,
     ) -> None:
         self._gen_ai_service = gen_ai_service
         self._event_bus = event_bus
         self._storage = storage
+        self._trade_manager = trade_manager
         self._entry_lock = threading.Lock()
         self._regime_detector = RegimeDetector()
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -49,6 +59,7 @@ class LLMEntryHandler:
         data: list,
         amt_result: AMTResult,
         tick: OHLC,
+        order_book=None,
     ) -> bool:
         """Check if LLM entry logic should run (regime-change triggered + gates)."""
         # Guard against degenerate AMT data (zero/negative levels)
@@ -58,9 +69,16 @@ class LLMEntryHandler:
         if ai_running or has_position or has_managed_positions or in_cooldown:
             return False
 
+        # Volatility / instrument health filter (pure quant)
+        if check_volatility_filter(data, tick):
+            return False
+
+        # Block entries if daily loss limit reached
+        if self._trade_manager and self._trade_manager.should_block_entry():
+            logger.info("LLM entry blocked: daily loss limit reached")
+            return False
+
         # CRITICAL: Don't consult regime detector until model is ready.
-        # Otherwise the first-observation trigger gets consumed while the
-        # model is still loading, and the LLM never gets called in stable markets.
         if not self._gen_ai_service.is_ready():
             return False
 
@@ -68,11 +86,11 @@ class LLMEntryHandler:
         if not self._regime_detector.should_trigger_llm(tick, amt_result):
             return False
 
-        # Three-Align gate — if it fails, still run LLM in monitoring mode
-        # (returns FLAT) so the UI gets updated with market context
-        aligned = self._three_align_check(data, amt_result, tick)
+        # Three-Align gate (pure quant)
+        aligned = three_align_check(data, amt_result, tick, order_book)
         if not aligned:
-            logger.debug("Three-Align gate failed — running LLM in monitoring mode")
+            logger.debug("Three-Align gate failed — skipping LLM call")
+            return False
         return True
 
     def run_entry(
@@ -88,13 +106,23 @@ class LLMEntryHandler:
 
         market_state_str = "Trending" if amt_result.market_state == "IMBALANCED" else "Balanced"
 
-        # Determine setup type based on market regime
+        # Session-aware setup bias (Fabio: London=MeanRev, NY=Trend)
+        session_info = get_session_info(timestamp=tick.time)
+
         if amt_result.market_state == "IMBALANCED":
             setup_type = SetupType.TREND_MODEL
             strategy_hint = "Market is IMBALANCED (trending). Favor trend continuation setups. Look for breakouts beyond VA boundaries."
         else:
             setup_type = SetupType.MEAN_REVERSION
             strategy_hint = "Market is BALANCED (range-bound). Favor mean reversion setups. Look for fades at VA extremes back toward POC."
+
+        # Session override: London forces mean reversion, NY forces trend
+        if session_info.session == "LONDON" and setup_type == SetupType.TREND_MODEL:
+            strategy_hint += " [London session — prefer mean reversion over trend.]"
+        elif session_info.session in ("NEW_YORK", "OVERLAP") and setup_type == SetupType.MEAN_REVERSION:
+            strategy_hint += " [NY session — watch for trend breakouts.]"
+        elif session_info.session == "ASIA":
+            strategy_hint += " [Asia session — reduced opportunity, be selective.]"
 
         # Profile shape — read from AMTResult (already computed once in analyzer)
         profile_shape_str = ""
@@ -105,6 +133,15 @@ class LLMEntryHandler:
                 "b": "b-shape (bottom-heavy, buying absorption)",
             }
             profile_shape_str = shape_descriptions.get(amt_result.profile_shape, "")
+
+        # Volume bubble summary (aggressive prints = 2.5σ volume spikes)
+        volume_bubble_desc = ""
+        if amt_result.aggressive_prints:
+            recent_prints = amt_result.aggressive_prints[-3:]  # last 3 bubbles
+            bubble_parts = []
+            for ap in recent_prints:
+                bubble_parts.append(f"{ap.side} bubble at {ap.price:.0f} ({ap.volume:.0f} vol, delta {ap.delta:+.0f})")
+            volume_bubble_desc = "; ".join(bubble_parts)
 
         market_data_ai = {
             "ltp": tick.close,
@@ -117,6 +154,12 @@ class LLMEntryHandler:
             "aggression": f"Aggression Score: {amt_result.aggression:.2f}",
             "profile_shape": profile_shape_str,
             "strategy_hint": strategy_hint,
+            "volume_bubbles": volume_bubble_desc,
+            "hvns": amt_result.hvns[:3] if amt_result.hvns else (),
+            "lvns": amt_result.lvns[:3] if amt_result.lvns else (),
+            "cvd_slope": amt_result.cvd_slope,
+            "cvd_divergence": amt_result.cvd_divergence,
+            "vwap": amt_result.session_vwap if amt_result.session_vwap > 0 else tick.vwap,
         }
 
         def _worker():
@@ -138,13 +181,54 @@ class LLMEntryHandler:
                 confidence = ai_result.get("confidence", "High" if direction != "FLAT" else "Medium")
                 logger.info("LLM result: direction=%s confidence=%s", direction, confidence)
 
-                # Shape-aware confidence adjustment
-                if profile_shape_str and direction in ("LONG", "SHORT"):
+                # A/B/C Setup Grading (Fabio methodology)
+                # A: full confluence (gate + volume bubble + CVD + session aligns)
+                # B: partial confluence (gate + 1 confirmation)
+                # C: gate only
+                if direction in ("LONG", "SHORT"):
+                    grade_score = 0
+                    # Volume bubble confirms direction
+                    if volume_bubble_desc:
+                        if (direction == "LONG" and "BUY" in volume_bubble_desc.upper()) or \
+                           (direction == "SHORT" and "SELL" in volume_bubble_desc.upper()):
+                            grade_score += 1
+                    # CVD confirms direction
+                    if (direction == "LONG" and amt_result.cvd_slope > 0.3) or \
+                       (direction == "SHORT" and amt_result.cvd_slope < -0.3):
+                        grade_score += 1
+                    # No CVD divergence against direction
+                    if not amt_result.cvd_divergence:
+                        grade_score += 1
+                    elif (direction == "LONG" and amt_result.cvd_divergence == "BEARISH_DIV") or \
+                         (direction == "SHORT" and amt_result.cvd_divergence == "BULLISH_DIV"):
+                        grade_score -= 2  # strong contra-signal
+
+                    # Session alignment
+                    if (session_info.favor_strategy == "MEAN_REVERSION" and setup_type == SetupType.MEAN_REVERSION) or \
+                       (session_info.favor_strategy == "TREND_CONTINUATION" and setup_type == SetupType.TREND_MODEL):
+                        grade_score += 1
+
+                    # Profile shape alignment
                     shape_code = profile_shape_str[0] if profile_shape_str else ""
                     if (shape_code == "b" and direction == "LONG") or (shape_code == "P" and direction == "SHORT"):
-                        confidence = "High"  # shape aligns with direction
+                        grade_score += 1
                     elif (shape_code == "b" and direction == "SHORT") or (shape_code == "P" and direction == "LONG"):
-                        confidence = "Low"   # shape contradicts direction
+                        grade_score -= 1
+
+                    # Map score to grade
+                    if grade_score >= 3:
+                        confidence = "High"  # A-grade setup
+                    elif grade_score >= 1:
+                        confidence = "Medium"  # B-grade setup
+                    else:
+                        confidence = "Low"  # C-grade setup
+
+                    # Outside prime hours: downgrade one level
+                    if session_info.session == "ASIA":
+                        confidence = "Low" if confidence in ("Medium", "Low") else "Medium"
+
+                    logger.info("Setup grade: score=%d confidence=%s (session=%s)",
+                                grade_score, confidence, session_info.session)
 
                 with session._lock:
                     session.last_ai_analysis = {
@@ -190,16 +274,22 @@ class LLMEntryHandler:
                         if live_positions:
                             logger.info("LLM wanted to enter but position already exists — skipping")
                         else:
-                            entry_signal = self._build_signal(direction, tick, amt_result, ai_result, setup_type)
-                            self._event_bus.publish(
-                                SignalGenerated(symbol=symbol, signal=entry_signal)
-                            )
+                            entry_signal = build_entry_signal(direction, tick, amt_result, ai_result, setup_type)
+                            # RR filter: reject signals with risk:reward < 1:2
+                            if not TradeManager.is_valid_rr(
+                                entry_signal.price, entry_signal.stop_loss, entry_signal.take_profit
+                            ):
+                                logger.info("RR filter rejected signal (< 1:2)")
+                            else:
+                                self._event_bus.publish(
+                                    SignalGenerated(symbol=symbol, signal=entry_signal)
+                                )
 
                 self._event_bus.publish(AIAnalysisCompleted(
                     symbol=symbol,
                     direction=direction,
                     rationale=ai_result["rationale"],
-                    confidence="High" if direction != "FLAT" else "Medium",
+                    confidence=confidence,
                 ))
             except Exception as e:
                 logger.error(f"AI Analysis failed: {e}")
@@ -208,122 +298,5 @@ class LLMEntryHandler:
 
         self._executor.submit(_worker)
 
-    # ------------------------------------------------------------------
-    # Fabio Playbook gates
-    # ------------------------------------------------------------------
-
-    def _three_align_check(self, data: list, amt_result: AMTResult, tick: OHLC) -> bool:
-        """Three-Align Gate: Market State + Location + Aggression."""
-        # Reject if AMT has zero levels (degenerate result)
-        if amt_result.poc <= 0 or amt_result.value_area_high <= 0 or amt_result.value_area_low <= 0:
-            return False
-
-        state_ok = amt_result.market_state in ("BALANCED", "IMBALANCED")
-
-        near_level = False
-        threshold = tick.close * 0.002
-        for level in [amt_result.value_area_high, amt_result.value_area_low, amt_result.poc]:
-            if abs(tick.close - level) < threshold:
-                near_level = True
-                break
-        if not near_level:
-            for lvn in amt_result.lvns:
-                if abs(tick.close - lvn) < threshold:
-                    near_level = True
-                    break
-
-        agg_ok = self._check_confirmation_bundle(data, tick)
-        return state_ok and near_level and agg_ok
-
-    def _check_confirmation_bundle(self, data: list, tick: OHLC) -> bool:
-        """Confirmation Bundle (2/3): Volume Impulse + Delta Pressure + Aggression Sigma.
-
-        Volume Impulse uses EMA(20) of volume (Valentini dynamic threshold).
-        Aggression Sigma uses EMA-based z-score (same as Volume Bubbles).
-        """
-        if not data or len(data) < 20:
-            return False
-
-        # 1. Volume Impulse — EMA-based (Valentini dynamic threshold)
-        alpha = 2.0 / 21  # EMA(20)
-        ema_vol = data[-20].volume
-        for d in data[-19:]:
-            ema_vol = alpha * d.volume + (1.0 - alpha) * ema_vol
-        vol_impulse = tick.volume > (ema_vol * 1.5)
-
-        # 2. Delta Pressure — directional filter
-        delta_ratio = abs(tick.delta) / tick.volume if tick.volume > 0 else 0
-        delta_pressure = delta_ratio > 0.15
-
-        # 3. Aggression Sigma — EMA-based z-score (2.5σ = top ~1%)
-        sigma = compute_aggression_sigma(tick, data[-50:])
-        agg_sigma = sigma >= 2.5
-
-        return sum([vol_impulse, delta_pressure, agg_sigma]) >= 2
-
-    # ------------------------------------------------------------------
-    # Signal construction
-    # ------------------------------------------------------------------
-
-    def _build_signal(
-        self, direction: str, tick: OHLC, amt_result: AMTResult, ai_result: dict,
-        setup_type: SetupType = SetupType.TREND_MODEL,
-    ) -> Signal:
-        """Build Signal from LLM decision using Fabio Playbook SL/TP.
-
-        Mean Reversion: TP at POC, tight SL beyond VA boundary.
-        Trend Model:    TP extended beyond VA, wider SL, trailing allowed.
-        """
-        is_buy = direction == "LONG"
-        sig_type = SignalType.BUY if is_buy else SignalType.SELL
-        buffer = tick.close * 0.001
-
-        if setup_type == SetupType.MEAN_REVERSION:
-            # Mean reversion: target POC, stop beyond VA edge
-            tp_price = amt_result.poc
-            if is_buy:
-                stop_price = amt_result.value_area_low - buffer
-                if tp_price <= tick.close or stop_price >= tick.close:
-                    tp_price = tick.close * 1.010
-                    stop_price = tick.close * 0.995
-            else:
-                stop_price = amt_result.value_area_high + buffer
-                if tp_price >= tick.close or stop_price <= tick.close:
-                    tp_price = tick.close * 0.990
-                    stop_price = tick.close * 1.005
-            allow_trail = False
-        else:
-            # Trend model: target extended beyond VA, trailing stop enabled
-            if is_buy:
-                tp_price = amt_result.value_area_high + (amt_result.value_area_high - amt_result.poc)
-                stop_price = amt_result.poc - buffer
-                if tp_price <= tick.close or stop_price >= tick.close:
-                    tp_price = tick.close * 1.020
-                    stop_price = tick.close * 0.990
-            else:
-                tp_price = amt_result.value_area_low - (amt_result.poc - amt_result.value_area_low)
-                stop_price = amt_result.poc + buffer
-                if tp_price >= tick.close or stop_price <= tick.close:
-                    tp_price = tick.close * 0.980
-                    stop_price = tick.close * 1.010
-            allow_trail = True
-
-        setup_label = "MeanRev" if setup_type == SetupType.MEAN_REVERSION else "Trend"
-
-        return Signal(
-            type=sig_type,
-            price=tick.close,
-            reason=f"LLM {setup_label}: {ai_result['rationale'][:80]}",
-            setup=setup_type,
-            source=Source.LLM,
-            stop_loss=stop_price,
-            take_profit=tp_price,
-            timestamp=tick.time,
-            metadata={
-                "llm_entry": True,
-                "allow_trail": allow_trail,
-                "confidence": ai_result.get("confidence", "Medium"),
-                "market_state_model": ai_result.get("market_state", "Unknown"),
-                "raw_output": ai_result.get("raw_output", "")[:200],
-            },
-        )
+    # Gate and signal methods extracted to domain/fabio_ai/services/entry_gate.py
+    # Delegated via: three_align_check, check_confirmation_bundle, build_entry_signal

@@ -37,12 +37,16 @@ class CVDTracker:
     to get the current CVD value, slope, and divergence status.
     """
 
+    # Maximum history length to prevent unbounded memory growth
+    _MAX_HISTORY = 500
+
     def __init__(self, slope_window: int = 14, divergence_window: int = 20) -> None:
         self._cvd: float = 0.0
         self._history: list[float] = []           # CVD values
         self._price_history: list[float] = []     # Close prices
         self._slope_window = slope_window
         self._divergence_window = divergence_window
+        self._last_time: str = ""
 
     # -- public API ----------------------------------------------------------
 
@@ -50,14 +54,29 @@ class CVDTracker:
         self._cvd = 0.0
         self._history.clear()
         self._price_history.clear()
+        self._last_time = ""
 
     def update(self, candle: OHLC) -> CVDState:
-        """Consume one candle and return the updated state."""
-        # Delta = aggressive buys − aggressive sells
-        # In the domain model: candle.delta already carries this value.
+        """Consume one candle and return the updated state.
+
+        Automatically resets at session boundaries (detected by time going
+        backwards, which indicates a new trading day/session).
+        """
+        # Session boundary detection: time going backwards = new session
+        if self._last_time and candle.time < self._last_time:
+            self.reset()
+        self._last_time = candle.time
+
         self._cvd += candle.delta
         self._history.append(self._cvd)
         self._price_history.append(candle.close)
+
+        # Cap history to prevent unbounded growth
+        if len(self._history) > self._MAX_HISTORY:
+            trim = len(self._history) - self._MAX_HISTORY
+            self._history = self._history[trim:]
+            self._price_history = self._price_history[trim:]
+
         return self.state()
 
     def state(self) -> CVDState:

@@ -24,7 +24,14 @@ LEVERAGE: int = 10
 RISK_PER_TRADE: float = 0.01
 MAX_HISTORY: int = 1000
 HISTORY_MIN_INTERVAL_SEC: float = 60.0
-BREAKEVEN_DELTA_THRESHOLD: float = 0.5
+MAX_PARTICIPATION_PCT: float = 0.02  # Never be > 2% of avg daily volume
+
+# Tiered risk by confidence level (Fabio Valentini position sizing)
+RISK_BY_CONFIDENCE: dict[str, float] = {
+    "High": 0.005,    # A setup: 0.5%
+    "Medium": 0.0035, # B setup: 0.35%
+    "Low": 0.002,     # C setup: 0.2%
+}
 
 
 @dataclass
@@ -88,17 +95,8 @@ class Portfolio:
         newly_closed: list[Position] = []
 
         for pos in self.positions:
-            # Break-even on strong CVD pressure
-            norm_delta = tick.delta / tick.volume if tick.volume > 0 else 0.0
-            if (pos.side == Side.LONG
-                    and norm_delta > BREAKEVEN_DELTA_THRESHOLD
-                    and pos.stop_loss < pos.entry_price):
-                pos.move_stop_to_breakeven()
-            elif (pos.side == Side.SHORT
-                    and norm_delta < -BREAKEVEN_DELTA_THRESHOLD
-                    and pos.stop_loss > pos.entry_price):
-                pos.move_stop_to_breakeven()
-
+            # Break-even logic is handled by TradeManager (single authority)
+            # Portfolio only handles simple SL/TP exits as a safety net
             should_close, reason = pos.should_close(current_price)
             if should_close:
                 pos.close(current_price, current_time, reason)
@@ -121,14 +119,23 @@ class Portfolio:
     def open_position(self, signal: Signal, symbol: str) -> Position | None:
         """Open a new position from *signal*, enforcing risk constraints.
 
+        Position sizing uses tiered risk based on signal confidence:
+        - High confidence (A setup): 0.5% risk per trade
+        - Medium confidence (B setup): 0.35% risk per trade
+        - Low confidence (C setup): 0.2% risk per trade
+
         Returns the created Position, or None if constraints prevent opening.
         """
         # Invariant: no duplicate source positions
         if self.has_open_position_for_source(signal.source):
             return None
 
-        # Position sizing based on risk
-        risk_amount = self.equity * RISK_PER_TRADE
+        # Tiered position sizing based on confidence, clamped to 0.25%-0.5%
+        confidence = (signal.metadata or {}).get("confidence", "Medium")
+        risk_pct = RISK_BY_CONFIDENCE.get(confidence, RISK_PER_TRADE)
+        risk_pct = max(0.0025, min(0.005, risk_pct))  # hard clamp
+        risk_amount = self.equity * risk_pct
+
         risk_per_unit = abs(signal.price - signal.stop_loss)
         if risk_per_unit == 0:
             return None
@@ -141,6 +148,40 @@ class Portfolio:
         position = Position.from_signal(signal, symbol, size)
         self.positions.append(position)
         return position
+
+    def partial_close_position(
+        self, position_id: str, partial_pct: float, price: float, reason: str
+    ) -> float:
+        """Close partial_pct of a position. Returns realized PnL from the partial.
+
+        The position remains open with reduced size. Stop loss on the Position
+        entity is moved to break-even by the TradeManager.
+        """
+        for pos in self.positions:
+            if pos.id == position_id and pos.is_open:
+                # Calculate PnL on the partial size
+                diff = (
+                    price - pos.entry_price
+                    if pos.side == Side.LONG
+                    else pos.entry_price - price
+                )
+                partial_size = pos.size * partial_pct
+                partial_pnl = diff * partial_size
+
+                # Reduce position size
+                pos.size -= partial_size
+
+                # Credit partial PnL to balance
+                self.balance += partial_pnl
+                self.equity = self.balance + sum(
+                    p.pnl for p in self.positions if p.is_open
+                )
+
+                # Move stop to break-even on the Position entity
+                pos.stop_loss = pos.entry_price
+
+                return partial_pnl
+        return 0.0
 
     def close_position(self, position_id: str, price: float, reason: str = "LLM_EXIT") -> Position | None:
         """Close a specific position by ID at the given price.

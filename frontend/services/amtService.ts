@@ -6,20 +6,20 @@ import { OHLCData, OrderBook, VolumeProfileLevel, TradeSignal, AMTAnalysis, Aggr
  */
 
 const CONFIG = {
-    LVN_SMOOTHING: 3, 
-    LVN_PROMINENCE: 0.85, // Increased from 0.70 to 0.85 to make LVNs easier to find (less strict)
+    LVN_THRESHOLD: 0.40,   // <40% of mean volume = Low Volume Node (formula: 0.3-0.5)
+    HVN_THRESHOLD: 0.40,   // >40% of max volume = High Volume Node (formula: 0.3-0.5)
+    LVN_SMOOTHING: 3,      // Smooth histogram before LVN/HVN detection
     OBI_THRESHOLD: 0.25,
     DELTA_THRESHOLD: 0.3,
     ABSORPTION_THRESHOLD: 0.3,
     STOP_BUFFER: 0.001,
-    BUBBLE_VOL_MULTIPLIER: 1.5 // Multiplier of Avg Vol to be considered a bubble
+    BUBBLE_VOL_MULTIPLIER: 2.5 // 2.5σ aggressive prints
 };
 
-// Helper: Calculate Simple Moving Average (Centered)
+// Centered simple moving average smoothing (for LVN/HVN detection)
 const smoothArray = (data: number[], window: number): number[] => {
     const smoothed: number[] = [];
     const offset = Math.floor(window / 2);
-    
     for (let i = 0; i < data.length; i++) {
         let sum = 0;
         let count = 0;
@@ -34,7 +34,7 @@ const smoothArray = (data: number[], window: number): number[] => {
     return smoothed;
 };
 
-const createProfile = (data: OHLCData[], buckets = 50): VolumeProfileLevel[] => {
+const createProfile = (data: OHLCData[], buckets = 24): VolumeProfileLevel[] => {
     if (data.length === 0) return [];
     
     let min = Infinity;
@@ -67,24 +67,56 @@ const createProfile = (data: OHLCData[], buckets = 50): VolumeProfileLevel[] => 
     }));
 
     data.forEach(d => {
+        if (d.volume <= 0) return;
+
         let startBucket = Math.floor((d.low - min) / step);
         let endBucket = Math.floor((d.high - min) / step);
         startBucket = Math.max(0, Math.min(buckets - 1, startBucket));
         endBucket = Math.max(0, Math.min(buckets - 1, endBucket));
 
-        const bucketsCovered = Math.max(1, endBucket - startBucket + 1);
-        const volPerBucket = d.volume / bucketsCovered;
-        
-        // Approximate Buy vs Sell based on TakerBuyVolume
-        const buyRatio = d.volume > 0 ? d.takerBuyVolume / d.volume : 0.5;
-        const buyVolPerBucket = volPerBucket * buyRatio;
-        const sellVolPerBucket = volPerBucket * (1 - buyRatio);
+        // Buy/sell split: use taker data if available, else body-proportional
+        let buyRatio: number;
+        if (d.takerBuyVolume > 0 && d.volume > 0) {
+            buyRatio = d.takerBuyVolume / d.volume;
+        } else {
+            const body = Math.abs(d.close - d.open);
+            const candleRange = d.high - d.low;
+            if (candleRange === 0) {
+                buyRatio = 0.5;
+            } else {
+                buyRatio = d.close >= d.open
+                    ? 0.5 + 0.5 * (body / candleRange)
+                    : 0.5 - 0.5 * (body / candleRange);
+            }
+        }
+
+        // Gaussian-weighted distribution centered on VWAP/close (matches backend)
+        const center = (d.vwap && d.vwap > 0) ? d.vwap : d.close;
+        const candleRange = d.high - d.low;
+        const sigma = Math.max(candleRange * 0.25, step * 0.5);
+
+        const weights: number[] = [];
+        let totalWeight = 0;
+        for (let i = startBucket; i <= endBucket; i++) {
+            const bucketCenter = profile[i].price;
+            const z = (bucketCenter - center) / sigma;
+            const w = Math.exp(-0.5 * z * z);
+            weights.push(w);
+            totalWeight += w;
+        }
+        if (totalWeight <= 0) {
+            const n = Math.max(1, endBucket - startBucket + 1);
+            for (let i = 0; i < weights.length; i++) weights[i] = 1.0 / n;
+            totalWeight = 1.0;
+        }
 
         for (let i = startBucket; i <= endBucket; i++) {
             if (profile[i]) {
-                profile[i].volume += volPerBucket;
-                profile[i].buyVolume += buyVolPerBucket;
-                profile[i].sellVolume += sellVolPerBucket;
+                const frac = weights[i - startBucket] / totalWeight;
+                const vol = d.volume * frac;
+                profile[i].volume += vol;
+                profile[i].buyVolume += vol * buyRatio;
+                profile[i].sellVolume += vol * (1 - buyRatio);
             }
         }
     });
@@ -93,34 +125,19 @@ const createProfile = (data: OHLCData[], buckets = 50): VolumeProfileLevel[] => 
 };
 
 const findLVNs = (profile: VolumeProfileLevel[]): number[] => {
-    const rawVolumes = profile.map(p => p.volume);
-    const smoothed = smoothArray(rawVolumes, CONFIG.LVN_SMOOTHING);
+    if (profile.length < 3) return [];
+    const raw = profile.map(p => p.volume);
+    const sm = smoothArray(raw, CONFIG.LVN_SMOOTHING);
+    const meanVol = sm.reduce((a, b) => a + b, 0) / sm.length;
+    if (meanVol <= 0) return [];
+
+    const threshold = meanVol * CONFIG.LVN_THRESHOLD;
+    const step = profile[1].price - profile[0].price;
     const lvns: number[] = [];
 
-    // Skip edges to avoid false LVNs at top/bottom of chart
-    for (let i = 3; i < smoothed.length - 3; i++) {
-        // Local Minimum
-        if (smoothed[i] <= smoothed[i - 1] && smoothed[i] <= smoothed[i + 1]) {
-            
-            // Find surrounding peaks
-            let leftPeak = smoothed[i];
-            let l = i; 
-            while (l > 0 && smoothed[l - 1] >= smoothed[l]) { 
-                l--; 
-                leftPeak = smoothed[l]; 
-            }
-            
-            let rightPeak = smoothed[i];
-            let r = i; 
-            while (r < smoothed.length - 1 && smoothed[r + 1] >= smoothed[r]) { 
-                r++; 
-                rightPeak = smoothed[r]; 
-            }
-
-            const lowerPeak = Math.min(leftPeak, rightPeak);
-            
-            // Prominence Check
-            if (profile[i].volume < lowerPeak * CONFIG.LVN_PROMINENCE) {
+    for (let i = 1; i < sm.length - 1; i++) {
+        if (sm[i] < sm[i - 1] && sm[i] < sm[i + 1] && sm[i] <= threshold) {
+            if (lvns.length === 0 || Math.abs(profile[i].price - lvns[lvns.length - 1]) > step * 2) {
                 lvns.push(profile[i].price);
             }
         }
@@ -129,17 +146,20 @@ const findLVNs = (profile: VolumeProfileLevel[]): number[] => {
 };
 
 const findHVNs = (profile: VolumeProfileLevel[]): number[] => {
-    const rawVolumes = profile.map(p => p.volume);
-    const smoothed = smoothArray(rawVolumes, CONFIG.LVN_SMOOTHING);
+    if (profile.length < 3) return [];
+    const raw = profile.map(p => p.volume);
+    const sm = smoothArray(raw, CONFIG.LVN_SMOOTHING);
+    const maxVol = Math.max(...sm);
+    if (maxVol <= 0) return [];
+
+    const threshold = maxVol * CONFIG.HVN_THRESHOLD;
+    const step = profile[1].price - profile[0].price;
     const hvns: number[] = [];
 
-    // Local Maxima
-    for (let i = 2; i < smoothed.length - 2; i++) {
-        if (smoothed[i] >= smoothed[i - 1] && smoothed[i] >= smoothed[i + 1]) {
-            const maxVol = Math.max(...smoothed);
-            // Significant volume only (> 40% of max)
-            if (smoothed[i] > maxVol * 0.4) { 
-                 hvns.push(profile[i].price);
+    for (let i = 1; i < sm.length - 1; i++) {
+        if (sm[i] > sm[i - 1] && sm[i] > sm[i + 1] && sm[i] >= threshold) {
+            if (hvns.length === 0 || Math.abs(profile[i].price - hvns[hvns.length - 1]) > step * 2) {
+                hvns.push(profile[i].price);
             }
         }
     }
@@ -196,7 +216,7 @@ export const analyzeAMT = (
         };
     }
 
-    const lookback = Math.min(data.length, 200);
+    const lookback = Math.min(data.length, 50);
     const recentData = data.slice(-lookback);
     const currentCandle = data[data.length - 1];
 
@@ -204,15 +224,13 @@ export const analyzeAMT = (
     const profile = createProfile(recentData);
     if (profile.length === 0) return { marketState: 'BALANCED', poc: 0, valueAreaHigh: 0, valueAreaLow: 0, lvns: [], hvns: [], aggression: 0, signal: null, setup: null, profile: [], aggressivePrints: [] };
 
-    // Find POC
-    let maxVol = 0;
-    let pocIndex = 0;
-    profile.forEach((level, i) => {
-        if (level.volume > maxVol) {
-            maxVol = level.volume;
-            pocIndex = i;
-        }
-    });
+    // Find POC — tie-break: closest to current price when multiple bins share max volume
+    const maxVol = Math.max(...profile.map(p => p.volume));
+    const pocCandidates = profile.map((p, i) => ({ i, vol: p.volume })).filter(c => c.vol === maxVol);
+    const currentPrice = currentCandle.close;
+    const pocIndex = pocCandidates.reduce((best, c) =>
+        Math.abs(profile[c.i].price - currentPrice) < Math.abs(profile[best.i].price - currentPrice) ? c : best
+    ).i;
     const poc = profile[pocIndex].price;
 
     // Calculate Value Area (70%)
@@ -222,23 +240,40 @@ export const analyzeAMT = (
     let upIdx = pocIndex;
     let downIdx = pocIndex;
 
+    // CME two-row pairs method with upward tie-breaking
     while (currentVolume < targetVolume) {
-        const upVol = (upIdx < profile.length - 1) ? profile[upIdx + 1].volume : 0;
-        const downVol = (downIdx > 0) ? profile[downIdx - 1].volume : 0;
+        // Sum next TWO rows above
+        let upPair = 0;
+        let upCount = 0;
+        for (let k = 1; k <= 2; k++) {
+            if (upIdx + k < profile.length) { upPair += profile[upIdx + k].volume; upCount++; }
+        }
+        // Sum next TWO rows below
+        let downPair = 0;
+        let downCount = 0;
+        for (let k = 1; k <= 2; k++) {
+            if (downIdx - k >= 0) { downPair += profile[downIdx - k].volume; downCount++; }
+        }
 
-        if (upVol >= downVol && upIdx < profile.length - 1) {
-            upIdx++;
-            currentVolume += profile[upIdx].volume;
-        } else if (downIdx > 0) {
-            downIdx--;
-            currentVolume += profile[downIdx].volume;
-        } else {
-            break;
+        if (upCount === 0 && downCount === 0) break;
+
+        if (upCount > 0 && (downCount === 0 || upPair >= downPair)) {
+            // Expand upward (tie: upward first per convention)
+            for (let k = 0; k < upCount; k++) {
+                if (upIdx + 1 < profile.length) { upIdx++; currentVolume += profile[upIdx].volume; }
+            }
+        } else if (downCount > 0) {
+            for (let k = 0; k < downCount; k++) {
+                if (downIdx - 1 >= 0) { downIdx--; currentVolume += profile[downIdx].volume; }
+            }
         }
     }
 
-    const valueAreaHigh = profile[upIdx].price;
-    const valueAreaLow = profile[downIdx].price;
+    // VAH = upper edge of top VA bin, VAL = lower edge of bottom VA bin
+    const step = profile.length > 1 ? profile[1].price - profile[0].price : 0;
+    const halfStep = step / 2;
+    const valueAreaHigh = profile[upIdx].price + halfStep;
+    const valueAreaLow = profile[downIdx].price - halfStep;
     const lvns = findLVNs(profile);
     const hvns = findHVNs(profile);
     const aggressivePrints = findAggressivePrints(recentData);

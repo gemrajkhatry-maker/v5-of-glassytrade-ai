@@ -3,6 +3,7 @@
 import pytest
 
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+from app.domain.fabio_ai.services.prompt_builder import build_entry_prompt, parse_entry_response
 from app.domain.ports.llm_inference import LLMInferencePort
 
 
@@ -54,45 +55,72 @@ def _make_market_data(**overrides):
 
 class TestBuildPrompt:
 
-    def test_balanced_market(self, svc):
-        prompt = svc._build_prompt(_make_market_data(market_state="Balanced"))
-        assert "inside the Value Area" in prompt
+    def test_balanced_market(self):
+        prompt = build_entry_prompt(_make_market_data(market_state="Balanced"))
+        # Price at POC in balanced market → "At POC" or "rotational"
+        assert "POC" in prompt or "rotational" in prompt
 
-    def test_trending_market(self, svc):
-        prompt = svc._build_prompt(_make_market_data(market_state="Imbalanced"))
-        assert "outside the Value Area" in prompt
+    def test_trending_market(self):
+        # Price outside VA → "trending outside"
+        prompt = build_entry_prompt(_make_market_data(ltp=15300.0, market_state="Imbalanced"))
+        assert "trending" in prompt.lower() or "outside" in prompt.lower() or "broke above" in prompt.lower()
 
-    def test_positive_delta(self, svc):
-        prompt = svc._build_prompt(_make_market_data(delta=500))
-        assert "Buyers are aggressive" in prompt
+    def test_positive_delta(self):
+        prompt = build_entry_prompt(_make_market_data(delta=500))
+        assert "+" in prompt or "Buyers" in prompt or "buyers" in prompt.lower()
 
-    def test_negative_delta(self, svc):
-        prompt = svc._build_prompt(_make_market_data(delta=-500))
-        assert "Sellers are aggressive" in prompt
+    def test_negative_delta(self):
+        prompt = build_entry_prompt(_make_market_data(delta=-500))
+        assert "sellers" in prompt.lower() or "-500" in prompt
 
-    def test_zero_delta(self, svc):
-        prompt = svc._build_prompt(_make_market_data(delta=0))
-        assert "neutral" in prompt
+    def test_zero_delta(self):
+        prompt = build_entry_prompt(_make_market_data(delta=0))
+        assert "neutral" in prompt.lower()
 
-    def test_price_near_val(self, svc):
-        prompt = svc._build_prompt(_make_market_data(ltp=15000.0))
-        assert "testing Value Area Low" in prompt
+    def test_price_near_val(self):
+        prompt = build_entry_prompt(_make_market_data(ltp=15000.0))
+        assert "VAL" in prompt
 
-    def test_price_near_vah(self, svc):
-        prompt = svc._build_prompt(_make_market_data(ltp=15200.0))
-        assert "testing Value Area High" in prompt
+    def test_price_near_vah(self):
+        prompt = build_entry_prompt(_make_market_data(ltp=15200.0, delta=100))
+        assert "VAH" in prompt or "Value Area High" in prompt or "broke above" in prompt
 
-    def test_price_at_poc(self, svc):
-        # Price very close to POC (within 0.2%)
-        prompt = svc._build_prompt(_make_market_data(ltp=15100.0, poc=15100.0))
-        assert "Point of Control" in prompt
+    def test_price_at_poc(self):
+        prompt = build_entry_prompt(_make_market_data(ltp=15100.0, poc=15100.0))
+        assert "POC" in prompt
 
-    def test_all_zero_prices(self, svc):
-        prompt = svc._build_prompt(
+    def test_all_zero_prices(self):
+        prompt = build_entry_prompt(
             {"ltp": 0, "vah": 0, "val": 0, "poc": 0, "delta": 0}
         )
         assert isinstance(prompt, str)
         assert len(prompt) > 0
+
+    def test_volume_bubbles_in_prompt(self):
+        prompt = build_entry_prompt(_make_market_data(
+            volume_bubbles="BUY bubble at 15100 (500 vol, delta +300)"
+        ))
+        assert "Volume bubbles" in prompt
+
+    def test_cvd_divergence_in_prompt(self):
+        prompt = build_entry_prompt(_make_market_data(cvd_divergence="BEARISH_DIV"))
+        assert "CVD divergence" in prompt
+
+    def test_vwap_in_prompt(self):
+        prompt = build_entry_prompt(_make_market_data(vwap=15050.0))
+        assert "VWAP" in prompt
+
+    def test_profile_shape_p(self):
+        prompt = build_entry_prompt(_make_market_data(
+            profile_shape="P-shape (top-heavy, sellers may be trapped)"
+        ))
+        assert "P-Shape" in prompt
+
+    def test_profile_shape_b(self):
+        prompt = build_entry_prompt(_make_market_data(
+            profile_shape="b-shape (bottom-heavy, buying absorption)"
+        ))
+        assert "b-Shape" in prompt
 
 
 # ===================================================================
@@ -101,44 +129,44 @@ class TestBuildPrompt:
 
 class TestParseResponse:
 
-    def test_enter_long(self, svc):
-        r = svc._parse_response('Trigger: **Enter Long**')
+    def test_enter_long(self):
+        r = parse_entry_response('Trigger: **Enter Long**')
         assert r["direction"] == "LONG"
 
-    def test_enter_short(self, svc):
-        r = svc._parse_response('Trigger: **Enter Short**')
+    def test_enter_short(self):
+        r = parse_entry_response('Trigger: **Enter Short**')
         assert r["direction"] == "SHORT"
 
-    def test_trigger_long(self, svc):
-        r = svc._parse_response('Trigger: **Long**')
+    def test_trigger_long(self):
+        r = parse_entry_response('Trigger: **Long**')
         assert r["direction"] == "LONG"
 
-    def test_trigger_short(self, svc):
-        r = svc._parse_response('Trigger: **Short**')
+    def test_trigger_short(self):
+        r = parse_entry_response('Trigger: **Short**')
         assert r["direction"] == "SHORT"
 
-    def test_add_to_longs(self, svc):
-        r = svc._parse_response('Add to Longs')
+    def test_add_to_longs(self):
+        r = parse_entry_response('Add to Longs')
         assert r["direction"] == "LONG"
 
-    def test_bank_profit(self, svc):
-        r = svc._parse_response('Bank Profit')
+    def test_bank_profit(self):
+        r = parse_entry_response('Bank Profit')
         assert r["direction"] == "FLAT"
 
-    def test_walk_away(self, svc):
-        r = svc._parse_response('Walk away')
+    def test_walk_away(self):
+        r = parse_entry_response('Walk away')
         assert r["direction"] == "FLAT"
 
-    def test_stay_flat(self, svc):
-        r = svc._parse_response('Stay Flat')
+    def test_stay_flat(self):
+        r = parse_entry_response('Stay Flat')
         assert r["direction"] == "FLAT"
 
-    def test_empty_response(self, svc):
-        r = svc._parse_response('')
+    def test_empty_response(self):
+        r = parse_entry_response('')
         assert r["direction"] == "FLAT"
 
-    def test_random_text(self, svc):
-        r = svc._parse_response('The quick brown fox jumped over the lazy dog.')
+    def test_random_text(self):
+        r = parse_entry_response('The quick brown fox jumped over the lazy dog.')
         assert r["direction"] == "FLAT"
 
 

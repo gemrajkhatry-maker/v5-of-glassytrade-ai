@@ -34,3 +34,9 @@ poc/models/
 
 # OS
 .DS_Store
+poc/lora_adapter_mac/adapter_model.safetensors
+poc/lora_adapter_mac/checkpoint-*/
+poc/models/
+*.db
+*.db-shm
+*.db-wal

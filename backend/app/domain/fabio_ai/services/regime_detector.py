@@ -47,9 +47,10 @@ class RegimeDetector:
         self,
         tick: OHLC,
         amt_result: AMTResult,
+        current_time: float | None = None,
     ) -> bool:
         """Return True if the market regime has changed enough to warrant LLM analysis."""
-        now = time.time()
+        now = current_time if current_time is not None else time.time()
 
         # Always record delta history (even during cooldown) for spike detection
         self._recent_deltas.append(abs(tick.delta))

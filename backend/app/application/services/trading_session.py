@@ -17,13 +17,12 @@ from app.domain.trading.models.value_objects import OHLC, OrderBook
 from app.domain.trading.models.aggregates import Portfolio
 from app.domain.trading.models.enums import Source
 from app.domain.trading.events import (
-    TickReceived, AnalysisCompleted, PredictionCompleted,
+    TickReceived,
     SignalGenerated, PositionOpened, PositionClosed,
 )
 from app.domain.ports.event_bus import EventBusPort
 from app.domain.ports.broker import BrokerPort
 from app.domain.ports.storage import StoragePort
-from app.domain.trading.services.signal_generator import SignalGenerator
 from app.domain.trading.services.risk_manager import RiskManager
 from app.domain.fabio_ai.services.learning_engine import LearningEngine
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
@@ -32,6 +31,7 @@ from app.application.handlers.amt_handler import AMTHandler
 from app.application.handlers.llm_entry_handler import LLMEntryHandler
 from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
 from app.application.handlers.rl_handler import RLHandler
+from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
 
 from app.infrastructure.serialization.schemas import portfolio_to_dto, stats_to_dto
 
@@ -57,6 +57,10 @@ class SessionState:
     _last_ai_time: float = 0
     _ai_running: bool = False
 
+    # Overseer throttling state
+    _last_overseer_time: float = 0
+    _overseer_running: bool = False
+
     # Thread safety lock for portfolio reads/writes
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -76,22 +80,27 @@ class TradingSessionService:
         self._storage = storage
 
         # Domain services
-        self._signal_generator = SignalGenerator()
         self._risk_manager = RiskManager()
 
         # Focused handlers
         self._amt_handler = AMTHandler()
-        self._llm_handler = LLMEntryHandler(gen_ai_service, event_bus, storage=storage)
         self._lifecycle_handler = TradeLifecycleHandler()
+        self._llm_handler = LLMEntryHandler(
+            gen_ai_service, event_bus, storage=storage,
+            trade_manager=self._lifecycle_handler.trade_manager,
+        )
         self._rl_handler = RLHandler()
+        self._overseer_handler = LLMOverseerHandler(
+            gen_ai_service, event_bus,
+            trade_manager=self._lifecycle_handler.trade_manager,
+            storage=storage,
+        )
 
         # Session state per symbol
         self._sessions: dict[str, SessionState] = {}
 
         # Wire event subscriptions
         self._event_bus.subscribe(TickReceived, self._on_tick)
-        self._event_bus.subscribe(AnalysisCompleted, self._on_analysis_completed)
-        self._event_bus.subscribe(PredictionCompleted, self._on_prediction_completed)
         self._event_bus.subscribe(SignalGenerated, self._on_signal_generated)
         self._event_bus.subscribe(PositionClosed, self._on_position_closed)
 
@@ -113,10 +122,17 @@ class TradingSessionService:
         """Process a new tick and return the current state snapshot."""
         session = self.get_or_create_session(symbol)
 
-        # Update data store
-        session.data.append(tick)
-        if len(session.data) > 1000:
-            del session.data[:len(session.data) - 1000]
+        # Update data store — deduplicate sub-candle updates.
+        # Binance kline WS sends ~150 updates per 5m candle.  Each update
+        # carries the same open-time but progressively updated OHLCV.
+        # We must replace the current candle in-place (not append) so that
+        # session.data contains exactly one entry per candle interval.
+        if session.data and session.data[-1].time == tick.time:
+            session.data[-1] = tick          # update current candle
+        else:
+            session.data.append(tick)        # new candle
+            if len(session.data) > 1000:
+                del session.data[:len(session.data) - 1000]
         session.order_book = order_book
 
         # Persist tick
@@ -152,6 +168,10 @@ class TradingSessionService:
 
         # Sync portfolio-closed positions to TradeManager to prevent double-close
         if closed_positions:
+            for pos in closed_positions:
+                # Track daily losses in TradeManager (SL exits via Portfolio safety net)
+                if pos.close_reason and "Stop" in pos.close_reason:
+                    self._lifecycle_handler.trade_manager.record_loss()
             self._lifecycle_handler.sync_closed(closed_positions)
             # Snapshot equity after trade closes (for performance tracking)
             if self._storage:
@@ -197,10 +217,20 @@ class TradingSessionService:
         with session._lock:
             position_closed = self._lifecycle_handler.check_exits(
                 session.portfolio, event.tick.close,
+                cvd_divergence=amt_result.cvd_divergence,
             )
             has_position = any(p.status == "OPEN" for p in session.portfolio.positions)
 
-        # 3. LLM Entry Decision (throttled)
+        # 3. LLM Overseer (runs while position IS open)
+        if has_position and self._overseer_handler.should_run(
+            last_overseer_time=session._last_overseer_time,
+            overseer_running=session._overseer_running,
+            ai_running=session._ai_running,
+            has_position=has_position,
+        ):
+            self._overseer_handler.run_overseer(session, event.symbol, event.tick, amt_result)
+
+        # 4. LLM Entry Decision (throttled)
         if self._llm_handler.should_run(
             last_ai_time=session._last_ai_time,
             ai_running=session._ai_running,
@@ -210,6 +240,7 @@ class TradingSessionService:
             data=session.data,
             amt_result=amt_result,
             tick=event.tick,
+            order_book=event.order_book,
         ):
             self._llm_handler.run_entry(session, event.symbol, event.tick, amt_result)
         elif not has_position and not session._ai_running:
@@ -222,28 +253,15 @@ class TradingSessionService:
                 )
                 session.last_ai_analysis = cooldown_status
 
-    def _on_analysis_completed(self, event: AnalysisCompleted) -> None:
-        signal = self._signal_generator.evaluate_amt(event.result)
-        if signal:
-            self._event_bus.publish(SignalGenerated(symbol=event.symbol, signal=signal))
-
-    def _on_prediction_completed(self, event: PredictionCompleted) -> None:
-        if not event.analysis:
-            return
-        session = self.get_or_create_session(event.symbol)
-        if not session.data:
-            return
-        signal = self._signal_generator.evaluate_prediction(
-            event.analysis, session.data[-1], event.generation,
-        )
-        if signal:
-            self._event_bus.publish(SignalGenerated(symbol=event.symbol, signal=signal))
-
     def _on_signal_generated(self, event: SignalGenerated) -> None:
         if not event.signal:
             return
         session = self.get_or_create_session(event.symbol)
+        sig = event.signal
+        log.info("Signal received: %s @ %.2f (SL=%.2f, TP=%.2f, source=%s)",
+                 sig.type, sig.price, sig.stop_loss, sig.take_profit, sig.source)
         if not self._risk_manager.validate(event.signal, session.portfolio):
+            log.info("Signal rejected by risk manager")
             return
         position = self._broker.execute_order(event.signal, session.portfolio, event.symbol)
         if position:
@@ -272,6 +290,8 @@ class TradingSessionService:
             "prediction": session.last_prediction,
             "footprint": session.last_footprint,
             "genAIAnalysis": self._camel_case_ai(ai_analysis),
+            "overseerAction": (ai_analysis or {}).get("overseer_action", ""),
+            "overseerReason": (ai_analysis or {}).get("overseer_reason", ""),
             "modelWeights": {
                 "trend": weights.trend,
                 "momentum": weights.momentum,

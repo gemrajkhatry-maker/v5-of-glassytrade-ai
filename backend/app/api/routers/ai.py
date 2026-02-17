@@ -1,29 +1,16 @@
-"""AI command router — proxies natural language commands to Gemini."""
+"""AI analysis router — market analysis via fine-tuned LLM."""
 
-from fastapi import APIRouter, Depends
+from typing import Optional
 
-from app.api.dependencies import get_ai_model
-from app.domain.ports.ai_model import AIModelPort
-from app.infrastructure.serialization.schemas import CommandRequestDTO
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
+
+from app.api.dependencies import get_gen_ai_service, get_storage
+from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+from app.infrastructure.storage.database import SQLiteStorageAdapter
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
-
-@router.post("/command")
-async def ai_command(
-    req: CommandRequestDTO,
-    ai_model: AIModelPort = Depends(get_ai_model),
-):
-    result = await ai_model.process_command(req.prompt, req.current_config)
-    return {
-        "message": result.message,
-        "action": result.action,
-        "configUpdates": result.config_updates,
-    }
-
-
-from pydantic import BaseModel
-from typing import Dict, Any, Optional
 
 class MarketAnalysisRequest(BaseModel):
     ltp: float
@@ -33,23 +20,29 @@ class MarketAnalysisRequest(BaseModel):
     key_level: Optional[str] = None
     aggression: Optional[str] = None
 
-from app.api.dependencies import get_gen_ai_service
-from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 
 @router.post("/analyze")
 async def analyze_market(
     req: MarketAnalysisRequest,
     service: GenerativeAIService = Depends(get_gen_ai_service),
 ):
-    """
-    Analyzes market data using the fine-tuned Nanbeige model (Fabio Logic).
-    """
-    # Convert Pydantic model to dict for service compatibility
+    """Analyzes market data using the fine-tuned Nanbeige model (Fabio Logic)."""
     market_data = req.dict()
     analysis = service.analyze_market(market_data)
-    
+
     return {
         "direction": analysis["direction"],
         "rationale": analysis["rationale"],
-        "raw_output": analysis.get("raw_output", "")
+        "raw_output": analysis.get("raw_output", ""),
     }
+
+
+@router.get("/history")
+async def get_decision_history(
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+    storage: SQLiteStorageAdapter = Depends(get_storage),
+):
+    """Returns persisted LLM decision history from SQLite."""
+    rows = storage.query_llm_decisions(start=start, end=end)
+    return {"decisions": rows}

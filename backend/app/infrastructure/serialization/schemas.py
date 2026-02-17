@@ -96,6 +96,15 @@ class AMTAnalysisDTO(BaseModel):
     setup: Optional[str] = None
     profile: list[VolumeProfileLevelDTO] = []
     aggressive_prints: list[AggressivePrintDTO] = Field(alias="aggressivePrints", default=[])
+    cvd_slope: float = Field(alias="cvdSlope", default=0.0)
+    cvd_divergence: str = Field(alias="cvdDivergence", default="")
+    profile_shape: str = Field(alias="profileShape", default="")
+    session_vwap: float = Field(alias="sessionVwap", default=0.0)
+    vwap_upper_1: float = Field(alias="vwapUpper1", default=0.0)
+    vwap_lower_1: float = Field(alias="vwapLower1", default=0.0)
+    vwap_upper_2: float = Field(alias="vwapUpper2", default=0.0)
+    vwap_lower_2: float = Field(alias="vwapLower2", default=0.0)
+    balance_ratio: float = Field(alias="balanceRatio", default=0.0)
 
     model_config = {"populate_by_name": True}
 
@@ -369,6 +378,15 @@ def amt_result_to_dto(r) -> dict:
              "delta": ap.delta, "side": ap.side}
             for ap in r.aggressive_prints
         ],
+        "cvdSlope": getattr(r, "cvd_slope", 0.0),
+        "cvdDivergence": getattr(r, "cvd_divergence", ""),
+        "profileShape": getattr(r, "profile_shape", ""),
+        "sessionVwap": getattr(r, "session_vwap", 0.0),
+        "vwapUpper1": getattr(r, "vwap_upper_1", 0.0),
+        "vwapLower1": getattr(r, "vwap_lower_1", 0.0),
+        "vwapUpper2": getattr(r, "vwap_upper_2", 0.0),
+        "vwapLower2": getattr(r, "vwap_lower_2", 0.0),
+        "balanceRatio": getattr(r, "balance_ratio", 0.0),
     }
 
 

@@ -19,7 +19,7 @@ class AMTHandler:
     """Handles AMT analysis and footprint generation (every tick)."""
 
     # Maximum number of candles kept in the incremental profile window.
-    _LOOKBACK: int = 500
+    _LOOKBACK: int = 200
 
     def __init__(self) -> None:
         self._amt_analyzer = AMTAnalyzer()
@@ -41,19 +41,24 @@ class AMTHandler:
         lookback = min(len(data), self._LOOKBACK)
         recent_data = data[-lookback:]
 
-        if len(data) > self._prev_data_len and recent_data:
-            new_candle = recent_data[-1]
-            # If the window is full, the oldest candle to drop is the one
-            # that was at position -lookback in the previous tick.
-            oldest = None
-            if len(data) > self._LOOKBACK and self._prev_data_len >= self._LOOKBACK:
-                oldest = data[-(lookback + 1)]
-            self._inc_profile.update(new_candle, oldest)
-        elif len(data) != self._prev_data_len:
-            # Data shrank or reset — full rebuild via fallback
+        data_len = len(data)
+        data_grew_by = data_len - self._prev_data_len
+
+        if data_grew_by > 1 or data_grew_by < 0 or (self._prev_data_len == 0 and data_len > 0):
+            # Bulk load, data reset, or first call — full rebuild
             self._inc_profile = IncrementalVolumeProfile()
             for candle in recent_data:
                 self._inc_profile.update(candle)
+            if data_grew_by > 1:
+                logger.info("VP full rebuild: %d candles (bulk load)", len(recent_data))
+        elif data_grew_by == 1 and recent_data:
+            # New candle arrived
+            new_candle = recent_data[-1]
+            oldest = None
+            if data_len > self._LOOKBACK and self._prev_data_len >= self._LOOKBACK:
+                oldest = data[-(lookback + 1)]
+            self._inc_profile.update(new_candle, oldest)
+        # data_grew_by == 0: sub-candle update — skip VP rebuild (noise)
 
         self._prev_data_len = len(data)
 

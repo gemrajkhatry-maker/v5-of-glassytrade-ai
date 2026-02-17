@@ -2,37 +2,9 @@
 
 import pytest
 from app.domain.trading.models.enums import Sentiment, SignalType, Source, SetupType
-from app.domain.trading.models.value_objects import (
-    OHLC, AMTResult,
-)
+from app.domain.trading.models.value_objects import OHLC
 from app.domain.fabio_ai.models.predictions import AIAnalysisResult, FactorBreakdown
-from app.domain.trading.models.entities import Signal
 from app.domain.trading.services.signal_generator import SignalGenerator
-
-
-class TestSignalGeneratorAMT:
-    def test_no_signal_when_none(self):
-        sg = SignalGenerator()
-        result = AMTResult(
-            market_state="BALANCED", poc=100,
-            value_area_high=110, value_area_low=90,
-        )
-        assert sg.evaluate_amt(result) is None
-
-    def test_extracts_signal(self):
-        sg = SignalGenerator()
-        signal = Signal(
-            type=SignalType.BUY, price=100, reason="test",
-            stop_loss=95, take_profit=110, timestamp="t",
-            setup=SetupType.TREND_MODEL, source=Source.AMT,
-        )
-        result = AMTResult(
-            market_state="IMBALANCED", poc=100,
-            value_area_high=110, value_area_low=90,
-            signal=signal,
-        )
-        extracted = sg.evaluate_amt(result)
-        assert extracted == signal
 
 
 class TestSignalGeneratorPrediction:

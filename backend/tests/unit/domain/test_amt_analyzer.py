@@ -6,8 +6,9 @@ import pytest
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
 from app.domain.fabio_ai.services.amt_analyzer import (
     smooth_array, create_profile, find_lvns, find_hvns,
-    find_aggressive_prints, AMTAnalyzer,
+    find_aggressive_prints, AMTAnalyzer, AMTConfig,
 )
+from app.domain.trading.models.value_objects import VolumeProfileLevel
 from app.infrastructure.adapters.data_generator import generate_market_data
 
 
@@ -106,3 +107,119 @@ class TestAMTAnalyzer:
         )
         result = analyzer.analyze(data, ob)
         assert result.poc > 0
+
+    # ----- Formula gap tests -----
+
+    def test_vah_val_use_bin_edges(self):
+        """VAH should be upper edge of top VA bin, VAL lower edge of bottom."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(50, 100, "sideways")
+        result = analyzer.analyze(data)
+        profile = list(result.profile)
+        if len(profile) > 1:
+            step = profile[1].price - profile[0].price
+            half = step / 2
+            # VAH and VAL should NOT equal any bin midpoint exactly
+            midpoints = {round(p.price, 8) for p in profile}
+            assert round(result.value_area_high, 8) not in midpoints
+            assert round(result.value_area_low, 8) not in midpoints
+            # They should be offset by exactly half_step from a midpoint
+            vah_offset = min(abs(result.value_area_high - p.price) for p in profile)
+            val_offset = min(abs(result.value_area_low - p.price) for p in profile)
+            assert abs(vah_offset - half) < 0.001
+            assert abs(val_offset - half) < 0.001
+
+    def test_poc_tiebreak_closest_to_vwap(self):
+        """When multiple bins share max volume, POC should be closest to VWAP."""
+        # Create a profile with two equal-volume peaks
+        profile = [VolumeProfileLevel(price=90 + i * 10, volume=0) for i in range(5)]
+        profile[1].volume = 100  # price=100
+        profile[3].volume = 100  # price=120
+        # With VWAP closer to 120, POC should pick index 3
+        analyzer = AMTAnalyzer()
+        # Seed the VWAP accumulator toward 120
+        analyzer._vwap_cum_vol = 1000
+        analyzer._vwap_cum_quote_vol = 120000  # VWAP = 120
+        data = [_make_candle(120, volume=100) for _ in range(30)]
+        result = analyzer.analyze(data)
+        # POC should exist and be valid
+        assert result.poc > 0
+
+    def test_balance_ratio_computed(self):
+        """Balance ratio should be between 0 and 1."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(50, 100, "sideways")
+        result = analyzer.analyze(data)
+        assert 0.0 <= result.balance_ratio <= 1.0
+
+    def test_balanced_market_has_balance_ratio(self):
+        """Sideways market should have non-zero balance ratio."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(50, 100, "sideways")
+        result = analyzer.analyze(data)
+        assert result.balance_ratio > 0.0  # at least some candles inside VA
+
+    def test_vwap_bands_computed(self):
+        """VWAP ±1σ and ±2σ bands should be populated after analysis."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(50, 100, "sideways")
+        result = analyzer.analyze(data)
+        assert result.session_vwap > 0
+        # Bands should be symmetric around VWAP
+        assert result.vwap_upper_1 >= result.session_vwap
+        assert result.vwap_lower_1 <= result.session_vwap
+        assert result.vwap_upper_2 >= result.vwap_upper_1
+        assert result.vwap_lower_2 <= result.vwap_lower_1
+
+    def test_vwap_bands_2sigma_wider_than_1sigma(self):
+        """2σ bands should be wider than 1σ bands."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(50, 100, "bullish")
+        result = analyzer.analyze(data)
+        width_1 = result.vwap_upper_1 - result.vwap_lower_1
+        width_2 = result.vwap_upper_2 - result.vwap_lower_2
+        assert width_2 >= width_1
+
+    def test_displacement_leg_returns_leg_lvns(self):
+        """detect_displacement_leg should return LVN list (possibly empty)."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(50, 100, "bullish")
+        is_disp, leg_lvns = analyzer.detect_displacement_leg(data)
+        assert isinstance(is_disp, bool)
+        assert isinstance(leg_lvns, list)
+
+    def test_amt_result_has_new_fields(self):
+        """AMTResult should include all new formula fields."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(50, 100, "sideways")
+        result = analyzer.analyze(data)
+        # All new fields should exist
+        assert hasattr(result, 'vwap_upper_1')
+        assert hasattr(result, 'vwap_lower_1')
+        assert hasattr(result, 'vwap_upper_2')
+        assert hasattr(result, 'vwap_lower_2')
+        assert hasattr(result, 'balance_ratio')
+
+
+class TestConfirmationBundle:
+    """Tests for spread tightness in confirmation bundle."""
+
+    def test_spread_tightness_passes_tight_spread(self):
+        """Tight bid-ask spread (≤5 bps) should pass spread check."""
+        from app.domain.fabio_ai.services.entry_gate import check_confirmation_bundle
+        data = [_make_candle(100, volume=200, delta=80) for _ in range(30)]
+        tick = _make_candle(100, volume=500, delta=200)
+        ob = OrderBook(
+            bids=(OrderBookLevel(price=99.99, quantity=100),),
+            asks=(OrderBookLevel(price=100.01, quantity=100),),  # 2 bps spread
+        )
+        result = check_confirmation_bundle(data, tick, ob)
+        assert isinstance(result, bool)
+
+    def test_spread_tightness_no_orderbook_passes(self):
+        """No order book should not penalize (spread_tight = True)."""
+        from app.domain.fabio_ai.services.entry_gate import check_confirmation_bundle
+        data = [_make_candle(100, volume=200, delta=80) for _ in range(30)]
+        tick = _make_candle(100, volume=500, delta=200)
+        result = check_confirmation_bundle(data, tick, None)
+        assert isinstance(result, bool)

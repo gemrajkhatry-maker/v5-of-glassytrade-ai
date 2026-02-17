@@ -25,8 +25,8 @@ The project uses **ES Modules** via CDN (Import Maps) to run without a local bun
 *   **Render Mode:** Canvas 2D
 
 ### Artificial Intelligence
-*   **SDK:** `@google/genai` (`^1.30.0`)
-*   **LLM Provider:** OpenRouter (accessing Grok / Gemini models).
+*   **Fine-tuned LLM:** Nanbeige 3B + LoRA via MLX (Apple Silicon inference).
+*   **LangChain:** Structured output for overseer decisions.
 
 ### Utilities
 *   **UUID:** `^13.0.0` (For unique trade/position IDs).
@@ -52,8 +52,7 @@ The project uses **ES Modules** via CDN (Import Maps) to run without a local bun
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "lightweight-charts": "https://esm.sh/lightweight-charts@4.1.1",
     "lucide-react": "https://aistudiocdn.com/lucide-react@^0.555.0",
-    "uuid": "https://aistudiocdn.com/uuid@^13.0.0",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0"
+    "uuid": "https://aistudiocdn.com/uuid@^13.0.0"
   }
 }
 ```

@@ -109,6 +109,9 @@ export interface InstrumentState {
   riskState: RiskState | null;
   llmHistory: LLMHistoryEntry[];
   predictions: OHLCData[];
+  overseerAction: string;
+  overseerReason: string;
+  stats: StrategyStats | null;
   lastUpdate: number;
 }
 

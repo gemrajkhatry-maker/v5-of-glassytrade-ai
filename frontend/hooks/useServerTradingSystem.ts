@@ -12,6 +12,7 @@ import {
     ModelWeights,
     RiskState,
     LLMHistoryEntry,
+    StrategyStats,
 } from '../types';
 import { normalizeSymbol } from '../services/binanceService';
 
@@ -51,6 +52,9 @@ const createInstrumentState = (
     riskState: null,
     llmHistory: [],
     predictions: [],
+    overseerAction: '',
+    overseerReason: '',
+    stats: null,
     lastUpdate: Date.now(),
 });
 
@@ -75,6 +79,7 @@ export const useServerTradingSystem = (
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const latestFootprint = useRef<Record<string, FootprintCandle> | null>(null);
+    const historySentRef = useRef<Set<string>>(new Set());
 
     // ----------------------------------------------------------------
     // 1.  Initialise instrument slots when candidates arrive
@@ -96,6 +101,33 @@ export const useServerTradingSystem = (
             setActiveSymbol(marketData.candidates[0]);
         }
     }, [marketData.candidates, marketData.initialHistory]);
+
+    // ----------------------------------------------------------------
+    // 1b. Load persisted LLM decision history on mount
+    // ----------------------------------------------------------------
+    useEffect(() => {
+        fetch(`${window.location.protocol}//${window.location.host}/api/ai/history`)
+            .then(res => res.json())
+            .then(data => {
+                if (!data.decisions || data.decisions.length === 0) return;
+                const entries: LLMHistoryEntry[] = data.decisions.map((d: any) => ({
+                    timestamp: new Date(d.created_at).getTime(),
+                    direction: d.direction || 'FLAT',
+                    confidence: d.confidence || 'Medium',
+                    rationale: d.rationale || '',
+                    inputPrompt: d.input_prompt || '',
+                    rawOutput: d.raw_output || '',
+                }));
+                setInstruments(prev => {
+                    const next = { ...prev };
+                    for (const sym of Object.keys(next)) {
+                        next[sym] = { ...next[sym], llmHistory: entries.slice(-20) };
+                    }
+                    return next;
+                });
+            })
+            .catch(() => {}); // Silently fail if backend not ready
+    }, []);
 
     // ----------------------------------------------------------------
     // 2.  Keep orderbooks in sync
@@ -131,6 +163,7 @@ export const useServerTradingSystem = (
         ws.onopen = () => {
             console.log('[ServerTradingSystem] WS connected');
             setRetryCount(0); // Reset backoff on success
+            historySentRef.current.clear(); // Re-send history on reconnect
         };
 
         ws.onmessage = (event) => {
@@ -152,18 +185,9 @@ export const useServerTradingSystem = (
                     const newModelWeights = state.modelWeights ?? inst.modelWeights;
                     const newGeneration = state.generation ?? inst.generation;
                     const newRiskState = state.riskState ?? inst.riskState;
-
-                    // Skip update if nothing changed (reference equality)
-                    if (newPortfolio === inst.portfolio &&
-                        newAmtAnalysis === inst.amtAnalysis &&
-                        newAiAnalysis === inst.aiAnalysis &&
-                        newGenAIAnalysis === inst.genAIAnalysis &&
-                        newPredictions === inst.predictions &&
-                        newModelWeights === inst.modelWeights &&
-                        newGeneration === inst.generation &&
-                        newRiskState === inst.riskState) {
-                        return prev;
-                    }
+                    const newOverseerAction = state.overseerAction ?? inst.overseerAction;
+                    const newOverseerReason = state.overseerReason ?? inst.overseerReason;
+                    const newStats = state.stats ?? inst.stats;
 
                     return {
                         ...prev,
@@ -192,6 +216,9 @@ export const useServerTradingSystem = (
                             modelWeights: newModelWeights,
                             generation: newGeneration,
                             riskState: newRiskState,
+                            overseerAction: newOverseerAction,
+                            overseerReason: newOverseerReason,
+                            stats: newStats,
                             lastUpdate: Date.now(),
                         },
                     };
@@ -265,6 +292,13 @@ export const useServerTradingSystem = (
 
         // Send to backend
         if (ws && ws.readyState === WebSocket.OPEN) {
+            // Send historical candles once per symbol to seed backend VP
+            if (!historySentRef.current.has(symbol) && marketData.initialHistory[symbol]?.length > 0) {
+                const history = marketData.initialHistory[symbol];
+                console.log(`[ServerTradingSystem] Sending ${history.length} historical candles for ${symbol}`);
+                ws.send(JSON.stringify({ symbol, history }));
+                historySentRef.current.add(symbol);
+            }
             const orderBook = marketData.orderBooks[symbol] || null;
             ws.send(JSON.stringify({ symbol, tick, orderBook }));
         }

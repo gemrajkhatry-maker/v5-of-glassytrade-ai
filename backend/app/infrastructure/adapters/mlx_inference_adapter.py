@@ -59,15 +59,16 @@ class MLXInferenceAdapter(LLMInferencePort):
         from mlx_lm import generate
         from mlx_lm.sample_utils import make_sampler
 
-        alpaca_prompt = (
-            "Below is an instruction that describes a task, paired with an input "
-            "that provides further context. Write a response that appropriately "
-            "completes the request.\n\n"
-            "### Instruction:\n{}\n\n"
-            "### Input:\n{}\n\n"
-            "### Response:\n"
+        # ChatML format with response prefill to skip <think> and get structured output
+        prompt = (
+            "<|im_start|>system\n"
+            f"{instruction} Always respond with exactly three lines:\n"
+            "Market State: Balance or Imbalance\n"
+            "Logic: brief reasoning\n"
+            "Trigger: Enter Long, Enter Short, or Stay Flat<|im_end|>\n"
+            f"<|im_start|>user\n{input_text}<|im_end|>\n"
+            "<|im_start|>assistant\nMarket State:"
         )
-        prompt = alpaca_prompt.format(instruction, input_text)
         sampler = make_sampler(temp=settings.LLM_TEMPERATURE)
         response = generate(
             self.model,
@@ -76,16 +77,24 @@ class MLXInferenceAdapter(LLMInferencePort):
             max_tokens=settings.LLM_MAX_NEW_TOKENS,
             sampler=sampler,
         )
-        return self._truncate_repetition(response.strip())
+        return self._truncate_repetition("Market State:" + response.strip())
 
     @staticmethod
     def _truncate_repetition(text: str) -> str:
-        """Cut off output if a sentence repeats more than twice."""
+        """Cut off output if a sentence repeats more than twice.
+
+        Preserves all sentences containing 'trigger:' to avoid losing
+        the directional decision that the parser relies on.
+        """
         sentences = [s.strip() for s in text.split('.') if s.strip()]
         seen: dict[str, int] = {}
         result = []
         for s in sentences:
             key = s.lower()
+            # Always keep Trigger lines regardless of repetition
+            if 'trigger' in key:
+                result.append(s)
+                continue
             seen[key] = seen.get(key, 0) + 1
             if seen[key] > 2:
                 break

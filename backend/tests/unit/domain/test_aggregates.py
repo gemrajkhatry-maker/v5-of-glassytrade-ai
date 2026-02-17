@@ -71,8 +71,9 @@ class TestPortfolioOpenPosition:
         p = Portfolio.create_default()
         sig = _make_signal(price=100, sl=95, tp=110)
         pos = p.open_position(sig, "BTCUSDT")
-        # risk_amount = 10M * 0.01 = 100K; risk_per_unit = 5; size = 20K
-        assert pos.size == pytest.approx(20000, rel=0.01)
+        # No metadata → confidence="Medium" → risk=0.35%
+        # risk_amount = 10M * 0.0035 = 35K; risk_per_unit = 5; size = 7K
+        assert pos.size == pytest.approx(7000, rel=0.01)
 
 
 class TestPortfolioProcessTick:
@@ -117,16 +118,16 @@ class TestPortfolioProcessTick:
         p.process_tick(tick)
         assert p.balance > initial_balance
 
-    def test_breakeven_on_strong_delta(self):
+    def test_portfolio_does_not_move_breakeven(self):
+        """Break-even logic is centralized in TradeManager, not Portfolio."""
         p = Portfolio.create_default()
         sig = _make_signal(price=100, sl=90, tp=120)
-        pos = p.open_position(sig, "BTCUSDT")
-        original_sl = pos.stop_loss
+        p.open_position(sig, "BTCUSDT")
 
-        # Strong positive delta for a LONG position
+        # Strong positive delta — Portfolio should NOT move SL
         tick = _make_tick(close=105, delta=600, volume=1000)
         p.process_tick(tick)
-        assert p.positions[0].stop_loss == 100  # moved to breakeven
+        assert p.positions[0].stop_loss == 90  # unchanged, TradeManager handles BE
 
 
 class TestPortfolioStats:

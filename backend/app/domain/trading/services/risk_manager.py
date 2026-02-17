@@ -45,7 +45,9 @@ class RiskManager:
     # Circuit-breaker thresholds
     MAX_DAILY_DRAWDOWN_PCT: float = 0.02  # 2% of starting equity
     MAX_CONSECUTIVE_LOSSES: int = 3
-    MAX_CONCURRENT_POSITIONS: int = 3
+    MAX_CONCURRENT_POSITIONS: int = 5
+    MAX_PORTFOLIO_NOTIONAL_PCT: float = 0.60  # 60% of equity
+    MAX_PER_SYMBOL_NOTIONAL_PCT: float = 0.20  # 20% of equity
 
     def __init__(self) -> None:
         self._daily = DailyRiskState()
@@ -85,8 +87,16 @@ class RiskManager:
             return False
 
         # Max concurrent positions
-        if len(portfolio.positions) >= self.MAX_CONCURRENT_POSITIONS:
+        open_positions = [p for p in portfolio.positions if p.is_open]
+        if len(open_positions) >= self.MAX_CONCURRENT_POSITIONS:
             logger.warning("Trade rejected: max concurrent positions (%d)", self.MAX_CONCURRENT_POSITIONS)
+            return False
+
+        # Portfolio notional cap (60% of equity)
+        total_notional = sum(p.size * p.entry_price for p in open_positions)
+        max_notional = portfolio.equity * self.MAX_PORTFOLIO_NOTIONAL_PCT
+        if total_notional >= max_notional:
+            logger.warning("Trade rejected: portfolio notional cap (%.0f >= %.0f)", total_notional, max_notional)
             return False
 
         return True
