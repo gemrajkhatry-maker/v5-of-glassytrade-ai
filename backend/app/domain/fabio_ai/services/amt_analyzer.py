@@ -490,21 +490,68 @@ class AMTAnalyzer:
         # VWAP variance accumulator for σ bands
         self._vwap_cum_sq_vol: float = 0.0  # Σ(price² × volume)
 
-    def detect_displacement_leg(self, data: list[OHLC]) -> tuple[bool, list[float]]:
-        """Detect displacement and return (is_displacement, leg_LVNs).
+    def detect_displacement_leg(self, data: list[OHLC]) -> dict:
+        """Detect displacement and return leg profile data.
 
-        When displacement is detected, builds a mini volume profile from the
-        leg candles and extracts LVNs — these are pullback targets.
+        Always builds a leg profile from the most recent directional move
+        (consecutive same-direction candles from the end). The strict displacement
+        flag is set when the move also meets range expansion criteria.
         """
+        empty = {"has_displacement": False, "profile": [], "lvns": [], "poc": 0.0, "vah": 0.0, "val": 0.0}
+        if len(data) < 5:
+            return empty
+
+        # Find the most recent directional leg: consecutive candles from end
+        # that share the same direction (bull or bear)
+        last = data[-1]
+        is_bull = last.close >= last.open
+        leg_candles = [last]
+        for i in range(len(data) - 2, max(len(data) - 15, -1), -1):
+            c = data[i]
+            if (c.close >= c.open) == is_bull:
+                leg_candles.insert(0, c)
+            else:
+                break
+
+        if len(leg_candles) < 2:
+            return empty
+
         is_disp = self.detect_displacement(data)
-        if not is_disp or len(data) < 3:
-            return is_disp, []
-        leg_candles = data[-3:]
-        leg_profile = create_profile(leg_candles, buckets=12)
+        leg_profile = create_profile(leg_candles, buckets=30)
         if len(leg_profile) < 3:
-            return True, []
+            return {"has_displacement": is_disp, "profile": leg_profile, "lvns": [], "poc": 0.0, "vah": 0.0, "val": 0.0}
         leg_lvns = find_lvns(leg_profile, self.config)
-        return True, leg_lvns
+        # Compute POC/VAH/VAL for the leg
+        max_vol = max(p.volume for p in leg_profile)
+        poc_idx = next(i for i, p in enumerate(leg_profile) if p.volume == max_vol)
+        leg_poc = leg_profile[poc_idx].price
+        total_volume = sum(p.volume for p in leg_profile)
+        target_volume = total_volume * 0.7
+        current_volume = max_vol
+        up_idx, down_idx = poc_idx, poc_idx
+        while current_volume < target_volume:
+            can_up = up_idx + 1 < len(leg_profile)
+            can_down = down_idx - 1 >= 0
+            if not can_up and not can_down:
+                break
+            up_vol = leg_profile[up_idx + 1].volume if can_up else -1
+            down_vol = leg_profile[down_idx - 1].volume if can_down else -1
+            if up_vol >= down_vol:
+                up_idx += 1
+                current_volume += up_vol
+            else:
+                down_idx -= 1
+                current_volume += down_vol
+        leg_vah = leg_profile[up_idx].price
+        leg_val = leg_profile[down_idx].price
+        return {
+            "has_displacement": is_disp,
+            "profile": leg_profile,
+            "lvns": leg_lvns,
+            "poc": leg_poc,
+            "vah": leg_vah,
+            "val": leg_val,
+        }
 
     def detect_displacement(self, data: list[OHLC]) -> bool:
         """Check for impulsive move: 3+ candles with direction + range expansion.
@@ -676,7 +723,8 @@ class AMTAnalyzer:
         # 2. Market State (Fabio: Displacement + Acceptance + ATR compression)
         market_state = MarketState.BALANCED
 
-        has_displacement, _leg_lvns = self.detect_displacement_leg(recent_data)
+        leg_data = self.detect_displacement_leg(recent_data)
+        has_displacement = leg_data["has_displacement"]
         has_acceptance = self.detect_acceptance(recent_data, vah, val)
 
         # Balance ratio: fraction of recent candles inside VA (computed early for market state)
@@ -793,6 +841,12 @@ class AMTAnalyzer:
             vwap_upper_2=vwap_upper_2,
             vwap_lower_2=vwap_lower_2,
             balance_ratio=balance_ratio,
+            leg_profile=tuple(leg_data.get("profile", [])),
+            leg_lvns=tuple(leg_data.get("lvns", [])),
+            leg_poc=leg_data.get("poc", 0.0),
+            leg_vah=leg_data.get("vah", 0.0),
+            leg_val=leg_data.get("val", 0.0),
+            has_displacement=leg_data.get("has_displacement", False),
         )
 
     def _generate_signal(

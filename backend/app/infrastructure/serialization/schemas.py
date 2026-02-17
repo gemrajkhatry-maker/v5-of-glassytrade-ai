@@ -105,6 +105,13 @@ class AMTAnalysisDTO(BaseModel):
     vwap_upper_2: float = Field(alias="vwapUpper2", default=0.0)
     vwap_lower_2: float = Field(alias="vwapLower2", default=0.0)
     balance_ratio: float = Field(alias="balanceRatio", default=0.0)
+    # Displacement leg profile
+    leg_profile: list[VolumeProfileLevelDTO] = Field(alias="legProfile", default=[])
+    leg_lvns: list[float] = Field(alias="legLvns", default=[])
+    leg_poc: float = Field(alias="legPoc", default=0.0)
+    leg_vah: float = Field(alias="legVah", default=0.0)
+    leg_val: float = Field(alias="legVal", default=0.0)
+    has_displacement: bool = Field(alias="hasDisplacement", default=False)
 
     model_config = {"populate_by_name": True}
 
@@ -387,6 +394,16 @@ def amt_result_to_dto(r) -> dict:
         "vwapUpper2": getattr(r, "vwap_upper_2", 0.0),
         "vwapLower2": getattr(r, "vwap_lower_2", 0.0),
         "balanceRatio": getattr(r, "balance_ratio", 0.0),
+        "legProfile": [
+            {"price": p.price, "volume": p.volume,
+             "buyVolume": p.buy_volume, "sellVolume": p.sell_volume}
+            for p in getattr(r, "leg_profile", ())
+        ],
+        "legLvns": list(getattr(r, "leg_lvns", ())),
+        "legPoc": getattr(r, "leg_poc", 0.0),
+        "legVah": getattr(r, "leg_vah", 0.0),
+        "legVal": getattr(r, "leg_val", 0.0),
+        "hasDisplacement": getattr(r, "has_displacement", False),
     }
 
 

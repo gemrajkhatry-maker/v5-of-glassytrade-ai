@@ -212,7 +212,8 @@ export const analyzeAMT = (
             signal: null,
             setup: null,
             profile: [],
-            aggressivePrints: []
+            aggressivePrints: [],
+            legProfile: [], legLvns: [], legPoc: 0, legVah: 0, legVal: 0, hasDisplacement: false
         };
     }
 
@@ -222,7 +223,7 @@ export const analyzeAMT = (
 
     // 1. VOLUME PROFILE
     const profile = createProfile(recentData);
-    if (profile.length === 0) return { marketState: 'BALANCED', poc: 0, valueAreaHigh: 0, valueAreaLow: 0, lvns: [], hvns: [], aggression: 0, signal: null, setup: null, profile: [], aggressivePrints: [] };
+    if (profile.length === 0) return { marketState: 'BALANCED', poc: 0, valueAreaHigh: 0, valueAreaLow: 0, lvns: [], hvns: [], aggression: 0, signal: null, setup: null, profile: [], aggressivePrints: [], legProfile: [], legLvns: [], legPoc: 0, legVah: 0, legVal: 0, hasDisplacement: false };
 
     // Find POC — tie-break: closest to current price when multiple bins share max volume
     const maxVol = Math.max(...profile.map(p => p.volume));
@@ -404,6 +405,7 @@ export const analyzeAMT = (
         signal,
         setup,
         profile,
-        aggressivePrints
+        aggressivePrints,
+        legProfile: [], legLvns: [], legPoc: 0, legVah: 0, legVal: 0, hasDisplacement: false
     };
 };

@@ -16,7 +16,7 @@ export const normalizeSymbol = (symbol: string): string => {
   let s = symbol.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   
   // Common mappings if user just types "BTC" or "ETH"
-  if (['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'BNB'].includes(s)) {
+  if (['BTC', 'ETH', 'SOL', 'XRP', 'ADA', 'DOGE', 'BNB', 'PAXG'].includes(s)) {
     return s + 'USDT';
   }
   
@@ -29,7 +29,7 @@ export const normalizeSymbol = (symbol: string): string => {
 };
 
 export const scanMarketCandidates = async (_limit: number = 6): Promise<string[]> => {
-  // Locked to BTCUSDT only for focused LLM testing
+  // Locked to BTCUSDT for focused LLM testing
   return ['BTCUSDT'];
 };
 

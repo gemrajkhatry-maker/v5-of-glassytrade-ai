@@ -207,14 +207,26 @@ function App() {
                                 </button>
                             </div>
 
-                            {/* Volume Profile Toggle */}
-                            <button
-                                onClick={() => setConfig(s => ({ ...s, showVolumeProfile: !s.showVolumeProfile }))}
-                                className={`p-2 bg-white/5 backdrop-blur rounded-lg transition-colors border border-white/10 ${config.showVolumeProfile ? 'text-white hover:bg-white/10' : 'text-white/50 hover:text-white hover:bg-white/10'}`}
-                                title={config.showVolumeProfile ? "Hide Volume Profile" : "Show Volume Profile"}
-                            >
-                                {config.showVolumeProfile ? <Eye size={20} /> : <EyeOff size={20} />}
-                            </button>
+                            {/* Dual Volume Profile Tabs */}
+                            <div className="flex bg-white/5 backdrop-blur rounded-lg border border-white/10 overflow-hidden">
+                                {([
+                                    { key: 'session', label: '1. Session' },
+                                    { key: 'leg', label: '2. Leg' },
+                                    { key: 'combined', label: '3. Combined' },
+                                    { key: 'off', label: 'Off' },
+                                ] as const).map(({ key, label }) => (
+                                    <button
+                                        key={key}
+                                        onClick={() => setConfig(s => ({ ...s, vpMode: key, showVolumeProfile: key !== 'off' }))}
+                                        className={`px-3 py-1.5 text-xs font-medium transition-all ${config.vpMode === key
+                                            ? key === 'combined' ? 'bg-blue-500/30 text-blue-100 shadow-sm' : 'bg-white/10 text-white'
+                                            : 'text-white/40 hover:text-white hover:bg-white/5'
+                                        }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
                         </div>
 
                         {/* Right Toggle (Analysis) + Chat Toggle */}

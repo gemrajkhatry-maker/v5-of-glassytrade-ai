@@ -33,34 +33,45 @@ def build_entry_prompt(data: Dict[str, Any]) -> str:
 
     parts: list[str] = []
     delta_int = int(round(delta))
+    volume = data.get("volume", 0)
+
+    # Delta significance: only call it "aggressive" if delta/volume ratio > 15%
+    delta_ratio = abs(delta) / volume if volume > 0 else 0
+    is_aggressive = delta_ratio > 0.15
 
     if val > 0 and price > 0:
         if price <= val * 1.002:
-            if delta_int < 0:
+            if delta_int < 0 and is_aggressive:
                 parts.append(f"VAL test at {val:.0f}. Aggressive selling with {delta_int} Delta.")
+            elif delta_int < 0:
+                parts.append(f"Price at VAL {val:.0f}. Delta {delta_int} (weak selling, not aggressive).")
             else:
                 parts.append(f"Price at VAL {val:.0f} with +{delta_int} Delta. Buyers defending.")
         elif price >= vah * 0.998:
-            if delta_int > 0:
+            if delta_int > 0 and is_aggressive:
                 parts.append(f"Price broke above Value Area High {vah:.0f} with strong +{delta_int} Delta.")
+            elif delta_int > 0:
+                parts.append(f"Price at VAH {vah:.0f}. Delta +{delta_int} (not aggressive).")
             else:
                 parts.append(f"Failed breakout above {vah:.0f}. Delta turned to {delta_int}.")
         elif poc > 0 and abs(price - poc) / poc < 0.003:
-            if delta_int > 0:
+            if delta_int > 0 and is_aggressive:
                 parts.append(f"At POC {poc:.0f}, delta is +{delta_int}. Buyers stepping in.")
-            elif delta_int < 0:
+            elif delta_int < 0 and is_aggressive:
                 parts.append(f"Price at POC {poc:.0f} with aggressive sellers. Delta {delta_int}.")
             else:
-                parts.append(f"Price at POC {poc:.0f}. Delta is neutral.")
+                parts.append(f"Price at POC {poc:.0f}. Delta {delta_int:+d} (neutral, no aggression).")
         else:
             if "Balanced" in str(market_state):
                 parts.append(f"Market is rotational. Price at {price:.0f}.")
             else:
                 parts.append(f"Price at {price:.0f}. Market trending outside value area.")
-            if delta_int > 0:
+            if delta_int > 0 and is_aggressive:
                 parts.append(f"Aggressive buyers with +{delta_int} Delta.")
-            elif delta_int < 0:
+            elif delta_int < 0 and is_aggressive:
                 parts.append(f"Aggressive sellers pushing. Delta {delta_int}.")
+            elif delta_int != 0:
+                parts.append(f"Delta {delta_int:+d} (low conviction, not aggressive).")
     else:
         parts.append(f"Price at {price:.0f}. Delta {delta_int:+d}.")
 
@@ -99,6 +110,13 @@ def build_entry_prompt(data: Dict[str, Any]) -> str:
     elif cvd_slope < -0.5:
         parts.append("CVD trending down. Sellers in control.")
 
+    leg_poc = data.get("leg_poc", 0)
+    leg_lvns = data.get("leg_lvns", ())
+    if leg_poc > 0:
+        parts.append(f"Displacement leg active. Leg POC: {leg_poc:.0f}.")
+        if leg_lvns:
+            parts.append(f"Leg LVNs (pullback entry zones): {', '.join(f'{l:.0f}' for l in leg_lvns[:3])}.")
+
     vwap = data.get("vwap", 0)
     if vwap > 0 and price > 0:
         if price > vwap * 1.001:
@@ -107,6 +125,11 @@ def build_entry_prompt(data: Dict[str, Any]) -> str:
             parts.append(f"Price below VWAP ({vwap:.0f}). Bearish bias.")
         else:
             parts.append(f"Price at VWAP ({vwap:.0f}). Neutral.")
+
+    # Strategy hint — tells model whether to favor mean reversion or trend
+    strategy_hint = data.get("strategy_hint", "")
+    if strategy_hint:
+        parts.append(strategy_hint)
 
     return " ".join(parts)
 

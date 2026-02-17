@@ -14,6 +14,7 @@ export const DEFAULT_CONFIG: ChartConfig = {
   autoRotate: false,
   showPredictions: true,
   showVolumeProfile: true,
+  vpMode: 'combined',
   trend: 'volatile',
 };
 

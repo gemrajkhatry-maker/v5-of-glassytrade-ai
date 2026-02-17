@@ -301,36 +301,86 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   };
 
 
-  // Helper: Draw Volume Profile
-  const drawVolumeProfile = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, series: ISeriesApi<"Candlestick">, amt: AMTAnalysis, cfg: ChartConfig) => {
-    const maxVol = Math.max(...amt.profile.map(p => p.volume));
+  // Helper: Draw a single VP profile on the RIGHT side of the chart
+  const drawProfileBars = (
+    ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
+    series: ISeriesApi<"Candlestick">, profile: { price: number; volume: number; buyVolume: number; sellVolume: number }[],
+    maxWidthPct: number, xOffset: number, bullColor: string, bearColor: string, useDirectionColors: boolean
+  ) => {
+    if (!profile || profile.length === 0) return;
+    const maxVol = Math.max(...profile.map(p => p.volume));
     if (maxVol === 0) return;
-
-    const maxBarWidth = canvas.width * 0.15;
+    const maxBarWidth = canvas.width * maxWidthPct;
     const widthScale = maxBarWidth / maxVol;
-    const step = amt.profile.length > 1 ? Math.abs(amt.profile[1].price - amt.profile[0].price) : 0;
+    const step = profile.length > 1 ? Math.abs(profile[1].price - profile[0].price) : 0;
+    const rightEdge = canvas.width - 50; // leave room for price axis
 
-    amt.profile.forEach(level => {
+    profile.forEach(level => {
       const y = series.priceToCoordinate(level.price);
       if (y === null) return;
-
       let barHeight = 2;
       if (step > 0) {
         const topY = series.priceToCoordinate(level.price + (step / 2));
         const bottomY = series.priceToCoordinate(level.price - (step / 2));
         if (topY !== null && bottomY !== null) {
-          barHeight = Math.abs(bottomY - topY);
-          barHeight = Math.max(1, barHeight + 0.5);
+          barHeight = Math.max(1, Math.abs(bottomY - topY) + 0.5);
         }
       }
       const barWidth = level.volume * widthScale;
-      const isBullish = level.buyVolume > level.sellVolume;
-      ctx.fillStyle = isBullish ? `${cfg.bullColor}40` : `${cfg.bearColor}40`;
-      ctx.fillRect(0, y - (barHeight / 2), barWidth, barHeight);
-
-      ctx.fillStyle = isBullish ? cfg.bullColor : cfg.bearColor;
-      ctx.fillRect(barWidth, y - (barHeight / 2), 1, barHeight);
+      const x = rightEdge - xOffset - barWidth;
+      if (useDirectionColors) {
+        const isBullish = level.buyVolume > level.sellVolume;
+        ctx.fillStyle = isBullish ? `${bullColor}50` : `${bearColor}50`;
+        ctx.fillRect(x, y - barHeight / 2, barWidth, barHeight);
+        ctx.fillStyle = isBullish ? bullColor : bearColor;
+      } else {
+        ctx.fillStyle = `${bullColor}50`;
+        ctx.fillRect(x, y - barHeight / 2, barWidth, barHeight);
+        ctx.fillStyle = bullColor;
+      }
+      // Edge line on the left side of the bar
+      ctx.fillRect(x, y - barHeight / 2, 1, barHeight);
     });
+  };
+
+  // Helper: Draw vertical label on the right side
+  const drawVerticalLabel = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, text: string, x: number, color: string) => {
+    ctx.save();
+    ctx.translate(x, canvas.height / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = color;
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.6;
+    ctx.fillText(text, 0, 0);
+    ctx.restore();
+  };
+
+  // Helper: Draw Volume Profile (session + leg on RIGHT side, controlled by vpMode)
+  const drawVolumeProfile = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, series: ISeriesApi<"Candlestick">, amt: AMTAnalysis, cfg: ChartConfig) => {
+    const mode = cfg.vpMode || 'combined';
+    const hasLeg = amt.legProfile && amt.legProfile.length > 0;
+    const rightEdge = canvas.width - 50;
+
+    // Session profile (blue-tinted direction bars)
+    if (mode === 'session' || mode === 'combined') {
+      const sessionOffset = (hasLeg && mode === 'combined') ? canvas.width * 0.12 : 0;
+      drawProfileBars(ctx, canvas, series, amt.profile, 0.15, sessionOffset, '#4488cc', '#cc4444', true);
+      drawVerticalLabel(ctx, canvas, 'SESSION PROFILE', rightEdge - sessionOffset - canvas.width * 0.08, '#6699cc');
+    }
+
+    // Leg profile (orange/yellow bars) when displacement active
+    if (hasLeg && (mode === 'leg' || mode === 'combined')) {
+      drawProfileBars(ctx, canvas, series, amt.legProfile, 0.10, 0, '#FF9900', '#FF6600', false);
+      drawVerticalLabel(ctx, canvas, 'LEG PROFILE', rightEdge - canvas.width * 0.05, '#FF9900');
+    }
+
+    // Show "No displacement" indicator when in leg mode but no leg data
+    if (!hasLeg && mode === 'leg') {
+      ctx.fillStyle = '#FF990060';
+      ctx.font = '11px monospace';
+      ctx.fillText('No active displacement leg', rightEdge - 200, 20);
+    }
   };
 
   // Helper: Draw Footprint
@@ -613,56 +663,105 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     amtLinesRef.current.forEach(l => candleSeriesRef.current?.removePriceLine(l));
     amtLinesRef.current = [];
 
-    // Only add lightweight-chart pricelines if NOT in footprint mode (to avoid double drawing or clutter)
+    // Only add lightweight-chart pricelines if NOT in footprint mode
+    const vpMode = config.vpMode || 'combined';
     if (amtAnalysis && config.showVolumeProfile && mode !== 'FOOTPRINT') {
-      amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-        price: amtAnalysis.poc,
-        color: '#facc15',
-        lineWidth: 2,
-        lineStyle: LineStyle.Solid,
-        axisLabelVisible: true,
-        title: 'POC',
-      }));
-      amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-        price: amtAnalysis.valueAreaHigh,
-        color: '#3b82f6',
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: 'VAH',
-      }));
-      amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-        price: amtAnalysis.valueAreaLow,
-        color: '#3b82f6',
-        lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
-        axisLabelVisible: true,
-        title: 'VAL',
-      }));
-
-      // LVN lines (orange dotted)
-      amtAnalysis.lvns?.forEach((lvn: number) => {
-        amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
-          price: lvn,
-          color: '#f97316',
-          lineWidth: 1,
-          lineStyle: LineStyle.Dotted,
-          axisLabelVisible: false,
-          title: 'LVN',
+      // Session levels (shown in session + combined modes)
+      if (vpMode === 'session' || vpMode === 'combined') {
+        amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+          price: amtAnalysis.poc,
+          color: '#facc15',
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
+          axisLabelVisible: true,
+          title: 'POC',
         }));
-      });
-
-      // HVN lines (green dotted)
-      amtAnalysis.hvns?.forEach((hvn: number) => {
-        amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
-          price: hvn,
-          color: '#22c55e',
+        amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+          price: amtAnalysis.valueAreaHigh,
+          color: '#3b82f6',
           lineWidth: 1,
-          lineStyle: LineStyle.Dotted,
-          axisLabelVisible: false,
-          title: 'HVN',
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: 'VAH',
         }));
-      });
+        amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+          price: amtAnalysis.valueAreaLow,
+          color: '#3b82f6',
+          lineWidth: 1,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: 'VAL',
+        }));
+
+        // LVN lines (orange dotted)
+        amtAnalysis.lvns?.forEach((lvn: number) => {
+          amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
+            price: lvn,
+            color: '#f97316',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dotted,
+            axisLabelVisible: false,
+            title: 'LVN',
+          }));
+        });
+
+        // HVN lines (green dotted)
+        amtAnalysis.hvns?.forEach((hvn: number) => {
+          amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
+            price: hvn,
+            color: '#22c55e',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dotted,
+            axisLabelVisible: false,
+            title: 'HVN',
+          }));
+        });
+      }
+
+      // Leg levels (shown in leg + combined modes when leg profile exists)
+      if ((vpMode === 'leg' || vpMode === 'combined') && amtAnalysis.legProfile && amtAnalysis.legProfile.length > 0) {
+        if (amtAnalysis.legPoc > 0) {
+          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+            price: amtAnalysis.legPoc,
+            color: '#FF9900',
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: 'Leg POC',
+          }));
+        }
+        if (amtAnalysis.legVah > 0) {
+          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+            price: amtAnalysis.legVah,
+            color: '#FF6600',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: 'Leg VAH',
+          }));
+        }
+        if (amtAnalysis.legVal > 0) {
+          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+            price: amtAnalysis.legVal,
+            color: '#FF6600',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: 'Leg VAL',
+          }));
+        }
+        // Leg LVN lines (yellow dotted)
+        amtAnalysis.legLvns?.forEach((lvn: number) => {
+          amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
+            price: lvn,
+            color: '#FFCC00',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dotted,
+            axisLabelVisible: false,
+            title: 'Leg LVN',
+          }));
+        });
+      }
     }
 
     if (mode === 'STANDARD') {
@@ -726,7 +825,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       activePriceLinesRef.current.set(pos.id, lines);
     });
 
-  }, [positions, activeSignal, amtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, mode]);
+  }, [positions, activeSignal, amtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
 
   return (
     <div className="w-full h-full relative bg-[#0f172a] overflow-hidden" style={{ display: isHidden ? 'none' : 'block' }}>

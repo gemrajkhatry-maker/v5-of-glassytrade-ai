@@ -42,6 +42,7 @@ def _make_market_data(**overrides):
         "val": 15000.0,
         "poc": 15100.0,
         "delta": 200,
+        "volume": 500,
         "market_state": "Balanced",
         "aggression": "Moderate buying",
     }

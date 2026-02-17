@@ -6,6 +6,7 @@ import concurrent.futures
 import logging
 import time
 import threading
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Callable
 
 from app.domain.trading.models.enums import SignalType, Source, SetupType
@@ -135,9 +136,12 @@ class LLMEntryHandler:
             profile_shape_str = shape_descriptions.get(amt_result.profile_shape, "")
 
         # Volume bubble summary (aggressive prints = 2.5σ volume spikes)
+        # Only include recent bubbles (last 10 candles) — stale prints mislead the model
         volume_bubble_desc = ""
         if amt_result.aggressive_prints:
-            recent_prints = amt_result.aggressive_prints[-3:]  # last 3 bubbles
+            cutoff_dt = datetime.fromisoformat(tick.time.replace("Z", "+00:00")) - timedelta(seconds=3000)
+            cutoff_time = cutoff_dt.isoformat()
+            recent_prints = [ap for ap in amt_result.aggressive_prints if ap.time >= cutoff_time][-3:]
             bubble_parts = []
             for ap in recent_prints:
                 bubble_parts.append(f"{ap.side} bubble at {ap.price:.0f} ({ap.volume:.0f} vol, delta {ap.delta:+.0f})")
@@ -160,6 +164,8 @@ class LLMEntryHandler:
             "cvd_slope": amt_result.cvd_slope,
             "cvd_divergence": amt_result.cvd_divergence,
             "vwap": amt_result.session_vwap if amt_result.session_vwap > 0 else tick.vwap,
+            "leg_poc": amt_result.leg_poc,
+            "leg_lvns": amt_result.leg_lvns[:3] if amt_result.leg_lvns else (),
         }
 
         def _worker():

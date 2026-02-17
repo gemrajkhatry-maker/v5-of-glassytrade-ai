@@ -184,9 +184,10 @@ class TestAMTAnalyzer:
         """detect_displacement_leg should return LVN list (possibly empty)."""
         analyzer = AMTAnalyzer()
         data = generate_market_data(50, 100, "bullish")
-        is_disp, leg_lvns = analyzer.detect_displacement_leg(data)
-        assert isinstance(is_disp, bool)
-        assert isinstance(leg_lvns, list)
+        result = analyzer.detect_displacement_leg(data)
+        assert isinstance(result, dict)
+        assert isinstance(result["has_displacement"], bool)
+        assert isinstance(result["lvns"], list)
 
     def test_amt_result_has_new_fields(self):
         """AMTResult should include all new formula fields."""

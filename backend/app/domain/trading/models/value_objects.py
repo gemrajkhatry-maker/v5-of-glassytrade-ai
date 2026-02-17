@@ -84,6 +84,13 @@ class AMTResult:
     vwap_upper_2: float = 0.0  # VWAP + 2σ
     vwap_lower_2: float = 0.0  # VWAP - 2σ
     balance_ratio: float = 0.0  # fraction of recent candles inside VA
+    # Displacement leg profile
+    leg_profile: tuple[VolumeProfileLevel, ...] = ()
+    leg_lvns: tuple[float, ...] = ()
+    leg_poc: float = 0.0
+    leg_vah: float = 0.0
+    leg_val: float = 0.0
+    has_displacement: bool = False
 
 
 # ---------------------------------------------------------------------------

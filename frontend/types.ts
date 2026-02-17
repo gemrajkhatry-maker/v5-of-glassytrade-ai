@@ -138,6 +138,7 @@ export interface ChartConfig {
   autoRotate: boolean;
   showPredictions: boolean;
   showVolumeProfile: boolean;
+  vpMode: 'session' | 'leg' | 'combined' | 'off';
   trend: 'bullish' | 'bearish' | 'sideways' | 'volatile';
 }
 
@@ -161,6 +162,13 @@ export interface AMTAnalysis {
   setup: 'TREND_MODEL' | 'MEAN_REVERSION' | null;
   profile: VolumeProfileLevel[];
   aggressivePrints: AggressivePrint[]; // "Volume Bubbles"
+  // Displacement leg profile
+  legProfile: VolumeProfileLevel[];
+  legLvns: number[];
+  legPoc: number;
+  legVah: number;
+  legVal: number;
+  hasDisplacement: boolean;
 }
 
 export interface TradeSignal {
