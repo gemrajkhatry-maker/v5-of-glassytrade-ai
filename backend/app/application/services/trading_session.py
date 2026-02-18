@@ -109,9 +109,10 @@ class TradingSessionService:
             new_session = SessionState(symbol=symbol)
             new_session.last_ai_analysis = {
                 "direction": "FLAT",
-                "rationale": "Initializing AI Model... Trigger: **Wait**",
+                "rationale": "Waiting for Three-Align gate to pass before first LLM call.",
                 "confidence": "Low",
-                "input_prompt": "System Startup",
+                "input_prompt": "",
+                "raw_output": "",
             }
             self._sessions[symbol] = new_session
         return self._sessions[symbol]

@@ -62,36 +62,40 @@ class LLMEntryHandler:
         tick: OHLC,
         order_book=None,
     ) -> bool:
-        """Check if LLM entry logic should run (regime-change triggered + gates)."""
+        """Check if LLM entry logic should run — no gates, model decides freely."""
+        import time as _time
         # Guard against degenerate AMT data (zero/negative levels)
         if amt_result.poc <= 0 or amt_result.value_area_high <= 0:
+            logger.debug("LLM blocked: degenerate AMT (poc=%.1f vah=%.1f)", amt_result.poc, amt_result.value_area_high)
             return False
 
-        if ai_running or has_position or has_managed_positions or in_cooldown:
+        if ai_running:
+            return False  # already running, silent skip
+
+        if has_position or has_managed_positions:
+            logger.debug("LLM blocked: has_position=%s has_managed=%s", has_position, has_managed_positions)
             return False
 
-        # Volatility / instrument health filter (pure quant)
-        if check_volatility_filter(data, tick):
+        if in_cooldown:
+            logger.debug("LLM blocked: in cooldown")
             return False
 
         # Block entries if daily loss limit reached
         if self._trade_manager and self._trade_manager.should_block_entry():
-            logger.info("LLM entry blocked: daily loss limit reached")
+            logger.info("LLM blocked: daily loss limit reached")
             return False
 
-        # CRITICAL: Don't consult regime detector until model is ready.
+        # Don't call until model is loaded
         if not self._gen_ai_service.is_ready():
+            logger.info("LLM blocked: model not ready (is_loading=%s)", not self._gen_ai_service.is_ready())
             return False
 
-        # Use regime detector instead of fixed 10s timer
-        if not self._regime_detector.should_trigger_llm(tick, amt_result):
+        # Simple 10s cooldown between LLM calls
+        elapsed = _time.time() - last_ai_time
+        if elapsed < 10:
             return False
 
-        # Three-Align gate (pure quant)
-        aligned = three_align_check(data, amt_result, tick, order_book)
-        if not aligned:
-            logger.debug("Three-Align gate failed — skipping LLM call")
-            return False
+        logger.info("LLM entry ALLOWED — calling model (elapsed=%.1fs)", elapsed)
         return True
 
     def run_entry(

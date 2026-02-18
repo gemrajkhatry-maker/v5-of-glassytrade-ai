@@ -145,17 +145,23 @@ _TRIGGER_LONG = [
     "enter long", "long with size", "long on pullback", "long on any dip",
     "long on re-entry", "long into", "add to longs", "re-enter long",
     "long with target", "long with full", "long hold", "buy on dip",
+    "bullish bias", "buyers in control", "bullish momentum", "buy signal",
+    "long entry", "favor long", "favour long", "go long",
 ]
 _TRIGGER_SHORT = [
     "enter short", "short on confirmation", "short with target",
     "short or", "short with", "short on rotation", "short with size",
     "buyers exhausted", "buyers are trapped", "failed breakout",
+    "bearish bias", "sellers in control", "bearish momentum", "sell signal",
+    "short entry", "favor short", "favour short", "go short", "bearish trend",
 ]
 _FLAT_KEYWORDS = [
     "walk away", "stay flat", "bank profit", "stop trading",
     "reduce size", "take profit", "exit long", "rebalance",
     "risk management", "discipline", "we are done",
     "no short", "no long", "no trade", "no clear", "not ready",
+    "setup rejected", "no significant", "balanced and rotational",
+    "range-bound", "no directional", "wait for",
 ]
 _HIGH_CONFIDENCE = ["with size", "squeeze", "asymmetrical", "full allocation", "full market protection"]
 _LOW_CONFIDENCE = ["watching", "wait for", "wait for break", "wait for passive"]
