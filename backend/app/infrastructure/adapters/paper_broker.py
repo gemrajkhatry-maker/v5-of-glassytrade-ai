@@ -20,5 +20,8 @@ class PaperBrokerAdapter(BrokerPort):
         """Execute a paper order.
 
         Delegates to Portfolio.open_position which enforces invariants.
+        Fabio Rule 4: LLM entries use 40/30/30 scale-in.
         """
-        return portfolio.open_position(signal, symbol)
+        scale_in = (signal.metadata or {}).get("scale_in", False)
+        scale_fraction = 0.4 if scale_in else 1.0
+        return portfolio.open_position(signal, symbol, scale_fraction=scale_fraction)

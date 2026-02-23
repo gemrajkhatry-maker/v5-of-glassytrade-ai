@@ -96,7 +96,7 @@ def check_confirmation_bundle(data: list[OHLC], tick: OHLC, order_book=None) -> 
             spread_bps = spread / mid * 10000
             spread_tight = spread_bps <= 5.0
     else:
-        spread_tight = True
+        spread_tight = False  # No order book = cannot confirm spread tightness
 
     score = sum([vol_impulse, delta_pressure, spread_tight])
     logger.debug("Confirmation bundle: vol_impulse=%s, delta_pressure=%s, spread_tight=%s -> %d/3",
@@ -205,6 +205,7 @@ def build_entry_signal(
         metadata={
             "llm_entry": True,
             "allow_trail": allow_trail,
+            "scale_in": True,  # Fabio Rule 4: 40/30/30 accumulation
             "confidence": ai_result.get("confidence", "Medium"),
             "market_state_model": ai_result.get("market_state", "Unknown"),
             "raw_output": ai_result.get("raw_output", "")[:200],

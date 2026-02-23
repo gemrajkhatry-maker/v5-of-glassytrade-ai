@@ -95,19 +95,27 @@ class LLMOverseerHandler:
         amt_result: AMTResult,
     ) -> None:
         """Run overseer analysis in background thread."""
-        session._last_overseer_time = time.time()
-        session._overseer_running = True
+        with session._lock:
+            session._last_overseer_time = time.time()
+            session._overseer_running = True
 
-        # Gather position state from TradeManager
-        managed_positions = list(self._trade_manager._positions.values())
+        # Gather position state from TradeManager — filter by symbol
+        with session._lock:
+            open_ids = {p.id for p in session.portfolio.positions if p.status == "OPEN"}
+        managed_positions = [
+            mp for mp in self._trade_manager._positions.values()
+            if mp.position_id in open_ids
+        ]
         if not managed_positions:
-            session._overseer_running = False
+            with session._lock:
+                session._overseer_running = False
             return
 
-        mp = managed_positions[0]  # We manage one position at a time
+        mp = managed_positions[0]
         pos_state = self._trade_manager.get_position_state(mp.position_id, tick.close)
         if pos_state is None:
-            session._overseer_running = False
+            with session._lock:
+                session._overseer_running = False
             return
 
         # Build the overseer prompt (pure quant)
@@ -157,7 +165,8 @@ class LLMOverseerHandler:
             except Exception as e:
                 logger.error("LLM overseer failed: %s", e)
             finally:
-                session._overseer_running = False
+                with session._lock:
+                    session._overseer_running = False
 
         self._executor.submit(_worker)
 

@@ -32,6 +32,7 @@ from app.application.handlers.llm_entry_handler import LLMEntryHandler
 from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
 from app.application.handlers.rl_handler import RLHandler
 from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
+from app.domain.fabio_ai.services.option_selector import OptionSelector
 
 from app.infrastructure.serialization.schemas import portfolio_to_dto, stats_to_dto
 
@@ -53,16 +54,16 @@ class SessionState:
     last_footprint: dict | None = None
     last_ai_analysis: dict | None = None
 
-    # LLM throttling state
+    # Thread safety lock for portfolio reads/writes AND throttle flags
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    # LLM throttling state — MUST be accessed under _lock
     _last_ai_time: float = 0
     _ai_running: bool = False
 
-    # Overseer throttling state
+    # Overseer throttling state — MUST be accessed under _lock
     _last_overseer_time: float = 0
     _overseer_running: bool = False
-
-    # Thread safety lock for portfolio reads/writes
-    _lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 class TradingSessionService:
@@ -84,7 +85,9 @@ class TradingSessionService:
 
         # Focused handlers
         self._amt_handler = AMTHandler()
-        self._lifecycle_handler = TradeLifecycleHandler()
+        self._lifecycle_handler = TradeLifecycleHandler(
+            on_stop_out=self._on_stop_out,
+        )
         self._llm_handler = LLMEntryHandler(
             gen_ai_service, event_bus, storage=storage,
             trade_manager=self._lifecycle_handler.trade_manager,
@@ -95,6 +98,9 @@ class TradingSessionService:
             trade_manager=self._lifecycle_handler.trade_manager,
             storage=storage,
         )
+
+        # Option selector for NSE options signal enrichment
+        self._option_selector = OptionSelector()
 
         # Session state per symbol
         self._sessions: dict[str, SessionState] = {}
@@ -109,11 +115,27 @@ class TradingSessionService:
             new_session = SessionState(symbol=symbol)
             new_session.last_ai_analysis = {
                 "direction": "FLAT",
-                "rationale": "Waiting for Three-Align gate to pass before first LLM call.",
+                "rationale": "Waiting for first LLM call.",
                 "confidence": "Low",
                 "input_prompt": "",
                 "raw_output": "",
             }
+            # Load prior session profile for gap analysis
+            if self._storage:
+                try:
+                    prior = self._storage.get_previous_session_profile(symbol, "NSE")
+                    if prior:
+                        new_session._prior_profile = prior
+                        log.info(
+                            "Loaded prior session profile for %s: POC=%.1f VAH=%.1f VAL=%.1f",
+                            symbol, prior.get("poc", 0), prior.get("vah", 0), prior.get("val", 0),
+                        )
+                except Exception:
+                    log.debug("Failed to load prior session profile", exc_info=True)
+
+            # Clear failed entry records from previous session
+            self._llm_handler.clear_failed_entries()
+
             self._sessions[symbol] = new_session
         return self._sessions[symbol]
 
@@ -162,7 +184,7 @@ class TradingSessionService:
                         "size": pos.size, "pnl": pos.pnl,
                         "source": pos.source.value if hasattr(pos.source, 'value') else str(pos.source),
                         "reason": pos.close_reason or "",
-                        "opened_at": pos.opened_at, "closed_at": pos.closed_at,
+                        "opened_at": pos.entry_time, "closed_at": pos.exit_time,
                     })
                 except Exception:
                     log.debug("Failed to persist trade", exc_info=True)
@@ -207,6 +229,41 @@ class TradingSessionService:
     def _on_tick(self, event: TickReceived) -> None:
         session = self.get_or_create_session(event.symbol)
 
+        # 0. Session phase check — force exit all positions in Phase 5 (15:15-15:30 IST)
+        from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
+        session_phase = _get_si(timestamp=event.tick.time, market="NSE")
+        if session_phase.force_exit:
+            with session._lock:
+                open_positions = [p for p in session.portfolio.positions if p.status == "OPEN"]
+                for pos in open_positions:
+                    session.portfolio.close_position(
+                        pos.id, event.tick.close, "SESSION_CLOSE (Phase 5: 15:15 IST)"
+                    )
+                    self._lifecycle_handler.trade_manager.unregister_position(pos.id)
+                    log.info("Session Phase 5: force-closed position %s at %.2f", pos.id, event.tick.close)
+
+            # Save end-of-session profile for next-day gap analysis
+            if self._storage and session.last_amt and not getattr(session, '_profile_saved', False):
+                try:
+                    from datetime import datetime, timezone, timedelta
+                    ist = timezone(timedelta(hours=5, minutes=30))
+                    session_date = datetime.now(ist).strftime("%Y-%m-%d")
+                    profile_data = {
+                        "symbol": event.symbol,
+                        "market": "NSE",
+                        "session_date": session_date,
+                        "poc": session.last_amt.get("poc", 0),
+                        "vah": session.last_amt.get("vah", 0),
+                        "val": session.last_amt.get("val", 0),
+                        "profile_shape": session.last_amt.get("profileShape", ""),
+                        "total_volume": sum(d.volume for d in session.data[-100:]),
+                    }
+                    self._storage.save_session_profile(profile_data)
+                    session._profile_saved = True  # Set AFTER successful save
+                    log.info("Saved session profile for %s on %s", event.symbol, session_date)
+                except Exception:
+                    log.debug("Failed to save session profile", exc_info=True)
+
         # 1. AMT Analysis + Footprint
         amt_result, amt_dto, fp_dto = self._amt_handler.analyze(
             list(event.data), event.order_book,
@@ -223,28 +280,37 @@ class TradingSessionService:
             has_position = any(p.status == "OPEN" for p in session.portfolio.positions)
 
         # 3. LLM Overseer (runs while position IS open)
-        if has_position and self._overseer_handler.should_run(
-            last_overseer_time=session._last_overseer_time,
-            overseer_running=session._overseer_running,
-            ai_running=session._ai_running,
-            has_position=has_position,
-        ):
+        # Read throttle flags under lock AND make dispatch decision atomically
+        with session._lock:
+            overseer_time = session._last_overseer_time
+            overseer_running = session._overseer_running
+            ai_running = session._ai_running
+            ai_time = session._last_ai_time
+            run_overseer = has_position and self._overseer_handler.should_run(
+                last_overseer_time=overseer_time,
+                overseer_running=overseer_running,
+                ai_running=ai_running,
+                has_position=has_position,
+            )
+            run_entry = (not run_overseer) and self._llm_handler.should_run(
+                last_ai_time=ai_time,
+                ai_running=ai_running,
+                has_position=has_position,
+                has_managed_positions=self._lifecycle_handler.has_managed_positions,
+                in_cooldown=self._lifecycle_handler.in_cooldown(),
+                data=session.data,
+                amt_result=amt_result,
+                tick=event.tick,
+                order_book=event.order_book,
+            )
+
+        if run_overseer:
             self._overseer_handler.run_overseer(session, event.symbol, event.tick, amt_result)
 
         # 4. LLM Entry Decision (throttled)
-        if self._llm_handler.should_run(
-            last_ai_time=session._last_ai_time,
-            ai_running=session._ai_running,
-            has_position=has_position,
-            has_managed_positions=self._lifecycle_handler.has_managed_positions,
-            in_cooldown=self._lifecycle_handler.in_cooldown(),
-            data=session.data,
-            amt_result=amt_result,
-            tick=event.tick,
-            order_book=event.order_book,
-        ):
+        if run_entry:
             self._llm_handler.run_entry(session, event.symbol, event.tick, amt_result)
-        elif not has_position and not session._ai_running:
+        elif not has_position and not ai_running:
             if self._lifecycle_handler.in_cooldown():
                 cooldown_status = session.last_ai_analysis or {}
                 cooldown_status["direction"] = "FLAT"
@@ -264,10 +330,40 @@ class TradingSessionService:
         if not self._risk_manager.validate(event.signal, session.portfolio):
             log.info("Signal rejected by risk manager")
             return
+
+        # Enrich signal with option selection (strike, expiry, lot sizing)
+        try:
+            underlying = event.symbol.replace("NSE:", "").split("-")[0]  # "NIFTY" or "BANKNIFTY"
+            direction = "LONG" if sig.is_buy else "SHORT"
+            selected_strike = self._option_selector.select_strike(
+                spot_price=sig.price, direction=direction, underlying=underlying,
+            )
+            if sig.metadata is None:
+                sig.metadata = {}
+            sig.metadata["option_strike"] = selected_strike
+            sig.metadata["option_type"] = "CE" if sig.is_buy else "PE"
+            sig.metadata["option_underlying"] = underlying
+            sig.metadata["option_lot_size"] = self._option_selector._lot_size_for(underlying)
+            log.info("Option selection: %s %s %d", underlying,
+                     sig.metadata["option_type"], selected_strike)
+        except Exception:
+            log.debug("Option selection skipped", exc_info=True)
+
         position = self._broker.execute_order(event.signal, session.portfolio, event.symbol)
         if position:
             self._event_bus.publish(PositionOpened(symbol=event.symbol, position=position))
             self._lifecycle_handler.register_position(position, event.signal)
+
+    def _on_stop_out(self, level: float, direction: str) -> None:
+        """Callback from TradeLifecycleHandler when a position is stopped out (Rule 11)."""
+        from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
+        import time as _time
+        # Determine current session phase for re-entry blocking
+        from datetime import datetime, timezone, timedelta
+        ist = timezone(timedelta(hours=5, minutes=30))
+        now_ist = datetime.now(ist).strftime("%H:%M:%S")
+        si = _get_si(timestamp=now_ist, market="NSE")
+        self._llm_handler.record_stop_out(level, direction, si.phase)
 
     def _on_position_closed(self, event: PositionClosed) -> None:
         if not event.position:

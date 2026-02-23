@@ -5,6 +5,7 @@ All functions are stateless and side-effect-free — no I/O, no threading.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import TYPE_CHECKING, Any, Dict, Literal, Optional
@@ -126,12 +127,44 @@ def build_entry_prompt(data: Dict[str, Any]) -> str:
         else:
             parts.append(f"Price at VWAP ({vwap:.0f}). Neutral.")
 
+    # OI context (OI walls + PCR)
+    oi_pcr = data.get("oi_pcr", 0)
+    oi_sentiment = data.get("oi_sentiment", "")
+    oi_nearest_support = data.get("oi_nearest_support", 0)
+    oi_nearest_resistance = data.get("oi_nearest_resistance", 0)
+    if oi_pcr > 0:
+        if oi_sentiment:
+            parts.append(f"PCR: {oi_pcr:.2f} ({oi_sentiment}).")
+        if oi_nearest_support > 0:
+            parts.append(f"OI support wall at {oi_nearest_support:.0f}.")
+        if oi_nearest_resistance > 0:
+            parts.append(f"OI resistance wall at {oi_nearest_resistance:.0f}.")
+
+    # Opening relation (gap analysis from prior session VA)
+    opening_relation = data.get("opening_relation", "")
+    if opening_relation and opening_relation != "IN_BALANCE":
+        if opening_relation == "OUT_ABOVE":
+            parts.append("Gap-up open above prior VA — bullish initiative, favor trend continuation.")
+        elif opening_relation == "OUT_BELOW":
+            parts.append("Gap-down open below prior VA — bearish initiative, favor trend continuation.")
+
     # Strategy hint — tells model whether to favor mean reversion or trend
     strategy_hint = data.get("strategy_hint", "")
     if strategy_hint:
         parts.append(strategy_hint)
 
-    return " ".join(parts)
+    narrative = " ".join(parts)
+
+    # Instruct the model to respond with structured JSON
+    json_instruction = (
+        "\n\nRespond ONLY with a JSON object in the following format, no extra text:\n"
+        '{"direction": "LONG" | "SHORT" | "FLAT", '
+        '"rationale": "<brief explanation>", '
+        '"confidence": "High" | "Medium" | "Low", '
+        '"market_state": "<current market state>"}'
+    )
+
+    return narrative + json_instruction
 
 
 # =====================================================================
@@ -168,7 +201,55 @@ _LOW_CONFIDENCE = ["watching", "wait for", "wait for break", "wait for passive"]
 
 
 def parse_entry_response(text: str) -> Dict[str, Any]:
-    """Parse model output into direction using two-stage extraction."""
+    """Parse model output into direction, trying JSON first then keyword fallback."""
+    # Try direct JSON parse
+    parsed = _try_parse_json(text)
+    if parsed is not None:
+        return _normalize_entry_json(parsed, text)
+
+    # Try extracting JSON from markdown code blocks (```json ... ``` or ``` ... ```)
+    code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+    if code_block_match:
+        parsed = _try_parse_json(code_block_match.group(1))
+        if parsed is not None:
+            return _normalize_entry_json(parsed, text)
+
+    # Fall back to keyword-based parsing
+    logger.debug("JSON parse failed, falling back to keyword parser for: %s", text[:200])
+    return _keyword_fallback_parse(text)
+
+
+def _try_parse_json(raw: str) -> Optional[Dict[str, Any]]:
+    """Attempt to parse a string as JSON. Returns None on failure."""
+    try:
+        obj = json.loads(raw.strip())
+        if isinstance(obj, dict):
+            return obj
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return None
+
+
+def _normalize_entry_json(obj: Dict[str, Any], raw_text: str) -> Dict[str, Any]:
+    """Normalise a parsed JSON dict into the expected entry response format."""
+    direction = str(obj.get("direction", "FLAT")).upper()
+    if direction not in ("LONG", "SHORT", "FLAT"):
+        direction = "FLAT"
+
+    confidence = str(obj.get("confidence", "Medium")).capitalize()
+    if confidence not in ("High", "Medium", "Low"):
+        confidence = "Medium"
+
+    return {
+        "direction": direction,
+        "rationale": obj.get("rationale", raw_text),
+        "raw_output": raw_text,
+        "confidence": confidence,
+    }
+
+
+def _keyword_fallback_parse(text: str) -> Dict[str, Any]:
+    """Legacy keyword-based parser used when JSON parsing fails."""
     lower = text.lower()
     direction = None
     confidence = "Medium"
@@ -310,7 +391,17 @@ def build_overseer_prompt(
         elif price < vwap * 0.999:
             parts.append(f"Price below VWAP ({vwap:.0f}). Bearish.")
 
-    return " ".join(parts)
+    narrative = " ".join(parts)
+
+    # Instruct the model to respond with structured JSON
+    json_instruction = (
+        "\n\nRespond ONLY with a JSON object in the following format, no extra text:\n"
+        '{"action": "HOLD" | "TIGHTEN_SL" | "PARTIAL_EXIT" | "FULL_EXIT" | "ADD", '
+        '"new_sl_price": <number or null>, '
+        '"reason": "<brief explanation>"}'
+    )
+
+    return narrative + json_instruction
 
 
 # =====================================================================
@@ -325,7 +416,50 @@ _RE_REASON = re.compile(r'reason:\s*(.+?)(?:\n|$)', re.IGNORECASE)
 
 
 def parse_overseer_response(text: str, pos_state: dict) -> OverseerAction:
-    """Parse overseer LLM output into a structured OverseerAction."""
+    """Parse overseer LLM output, trying JSON first then keyword fallback."""
+    # Try direct JSON parse
+    parsed = _try_parse_json(text)
+    if parsed is not None:
+        return _normalize_overseer_json(parsed, pos_state)
+
+    # Try extracting JSON from markdown code blocks
+    code_block_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
+    if code_block_match:
+        parsed = _try_parse_json(code_block_match.group(1))
+        if parsed is not None:
+            return _normalize_overseer_json(parsed, pos_state)
+
+    # Fall back to keyword-based parsing
+    logger.debug("JSON parse failed for overseer, falling back to keyword parser: %s", text[:200])
+    return _keyword_fallback_parse_overseer(text, pos_state)
+
+
+_VALID_OVERSEER_ACTIONS = {"HOLD", "TIGHTEN_SL", "PARTIAL_EXIT", "FULL_EXIT", "ADD"}
+
+
+def _normalize_overseer_json(obj: Dict[str, Any], pos_state: dict) -> OverseerAction:
+    """Normalise a parsed JSON dict into an OverseerAction."""
+    action = str(obj.get("action", "HOLD")).upper().replace(" ", "_")
+    if action not in _VALID_OVERSEER_ACTIONS:
+        action = "HOLD"
+
+    reason = str(obj.get("reason", ""))
+    new_sl = obj.get("new_sl_price")
+
+    # Ensure TIGHTEN_SL has a valid stop-loss price
+    if action == "TIGHTEN_SL":
+        if not isinstance(new_sl, (int, float)) or new_sl <= 0:
+            new_sl = compute_tighten_sl(pos_state)
+
+    return OverseerAction(
+        action=action,
+        new_sl_price=float(new_sl) if isinstance(new_sl, (int, float)) and new_sl and new_sl > 0 else None,
+        reason=reason,
+    )
+
+
+def _keyword_fallback_parse_overseer(text: str, pos_state: dict) -> OverseerAction:
+    """Legacy keyword-based overseer parser used when JSON parsing fails."""
     lower = text.lower()
     reason = ""
 

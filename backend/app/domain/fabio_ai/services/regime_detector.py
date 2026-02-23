@@ -3,6 +3,9 @@
 Instead of a fixed timer, the LLM is invoked only when meaningful
 market regime changes occur: state transitions, VA boundary crossings,
 POC migration shifts, or delta divergence spikes.
+
+Also implements Fabio Rule 8 (contraction detection) and Rule 11
+(failed auction re-entry blocking).
 """
 
 from __future__ import annotations
@@ -30,18 +33,50 @@ class _RegimeSnapshot:
     timestamp: float = 0.0
 
 
+@dataclass(frozen=True)
+class _FailedEntry:
+    """Records a stopped-out entry for re-entry blocking (Fabio Rule 11)."""
+    level: float
+    direction: str        # "LONG" | "SHORT"
+    session_phase: int    # session phase when the failure occurred
+
+
+@dataclass
+class ContractionConfig:
+    """Tunable thresholds for contraction detection (Fabio Rule 8)."""
+    contraction_ratio: float = 0.30   # current range < ratio * expansion range => contracting
+    lookback: int = 20                # candles to measure current range
+
+
 class RegimeDetector:
-    """Detects meaningful market regime changes to trigger LLM analysis."""
+    """Detects meaningful market regime changes to trigger LLM analysis.
+
+    Also provides:
+    - Contraction detection (Fabio Rule 8): after expansion, detect when
+      range compresses below 30% of the last expansion range.
+    - Failed auction re-entry blocking (Fabio Rule 11): block re-entry
+      at the same level/direction after a stop-out.
+    """
 
     # POC migration threshold (relative change)
     POC_MIGRATION_THRESHOLD = 0.002  # 0.2%
     # Delta divergence threshold (absolute delta relative to price)
     DELTA_SPIKE_MULTIPLIER = 3.0
 
-    def __init__(self) -> None:
+    def __init__(self, contraction_config: ContractionConfig | None = None) -> None:
         self._previous: _RegimeSnapshot | None = None
         self._last_trigger_time: float = 0.0
         self._recent_deltas: deque[float] = deque(maxlen=20)
+
+        # Contraction detection state (Fabio Rule 8)
+        self._config = contraction_config or ContractionConfig()
+
+        # Failed auction re-entry state (Fabio Rule 11)
+        self._failed_entries: list[_FailedEntry] = []
+
+    # ------------------------------------------------------------------
+    # LLM trigger detection (existing behaviour)
+    # ------------------------------------------------------------------
 
     def should_trigger_llm(
         self,
@@ -100,6 +135,107 @@ class RegimeDetector:
             self._last_trigger_time = now
 
         return triggered
+
+    # ------------------------------------------------------------------
+    # Fabio Rule 8 — Contraction Detection
+    # ------------------------------------------------------------------
+
+    def is_contracting(self, data: list[OHLC], lookback: int = 20) -> bool:
+        """Detect contraction after expansion.
+
+        Compares the range of the last *lookback* candles against the
+        range of the preceding *lookback* candles (the expansion window).
+        If the current range is less than ``contraction_ratio`` (default
+        30%) of the expansion range, the market is contracting.
+
+        When contracting, no new trend trades should be taken — only
+        mean-reversion setups are valid.
+        """
+        if len(data) < lookback * 2:
+            return False
+
+        # Expansion window: candles before the current lookback window
+        expansion_window = data[-(lookback * 2):-lookback]
+        exp_high = max(c.high for c in expansion_window)
+        exp_low = min(c.low for c in expansion_window)
+        expansion_range = exp_high - exp_low
+
+        if expansion_range <= 0:
+            return False
+
+        # Current window
+        current_window = data[-lookback:]
+        cur_high = max(c.high for c in current_window)
+        cur_low = min(c.low for c in current_window)
+        current_range = cur_high - cur_low
+
+        ratio = current_range / expansion_range
+        is_contracted = ratio < self._config.contraction_ratio
+
+        if is_contracted:
+            logger.debug(
+                "Contraction detected: range=%.2f expansion=%.2f ratio=%.2f%%",
+                current_range, expansion_range, ratio * 100,
+            )
+
+        return is_contracted
+
+    # ------------------------------------------------------------------
+    # Fabio Rule 11 — Failed Auction Re-entry Blocking
+    # ------------------------------------------------------------------
+
+    def record_failed_entry(self, level: float, direction: str, session_phase: int) -> None:
+        """Record a stopped-out entry so the same level/direction is blocked.
+
+        Call this when a position hits its stop loss.
+        """
+        self._failed_entries.append(
+            _FailedEntry(level=level, direction=direction, session_phase=session_phase)
+        )
+        logger.info(
+            "Recorded failed entry: level=%.2f dir=%s phase=%d",
+            level, direction, session_phase,
+        )
+
+    def is_re_entry_blocked(
+        self,
+        level: float,
+        direction: str,
+        session_phase: int,
+        buffer_pct: float = 0.003,
+    ) -> bool:
+        """Check whether re-entry at *level* in *direction* is blocked.
+
+        Re-entry is blocked when a previous stop-out occurred at the
+        same level (within *buffer_pct*) in the same direction during
+        the same session phase.
+
+        Re-entry is allowed if:
+        - The session phase has changed (new structure).
+        - The price is outside the buffer of all failed levels.
+        """
+        for fe in self._failed_entries:
+            if fe.direction != direction:
+                continue
+            if fe.session_phase != session_phase:
+                continue  # new session phase — allow
+            # Check if level is within buffer of the failed level
+            if fe.level > 0 and abs(level - fe.level) / fe.level <= buffer_pct:
+                logger.debug(
+                    "Re-entry blocked: level=%.2f matches failed %.2f (dir=%s phase=%d)",
+                    level, fe.level, direction, session_phase,
+                )
+                return True
+        return False
+
+    def clear_failed_entries(self) -> None:
+        """Clear all failed entry records.  Call on new session start."""
+        self._failed_entries.clear()
+        logger.debug("Cleared failed entries")
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     def _build_snapshot(self, tick: OHLC, amt: AMTResult, now: float) -> _RegimeSnapshot:
         price = tick.close

@@ -81,10 +81,23 @@ CREATE TABLE IF NOT EXISTS performance_snapshots (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS session_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    market TEXT NOT NULL DEFAULT 'NSE',
+    session_date TEXT NOT NULL,
+    poc REAL, vah REAL, val REAL,
+    profile_shape TEXT,
+    total_volume REAL,
+    extra TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_ticks_symbol_time ON ticks(symbol, time);
 CREATE INDEX IF NOT EXISTS idx_trades_closed_at ON trades(closed_at);
 CREATE INDEX IF NOT EXISTS idx_llm_created ON llm_decisions(created_at);
 CREATE INDEX IF NOT EXISTS idx_perf_created ON performance_snapshots(created_at);
+CREATE INDEX IF NOT EXISTS idx_session_profiles ON session_profiles(symbol, market, session_date);
 """
 
 # Tick batch settings
@@ -302,3 +315,35 @@ class SQLiteStorageAdapter(StoragePort):
             query += " ORDER BY created_at ASC"
             rows = self._conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
+
+    def save_session_profile(self, profile_data: dict[str, Any]) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO session_profiles (symbol, market, session_date, poc, vah, val, "
+                "profile_shape, total_volume, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    profile_data.get("symbol", ""),
+                    profile_data.get("market", "NSE"),
+                    profile_data.get("session_date", ""),
+                    profile_data.get("poc", 0),
+                    profile_data.get("vah", 0),
+                    profile_data.get("val", 0),
+                    profile_data.get("profile_shape", ""),
+                    profile_data.get("total_volume", 0),
+                    json.dumps({k: v for k, v in profile_data.items()
+                                if k not in ("symbol", "market", "session_date", "poc",
+                                             "vah", "val", "profile_shape", "total_volume")}),
+                ),
+            )
+            self._conn.commit()
+
+    def get_previous_session_profile(
+        self, symbol: str, market: str = "NSE",
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM session_profiles WHERE symbol = ? AND market = ? "
+                "ORDER BY session_date DESC LIMIT 1",
+                (symbol, market),
+            ).fetchone()
+            return dict(row) if row else None

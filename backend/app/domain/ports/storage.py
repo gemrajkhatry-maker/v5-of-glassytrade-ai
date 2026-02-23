@@ -43,3 +43,13 @@ class StoragePort(ABC):
         self, start: str | None = None, end: str | None = None,
     ) -> list[dict[str, Any]]:
         """Query historical LLM decisions."""
+
+    @abstractmethod
+    def save_session_profile(self, profile_data: dict[str, Any]) -> None:
+        """Persist end-of-session volume profile (VAH/VAL/POC/date/symbol)."""
+
+    @abstractmethod
+    def get_previous_session_profile(
+        self, symbol: str, market: str = "NSE",
+    ) -> dict[str, Any] | None:
+        """Retrieve the most recent completed session profile for gap analysis."""

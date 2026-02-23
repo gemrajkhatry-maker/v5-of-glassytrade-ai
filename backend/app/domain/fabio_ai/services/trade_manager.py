@@ -34,7 +34,7 @@ class TradeManagerConfig:
     take_profit_pct: float = 0.015      # 1.5% take profit
     trail_activation_pct: float = 0.50  # activate trail after 50% of TP
     trail_step_pct: float = 0.30        # trail 30% behind peak unrealised PnL
-    max_hold_seconds: float = 120       # 2 min time stop (scratch)
+    max_hold_seconds: float = 1800      # 30 min time stop for scalps (Fabio: < 30 min)
     cooldown_seconds: float = 30        # no re-entry for 30s after exit
     partial_tp_pct: float = 0.50        # take partial at 50% of TP distance
     partial_size_pct: float = 0.50      # close 50% of position on partial
@@ -69,6 +69,11 @@ class ManagedPosition:
     runner_active: bool = False       # True when runner portion is being trailed
     mae: float = 0.0                 # Maximum Adverse Excursion
     mfe: float = 0.0                 # Maximum Favorable Excursion
+
+    # Scale-in state (Fabio Rule 4: 40/30/30)
+    scale_step: int = 1              # 1=initial(40%), 2=confirmation(+30%), 3=breakout(+30%)
+    scale_confirm_price: float = 0.0 # price level that triggers step 2
+    scale_breakout_price: float = 0.0  # price level that triggers step 3
 
     @property
     def is_long(self) -> bool:
@@ -195,8 +200,28 @@ class TradeManager:
         allow_trail: bool = False,
         market_state: str = "BALANCED",
         entry_time: float | None = None,
+        enable_scale_in: bool = False,
     ) -> None:
-        """Start managing a newly opened position."""
+        """Start managing a newly opened position.
+
+        If ``enable_scale_in`` is True, scale-in trigger levels are set:
+          - Step 2 (confirmation): price moves 30% of SL distance in favor
+          - Step 3 (breakout): price moves 60% toward TP
+        """
+        risk = abs(entry_price - stop_loss)
+        tp_dist = abs(take_profit - entry_price)
+
+        # Scale-in levels
+        if enable_scale_in and side == "LONG":
+            confirm_price = entry_price + risk * 0.3
+            breakout_price = entry_price + tp_dist * 0.6
+        elif enable_scale_in and side == "SHORT":
+            confirm_price = entry_price - risk * 0.3
+            breakout_price = entry_price - tp_dist * 0.6
+        else:
+            confirm_price = 0.0
+            breakout_price = 0.0
+
         mp = ManagedPosition(
             position_id=position_id,
             side=side,
@@ -208,12 +233,16 @@ class TradeManager:
             peak_price=entry_price,
             initial_stop=stop_loss,
             entry_time=entry_time if entry_time is not None else time.time(),
+            scale_step=1 if enable_scale_in else 3,  # 3 = fully deployed
+            scale_confirm_price=confirm_price,
+            scale_breakout_price=breakout_price,
         )
         with self._lock:
             self._positions[position_id] = mp
         logger.info(
             f"TradeManager: registered {side} {position_id} "
             f"entry={entry_price:.2f} SL={stop_loss:.2f} TP={take_profit:.2f}"
+            f"{' [scale-in enabled]' if enable_scale_in else ''}"
         )
 
     def unregister_position(self, position_id: str, current_time: float | None = None) -> None:
@@ -368,9 +397,10 @@ class TradeManager:
 
         # ----- 5. TIME STOP / SCRATCH -----
         # Imbalanced markets get more time (trends need time to develop)
+        # Fabio: scalps < 30 min, momentum trades < 2 hours
         max_hold = self.config.max_hold_seconds
         if mp.market_state == "IMBALANCED":
-            max_hold = 300  # 5 min for trending markets
+            max_hold = 7200  # 2 hr for trending/momentum markets
 
         if (now - mp.entry_time) >= max_hold:
             price_move_pct = abs(current_price - mp.entry_price) / mp.entry_price
@@ -388,6 +418,43 @@ class TradeManager:
                 return ExitSignal(position_id, ExitReason.TIME_STOP, current_price)
 
         return None
+
+    def check_scale_in(self, position_id: str, current_price: float) -> float:
+        """Check if a scale-in trigger is hit. Returns the fraction to add (0.3) or 0.0."""
+        with self._lock:
+            mp = self._positions.get(position_id)
+        if mp is None or mp.scale_step >= 3:
+            return 0.0
+
+        if mp.scale_step == 1:
+            # Step 2: confirmation — price moved favorably past confirm level
+            triggered = (
+                (mp.is_long and current_price >= mp.scale_confirm_price > 0) or
+                (not mp.is_long and current_price <= mp.scale_confirm_price and mp.scale_confirm_price > 0)
+            )
+            if triggered:
+                mp.scale_step = 2
+                logger.info(
+                    f"TradeManager: SCALE-IN step 2 (confirmation) for {position_id} "
+                    f"at {current_price:.2f} — adding 30%%"
+                )
+                return 0.3
+
+        if mp.scale_step == 2:
+            # Step 3: breakout — price reached breakout level
+            triggered = (
+                (mp.is_long and current_price >= mp.scale_breakout_price > 0) or
+                (not mp.is_long and current_price <= mp.scale_breakout_price and mp.scale_breakout_price > 0)
+            )
+            if triggered:
+                mp.scale_step = 3
+                logger.info(
+                    f"TradeManager: SCALE-IN step 3 (breakout) for {position_id} "
+                    f"at {current_price:.2f} — adding final 30%%"
+                )
+                return 0.3
+
+        return 0.0
 
     def apply_cvd_kill_signal(
         self, position_id: str, cvd_divergence: str, current_price: float,

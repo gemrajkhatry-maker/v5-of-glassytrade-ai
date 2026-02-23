@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from app.domain.fabio_ai.services.trade_manager import TradeManager, ExitReason
 from app.domain.trading.models.enums import SignalType, Source
@@ -18,8 +18,9 @@ logger = logging.getLogger(__name__)
 class TradeLifecycleHandler:
     """Handles position exits via TradeManager (SL/TP/Trail/Time)."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_stop_out: Callable[[float, str], None] | None = None) -> None:
         self._trade_manager = TradeManager()
+        self._on_stop_out = on_stop_out
 
     @property
     def trade_manager(self) -> TradeManager:
@@ -27,7 +28,7 @@ class TradeLifecycleHandler:
         return self._trade_manager
 
     def check_exits(self, portfolio: Portfolio, current_price: float, cvd_divergence: str = "") -> bool:
-        """Check all open positions for exit conditions.
+        """Check all open positions for exit conditions and scale-in triggers.
 
         Returns:
             True if a position was fully closed (so caller knows the slot is free).
@@ -38,6 +39,12 @@ class TradeLifecycleHandler:
             # Skip positions already closed (e.g. by Portfolio.process_tick SL/TP)
             if pos.status != "OPEN":
                 continue
+
+            # Scale-in check (Fabio Rule 4: 40/30/30)
+            add_fraction = self._trade_manager.check_scale_in(pos.id, current_price)
+            if add_fraction > 0:
+                portfolio.add_to_position(pos.id, add_fraction, current_price)
+
             # CVD kill signal check (Fabio: exit when CVD diverges against position)
             if cvd_divergence:
                 cvd_exit = self._trade_manager.apply_cvd_kill_signal(
@@ -75,6 +82,10 @@ class TradeLifecycleHandler:
                     # Track daily losses on stop loss exits
                     if exit_sig.reason == ExitReason.STOP_LOSS:
                         self._trade_manager.record_loss()
+                        # Record stop-out for Rule 11 re-entry blocking
+                        if self._on_stop_out:
+                            side = "LONG" if pos.side.value == "BUY" else "SHORT"
+                            self._on_stop_out(pos.entry_price, side)
                     logger.info(
                         f"Position {pos.id} closed: {exit_sig.reason} "
                         f"at {exit_sig.exit_price:.2f}"
@@ -86,6 +97,7 @@ class TradeLifecycleHandler:
         """Register a new position with TradeManager for exit monitoring."""
         if signal.source == Source.LLM:
             allow_trail = (signal.metadata or {}).get("allow_trail", False)
+            scale_in = (signal.metadata or {}).get("scale_in", False)
             market_state = (signal.metadata or {}).get("market_state_model", "BALANCED")
             # Normalize: "Trending" → "IMBALANCED"
             if "trend" in market_state.lower() or "imbalance" in market_state.lower():
@@ -100,6 +112,7 @@ class TradeLifecycleHandler:
                 take_profit=signal.take_profit,
                 allow_trail=allow_trail,
                 market_state=market_state,
+                enable_scale_in=scale_in,
             )
 
     @property

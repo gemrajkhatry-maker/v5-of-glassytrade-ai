@@ -95,8 +95,14 @@ class Portfolio:
         newly_closed: list[Position] = []
 
         for pos in self.positions:
-            # Break-even logic is handled by TradeManager (single authority)
-            # Portfolio only handles simple SL/TP exits as a safety net
+            # LLM positions: SL/TP managed exclusively by TradeManager
+            # (which handles trailing stops, partials, time-based exits).
+            # Portfolio SL/TP only fires for non-LLM sources as a safety net.
+            if pos.source == Source.LLM:
+                pos.update_pnl(current_price)
+                active.append(pos)
+                unrealized_pnl += pos.pnl
+                continue
             should_close, reason = pos.should_close(current_price)
             if should_close:
                 pos.close(current_price, current_time, reason)
@@ -116,13 +122,19 @@ class Portfolio:
 
         return newly_closed
 
-    def open_position(self, signal: Signal, symbol: str) -> Position | None:
+    def open_position(
+        self, signal: Signal, symbol: str, scale_fraction: float = 1.0,
+    ) -> Position | None:
         """Open a new position from *signal*, enforcing risk constraints.
 
         Position sizing uses tiered risk based on signal confidence:
         - High confidence (A setup): 0.5% risk per trade
         - Medium confidence (B setup): 0.35% risk per trade
         - Low confidence (C setup): 0.2% risk per trade
+
+        ``scale_fraction`` controls how much of the full size to deploy
+        (Fabio 40/30/30 scale-in: first entry uses 0.4, add-ons use 0.3).
+        The full size is computed from risk, but only ``scale_fraction`` is deployed.
 
         Returns the created Position, or None if constraints prevent opening.
         """
@@ -140,14 +152,55 @@ class Portfolio:
         if risk_per_unit == 0:
             return None
 
-        size = risk_amount / risk_per_unit
+        full_size = risk_amount / risk_per_unit
         max_notional = self.equity * self.leverage
-        if size * signal.price > max_notional:
-            size = max_notional / signal.price
+        if full_size * signal.price > max_notional:
+            full_size = max_notional / signal.price
+
+        # Apply scale-in fraction (Fabio Rule 4: 40/30/30)
+        size = full_size * max(0.0, min(1.0, scale_fraction))
+        if size <= 0:
+            return None
 
         position = Position.from_signal(signal, symbol, size)
+        # Store full_size in metadata so scale-in adds know the target
+        if position.metadata is None:
+            position.metadata = {}
+        position.metadata["full_size"] = full_size
+        position.metadata["deployed_fraction"] = scale_fraction
+
         self.positions.append(position)
         return position
+
+    def add_to_position(self, position_id: str, add_fraction: float, current_price: float) -> bool:
+        """Scale into an existing position (Fabio 40/30/30 rule).
+
+        Adds ``add_fraction`` of the original full_size at ``current_price``.
+        Uses weighted-average to adjust entry_price.
+        Returns True if successful.
+        """
+        for pos in self.positions:
+            if pos.id == position_id and pos.is_open:
+                full_size = (pos.metadata or {}).get("full_size", 0)
+                deployed = (pos.metadata or {}).get("deployed_fraction", 1.0)
+                if full_size <= 0 or deployed >= 1.0:
+                    return False  # already fully deployed
+
+                add_size = full_size * add_fraction
+                new_total = pos.size + add_size
+
+                # Weighted average entry
+                pos.entry_price = (
+                    (pos.entry_price * pos.size + current_price * add_size) / new_total
+                )
+                pos.size = new_total
+
+                # Update metadata
+                new_deployed = min(1.0, deployed + add_fraction)
+                pos.metadata["deployed_fraction"] = new_deployed
+
+                return True
+        return False
 
     def partial_close_position(
         self, position_id: str, partial_pct: float, price: float, reason: str
