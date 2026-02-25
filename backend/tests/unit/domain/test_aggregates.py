@@ -27,8 +27,9 @@ def _make_signal(price=100, sl=95, tp=110, source=Source.AMT, sig_type=SignalTyp
 class TestPortfolioCreate:
     def test_default(self):
         p = Portfolio.create_default()
-        assert p.balance == 10_000_000
-        assert p.equity == 10_000_000
+        from app.domain.trading.models.aggregates import INITIAL_CAPITAL
+        assert p.balance == INITIAL_CAPITAL
+        assert p.equity == INITIAL_CAPITAL
         assert p.leverage == 10
         assert p.positions == []
         assert p.closed_trades == []
@@ -72,8 +73,8 @@ class TestPortfolioOpenPosition:
         sig = _make_signal(price=100, sl=95, tp=110)
         pos = p.open_position(sig, "BTCUSDT")
         # No metadata → confidence="Medium" → risk=0.35%
-        # risk_amount = 10M * 0.0035 = 35K; risk_per_unit = 5; size = 7K
-        assert pos.size == pytest.approx(7000, rel=0.01)
+        # risk_amount = 1M * 0.0035 = 3.5K; risk_per_unit = 5; size = 700
+        assert pos.size == pytest.approx(700, rel=0.01)
 
 
 class TestPortfolioProcessTick:

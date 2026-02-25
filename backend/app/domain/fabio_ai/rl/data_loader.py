@@ -1,6 +1,6 @@
 """Data Loader — historical data preparation for RL training.
 
-Loads OHLCV data from Binance via the existing infrastructure adapter
+Loads OHLCV data via the existing infrastructure adapter
 or from local CSV files, and prepares train/validation/test splits.
 """
 

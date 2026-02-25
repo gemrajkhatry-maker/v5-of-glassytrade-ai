@@ -2,9 +2,9 @@
 import { ChartConfig } from './types';
 
 export const DEFAULT_CONFIG: ChartConfig = {
-  symbol: 'BTCUSDT',
+  symbol: '',
   interval: '5m',
-  dataSource: 'BINANCE',
+  dataSource: 'DHAN',
   bullColor: '#10b981', // Emerald 500
   bearColor: '#ef4444', // Red 500
   glassOpacity: 1.0,
@@ -19,9 +19,9 @@ export const DEFAULT_CONFIG: ChartConfig = {
 };
 
 export const SAMPLE_PROMPTS = [
-  "Show me ETH live",
-  "Make the chart look like red and blue neon",
-  "Simulate a market crash",
-  "Turn on auto rotation",
-  "Change to 1h timeframe",
+  "Show me nifty",
+  "Set interval 15m",
+  "Hide volume profile",
+  "Bull color cyan",
+  "Show predictions",
 ];

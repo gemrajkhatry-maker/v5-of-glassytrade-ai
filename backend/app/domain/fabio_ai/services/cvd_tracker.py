@@ -6,10 +6,10 @@ and detects price-vs-CVD divergence (absorption signals).
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 
 from app.domain.trading.models.value_objects import OHLC
+from app.domain.fabio_ai.services import mlx_compute as mc
 
 
 # ---------------------------------------------------------------------------
@@ -98,71 +98,18 @@ class CVDTracker:
     # -- internals -----------------------------------------------------------
 
     def _compute_slope(self) -> float:
-        """Linear-regression slope of recent CVD values."""
+        """Linear-regression slope of recent CVD values (MLX-accelerated)."""
         window = self._history[-self._slope_window:]
-        n = len(window)
-        if n < 3:
+        if len(window) < 3:
             return 0.0
-
-        sum_x = sum_y = sum_xy = sum_xx = 0.0
-        for i in range(n):
-            sum_x += i
-            sum_y += window[i]
-            sum_xy += i * window[i]
-            sum_xx += i * i
-
-        denom = n * sum_xx - sum_x * sum_x
-        if denom == 0:
-            return 0.0
-        return (n * sum_xy - sum_x * sum_y) / denom
+        return mc.linreg_slope(window)
 
     def _detect_divergence(self) -> tuple[str, float]:
-        """Detect price-vs-CVD divergence over recent window.
-
-        Bearish divergence: price makes Higher High, CVD makes Lower High
-        Bullish divergence: price makes Lower Low, CVD makes Higher Low
-        """
+        """Detect price-vs-CVD divergence (MLX-accelerated)."""
         w = self._divergence_window
         if len(self._history) < w or len(self._price_history) < w:
             return "NONE", 0.0
-
-        prices = self._price_history[-w:]
-        cvds = self._history[-w:]
-        half = w // 2
-
-        # Compare first-half vs second-half peaks/troughs
-        p1_max = max(prices[:half])
-        p2_max = max(prices[half:])
-        c1_max = max(cvds[:half])
-        c2_max = max(cvds[half:])
-
-        p1_min = min(prices[:half])
-        p2_min = min(prices[half:])
-        c1_min = min(cvds[:half])
-        c2_min = min(cvds[half:])
-
-        # Z-score: magnitude of divergence relative to price volatility
-        price_std = _std(prices)
-        if price_std == 0:
-            price_std = 1.0
-
-        # Bearish divergence: price HH, CVD LH (absorption at top)
-        if p2_max > p1_max and c2_max < c1_max:
-            z = abs(p2_max - p1_max) / price_std
-            return "BEARISH_DIV", z
-
-        # Bullish divergence: price LL, CVD HL (absorption at bottom)
-        if p2_min < p1_min and c2_min > c1_min:
-            z = abs(p2_min - p1_min) / price_std
-            return "BULLISH_DIV", z
-
-        return "NONE", 0.0
-
-
-def _std(values: list[float]) -> float:
-    """Population standard deviation."""
-    n = len(values)
-    if n < 2:
-        return 0.0
-    mean = sum(values) / n
-    return math.sqrt(sum((v - mean) ** 2 for v in values) / n)
+        return mc.divergence_detect(
+            self._price_history[-w:],
+            self._history[-w:],
+        )

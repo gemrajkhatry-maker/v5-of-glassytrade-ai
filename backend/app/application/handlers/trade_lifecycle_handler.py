@@ -46,7 +46,9 @@ class TradeLifecycleHandler:
                 portfolio.add_to_position(pos.id, add_fraction, current_price)
 
             # CVD kill signal check (Fabio: exit when CVD diverges against position)
-            if cvd_divergence:
+            # Grace period: skip CVD kill for first 3 ticks after entry
+            mp = self._trade_manager._positions.get(pos.id)
+            if cvd_divergence and (mp is None or mp.tick_count >= 3):
                 cvd_exit = self._trade_manager.apply_cvd_kill_signal(
                     pos.id, cvd_divergence, current_price
                 )
@@ -58,6 +60,9 @@ class TradeLifecycleHandler:
 
             exit_sig = self._trade_manager.check_position(pos.id, current_price)
             if exit_sig:
+                logger.info("Exit trigger: pos=%s reason=%s price=%.2f tick=%d",
+                            pos.id, exit_sig.reason, exit_sig.exit_price,
+                            mp.tick_count if mp else -1)
                 if exit_sig.reason == ExitReason.PARTIAL_TAKE_PROFIT:
                     # Runner mode: close 75% at target, keep 25% trailing
                     # Standard partial: close 50%
@@ -84,7 +89,7 @@ class TradeLifecycleHandler:
                         self._trade_manager.record_loss()
                         # Record stop-out for Rule 11 re-entry blocking
                         if self._on_stop_out:
-                            side = "LONG" if pos.side.value == "BUY" else "SHORT"
+                            side = "LONG" if pos.side.value == "LONG" else "SHORT"
                             self._on_stop_out(pos.entry_price, side)
                     logger.info(
                         f"Position {pos.id} closed: {exit_sig.reason} "

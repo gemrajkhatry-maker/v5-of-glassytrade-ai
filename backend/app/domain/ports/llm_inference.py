@@ -3,6 +3,10 @@
 from abc import ABC, abstractmethod
 
 
+class LLMNotReadyError(RuntimeError):
+    """Raised when inference is attempted before the model is loaded."""
+
+
 class LLMInferencePort(ABC):
     """Abstraction for LLM inference (fine-tuned model)."""
 

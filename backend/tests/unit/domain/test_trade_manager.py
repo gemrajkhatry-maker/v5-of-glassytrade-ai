@@ -139,6 +139,9 @@ def test_time_stop(mgr: TradeManager):
     mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
     # Backdate entry_time
     mgr._positions["P1"].entry_time = time.time() - 120
+    # Advance past grace period (5 ticks)
+    for _ in range(5):
+        mgr.check_position("P1", 102.0)
     sig = mgr.check_position("P1", 102.0)
     assert sig is not None
     assert sig.reason == ExitReason.TIME_STOP

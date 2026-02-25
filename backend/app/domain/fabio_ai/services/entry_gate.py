@@ -27,6 +27,8 @@ def three_align_check(
     amt_result: AMTResult,
     tick: OHLC,
     order_book=None,
+    ib_high: float = 0.0,
+    ib_low: float = 0.0,
 ) -> bool:
     """Three-Align Gate: Market State + Location + Confirmation Bundle.
 
@@ -57,6 +59,11 @@ def three_align_check(
     if not near_level:
         for lvn in amt_result.lvns:
             if abs(tick.close - lvn) < threshold:
+                near_level = True
+                break
+    if not near_level:
+        for ib_level in [ib_high, ib_low]:
+            if ib_level > 0 and abs(tick.close - ib_level) < threshold:
                 near_level = True
                 break
 
@@ -141,6 +148,7 @@ def build_entry_signal(
     amt_result: AMTResult,
     ai_result: dict,
     setup_type: SetupType = SetupType.TREND_MODEL,
+    data: list[OHLC] | None = None,
 ) -> Signal:
     """Build Signal from LLM decision using Fabio Playbook SL/TP.
 
@@ -155,20 +163,34 @@ def build_entry_signal(
 
     agg_sl = sl_from_aggressive_print(amt_result, tick, is_buy, buffer)
 
+    # VA width as proxy for reasonable SL distance
+    va_width = abs(amt_result.value_area_high - amt_result.value_area_low)
+
+    # Minimum reward threshold: at least 0.3% of price to avoid dust trades
+    min_reward = tick.close * 0.003
+
     if setup_type == SetupType.MEAN_REVERSION:
         tp_price = amt_result.poc
         if is_buy:
             stop_price = agg_sl or (amt_result.value_area_low - buffer)
+            # Cap SL distance: don't risk more than 50% of VA width or 2% of price
+            # This cap applies even when aggressive print SL is used
+            max_sl_dist = min(va_width * 0.5, tick.close * 0.02) if va_width > 0 else tick.close * 0.005
+            if abs(tick.close - stop_price) > max_sl_dist:
+                stop_price = tick.close - max_sl_dist
             if not agg_sl and vwap and stop_price < vwap < tick.close:
                 stop_price = vwap - buffer
-            if tp_price <= tick.close or stop_price >= tick.close:
+            if tp_price <= tick.close or stop_price >= tick.close or (tp_price - tick.close) < min_reward:
                 tp_price = tick.close * 1.010
                 stop_price = tick.close * 0.995
         else:
             stop_price = agg_sl or (amt_result.value_area_high + buffer)
+            max_sl_dist = min(va_width * 0.5, tick.close * 0.02) if va_width > 0 else tick.close * 0.005
+            if abs(stop_price - tick.close) > max_sl_dist:
+                stop_price = tick.close + max_sl_dist
             if not agg_sl and vwap and stop_price > vwap > tick.close:
                 stop_price = vwap + buffer
-            if tp_price >= tick.close or stop_price <= tick.close:
+            if tp_price >= tick.close or stop_price <= tick.close or (tick.close - tp_price) < min_reward:
                 tp_price = tick.close * 0.990
                 stop_price = tick.close * 1.005
         allow_trail = False
@@ -176,6 +198,9 @@ def build_entry_signal(
         if is_buy:
             tp_price = amt_result.value_area_high + (amt_result.value_area_high - amt_result.poc)
             stop_price = agg_sl or (amt_result.poc - buffer)
+            max_sl_dist = min(va_width * 0.75, tick.close * 0.03) if va_width > 0 else tick.close * 0.01
+            if abs(tick.close - stop_price) > max_sl_dist:
+                stop_price = tick.close - max_sl_dist
             if not agg_sl and vwap and stop_price < vwap < tick.close:
                 stop_price = vwap - buffer
             if tp_price <= tick.close or stop_price >= tick.close:
@@ -184,6 +209,9 @@ def build_entry_signal(
         else:
             tp_price = amt_result.value_area_low - (amt_result.poc - amt_result.value_area_low)
             stop_price = agg_sl or (amt_result.poc + buffer)
+            max_sl_dist = min(va_width * 0.75, tick.close * 0.03) if va_width > 0 else tick.close * 0.01
+            if abs(stop_price - tick.close) > max_sl_dist:
+                stop_price = tick.close + max_sl_dist
             if not agg_sl and vwap and stop_price > vwap > tick.close:
                 stop_price = vwap + buffer
             if tp_price >= tick.close or stop_price <= tick.close:
@@ -191,7 +219,27 @@ def build_entry_signal(
                 stop_price = tick.close * 1.010
         allow_trail = True
 
+    # ---- Minimum SL floor ----
+    # Options have wider spreads and faster moves than futures.
+    # Use ATR-based floor (1x ATR) or 1.5% of price, whichever is larger.
+    # This prevents absurdly tight stops that get hit by normal noise.
+    atr_val = compute_atr(data, 14) if data and len(data) >= 14 else tick.close * 0.015
+    min_sl_dist = max(tick.close * 0.015, atr_val)
+    if abs(tick.close - stop_price) < min_sl_dist:
+        if is_buy:
+            stop_price = tick.close - min_sl_dist
+        else:
+            stop_price = tick.close + min_sl_dist
+
     setup_label = "MeanRev" if setup_type == SetupType.MEAN_REVERSION else "Trend"
+    risk = abs(tick.close - stop_price)
+    reward = abs(tp_price - tick.close)
+    rr = reward / risk if risk > 0 else 0
+    logger.info("build_entry_signal: %s %s entry=%.2f SL=%.2f TP=%.2f risk=%.2f reward=%.2f RR=%.2f "
+                "poc=%.2f vah=%.2f val=%.2f vwap=%.2f agg_sl=%s",
+                setup_label, direction, tick.close, stop_price, tp_price,
+                risk, reward, rr, amt_result.poc, amt_result.value_area_high,
+                amt_result.value_area_low, vwap, agg_sl)
 
     return Signal(
         type=sig_type,
@@ -224,12 +272,75 @@ def sl_from_aggressive_print(
     for ap in amt_result.aggressive_prints[-5:]:
         if is_buy and ap.side == "SELL" and ap.price < tick.close:
             if abs(ap.price - tick.close) < proximity:
-                if best is None or ap.price < best:
+                if best is None or ap.price > best:
                     best = ap.price
         elif not is_buy and ap.side == "BUY" and ap.price > tick.close:
             if abs(ap.price - tick.close) < proximity:
-                if best is None or ap.price > best:
+                if best is None or ap.price < best:
                     best = ap.price
     if best is None:
         return None
     return (best - buffer) if is_buy else (best + buffer)
+
+
+# ------------------------------------------------------------------
+# Option Execution Gates
+# ------------------------------------------------------------------
+
+def check_iv_gate(current_iv: float, baseline_iv: float, max_ratio: float = 1.5) -> bool:
+    """Returns True if entry should be BLOCKED due to elevated IV.
+
+    Blocks when current IV > max_ratio x baseline IV.
+    """
+    if current_iv <= 0 or baseline_iv <= 0:
+        return False  # No IV data — don't block
+    return current_iv > baseline_iv * max_ratio
+
+
+def check_delta_filter(delta: float, min_delta: float = 0.35, max_delta: float = 0.65) -> bool:
+    """Returns True if option delta is in acceptable range for scalping.
+
+    Too low delta -> slow movement (no edge).
+    Too high delta -> low gamma (no acceleration).
+    """
+    if delta <= 0:
+        return True  # No delta data — allow (don't over-filter)
+    abs_delta = abs(delta)
+    return min_delta <= abs_delta <= max_delta
+
+
+def classify_oi_action(price_change: float, oi_change: float) -> str:
+    """Classify OI + price action into market positioning.
+
+    Returns: "LONG_BUILD" | "SHORT_BUILD" | "LONG_UNWIND" | "SHORT_COVER" | "NEUTRAL"
+    """
+    if abs(price_change) < 0.001 and abs(oi_change) < 1:
+        return "NEUTRAL"
+
+    price_up = price_change > 0
+    oi_up = oi_change > 0
+
+    if price_up and oi_up:
+        return "LONG_BUILD"
+    elif not price_up and oi_up:
+        return "SHORT_BUILD"
+    elif price_up and not oi_up:
+        return "SHORT_COVER"
+    else:  # price down and OI down
+        return "LONG_UNWIND"
+
+
+def check_theta_gate(
+    theta: float, expected_hold_minutes: int, premium: float,
+) -> bool:
+    """Returns True if theta cost is acceptable (< 20% of premium).
+
+    Blocks if theta decay during expected hold time exceeds 20% of premium.
+    """
+    if theta >= 0 or premium <= 0:
+        return True  # No theta data or positive theta — allow
+    # theta is negative (daily decay in rupees per lot)
+    # Scale to per-minute: theta / (375 trading minutes)
+    theta_per_minute = abs(theta) / 375
+    theta_cost = theta_per_minute * expected_hold_minutes
+    return theta_cost < premium * 0.20

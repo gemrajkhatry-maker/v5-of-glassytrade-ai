@@ -2,7 +2,7 @@ import logging
 import threading
 
 from app.config import settings
-from app.domain.ports.llm_inference import LLMInferencePort
+from app.domain.ports.llm_inference import LLMInferencePort, LLMNotReadyError
 
 logger = logging.getLogger(__name__)
 
@@ -53,20 +53,23 @@ class MLXInferenceAdapter(LLMInferencePort):
         """Generate a prediction using the Alpaca prompt format."""
         if not self.model:
             if self._is_loading:
-                return "Analysis Warning: Model is still loading..."
-            return "Analysis Error: Model failed to load."
+                raise LLMNotReadyError("Model is still loading")
+            raise LLMNotReadyError("Model failed to load")
 
         from mlx_lm import generate
         from mlx_lm.sample_utils import make_sampler
 
-        # ChatML format with response prefill to skip <think> and get structured output
+        # ChatML format with response prefill to skip <think> and get structured output.
+        # The model was fine-tuned on Market State:/Logic:/Trigger: format.
+        # Strip any JSON instructions appended by prompt_builder — model doesn't understand JSON.
+        clean_input = input_text.split("\n\nRespond ONLY with a JSON")[0]
         prompt = (
             "<|im_start|>system\n"
             f"{instruction} Always respond with exactly three lines:\n"
             "Market State: Balance or Imbalance\n"
             "Logic: brief reasoning\n"
             "Trigger: Enter Long, Enter Short, or Stay Flat<|im_end|>\n"
-            f"<|im_start|>user\n{input_text}<|im_end|>\n"
+            f"<|im_start|>user\n{clean_input}<|im_end|>\n"
             "<|im_start|>assistant\nMarket State:"
         )
         sampler = make_sampler(temp=settings.LLM_TEMPERATURE)

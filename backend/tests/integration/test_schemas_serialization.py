@@ -110,7 +110,8 @@ class TestPortfolioSerialization:
     def test_empty_portfolio(self):
         p = Portfolio.create_default()
         d = portfolio_to_dto(p)
-        assert d["balance"] == 10_000_000
+        from app.domain.trading.models.aggregates import INITIAL_CAPITAL
+        assert d["balance"] == INITIAL_CAPITAL
         assert d["positions"] == []
         assert d["closedTrades"] == []
 

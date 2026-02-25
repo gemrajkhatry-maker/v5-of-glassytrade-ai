@@ -59,8 +59,13 @@ def _to_ist(timestamp: str | datetime | None) -> datetime:
         dt = datetime.now(_IST)
     elif isinstance(timestamp, str):
         try:
-            dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-        except (ValueError, TypeError):
+            # Handle epoch timestamps (e.g. "1771832400.0" from Dhan adapter)
+            stripped = timestamp.strip()
+            if stripped.replace(".", "", 1).lstrip("-").isdigit() and "T" not in stripped and len(stripped) >= 9:
+                dt = datetime.fromtimestamp(float(stripped), tz=timezone.utc)
+            else:
+                dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        except (ValueError, TypeError, OSError):
             dt = datetime.now(_IST)
     else:
         dt = timestamp
@@ -278,3 +283,40 @@ def get_session_info(
             force_exit=False,
             market="GLOBAL",
         )
+
+
+# ---------------------------------------------------------------------------
+# Gap Classification & Opening Inventory Bias
+# ---------------------------------------------------------------------------
+
+def classify_gap(open_price: float, prior_close: float, prior_range: float) -> str:
+    """Classify opening gap size relative to prior session range.
+
+    Returns "" (no gap), "SMALL", "MEDIUM", or "LARGE".
+    """
+    if prior_close <= 0 or prior_range <= 0:
+        return ""
+    gap_pct = abs(open_price - prior_close) / prior_range
+    if gap_pct < 0.005:
+        return ""
+    elif gap_pct < 0.15:
+        return "SMALL"
+    elif gap_pct < 0.50:
+        return "MEDIUM"
+    else:
+        return "LARGE"
+
+
+def opening_inventory_bias(open_price: float, prior_vah: float, prior_val: float) -> str:
+    """Determine inventory bias from opening price vs prior session value area.
+
+    Returns "" (invalid inputs), "LONG_BIAS", "SHORT_BIAS", or "NEUTRAL".
+    """
+    if prior_vah <= 0 or prior_val <= 0:
+        return ""
+    if open_price > prior_vah:
+        return "LONG_BIAS"
+    elif open_price < prior_val:
+        return "SHORT_BIAS"
+    else:
+        return "NEUTRAL"

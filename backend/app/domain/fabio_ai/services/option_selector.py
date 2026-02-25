@@ -65,6 +65,31 @@ class OptionSelectorConfig:
     banknifty_strike_interval: int = 100
 
 
+# MCX lot sizes and strike intervals
+MCX_LOT_SIZES: dict[str, int] = {
+    "CRUDEOIL": 100,
+    "CRUDEOILM": 10,     # Mini crude
+    "NATURALGAS": 1250,
+    "GOLD": 100,          # grams
+    "GOLDM": 10,          # Mini gold
+    "GOLDPETAL": 1,
+    "SILVER": 30,         # kg
+    "SILVERM": 5,         # Mini silver
+    "COPPER": 2500,       # kg
+}
+MCX_STRIKE_INTERVALS: dict[str, int] = {
+    "CRUDEOIL": 50,
+    "CRUDEOILM": 50,
+    "NATURALGAS": 5,
+    "GOLD": 100,
+    "GOLDM": 100,
+    "GOLDPETAL": 50,
+    "SILVER": 500,
+    "SILVERM": 500,
+    "COPPER": 5,
+}
+
+
 # ---------------------------------------------------------------------------
 # Service
 # ---------------------------------------------------------------------------
@@ -79,13 +104,19 @@ class OptionSelector:
 
     def _strike_interval(self, underlying: str) -> int:
         """Return the exchange-mandated strike interval for *underlying*."""
-        if underlying.upper() == "BANKNIFTY":
+        key = underlying.upper()
+        if key in MCX_STRIKE_INTERVALS:
+            return MCX_STRIKE_INTERVALS[key]
+        if key == "BANKNIFTY":
             return self.cfg.banknifty_strike_interval
         return self.cfg.nifty_strike_interval
 
     def _lot_size_for(self, underlying: str) -> int:
         """Return the standard lot size for *underlying*."""
-        if underlying.upper() == "BANKNIFTY":
+        key = underlying.upper()
+        if key in MCX_LOT_SIZES:
+            return MCX_LOT_SIZES[key]
+        if key == "BANKNIFTY":
             return self.cfg.banknifty_lot_size
         return self.cfg.nifty_lot_size
 
@@ -115,6 +146,27 @@ class OptionSelector:
             return atm + interval
         # PE: one strike OTM (below spot)
         return atm - interval
+
+    def build_symbol(
+        self,
+        underlying: str,
+        strike: int,
+        option_type: str,
+        expiry: str,
+    ) -> str:
+        """Build a human-readable Dhan-style symbol string.
+
+        Example: build_symbol("NIFTY", 23400, "CE", "2026-03-20")
+                 → "NIFTY 20 MAR 23400 CE"
+        """
+        _MONTHS = {
+            1: "JAN", 2: "FEB", 3: "MAR", 4: "APR", 5: "MAY", 6: "JUN",
+            7: "JUL", 8: "AUG", 9: "SEP", 10: "OCT", 11: "NOV", 12: "DEC",
+        }
+        d = date.fromisoformat(expiry)
+        day = d.day
+        mon = _MONTHS[d.month]
+        return f"{underlying.upper()} {day} {mon} {strike} {option_type.upper()}"
 
     def validate_option(
         self,

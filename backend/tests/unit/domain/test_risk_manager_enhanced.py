@@ -1,7 +1,7 @@
 """Tests for enhanced RiskManager — circuit breakers, position limits, consecutive losses."""
 
 import pytest
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
 from unittest.mock import patch
 
 from app.domain.trading.models.enums import Source, SignalType, SetupType
@@ -27,7 +27,7 @@ class TestCircuitBreakers:
 
     def test_halts_after_consecutive_losses(self):
         sig = _make_signal()
-        for _ in range(3):
+        for _ in range(10):
             self.rm.record_trade_result(-100, self.portfolio)
 
         assert self.rm.is_halted
@@ -44,14 +44,18 @@ class TestCircuitBreakers:
         assert self.rm._daily.consecutive_losses == 1
 
     def test_halts_on_daily_drawdown(self):
-        # 2% of 10M = 200k
-        self.rm.record_trade_result(-200_001, self.portfolio)
+        # 2% of 1M = 20k. Simulate equity drop.
+        self.portfolio.balance -= 20_001
+        self.portfolio.equity = self.portfolio.balance
+        self.rm.record_trade_result(-20_001, self.portfolio)
 
         assert self.rm.is_halted
         assert "drawdown" in self.rm.halt_reason
 
     def test_no_halt_under_drawdown_limit(self):
-        self.rm.record_trade_result(-100_000, self.portfolio)
+        self.portfolio.balance -= 10_000
+        self.portfolio.equity = self.portfolio.balance
+        self.rm.record_trade_result(-10_000, self.portfolio)
         assert not self.rm.is_halted
 
 
@@ -81,15 +85,14 @@ class TestDailyReset:
         self.portfolio = Portfolio.create_default()
 
     def test_resets_on_new_day(self):
-        self.rm.record_trade_result(-100, self.portfolio)
-        self.rm.record_trade_result(-100, self.portfolio)
-        self.rm.record_trade_result(-100, self.portfolio)
+        for _ in range(10):
+            self.rm.record_trade_result(-100, self.portfolio)
         assert self.rm.is_halted
 
-        # Simulate next day
-        with patch("app.domain.trading.services.risk_manager.date") as mock_date:
-            mock_date.today.return_value = date(2099, 1, 1)
-            mock_date.side_effect = lambda *a, **kw: date(*a, **kw)
+        # Simulate next day (risk_manager uses datetime.now(_IST).date())
+        with patch("app.domain.trading.services.risk_manager.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2099, 1, 1, 12, 0, tzinfo=timezone(timedelta(hours=5, minutes=30)))
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             sig = _make_signal()
             result = self.rm.validate(sig, self.portfolio)
             assert result is True

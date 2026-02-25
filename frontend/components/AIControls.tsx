@@ -80,9 +80,9 @@ const AIControls: React.FC<AIControlsProps> = ({
           <div className="text-center text-white/40 mt-10">
             <p className="text-sm">Try saying:</p>
             <ul className="mt-2 space-y-2 text-xs">
-              <li>"Show me a bullish setup for BTC"</li>
-              <li>"Make it look like red neon glass"</li>
-              <li>"Simulate high volatility"</li>
+              <li>"Show me nifty"</li>
+              <li>"Set interval 15m"</li>
+              <li>"Bull color cyan"</li>
             </ul>
           </div>
         )}

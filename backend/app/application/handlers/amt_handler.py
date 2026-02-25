@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
 from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer, IncrementalVolumeProfile
@@ -14,18 +15,44 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _filter_today_session(data: list) -> list:
+    """Filter candles to today's trading session only.
+
+    For options/intraday instruments, multi-day VP is meaningless
+    because overnight premium decay creates huge price gaps.
+    """
+    if not data:
+        return data
+    today = datetime.now(_IST).strftime("%Y-%m-%d")
+    today_data = [c for c in data if today in str(c.time)]
+    # Fall back to all data only if ZERO candles from today (e.g. weekend/pre-market).
+    # Even 1 today candle is better than using yesterday's prices for options —
+    # overnight theta decay creates huge price gaps that distort VP.
+    if len(today_data) == 0:
+        # Pre-market: use only the most recent 20 candles to minimize stale data
+        return data[-20:] if len(data) > 20 else data
+    return today_data
+
 
 class AMTHandler:
     """Handles AMT analysis and footprint generation (every tick)."""
 
     # Maximum number of candles kept in the incremental profile window.
-    _LOOKBACK: int = 200
+    # 60 candles (~5h at 5m interval) keeps VP relevant for options
+    # that can move 20%+ intraday, preventing stale POC from early session.
+    _LOOKBACK: int = 60
 
-    def __init__(self) -> None:
+    def __init__(self, session_only_vp: bool = True) -> None:
         self._amt_analyzer = AMTAnalyzer()
         self._footprint_analyzer = FootprintAnalyzer()
         self._inc_profile = IncrementalVolumeProfile()
         self._prev_data_len: int = 0
+        self._session_only_vp = session_only_vp
+        # Track current trading date (IST) to force VP rebuild on day boundary
+        self._trading_date: str = datetime.now(_IST).strftime("%Y-%m-%d")
 
     def analyze(
         self,
@@ -37,10 +64,22 @@ class AMTHandler:
         Returns:
             (amt_result, amt_dto, footprint_dto)
         """
-        # Incrementally update the volume profile with the latest candle.
-        lookback = min(len(data), self._LOOKBACK)
-        recent_data = data[-lookback:]
+        # Detect day boundary — force full VP rebuild when trading date changes
+        current_date = datetime.now(_IST).strftime("%Y-%m-%d")
+        if current_date != self._trading_date:
+            logger.info("Trading day changed %s → %s, resetting VP", self._trading_date, current_date)
+            self._inc_profile = IncrementalVolumeProfile()
+            self._prev_data_len = 0
+            self._trading_date = current_date
 
+        # For intraday options, use only today's session candles for VP
+        vp_data = _filter_today_session(data) if self._session_only_vp else data
+
+        # Incrementally update the volume profile with the latest candle.
+        lookback = min(len(vp_data), self._LOOKBACK)
+        recent_data = vp_data[-lookback:]
+
+        vp_len = len(vp_data)
         data_len = len(data)
         data_grew_by = data_len - self._prev_data_len
 
@@ -50,17 +89,17 @@ class AMTHandler:
             for candle in recent_data:
                 self._inc_profile.update(candle)
             if data_grew_by > 1:
-                logger.info("VP full rebuild: %d candles (bulk load)", len(recent_data))
+                logger.info("VP full rebuild: %d candles (session_filtered=%d)", len(recent_data), vp_len)
         elif data_grew_by == 1 and recent_data:
             # New candle arrived
             new_candle = recent_data[-1]
             oldest = None
-            if data_len > self._LOOKBACK and self._prev_data_len >= self._LOOKBACK:
-                oldest = data[-(lookback + 1)]
+            if vp_len > self._LOOKBACK:
+                oldest = vp_data[-(lookback + 1)]
             self._inc_profile.update(new_candle, oldest)
         # data_grew_by == 0: sub-candle update — skip VP rebuild (noise)
 
-        self._prev_data_len = len(data)
+        self._prev_data_len = data_len
 
         amt_result = self._amt_analyzer.analyze(
             data, order_book, incremental_profile=self._inc_profile,

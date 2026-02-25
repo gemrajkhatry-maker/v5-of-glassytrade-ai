@@ -111,25 +111,29 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                   </div>
               ) : (
                   recentTrades.map(trade => (
-                      <div key={trade.id} className="p-2 rounded-lg bg-white/5 border border-white/5 flex justify-between items-center text-xs hover:bg-white/10 transition-colors">
-                          <div>
+                      <div key={trade.id} className="p-2 rounded-lg bg-white/5 border border-white/5 text-xs hover:bg-white/10 transition-colors space-y-1">
+                          <div className="flex justify-between items-center">
                               <div className="flex items-center gap-1.5">
                                   <span className="font-bold text-white/90">{trade.symbol.replace('USDT','')}</span>
                                   <span className={`text-[9px] px-1 rounded ${trade.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
                                     {trade.side}
                                   </span>
+                                  {trade.size > 0 && <span className="text-[9px] text-white/40">x{trade.size}</span>}
                               </div>
-                              <div className="text-[9px] text-white/30 mt-0.5">
-                                  {new Date(trade.exitTime || '').toLocaleTimeString()}
+                              <div className={`font-mono font-bold ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                  {trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)}
                               </div>
                           </div>
-                          <div className="text-right">
-                              <div className={`font-mono font-bold ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                  {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                              </div>
-                              <div className="text-[9px] text-white/30">
-                                  {trade.source}
-                              </div>
+                          <div className="flex justify-between text-[9px] text-white/40 font-mono">
+                              <span>Entry: {trade.entryPrice?.toFixed(2)}</span>
+                              <span>Exit: {trade.exitPrice?.toFixed(2) || '—'}</span>
+                          </div>
+                          <div className="flex justify-between text-[9px] text-white/30">
+                              <span>{new Date(trade.entryTime || '').toLocaleTimeString()} → {new Date(trade.exitTime || '').toLocaleTimeString()}</span>
+                          </div>
+                          <div className="flex justify-between text-[9px]">
+                              <span className="text-white/30">{trade.source}</span>
+                              {trade.closeReason && <span className="text-amber-400/70">{trade.closeReason}</span>}
                           </div>
                       </div>
                   ))

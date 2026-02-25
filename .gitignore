@@ -40,3 +40,13 @@ poc/models/
 *.db
 *.db-shm
 *.db-wal
+
+# Large data directories
+poc3/
+archive/
+backend/live_trading_logs/
+backend/models/
+backend/.vite/
+*.jsonl
+*.csv
+!backend/tests/**/*.csv

@@ -23,12 +23,22 @@ class Source(str, Enum):
     PREDICTION = "PREDICTION"
     RL = "RL"
     LLM = "LLM"
+    AGENT = "AGENT"
 
 
 class MarketState(str, Enum):
     """Auction Market Theory market state."""
     BALANCED = "BALANCED"
     IMBALANCED = "IMBALANCED"
+
+
+class MarketStructureState(str, Enum):
+    """5-state market structure classification."""
+    BALANCE = "BALANCE"
+    IMBALANCE = "IMBALANCE"
+    TRANSITION = "TRANSITION"
+    EXPANSION = "EXPANSION"
+    CHOP = "CHOP"
 
 
 class SetupType(str, Enum):

@@ -22,6 +22,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from app.config import settings
 from app.domain.fabio_ai.services.trade_manager import TradeManager, ExitReason
 from app.domain.fabio_ai.services.prompt_builder import (
     OverseerAction,
@@ -34,11 +35,16 @@ if TYPE_CHECKING:
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
     from app.domain.ports.event_bus import EventBusPort
     from app.domain.ports.storage import StoragePort
+    from app.domain.ports.probability_inference import ProbabilityInferencePort
 
 logger = logging.getLogger(__name__)
 
 # Minimum seconds between overseer calls
 OVERSEER_COOLDOWN = 10.0
+
+# ADD rate-limiting
+ADD_COOLDOWN = 120.0          # 2 minutes between ADD actions
+MAX_ADDS_PER_POSITION = 2    # Maximum ADDs per position lifetime
 
 
 class LLMOverseerHandler:
@@ -62,12 +68,24 @@ class LLMOverseerHandler:
         event_bus: EventBusPort,
         trade_manager: TradeManager,
         storage: StoragePort | None = None,
+        probability_engine: ProbabilityInferencePort | None = None,
     ) -> None:
         self._gen_ai_service = gen_ai_service
         self._event_bus = event_bus
         self._trade_manager = trade_manager
         self._storage = storage
+        self._probability_engine = probability_engine
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        self._predict_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+        # ADD rate-limiting state
+        self._last_add_time: float = 0.0
+        self._add_count: int = 0
+
+    def reset_position_state(self) -> None:
+        """Reset per-position state — call when position closes."""
+        self._last_add_time = 0.0
+        self._add_count = 0
 
     def should_run(
         self,
@@ -112,29 +130,83 @@ class LLMOverseerHandler:
             return
 
         mp = managed_positions[0]
-        pos_state = self._trade_manager.get_position_state(mp.position_id, tick.close)
-        if pos_state is None:
-            with session._lock:
-                session._overseer_running = False
-            return
-
-        # Build the overseer prompt (pure quant)
-        prompt = build_overseer_prompt(pos_state, tick, amt_result)
+        position_id = mp.position_id
 
         def _worker():
             try:
+                # Capture fresh position state INSIDE worker thread.
+                # Between dispatch and execution (~300ms), check_exits() on the main
+                # thread may have partially closed or fully closed this position.
+                pos_state = self._trade_manager.get_position_state(position_id, tick.close)
+                if pos_state is None:
+                    logger.debug("Overseer: position %s closed before worker started", position_id)
+                    return
+
+                # Probability engine: compute exit probability if available
+                exit_probability = None
+                if self._probability_engine and self._probability_engine.is_ready():
+                    try:
+                        from app.domain.probability.features import extract_features
+                        data = getattr(session, 'data', [])
+                        if len(data) >= 20:
+                            features = extract_features(data, amt_result, tick, getattr(session, 'order_book', None))
+                            side = pos_state["side"]
+                            if side == "LONG":
+                                proba = self._probability_engine.predict_proba(features)
+                                exit_probability = 1.0 - proba.get("long", 0.5)
+                            else:
+                                proba = self._probability_engine.predict_proba(features)
+                                exit_probability = 1.0 - proba.get("short", 0.5)
+                            pos_state["exit_probability"] = exit_probability
+                    except Exception:
+                        logger.debug("Probability engine failed in overseer", exc_info=True)
+
+                # Build the overseer prompt (pure quant)
+                prompt = build_overseer_prompt(pos_state, tick, amt_result)
+
                 logger.info(
                     "LLM overseer starting for %s (%s from %.2f, unrealized=%.2f%%)",
                     symbol, pos_state["side"], pos_state["entry_price"],
                     pos_state["unrealized_pnl_pct"] * 100,
                 )
 
-                # Use the same predict() path as entry decisions
+                # Use nested executor with timeout to prevent infinite hangs
                 adapter = self._gen_ai_service.llm_adapter
-                raw = adapter.predict(self.OVERSEER_INSTRUCTION, prompt)
-                decision = parse_overseer_response(raw, pos_state)
+                predict_future = self._predict_executor.submit(
+                    adapter.predict, self.OVERSEER_INSTRUCTION, prompt,
+                )
+                try:
+                    raw = predict_future.result(timeout=settings.LLM_TIMEOUT_SECONDS)
+                except concurrent.futures.TimeoutError:
+                    logger.warning(
+                        "Overseer LLM timed out after %.0fs — defaulting to HOLD",
+                        settings.LLM_TIMEOUT_SECONDS,
+                    )
+                    return  # no action = HOLD
 
+                decision = parse_overseer_response(raw, pos_state)
                 logger.info("LLM overseer: %s (reason: %s)", decision.action, decision.reason[:80])
+
+                # Probability override: high P(reversal) forces exit
+                if exit_probability is not None and exit_probability > 0.65 and decision.action == "HOLD":
+                    logger.info(
+                        "Probability override: P(adverse)=%.2f > 0.65 — overriding HOLD→FULL_EXIT",
+                        exit_probability,
+                    )
+                    decision = OverseerAction(
+                        action="FULL_EXIT",
+                        reason=f"Probability model: {exit_probability:.0%} chance of adverse move",
+                    )
+
+                # Probability gate for ADD: only allow if P(continuation) > 0.7
+                if decision.action == "ADD" and exit_probability is not None:
+                    continuation_prob = 1.0 - exit_probability
+                    if continuation_prob < 0.7:
+                        logger.info(
+                            "ADD blocked by probability: P(continuation)=%.2f < 0.70",
+                            continuation_prob,
+                        )
+                        decision = OverseerAction(action="HOLD", reason="ADD blocked — insufficient continuation probability")
 
                 # Execute the decision
                 self._execute_decision(decision, session, symbol, tick.close, pos_state)
@@ -223,7 +295,19 @@ class LLMOverseerHandler:
                     logger.info("Overseer: full exit for %s at %.2f", position_id, current_price)
 
         elif decision.action == "ADD":
+            # Rate-limiting: cooldown + max count
+            now = time.time()
+            if self._add_count >= MAX_ADDS_PER_POSITION:
+                logger.info("Overseer: ADD rejected — max adds reached (%d/%d)", self._add_count, MAX_ADDS_PER_POSITION)
+                return
+            if now - self._last_add_time < ADD_COOLDOWN and self._last_add_time > 0:
+                logger.info("Overseer: ADD rejected — cooldown (%.0fs remaining)", ADD_COOLDOWN - (now - self._last_add_time))
+                return
+
             if pos_state["unrealized_pnl_pct"] > 0 and not pos_state.get("partial_taken"):
-                logger.info("Overseer: ADD signal for %s — publishing pyramid signal", position_id)
+                self._last_add_time = now
+                self._add_count += 1
+                logger.info("Overseer: ADD signal for %s — publishing pyramid signal (%d/%d)",
+                           position_id, self._add_count, MAX_ADDS_PER_POSITION)
             else:
                 logger.info("Overseer: ADD rejected — not profitable or partial already taken")

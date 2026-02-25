@@ -19,7 +19,7 @@ from app.domain.trading.models.value_objects import OHLC, StrategyStats
 # Configuration (could be injected; kept as module-level for simplicity)
 # ---------------------------------------------------------------------------
 
-INITIAL_CAPITAL: float = 10_000_000
+INITIAL_CAPITAL: float = 1_000_000  # 10 lakhs INR
 LEVERAGE: int = 10
 RISK_PER_TRADE: float = 0.01
 MAX_HISTORY: int = 1000
@@ -30,7 +30,7 @@ MAX_PARTICIPATION_PCT: float = 0.02  # Never be > 2% of avg daily volume
 RISK_BY_CONFIDENCE: dict[str, float] = {
     "High": 0.005,    # A setup: 0.5%
     "Medium": 0.0035, # B setup: 0.35%
-    "Low": 0.002,     # C setup: 0.2%
+    "Low": 0.0025,    # C setup: 0.25%
 }
 
 
@@ -115,6 +115,9 @@ class Portfolio:
 
         self.positions = active
         self.closed_trades.extend(newly_closed)
+        # Trim to prevent unbounded growth throughout the day
+        if len(self.closed_trades) > 200:
+            self.closed_trades = self.closed_trades[-200:]
         self.equity = self.balance + unrealized_pnl
 
         # Equity history (throttled to one per minute)
@@ -161,6 +164,13 @@ class Portfolio:
         size = full_size * max(0.0, min(1.0, scale_fraction))
         if size <= 0:
             return None
+
+        # Snap to whole lot multiples for options
+        lot_size = (signal.metadata or {}).get("option_lot_size", 0)
+        if lot_size > 0:
+            num_lots = max(1, int(size / lot_size))
+            size = float(num_lots * lot_size)
+            full_size = max(full_size, size)  # ensure full_size >= deployed
 
         position = Position.from_signal(signal, symbol, size)
         # Store full_size in metadata so scale-in adds know the target
@@ -247,6 +257,9 @@ class Portfolio:
                 pos.close(price, datetime.utcnow().isoformat() + "Z", reason)
                 self.balance += pos.pnl
                 self.closed_trades.append(pos)
+                # Trim to prevent unbounded growth throughout the day
+                if len(self.closed_trades) > 200:
+                    self.closed_trades = self.closed_trades[-200:]
                 self.positions.pop(i)
                 self.equity = self.balance + sum(p.pnl for p in self.positions)
                 return pos
@@ -254,17 +267,21 @@ class Portfolio:
 
     # ----- internal -----
 
+    @staticmethod
+    def _parse_ts(s: str) -> float:
+        """Parse a timestamp string to epoch seconds (handles ISO and epoch formats)."""
+        stripped = s.strip()
+        if stripped.replace(".", "", 1).lstrip("-").isdigit() and "T" not in stripped and len(stripped) >= 9:
+            return float(stripped)
+        return datetime.fromisoformat(stripped.replace("Z", "+00:00")).timestamp()
+
     def _append_history(self, time_str: str, pnl: float) -> None:
         should_add = True
         if self.history:
             last_time = self.history[-1].get("time", "")
             try:
-                curr_ts = datetime.fromisoformat(
-                    time_str.replace("Z", "+00:00")
-                ).timestamp()
-                last_ts = datetime.fromisoformat(
-                    last_time.replace("Z", "+00:00")
-                ).timestamp()
+                curr_ts = self._parse_ts(time_str)
+                last_ts = self._parse_ts(last_time)
                 should_add = (curr_ts - last_ts) > HISTORY_MIN_INTERVAL_SEC
             except Exception:
                 should_add = True

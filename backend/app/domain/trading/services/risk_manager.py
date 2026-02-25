@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
+
+# IST (UTC+5:30) — NSE/NFO trading timezone
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 from app.domain.trading.models.entities import Signal
 from app.domain.trading.models.aggregates import Portfolio
@@ -21,8 +24,10 @@ logger = logging.getLogger(__name__)
 class DailyRiskState:
     """Tracks intra-day risk metrics.  Resets on new trading day."""
 
-    trade_date: date = field(default_factory=date.today)
+    trade_date: date = field(default_factory=lambda: datetime.now(_IST).date())
     starting_equity: float = 0.0
+    peak_equity: float = 0.0          # High-water mark for the day
+    current_equity: float = 0.0       # Updated after every trade result
     realized_pnl: float = 0.0
     consecutive_losses: int = 0
     total_trades: int = 0
@@ -30,8 +35,10 @@ class DailyRiskState:
     halt_reason: str = ""
 
     def reset(self, equity: float) -> None:
-        self.trade_date = date.today()
+        self.trade_date = datetime.now(_IST).date()
         self.starting_equity = equity
+        self.peak_equity = equity
+        self.current_equity = equity
         self.realized_pnl = 0.0
         self.consecutive_losses = 0
         self.total_trades = 0
@@ -43,21 +50,30 @@ class RiskManager:
     """Validates trade signals against portfolio risk constraints."""
 
     # Circuit-breaker thresholds
-    MAX_DAILY_DRAWDOWN_PCT: float = 0.02  # 2% of starting equity
-    MAX_CONSECUTIVE_LOSSES: int = 3
+    MAX_DAILY_DRAWDOWN_PCT: float = 0.02  # 2% from day's peak equity
+    MAX_CONSECUTIVE_LOSSES: int = 10
     MAX_CONCURRENT_POSITIONS: int = 5
     MAX_PORTFOLIO_NOTIONAL_PCT: float = 0.60  # 60% of equity
     MAX_PER_SYMBOL_NOTIONAL_PCT: float = 0.20  # 20% of equity
 
     def __init__(self) -> None:
         self._daily = DailyRiskState()
+        self._force_halted: bool = False  # Emergency kill switch
+
+        # Drift detection — rolling win rate vs historical baseline
+        self._recent_outcomes: list[bool] = []  # True=win, False=loss (last 50 trades)
+        self._baseline_win_rate: float = 0.45   # Expected baseline from backtest
+        self._drift_alert: bool = False
+        self._drift_message: str = ""
 
     @property
     def is_halted(self) -> bool:
-        return self._daily.halted
+        return self._force_halted or self._daily.halted
 
     @property
     def halt_reason(self) -> str:
+        if self._force_halted:
+            return "Emergency kill switch active"
         return self._daily.halt_reason
 
     @property
@@ -65,11 +81,30 @@ class RiskManager:
         return self._daily
 
     # ------------------------------------------------------------------
+    # Emergency kill switch
+    # ------------------------------------------------------------------
+
+    def halt_trading(self) -> None:
+        """Immediately halt all trading until manually resumed."""
+        self._force_halted = True
+        logger.warning("Trading FORCE HALTED via emergency kill switch")
+
+    def resume_trading(self) -> None:
+        """Clear the emergency kill switch (does NOT clear daily halts)."""
+        self._force_halted = False
+        logger.info("Emergency kill switch cleared")
+
+    # ------------------------------------------------------------------
     # Core validation
     # ------------------------------------------------------------------
 
     def validate(self, signal: Signal, portfolio: Portfolio) -> bool:
         """Return True if *signal* passes all risk checks."""
+        # Emergency kill switch — always checked first
+        if self._force_halted:
+            logger.warning("Trade rejected: emergency kill switch active")
+            return False
+
         self._maybe_reset_day(portfolio)
 
         # Circuit breaker — trading halted for the day
@@ -111,6 +146,15 @@ class RiskManager:
         self._daily.realized_pnl += pnl
         self._daily.total_trades += 1
 
+        # Initialize peak equity on first call (lazy init for fresh sessions)
+        if self._daily.peak_equity <= 0:
+            self._daily.peak_equity = portfolio.equity + abs(pnl) if pnl < 0 else portfolio.equity
+
+        # Update current equity and high-water mark
+        self._daily.current_equity = portfolio.equity
+        if portfolio.equity > self._daily.peak_equity:
+            self._daily.peak_equity = portfolio.equity
+
         if pnl <= 0:
             self._daily.consecutive_losses += 1
         else:
@@ -120,10 +164,33 @@ class RiskManager:
         if self._daily.consecutive_losses >= self.MAX_CONSECUTIVE_LOSSES:
             self._halt(f"Circuit breaker: {self._daily.consecutive_losses} consecutive losses")
 
-        if self._daily.starting_equity > 0:
-            drawdown_pct = abs(self._daily.realized_pnl) / self._daily.starting_equity
-            if self._daily.realized_pnl < 0 and drawdown_pct >= self.MAX_DAILY_DRAWDOWN_PCT:
-                self._halt(f"Circuit breaker: daily drawdown {drawdown_pct:.1%} exceeds {self.MAX_DAILY_DRAWDOWN_PCT:.0%} limit")
+        # Percentage-based drawdown from day's peak equity
+        if self._daily.peak_equity > 0:
+            drawdown_pct = (self._daily.peak_equity - portfolio.equity) / self._daily.peak_equity
+            if drawdown_pct >= self.MAX_DAILY_DRAWDOWN_PCT:
+                self._halt(f"Circuit breaker: daily drawdown {drawdown_pct:.1%} from peak exceeds {self.MAX_DAILY_DRAWDOWN_PCT:.0%} limit")
+
+        # Drift detection — rolling win rate vs baseline
+        self._recent_outcomes.append(pnl > 0)
+        if len(self._recent_outcomes) > 50:
+            self._recent_outcomes = self._recent_outcomes[-50:]
+
+        if len(self._recent_outcomes) >= 20:
+            import math
+            n = len(self._recent_outcomes)
+            rolling_wr = sum(self._recent_outcomes) / n
+            sigma = math.sqrt(self._baseline_win_rate * (1 - self._baseline_win_rate) / n)
+            threshold = self._baseline_win_rate - 2 * sigma
+            if rolling_wr < threshold:
+                self._drift_alert = True
+                self._drift_message = (
+                    f"Performance drift: rolling WR {rolling_wr:.0%} "
+                    f"(last {n} trades) below threshold {threshold:.0%}"
+                )
+                logger.warning(self._drift_message)
+            else:
+                self._drift_alert = False
+                self._drift_message = ""
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -131,7 +198,7 @@ class RiskManager:
 
     def _maybe_reset_day(self, portfolio: Portfolio) -> None:
         """Reset daily state if the trading day has changed."""
-        today = date.today()
+        today = datetime.now(_IST).date()
         if self._daily.trade_date != today:
             self._daily.reset(portfolio.equity)
 

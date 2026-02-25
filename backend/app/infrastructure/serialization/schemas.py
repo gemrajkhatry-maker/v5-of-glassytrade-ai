@@ -404,6 +404,7 @@ def amt_result_to_dto(r) -> dict:
         "legVah": getattr(r, "leg_vah", 0.0),
         "legVal": getattr(r, "leg_val", 0.0),
         "hasDisplacement": getattr(r, "has_displacement", False),
+        "ofi": getattr(r, "ofi", 0.0),
     }
 
 
@@ -422,7 +423,8 @@ def footprint_to_dto(fp) -> dict:
         "time": fp.time,
         "levels": [
             {"price": l.price, "bid": l.bid, "ask": l.ask,
-             "delta": l.delta, "imbalance": l.imbalance}
+             "delta": l.delta, "imbalance": l.imbalance,
+             "stacked": getattr(l, "stacked", False)}
             for l in fp.levels
         ],
         "pocPrice": fp.poc_price,

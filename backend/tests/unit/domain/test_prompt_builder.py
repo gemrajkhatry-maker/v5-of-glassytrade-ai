@@ -41,12 +41,12 @@ class TestBuildEntryPrompt:
 
     def test_includes_val_when_near(self):
         prompt = build_entry_prompt({"ltp": 95, "vah": 105, "val": 95, "poc": 100, "delta": -200})
-        assert "VAL" in prompt
+        assert "Value Area Low" in prompt or "VAL" in prompt
 
     def test_includes_cvd_divergence(self):
         prompt = build_entry_prompt({"ltp": 100, "vah": 105, "val": 95, "poc": 100, "delta": 0,
                                      "cvd_divergence": "BEARISH_DIV"})
-        assert "CVD divergence" in prompt
+        assert "CVD" in prompt and "divergence" in prompt.lower()
 
     def test_includes_volume_bubbles(self):
         prompt = build_entry_prompt({"ltp": 100, "vah": 105, "val": 95, "poc": 100, "delta": 0,

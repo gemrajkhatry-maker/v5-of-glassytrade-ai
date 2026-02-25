@@ -1,16 +1,19 @@
 import React, { useMemo } from 'react';
-import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry } from '../types';
-import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Settings, Zap, AlertTriangle, Clock } from 'lucide-react';
+import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook } from '../types';
+import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Settings, Zap, AlertTriangle, Clock, BarChart3 } from 'lucide-react';
 
 interface AIAnalysisPanelProps {
     analysis: GenAIAnalysis | null;
     amtResult: AMTAnalysis | null;
     portfolio: Portfolio;
     riskState?: RiskState | null;
+    agentDecision?: AgentDecision | null;
     llmHistory?: LLMHistoryEntry[];
+    orderBook?: OrderBook | null;
+    depth20Active?: boolean;
 }
 
-export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, llmHistory = [] }) => {
+export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, depth20Active }) => {
     // 1. Fallback: If both are missing -> Initializing
     if (!analysis && !amtResult) {
         return (
@@ -201,6 +204,167 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                 </div>
             </div>
 
+            {/* 03b. MARKET METRICS — Verification Bars */}
+            <div className="flex flex-col gap-2">
+                <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
+                    <span>03b. Market Metrics</span>
+                    <BarChart3 className="w-3 h-3 hover:text-white/80 transition-colors" />
+                </div>
+                <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2">
+                    {/* OFI Bar */}
+                    <div>
+                        <div className="flex justify-between mb-1">
+                            <span className="text-[10px] text-white/40">OFI</span>
+                            <span className={`text-[10px] font-mono font-bold ${(amtResult?.ofi ?? 0) > 0 ? 'text-green-400' : (amtResult?.ofi ?? 0) < 0 ? 'text-red-400' : 'text-white/40'}`}>
+                                {(amtResult?.ofi ?? 0) > 0 ? '+' : ''}{(amtResult?.ofi ?? 0).toFixed(3)}
+                            </span>
+                        </div>
+                        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden relative">
+                            <div className="absolute top-0 left-1/2 w-px h-full bg-white/20" />
+                            {(amtResult?.ofi ?? 0) !== 0 && (
+                                <div className="absolute top-0 h-full rounded-full transition-all duration-300" style={{
+                                    left: (amtResult?.ofi ?? 0) > 0 ? '50%' : `${50 + (amtResult?.ofi ?? 0) * 50}%`,
+                                    width: `${Math.min(Math.abs(amtResult?.ofi ?? 0) * 50, 50)}%`,
+                                    backgroundColor: (amtResult?.ofi ?? 0) > 0 ? '#4ade80' : '#f87171',
+                                    opacity: 0.7,
+                                }} />
+                            )}
+                        </div>
+                    </div>
+                    {/* CVD Slope Bar */}
+                    <div>
+                        <div className="flex justify-between mb-1">
+                            <span className="text-[10px] text-white/40">CVD Slope</span>
+                            <span className={`text-[10px] font-mono font-bold ${(amtResult?.cvdSlope ?? 0) > 0 ? 'text-green-400' : (amtResult?.cvdSlope ?? 0) < 0 ? 'text-red-400' : 'text-white/40'}`}>
+                                {(amtResult?.cvdSlope ?? 0).toFixed(1)}
+                                {amtResult?.cvdDivergence ? ` (${amtResult.cvdDivergence.replace('_DIV', '')})` : ''}
+                            </span>
+                        </div>
+                        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden relative">
+                            <div className="absolute top-0 left-1/2 w-px h-full bg-white/20" />
+                            {(() => {
+                                const cvd = amtResult?.cvdSlope ?? 0;
+                                const norm = Math.min(Math.abs(cvd) / 100, 1);
+                                return cvd !== 0 ? (
+                                    <div className="absolute top-0 h-full rounded-full transition-all duration-300" style={{
+                                        left: cvd > 0 ? '50%' : `${50 - norm * 50}%`,
+                                        width: `${norm * 50}%`,
+                                        backgroundColor: cvd > 0 ? '#4ade80' : '#f87171',
+                                        opacity: 0.7,
+                                    }} />
+                                ) : null;
+                            })()}
+                        </div>
+                    </div>
+                    {/* Balance Ratio Bar */}
+                    <div>
+                        <div className="flex justify-between mb-1">
+                            <span className="text-[10px] text-white/40">Balance</span>
+                            <span className="text-[10px] font-mono font-bold text-blue-300">
+                                {((amtResult?.balanceRatio ?? 0) * 100).toFixed(0)}% in VA
+                            </span>
+                        </div>
+                        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-300" style={{
+                                width: `${(amtResult?.balanceRatio ?? 0) * 100}%`,
+                                backgroundColor: '#60a5fa',
+                                opacity: 0.6,
+                            }} />
+                        </div>
+                    </div>
+                    {/* Profile Shape + Spread + Depth row */}
+                    <div className="flex justify-between items-center pt-1 border-t border-white/5">
+                        <div className="flex items-center gap-2">
+                            <span className="text-[10px] text-white/40">Shape</span>
+                            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
+                                amtResult?.profileShape === 'B' ? 'bg-purple-500/20 text-purple-400' :
+                                amtResult?.profileShape === 'P' ? 'bg-red-500/20 text-red-400' :
+                                amtResult?.profileShape === 'b' ? 'bg-green-500/20 text-green-400' :
+                                'bg-white/10 text-white/40'
+                            }`}>
+                                {amtResult?.profileShape === 'B' ? 'B Bimodal' :
+                                 amtResult?.profileShape === 'P' ? 'P Top-heavy' :
+                                 amtResult?.profileShape === 'b' ? 'b Bottom-heavy' :
+                                 amtResult?.profileShape === 'D' ? 'D Balanced' : '—'}
+                            </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {(() => {
+                                const bestBid = orderBook?.bids?.[0]?.price ?? 0;
+                                const bestAsk = orderBook?.asks?.[0]?.price ?? 0;
+                                const mid = (bestBid + bestAsk) / 2;
+                                const spreadBps = mid > 0 ? ((bestAsk - bestBid) / mid * 10000) : 0;
+                                return bestBid > 0 ? (
+                                    <span className={`text-[10px] font-mono ${spreadBps <= 5 ? 'text-green-400' : spreadBps <= 15 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                        {spreadBps.toFixed(1)} bps
+                                    </span>
+                                ) : <span className="text-[10px] text-white/20">—</span>;
+                            })()}
+                            <span className={`text-[9px] font-mono px-1 py-0.5 rounded ${depth20Active ? 'bg-green-500/20 text-green-400' : 'bg-white/5 text-white/20'}`}>
+                                {depth20Active ? 'D20' : 'D5'}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* 04. PROBABILITY ENGINE */}
+            <div className="flex flex-col gap-2">
+                <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
+                    <span>04. Probability</span>
+                    <Brain className="w-3 h-3 hover:text-white/80 transition-colors" />
+                </div>
+                <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2">
+                    {agentDecision ? (
+                        <>
+                            <div className="flex justify-between items-center">
+                                <span className="text-[10px] text-white/40">Direction</span>
+                                <span className={`text-xs font-bold ${agentDecision.direction === 'LONG' ? 'text-emerald-400' : agentDecision.direction === 'SHORT' ? 'text-red-400' : 'text-blue-300'}`}>
+                                    {agentDecision.direction}
+                                </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-[10px] text-white/40">P(target)</span>
+                                <span className={`text-xs font-mono font-bold ${agentDecision.probability >= 0.6 ? 'text-emerald-400' : agentDecision.probability >= 0.45 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                    {(agentDecision.probability * 100).toFixed(1)}%
+                                </span>
+                            </div>
+                            {/* Probability bar */}
+                            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full transition-all duration-500" style={{
+                                    width: `${Math.min(agentDecision.probability * 100, 100)}%`,
+                                    backgroundColor: agentDecision.probability >= 0.6 ? '#4ade80' : agentDecision.probability >= 0.45 ? '#facc15' : '#f87171',
+                                }} />
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-[10px] text-white/40">Regime</span>
+                                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                                    agentDecision.regime === 'TRENDING' ? 'bg-purple-500/20 text-purple-400' :
+                                    agentDecision.regime === 'BALANCED' ? 'bg-blue-500/20 text-blue-400' :
+                                    agentDecision.regime === 'VOLATILE' ? 'bg-orange-500/20 text-orange-400' :
+                                    'bg-white/10 text-white/40'
+                                }`}>{agentDecision.regime}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-[10px] text-white/40">Timing</span>
+                                <span className={`text-[10px] font-mono ${agentDecision.timing === 'ENTER_NOW' ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                                    {agentDecision.timing}
+                                </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-[10px] text-white/40">Kelly Size</span>
+                                <span className="text-[10px] font-mono text-white/60">{(agentDecision.sizeFraction * 100).toFixed(1)}%</span>
+                            </div>
+                            <div className="text-[9px] text-white/30 font-mono pt-1 border-t border-white/5">
+                                {agentDecision.rationale} ({agentDecision.latencyUs}μs)
+                            </div>
+                        </>
+                    ) : (
+                        <div className="text-[10px] text-white/30 text-center py-2">Waiting for probability engine...</div>
+                    )}
+                </div>
+            </div>
+
             {/* Footer Status */}
             <div className="mt-2 text-xs text-white/40 flex items-start gap-2 pt-2 border-t border-white/5">
                 <div className={`mt-1 h-2 w-2 rounded-full ${displayAnalysis.direction !== 'FLAT' ? 'bg-green-500 animate-ping' : 'bg-slate-600'}`}></div>
@@ -216,7 +380,7 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
 
             {/* 04. MODEL I/O LOG */}
             <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
-                <div className="text-[10px] text-white/40 uppercase tracking-widest">04. Model I/O</div>
+                <div className="text-[10px] text-white/40 uppercase tracking-widest">05. Model I/O</div>
                 <div className="p-2 rounded-lg bg-black/30 border border-white/5 space-y-2 max-h-[200px] overflow-y-auto">
                     <div>
                         <div className="text-[9px] text-cyan-400/60 uppercase font-bold mb-1">Prompt → Model</div>
@@ -237,7 +401,7 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
             {llmHistory.length > 0 && (
                 <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
                     <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
-                        <span>05. Decision History ({llmHistory.length})</span>
+                        <span>06. Decision History ({llmHistory.length})</span>
                         <Clock className="w-3 h-3" />
                     </div>
                     <div className="space-y-1 max-h-[250px] overflow-y-auto">

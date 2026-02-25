@@ -1,13 +1,16 @@
 """AI analysis router — market analysis via fine-tuned LLM."""
 
-from typing import Optional
+import logging
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_gen_ai_service, get_storage
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 from app.infrastructure.storage.database import SQLiteStorageAdapter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -37,6 +40,90 @@ async def analyze_market(
     }
 
 
+class CommandRequest(BaseModel):
+    prompt: str
+    current_config: dict[str, Any] = Field(alias="currentConfig", default={})
+    model_config = {"populate_by_name": True}
+
+
+# Chart command keywords → config updates
+_SYMBOL_KEYWORDS = {
+    "nifty": "NIFTY", "banknifty": "BANKNIFTY", "finnifty": "FINNIFTY",
+    "crude": "CRUDEOIL", "crudeoil": "CRUDEOIL", "natural gas": "NATURALGAS",
+    "gold": "GOLD", "silver": "SILVER",
+}
+_INTERVAL_KEYWORDS = {"15m": "15m", "1m": "1m", "5m": "5m", "1h": "1h", "4h": "4h", "1d": "1d"}
+_COLOR_KEYWORDS = {
+    "red": "#ef4444", "green": "#10b981", "blue": "#3b82f6",
+    "purple": "#8b5cf6", "cyan": "#06b6d4", "amber": "#f59e0b",
+    "neon": "#39ff14", "pink": "#ec4899", "white": "#ffffff",
+}
+
+
+@router.post("/command")
+async def process_command(req: CommandRequest):
+    """Process natural-language chart/config commands from the frontend chat overlay."""
+    prompt = req.prompt.lower().strip()
+    config_updates: dict[str, Any] = {}
+    messages: list[str] = []
+
+    # Symbol switching
+    for kw, sym in _SYMBOL_KEYWORDS.items():
+        if kw in prompt:
+            config_updates["symbol"] = sym
+            messages.append(f"Switched to {sym}")
+            break
+
+    # Interval switching
+    for kw, interval in _INTERVAL_KEYWORDS.items():
+        if kw in prompt:
+            config_updates["interval"] = interval
+            messages.append(f"Interval set to {interval}")
+            break
+
+    # Color changes
+    if "bull" in prompt:
+        for kw, color in _COLOR_KEYWORDS.items():
+            if kw in prompt:
+                config_updates["bullColor"] = color
+                messages.append(f"Bull color set to {kw}")
+                break
+    if "bear" in prompt:
+        for kw, color in _COLOR_KEYWORDS.items():
+            if kw in prompt:
+                config_updates["bearColor"] = color
+                messages.append(f"Bear color set to {kw}")
+                break
+
+    # Toggle features
+    if "volume profile" in prompt:
+        if "off" in prompt or "hide" in prompt:
+            config_updates["showVolumeProfile"] = False
+            config_updates["vpMode"] = "off"
+            messages.append("Volume profile hidden")
+        else:
+            config_updates["showVolumeProfile"] = True
+            config_updates["vpMode"] = "session"
+            messages.append("Volume profile enabled")
+
+    if "predictions" in prompt or "ghost" in prompt:
+        show = "off" not in prompt and "hide" not in prompt
+        config_updates["showPredictions"] = show
+        messages.append(f"Predictions {'shown' if show else 'hidden'}")
+
+    if "footprint" in prompt:
+        messages.append("Switch to footprint mode using the tab at top-left")
+
+    if not messages:
+        messages.append(f"I understood: \"{req.prompt}\". Try commands like 'show nifty', 'set interval 5m', or 'bull color cyan'.")
+
+    return {
+        "message": " | ".join(messages),
+        "configUpdates": config_updates if config_updates else None,
+        "action": "UPDATE_CONFIG" if config_updates else None,
+    }
+
+
 @router.get("/history")
 async def get_decision_history(
     start: Optional[str] = Query(None),
@@ -46,3 +133,19 @@ async def get_decision_history(
     """Returns persisted LLM decision history from SQLite."""
     rows = storage.query_llm_decisions(start=start, end=end)
     return {"decisions": rows}
+
+
+@router.get("/journal")
+async def get_journal(date: Optional[str] = Query(None)):
+    """Returns journal entries for a given date (YYYY-MM-DD)."""
+    from app.application.services.trade_journal import TradeJournal
+    journal = TradeJournal()
+    return {"entries": journal.read_entries(date)}
+
+
+@router.get("/journal/summary")
+async def get_journal_summary(date: Optional[str] = Query(None)):
+    """Returns trade summary for a given date."""
+    from app.application.services.trade_journal import TradeJournal
+    journal = TradeJournal()
+    return journal.summary(date)

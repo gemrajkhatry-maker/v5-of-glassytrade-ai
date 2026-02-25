@@ -6,15 +6,9 @@ import {
     OHLCData,
     FootprintCandle,
     OrderBook,
-    Portfolio,
-    AMTAnalysis,
-    AIAnalysis,
     ModelWeights,
-    RiskState,
     LLMHistoryEntry,
-    StrategyStats,
 } from '../types';
-import { normalizeSymbol } from '../services/binanceService';
 
 const DEFAULT_WEIGHTS: ModelWeights = {
     trend: 0.40,
@@ -28,14 +22,10 @@ const DEFAULT_WEIGHTS: ModelWeights = {
  * Creates a fresh instrument state.
  * Used on initialisation before the backend has responded.
  */
-const createInstrumentState = (
-    symbol: string,
-    initialData: OHLCData[] = [],
-    orderBook: OrderBook | null = null,
-): InstrumentState => ({
+const createInstrumentState = (symbol: string): InstrumentState => ({
     symbol,
-    data: initialData,
-    orderBook,
+    data: [],
+    orderBook: null,
     portfolio: {
         balance: 10_000_000,
         equity: 10_000_000,
@@ -50,68 +40,62 @@ const createInstrumentState = (
     genAIAnalysis: null,
     amtAnalysis: null,
     riskState: null,
+    agentDecision: null,
     llmHistory: [],
     predictions: [],
     overseerAction: '',
     overseerReason: '',
     stats: null,
+    depth20Active: false,
     lastUpdate: Date.now(),
 });
 
 /**
- * Server-side trading system hook.
+ * Server-driven trading system hook.
  *
- * Opens a WebSocket to the backend game-loop and forwards every
- * incoming tick.  The server runs the full DDD pipeline and returns
- * a state snapshot that the frontend renders.
+ * Backend streams ticks from Dhan, processes them, and pushes state.
+ * Frontend is a pure renderer — no market data fetching, no business logic.
  */
-export const useServerTradingSystem = (
-    config: ChartConfig,
-    marketData: {
-        candidates: string[];
-        initialHistory: Record<string, OHLCData[]>;
-        tickStream: { symbol: string; tick: OHLCData } | null;
-        orderBooks: Record<string, OrderBook>;
-    },
-) => {
+export const useServerTradingSystem = (config: ChartConfig) => {
     const [instruments, setInstruments] = useState<Record<string, InstrumentState>>({});
     const [activeSymbol, setActiveSymbol] = useState<string>('');
+    const [connected, setConnected] = useState(false);
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const latestFootprint = useRef<Record<string, FootprintCandle> | null>(null);
-    const historySentRef = useRef<Set<string>>(new Set());
 
     // ----------------------------------------------------------------
-    // 1.  Initialise instrument slots when candidates arrive
-    // ----------------------------------------------------------------
-    useEffect(() => {
-        if (marketData.candidates.length === 0 || Object.keys(instruments).length > 0) return;
-
-        const init: Record<string, InstrumentState> = {};
-        marketData.candidates.forEach(sym => {
-            init[sym] = createInstrumentState(
-                sym,
-                marketData.initialHistory[sym] || [],
-                marketData.orderBooks[sym] || null,
-            );
-        });
-
-        setInstruments(init);
-        if (!activeSymbol && marketData.candidates.length > 0) {
-            setActiveSymbol(marketData.candidates[0]);
-        }
-    }, [marketData.candidates, marketData.initialHistory]);
-
-    // ----------------------------------------------------------------
-    // 1b. Load persisted LLM decision history on mount
+    // 0.  Fetch backend config on mount
     // ----------------------------------------------------------------
     useEffect(() => {
-        fetch(`${window.location.protocol}//${window.location.host}/api/ai/history`)
+        fetch('/api/system/config')
+            .then(res => res.json())
+            .then(cfg => {
+                console.log('[TradingSystem] Backend config:', cfg);
+                if (cfg.defaultSymbol) {
+                    const sym = cfg.defaultSymbol;
+                    setInstruments(prev => ({
+                        ...prev,
+                        [sym]: createInstrumentState(sym),
+                    }));
+                    setActiveSymbol(sym);
+                }
+            })
+            .catch(() => {
+                console.warn('[TradingSystem] Backend not available');
+            });
+    }, []);
+
+    // ----------------------------------------------------------------
+    // 1.  Load persisted LLM decision history on mount
+    // ----------------------------------------------------------------
+    useEffect(() => {
+        fetch('/api/ai/history')
             .then(res => res.json())
             .then(data => {
                 if (!data.decisions || data.decisions.length === 0) return;
                 const entries: LLMHistoryEntry[] = data.decisions.map((d: any) => ({
-                    timestamp: new Date(d.created_at).getTime(),
+                    timestamp: new Date(d.created_at + 'Z').getTime(),
                     direction: d.direction || 'FLAT',
                     confidence: d.confidence || 'Medium',
                     rationale: d.rationale || '',
@@ -130,30 +114,124 @@ export const useServerTradingSystem = (
     }, []);
 
     // ----------------------------------------------------------------
-    // 2.  Keep orderbooks in sync
+    // 2.  WebSocket message handler
     // ----------------------------------------------------------------
-    useEffect(() => {
-        setInstruments(prev => {
-            const next = { ...prev };
-            let changed = false;
-            Object.entries(marketData.orderBooks).forEach(([sym, book]) => {
-                if (next[sym] && next[sym].orderBook !== book) {
-                    next[sym] = { ...next[sym], orderBook: book };
-                    changed = true;
+    const handleWsMessage = useCallback((event: MessageEvent) => {
+        try {
+            const state = JSON.parse(event.data);
+
+            // Server mode init
+            if (state.status === 'server_mode') {
+                console.log(`[TradingSystem] Server mode: symbol=${state.symbol}`);
+                const sym = state.symbol;
+                setInstruments(prev => ({
+                    ...prev,
+                    [sym]: prev[sym] || createInstrumentState(sym),
+                }));
+                setActiveSymbol(sym);
+                return;
+            }
+
+            // History loaded from server
+            if (state.status === 'history_loaded') {
+                if (state.history && state.symbol) {
+                    const sym = state.symbol;
+                    setInstruments(prev => {
+                        const inst = prev[sym] || createInstrumentState(sym);
+                        return {
+                            ...prev,
+                            [sym]: { ...inst, data: state.history },
+                        };
+                    });
                 }
+                console.log(`[TradingSystem] History loaded: ${state.count} candles`);
+                return;
+            }
+
+            // Full state snapshot from backend
+            const symbol: string = state._symbol;
+            if (!symbol) return;
+
+            setInstruments(prev => {
+                const inst = prev[symbol] || createInstrumentState(symbol);
+
+                // Update chart data from tick if present
+                let newData = inst.data;
+                if (state.tick) {
+                    newData = [...inst.data];
+                    const last = newData[newData.length - 1];
+                    if (last && state.tick.time === last.time) {
+                        newData[newData.length - 1] = state.tick;
+                    } else {
+                        newData.push(state.tick);
+                        if (newData.length > 1000) newData.shift();
+                    }
+                }
+
+                const newPortfolio = state.portfolio ?? inst.portfolio;
+                const newAmtAnalysis = state.amt ?? inst.amtAnalysis;
+                const newGenAIAnalysis = state.genAIAnalysis ?? inst.genAIAnalysis;
+                const newPredictions = state.prediction?.predictions ?? inst.predictions;
+                const newModelWeights = state.modelWeights ?? inst.modelWeights;
+                const newGeneration = state.generation ?? inst.generation;
+                const newRiskState = state.riskState ?? inst.riskState;
+                const newAgentDecision = state.agentDecision ?? inst.agentDecision;
+                const newOverseerAction = state.overseerAction ?? inst.overseerAction;
+                const newOverseerReason = state.overseerReason ?? inst.overseerReason;
+                const newStats = state.stats ?? inst.stats;
+
+                return {
+                    ...prev,
+                    [symbol]: {
+                        ...inst,
+                        data: newData,
+                        portfolio: newPortfolio,
+                        amtAnalysis: newAmtAnalysis,
+                        aiAnalysis: state.prediction?.analysis ?? inst.aiAnalysis,
+                        genAIAnalysis: newGenAIAnalysis,
+                        llmHistory: (() => {
+                            const newAi = state.genAIAnalysis;
+                            if (!newAi || !newAi.inputPrompt) return inst.llmHistory;
+                            const lastEntry = inst.llmHistory[inst.llmHistory.length - 1];
+                            if (lastEntry && lastEntry.inputPrompt === newAi.inputPrompt) return inst.llmHistory;
+                            const entry: LLMHistoryEntry = {
+                                timestamp: Date.now(),
+                                direction: newAi.direction,
+                                confidence: newAi.confidence,
+                                rationale: newAi.rationale,
+                                inputPrompt: newAi.inputPrompt,
+                                rawOutput: newAi.rawOutput,
+                            };
+                            return [...inst.llmHistory, entry].slice(-20);
+                        })(),
+                        predictions: newPredictions,
+                        modelWeights: newModelWeights,
+                        generation: newGeneration,
+                        riskState: newRiskState,
+                        agentDecision: newAgentDecision,
+                        overseerAction: newOverseerAction,
+                        overseerReason: newOverseerReason,
+                        orderBook: state.depth ?? inst.orderBook,
+                        depth20Active: state.depth20Active ?? inst.depth20Active,
+                        stats: newStats,
+                        lastUpdate: Date.now(),
+                    },
+                };
             });
-            return changed ? next : prev;
-        });
-    }, [marketData.orderBooks]);
+
+            if (state.footprint) {
+                latestFootprint.current = state.footprint;
+            }
+        } catch (e) {
+            console.error('[TradingSystem] WS parse error', e);
+        }
+    }, []);
 
     // ----------------------------------------------------------------
-    // 3.  WebSocket connection to backend game-loop
+    // 3.  WebSocket connection
     // ----------------------------------------------------------------
     const [retryCount, setRetryCount] = useState(0);
 
-    // ----------------------------------------------------------------
-    // 3.  WebSocket connection to backend game-loop
-    // ----------------------------------------------------------------
     const connect = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
@@ -161,82 +239,24 @@ export const useServerTradingSystem = (
         const ws = new WebSocket(`${protocol}://${window.location.host}/api/trading/ws/gameloop`);
 
         ws.onopen = () => {
-            console.log('[ServerTradingSystem] WS connected');
-            setRetryCount(0); // Reset backoff on success
-            historySentRef.current.clear(); // Re-send history on reconnect
-        };
+            console.log('[TradingSystem] WS connected');
+            setRetryCount(0);
+            setConnected(true);
 
-        ws.onmessage = (event) => {
-            try {
-                const state = JSON.parse(event.data);
-                const symbol: string = state._symbol;
-                if (!symbol) return;
-
-                setInstruments(prev => {
-                    const inst = prev[symbol];
-                    if (!inst) return prev;
-
-                    // Resolve new values, falling back to existing if not provided
-                    const newPortfolio = state.portfolio ?? inst.portfolio;
-                    const newAmtAnalysis = state.amt ?? inst.amtAnalysis;
-                    const newAiAnalysis = state.prediction?.analysis ?? inst.aiAnalysis;
-                    const newGenAIAnalysis = state.genAIAnalysis ?? inst.genAIAnalysis;
-                    const newPredictions = state.prediction?.predictions ?? inst.predictions;
-                    const newModelWeights = state.modelWeights ?? inst.modelWeights;
-                    const newGeneration = state.generation ?? inst.generation;
-                    const newRiskState = state.riskState ?? inst.riskState;
-                    const newOverseerAction = state.overseerAction ?? inst.overseerAction;
-                    const newOverseerReason = state.overseerReason ?? inst.overseerReason;
-                    const newStats = state.stats ?? inst.stats;
-
-                    return {
-                        ...prev,
-                        [symbol]: {
-                            ...inst,
-                            portfolio: newPortfolio,
-                            amtAnalysis: newAmtAnalysis,
-                            aiAnalysis: newAiAnalysis,
-                            genAIAnalysis: newGenAIAnalysis,
-                            llmHistory: (() => {
-                                const newAi = state.genAIAnalysis;
-                                if (!newAi || !newAi.inputPrompt) return inst.llmHistory;
-                                const lastEntry = inst.llmHistory[inst.llmHistory.length - 1];
-                                if (lastEntry && lastEntry.inputPrompt === newAi.inputPrompt) return inst.llmHistory;
-                                const entry: LLMHistoryEntry = {
-                                    timestamp: Date.now(),
-                                    direction: newAi.direction,
-                                    confidence: newAi.confidence,
-                                    rationale: newAi.rationale,
-                                    inputPrompt: newAi.inputPrompt,
-                                    rawOutput: newAi.rawOutput,
-                                };
-                                return [...inst.llmHistory, entry].slice(-20);
-                            })(),
-                            predictions: newPredictions,
-                            modelWeights: newModelWeights,
-                            generation: newGeneration,
-                            riskState: newRiskState,
-                            overseerAction: newOverseerAction,
-                            overseerReason: newOverseerReason,
-                            stats: newStats,
-                            lastUpdate: Date.now(),
-                        },
-                    };
-                });
-
-                if (state.footprint) {
-                    latestFootprint.current = state.footprint;
-                }
-            } catch (e) {
-                console.error('[ServerTradingSystem] WS parse error', e);
+            // Subscribe to server-driven stream
+            if (activeSymbol) {
+                ws.send(JSON.stringify({ subscribe: activeSymbol }));
+                console.log(`[TradingSystem] Subscribed to ${activeSymbol}`);
             }
         };
 
+        ws.onmessage = handleWsMessage;
+
         ws.onclose = (e) => {
-            // Only reconnect if not 1000 (Normal Closure) and ref still exists
+            setConnected(false);
             if (e.code !== 1000 && wsRef.current) {
                 const delay = Math.min(500 * Math.pow(2, retryCount), 5000);
-                console.warn(`[ServerTradingSystem] WS disconnected, reconnecting in ${delay}ms…`);
+                console.warn(`[TradingSystem] WS disconnected, reconnecting in ${delay}ms…`);
                 reconnectTimer.current = setTimeout(() => {
                     setRetryCount(c => c + 1);
                     connect();
@@ -244,68 +264,26 @@ export const useServerTradingSystem = (
             }
         };
 
-        ws.onerror = (e) => {
-            // Quietly handle errors, let onclose handle reconnect
-            // console.debug('[ServerTradingSystem] WS error', e);
-        };
+        ws.onerror = () => {};
 
         wsRef.current = ws;
-    }, [activeSymbol, retryCount]);
+    }, [activeSymbol, retryCount, handleWsMessage]);
 
     useEffect(() => {
+        if (!activeSymbol) return; // Wait for config to load
         connect();
         return () => {
             if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-            // Mark as intentionally closed to prevent reconnect loop
             if (wsRef.current) {
                 const ws = wsRef.current;
-                wsRef.current = null; // Detach ref first
+                wsRef.current = null;
                 ws.close(1000, "Component Unmounted");
             }
         };
-    }, []); // Only run once on mount (depend on internal recursion for retries)
+    }, [activeSymbol]);
 
     // ----------------------------------------------------------------
-    // 4.  Forward ticks to the backend
-    // ----------------------------------------------------------------
-    useEffect(() => {
-        if (!marketData.tickStream) return;
-        const { symbol, tick } = marketData.tickStream;
-        const ws = wsRef.current;
-
-        // Update local data buffer (for chart rendering while backend responds)
-        setInstruments(prev => {
-            const inst = prev[symbol];
-            if (!inst) return prev;
-
-            let newData = [...inst.data];
-            const last = newData[newData.length - 1];
-            if (last && new Date(tick.time).getTime() === new Date(last.time).getTime()) {
-                newData[newData.length - 1] = tick;
-            } else {
-                newData.push(tick);
-                if (newData.length > 1000) newData.shift();
-            }
-
-            return { ...prev, [symbol]: { ...inst, data: newData } };
-        });
-
-        // Send to backend
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            // Send historical candles once per symbol to seed backend VP
-            if (!historySentRef.current.has(symbol) && marketData.initialHistory[symbol]?.length > 0) {
-                const history = marketData.initialHistory[symbol];
-                console.log(`[ServerTradingSystem] Sending ${history.length} historical candles for ${symbol}`);
-                ws.send(JSON.stringify({ symbol, history }));
-                historySentRef.current.add(symbol);
-            }
-            const orderBook = marketData.orderBooks[symbol] || null;
-            ws.send(JSON.stringify({ symbol, tick, orderBook }));
-        }
-    }, [marketData.tickStream]);
-
-    // ----------------------------------------------------------------
-    // 5.  Derived state
+    // 4.  Derived state
     // ----------------------------------------------------------------
     const activeInstrument = instruments[activeSymbol];
 
@@ -320,7 +298,7 @@ export const useServerTradingSystem = (
             runningDelta += d.delta;
             return runningDelta;
         });
-    }, [activeInstrument?.data]);
+    }, [activeInstrument?.data?.length, activeInstrument?.data?.[activeInstrument?.data?.length - 1]?.delta]);
 
     return {
         instruments,
@@ -331,5 +309,6 @@ export const useServerTradingSystem = (
             data: footprintData,
             cumulativeDeltas,
         },
+        connected,
     };
 };

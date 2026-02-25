@@ -23,145 +23,264 @@ logger = logging.getLogger(__name__)
 # =====================================================================
 
 def build_entry_prompt(data: Dict[str, Any]) -> str:
-    """Convert structured market data into the concise narrative format
-    the model was fine-tuned on."""
+    """Build entry prompt aligned with Fabio Valentini's AMT playbook.
+
+    7-section structured prompt:
+    1. Session Structure: Prior levels, gap, IB, opening bias
+    2. Market State: Balance/Imbalance, acceptance/rejection
+    3. VP Levels: POC, VAH, VAL, LVN, HVN, shape, POC migration
+    4. Break State: Initiative/responsive/absorption
+    5. Order Flow: Delta, CVD, aggressive prints, LVN play
+    6. Option Context: IV, delta, OI, theta
+    7. Strategy Hint: Session phase + active model
+    """
     price = data.get("ltp", 0)
     vah = data.get("vah", 0)
     val = data.get("val", 0)
     poc = data.get("poc", 0)
     delta = data.get("delta", 0)
     market_state = data.get("market_state", "Balanced")
-
-    parts: list[str] = []
-    delta_int = int(round(delta))
     volume = data.get("volume", 0)
-
-    # Delta significance: only call it "aggressive" if delta/volume ratio > 15%
+    delta_int = int(round(delta))
     delta_ratio = abs(delta) / volume if volume > 0 else 0
     is_aggressive = delta_ratio > 0.15
+    is_balanced = "Balanced" in str(market_state)
 
+    parts: list[str] = []
+
+    # ── §1 SESSION STRUCTURE ─────────────────────────────────────────
+    # Prior day levels
+    prior_poc = data.get("prior_poc", 0)
+    prior_vah = data.get("prior_vah", 0)
+    prior_val = data.get("prior_val", 0)
+    if prior_poc > 0:
+        parts.append(f"PRIOR SESSION: POC {prior_poc:.0f}, VAH {prior_vah:.0f}, VAL {prior_val:.0f}.")
+
+    # Gap classification
+    gap_type = data.get("gap_type", "")
+    opening_bias = data.get("opening_bias", "")
+    if gap_type:
+        parts.append(f"Gap: {gap_type}.")
+    if opening_bias and opening_bias != "NEUTRAL":
+        parts.append(f"Opening inventory: {opening_bias}.")
+
+    # Initial Balance
+    ib_high = data.get("ib_high", 0)
+    ib_low = data.get("ib_low", 0)
+    ib_complete = data.get("ib_complete", False)
+    if ib_high > 0 and ib_low > 0:
+        status = "complete" if ib_complete else "forming"
+        parts.append(f"IB ({status}): {ib_low:.0f}-{ib_high:.0f} (range {ib_high - ib_low:.0f}).")
+
+    # Opening relation
+    opening_relation = data.get("opening_relation", "")
+    if opening_relation == "OUT_ABOVE":
+        parts.append("Open above prior VA — bullish initiative.")
+    elif opening_relation == "OUT_BELOW":
+        parts.append("Open below prior VA — bearish initiative.")
+
+    # ── §2 MARKET STATE ──────────────────────────────────────────────
+    has_displacement = data.get("has_displacement", False)
+    acceptance_above = data.get("acceptance_above", False)
+    acceptance_below = data.get("acceptance_below", False)
+    rejection_high = data.get("rejection_at_high", False)
+    rejection_low = data.get("rejection_at_low", False)
+    velocity = data.get("price_velocity", 0.0)
+
+    if is_balanced:
+        parts.append("MARKET STATE: Balance. Price rotating around fair value.")
+        parts.append("Active model: MEAN REVERSION.")
+    else:
+        parts.append("MARKET STATE: Imbalance. Directional displacement detected.")
+        parts.append("Active model: TREND CONTINUATION.")
+
+    if acceptance_above:
+        parts.append("ACCEPTANCE above VAH — value migrating higher.")
+    if acceptance_below:
+        parts.append("ACCEPTANCE below VAL — value migrating lower.")
+    if rejection_high:
+        parts.append("REJECTION at VAH — wick rejection with volume spike.")
+    if rejection_low:
+        parts.append("REJECTION at VAL — wick rejection with volume spike.")
+    if velocity > 0.5:
+        parts.append(f"High velocity: {velocity:.2f} pts/s.")
+
+    # Balance ratio
+    balance_ratio = data.get("balance_ratio", 0)
+    if balance_ratio > 0:
+        parts.append(f"Balance ratio: {balance_ratio:.0%} inside VA.")
+
+    # Market structure (5-state classifier)
+    mkt_struct = data.get("market_structure", "")
+    struct_conf = data.get("structure_confidence", 0)
+    if mkt_struct and mkt_struct != "BALANCE":
+        parts.append(f"Structure: {mkt_struct} ({struct_conf}/100).")
+
+    # ── §3 VP LEVELS ─────────────────────────────────────────────────
     if val > 0 and price > 0:
         if price <= val * 1.002:
-            if delta_int < 0 and is_aggressive:
-                parts.append(f"VAL test at {val:.0f}. Aggressive selling with {delta_int} Delta.")
-            elif delta_int < 0:
-                parts.append(f"Price at VAL {val:.0f}. Delta {delta_int} (weak selling, not aggressive).")
-            else:
-                parts.append(f"Price at VAL {val:.0f} with +{delta_int} Delta. Buyers defending.")
+            parts.append(f"Price at VAL ({val:.0f}).")
         elif price >= vah * 0.998:
-            if delta_int > 0 and is_aggressive:
-                parts.append(f"Price broke above Value Area High {vah:.0f} with strong +{delta_int} Delta.")
-            elif delta_int > 0:
-                parts.append(f"Price at VAH {vah:.0f}. Delta +{delta_int} (not aggressive).")
-            else:
-                parts.append(f"Failed breakout above {vah:.0f}. Delta turned to {delta_int}.")
+            parts.append(f"Price at VAH ({vah:.0f}).")
         elif poc > 0 and abs(price - poc) / poc < 0.003:
-            if delta_int > 0 and is_aggressive:
-                parts.append(f"At POC {poc:.0f}, delta is +{delta_int}. Buyers stepping in.")
-            elif delta_int < 0 and is_aggressive:
-                parts.append(f"Price at POC {poc:.0f} with aggressive sellers. Delta {delta_int}.")
-            else:
-                parts.append(f"Price at POC {poc:.0f}. Delta {delta_int:+d} (neutral, no aggression).")
-        else:
-            if "Balanced" in str(market_state):
-                parts.append(f"Market is rotational. Price at {price:.0f}.")
-            else:
-                parts.append(f"Price at {price:.0f}. Market trending outside value area.")
-            if delta_int > 0 and is_aggressive:
-                parts.append(f"Aggressive buyers with +{delta_int} Delta.")
-            elif delta_int < 0 and is_aggressive:
-                parts.append(f"Aggressive sellers pushing. Delta {delta_int}.")
-            elif delta_int != 0:
-                parts.append(f"Delta {delta_int:+d} (low conviction, not aggressive).")
+            parts.append(f"Price at POC ({poc:.0f}).")
+        elif poc > 0:
+            parts.append(f"Price {price:.0f}. POC {poc:.0f}, VAH {vah:.0f}, VAL {val:.0f}.")
     else:
-        parts.append(f"Price at {price:.0f}. Delta {delta_int:+d}.")
+        parts.append(f"Price {price:.0f}.")
 
-    profile_shape = data.get("profile_shape", "")
-    if profile_shape and "p-shape" in profile_shape.lower():
-        parts.append("A 'P-Shape' profile is forming. Long liquidation visible — sellers in control.")
-    elif profile_shape and "b-shape" in profile_shape.lower():
-        parts.append("A 'b-Shape' profile is forming. Short covering — buyers absorbing at lows.")
-    elif profile_shape and "d-shape" in profile_shape.lower():
-        parts.append("D-shaped profile. Market is balanced and rotational.")
-
-    volume_bubbles = data.get("volume_bubbles", "")
-    if volume_bubbles:
-        parts.append(f"Volume bubbles detected: {volume_bubbles}.")
-    else:
-        parts.append("No significant volume bubbles.")
-
-    hvns = data.get("hvns", ())
-    if hvns:
-        hvn_str = ", ".join(f"{h:.0f}" for h in hvns[:3])
-        parts.append(f"Key HVN levels: {hvn_str}.")
-
+    # LVN levels
     lvns = data.get("lvns", ())
     if lvns:
         lvn_str = ", ".join(f"{l:.0f}" for l in lvns[:3])
-        parts.append(f"Low Volume Nodes (LVN): {lvn_str}. Price moves quickly through these levels.")
+        near_lvn = any(abs(price - l) / price < 0.003 for l in lvns[:3]) if price > 0 else False
+        if near_lvn:
+            parts.append(f"ENTRY ZONE: Price at LVN ({lvn_str}).")
+        else:
+            parts.append(f"LVNs: {lvn_str}.")
 
+    # HVN levels
+    hvns = data.get("hvns", ())
+    if hvns:
+        parts.append(f"HVNs: {', '.join(f'{h:.0f}' for h in hvns[:3])}.")
+
+    # POC migration signal
+    poc_signal = data.get("poc_signal", "")
+    poc_vs_price = data.get("poc_vs_price", "")
+    if poc_signal:
+        parts.append(f"POC migration: {poc_signal} ({poc_vs_price}).")
+
+    # Profile shape
+    profile_shape = data.get("profile_shape", "")
+    _ps = profile_shape.lower() if profile_shape else ""
+    if _ps == "P":
+        parts.append("P-shape: long liquidation.")
+    elif _ps == "B":
+        parts.append("B-shape: bimodal, potential breakout.")
+    elif _ps == "b":
+        parts.append("b-shape: short covering.")
+    elif _ps == "D":
+        parts.append("D-shape: balanced rotation.")
+
+    # Displacement leg
+    leg_poc = data.get("leg_poc", 0)
+    leg_lvns = data.get("leg_lvns", ())
+    if has_displacement and leg_poc > 0:
+        parts.append(f"Displacement leg POC: {leg_poc:.0f}.")
+        if leg_lvns:
+            parts.append(f"Leg LVNs: {', '.join(f'{l:.0f}' for l in leg_lvns[:3])}.")
+
+    # ── §4 BREAK STATE ───────────────────────────────────────────────
+    break_type = data.get("break_type", "")
+    break_dir = data.get("break_direction", "")
+    break_level = data.get("break_level", 0)
+    if break_type:
+        parts.append(f"BREAK: {break_type} {break_dir} at {break_level:.0f}.")
+        if break_type == "INITIATIVE":
+            parts.append("Volume-confirmed breakout — favor trend continuation.")
+        elif break_type == "RESPONSIVE":
+            parts.append("Failed push — favor mean reversion back into value.")
+        elif break_type == "ABSORPTION":
+            parts.append("Hidden delta at level — large player absorbing orders.")
+
+    # ── §5 ORDER FLOW ────────────────────────────────────────────────
+    if is_aggressive:
+        if delta_int > 0:
+            parts.append(f"Aggressive BUYING. Delta +{delta_int} ({delta_ratio:.0%}).")
+        else:
+            parts.append(f"Aggressive SELLING. Delta {delta_int} ({delta_ratio:.0%}).")
+    else:
+        parts.append(f"Delta {delta_int:+d} (no aggression).")
+
+    # Volume bubbles
+    volume_bubbles = data.get("volume_bubbles", "")
+    if volume_bubbles:
+        parts.append(f"Volume bubbles: {volume_bubbles}.")
+
+    # CVD
     cvd_div = data.get("cvd_divergence", "")
     cvd_slope = data.get("cvd_slope", 0.0)
     if cvd_div == "BEARISH_DIV":
-        parts.append("CVD divergence: price rising but buying pressure declining. Caution for longs.")
+        parts.append("CVD BEARISH DIVERGENCE — buying pressure declining.")
     elif cvd_div == "BULLISH_DIV":
-        parts.append("CVD divergence: price falling but selling pressure declining. Accumulation possible.")
+        parts.append("CVD BULLISH DIVERGENCE — selling pressure declining.")
     elif cvd_slope > 0.5:
-        parts.append("CVD trending up. Buyers in control.")
+        parts.append("CVD up — sustained buying.")
     elif cvd_slope < -0.5:
-        parts.append("CVD trending down. Sellers in control.")
+        parts.append("CVD down — sustained selling.")
 
-    leg_poc = data.get("leg_poc", 0)
-    leg_lvns = data.get("leg_lvns", ())
-    if leg_poc > 0:
-        parts.append(f"Displacement leg active. Leg POC: {leg_poc:.0f}.")
-        if leg_lvns:
-            parts.append(f"Leg LVNs (pullback entry zones): {', '.join(f'{l:.0f}' for l in leg_lvns[:3])}.")
+    # LVN play signal
+    lvn_play = data.get("lvn_play")
+    if lvn_play:
+        parts.append(
+            f"LVN PLAY: {lvn_play['direction']} at {lvn_play['lvn_price']:.0f} "
+            f"(vol {lvn_play['velocity_ratio']:.1f}x, "
+            f"rej={'Y' if lvn_play['has_rejection'] else 'N'}, "
+            f"flip={'Y' if lvn_play['has_delta_flip'] else 'N'}) "
+            f"→ target {lvn_play['target']:.0f}."
+        )
 
-    vwap = data.get("vwap", 0)
-    if vwap > 0 and price > 0:
-        if price > vwap * 1.001:
-            parts.append(f"Price above VWAP ({vwap:.0f}). Bullish bias.")
-        elif price < vwap * 0.999:
-            parts.append(f"Price below VWAP ({vwap:.0f}). Bearish bias.")
-        else:
-            parts.append(f"Price at VWAP ({vwap:.0f}). Neutral.")
+    # ── §6 OPTION CONTEXT ────────────────────────────────────────────
+    greeks = data.get("greeks")
+    if greeks:
+        g_parts = []
+        if greeks.get("iv", 0) > 0:
+            g_parts.append(f"IV={greeks['iv']:.1f}%")
+        if greeks.get("delta", 0) != 0:
+            g_parts.append(f"Delta={greeks['delta']:.2f}")
+        if greeks.get("theta", 0) != 0:
+            g_parts.append(f"Theta={greeks['theta']:.2f}")
+        if greeks.get("gamma", 0) != 0:
+            g_parts.append(f"Gamma={greeks['gamma']:.4f}")
+        if g_parts:
+            parts.append(f"Options: {', '.join(g_parts)}.")
 
-    # OI context (OI walls + PCR)
+    # OI analysis
+    oi_action = data.get("oi_action", "")
+    if oi_action and oi_action != "NEUTRAL":
+        parts.append(f"OI: {oi_action}.")
     oi_pcr = data.get("oi_pcr", 0)
-    oi_sentiment = data.get("oi_sentiment", "")
-    oi_nearest_support = data.get("oi_nearest_support", 0)
-    oi_nearest_resistance = data.get("oi_nearest_resistance", 0)
     if oi_pcr > 0:
-        if oi_sentiment:
-            parts.append(f"PCR: {oi_pcr:.2f} ({oi_sentiment}).")
-        if oi_nearest_support > 0:
-            parts.append(f"OI support wall at {oi_nearest_support:.0f}.")
-        if oi_nearest_resistance > 0:
-            parts.append(f"OI resistance wall at {oi_nearest_resistance:.0f}.")
+        parts.append(f"PCR: {oi_pcr:.2f}.")
 
-    # Opening relation (gap analysis from prior session VA)
-    opening_relation = data.get("opening_relation", "")
-    if opening_relation and opening_relation != "IN_BALANCE":
-        if opening_relation == "OUT_ABOVE":
-            parts.append("Gap-up open above prior VA — bullish initiative, favor trend continuation.")
-        elif opening_relation == "OUT_BELOW":
-            parts.append("Gap-down open below prior VA — bearish initiative, favor trend continuation.")
+    # ── §7 STRATEGY + SIGNALS ────────────────────────────────────────
+    # ML model signal
+    ml_signal = data.get("ml_signal")
+    if ml_signal:
+        ml_dir = ml_signal.get("direction", "")
+        ml_prob = ml_signal.get("probability", 0)
+        ml_regime = ml_signal.get("regime", "")
+        parts.append(f"ML: {ml_dir} ({ml_prob:.0%}, {ml_regime}).")
 
-    # Strategy hint — tells model whether to favor mean reversion or trend
+    # Strategy hint
     strategy_hint = data.get("strategy_hint", "")
     if strategy_hint:
         parts.append(strategy_hint)
 
+    # Episodic memory
+    episodic_memory = data.get("episodic_memory", "")
+    if episodic_memory:
+        parts.append(episodic_memory)
+
+    # ── DECISION FRAMEWORK ───────────────────────────────────────────
+    parts.append(
+        "RULES: "
+        "1) Market State → active model (Trend or Mean Reversion). "
+        "2) Price at LVN/IB/VA boundary → entry zone. "
+        "3) Order flow confirms direction (delta + CVD + volume). "
+        "ALL THREE must align. If LVN play detected, weigh heavily. "
+        "If break is INITIATIVE, favor continuation. If RESPONSIVE, favor fade. "
+        "Stay FLAT if no confluence."
+    )
+
     narrative = " ".join(parts)
 
-    # Instruct the model to respond with structured JSON
     json_instruction = (
-        "\n\nRespond ONLY with a JSON object in the following format, no extra text:\n"
+        "\n\nRespond ONLY with a JSON object:\n"
         '{"direction": "LONG" | "SHORT" | "FLAT", '
-        '"rationale": "<brief explanation>", '
+        '"rationale": "<brief explanation referencing market state + location + aggression>", '
         '"confidence": "High" | "Medium" | "Low", '
-        '"market_state": "<current market state>"}'
+        '"market_state": "<Balance or Imbalance>"}'
     )
 
     return narrative + json_instruction
@@ -180,6 +299,10 @@ _TRIGGER_LONG = [
     "long with target", "long with full", "long hold", "buy on dip",
     "bullish bias", "buyers in control", "bullish momentum", "buy signal",
     "long entry", "favor long", "favour long", "go long",
+    "rising market", "price rising", "bullish trend",
+    "imbalanced (bullish)", "trending up", "price moving up",
+    "aggressive buying", "call options trending",
+    "bullish pressure", "bullish. ",
 ]
 _TRIGGER_SHORT = [
     "enter short", "short on confirmation", "short with target",
@@ -187,6 +310,10 @@ _TRIGGER_SHORT = [
     "buyers exhausted", "buyers are trapped", "failed breakout",
     "bearish bias", "sellers in control", "bearish momentum", "sell signal",
     "short entry", "favor short", "favour short", "go short", "bearish trend",
+    "falling market", "price falling",
+    "imbalanced (bearish)", "trending down", "price moving down",
+    "aggressive selling", "put options trending",
+    "bearish pressure", "bearish. ",
 ]
 _FLAT_KEYWORDS = [
     "walk away", "stay flat", "bank profit", "stop trading",
@@ -390,6 +517,14 @@ def build_overseer_prompt(
             parts.append(f"Price above VWAP ({vwap:.0f}). Bullish.")
         elif price < vwap * 0.999:
             parts.append(f"Price below VWAP ({vwap:.0f}). Bearish.")
+
+    # Probability model exit signal
+    if pos_state.get("exit_probability") is not None:
+        ep = pos_state["exit_probability"]
+        if ep > 0.5:
+            parts.append(f"Exit probability model: {ep:.0%} chance of adverse move — consider exiting.")
+        else:
+            parts.append(f"Exit probability model: {ep:.0%} chance of adverse move — low risk.")
 
     narrative = " ".join(parts)
 

@@ -6,19 +6,25 @@ FastAPI dependencies pull from the singleton graph.
 
 from __future__ import annotations
 
+import logging
+import os
 from functools import lru_cache
 
 from app.config import settings
 from app.infrastructure.event_bus import InMemoryEventBus
-from app.infrastructure.adapters.binance_adapter import BinanceMarketDataAdapter
+from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter
 from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 from app.infrastructure.adapters.mlx_inference_adapter import MLXInferenceAdapter
+from app.infrastructure.adapters.lgbm_probability_adapter import LGBMProbabilityAdapter
 from app.infrastructure.storage.database import SQLiteStorageAdapter
 from app.application.services.trading_session import TradingSessionService
 from app.domain.ports.market_data import MarketDataPort
 from app.domain.ports.llm_inference import LLMInferencePort
+from app.domain.ports.probability_inference import ProbabilityInferencePort
 from app.domain.ports.storage import StoragePort
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+
+logger = logging.getLogger(__name__)
 
 
 class ServiceGraph:
@@ -26,19 +32,78 @@ class ServiceGraph:
 
     def __init__(self) -> None:
         self.event_bus = InMemoryEventBus()
-        self.market_data: MarketDataPort = BinanceMarketDataAdapter(
-            base_url=settings.BINANCE_BASE_URL,
+        self.market_data: MarketDataPort = DhanMarketDataAdapter(
+            symbols=settings.DHAN_SYMBOLS,
+            exchange=settings.DEFAULT_EXCHANGE,
+            client_id=settings.DHAN_CLIENT_ID,
+            access_token=settings.DHAN_ACCESS_TOKEN,
         )
         self.broker = PaperBrokerAdapter()
         self.llm_inference: LLMInferencePort = MLXInferenceAdapter()
         self.gen_ai_service = GenerativeAIService(llm_adapter=self.llm_inference)
         self.storage = SQLiteStorageAdapter()
+
+        # Probability engine (LightGBM first-passage models)
+        _model_dir = os.path.join(os.path.dirname(__file__), "..", "..", "models")
+        _model_dir = os.path.normpath(_model_dir)
+        self.probability_engine: ProbabilityInferencePort = LGBMProbabilityAdapter(
+            model_dir=_model_dir,
+        )
+        logger.info("Probability engine ready=%s (model_dir=%s)",
+                     self.probability_engine.is_ready(), _model_dir)
+
         self.trading_session = TradingSessionService(
             event_bus=self.event_bus,
             broker=self.broker,
             gen_ai_service=self.gen_ai_service,
             storage=self.storage,
+            probability_engine=self.probability_engine,
         )
+
+        # Pre-warm broker: load instrument cache (date-stamped, refreshed once/day).
+        # ensure_initialized_sync() is thread-safe and idempotent — no race with
+        # the async gameloop path that calls _ensure_initialized() later.
+        import concurrent.futures as _cf
+
+        # Pre-warm broker with hard timeout (don't block startup if market is closed)
+        _init_pool = _cf.ThreadPoolExecutor(max_workers=1)
+        try:
+            _fut = _init_pool.submit(self.market_data.ensure_initialized_sync, 30)
+            _fut.result(timeout=35)
+        except (_cf.TimeoutError, Exception):
+            logger.warning("Broker pre-warm failed/timed out (non-critical — market may be closed)")
+        finally:
+            _init_pool.shutdown(wait=False)
+
+        # Auto-select option contract on startup
+        self.active_symbol: str = settings.DEFAULT_SYMBOL
+        _scan_pool = _cf.ThreadPoolExecutor(max_workers=1)
+        try:
+            from app.domain.fabio_ai.services.option_scanner import OptionScannerService
+
+            def _scan():
+                _scanner = OptionScannerService(self.market_data)
+                return _scanner.scan(
+                    underlying=settings.SCANNER_UNDERLYING,
+                    preferred_option_type=settings.SCANNER_OPTION_TYPE,
+                    exchange=settings.DEFAULT_EXCHANGE,
+                    expiry_index=settings.SCANNER_EXPIRY_INDEX,
+                )
+
+            _result = _scan_pool.submit(_scan).result(timeout=30)
+
+            if _result:
+                self.active_symbol = _result.symbol
+                logger.info("Auto-selected option contract: %s (LTP=%.2f, OI=%d, Score=%.1f, Bias=%s)",
+                           _result.symbol, _result.ltp, _result.oi, _result.score, _result.bias)
+                if _result.bias_reason:
+                    logger.info("Selection reason: %s", _result.bias_reason)
+            else:
+                logger.warning("Option scan returned no result — using DEFAULT_SYMBOL=%s", settings.DEFAULT_SYMBOL)
+        except (_cf.TimeoutError, Exception):
+            logger.warning("Option scanner failed/timed out — using DEFAULT_SYMBOL=%s", settings.DEFAULT_SYMBOL)
+        finally:
+            _scan_pool.shutdown(wait=False)
 
 
 @lru_cache(maxsize=1)
@@ -63,3 +128,7 @@ def get_gen_ai_service() -> GenerativeAIService:
 
 def get_storage() -> StoragePort:
     return get_service_graph().storage
+
+
+def get_active_symbol() -> str:
+    return get_service_graph().active_symbol

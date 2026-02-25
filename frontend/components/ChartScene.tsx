@@ -20,6 +20,7 @@ interface ChartSceneProps {
   config: ChartConfig;
   activeSignal?: TradeSignal | null;
   positions: TradePosition[];
+  closedTrades?: TradePosition[];
   aiAnalysis?: AIAnalysis | null;
   amtAnalysis?: AMTAnalysis | null;
   mode?: ChartMode;
@@ -50,6 +51,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   config,
   activeSignal,
   positions,
+  closedTrades = [],
   aiAnalysis,
   amtAnalysis,
   mode = 'STANDARD',
@@ -257,7 +259,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     prints.forEach(print => {
       // Convert time string to timestamp
-      const printTime = new Date(print.time).getTime() / 1000 as UTCTimestamp;
+      const printTime = (new Date(print.time).getTime() / 1000 + 19800) as UTCTimestamp;
 
       // Coordinate conversion
       const x = timeScale.timeToCoordinate(printTime);
@@ -267,7 +269,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
       // Radius based on volume (logarithmic scale)
       // Adjust 3 and 1.5 multiplier as needed for visual balance
-      const radius = Math.max(2, Math.log(print.volume) * 2.5);
+      const radius = Math.min(25, Math.max(2, Math.log(print.volume) * 2.5));
 
       const isBuy = print.side === 'BUY';
       const color = isBuy ? cfg.bullColor : cfg.bearColor;
@@ -403,8 +405,9 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     // Layout
     const colWidth = barSpacing * 0.95;
-    const spineWidth = 6;
-    const sideWidth = (colWidth - spineWidth) / 2;
+    const deltaSpineWidth = colWidth > 60 ? 20 : 6; // Wider spine for delta text when room allows
+    const spineWidth = 6; // Visual spine (candle body) stays narrow
+    const sideWidth = (colWidth - deltaSpineWidth) / 2;
     const textPadding = 4;
 
     // Bottom Section Bounds
@@ -485,8 +488,8 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       }
 
       // --- 2. FOOTPRINT CELLS ---
-      const bidX = centerX - spineWidth / 2 - sideWidth;
-      const askX = centerX + spineWidth / 2;
+      const bidX = centerX - deltaSpineWidth / 2 - sideWidth;
+      const askX = centerX + deltaSpineWidth / 2;
 
       // Calculate max volume for this specific candle (for profile bars)
       let maxVolInCandle = 0;
@@ -529,45 +532,66 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         // --- INTENSITY LOGIC ---
         // Calculate alpha based on ratio of volume to max volume in candle
         // Base alpha 0.2, scales up to 0.9
+        const isBuyImbalance = level.imbalance && level.ask > level.bid;
+        const isSellImbalance = level.imbalance && level.bid > level.ask;
 
         // Bid Bar (Left Side - Grows Right to Left)
         const bidRatio = maxVolInCandle > 0 ? level.bid / maxVolInCandle : 0;
-        const bidBarW = bidRatio * sideWidth; // Width still represents ratio
-        const bidAlpha = 0.2 + (bidRatio * 0.7); // Intensity
+        const bidBarW = bidRatio * sideWidth;
+        const bidAlpha = 0.2 + (bidRatio * 0.7);
 
-        ctx.fillStyle = hexToRgba(cfg.bearColor, bidAlpha);
-        // Draw bar from spine outwards (Right to Left)
+        // Use bright red for sell imbalance bars, normal bearColor otherwise
+        const bidBarColor = isSellImbalance ? '#ef4444' : cfg.bearColor;
+        ctx.fillStyle = hexToRgba(bidBarColor, bidAlpha);
         ctx.fillRect(bidX + sideWidth - bidBarW, drawY, bidBarW, drawH);
 
         // Ask Bar (Right Side - Grows Left to Right)
         const askRatio = maxVolInCandle > 0 ? level.ask / maxVolInCandle : 0;
         const askBarW = askRatio * sideWidth;
-        const askAlpha = 0.2 + (askRatio * 0.7); // Intensity
+        const askAlpha = 0.2 + (askRatio * 0.7);
 
-        ctx.fillStyle = hexToRgba(cfg.bullColor, askAlpha);
+        // Use bright green for buy imbalance bars, normal bullColor otherwise
+        const askBarColor = isBuyImbalance ? '#22c55e' : cfg.bullColor;
+        ctx.fillStyle = hexToRgba(askBarColor, askAlpha);
         ctx.fillRect(askX, drawY, askBarW, drawH);
+
+        // Stacked imbalance border (3+ consecutive imbalances)
+        if (level.stacked) {
+          const stackedBorderColor = level.ask > level.bid ? '#f59e0b' : '#ec4899'; // Gold for buy, magenta for sell
+          ctx.strokeStyle = stackedBorderColor;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(bidX, drawY, sideWidth * 2 + deltaSpineWidth, drawH);
+        }
 
         // POC Highlight (Within Candle)
         const isPOC = Math.abs(level.price - fp.pocPrice) < 0.00001;
         if (isPOC) {
           ctx.strokeStyle = '#facc15';
           ctx.lineWidth = 1.5;
-          ctx.strokeRect(bidX, drawY, (sideWidth * 2) + spineWidth, drawH);
+          ctx.strokeRect(bidX, drawY, (sideWidth * 2) + deltaSpineWidth, drawH);
         }
 
         if (showText) {
           const midY = drawY + drawH / 2;
 
           // Bid Text (Right Aligned in Left Column)
-          // Highlight Imbalance
-          ctx.fillStyle = level.imbalance && level.bid > level.ask ? '#22d3ee' : '#ffffff'; // Cyan for aggressive sell imb
+          ctx.fillStyle = isSellImbalance ? '#22d3ee' : '#ffffff'; // Cyan for aggressive sell imb
           ctx.textAlign = 'right';
           ctx.fillText(formatK(level.bid), bidX + sideWidth - textPadding, midY);
 
           // Ask Text (Left Aligned in Right Column)
-          ctx.fillStyle = level.imbalance && level.ask > level.bid ? '#bef264' : '#ffffff'; // Lime for aggressive buy imb
+          ctx.fillStyle = isBuyImbalance ? '#bef264' : '#ffffff'; // Lime for aggressive buy imb
           ctx.textAlign = 'left';
           ctx.fillText(formatK(level.ask), askX + textPadding, midY);
+
+          // Per-level delta in the spine area (between bid and ask columns)
+          if (cellHeight > 12 && sideWidth > 25) {
+            ctx.fillStyle = level.delta >= 0 ? '#22c55e' : '#ef4444';
+            ctx.textAlign = 'center';
+            ctx.font = `${Math.min(9, cellHeight - 4)}px monospace`;
+            ctx.fillText(formatK(level.delta), centerX, midY);
+            ctx.font = `${Math.min(11, cellHeight - 3)}px monospace`; // Restore font
+          }
         }
       });
 
@@ -612,6 +636,50 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       ctx.fillStyle = fp.totalDelta > 0 ? cfg.bullColor : cfg.bearColor;
       ctx.fillText((fp.totalDelta > 0 ? '+' : '') + formatK(fp.totalDelta), centerX, cardY + 24);
     }
+
+    // --- 4. CVD LINE (drawn in summary area below separator) ---
+    if (cvdData.length > 0) {
+      const cvdTop = summaryY + 4;
+      const cvdBottom = canvas.height - 4;
+      const cvdHeight = cvdBottom - cvdTop;
+
+      // Collect visible CVD points
+      const cvdPoints: { x: number; val: number }[] = [];
+      for (let i = Math.floor(visibleRange.from); i < Math.ceil(visibleRange.to); i++) {
+        if (i < 0 || i >= data.length || i >= cvdData.length) continue;
+        const x = timeScale.logicalToCoordinate(i as Logical);
+        if (x === null) continue;
+        cvdPoints.push({ x, val: cvdData[i] });
+      }
+
+      if (cvdPoints.length > 1) {
+        // Normalize CVD values to available height
+        let minCvd = Infinity, maxCvd = -Infinity;
+        cvdPoints.forEach(p => { minCvd = Math.min(minCvd, p.val); maxCvd = Math.max(maxCvd, p.val); });
+        const cvdRange = maxCvd - minCvd || 1;
+
+        // Draw CVD line segments: green when rising, red when falling
+        ctx.lineWidth = 1.5;
+        for (let j = 1; j < cvdPoints.length; j++) {
+          const prev = cvdPoints[j - 1];
+          const curr = cvdPoints[j];
+          const prevY = cvdBottom - ((prev.val - minCvd) / cvdRange) * cvdHeight;
+          const currY = cvdBottom - ((curr.val - minCvd) / cvdRange) * cvdHeight;
+
+          ctx.strokeStyle = curr.val >= prev.val ? '#22c55e' : '#ef4444';
+          ctx.beginPath();
+          ctx.moveTo(prev.x, prevY);
+          ctx.lineTo(curr.x, currY);
+          ctx.stroke();
+        }
+
+        // Label
+        ctx.fillStyle = '#64748b';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('CVD', 5, cvdTop + 10);
+      }
+    }
   };
 
   const formatK = (val: number) => {
@@ -625,8 +693,13 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !predictionSeriesRef.current) return;
 
+    // Offset UTC → IST (+5:30) so chart axis shows Indian Standard Time
+    const IST_OFFSET = 19800; // 5h30m in seconds
+    const toIST = (timeStr: string) =>
+      (new Date(timeStr).getTime() / 1000 + IST_OFFSET) as UTCTimestamp;
+
     const formatCandle = (d: OHLCData) => ({
-      time: (new Date(d.time).getTime() / 1000) as UTCTimestamp,
+      time: toIST(d.time),
       open: d.open,
       high: d.high,
       low: d.low,
@@ -634,7 +707,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     });
 
     const formatVolume = (d: OHLCData) => ({
-      time: (new Date(d.time).getTime() / 1000) as UTCTimestamp,
+      time: toIST(d.time),
       value: d.volume,
       color: d.close >= d.open ? `${config.bullColor}80` : `${config.bearColor}80`,
     });
@@ -766,16 +839,57 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     if (mode === 'STANDARD') {
       const markers: SeriesMarker<UTCTimestamp>[] = [];
+
+      // Entry markers from open positions
+      positions.forEach(pos => {
+        markers.push({
+          time: (new Date(pos.entryTime).getTime() / 1000 + 19800) as UTCTimestamp,
+          position: pos.side === 'LONG' ? 'belowBar' : 'aboveBar',
+          color: pos.side === 'LONG' ? '#10b981' : '#ef4444',
+          shape: pos.side === 'LONG' ? 'arrowUp' : 'arrowDown',
+          text: `${pos.side} @${pos.entryPrice.toFixed(2)}`,
+          size: 2,
+        });
+      });
+
+      // Entry + exit markers from closed trades
+      (closedTrades || []).forEach(trade => {
+        markers.push({
+          time: (new Date(trade.entryTime).getTime() / 1000 + 19800) as UTCTimestamp,
+          position: trade.side === 'LONG' ? 'belowBar' : 'aboveBar',
+          color: trade.side === 'LONG' ? '#10b981' : '#ef4444',
+          shape: trade.side === 'LONG' ? 'arrowUp' : 'arrowDown',
+          text: `${trade.side} @${trade.entryPrice.toFixed(2)}`,
+          size: 1,
+        });
+        if (trade.exitTime && trade.exitPrice) {
+          const reason = trade.closeReason || 'EXIT';
+          const pnlStr = trade.pnl >= 0 ? `+${trade.pnl.toFixed(2)}` : trade.pnl.toFixed(2);
+          markers.push({
+            time: (new Date(trade.exitTime).getTime() / 1000 + 19800) as UTCTimestamp,
+            position: trade.side === 'LONG' ? 'aboveBar' : 'belowBar',
+            color: trade.pnl >= 0 ? '#10b981' : '#ef4444',
+            shape: 'circle',
+            text: `${reason} ${pnlStr}`,
+            size: 1,
+          });
+        }
+      });
+
+      // Active signal (when no position yet)
       if (activeSignal && positions.length === 0) {
         markers.push({
-          time: (new Date(activeSignal.timestamp).getTime() / 1000) as UTCTimestamp,
+          time: (new Date(activeSignal.timestamp).getTime() / 1000 + 19800) as UTCTimestamp,
           position: activeSignal.type === 'BUY' ? 'belowBar' : 'aboveBar',
           color: activeSignal.type === 'BUY' ? '#10b981' : '#ef4444',
           shape: activeSignal.type === 'BUY' ? 'arrowUp' : 'arrowDown',
           text: `SIGNAL: ${activeSignal.type}`,
-          size: 2
+          size: 2,
         });
       }
+
+      // Sort markers by time (required by lightweight-charts)
+      markers.sort((a, b) => (a.time as number) - (b.time as number));
       candleSeriesRef.current.setMarkers(markers);
     } else {
       candleSeriesRef.current.setMarkers([]);
@@ -825,7 +939,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       activePriceLinesRef.current.set(pos.id, lines);
     });
 
-  }, [positions, activeSignal, amtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
+  }, [positions, closedTrades, activeSignal, amtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
 
   return (
     <div className="w-full h-full relative bg-[#0f172a] overflow-hidden" style={{ display: isHidden ? 'none' : 'block' }}>

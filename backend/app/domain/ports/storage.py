@@ -6,7 +6,43 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 
-class StoragePort(ABC):
+# ---------------------------------------------------------------------------
+# Sub-ports (Interface Segregation)
+# ---------------------------------------------------------------------------
+
+class TickStoragePort(ABC):
+    @abstractmethod
+    def save_tick(self, symbol: str, tick_data: dict[str, Any]) -> None: ...
+    @abstractmethod
+    def query_ticks(self, symbol: str, start: str | None = None, end: str | None = None, limit: int = 1000) -> list[dict[str, Any]]: ...
+
+
+class TradeStoragePort(ABC):
+    @abstractmethod
+    def save_trade(self, trade_data: dict[str, Any]) -> None: ...
+    @abstractmethod
+    def query_trades(self, start: str | None = None, end: str | None = None) -> list[dict[str, Any]]: ...
+
+
+class DecisionStoragePort(ABC):
+    @abstractmethod
+    def save_llm_decision(self, decision_data: dict[str, Any]) -> None: ...
+    @abstractmethod
+    def query_llm_decisions(self, start: str | None = None, end: str | None = None) -> list[dict[str, Any]]: ...
+
+
+class OpenPositionStoragePort(ABC):
+    @abstractmethod
+    def save_open_position(self, position: dict[str, Any]) -> None: ...
+    @abstractmethod
+    def delete_open_position(self, position_id: str) -> None: ...
+    @abstractmethod
+    def load_open_positions(self) -> list[dict[str, Any]]: ...
+
+
+# ---------------------------------------------------------------------------
+
+class StoragePort(TickStoragePort, TradeStoragePort, DecisionStoragePort, OpenPositionStoragePort):
     """Abstraction for persisting ticks, trades, and LLM decisions."""
 
     @abstractmethod
@@ -53,3 +89,7 @@ class StoragePort(ABC):
         self, symbol: str, market: str = "NSE",
     ) -> dict[str, Any] | None:
         """Retrieve the most recent completed session profile for gap analysis."""
+
+    @abstractmethod
+    def get_recent_trades(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Retrieve the most recent closed trades (newest first)."""

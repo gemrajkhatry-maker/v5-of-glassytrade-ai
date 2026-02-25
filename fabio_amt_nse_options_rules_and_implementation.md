@@ -540,6 +540,257 @@ EXPECTED PERFORMANCE PARAMETERS:
 
 ---
 
+### Rule 13: VWAP Bands — "Extension from Fair Value"
+
+**Research Evidence:**
+> "VWAP standard deviation bands are used to identify potential overextensions of price from the fair value"
+> "When price reaches the second or third standard deviation, there's a higher probability of returning to the VWAP"
+> "He often considers reversal trades only after accumulating some profit and when price reaches these extreme standard deviations"
+> "Trail stop to VWAP band after a +1.5R gain"
+
+**Extracted Rule:**
+```
+VWAP USAGE (3 distinct purposes):
+
+    1. BIAS FILTER:
+        Price ABOVE session VWAP → bullish bias (prefer longs)
+        Price BELOW session VWAP → bearish bias (prefer shorts)
+        "Simple directional filter before any setup"
+
+    2. OVEREXTENSION DETECTOR:
+        VWAP + 2σ / VWAP - 2σ = "extended" zone
+        VWAP + 3σ / VWAP - 3σ = "extreme" zone
+
+        At 2σ: tighten stops, take partials
+        At 3σ: consider counter-trend ONLY if:
+            - Already in profit for session (cushion built)
+            - Absorption visible at that level
+            - This is a mean-reversion setup, not prediction
+
+    3. TRAILING STOP REFERENCE:
+        After +1.5R profit on a trade:
+            Move stop to the nearest VWAP band
+            (typically VWAP + 1σ for longs, VWAP - 1σ for shorts)
+
+        This replaces fixed trailing distances.
+        "Dynamic trailing based on where fair value actually is"
+
+    For NSE Implementation:
+        Calculate session VWAP on NIFTY/BANKNIFTY futures:
+            VWAP = Σ(Price × Volume) / Σ(Volume)
+            σ = standard deviation of price from VWAP
+        Plot bands at ±1σ, ±2σ, ±3σ
+        Use 1-minute candles for calculation
+```
+
+---
+
+### Rule 14: Big Trades as Breakout Levels — "Not Just Aggression"
+
+**Research Evidence:**
+> "Big Trades indicator to spot significant institutional activity... treating these as breakout levels"
+> "Deep Trades filter goes beyond simple trade bubbles by incorporating MBO data, Icebergs, and aggregation"
+> "He uses big trades not just to detect aggression but as levels themselves — where a big trade occurred becomes a breakout/breakdown reference"
+> "Deep M Effort NQ identifies sensitive zones where buyers or sellers are absorbed"
+
+**Extracted Rule:**
+```
+BIG TRADES AS STRUCTURE (not just confirmation):
+
+    Standard use: big trade = confirmation of aggression ✅
+    ADDITIONAL use: big trade LOCATION becomes a level itself
+
+    How it works:
+        1. A large trade ("big print") occurs at price level X
+        2. That level X is now marked as a structural reference
+        3. If price returns to X → watch for reaction
+        4. If price breaks through X → that's a breakout signal
+
+    Think of it as: "big trades create temporary POC-like levels"
+
+    For NSE (proxy implementation):
+        Since we can't see individual large trades:
+
+        1. Volume spike detection:
+            If a 1-min candle has volume > 3× 20-period average:
+                Mark that candle's VWAP as a "big trade level"
+                This level acts as support/resistance going forward
+
+        2. OI spike detection:
+            If OI at a strike changes by > 2× average OI change:
+                Mark that strike price as a "big trade level"
+                This is the options market equivalent
+
+        3. Usage:
+            - Stop loss placement: behind the nearest big trade level
+            - Breakout trigger: when price breaks a big trade level with volume
+            - Mean reversion target: big trade levels as interim targets
+```
+
+---
+
+### Rule 15: Intraday Compounding — "The Cushion System"
+
+**Research Evidence:**
+> "He starts with low risk and compounds profits throughout the day"
+> "If he makes 3% profit from three successful trades, he reallocates 2% of that profit to open new trades with increased risk"
+> "Starts at 0.25%, scales to 0.35% or 0.40% after successful start"
+> "I only risk the profit of the session"
+> "On a $25,000 day, what I'm risking 2,000, not even 10%"
+
+**Extracted Rule:**
+```
+INTRADAY COMPOUNDING PROTOCOL:
+
+    Phase 1 — Conservative Start (first 1-2 trades):
+        risk_per_trade = 0.25% of account
+        "Start small, prove the market is readable today"
+
+    Phase 2 — Cushion Built (after first profitable trade):
+        IF session_pnl > 0:
+            risk_per_trade = 0.35% of account
+            Additional allowed: up to 20% of session profit
+
+        Example:
+            Account: ₹10,00,000
+            Phase 1 risk: ₹2,500
+            Won ₹7,500 on first trade
+            Phase 2 risk: ₹3,500 (0.35%) + ₹1,500 (20% of ₹7,500) = ₹5,000
+
+    Phase 3 — Momentum Day (2+ consecutive wins):
+        IF session_pnl > 2 × base_risk:
+            risk_per_trade = 0.40% of account
+            Can increase lot count by 1-2 lots
+            "I can start to build my position"
+
+    COMPOUNDING CAP:
+        NEVER risk more than 0.50% of account on a single trade
+        NEVER risk more than session_profit × 0.30 on a single trade
+        "If I'm up 20,000, I don't risk 20,000 on one trade"
+
+    REVERSE SCALING (losing day):
+        After 1st loss: stay at current risk level
+        After 2nd consecutive loss: reduce to 0.25%
+        After 3rd consecutive loss: STOP TRADING
+
+    For NSE Options:
+        Phase 1: 3 lots NIFTY CE/PE
+        Phase 2 (cushion): 5 lots
+        Phase 3 (momentum): 7-8 lots
+        NEVER exceed risk cap regardless of lot count
+```
+
+---
+
+### Rule 16: Pre-Session Daily Narrative — "Know Before You Trade"
+
+**Research Evidence:**
+> "He first establishes a daily narrative based on price structure and volume to determine if the market is dominated by aggressive buyers or sellers"
+> "Identify points of interest and wait for order flow confirmation at these critical levels"
+> "Use previous day session profile as baseline"
+> "Mark impulse leg, profile it, mark LVNs"
+
+**Extracted Rule:**
+```
+PRE-SESSION CHECKLIST (before 09:15 IST):
+
+    1. PREVIOUS SESSION ANALYSIS (5 min of work):
+        □ Build yesterday's volume profile (POC, VAH, VAL)
+        □ Mark yesterday's developing POC position:
+            P-shape = bullish (volume concentrated at top)
+            b-shape = bearish (volume concentrated at bottom)
+            D-shape = balanced (bell curve)
+        □ Note yesterday's close relative to VA:
+            Close above VAH = bullish gap potential
+            Close below VAL = bearish gap potential
+            Close inside VA = balanced open expected
+
+    2. OVERNIGHT CONTEXT:
+        □ Any gap from previous close?
+            Gap > 0.5% = significant, will affect morning behavior
+        □ Global cues (SGX NIFTY, US futures overnight)
+        □ Any scheduled events today? (RBI, results, expiry)
+
+    3. KEY LEVELS MARKED (before market opens):
+        □ Yesterday's POC, VAH, VAL
+        □ Previous week's POC, VAH, VAL (for weekly context)
+        □ Recent swing highs/lows
+        □ VWAP from previous session close
+        □ Max pain strike for current expiry
+        □ Highest OI CE strike (resistance)
+        □ Highest OI PE strike (support)
+
+    4. DAILY BIAS (one sentence):
+        Write it down: "Today I expect [TREND UP / TREND DOWN / RANGE]
+        because [specific reason: e.g., yesterday P-shape, gap up, OI buildup at X]"
+
+        This is NOT a prediction to marry.
+        This is a starting framework to update as data comes in.
+        "If the market tells you different, listen to the market."
+```
+
+---
+
+### Rule 17: Trade Abort Signals — "Kill the Trade"
+
+**Research Evidence:**
+> "Abort trades if there's an aggressive unwind shown by delta divergence"
+> "Opposing stacked imbalances indicate position reversal"
+> "Clean VWAP reclaim against trade bias = exit immediately"
+> "Scales out of partial positions at first sign of opposing order flow"
+> "If confirmation disappears quickly (no follow-through), scratch/exit early"
+
+**Extracted Rule:**
+```
+TRADE ABORT SIGNALS (exit immediately, don't wait for SL):
+
+    ANY ONE of these → EXIT the trade:
+
+    1. DELTA DIVERGENCE:
+        You are LONG but CVD is making lower lows
+        = buyers are trying but losing ground
+        "The pressure has shifted, get out before SL"
+
+    2. OPPOSING STACKED IMBALANCES:
+        You are LONG but 3+ consecutive price bins show
+        sell-side imbalance (sellers dominating at multiple levels)
+        = institutional selling pressure building against you
+
+    3. VWAP RECLAIM AGAINST YOU:
+        You are LONG and price drops back below VWAP
+        with volume (not just a wick, a close below)
+        = the fair value has shifted against your trade
+
+    4. NO FOLLOW-THROUGH:
+        Entry was triggered but within 5-10 candles:
+            - No new high (for longs) / no new low (for shorts)
+            - Volume declining, not expanding
+            - "The trade should work immediately or not at all"
+
+    5. SPREAD BLOWOUT:
+        Option bid-ask spread widens to > 3% of premium
+        = liquidity is leaving, something is wrong
+        Exit at market before it gets worse
+
+    NSE Proxy Implementation:
+        Delta divergence → estimate from candle-level CVD
+        Stacked imbalances → not available, use volume decline instead
+        VWAP reclaim → directly observable
+        No follow-through → directly observable (candle count + range)
+        Spread blowout → directly observable from option chain
+
+    CRITICAL DIFFERENCE FROM STOP LOSS:
+        Stop loss = price-based, mechanical safety net
+        Abort signal = behavior-based, proactive exit
+
+        Abort signals trigger EXIT before the stop loss is hit.
+        This is how Fabio keeps average losses small:
+        "The average losing trade is $600" when the stop was $2,000
+        because most losses are ABORTED early, not stopped out.
+```
+
+---
+
 ## Part B: NSE Options Implementation Guide
 
 ### B1. Instrument Selection
@@ -687,17 +938,25 @@ EVERY CANDLE (5-min on underlying):
     ┌────────────────────────────────────────────────┐
     │ 1. UPDATE VOLUME PROFILE (on underlying)       │
     │    → POC, VAH, VAL, LVNs, HVNs                │
+    │    → Mark "big trade levels" (vol > 3× avg)    │
     └──────────────────┬─────────────────────────────┘
                        │
     ┌──────────────────▼─────────────────────────────┐
-    │ 2. UPDATE NSE OPTION PROXIES                   │
+    │ 2. UPDATE VWAP + BANDS (Rule 13)               │
+    │    → Session VWAP, ±1σ, ±2σ, ±3σ              │
+    │    → BIAS: above VWAP = bullish, below = bear  │
+    └──────────────────┬─────────────────────────────┘
+                       │
+    ┌──────────────────▼─────────────────────────────┐
+    │ 3. UPDATE NSE OPTION PROXIES                   │
     │    → OI changes, PCR, max pain, OI distribution│
     │    → Volume relative to average                 │
     │    → Delta estimate from candle structure       │
+    │    → CVD (cumulative volume delta)              │
     └──────────────────┬─────────────────────────────┘
                        │
     ┌──────────────────▼─────────────────────────────┐
-    │ 3. SESSION FILTER                              │
+    │ 4. SESSION FILTER                              │
     │    Phase 1 (09:15-09:30): SKIP                 │
     │    Phase 2 (09:30-11:30): ALL MODELS ACTIVE    │
     │    Phase 3 (11:30-14:00): REVERSION ONLY       │
@@ -706,27 +965,36 @@ EVERY CANDLE (5-min on underlying):
     └──────────────────┬─────────────────────────────┘
                        │
     ┌──────────────────▼─────────────────────────────┐
-    │ 4. MARKET STATE GATE                           │
-    │    Balanced / Imbalanced / Transitioning        │
-    │    (using VP on underlying + OI changes)        │
+    │ 5. CONSECUTIVE LOSS CHECK (Rule 9 + 15)        │
+    │    IF losses >= 3 AND session_pnl <= 0: STOP   │
+    │    IF losses >= 5 AND session_pnl > 0: STOP    │
     └──────────────────┬─────────────────────────────┘
                        │
     ┌──────────────────▼─────────────────────────────┐
-    │ 5. MODEL SELECTION                             │
+    │ 6. MARKET STATE GATE                           │
+    │    Balanced / Imbalanced / Transitioning        │
+    │    (using VP on underlying + OI changes)        │
+    │    IF contraction detected → skip trend model   │
+    └──────────────────┬─────────────────────────────┘
+                       │
+    ┌──────────────────▼─────────────────────────────┐
+    │ 7. MODEL SELECTION                             │
     │    IMBALANCED → Trend Continuation              │
     │    BALANCED/Failed breakout → Mean Reversion    │
     │    Compression post-expansion → Momentum Squeeze│
+    │    + VWAP bias must align with model direction  │
     └──────────────────┬─────────────────────────────┘
                        │
     ┌──────────────────▼─────────────────────────────┐
-    │ 6. LOCATION GATE                               │
+    │ 8. LOCATION GATE                               │
     │    Price at VAL/VAH/LVN on underlying?          │
-    │    + Check: is this near a high-OI strike?      │
-    │    (option chain "wall" alignment)              │
+    │    + Near a high-OI strike (wall alignment)?    │
+    │    + Near a "big trade level" (Rule 14)?        │
+    │    + VWAP band proximity check (Rule 13)        │
     └──────────────────┬─────────────────────────────┘
                        │
     ┌──────────────────▼─────────────────────────────┐
-    │ 7. CONFIRMATION GATE (adapted for NSE)         │
+    │ 9. CONFIRMATION GATE (adapted for NSE)         │
     │                                                 │
     │    Sub-score 1: Option Spread                   │
     │      bid_ask_spread <= 2% of premium            │
@@ -736,28 +1004,50 @@ EVERY CANDLE (5-min on underlying):
     │                                                 │
     │    Sub-score 3: OI Pressure                     │
     │      For LONG: OI in PEs increasing at support  │
-    │        (put writers adding = they believe support│
-    │         will hold = bullish)                    │
+    │        (put writers adding = bullish)            │
     │      For SHORT: OI in CEs increasing at resist  │
-    │        (call writers adding = they believe       │
-    │         resistance will hold = bearish)         │
+    │        (call writers adding = bearish)           │
     │                                                 │
-    │    Pass if >= 2 of 3 sub-scores pass            │
+    │    Sub-score 4: CVD alignment (Rule 17)         │
+    │      CVD trending in trade direction             │
+    │                                                 │
+    │    Pass if >= 2 of 4 sub-scores pass            │
     └──────────────────┬─────────────────────────────┘
                        │
     ┌──────────────────▼─────────────────────────────┐
-    │ 8. OPTION SELECTION                            │
+    │10. DYNAMIC RISK SIZING (Rule 15)               │
+    │    Phase 1: 0.25% (start of day / after loss)  │
+    │    Phase 2: 0.35% + 20% session profit         │
+    │    Phase 3: 0.40% (momentum day, 2+ wins)      │
+    │    HARD CAP: never exceed 0.50%                 │
+    └──────────────────┬─────────────────────────────┘
+                       │
+    ┌──────────────────▼─────────────────────────────┐
+    │11. OPTION SELECTION                            │
     │    ATM or 1-strike OTM                          │
     │    Check: liquidity, spread, OI, expiry         │
-    │    Compute: lots based on risk sizing rules     │
+    │    Compute: lots based on dynamic risk sizing   │
+    │    Theta cost check: holding_cost < 20% of TP   │
     └──────────────────┬─────────────────────────────┘
                        │
     ┌──────────────────▼─────────────────────────────┐
-    │ 9. EXECUTION                                   │
+    │12. EXECUTION                                   │
     │    Scale in: 40% → 30% → 30%                   │
     │    Stop in UNDERLYING terms (not premium)       │
-    │    Move to BE ASAP                              │
-    │    Take profit at POC/target                    │
+    │    Move to BE ASAP (Rule 5)                     │
+    │    Take profit at POC/target (Rule 6)           │
+    └──────────────────┬─────────────────────────────┘
+                       │
+    ┌──────────────────▼─────────────────────────────┐
+    │13. POST-ENTRY: ABORT MONITOR (Rule 17)         │
+    │    Every candle while in trade, check:          │
+    │    □ Delta divergence → EXIT                    │
+    │    □ VWAP reclaim against bias → EXIT           │
+    │    □ No follow-through (5-10 candles) → EXIT    │
+    │    □ Spread blowout (> 3%) → EXIT               │
+    │    □ Volume declining → tighten stop             │
+    │                                                 │
+    │    After +1.5R: trail stop to VWAP band         │
     └────────────────────────────────────────────────┘
 ```
 
@@ -954,6 +1244,35 @@ NSE EQUIVALENT FILTERS (to be validated with your data):
 □ Add OI wall alignment bonus to location gate
 □ Add PCR trend as supplementary signal
 □ Add max pain proximity as additional context
+□ Add CVD alignment as 4th confirmation sub-score
+```
+
+### Phase 4 Changes (New Rules 13-17)
+
+```
+□ VWAP calculator (session VWAP + ±1σ/2σ/3σ bands on underlying)
+□ VWAP bias filter integrated into model selection gate
+□ VWAP band trailing stop logic (after +1.5R, trail to nearest band)
+□ Big trade level detector (volume > 3× 20-period avg → mark level)
+□ OI spike level detector (OI change > 2× avg → mark strike as level)
+□ Intraday compounding engine (phase 1/2/3 risk scaling)
+□ Session P&L tracker for dynamic risk adjustment
+□ Consecutive loss counter with circuit breaker (3-loss / 5-loss rules)
+□ Trade abort signal monitor (5 abort conditions checked every candle)
+□ Delta divergence detector (CVD lower lows while price holds)
+□ No-follow-through detector (range + volume declining over N candles)
+□ Spread blowout alert (bid-ask > 3% of premium → force exit)
+```
+
+### Phase 5 Changes (Pre-Session Automation)
+
+```
+□ Previous session profile auto-builder (POC, VAH, VAL from yesterday)
+□ Profile shape classifier (P-shape / b-shape / D-shape)
+□ Gap detector (current open vs previous close)
+□ Auto-mark key levels (yesterday's VP + weekly VP + OI walls)
+□ Daily narrative generator (bias suggestion based on profile shape + gap)
+□ Event calendar integration (RBI, expiry, budget day → auto-filter)
 ```
 
 ### Data Structures
@@ -999,6 +1318,61 @@ class ThetaCheck:
     expected_profit: float   # target - entry in premium terms × lots × lot_size
     theta_ratio: float       # holding_cost / expected_profit
     viable: bool             # theta_ratio < 0.20
+
+@dataclass
+class VWAPState:
+    vwap: float              # session VWAP price
+    sigma: float             # standard deviation from VWAP
+    band_1_upper: float      # VWAP + 1σ
+    band_1_lower: float      # VWAP - 1σ
+    band_2_upper: float      # VWAP + 2σ
+    band_2_lower: float      # VWAP - 2σ
+    band_3_upper: float      # VWAP + 3σ
+    band_3_lower: float      # VWAP - 3σ
+    bias: str                # "BULLISH" / "BEARISH" (price vs VWAP)
+    extension: str           # "NORMAL" / "EXTENDED" / "EXTREME"
+
+@dataclass
+class BigTradeLevel:
+    price: float             # price where big trade occurred
+    timestamp: datetime      # when it occurred
+    volume: float            # volume of the candle
+    volume_ratio: float      # volume / 20-period avg (must be > 3×)
+    direction: str           # "BUY" / "SELL" (estimated from candle)
+    still_valid: bool        # False if price has traded through it 3+ times
+
+@dataclass
+class CompoundingState:
+    phase: int               # 1 (conservative), 2 (cushion), 3 (momentum)
+    base_risk_pct: float     # 0.25% baseline
+    current_risk_pct: float  # dynamically adjusted (0.25-0.50%)
+    session_pnl: float       # running P&L for the session
+    consecutive_wins: int    # for phase advancement
+    consecutive_losses: int  # for circuit breaker
+    lots_allowed: int        # computed from current risk
+    trading_halted: bool     # True if circuit breaker triggered
+
+@dataclass
+class AbortSignal:
+    delta_divergence: bool   # CVD lower lows while price holds
+    vwap_reclaim: bool       # price reclaims VWAP against trade bias
+    no_follow_through: bool  # no new high/low in N candles + vol declining
+    spread_blowout: bool     # bid-ask > 3% of premium
+    volume_declining: bool   # volume < 50% of entry candle volume
+    should_abort: bool       # True if ANY of the above is True
+    should_tighten: bool     # True if volume_declining (not full abort)
+
+@dataclass
+class DailyNarrative:
+    prev_poc: float          # yesterday's POC
+    prev_vah: float          # yesterday's VAH
+    prev_val: float          # yesterday's VAL
+    profile_shape: str       # "P" / "b" / "D"
+    gap_pct: float           # (open - prev_close) / prev_close × 100
+    bias: str                # "TREND_UP" / "TREND_DOWN" / "RANGE"
+    bias_reason: str         # human-readable reason for bias
+    key_levels: list         # sorted list of all pre-marked levels
+    event_filter: str        # "NORMAL" / "REDUCED" / "NO_TRADE"
 ```
 
 ---
@@ -1019,6 +1393,11 @@ class ThetaCheck:
 | Cost | Commission only | Premium + spread + theta |
 | Leverage | Built into futures | Built into options (delta) |
 | "CVD" Proxy | Actual CVD from exchange | Estimated from candle + OI data |
-| "Big Trades" | Visible on tape | Not directly visible — use OI as proxy |
+| "Big Trades" | Visible on tape, used as levels | Volume spike levels + OI spike levels |
 | Maximum Holding | "Till POC" (could be hours) | Stricter: < 2 hours typical |
 | Day Filters | "Remove Friday" | Remove expiry-day afternoon + Fridays |
+| VWAP Usage | Direct from exchange, trail at bands | Calculated from candles, same trailing |
+| Abort Signals | Delta flip, stacked imbalances | CVD proxy + VWAP reclaim + spread |
+| Compounding | Add contracts from session profit | Add lots from session profit (capped) |
+| Pre-Session | Mark levels on Deep Charts | Auto-build from yesterday's profile + OI |
+

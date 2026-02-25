@@ -93,6 +93,19 @@ CREATE TABLE IF NOT EXISTS session_profiles (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS open_positions (
+    id TEXT PRIMARY KEY,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    entry_price REAL,
+    size REAL,
+    stop_loss REAL,
+    take_profit REAL,
+    source TEXT,
+    opened_at TEXT,
+    extra TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_ticks_symbol_time ON ticks(symbol, time);
 CREATE INDEX IF NOT EXISTS idx_trades_closed_at ON trades(closed_at);
 CREATE INDEX IF NOT EXISTS idx_llm_created ON llm_decisions(created_at);
@@ -347,3 +360,55 @@ class SQLiteStorageAdapter(StoragePort):
                 (symbol, market),
             ).fetchone()
             return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # Open position persistence (survive restarts)
+    # ------------------------------------------------------------------
+
+    def save_open_position(self, position: dict[str, Any]) -> None:
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO open_positions "
+                "(id, symbol, side, entry_price, size, stop_loss, take_profit, source, opened_at, extra) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    position.get("id", ""),
+                    position.get("symbol", ""),
+                    position.get("side", ""),
+                    position.get("entry_price", 0.0),
+                    position.get("size", 0.0),
+                    position.get("stop_loss", 0.0),
+                    position.get("take_profit", 0.0),
+                    position.get("source", ""),
+                    position.get("opened_at", ""),
+                    json.dumps({k: v for k, v in position.items()
+                                if k not in ("id", "symbol", "side", "entry_price", "size",
+                                             "stop_loss", "take_profit", "source", "opened_at")}),
+                ),
+            )
+            self._conn.commit()
+
+    def delete_open_position(self, position_id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM open_positions WHERE id = ?", (position_id,))
+            self._conn.commit()
+
+    def load_open_positions(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM open_positions").fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                extra = json.loads(d.pop("extra", "{}") or "{}")
+                d.update(extra)
+                result.append(d)
+            return result
+
+    def get_recent_trades(self, limit: int = 5) -> list[dict[str, Any]]:
+        """Retrieve the most recent closed trades, newest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM trades ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]

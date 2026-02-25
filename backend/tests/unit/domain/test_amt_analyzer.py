@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import pytest
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
 from app.domain.fabio_ai.services.amt_analyzer import (
@@ -224,3 +225,174 @@ class TestConfirmationBundle:
         tick = _make_candle(100, volume=500, delta=200)
         result = check_confirmation_bundle(data, tick, None)
         assert isinstance(result, bool)
+
+
+# ---------------------------------------------------------------------------
+# Group 1: Full AMTAnalyzer.analyze() Integration Tests
+# ---------------------------------------------------------------------------
+
+def _make_candle_timed(close: float, time_str: str, volume: float = 1000,
+                       delta: float = 0, high: float | None = None,
+                       low: float | None = None) -> OHLC:
+    """Helper that creates a candle with a specific timestamp."""
+    o = close
+    h = high or close * 1.002
+    l = low or close * 0.998
+    return OHLC(
+        time=time_str, open=o, high=h, low=l,
+        close=close, volume=volume,
+        vwap=(h + l + close) / 3,
+        taker_buy_volume=(volume + delta) / 2, delta=delta,
+    )
+
+
+class TestAnalyzeIntegration:
+    """Integration tests for the full analyze() pipeline."""
+
+    def test_analyze_returns_three_tuple(self):
+        """analyze() should return an AMTResult (not a tuple in current API)."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(50, 100, "sideways")
+        result = analyzer.analyze(data)
+        # The return type is AMTResult with all required fields
+        assert hasattr(result, "market_state")
+        assert hasattr(result, "poc")
+        assert hasattr(result, "value_area_high")
+        assert hasattr(result, "value_area_low")
+        assert hasattr(result, "profile")
+        assert hasattr(result, "market_structure")
+
+    def test_analyze_all_fields_populated(self):
+        """All AMTResult fields should be populated with valid values on sideways data."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(60, 100, "sideways")
+        result = analyzer.analyze(data)
+
+        # Core VP fields
+        assert result.poc > 0
+        assert result.value_area_high > 0
+        assert result.value_area_low > 0
+        assert result.value_area_high >= result.value_area_low
+
+        # Profile populated
+        assert len(result.profile) > 0
+        assert sum(p.volume for p in result.profile) > 0
+
+        # VWAP bands
+        assert result.session_vwap > 0
+        assert result.vwap_upper_1 >= result.session_vwap
+        assert result.vwap_lower_1 <= result.session_vwap
+        assert result.vwap_upper_2 >= result.vwap_upper_1
+        assert result.vwap_lower_2 <= result.vwap_lower_1
+
+        # Balance ratio in valid range
+        assert 0.0 <= result.balance_ratio <= 1.0
+
+        # CVD slope is a finite number
+        assert math.isfinite(result.cvd_slope)
+
+        # Profile shape is a non-empty string
+        assert isinstance(result.profile_shape, str)
+        assert len(result.profile_shape) > 0
+
+        # Market structure and confidence
+        assert isinstance(result.market_structure, str)
+        assert result.structure_confidence >= 0.0
+
+        # LVN/HVN are tuples (possibly empty)
+        assert isinstance(result.lvns, tuple)
+        assert isinstance(result.hvns, tuple)
+
+    def test_analyze_trending_data(self):
+        """Trending data should produce a valid market structure reflecting the trend."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(80, 100, "bullish")
+        result = analyzer.analyze(data)
+
+        # POC should exist and be reasonable
+        assert result.poc > 0
+        assert result.value_area_high >= result.value_area_low
+
+        # Market structure should be one of the valid states
+        valid_structures = {
+            "BALANCE", "BALANCED", "TRENDING_UP", "TRENDING_DOWN",
+            "BREAKOUT_UP", "BREAKOUT_DOWN",
+        }
+        assert result.market_structure in valid_structures
+
+        # Profile shape should be valid
+        assert result.profile_shape in ("P", "b", "D", "B")
+
+    def test_analyze_minimal_data(self):
+        """Exactly 5 candles (minimum for analyze) should not crash."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(5, 100, "sideways")
+        result = analyzer.analyze(data)
+
+        # Should return a valid result, not crash
+        assert result.poc > 0
+        assert result.value_area_high >= result.value_area_low
+        assert 0.0 <= result.balance_ratio <= 1.0
+        assert math.isfinite(result.cvd_slope)
+
+
+# ---------------------------------------------------------------------------
+# Group 3: Incremental Profile Update Tests
+# ---------------------------------------------------------------------------
+
+class TestIncrementalProfile:
+    """Tests for incremental profile updates matching full rebuilds."""
+
+    def test_incremental_matches_full_rebuild(self):
+        """Incremental analyze (30 then 31) should match fresh analyze of all 31."""
+        data_30 = generate_market_data(30, 100, "sideways")
+        data_31 = data_30 + [generate_market_data(1, data_30[-1].close, "sideways")[0]]
+
+        # Incremental path: same analyzer instance, two calls
+        inc_analyzer = AMTAnalyzer()
+        inc_analyzer.analyze(data_30)
+        inc_result = inc_analyzer.analyze(data_31)
+
+        # Fresh path: new analyzer, full data
+        fresh_analyzer = AMTAnalyzer()
+        fresh_result = fresh_analyzer.analyze(data_31)
+
+        # POC/VAH/VAL should be very close (same profile construction)
+        assert inc_result.poc == pytest.approx(fresh_result.poc, rel=0.01)
+        assert inc_result.value_area_high == pytest.approx(
+            fresh_result.value_area_high, rel=0.01,
+        )
+        assert inc_result.value_area_low == pytest.approx(
+            fresh_result.value_area_low, rel=0.01,
+        )
+
+    def test_incremental_rebuilds_on_range_expansion(self):
+        """Adding a candle far outside the range should still produce valid results."""
+        # 20 candles in range 100-110
+        data = []
+        for i in range(20):
+            price = 100 + (i % 10)
+            data.append(_make_candle_timed(
+                price, f"2026-01-01T00:{i:02d}:00Z",
+                volume=1000, delta=50,
+                high=price + 0.5, low=price - 0.5,
+            ))
+
+        analyzer = AMTAnalyzer()
+        analyzer.analyze(data)
+
+        # Add candle at 120, well outside previous range
+        outlier = _make_candle_timed(
+            120, f"2026-01-01T00:20:00Z",
+            volume=2000, delta=100, high=121, low=119,
+        )
+        data_expanded = data + [outlier]
+        result = analyzer.analyze(data_expanded)
+
+        # Should not crash and produce valid VP metrics
+        assert result.poc > 0
+        assert result.value_area_high > result.value_area_low
+        # The outlier at 120 should appear in HVNs (it has 2x volume)
+        # or at least the profile should span the full range
+        profile_max = max(p.price for p in result.profile)
+        assert profile_max >= 119  # profile covers the outlier region

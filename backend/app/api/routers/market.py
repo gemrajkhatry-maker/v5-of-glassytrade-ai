@@ -1,4 +1,4 @@
-"""Market data router — REST endpoints proxied to Binance."""
+"""Market data router — REST endpoints for market data."""
 
 from fastapi import APIRouter, Depends, Query
 

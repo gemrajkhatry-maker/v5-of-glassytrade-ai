@@ -91,6 +91,33 @@ class AMTResult:
     leg_vah: float = 0.0
     leg_val: float = 0.0
     has_displacement: bool = False
+    # Market structure classifier output
+    market_structure: str = "BALANCE"
+    structure_confidence: int = 0
+    # Phase 1: Initial Balance + Prior Day Levels
+    ib_high: float = 0.0
+    ib_low: float = 0.0
+    ib_complete: bool = False
+    prior_poc: float = 0.0
+    prior_vah: float = 0.0
+    prior_val: float = 0.0
+    gap_type: str = ""       # "SMALL" / "MEDIUM" / "LARGE" / ""
+    opening_bias: str = ""   # "LONG_BIAS" / "SHORT_BIAS" / "NEUTRAL" / ""
+    # Phase 2: Acceptance vs Rejection
+    acceptance_above: bool = False
+    acceptance_below: bool = False
+    rejection_at_high: bool = False
+    rejection_at_low: bool = False
+    price_velocity: float = 0.0
+    # Phase 3: Break Detection
+    break_direction: str = ""   # "UP" / "DOWN" / ""
+    break_type: str = ""        # "INITIATIVE" / "RESPONSIVE" / "ABSORPTION" / ""
+    break_level: float = 0.0
+    # Phase 4: POC Migration + LVN Play
+    poc_signal: str = ""        # "POC_RISING_BULLISH" / "POC_FALLING_BEARISH" / "POC_DIVERGENCE" / ""
+    poc_vs_price: str = ""      # "ALIGNED" / "DIVERGENT" / ""
+    lvn_play: dict | None = None
+    ofi: float = 0.0  # Order Flow Imbalance from order book (-1 to +1)
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +147,7 @@ class FootprintLevel:
     ask: float  # Buy volume
     delta: float
     imbalance: bool = False
+    stacked: bool = False   # Part of stacked imbalance (3+ consecutive)
 
 
 @dataclass(frozen=True)

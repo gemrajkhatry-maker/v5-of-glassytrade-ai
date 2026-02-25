@@ -3,16 +3,12 @@ import React, { useState, useMemo } from 'react';
 import ChartScene from './components/ChartScene';
 import AIControls from './components/AIControls';
 import { AIAnalysisPanel } from './components/AIAnalysisPanel';
-import ModelAnalysisPanel from './components/ModelAnalysisPanel';
-import PredictionPerformancePanel from './components/PredictionPerformancePanel';
-import RLTrainingPanel from './components/RLTrainingPanel';
 import MarketSidebar from './components/MarketSidebar';
-import { normalizeSymbol } from './services/binanceService';
 import { DEFAULT_CONFIG } from './constants';
-import { ChartConfig, ChatMessage, MessageRole, ChartMode, StrategyStats, TradePosition } from './types';
-import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, Eye, EyeOff, BarChart2, Grid } from 'lucide-react';
-import { useBinanceData } from './hooks/useBinanceData';
+import { ChartConfig, ChatMessage, MessageRole, ChartMode } from './types';
+import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, Grid, BookOpen } from 'lucide-react';
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
+import JournalPage from './components/JournalPage';
 
 const simpleId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
@@ -25,18 +21,17 @@ function App() {
     const [showControls, setShowControls] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
+    const [currentPage, setCurrentPage] = useState<'trading' | 'journal'>('trading');
 
-    // 2. Infrastructure Layer (Data Fetching)
-    const marketData = useBinanceData(config.interval);
-
-    // 3. Application Layer (Business Logic & State)
+    // 2. Server-driven trading system (all logic on backend)
     const {
         instruments,
         activeSymbol,
         setActiveSymbol,
         activeInstrument,
-        activeFootprint
-    } = useTradingSystem(config, marketData);
+        activeFootprint,
+        connected,
+    } = useTradingSystem(config);
 
     // --- Handlers ---
 
@@ -55,11 +50,11 @@ function App() {
 
             if (result.configUpdates) {
                 if (result.configUpdates.symbol) {
-                    const newSym = normalizeSymbol(result.configUpdates.symbol);
+                    const newSym = result.configUpdates.symbol;
                     if (instruments[newSym]) {
                         setActiveSymbol(newSym);
                     } else {
-                        setChatHistory(prev => [...prev, { id: simpleId(), role: MessageRole.SYSTEM, text: `I switched your view to ${newSym}, but I am not currently trading it in the scanned universe.` }]);
+                        setChatHistory(prev => [...prev, { id: simpleId(), role: MessageRole.SYSTEM, text: `Switched view to ${newSym}, but not currently in scanned universe.` }]);
                     }
                 }
                 setConfig(prev => ({ ...prev, ...result.configUpdates }));
@@ -72,33 +67,6 @@ function App() {
         }
     };
 
-    // Memoized derived state — must be before early returns (Rules of Hooks)
-    const aiStats = useMemo<StrategyStats>(() => {
-        if (!activeInstrument) return { totalTrades: 0, wins: 0, losses: 0, winRate: 0, netProfit: 0, avgProfit: 0, largestWin: 0, largestLoss: 0 };
-        const predTrades = activeInstrument.portfolio.closedTrades.filter((t: TradePosition) => t.source === 'PREDICTION');
-        const wins = predTrades.filter((t: TradePosition) => t.pnl > 0);
-        const losses = predTrades.filter((t: TradePosition) => t.pnl <= 0);
-        const netProfit = predTrades.reduce((s: number, t: TradePosition) => s + t.pnl, 0);
-        return {
-            totalTrades: predTrades.length,
-            wins: wins.length,
-            losses: losses.length,
-            winRate: predTrades.length > 0 ? (wins.length / predTrades.length) * 100 : 0,
-            netProfit,
-            avgProfit: predTrades.length > 0 ? netProfit / predTrades.length : 0,
-            largestWin: wins.reduce((max: number, t: TradePosition) => Math.max(max, t.pnl), 0),
-            largestLoss: losses.reduce((min: number, t: TradePosition) => Math.min(min, t.pnl), 0),
-        };
-    }, [activeInstrument?.portfolio.closedTrades]);
-
-    const amtPortfolio = useMemo(() => {
-        if (!activeInstrument) return null;
-        return {
-            ...activeInstrument.portfolio,
-            positions: activeInstrument.portfolio.positions.filter(p => p.source === 'AMT'),
-        };
-    }, [activeInstrument?.portfolio]);
-
     const effectiveConfig = useMemo<ChartConfig>(() => ({
         ...config,
         symbol: activeInstrument?.symbol || config.symbol,
@@ -106,19 +74,21 @@ function App() {
 
     // --- Rendering ---
 
-    if (marketData.isScanning) {
+    if (currentPage === 'journal') {
+        return <JournalPage onBack={() => setCurrentPage('trading')} />;
+    }
+
+    if (!activeInstrument) {
         return (
             <div className="w-screen h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4">
                 <Loader2 className="w-12 h-12 animate-spin text-purple-500" />
                 <div className="text-center">
-                    <h2 className="text-xl font-bold">Scanning Market</h2>
-                    <p className="text-sm text-white/50">Identifying high-volatility contracts...</p>
+                    <h2 className="text-xl font-bold">Connecting to Backend</h2>
+                    <p className="text-sm text-white/50">Waiting for market data stream...</p>
                 </div>
             </div>
         );
     }
-
-    if (!activeInstrument) return null;
 
     return (
         <div className="relative w-screen h-screen overflow-hidden bg-slate-900 flex">
@@ -152,6 +122,7 @@ function App() {
                         config={effectiveConfig}
                         activeSignal={activeInstrument.amtAnalysis?.signal}
                         positions={activeInstrument.portfolio.positions}
+                        closedTrades={activeInstrument.portfolio.closedTrades}
                         amtAnalysis={activeInstrument.amtAnalysis}
                         mode="STANDARD"
                         isHidden={chartMode !== 'STANDARD'}
@@ -166,6 +137,7 @@ function App() {
                         config={effectiveConfig}
                         activeSignal={activeInstrument.amtAnalysis?.signal}
                         positions={activeInstrument.portfolio.positions}
+                        closedTrades={activeInstrument.portfolio.closedTrades}
                         amtAnalysis={activeInstrument.amtAnalysis}
                         mode="FOOTPRINT"
                         isHidden={chartMode !== 'FOOTPRINT'}
@@ -259,6 +231,15 @@ function App() {
                 </div>
             </div>
 
+            {/* Bottom Right: Journal Button */}
+            <button
+                onClick={() => setCurrentPage('journal')}
+                className="absolute bottom-6 right-6 z-30 p-3 bg-purple-600 hover:bg-purple-500 rounded-full shadow-lg shadow-purple-500/25 transition-all hover:scale-105"
+                title="Trade Journal"
+            >
+                <BookOpen size={20} className="text-white" />
+            </button>
+
             {/* RIGHT: Sidebar (Analysis & AI) */}
             <div className={`
           absolute right-0 top-0 h-full w-80 z-20 transition-all duration-300
@@ -281,38 +262,16 @@ function App() {
 
                 {/* Content Scroll */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {/* 
-                    {config.showPredictions && (
-                        <PredictionPerformancePanel
-                            stats={aiStats}
-                            activeTrade={activeInstrument.portfolio.positions.find(p => p.source === 'PREDICTION')}
-                            ghostCandles={activeInstrument.predictions}
-                            analysis={activeInstrument.aiAnalysis}
-                            weights={activeInstrument.modelWeights}
-                            generation={activeInstrument.generation}
-                        />
-                    )} 
-                    */}
-
                     <AIAnalysisPanel
                         analysis={activeInstrument.genAIAnalysis}
                         amtResult={activeInstrument.amtAnalysis}
                         portfolio={activeInstrument.portfolio}
                         riskState={activeInstrument.riskState}
+                        agentDecision={activeInstrument.agentDecision}
                         llmHistory={activeInstrument.llmHistory}
+                        orderBook={activeInstrument.orderBook}
+                        depth20Active={activeInstrument.depth20Active}
                     />
-
-                    {/* 
-                    <ModelAnalysisPanel
-                        analysis={activeInstrument.amtAnalysis}
-                        portfolio={amtPortfolio}
-                        show={true}
-                    />
-
-                    <RLTrainingPanel
-                        liveStatus={(activeInstrument as any).rlStatus ?? null}
-                    /> 
-                    */}
                 </div>
             </div>
 

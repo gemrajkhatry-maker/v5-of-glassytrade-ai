@@ -47,6 +47,18 @@ export interface GenAIAnalysis {
   aggression?: string;
 }
 
+export interface AgentDecision {
+  direction: 'LONG' | 'SHORT' | 'FLAT';
+  probability: number;
+  regime: string;
+  timing: string;
+  sizeFraction: number;
+  slAdjust: number;
+  tpAdjust: number;
+  latencyUs: number;
+  rationale: string;
+}
+
 export interface RiskState {
   halted: boolean;
   haltReason: string;
@@ -107,11 +119,13 @@ export interface InstrumentState {
   genAIAnalysis: GenAIAnalysis | null; // This refers to the Fabio Logic LLM
   amtAnalysis: AMTAnalysis | null;
   riskState: RiskState | null;
+  agentDecision: AgentDecision | null;
   llmHistory: LLMHistoryEntry[];
   predictions: OHLCData[];
   overseerAction: string;
   overseerReason: string;
   stats: StrategyStats | null;
+  depth20Active: boolean;
   lastUpdate: number;
 }
 
@@ -128,7 +142,7 @@ export interface AppState {
 export interface ChartConfig {
   symbol: string; // Used for display/API context
   interval: string;
-  dataSource: 'BINANCE' | 'SIMULATION';
+  dataSource: 'DHAN' | 'SERVER';
   bullColor: string;
   bearColor: string;
   glassOpacity: number;
@@ -169,6 +183,13 @@ export interface AMTAnalysis {
   legVah: number;
   legVal: number;
   hasDisplacement: boolean;
+  // Verification metrics
+  profileShape?: string;
+  balanceRatio?: number;
+  ofi?: number;
+  cvdSlope?: number;
+  cvdDivergence?: string;
+  sessionVwap?: number;
 }
 
 export interface TradeSignal {
@@ -234,6 +255,7 @@ export interface FootprintLevel {
   ask: number; // Buy volume
   delta: number;
   imbalance: boolean; // True if significant imbalance
+  stacked: boolean; // Part of stacked imbalance (3+ consecutive)
 }
 
 export interface FootprintCandle {
