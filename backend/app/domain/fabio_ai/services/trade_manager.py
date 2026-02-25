@@ -42,6 +42,12 @@ class TradeManagerConfig:
     # Runner logic (Fabio: close 75% at target, trail 25% as runner)
     runner_close_pct: float = 0.75      # close 75% at primary target
     runner_trail_pct: float = 0.25      # trail remaining 25%
+    # Breakeven at 1R: move SL to entry when unrealised profit reaches 1R
+    breakeven_at_1r: bool = True
+    # CVD-based breakeven: move SL to entry when CVD confirms direction
+    cvd_breakeven: bool = True
+    # Trail activation at 1R instead of 50% TP distance
+    trail_activation_r: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +77,15 @@ class ManagedPosition:
     mfe: float = 0.0                 # Maximum Favorable Excursion
     tick_count: int = 0              # ticks since entry (grace period guard)
 
+    # Breakeven tracking
+    breakeven_set: bool = False      # True once SL moved to entry (1R or CVD)
+    entry_cvd_direction: str = ""    # "LONG" or "SHORT" — set by CVD confirmation
+
+    # Session-aware time stop fields
+    session_phase: str = ""          # "MORNING" or "AFTERNOON"
+    is_expiry: bool = False          # True on options expiry day
+    applied_time_stop: float = 0.0   # computed session time stop (never shrinks)
+
     # Scale-in state (Fabio Rule 4: 40/30/30)
     scale_step: int = 1              # 1=initial(40%), 2=confirmation(+30%), 3=breakout(+30%)
     scale_confirm_price: float = 0.0 # price level that triggers step 2
@@ -95,6 +110,7 @@ class ExitReason:
     BREAK_EVEN = "BREAK_EVEN"
     OVERSEER_EXIT = "OVERSEER_EXIT"
     OVERSEER_PARTIAL = "OVERSEER_PARTIAL"
+    SPREAD_BLOWOUT = "SPREAD_BLOWOUT"
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +123,22 @@ class ExitSignal:
     position_id: str
     reason: str
     exit_price: float
+
+
+# ---------------------------------------------------------------------------
+# Session-aware time stop table
+# ---------------------------------------------------------------------------
+
+# (session_phase, market_state) -> time stop in seconds
+TIME_STOP_TABLE: dict[tuple[str, str], float] = {
+    ("MORNING", "BALANCED"): 1200,      # 20 min
+    ("MORNING", "IMBALANCED"): 2700,    # 45 min
+    ("AFTERNOON", "BALANCED"): 900,     # 15 min
+    ("AFTERNOON", "IMBALANCED"): 1800,  # 30 min
+}
+
+# Expiry day flat time stop (regardless of session/state)
+EXPIRY_TIME_STOP: float = 600  # 10 min
 
 
 class TradeManager:
@@ -174,6 +206,54 @@ class TradeManager:
         return self.is_daily_limit_reached()
 
     # ------------------------------------------------------------------
+    # Session-aware time stop
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def get_session_time_stop(
+        market_state: str,
+        session_phase: str,
+        is_expiry: bool,
+        time_to_close: float,
+    ) -> float:
+        """Compute session-aware time stop in seconds.
+
+        Args:
+            market_state: "BALANCED" or "IMBALANCED"
+            session_phase: "MORNING" or "AFTERNOON" (empty = fallback)
+            is_expiry: True on options expiry day
+            time_to_close: seconds until market close (0 = unknown)
+
+        Returns:
+            Time stop in seconds. Caller must use max(applied, new) to
+            ensure stops never shrink.
+        """
+        # Expiry day: flat 600s regardless of session/state
+        if is_expiry:
+            phase_stop = EXPIRY_TIME_STOP
+        elif session_phase:
+            # Look up from table; fallback to config defaults if not found
+            key = (session_phase.upper(), market_state.upper())
+            phase_stop = TIME_STOP_TABLE.get(key, 0.0)
+            if phase_stop == 0.0:
+                # Fallback: 1800 balanced, 7200 imbalanced
+                phase_stop = 7200.0 if market_state.upper() == "IMBALANCED" else 1800.0
+        else:
+            # No session info: use static fallback
+            phase_stop = 7200.0 if market_state.upper() == "IMBALANCED" else 1800.0
+
+        # Near close: cap at time_to_close - 300s (5 min buffer before close)
+        if time_to_close > 0:
+            near_close_stop = time_to_close - 300.0
+            if near_close_stop > 0:
+                phase_stop = min(phase_stop, near_close_stop)
+            else:
+                # Less than 5 min to close: exit immediately (1s)
+                phase_stop = 1.0
+
+        return phase_stop
+
+    # ------------------------------------------------------------------
     # RR Filter
     # ------------------------------------------------------------------
 
@@ -205,6 +285,8 @@ class TradeManager:
         market_state: str = "BALANCED",
         entry_time: float | None = None,
         enable_scale_in: bool = False,
+        session_phase: str = "",
+        is_expiry: bool = False,
     ) -> None:
         """Start managing a newly opened position.
 
@@ -240,6 +322,8 @@ class TradeManager:
             scale_step=1 if enable_scale_in else 3,  # 3 = fully deployed
             scale_confirm_price=confirm_price,
             scale_breakout_price=breakout_price,
+            session_phase=session_phase,
+            is_expiry=is_expiry,
         )
         with self._lock:
             self._positions[position_id] = mp
@@ -264,6 +348,7 @@ class TradeManager:
     def check_position(
         self, position_id: str, current_price: float,
         current_time: float | None = None,
+        time_to_close: float = 0.0,
     ) -> Optional[ExitSignal]:
         """Check all exit rules for a managed position.
 
@@ -293,6 +378,26 @@ class TradeManager:
                 mp.mfe = unrealised
             if unrealised < -mp.mae:
                 mp.mae = -unrealised  # mae stored as positive value
+
+            # ----- 1b. BREAKEVEN AT 1R -----
+            # Move SL to entry when unrealised profit reaches 1R (risk distance)
+            if self.config.breakeven_at_1r and not mp.breakeven_set:
+                risk = abs(mp.entry_price - mp.initial_stop)
+                if risk > 0 and unrealised >= risk:
+                    mp.stop_loss = mp.entry_price
+                    mp.breakeven_set = True
+                    logger.info(
+                        f"TradeManager: BREAKEVEN at 1R for {position_id} — "
+                        f"SL moved to entry {mp.entry_price:.2f}"
+                    )
+
+            # ----- 1c. BREAKEVEN FLOOR -----
+            # Once breakeven is set, SL can never go below entry
+            if mp.breakeven_set:
+                if mp.is_long and mp.stop_loss < mp.entry_price:
+                    mp.stop_loss = mp.entry_price
+                elif not mp.is_long and mp.stop_loss > mp.entry_price:
+                    mp.stop_loss = mp.entry_price
 
             # ----- 2. TAKE PROFIT -----
             tp_hit = (
@@ -349,14 +454,15 @@ class TradeManager:
                     mp.peak_price = current_price
                 mp.peak_price = min(mp.peak_price, current_price)
 
-            # Activation check
+            # Activation check — activate at 1R (risk distance) instead of 50% TP
             if mp.allow_trail and not mp.trailing_active:
-                tp_distance = abs(mp.take_profit - mp.entry_price)
+                risk = abs(mp.entry_price - mp.initial_stop)
+                activation_threshold = risk * self.config.trail_activation_r
                 unrealised = (
                     (current_price - mp.entry_price) if mp.is_long
                     else (mp.entry_price - current_price)
                 )
-                if unrealised >= tp_distance * self.config.trail_activation_pct:
+                if activation_threshold > 0 and unrealised >= activation_threshold:
                     mp.trailing_active = True
                     trail_offset = unrealised * self.config.trail_step_pct
                     if mp.is_long:
@@ -404,11 +510,23 @@ class TradeManager:
             # Grace period: skip time stop for first 5 ticks (position settling)
             if mp.tick_count < 5:
                 return None
-            # Imbalanced markets get more time (trends need time to develop)
-            # Fabio: scalps < 30 min, momentum trades < 2 hours
-            max_hold = self.config.max_hold_seconds
-            if mp.market_state == "IMBALANCED":
-                max_hold = 7200  # 2 hr for trending/momentum markets
+
+            # Session-aware time stop: use table if session info is available
+            if mp.session_phase or mp.is_expiry:
+                new_stop = self.get_session_time_stop(
+                    market_state=mp.market_state,
+                    session_phase=mp.session_phase,
+                    is_expiry=mp.is_expiry,
+                    time_to_close=time_to_close,
+                )
+                # Never shrink: only extend the time stop
+                mp.applied_time_stop = max(mp.applied_time_stop, new_stop)
+                max_hold = mp.applied_time_stop
+            else:
+                # Fallback: static time stops (no session info)
+                max_hold = self.config.max_hold_seconds
+                if mp.market_state == "IMBALANCED":
+                    max_hold = 7200  # 2 hr for trending/momentum markets
 
             if (now - mp.entry_time) >= max_hold:
                 price_move_pct = abs(current_price - mp.entry_price) / mp.entry_price
@@ -499,6 +617,37 @@ class TradeManager:
 
             return None
 
+    def apply_cvd_breakeven(self, position_id: str, cvd_slope: float) -> bool:
+        """Move SL to breakeven if CVD slope confirms the trade direction.
+
+        Positive slope confirms LONG, negative slope confirms SHORT.
+        Returns True if breakeven was applied, False otherwise.
+        """
+        if not self.config.cvd_breakeven:
+            return False
+
+        with self._lock:
+            mp = self._positions.get(position_id)
+            if mp is None or mp.breakeven_set:
+                return False
+
+            # CVD slope must confirm trade direction
+            confirms = (
+                (mp.is_long and cvd_slope > 0) or
+                (not mp.is_long and cvd_slope < 0)
+            )
+            if not confirms:
+                return False
+
+            mp.stop_loss = mp.entry_price
+            mp.breakeven_set = True
+            mp.entry_cvd_direction = mp.side
+            logger.info(
+                f"TradeManager: CVD BREAKEVEN for {position_id} — "
+                f"slope={cvd_slope:.3f}, SL moved to entry {mp.entry_price:.2f}"
+            )
+            return True
+
     # ------------------------------------------------------------------
     # Overseer helpers
     # ------------------------------------------------------------------
@@ -561,6 +710,21 @@ class TradeManager:
                 logger.warning(f"TradeManager: adjust_stop_loss — position {position_id} not found")
                 return False
 
+            # Breakeven floor: once set, SL cannot go below entry
+            if mp.breakeven_set:
+                if mp.is_long and new_sl < mp.entry_price:
+                    logger.info(
+                        f"TradeManager: adjust_stop_loss REJECTED for {position_id} — "
+                        f"breakeven set, new SL {new_sl:.2f} < entry {mp.entry_price:.2f}"
+                    )
+                    return False
+                if not mp.is_long and new_sl > mp.entry_price:
+                    logger.info(
+                        f"TradeManager: adjust_stop_loss REJECTED for {position_id} — "
+                        f"breakeven set, new SL {new_sl:.2f} > entry {mp.entry_price:.2f}"
+                    )
+                    return False
+
             if mp.is_long:
                 if new_sl <= mp.stop_loss:
                     logger.info(
@@ -583,6 +747,90 @@ class TradeManager:
                 f"{old_sl:.2f} -> {new_sl:.2f}"
             )
             return True
+
+
+    # ------------------------------------------------------------------
+    # Spread blowout detection
+    # ------------------------------------------------------------------
+
+    def check_spread_blowout(
+        self,
+        position_id: str,
+        best_bid: float,
+        best_ask: float,
+        premium: float,
+        max_spread_pct: float = 0.03,
+    ) -> Optional[ExitSignal]:
+        """Check if bid-ask spread has blown out beyond threshold.
+
+        If spread >= max_spread_pct of premium, return an immediate exit signal.
+        Gracefully returns None if order book data is missing (bid/ask <= 0)
+        or premium <= 0.
+        """
+        with self._lock:
+            mp = self._positions.get(position_id)
+            if mp is None:
+                return None
+
+        # Skip if no valid order book data
+        if best_bid <= 0 or best_ask <= 0 or premium <= 0:
+            return None
+
+        spread = best_ask - best_bid
+        spread_pct = spread / premium
+
+        if spread_pct >= max_spread_pct:
+            logger.info(
+                "TradeManager: SPREAD BLOWOUT for %s — spread=%.2f (%.1f%% of premium %.2f)",
+                position_id, spread, spread_pct * 100, premium,
+            )
+            # Use midpoint as exit price (best realistic fill in illiquid conditions)
+            exit_price = (best_bid + best_ask) / 2
+            return ExitSignal(position_id, ExitReason.SPREAD_BLOWOUT, exit_price)
+
+        return None
+
+    # ------------------------------------------------------------------
+    # CVD-based breakeven
+    # ------------------------------------------------------------------
+
+    def apply_cvd_breakeven(self, position_id: str, cvd_slope: float) -> bool:
+        """Move SL to breakeven if CVD confirms the trade direction.
+
+        LONG + positive CVD slope = buyers confirming -> breakeven.
+        SHORT + negative CVD slope = sellers confirming -> breakeven.
+        Returns True if SL was moved, False otherwise.
+        """
+        with self._lock:
+            mp = self._positions.get(position_id)
+            if mp is None:
+                return False
+
+            if not self.config.cvd_breakeven:
+                return False
+
+            if mp.breakeven_set:
+                return False  # already at breakeven
+
+            # Check CVD direction alignment
+            if mp.is_long and cvd_slope > 0:
+                mp.stop_loss = mp.entry_price
+                mp.breakeven_set = True
+                logger.info(
+                    "TradeManager: CVD breakeven for %s — CVD slope %.2f confirms LONG",
+                    position_id, cvd_slope,
+                )
+                return True
+            elif not mp.is_long and cvd_slope < 0:
+                mp.stop_loss = mp.entry_price
+                mp.breakeven_set = True
+                logger.info(
+                    "TradeManager: CVD breakeven for %s — CVD slope %.2f confirms SHORT",
+                    position_id, cvd_slope,
+                )
+                return True
+
+            return False
 
     # ------------------------------------------------------------------
     # Cooldown query

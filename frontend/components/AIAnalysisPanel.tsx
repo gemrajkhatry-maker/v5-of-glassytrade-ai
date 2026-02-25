@@ -135,8 +135,12 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                     <span>01. State</span>
                     <Settings className="w-3 h-3 hover:text-white/80 transition-colors" />
                 </div>
-                <div className={`p-3 rounded-lg bg-white/5 border border-white/5 flex justify-between items-center ${statusBg}`}>
-                    <div>
+                <div className={`p-3 rounded-lg bg-white/5 border border-white/5 ${statusBg}`}>
+                    <div className="flex justify-between items-center mb-2">
+                        <div className="text-[9px] text-white/30 uppercase tracking-wider">Session</div>
+                        <div className="h-2 w-2 rounded-full bg-green-400 animate-pulse" title="Live"></div>
+                    </div>
+                    <div className="flex justify-between items-center">
                         <div className={`text-sm font-bold ${statusColor} tracking-wide`}>
                             {liveMarketState.toUpperCase()}
                         </div>
@@ -144,7 +148,17 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                             {isImbalanced ? 'Trend Mode' : 'Range Mode'}
                         </div>
                     </div>
-                    <div className="h-2 w-2 rounded-full bg-green-400 animate-pulse" title="Live"></div>
+                    <div className="border-t border-white/5 mt-2 pt-2">
+                        <div className="text-[9px] text-white/30 uppercase tracking-wider mb-1">Leg</div>
+                        <div className="flex justify-between items-center">
+                            <div className={`text-sm font-bold tracking-wide ${amtResult?.hasDisplacement ? 'text-orange-400' : 'text-cyan-400'}`}>
+                                {amtResult?.hasDisplacement ? 'IMBALANCED' : 'BALANCED'}
+                            </div>
+                            <div className="text-[10px] text-white/50">
+                                {amtResult?.hasDisplacement ? 'Displacement' : 'Rotation'}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 

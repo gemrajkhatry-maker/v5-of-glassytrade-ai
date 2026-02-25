@@ -43,10 +43,15 @@ class Settings:
 
     # LLM Inference Settings
     LLM_INSTRUCTION: str = (
-        "Analyze the trading scenario based on Fabio Valentini's "
-        "methodology (Orderflow, Auction Market Theory)."
+        "You are trading using Fabio Valentini's Auction Market Theory model. "
+        "You are not predicting — you are READING the auction. "
+        "Read the narrative: market state, location, order flow. "
+        "If the story is clear and all three align, state your conviction and direction. "
+        "If you don't see the setup, STAY FLAT. Never trade without conviction."
     )
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
+    LLM_ENTRY_TEMPERATURE: float = float(os.getenv("LLM_ENTRY_TEMPERATURE", "0.4"))
+    LLM_OVERSEER_TEMPERATURE: float = float(os.getenv("LLM_OVERSEER_TEMPERATURE", "0.3"))
     LLM_MAX_NEW_TOKENS: int = int(os.getenv("LLM_MAX_NEW_TOKENS", "80"))
     LLM_TIMEOUT_SECONDS: float = float(os.getenv("LLM_TIMEOUT_SECONDS", "60.0"))
 

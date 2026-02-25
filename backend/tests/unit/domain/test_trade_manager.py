@@ -256,3 +256,307 @@ def test_zero_volume_blocks_entry():
 
     tick = OHLC(time="t", open=100, high=101, low=99, close=100, volume=0)
     assert check_volatility_filter([], tick) is True  # blocked
+
+
+# ---- 19. Breakeven at 1R ----
+
+def test_breakeven_at_1r_long():
+    """When unrealised profit reaches 1R, SL should move to entry price."""
+    mgr = TradeManager()
+    # Entry=100, SL=95 -> risk=5. 1R profit at price=105.
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0)
+    sig = mgr.check_position("P1", 105.0)
+    mp = mgr._positions["P1"]
+    assert mp.breakeven_set is True
+    assert mp.stop_loss == 100.0  # moved to entry (breakeven)
+    # No exit signal, just SL adjustment
+    assert sig is None
+
+
+def test_breakeven_at_1r_short():
+    """Short position: 1R profit moves SL to entry."""
+    mgr = TradeManager()
+    # Entry=100, SL=105 -> risk=5. 1R profit at price=95.
+    mgr.register_position("P1", "SHORT", 100.0, 105.0, 85.0)
+    mgr.check_position("P1", 95.0)
+    mp = mgr._positions["P1"]
+    assert mp.breakeven_set is True
+    assert mp.stop_loss == 100.0
+
+
+def test_sl_never_below_entry_once_breakeven_set():
+    """Once breakeven_set=True, SL must never go below entry for LONG."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0)
+    # Trigger breakeven
+    mgr.check_position("P1", 105.0)
+    mp = mgr._positions["P1"]
+    assert mp.breakeven_set is True
+    assert mp.stop_loss == 100.0
+    # Attempt to adjust SL below entry — should be rejected
+    result = mgr.adjust_stop_loss("P1", 98.0)
+    assert result is False
+    assert mp.stop_loss == 100.0  # unchanged
+
+
+def test_cvd_breakeven_long():
+    """CVD confirms LONG direction (positive slope) -> SL moves to entry."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0)
+    # Positive CVD slope confirms long
+    moved = mgr.apply_cvd_breakeven("P1", cvd_slope=0.5)
+    mp = mgr._positions["P1"]
+    assert moved is True
+    assert mp.breakeven_set is True
+    assert mp.stop_loss == 100.0
+
+
+def test_cvd_breakeven_short():
+    """CVD confirms SHORT direction (negative slope) -> SL moves to entry."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "SHORT", 100.0, 105.0, 85.0)
+    moved = mgr.apply_cvd_breakeven("P1", cvd_slope=-0.5)
+    mp = mgr._positions["P1"]
+    assert moved is True
+    assert mp.breakeven_set is True
+    assert mp.stop_loss == 100.0
+
+
+def test_cvd_breakeven_wrong_direction_no_move():
+    """CVD opposing trade direction should NOT move SL to breakeven."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0)
+    moved = mgr.apply_cvd_breakeven("P1", cvd_slope=-0.5)
+    mp = mgr._positions["P1"]
+    assert moved is False
+    assert mp.breakeven_set is False
+    assert mp.stop_loss == 95.0
+
+
+def test_partial_tp_still_fires_after_breakeven():
+    """Partial TP should still fire at correct distance (no regression)."""
+    mgr = TradeManager()
+    # Entry=100, SL=95, TP=110 -> risk=5, partial at 50% of TP dist = 5
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    # First reach 1R (price=105) -> breakeven set, partial also fires (50% of 10 = 5)
+    sig = mgr.check_position("P1", 105.0)
+    mp = mgr._positions["P1"]
+    assert mp.breakeven_set is True
+    # Partial TP fires at same threshold
+    assert sig is not None
+    assert sig.reason == ExitReason.PARTIAL_TAKE_PROFIT
+
+
+def test_trailing_activates_at_1r():
+    """Trailing stop should activate at 1R instead of 50% TP distance."""
+    mgr = TradeManager()
+    # Entry=100, SL=95, TP=120 -> risk=5, 1R at 105
+    # Old 50% TP activation = 110, new 1R activation = 105
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 120.0, allow_trail=True)
+    # Price at 105 = 1R profit. Trail should activate.
+    mgr.check_position("P1", 105.0)  # breakeven + partial
+    mgr.check_position("P1", 105.0)  # trail activation
+    mp = mgr._positions["P1"]
+    assert mp.trailing_active is True
+
+
+def test_tight_sl_wide_spread_edge_case():
+    """Tight SL (small risk) should still trigger breakeven at 1R."""
+    mgr = TradeManager()
+    # Entry=100, SL=99.5 -> risk=0.5. 1R at 100.5.
+    mgr.register_position("P1", "LONG", 100.0, 99.5, 105.0)
+    mgr.check_position("P1", 100.5)
+    mp = mgr._positions["P1"]
+    assert mp.breakeven_set is True
+    assert mp.stop_loss == 100.0
+
+
+def test_cvd_breakeven_then_doji_holds():
+    """After CVD triggers breakeven, a doji candle should hold at BE."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0)
+    mgr.apply_cvd_breakeven("P1", cvd_slope=0.5)
+    mp = mgr._positions["P1"]
+    assert mp.breakeven_set is True
+    # Doji-like: price stays near entry, slightly above SL (breakeven)
+    sig = mgr.check_position("P1", 100.1)
+    assert sig is None  # no exit, position holds at breakeven
+
+
+# ---- 22. Spread Blowout Detection ----
+
+def test_spread_below_threshold_no_exit():
+    """Spread < 3% of premium should not trigger exit."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    # Premium=100, spread=2 (2% < 3%)
+    sig = mgr.check_spread_blowout("P1", best_bid=99.0, best_ask=101.0, premium=100.0)
+    assert sig is None
+
+
+def test_spread_at_threshold_triggers_exit():
+    """Spread exactly at 3% of premium should trigger SPREAD_BLOWOUT exit."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    # Premium=100, spread=3 (3% == 3%)
+    sig = mgr.check_spread_blowout("P1", best_bid=98.5, best_ask=101.5, premium=100.0)
+    assert sig is not None
+    assert sig.reason == ExitReason.SPREAD_BLOWOUT
+    assert sig.exit_price == 100.0  # midpoint of bid/ask
+
+
+def test_spread_above_threshold_triggers_exit():
+    """Spread > 3% of premium should trigger SPREAD_BLOWOUT exit."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    # Premium=100, spread=5 (5% > 3%)
+    sig = mgr.check_spread_blowout("P1", best_bid=97.5, best_ask=102.5, premium=100.0)
+    assert sig is not None
+    assert sig.reason == ExitReason.SPREAD_BLOWOUT
+
+
+def test_spread_no_order_book_data_skips():
+    """Missing order book data (bid/ask <= 0) should skip gracefully."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    # Zero bid/ask
+    assert mgr.check_spread_blowout("P1", best_bid=0, best_ask=0, premium=100.0) is None
+    # Negative values
+    assert mgr.check_spread_blowout("P1", best_bid=-1, best_ask=101, premium=100.0) is None
+    # Zero premium
+    assert mgr.check_spread_blowout("P1", best_bid=99, best_ask=101, premium=0) is None
+
+
+def test_spread_unknown_position_returns_none():
+    """Spread check on unknown position should return None."""
+    mgr = TradeManager()
+    sig = mgr.check_spread_blowout("UNKNOWN", best_bid=99, best_ask=101, premium=100.0)
+    assert sig is None
+
+
+# ---- Session-Aware Time Stops ----
+
+def test_session_time_stop_morning_balanced():
+    """Morning balanced session should use 1200s time stop."""
+    stop = TradeManager.get_session_time_stop(
+        market_state="BALANCED", session_phase="MORNING",
+        is_expiry=False, time_to_close=0.0,
+    )
+    assert stop == 1200.0
+
+
+def test_session_time_stop_afternoon_imbalanced():
+    """Afternoon imbalanced session should use 1800s time stop."""
+    stop = TradeManager.get_session_time_stop(
+        market_state="IMBALANCED", session_phase="AFTERNOON",
+        is_expiry=False, time_to_close=0.0,
+    )
+    assert stop == 1800.0
+
+
+def test_session_time_stop_expiry_day():
+    """Expiry day should use flat 600s regardless of session/state."""
+    stop = TradeManager.get_session_time_stop(
+        market_state="BALANCED", session_phase="MORNING",
+        is_expiry=True, time_to_close=0.0,
+    )
+    assert stop == 600.0
+
+
+def test_session_time_stop_near_close():
+    """Near close: min(phase_stop, time_to_close - 300)."""
+    # 20 min to close = 1200s; phase stop for morning balanced = 1200s
+    # near_close = 1200 - 300 = 900; min(1200, 900) = 900
+    stop = TradeManager.get_session_time_stop(
+        market_state="BALANCED", session_phase="MORNING",
+        is_expiry=False, time_to_close=1200.0,
+    )
+    assert stop == 900.0
+
+
+def test_session_time_stop_very_near_close():
+    """Less than 5 min to close should force immediate exit (1s)."""
+    stop = TradeManager.get_session_time_stop(
+        market_state="BALANCED", session_phase="MORNING",
+        is_expiry=False, time_to_close=200.0,
+    )
+    assert stop == 1.0
+
+
+def test_session_time_stop_never_shrinks():
+    """BALANCED -> IMBALANCED mid-trade: time stop should extend, never shrink."""
+    mgr = TradeManager()
+    entry_time = time.time() - 100  # entered 100s ago
+    mgr.register_position(
+        "P1", "LONG", 100.0, 95.0, 110.0,
+        market_state="BALANCED", session_phase="MORNING",
+        entry_time=entry_time,
+    )
+    mp = mgr._positions["P1"]
+
+    # First check: BALANCED morning -> 1200s
+    for _ in range(5):
+        mgr.check_position("P1", 102.0)
+    mgr.check_position("P1", 102.0)
+    assert mp.applied_time_stop == 1200.0
+
+    # Market state changes to IMBALANCED -> 2700s (extends)
+    mp.market_state = "IMBALANCED"
+    mgr.check_position("P1", 102.0)
+    assert mp.applied_time_stop == 2700.0
+
+    # Change back to BALANCED -> should stay at 2700 (never shrink)
+    mp.market_state = "BALANCED"
+    mgr.check_position("P1", 102.0)
+    assert mp.applied_time_stop == 2700.0
+
+
+def test_session_time_stop_no_session_fallback():
+    """No session data should fall back to 1800/7200."""
+    stop = TradeManager.get_session_time_stop(
+        market_state="BALANCED", session_phase="",
+        is_expiry=False, time_to_close=0.0,
+    )
+    assert stop == 1800.0
+
+    stop = TradeManager.get_session_time_stop(
+        market_state="IMBALANCED", session_phase="",
+        is_expiry=False, time_to_close=0.0,
+    )
+    assert stop == 7200.0
+
+
+def test_session_time_stop_fires_at_correct_time():
+    """Position with session phase should exit at session-aware time stop."""
+    config = TradeManagerConfig(max_hold_seconds=1800)
+    mgr = TradeManager(config)
+    entry_time = time.time() - 1300  # 1300s ago (>1200s morning balanced)
+    mgr.register_position(
+        "P1", "LONG", 100.0, 95.0, 110.0,
+        market_state="BALANCED", session_phase="MORNING",
+        entry_time=entry_time,
+    )
+    # Advance past grace period
+    for _ in range(5):
+        mgr.check_position("P1", 102.0)
+    sig = mgr.check_position("P1", 102.0)
+    assert sig is not None
+    assert sig.reason == ExitReason.TIME_STOP
+
+
+def test_session_time_stop_morning_imbalanced():
+    """Morning imbalanced session should use 2700s."""
+    stop = TradeManager.get_session_time_stop(
+        market_state="IMBALANCED", session_phase="MORNING",
+        is_expiry=False, time_to_close=0.0,
+    )
+    assert stop == 2700.0
+
+
+def test_session_time_stop_afternoon_balanced():
+    """Afternoon balanced session should use 900s."""
+    stop = TradeManager.get_session_time_stop(
+        market_state="BALANCED", session_phase="AFTERNOON",
+        is_expiry=False, time_to_close=0.0,
+    )
+    assert stop == 900.0

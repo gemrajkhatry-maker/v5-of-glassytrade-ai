@@ -49,8 +49,15 @@ class MLXInferenceAdapter(LLMInferencePort):
             logger.error(f"Failed to load MLX model: {e}")
             self._is_loading = False
 
-    def predict(self, instruction: str, input_text: str) -> str:
-        """Generate a prediction using the Alpaca prompt format."""
+    def predict(self, instruction: str, input_text: str, temperature: float | None = None) -> str:
+        """Generate a prediction using the ChatML prompt format.
+
+        Args:
+            instruction: System instruction for the model.
+            input_text: User input text (market data prompt).
+            temperature: Sampling temperature override. If None, falls back to
+                settings.LLM_TEMPERATURE for backward compatibility.
+        """
         if not self.model:
             if self._is_loading:
                 raise LLMNotReadyError("Model is still loading")
@@ -72,7 +79,8 @@ class MLXInferenceAdapter(LLMInferencePort):
             f"<|im_start|>user\n{clean_input}<|im_end|>\n"
             "<|im_start|>assistant\nMarket State:"
         )
-        sampler = make_sampler(temp=settings.LLM_TEMPERATURE)
+        temp = temperature if temperature is not None else settings.LLM_TEMPERATURE
+        sampler = make_sampler(temp=temp)
         response = generate(
             self.model,
             self.tokenizer,

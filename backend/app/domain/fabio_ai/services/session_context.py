@@ -22,7 +22,7 @@ MCX sessions:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from typing import Literal
 
 
@@ -305,6 +305,41 @@ def classify_gap(open_price: float, prior_close: float, prior_range: float) -> s
         return "MEDIUM"
     else:
         return "LARGE"
+
+
+# ---------------------------------------------------------------------------
+# Session-Aware Time Stop Helpers
+# ---------------------------------------------------------------------------
+
+def is_expiry_day(trade_date: date) -> bool:
+    """Check if the given date is an options expiry day.
+
+    Weekly expiry: every Thursday.
+    Monthly expiry: last Thursday of the month.
+    Both are Thursdays, so any Thursday is an expiry day.
+    """
+    return trade_date.weekday() == 3  # Thursday = 3
+
+
+def seconds_to_close(current_time: datetime, exchange: str = "NSE") -> float:
+    """Return seconds remaining until market close.
+
+    NSE close: 15:15 IST
+    MCX close: 23:15 IST
+    Returns 0.0 if market is already closed or exchange is unknown.
+    """
+    ist_dt = _to_ist(current_time)
+
+    if exchange.upper() == "NSE":
+        close_hour, close_minute = 15, 15
+    elif exchange.upper() == "MCX":
+        close_hour, close_minute = 23, 15
+    else:
+        return 0.0
+
+    close_time = ist_dt.replace(hour=close_hour, minute=close_minute, second=0, microsecond=0)
+    diff = (close_time - ist_dt).total_seconds()
+    return max(0.0, diff)
 
 
 def opening_inventory_bias(open_price: float, prior_vah: float, prior_val: float) -> str:

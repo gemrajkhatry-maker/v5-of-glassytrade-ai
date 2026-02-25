@@ -27,7 +27,11 @@ class TradeLifecycleHandler:
         """Expose trade manager for RR filter and daily limit checks."""
         return self._trade_manager
 
-    def check_exits(self, portfolio: Portfolio, current_price: float, cvd_divergence: str = "") -> bool:
+    def check_exits(
+        self, portfolio: Portfolio, current_price: float,
+        cvd_divergence: str = "", time_to_close: float = 0.0,
+        cvd_slope: float = 0.0,
+    ) -> bool:
         """Check all open positions for exit conditions and scale-in triggers.
 
         Returns:
@@ -58,7 +62,13 @@ class TradeLifecycleHandler:
                     logger.info(f"Position {pos.id} closed: CVD kill signal at {cvd_exit.exit_price:.2f}")
                     return True
 
-            exit_sig = self._trade_manager.check_position(pos.id, current_price)
+            # CVD-based breakeven: move SL to entry when CVD confirms direction
+            if cvd_slope != 0.0 and mp is not None:
+                self._trade_manager.apply_cvd_breakeven(pos.id, cvd_slope)
+
+            exit_sig = self._trade_manager.check_position(
+                pos.id, current_price, time_to_close=time_to_close,
+            )
             if exit_sig:
                 logger.info("Exit trigger: pos=%s reason=%s price=%.2f tick=%d",
                             pos.id, exit_sig.reason, exit_sig.exit_price,
@@ -101,10 +111,13 @@ class TradeLifecycleHandler:
     def register_position(self, position: Position, signal: Signal) -> None:
         """Register a new position with TradeManager for exit monitoring."""
         if signal.source == Source.LLM:
-            allow_trail = (signal.metadata or {}).get("allow_trail", False)
-            scale_in = (signal.metadata or {}).get("scale_in", False)
-            market_state = (signal.metadata or {}).get("market_state_model", "BALANCED")
-            # Normalize: "Trending" → "IMBALANCED"
+            meta = signal.metadata or {}
+            allow_trail = meta.get("allow_trail", False)
+            scale_in = meta.get("scale_in", False)
+            market_state = meta.get("market_state_model", "BALANCED")
+            session_phase = meta.get("session_phase", "")
+            is_expiry = meta.get("is_expiry", False)
+            # Normalize: "Trending" -> "IMBALANCED"
             if "trend" in market_state.lower() or "imbalance" in market_state.lower():
                 market_state = "IMBALANCED"
             else:
@@ -118,6 +131,8 @@ class TradeLifecycleHandler:
                 allow_trail=allow_trail,
                 market_state=market_state,
                 enable_scale_in=scale_in,
+                session_phase=session_phase,
+                is_expiry=is_expiry,
             )
 
     @property
