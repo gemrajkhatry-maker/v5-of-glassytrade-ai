@@ -37,7 +37,7 @@ const ModelAnalysisPanel: React.FC<ModelAnalysisPanelProps> = ({ analysis, portf
         </div>
         <div className="flex items-center gap-2">
             <div className="text-[9px] bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded text-blue-300 font-mono">
-                10X LIVE
+                1X LIVE
             </div>
         </div>
       </div>
@@ -52,7 +52,7 @@ const ModelAnalysisPanel: React.FC<ModelAnalysisPanelProps> = ({ analysis, portf
                         <Wallet size={10} /> Equity
                     </div>
                     <span className="font-mono font-bold text-white text-xs">
-                        ${portfolio.equity.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                        ₹{portfolio.equity.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
                     </span>
                 </div>
                 <div className="flex justify-between items-end">

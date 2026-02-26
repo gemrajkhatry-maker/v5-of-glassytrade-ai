@@ -18,9 +18,14 @@ logger = logging.getLogger(__name__)
 class TradeLifecycleHandler:
     """Handles position exits via TradeManager (SL/TP/Trail/Time)."""
 
-    def __init__(self, on_stop_out: Callable[[float, str], None] | None = None) -> None:
+    def __init__(
+        self,
+        on_stop_out: Callable[[float, str], None] | None = None,
+        on_partial_exit: Callable[[str, str, float, float, float, float, float, str], None] | None = None,
+    ) -> None:
         self._trade_manager = TradeManager()
         self._on_stop_out = on_stop_out
+        self._on_partial_exit = on_partial_exit  # (pos_id, side, entry_price, exit_price, partial_pct, size_closed, realized_pnl, reason)
 
     @property
     def trade_manager(self) -> TradeManager:
@@ -81,13 +86,22 @@ class TradeLifecycleHandler:
                         partial_pct = self._trade_manager.config.runner_close_pct
                     else:
                         partial_pct = self._trade_manager.config.partial_size_pct
+                    size_before = pos.size
                     realized_pnl = portfolio.partial_close_position(
                         pos.id, partial_pct, exit_sig.exit_price, exit_sig.reason
                     )
                     logger.info(
                         f"Position {pos.id} partial close: {exit_sig.reason} "
-                        f"at {exit_sig.exit_price:.2f}, realized PnL={realized_pnl:.2f}"
+                        f"at {exit_sig.exit_price:.2f}, realized PnL={realized_pnl:.2f}, "
+                        f"size {size_before:.0f} → {pos.size:.0f}"
                     )
+                    # Notify journal/forward logger
+                    if self._on_partial_exit:
+                        side = pos.side.value if hasattr(pos.side, 'value') else str(pos.side)
+                        self._on_partial_exit(
+                            pos.id, side, pos.entry_price, exit_sig.exit_price,
+                            partial_pct, size_before * partial_pct, pos.size, realized_pnl,
+                        )
                     # Do NOT unregister — position is still open with remaining size
                     return False
                 else:
@@ -109,31 +123,34 @@ class TradeLifecycleHandler:
         return False
 
     def register_position(self, position: Position, signal: Signal) -> None:
-        """Register a new position with TradeManager for exit monitoring."""
-        if signal.source == Source.LLM:
-            meta = signal.metadata or {}
-            allow_trail = meta.get("allow_trail", False)
-            scale_in = meta.get("scale_in", False)
-            market_state = meta.get("market_state_model", "BALANCED")
-            session_phase = meta.get("session_phase", "")
-            is_expiry = meta.get("is_expiry", False)
-            # Normalize: "Trending" -> "IMBALANCED"
-            if "trend" in market_state.lower() or "imbalance" in market_state.lower():
-                market_state = "IMBALANCED"
-            else:
-                market_state = "BALANCED"
-            self._trade_manager.register_position(
-                position_id=position.id,
-                side="LONG" if signal.type == SignalType.BUY else "SHORT",
-                entry_price=position.entry_price,
-                stop_loss=signal.stop_loss,
-                take_profit=signal.take_profit,
-                allow_trail=allow_trail,
-                market_state=market_state,
-                enable_scale_in=scale_in,
-                session_phase=session_phase,
-                is_expiry=is_expiry,
-            )
+        """Register a new position with TradeManager for exit monitoring.
+
+        All signal sources (LLM, AGENT, AMT, etc.) must be registered so the
+        overseer can manage the position.
+        """
+        meta = signal.metadata or {}
+        allow_trail = meta.get("allow_trail", False)
+        scale_in = meta.get("scale_in", False)
+        market_state = meta.get("market_state_model", "BALANCED")
+        session_phase = meta.get("session_phase", "")
+        is_expiry = meta.get("is_expiry", False)
+        # Normalize: "Trending" -> "IMBALANCED"
+        if "trend" in market_state.lower() or "imbalance" in market_state.lower():
+            market_state = "IMBALANCED"
+        else:
+            market_state = "BALANCED"
+        self._trade_manager.register_position(
+            position_id=position.id,
+            side="LONG" if signal.type == SignalType.BUY else "SHORT",
+            entry_price=position.entry_price,
+            stop_loss=signal.stop_loss,
+            take_profit=signal.take_profit,
+            allow_trail=allow_trail,
+            market_state=market_state,
+            enable_scale_in=scale_in,
+            session_phase=session_phase,
+            is_expiry=is_expiry,
+        )
 
     @property
     def has_managed_positions(self) -> bool:

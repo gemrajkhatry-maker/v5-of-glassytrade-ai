@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 # Track the active server-driven stream task so we can cancel it on frontend reload
 _active_stream_task: asyncio.Task | None = None
+# Global cooldown: prevent rapid-fire Dhan WS connections from frontend reconnect loop
+_last_dhan_connect_time: float = 0.0
+_DHAN_CONNECT_COOLDOWN: float = 5.0  # min seconds between Dhan WS connection attempts
 
 
 def _validate_tick(tick: OHLC) -> str | None:
@@ -92,6 +95,8 @@ async def gameloop_ws(ws: WebSocket):
                         await _active_stream_task
                     except (asyncio.CancelledError, Exception):
                         pass
+                    # Give Dhan time to release the old connection slot
+                    await asyncio.sleep(2.0)
                 logger.info("Server-driven mode: subscribing to %s via Dhan", symbol)
                 _active_stream_task = asyncio.current_task()
                 await _server_driven_loop(ws, graph, session_service, symbol)
@@ -563,27 +568,48 @@ def _depth_to_dto(book: OrderBook | None) -> dict | None:
     }
 
 
-async def _stream_with_reconnect(market_data, symbols: list[str], max_retries: int = 3):
-    """Wrap stream_full() with limited retry. WS client handles its own reconnect internally."""
-    retry = 0
-    while retry < max_retries:
+async def _stream_with_reconnect(market_data, symbols: list[str]):
+    """Wrap stream_full() with infinite retry and exponential backoff.
+
+    Never gives up — the frontend reconnect loop will cancel via CancelledError
+    if a new subscribe arrives.  Backoff caps at 60s to avoid hammering Dhan
+    with HTTP 429.
+
+    Dhan allows max 5 concurrent WS connections per token.  The WS client
+    has its own internal reconnect (30 attempts with exponential backoff).
+    This outer loop only fires when the inner reconnect is fully exhausted.
+    A global cooldown prevents multiple frontend reconnects from hammering
+    Dhan simultaneously.
+    """
+    global _last_dhan_connect_time
+    consecutive_failures = 0
+    while True:
+        # Enforce global cooldown to avoid rapid-fire Dhan connections
+        now = asyncio.get_event_loop().time()
+        since_last = now - _last_dhan_connect_time
+        if since_last < _DHAN_CONNECT_COOLDOWN:
+            wait_for = _DHAN_CONNECT_COOLDOWN - since_last
+            logger.info("Dhan connect cooldown: waiting %.1fs", wait_for)
+            await asyncio.sleep(wait_for)
+        _last_dhan_connect_time = asyncio.get_event_loop().time()
+
         try:
             async for pkt in market_data.stream_full(symbols):
-                retry = 0  # reset on successful data
+                consecutive_failures = 0  # reset on successful data
                 yield pkt
-            # Generator exhausted cleanly — done
-            return
+            # Generator exhausted cleanly — reconnect
+            logger.info("Stream ended cleanly, reconnecting...")
         except asyncio.CancelledError:
             raise  # propagate cancellation
         except Exception as e:
-            retry += 1
-            wait = min(10 * retry, 30)
+            consecutive_failures += 1
+            # Exponential backoff: 5, 10, 20, 40, 60, 60, 60...
+            wait = min(5 * (2 ** (consecutive_failures - 1)), 60)
             logger.warning(
-                "Stream disconnected (%d/%d), reconnecting in %ds: %s",
-                retry, max_retries, wait, e,
+                "Stream disconnected (attempt %d), reconnecting in %ds: %s",
+                consecutive_failures, wait, e,
             )
             await asyncio.sleep(wait)
-    logger.error("Stream exhausted after %d retries", max_retries)
 
 
 async def _listen_for_client(ws: WebSocket) -> None:

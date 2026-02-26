@@ -750,6 +750,100 @@ class TradeManager:
 
 
     # ------------------------------------------------------------------
+    # VWAP Band Trailing
+    # ------------------------------------------------------------------
+
+    def apply_vwap_trail(
+        self,
+        position_id: str,
+        current_price: float,
+        vwap: float,
+        vwap_upper_1: float,
+        vwap_lower_1: float,
+        vwap_upper_2: float,
+        vwap_lower_2: float,
+    ) -> None:
+        """Trail stop-loss to nearest VWAP band at 1.5R profit, tighten at 2 sigma.
+
+        Rules:
+        - Only activates when unrealised profit >= 1.5R.
+        - For LONG: SL moves to highest VWAP band below price and above entry.
+        - 1.5R floor: trail distance never exceeds 1.5R from entry.
+        - 2 sigma tighten: if price at/beyond 2-sigma band, SL tightened to 50%
+          of current price-to-SL distance.
+        - SL only ratchets (never loosens).
+        """
+        with self._lock:
+            mp = self._positions.get(position_id)
+            if mp is None:
+                return
+
+            entry = mp.entry_price
+            initial_risk = abs(entry - mp.initial_stop)
+            if initial_risk <= 0:
+                return
+
+            unrealised = (current_price - entry) if mp.is_long else (entry - current_price)
+            unrealised_r = unrealised / initial_risk
+
+            if unrealised_r < 1.5:
+                return  # Not enough profit to trail
+
+            bands = sorted([vwap, vwap_upper_1, vwap_lower_1, vwap_upper_2, vwap_lower_2])
+
+            if mp.is_long:
+                # Find highest band below current price and above entry
+                valid_bands = [b for b in bands if b < current_price and b > entry]
+                if valid_bands:
+                    trail_sl = max(valid_bands)
+                else:
+                    trail_sl = entry + initial_risk * 1.5
+
+                # Cap: trail must be at least 1.5R above entry
+                min_trail = entry + initial_risk * 1.5
+                trail_sl = max(trail_sl, min_trail)
+
+                # 2 sigma tighten: if price at/above vwap_upper_2
+                if current_price >= vwap_upper_2:
+                    current_distance = current_price - mp.stop_loss
+                    tightened = current_price - (current_distance * 0.5)
+                    trail_sl = max(trail_sl, tightened)
+
+                # Never lower SL (ratchet only)
+                if trail_sl > mp.stop_loss:
+                    mp.stop_loss = trail_sl
+                    logger.info(
+                        "TradeManager: VWAP trail for %s — SL moved to %.2f (%.1fR)",
+                        position_id, trail_sl, unrealised_r,
+                    )
+
+            elif not mp.is_long:
+                # For SHORT: find lowest band above current price and below entry
+                valid_bands = [b for b in bands if b > current_price and b < entry]
+                if valid_bands:
+                    trail_sl = min(valid_bands)
+                else:
+                    trail_sl = entry - initial_risk * 1.5
+
+                # Cap
+                max_trail = entry - initial_risk * 1.5
+                trail_sl = min(trail_sl, max_trail)
+
+                # 2 sigma tighten
+                if current_price <= vwap_lower_2:
+                    current_distance = mp.stop_loss - current_price
+                    tightened = current_price + (current_distance * 0.5)
+                    trail_sl = min(trail_sl, tightened)
+
+                # Never loosen SL (ratchet only)
+                if trail_sl < mp.stop_loss:
+                    mp.stop_loss = trail_sl
+                    logger.info(
+                        "TradeManager: VWAP trail for %s — SL moved to %.2f (%.1fR)",
+                        position_id, trail_sl, unrealised_r,
+                    )
+
+    # ------------------------------------------------------------------
     # Spread blowout detection
     # ------------------------------------------------------------------
 
@@ -835,6 +929,48 @@ class TradeManager:
     # ------------------------------------------------------------------
     # Cooldown query
     # ------------------------------------------------------------------
+
+    def check_imbalance_tighten(
+        self, position_id: str, imbalances: list, current_price: float,
+    ) -> bool:
+        """Tighten SL if stacked imbalances oppose position. Returns True if tightened.
+
+        Opposing imbalances (SELL for LONG, BUY for SHORT) trigger a 30%
+        tighten of the current price-to-SL distance.
+        """
+        with self._lock:
+            pos = self._positions.get(position_id)
+            if pos is None or not imbalances:
+                return False
+
+            opposing = [
+                im for im in imbalances
+                if (pos.side == "LONG" and im.direction == "SELL")
+                or (pos.side == "SHORT" and im.direction == "BUY")
+            ]
+            if not opposing:
+                return False
+
+            # Tighten SL by 30% of current distance
+            if pos.is_long:
+                distance = current_price - pos.stop_loss
+                if distance > 0:
+                    pos.stop_loss = pos.stop_loss + distance * 0.3
+                    logger.info(
+                        "TradeManager: imbalance tighten for %s — SL moved to %.2f",
+                        position_id, pos.stop_loss,
+                    )
+                    return True
+            else:
+                distance = pos.stop_loss - current_price
+                if distance > 0:
+                    pos.stop_loss = pos.stop_loss - distance * 0.3
+                    logger.info(
+                        "TradeManager: imbalance tighten for %s — SL moved to %.2f",
+                        position_id, pos.stop_loss,
+                    )
+                    return True
+            return False
 
     def in_cooldown(self, current_time: float | None = None) -> bool:
         """True if a recent exit was taken and we should not re-enter yet."""

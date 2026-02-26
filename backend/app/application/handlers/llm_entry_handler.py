@@ -19,6 +19,7 @@ from app.domain.fabio_ai.services.entry_gate import (
     check_iv_gate,
     check_delta_filter,
     classify_oi_action,
+    check_momentum_fade,
 )
 
 if TYPE_CHECKING:
@@ -314,6 +315,11 @@ class LLMEntryHandler:
                     )
                     return
                 direction = ai_result["direction"]
+                # BUY-only gate: block SHORT when ALLOW_SHORT=false
+                if direction == "SHORT" and not _settings.ALLOW_SHORT:
+                    logger.info("BUY-ONLY mode: SHORT blocked → FLAT")
+                    direction = "FLAT"
+                    ai_result["direction"] = "FLAT"
                 confidence = ai_result.get("confidence", "High" if direction != "FLAT" else "Medium")
                 logger.info("LLM result: direction=%s confidence=%s", direction, confidence)
 
@@ -357,6 +363,13 @@ class LLMEntryHandler:
                         if self._journal:
                             self._journal.log_rejection(symbol=symbol, reason="DELTA_FILTER", amt=session.last_amt, llm_direction=direction)
                         direction = "FLAT"
+
+                # Momentum Fade Gate (Fabio Rule: Don't short a freight train)
+                if direction in ("LONG", "SHORT") and check_momentum_fade(session.data, tick, direction):
+                    logger.info("Momentum Fade Gate blocked entry: Attempting to %s into massive unrejected momentum", direction)
+                    if self._journal:
+                        self._journal.log_rejection(symbol=symbol, reason="MOMENTUM_FADE", amt=session.last_amt, llm_direction=direction)
+                    direction = "FLAT"
 
                 # A/B/C Setup Grading (Fabio methodology)
                 # A: full confluence (gate + volume bubble + CVD + session aligns)

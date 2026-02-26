@@ -303,11 +303,12 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   };
 
 
-  // Helper: Draw a single VP profile on the RIGHT side of the chart
+  // Helper: Draw a single VP profile on the RIGHT side of the chart (glassy style)
   const drawProfileBars = (
     ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement,
     series: ISeriesApi<"Candlestick">, profile: { price: number; volume: number; buyVolume: number; sellVolume: number }[],
-    maxWidthPct: number, xOffset: number, bullColor: string, bearColor: string, useDirectionColors: boolean
+    maxWidthPct: number, xOffset: number, bullColor: string, bearColor: string, useDirectionColors: boolean,
+    hvnPrices?: number[], lvnPrices?: number[], vahPrice?: number, valPrice?: number, pocPrice?: number
   ) => {
     if (!profile || profile.length === 0) return;
     const maxVol = Math.max(...profile.map(p => p.volume));
@@ -315,7 +316,29 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     const maxBarWidth = canvas.width * maxWidthPct;
     const widthScale = maxBarWidth / maxVol;
     const step = profile.length > 1 ? Math.abs(profile[1].price - profile[0].price) : 0;
-    const rightEdge = canvas.width - 50; // leave room for price axis
+    const rightEdge = canvas.width - 50;
+    const tolerance = step > 0 ? step * 0.6 : 1;
+
+    const isNear = (price: number, targets: number[] | undefined) =>
+      targets?.some(t => Math.abs(price - t) < tolerance) ?? false;
+    const inValueArea = (price: number) =>
+      vahPrice != null && valPrice != null && price >= valPrice && price <= vahPrice;
+    const isPoc = (price: number) =>
+      pocPrice != null && Math.abs(price - pocPrice) < tolerance;
+
+    // Value Area shaded background
+    if (vahPrice != null && valPrice != null) {
+      const vahY = series.priceToCoordinate(vahPrice);
+      const valY = series.priceToCoordinate(valPrice);
+      if (vahY !== null && valY !== null) {
+        const vaGrad = ctx.createLinearGradient(rightEdge - xOffset - maxBarWidth, 0, rightEdge - xOffset, 0);
+        vaGrad.addColorStop(0, 'rgba(59,130,246,0.0)');
+        vaGrad.addColorStop(0.5, 'rgba(59,130,246,0.04)');
+        vaGrad.addColorStop(1, 'rgba(59,130,246,0.08)');
+        ctx.fillStyle = vaGrad;
+        ctx.fillRect(rightEdge - xOffset - maxBarWidth, Math.min(vahY, valY), maxBarWidth, Math.abs(valY - vahY));
+      }
+    }
 
     profile.forEach(level => {
       const y = series.priceToCoordinate(level.price);
@@ -330,18 +353,74 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       }
       const barWidth = level.volume * widthScale;
       const x = rightEdge - xOffset - barWidth;
+
+      // Determine zone type for color enhancement
+      const isHvn = isNear(level.price, hvnPrices);
+      const isLvn = isNear(level.price, lvnPrices);
+      const isVA = inValueArea(level.price);
+      const isP = isPoc(level.price);
+
+      // Base color selection
+      let baseColor: string;
+      let baseAlpha: number;
       if (useDirectionColors) {
         const isBullish = level.buyVolume > level.sellVolume;
-        ctx.fillStyle = isBullish ? `${bullColor}50` : `${bearColor}50`;
-        ctx.fillRect(x, y - barHeight / 2, barWidth, barHeight);
-        ctx.fillStyle = isBullish ? bullColor : bearColor;
+        baseColor = isBullish ? bullColor : bearColor;
       } else {
-        ctx.fillStyle = `${bullColor}50`;
-        ctx.fillRect(x, y - barHeight / 2, barWidth, barHeight);
-        ctx.fillStyle = bullColor;
+        baseColor = bullColor;
       }
-      // Edge line on the left side of the bar
-      ctx.fillRect(x, y - barHeight / 2, 1, barHeight);
+
+      // Alpha and glow based on zone
+      if (isP) {
+        baseAlpha = 0.85;
+      } else if (isHvn) {
+        baseAlpha = 0.65;
+      } else if (isLvn) {
+        baseAlpha = 0.18;
+      } else if (isVA) {
+        baseAlpha = 0.45;
+      } else {
+        baseAlpha = 0.30;
+      }
+
+      // Glassy gradient fill (left=transparent → right=color)
+      const grad = ctx.createLinearGradient(x, 0, x + barWidth, 0);
+      grad.addColorStop(0, hexToRgba(baseColor, baseAlpha * 0.3));
+      grad.addColorStop(0.4, hexToRgba(baseColor, baseAlpha * 0.7));
+      grad.addColorStop(1, hexToRgba(baseColor, baseAlpha));
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, y - barHeight / 2, barWidth, barHeight);
+
+      // Top highlight (glass refraction)
+      ctx.fillStyle = `rgba(255,255,255,${baseAlpha * 0.12})`;
+      ctx.fillRect(x, y - barHeight / 2, barWidth, Math.max(1, barHeight * 0.3));
+
+      // POC bar: bright edge + glow
+      if (isP) {
+        ctx.shadowColor = hexToRgba('#facc15', 0.6);
+        ctx.shadowBlur = 8;
+        ctx.fillStyle = hexToRgba('#facc15', 0.9);
+        ctx.fillRect(x, y - barHeight / 2, 2, barHeight);
+        ctx.shadowBlur = 0;
+      }
+      // HVN: bright left edge + subtle glow
+      else if (isHvn) {
+        ctx.shadowColor = hexToRgba('#22c55e', 0.4);
+        ctx.shadowBlur = 6;
+        ctx.fillStyle = hexToRgba('#22c55e', 0.7);
+        ctx.fillRect(x, y - barHeight / 2, 2, barHeight);
+        ctx.shadowBlur = 0;
+      }
+      // LVN: thin dim edge
+      else if (isLvn) {
+        ctx.fillStyle = hexToRgba('#f97316', 0.5);
+        ctx.fillRect(x, y - barHeight / 2, 1, barHeight);
+      }
+      // Normal edge
+      else {
+        ctx.fillStyle = hexToRgba(baseColor, baseAlpha * 0.8);
+        ctx.fillRect(x, y - barHeight / 2, 1, barHeight);
+      }
     });
   };
 
@@ -364,16 +443,18 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     const hasLeg = amt.legProfile && amt.legProfile.length > 0;
     const rightEdge = canvas.width - 50;
 
-    // Session profile (blue-tinted direction bars)
+    // Session profile (blue-tinted direction bars with HVN/LVN/VA zones)
     if (mode === 'session' || mode === 'combined') {
       const sessionOffset = (hasLeg && mode === 'combined') ? canvas.width * 0.12 : 0;
-      drawProfileBars(ctx, canvas, series, amt.profile, 0.15, sessionOffset, '#4488cc', '#cc4444', true);
+      drawProfileBars(ctx, canvas, series, amt.profile, 0.15, sessionOffset, '#4488cc', '#cc4444', true,
+        amt.hvns, amt.lvns, amt.valueAreaHigh, amt.valueAreaLow, amt.poc);
       drawVerticalLabel(ctx, canvas, 'SESSION PROFILE', rightEdge - sessionOffset - canvas.width * 0.08, '#6699cc');
     }
 
-    // Leg profile (orange/yellow bars) when displacement active
+    // Leg profile (amber/orange bars with leg-specific levels)
     if (hasLeg && (mode === 'leg' || mode === 'combined')) {
-      drawProfileBars(ctx, canvas, series, amt.legProfile, 0.10, 0, '#FF9900', '#FF6600', false);
+      drawProfileBars(ctx, canvas, series, amt.legProfile, 0.10, 0, '#FF9900', '#FF6600', false,
+        undefined, amt.legLvns, amt.legVah > 0 ? amt.legVah : undefined, amt.legVal > 0 ? amt.legVal : undefined, amt.legPoc > 0 ? amt.legPoc : undefined);
       drawVerticalLabel(ctx, canvas, 'LEG PROFILE', rightEdge - canvas.width * 0.05, '#FF9900');
     }
 
@@ -766,26 +847,26 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           title: 'VAL',
         }));
 
-        // LVN lines (orange dotted)
+        // LVN lines (amber dotted — thin, low-volume gaps)
         amtAnalysis.lvns?.forEach((lvn: number) => {
           amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
             price: lvn,
-            color: '#f97316',
+            color: '#fb923c',
             lineWidth: 1,
             lineStyle: LineStyle.Dotted,
-            axisLabelVisible: false,
+            axisLabelVisible: true,
             title: 'LVN',
           }));
         });
 
-        // HVN lines (green dotted)
+        // HVN lines (emerald dashed — high-volume support/resistance)
         amtAnalysis.hvns?.forEach((hvn: number) => {
           amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
             price: hvn,
-            color: '#22c55e',
-            lineWidth: 1,
-            lineStyle: LineStyle.Dotted,
-            axisLabelVisible: false,
+            color: '#34d399',
+            lineWidth: 2,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
             title: 'HVN',
           }));
         });
@@ -823,14 +904,14 @@ const ChartScene: React.FC<ChartSceneProps> = ({
             title: 'Leg VAL',
           }));
         }
-        // Leg LVN lines (yellow dotted)
+        // Leg LVN lines (warm yellow dotted)
         amtAnalysis.legLvns?.forEach((lvn: number) => {
           amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
             price: lvn,
-            color: '#FFCC00',
+            color: '#fbbf24',
             lineWidth: 1,
             lineStyle: LineStyle.Dotted,
-            axisLabelVisible: false,
+            axisLabelVisible: true,
             title: 'Leg LVN',
           }));
         });

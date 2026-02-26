@@ -20,7 +20,7 @@ from app.domain.trading.models.value_objects import OHLC, StrategyStats
 # ---------------------------------------------------------------------------
 
 INITIAL_CAPITAL: float = 1_000_000  # 10 lakhs INR
-LEVERAGE: int = 10
+LEVERAGE: int = 1
 RISK_PER_TRADE: float = 0.01
 MAX_HISTORY: int = 1000
 HISTORY_MIN_INTERVAL_SEC: float = 60.0
@@ -240,6 +240,12 @@ class Portfolio:
                     p.pnl for p in self.positions if p.is_open
                 )
 
+                # Track cumulative partial PnL for accurate final close accounting
+                if pos.metadata is None:
+                    pos.metadata = {}
+                prev_partial = pos.metadata.get("partial_realized_pnl", 0.0)
+                pos.metadata["partial_realized_pnl"] = prev_partial + partial_pnl
+
                 # Move stop to break-even on the Position entity
                 pos.stop_loss = pos.entry_price
 
@@ -248,14 +254,17 @@ class Portfolio:
 
     def close_position(self, position_id: str, price: float, reason: str = "LLM_EXIT") -> Position | None:
         """Close a specific position by ID at the given price.
-        
+
         Used by the LLM trading engine for manual exits.
         Returns the closed Position, or None if not found.
         """
         for i, pos in enumerate(self.positions):
             if pos.id == position_id and pos.is_open:
                 pos.close(price, datetime.utcnow().isoformat() + "Z", reason)
-                self.balance += pos.pnl
+                # Store realized partial PnL in closed trade record for accurate reporting
+                partial_realized = (pos.metadata or {}).get("partial_realized_pnl", 0.0)
+                pos.pnl += partial_realized  # combine partial + runner for display
+                self.balance += pos.pnl - partial_realized  # only credit runner portion (partial already credited)
                 self.closed_trades.append(pos)
                 # Trim to prevent unbounded growth throughout the day
                 if len(self.closed_trades) > 200:

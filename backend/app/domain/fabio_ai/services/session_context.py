@@ -152,6 +152,18 @@ _NY_START = 13
 _NY_END = 21
 
 
+def get_session(timestamp: str) -> str:
+    """Return global session name for a UTC timestamp string."""
+    from datetime import datetime as _dt
+    if isinstance(timestamp, str):
+        ts = _dt.fromisoformat(timestamp)
+    else:
+        ts = timestamp
+    utc_hour = ts.hour
+    name, _ = _get_global_session(utc_hour)
+    return name
+
+
 def _get_global_session(utc_hour: int) -> tuple[str, str]:
     """Returns (session_name, favor_strategy)."""
     in_london = _LONDON_START <= utc_hour < _LONDON_END

@@ -14,6 +14,7 @@ import logging
 import threading
 import time
 
+from app.config import Settings
 from app.domain.trading.models.value_objects import OHLC, OrderBook
 from app.domain.trading.models.aggregates import Portfolio
 from app.domain.trading.models.enums import Source
@@ -101,11 +102,19 @@ class TradingSessionService:
 
         # Focused handlers
         self._amt_handler = amt_handler or AMTHandler()
-        self._lifecycle_handler = TradeLifecycleHandler(
-            on_stop_out=self._on_stop_out,
-        )
         # Trading journal — comprehensive JSONL trade logging
         self._journal = TradeJournal()
+        self._forward_logger: ForwardTestLogger | None = None
+        try:
+            from app.application.services.forward_test_logger import ForwardTestLogger
+            self._forward_logger = ForwardTestLogger()
+        except Exception:
+            pass
+
+        self._lifecycle_handler = TradeLifecycleHandler(
+            on_stop_out=self._on_stop_out,
+            on_partial_exit=self._on_partial_exit,
+        )
 
         self._llm_handler = LLMEntryHandler(
             gen_ai_service, event_bus, storage=storage,
@@ -354,8 +363,13 @@ class TradingSessionService:
                     log.debug("Failed to save session profile", exc_info=True)
 
         # 1. AMT Analysis + Footprint
+        # Pass prior session data for gap/bias computation
+        prior = getattr(session, '_prior_profile', None)
         amt_result, amt_dto, fp_dto = self._amt_handler.analyze(
             list(event.data), event.order_book,
+            prior_poc=prior.get("poc", 0.0) if prior else 0.0,
+            prior_vah=prior.get("vah", 0.0) if prior else 0.0,
+            prior_val=prior.get("val", 0.0) if prior else 0.0,
         )
         session.last_amt = amt_dto
         session.last_footprint = fp_dto
@@ -407,15 +421,12 @@ class TradingSessionService:
                 ai_running=ai_running,
                 has_position=has_position,
             )
-            # Agent pipeline gates LLM: if agent says FLAT, LLM must not enter.
-            # This unifies the two decision paths — agent is the quant gate,
-            # LLM only fires when agent confirms a directional edge.
-            agent_blocks = (
-                agent_decision is not None
-                and (agent_decision.direction == "FLAT" or agent_decision.timing == "SKIP")
-            )
-            if agent_blocks:
-                log.info("Agent veto: %s/%s — blocking LLM entry", agent_decision.direction, agent_decision.timing)
+            # Agent pipeline advises LLM but does NOT block it.
+            # LLM is the Fabio-trained reasoning engine — it should always get
+            # a chance to evaluate regime changes and market structure, even when
+            # the quant agent sees no statistical edge. The agent fast-enters
+            # independently when it has high conviction (ENTER_NOW path below).
+            agent_blocks = False  # LLM runs independently of agent
             # Only evaluate entry on new candle boundaries — prevents signal spam
             # on mid-candle updates (150 updates per 5m candle from live feed).
             # Overseer still runs every ~10s for active position management.
@@ -445,6 +456,7 @@ class TradingSessionService:
         if (not has_position and not ai_running and _agent_cooldown_ok
                 and not getattr(session, '_pending_signal', None)
                 and agent_decision and agent_decision.direction != "FLAT"
+                and (Settings().ALLOW_SHORT or agent_decision.direction != "SHORT")
                 and agent_decision.timing == "ENTER_NOW"
                 and agent_decision.probability >= 0.55
                 and agent_decision.size_fraction > 0
@@ -570,7 +582,14 @@ class TradingSessionService:
             if sig.metadata is None:
                 sig.metadata = {}
             sig.metadata["option_strike"] = selected_strike
-            sig.metadata["option_type"] = "CE" if sig.is_buy else "PE"
+            # Derive option type from the active symbol (scanner already picked CE/PE)
+            _sym_upper = symbol.upper()
+            if "CALL" in _sym_upper or "CE" in _sym_upper:
+                sig.metadata["option_type"] = "CE"
+            elif "PUT" in _sym_upper or "PE" in _sym_upper:
+                sig.metadata["option_type"] = "PE"
+            else:
+                sig.metadata["option_type"] = "CE"  # fallback
             sig.metadata["option_underlying"] = underlying
             sig.metadata["option_lot_size"] = self._option_selector._lot_size_for(underlying)
             log.info("Option selection: %s %s %d", underlying,
@@ -621,6 +640,36 @@ class TradingSessionService:
                 except Exception:
                     log.debug("Failed to persist open position", exc_info=True)
 
+    def _on_partial_exit(
+        self, pos_id: str, side: str, entry_price: float, exit_price: float,
+        partial_pct: float, size_closed: float, size_remaining: float, realized_pnl: float,
+    ) -> None:
+        """Callback from TradeLifecycleHandler when a partial exit fires."""
+        # Find the symbol from any active session
+        symbol = ""
+        for sym, sess in self._sessions.items():
+            if any(p.id == pos_id for p in sess.portfolio.positions):
+                symbol = sym
+                break
+
+        self._journal.log_partial_exit(
+            symbol=symbol, position_id=pos_id, side=side,
+            entry_price=entry_price, exit_price=exit_price,
+            partial_pct=partial_pct, size_closed=size_closed,
+            size_remaining=size_remaining, realized_pnl=realized_pnl,
+        )
+        if self._forward_logger:
+            self._forward_logger.log_partial_exit(
+                symbol=symbol, position_id=pos_id,
+                partial_pct=partial_pct, size_closed=size_closed,
+                size_remaining=size_remaining, exit_price=exit_price,
+                realized_pnl=realized_pnl, exit_reason="PARTIAL_TAKE_PROFIT",
+            )
+        log.info(
+            "Journal: PARTIAL_EXIT pos=%s side=%s %d→%d @ %.2f pnl=%.2f",
+            pos_id, side, size_closed, size_remaining, exit_price, realized_pnl,
+        )
+
     def _on_stop_out(self, level: float, direction: str) -> None:
         """Callback from TradeLifecycleHandler when a position is stopped out (Rule 11)."""
         from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
@@ -643,6 +692,17 @@ class TradingSessionService:
         self._overseer_handler.reset_position_state()
         # Journal exit
         mp = self._lifecycle_handler.trade_manager._positions.get(pos.id)
+        # Calculate time in trade (entry_time and exit_time are ISO strings)
+        time_in_trade = 0.0
+        if pos.exit_time and pos.entry_time:
+            try:
+                from datetime import datetime as _dt
+                _exit = _dt.fromisoformat(pos.exit_time.replace("Z", "+00:00"))
+                _entry = _dt.fromisoformat(pos.entry_time.replace("Z", "+00:00"))
+                time_in_trade = (_exit - _entry).total_seconds()
+            except Exception:
+                time_in_trade = mp.tick_count * 0.5 if mp else 0.0  # fallback
+
         self._journal.log_exit(
             symbol=event.symbol,
             position_id=pos.id,
@@ -651,12 +711,20 @@ class TradingSessionService:
             exit_price=pos.exit_price or pos.entry_price,
             exit_reason=pos.close_reason or "UNKNOWN",
             pnl=pos.pnl,
-            time_in_trade_s=(pos.exit_time - pos.entry_time) if pos.exit_time and pos.entry_time else 0,
+            time_in_trade_s=time_in_trade,
             mfe=mp.mfe if mp else 0,
             mae=mp.mae if mp else 0,
             tick_count=mp.tick_count if mp else 0,
             amt=session.last_amt,
         )
+        if self._forward_logger:
+            self._forward_logger.log_exit(
+                symbol=event.symbol, position_id=pos.id,
+                pnl=pos.pnl, mfe=mp.mfe if mp else 0,
+                mae=mp.mae if mp else 0,
+                time_in_trade_s=time_in_trade,
+                exit_reason=pos.close_reason or "UNKNOWN",
+            )
         # Remove persisted open position (crash recovery cleanup)
         if self._storage:
             try:

@@ -7,7 +7,7 @@ load_dotenv()
 
 
 class Settings:
-    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3090", "http://127.0.0.1:3090", "http://localhost:5190", "http://127.0.0.1:5190"]
+    CORS_ORIGINS: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3030", "http://127.0.0.1:3030", "http://localhost:3090", "http://127.0.0.1:3090", "http://localhost:5190", "http://127.0.0.1:5190"]
 
     # Dhan Broker Config
     DHAN_CLIENT_ID: str = os.getenv("DHAN_CLIENT_ID", "")
@@ -23,6 +23,7 @@ class Settings:
     TRADING_MODE: str = os.getenv("TRADING_MODE", "PAPER")
     STREAM_INTERVAL: str = os.getenv("STREAM_INTERVAL", "5m")
     TICK_POLL_SECONDS: float = float(os.getenv("TICK_POLL_SECONDS", "5"))
+    ALLOW_SHORT: bool = os.getenv("ALLOW_SHORT", "false").lower() in ("true", "1", "yes")
 
     # LLM Inference Paths (fine-tuned model)
     LLM_BASE_MODEL_PATH: str = os.getenv(

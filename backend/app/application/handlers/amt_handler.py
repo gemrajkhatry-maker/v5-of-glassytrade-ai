@@ -58,6 +58,9 @@ class AMTHandler:
         self,
         data: list[OHLC],
         order_book: OrderBook | None = None,
+        prior_poc: float = 0.0,
+        prior_vah: float = 0.0,
+        prior_val: float = 0.0,
     ) -> tuple[AMTResult, dict, dict]:
         """Run AMT analysis and footprint generation.
 
@@ -103,6 +106,7 @@ class AMTHandler:
 
         amt_result = self._amt_analyzer.analyze(
             data, order_book, incremental_profile=self._inc_profile,
+            prior_poc=prior_poc, prior_vah=prior_vah, prior_val=prior_val,
         )
         amt_dto = amt_result_to_dto(amt_result)
 

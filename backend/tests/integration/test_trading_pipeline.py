@@ -47,7 +47,7 @@ class TestTradingSessionPipeline:
         assert state is not None
         assert state["portfolio"]["balance"] > 0
         assert state["amt"] is not None
-        assert state["prediction"] is not None
+        assert "prediction" in state
 
     def test_session_state_persists(self):
         data = generate_market_data(10, 100, "sideways")

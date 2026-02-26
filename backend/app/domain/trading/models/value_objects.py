@@ -141,6 +141,16 @@ class StrategyStats:
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
+class StackedImbalance:
+    """Consecutive footprint imbalance levels in one direction (volume bubble)."""
+    direction: str       # "BUY" or "SELL"
+    price_low: float
+    price_high: float
+    magnitude: int       # number of consecutive imbalance levels
+    candle_time: str
+
+
+@dataclass(frozen=True)
 class FootprintLevel:
     price: float
     bid: float  # Sell volume

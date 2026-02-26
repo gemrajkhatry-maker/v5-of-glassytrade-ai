@@ -71,6 +71,32 @@ class ForwardTestLogger:
         }
         self._write("exits", row)
 
+    def log_partial_exit(
+        self,
+        *,
+        symbol: str,
+        position_id: str,
+        partial_pct: float,
+        size_closed: float,
+        size_remaining: float,
+        exit_price: float,
+        realized_pnl: float,
+        exit_reason: str,
+    ) -> None:
+        """Log a partial exit."""
+        row = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "symbol": symbol,
+            "position_id": position_id,
+            "partial_pct": round(partial_pct, 2),
+            "size_closed": round(size_closed, 2),
+            "size_remaining": round(size_remaining, 2),
+            "exit_price": round(exit_price, 4),
+            "realized_pnl": round(realized_pnl, 4),
+            "exit_reason": exit_reason,
+        }
+        self._write("partial_exits", row)
+
     def _write(self, kind: str, row: dict) -> None:
         """Append a row to the daily CSV file for the given kind."""
         fname = os.path.join(self._log_dir, f"forward_{kind}_{date.today()}.csv")

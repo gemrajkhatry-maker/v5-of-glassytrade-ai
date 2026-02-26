@@ -22,6 +22,44 @@ logger = logging.getLogger(__name__)
 # Three-Align Gate
 # ------------------------------------------------------------------
 
+def cluster_aggressive_prints(
+    prints: tuple, cluster_pct: float = 0.001,
+) -> list[float]:
+    """Cluster prints within *cluster_pct* of each other, return VWAP of each cluster.
+
+    Caps at top 5 clusters by total volume.
+    """
+    if not prints:
+        return []
+
+    sorted_prints = sorted(prints, key=lambda p: p.price)
+    clusters: list[tuple[float, float]] = []  # (vwap, total_vol)
+
+    current_cluster: list[tuple[float, float]] = [
+        (sorted_prints[0].price, sorted_prints[0].volume)
+    ]
+
+    for p in sorted_prints[1:]:
+        ref_price = current_cluster[0][0]
+        if abs(p.price - ref_price) / ref_price <= cluster_pct:
+            current_cluster.append((p.price, p.volume))
+        else:
+            total_vol = sum(v for _, v in current_cluster)
+            vwap = sum(pr * v for pr, v in current_cluster) / total_vol
+            clusters.append((vwap, total_vol))
+            current_cluster = [(p.price, p.volume)]
+
+    # Finalize last cluster
+    if current_cluster:
+        total_vol = sum(v for _, v in current_cluster)
+        vwap = sum(pr * v for pr, v in current_cluster) / total_vol
+        clusters.append((vwap, total_vol))
+
+    # Cap at top 5 by volume
+    clusters.sort(key=lambda c: c[1], reverse=True)
+    return [c[0] for c in clusters[:5]]
+
+
 def three_align_check(
     data: list[OHLC],
     amt_result: AMTResult,
@@ -29,10 +67,13 @@ def three_align_check(
     order_book=None,
     ib_high: float = 0.0,
     ib_low: float = 0.0,
+    aggressive_levels: list[float] | None = None,
 ) -> bool:
     """Three-Align Gate: Market State + Location + Confirmation Bundle.
 
     All three conditions must pass before LLM fires.
+    *aggressive_levels* are clustered aggressive-print VWAPs that count
+    as structural levels for the near-level check.
     """
     if amt_result.poc <= 0 or amt_result.value_area_high <= 0 or amt_result.value_area_low <= 0:
         return False
@@ -66,6 +107,12 @@ def three_align_check(
             if ib_level > 0 and abs(tick.close - ib_level) < threshold:
                 near_level = True
                 break
+    # Aggressive print cluster levels as structural levels
+    if not near_level and aggressive_levels:
+        for agg_level in aggressive_levels:
+            if abs(tick.close - agg_level) < threshold:
+                near_level = True
+                break
 
     agg_ok = check_confirmation_bundle(data, tick, order_book)
     return state_ok and near_level and agg_ok
@@ -93,6 +140,24 @@ def check_confirmation_bundle(data: list[OHLC], tick: OHLC, order_book=None) -> 
     delta_ratio = abs(tick.delta) / tick.volume if tick.volume > 0 else 0
     delta_pressure = delta_ratio > 0.15
 
+    # Check for Momentum Fade (Fabio Rule: Do not fade a 2.5 sigma breakout candle with no rejection)
+    if vol_impulse and tick.volume > (ema_vol * 2.5):
+        # We are on a massive volume spike (>2.5x EMA)
+        body = abs(tick.close - tick.open)
+        upper_wick = tick.high - max(tick.open, tick.close)
+        lower_wick = min(tick.open, tick.close) - tick.low
+        # If the candle is a strong impulse (body is majority of the range, no strong rejection)
+        candle_range = tick.high - tick.low
+        if candle_range > 0 and body > (candle_range * 0.70):
+            # Bullish impulse, no upper rejection wick
+            if tick.close > tick.open and upper_wick < (body * 0.3):
+                # The LLM must NOT output SHORT against this. We block it by rejecting the bundle.
+                # However, this logic is purely functional, we just block the entry gate overall
+                # if there's extreme directional momentum that is counter to a mean reversion setup.
+                # To be precise, we shouldn't fail the "aggression" bundle here, we should add a separate gate.
+                # For now, we'll keep the logic simple, but we should probably decouple it.
+                pass # Let it pass the aggression check, we'll filter it in a new function
+
     spread_tight = False
     if order_book and order_book.bids and order_book.asks:
         best_bid = order_book.bids[0].price
@@ -110,6 +175,52 @@ def check_confirmation_bundle(data: list[OHLC], tick: OHLC, order_book=None) -> 
                  vol_impulse, delta_pressure, spread_tight, score)
     return score >= 2
 
+
+# ------------------------------------------------------------------
+# Momentum Fade Filter (Fabio Rule)
+# ------------------------------------------------------------------
+
+def check_momentum_fade(data: list[OHLC], tick: OHLC, direction: str) -> bool:
+    """Returns True if entry should be BLOCKED because it fades a freight train.
+    
+    Fabio Rule: Do not short a 2.5 sigma bullish impulse on the first touch
+    if it has no meaningful rejection wick. (Same for long on bearish impulse).
+    """
+    if not data or len(data) < 20 or tick.volume <= 0:
+        return False
+        
+    alpha = 2.0 / 21  # EMA(20)
+    ema_vol = data[-20].volume
+    for d in data[-19:]:
+        ema_vol = alpha * d.volume + (1.0 - alpha) * ema_vol
+        
+    # Is it a massive volume spike?
+    if tick.volume < (ema_vol * 2.5):
+        return False
+        
+    body = abs(tick.close - tick.open)
+    candle_range = tick.high - tick.low
+    
+    # Must be a strong directional candle (body is large part of range)
+    if candle_range <= 0 or body < (candle_range * 0.70):
+        return False
+        
+    upper_wick = tick.high - max(tick.open, tick.close)
+    lower_wick = min(tick.open, tick.close) - tick.low
+    
+    # Block SHORT entries against strong BULLISH momentum
+    if direction == "SHORT" and tick.close > tick.open:
+        if upper_wick < (body * 0.3):  # No meaningful rejection wick at the top
+            logger.warning("BLOCKED: Attempting to SHORT into 2.5σ bullish momentum without rejection!")
+            return True
+            
+    # Block LONG entries against strong BEARISH momentum
+    if direction == "LONG" and tick.close < tick.open:
+        if lower_wick < (body * 0.3):  # No meaningful rejection wick at the bottom
+            logger.warning("BLOCKED: Attempting to LONG into 2.5σ bearish momentum without rejection!")
+            return True
+            
+    return False
 
 # ------------------------------------------------------------------
 # Volatility Filter
@@ -287,6 +398,35 @@ def sl_from_aggressive_print(
 # Option Execution Gates
 # ------------------------------------------------------------------
 
+# ------------------------------------------------------------------
+# VWAP Bias Check
+# ------------------------------------------------------------------
+
+def check_vwap_bias(
+    direction: str, price: float, vwap: float,
+    vwap_upper_2: float, vwap_lower_2: float,
+) -> dict:
+    """Check VWAP bias for entry quality.
+
+    Returns {"warning": bool, "overextended": bool}.
+    - warning: True if entering against VWAP bias (LONG below VWAP, SHORT above).
+    - overextended: True if price is at or beyond the 2-sigma VWAP band.
+    """
+    warning = False
+    overextended = False
+    if direction == "LONG":
+        if price < vwap:
+            warning = True
+        if price >= vwap_upper_2:
+            overextended = True
+    elif direction == "SHORT":
+        if price > vwap:
+            warning = True
+        if price <= vwap_lower_2:
+            overextended = True
+    return {"warning": warning, "overextended": overextended}
+
+
 def check_iv_gate(current_iv: float, baseline_iv: float, max_ratio: float = 1.5) -> bool:
     """Returns True if entry should be BLOCKED due to elevated IV.
 
@@ -328,6 +468,28 @@ def classify_oi_action(price_change: float, oi_change: float) -> str:
         return "SHORT_COVER"
     else:  # price down and OI down
         return "LONG_UNWIND"
+
+
+def check_imbalance_alignment(direction: str, imbalances: list) -> int:
+    """Returns grade_score adjustment based on stacked imbalance alignment.
+
+    +1 if aligned (majority imbalances support direction),
+    -2 if opposing (majority imbalances oppose direction),
+     0 if empty or evenly mixed.
+    """
+    if not imbalances:
+        return 0
+    aligned = sum(
+        1 for im in imbalances
+        if (direction == "LONG" and im.direction == "BUY")
+        or (direction == "SHORT" and im.direction == "SELL")
+    )
+    opposing = len(imbalances) - aligned
+    if aligned > opposing:
+        return 1
+    if opposing > aligned:
+        return -2
+    return 0
 
 
 def check_theta_gate(

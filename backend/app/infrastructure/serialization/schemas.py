@@ -112,6 +112,33 @@ class AMTAnalysisDTO(BaseModel):
     leg_vah: float = Field(alias="legVah", default=0.0)
     leg_val: float = Field(alias="legVal", default=0.0)
     has_displacement: bool = Field(alias="hasDisplacement", default=False)
+    # Market structure (5-state classifier)
+    market_structure: str = Field(alias="marketStructure", default="BALANCE")
+    structure_confidence: int = Field(alias="structureConfidence", default=0)
+    # Initial Balance
+    ib_high: float = Field(alias="ibHigh", default=0.0)
+    ib_low: float = Field(alias="ibLow", default=0.0)
+    ib_complete: bool = Field(alias="ibComplete", default=False)
+    # Prior day levels
+    prior_poc: float = Field(alias="priorPoc", default=0.0)
+    prior_vah: float = Field(alias="priorVah", default=0.0)
+    prior_val: float = Field(alias="priorVal", default=0.0)
+    gap_type: str = Field(alias="gapType", default="")
+    opening_bias: str = Field(alias="openingBias", default="")
+    # Acceptance / Rejection
+    acceptance_above: bool = Field(alias="acceptanceAbove", default=False)
+    acceptance_below: bool = Field(alias="acceptanceBelow", default=False)
+    rejection_at_high: bool = Field(alias="rejectionAtHigh", default=False)
+    rejection_at_low: bool = Field(alias="rejectionAtLow", default=False)
+    price_velocity: float = Field(alias="priceVelocity", default=0.0)
+    # Break detection
+    break_direction: str = Field(alias="breakDirection", default="")
+    break_type: str = Field(alias="breakType", default="")
+    break_level: float = Field(alias="breakLevel", default=0.0)
+    # POC migration + LVN play
+    poc_signal: str = Field(alias="pocSignal", default="")
+    poc_vs_price: str = Field(alias="pocVsPrice", default="")
+    lvn_play: Optional[dict[str, Any]] = Field(alias="lvnPlay", default=None)
 
     model_config = {"populate_by_name": True}
 
@@ -182,7 +209,7 @@ class TradePositionDTO(BaseModel):
 class PortfolioDTO(BaseModel):
     balance: float
     equity: float
-    leverage: int = 10
+    leverage: int = 1
     positions: list[TradePositionDTO] = []
     closed_trades: list[TradePositionDTO] = Field(alias="closedTrades", default=[])
     history: list[dict[str, Any]] = []
@@ -337,6 +364,8 @@ def position_to_dto(p) -> dict:
         "status": p.status.value if hasattr(p.status, "value") else p.status,
         "exitPrice": p.exit_price, "exitTime": p.exit_time,
         "closeReason": p.close_reason, "metadata": p.metadata,
+        "partialRealizedPnl": (p.metadata or {}).get("partial_realized_pnl", 0.0),
+        "originalSize": (p.metadata or {}).get("full_size", p.size),
     }
 
 
@@ -405,6 +434,33 @@ def amt_result_to_dto(r) -> dict:
         "legVal": getattr(r, "leg_val", 0.0),
         "hasDisplacement": getattr(r, "has_displacement", False),
         "ofi": getattr(r, "ofi", 0.0),
+        # Market structure
+        "marketStructure": getattr(r, "market_structure", "BALANCE"),
+        "structureConfidence": getattr(r, "structure_confidence", 0),
+        # Initial Balance
+        "ibHigh": getattr(r, "ib_high", 0.0),
+        "ibLow": getattr(r, "ib_low", 0.0),
+        "ibComplete": getattr(r, "ib_complete", False),
+        # Prior day levels
+        "priorPoc": getattr(r, "prior_poc", 0.0),
+        "priorVah": getattr(r, "prior_vah", 0.0),
+        "priorVal": getattr(r, "prior_val", 0.0),
+        "gapType": getattr(r, "gap_type", ""),
+        "openingBias": getattr(r, "opening_bias", ""),
+        # Acceptance / Rejection
+        "acceptanceAbove": getattr(r, "acceptance_above", False),
+        "acceptanceBelow": getattr(r, "acceptance_below", False),
+        "rejectionAtHigh": getattr(r, "rejection_at_high", False),
+        "rejectionAtLow": getattr(r, "rejection_at_low", False),
+        "priceVelocity": getattr(r, "price_velocity", 0.0),
+        # Break detection
+        "breakDirection": getattr(r, "break_direction", ""),
+        "breakType": getattr(r, "break_type", ""),
+        "breakLevel": getattr(r, "break_level", 0.0),
+        # POC migration + LVN play
+        "pocSignal": getattr(r, "poc_signal", ""),
+        "pocVsPrice": getattr(r, "poc_vs_price", ""),
+        "lvnPlay": getattr(r, "lvn_play", None),
     }
 
 

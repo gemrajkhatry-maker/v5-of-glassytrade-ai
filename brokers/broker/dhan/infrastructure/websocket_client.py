@@ -120,7 +120,6 @@ class DhanWebSocketClient(IWebSocketClient):
 
         self._message_queue: Optional[asyncio.Queue] = None  # lazily initialized in connect()
         self._receive_task: Optional[asyncio.Task] = None
-        self._ping_task: Optional[asyncio.Task] = None
 
         self._subscriptions: Set[str] = set()
         self._current_feed_type: int = FEED_TYPE_FULL
@@ -172,6 +171,9 @@ class DhanWebSocketClient(IWebSocketClient):
         if self.is_connected:
             return
 
+        # Clean up any stale tasks from previous connection before reconnecting
+        await self._cancel_tasks()
+
         # Lazily create the queue inside a running event loop (Python 3.10+)
         if self._message_queue is None:
             self._message_queue = asyncio.Queue(maxsize=10000)
@@ -180,24 +182,31 @@ class DhanWebSocketClient(IWebSocketClient):
         logger.info(f"Connecting to Dhan market feed WS (clientId={self._client_id})")
 
         try:
+            # Dhan pings every 10s; server tolerates up to 40s silence.
+            # websockets library handles ping/pong automatically — no manual
+            # ping loop needed.  Set ping_timeout generous (40s) to avoid
+            # premature client-side closure when event loop is briefly busy
+            # (e.g. MLX inference running in thread pool).
             self._ws = await websockets.connect(
                 auth_url,
                 ping_interval=self._ping_interval,
-                ping_timeout=self._ping_interval * 2,
-                close_timeout=5.0,
+                ping_timeout=40.0,
+                close_timeout=10.0,
             )
             self._connected = True
             self._reconnect_count = 0
             logger.info("WebSocket connected successfully")
 
             self._receive_task = asyncio.create_task(self._receive_loop())
-            self._ping_task = asyncio.create_task(self._ping_loop())
 
             if self._subscriptions:
-                sids = list(self._subscriptions)
-                # Reconstruct per-instrument segments from persisted map (empty = NSE_EQ default)
-                segs = [self._sid_to_segment.get(sid, "NSE_EQ") for sid in sids]
-                await self._send_subscription(sids, self._current_feed_type, segs)
+                try:
+                    sids = list(self._subscriptions)
+                    segs = [self._sid_to_segment.get(sid, "NSE_EQ") for sid in sids]
+                    await self._send_subscription(sids, self._current_feed_type, segs)
+                except Exception as e:
+                    logger.error("Failed to replay subscriptions after reconnect: %s", e)
+                    # Don't fail the connection — caller can retry subscription
 
         except websockets.exceptions.InvalidStatus as e:
             if e.response.status_code == 401:
@@ -220,21 +229,23 @@ class DhanWebSocketClient(IWebSocketClient):
                 details={"error": str(e)},
             )
 
+    async def _cancel_tasks(self) -> None:
+        """Cancel and await background tasks (receive loop)."""
+        if self._receive_task and not self._receive_task.done():
+            self._receive_task.cancel()
+            try:
+                await self._receive_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        self._receive_task = None
+
     async def disconnect(self) -> None:
         """Close WebSocket connection and cancel background tasks."""
-        if not self._connected:
+        if not self._connected and self._ws is None:
             return
 
         logger.info("Disconnecting WebSocket…")
-        for task in (self._receive_task, self._ping_task):
-            if task:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
-        self._receive_task = None
-        self._ping_task = None
+        await self._cancel_tasks()
 
         if self._ws:
             try:
@@ -371,6 +382,8 @@ class DhanWebSocketClient(IWebSocketClient):
         """
         while True:
             try:
+                if self._message_queue is None:
+                    break
                 msg = await asyncio.wait_for(self._message_queue.get(), timeout=1.0)
                 # Terminal: max reconnect attempts exhausted
                 if msg.type == "disconnected" and "Max reconnection" in str(msg.data.get("reason", "")):
@@ -404,7 +417,7 @@ class DhanWebSocketClient(IWebSocketClient):
                 raw = await self._ws.recv()
                 for chunk in self._split_raw(raw):
                     msg = self._parse_message(chunk)
-                    if msg:
+                    if msg and self._message_queue:
                         try:
                             self._message_queue.put_nowait(msg)
                         except asyncio.QueueFull:
@@ -417,26 +430,17 @@ class DhanWebSocketClient(IWebSocketClient):
             except websockets.exceptions.ConnectionClosed as e:
                 logger.warning(f"WebSocket closed: {e}")
                 self._connected = False
+                self._ws = None  # Clear stale reference
                 await self._attempt_reconnect()
                 break
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logger.exception("Error receiving message: %s", e)
-                await self._message_queue.put(
-                    WSMessage(type="error", data={"error": str(e)}, timestamp=datetime.now())
-                )
-
-    async def _ping_loop(self) -> None:
-        while self.is_connected and self._ws:
-            try:
-                await asyncio.sleep(self._ping_interval)
-                if self._ws and self._ws.state is WSState.OPEN:
-                    await self._ws.ping()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.warning(f"Ping error: {e}")
+                if self._message_queue:
+                    await self._message_queue.put(
+                        WSMessage(type="error", data={"error": str(e)}, timestamp=datetime.now())
+                    )
 
     async def _attempt_reconnect(self) -> None:
         while self._reconnect_count < self._max_reconnect_attempts:
@@ -458,15 +462,25 @@ class DhanWebSocketClient(IWebSocketClient):
             try:
                 await self.connect()
                 return
+            except DhanWebSocketConnectionError as e:
+                # Check if rate limited — back off extra
+                details = getattr(e, 'details', {}) or {}
+                if details.get("status_code") == 429:
+                    extra_wait = min(delay * 2, 120.0)
+                    logger.warning("Rate limited (429) — extra backoff %.0fs", extra_wait)
+                    await asyncio.sleep(extra_wait)
+                else:
+                    logger.exception("Reconnect failed")
             except Exception:
                 logger.exception("Reconnect failed")
         logger.error("Max reconnection attempts reached")
-        await self._message_queue.put(
-            WSMessage(type="disconnected",
-                      data={"reason": "Max reconnection attempts reached",
-                            "attempts": self._reconnect_count},
-                      timestamp=datetime.now())
-        )
+        if self._message_queue:
+            await self._message_queue.put(
+                WSMessage(type="disconnected",
+                          data={"reason": "Max reconnection attempts reached",
+                                "attempts": self._reconnect_count},
+                          timestamp=datetime.now())
+            )
 
     # ------------------------------------------------------------------
     # Message parsing — binary protocol decoder

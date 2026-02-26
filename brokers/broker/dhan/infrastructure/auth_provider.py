@@ -410,9 +410,10 @@ class DhanAuthProvider(IAuthProvider):
         logger.info(f"Authenticating client: {client_id} via auth.dhan.co")
 
         try:
+            # Dhan uses query parameters, NOT JSON body
             response = _requests.post(
                 AUTH_GENERATE_TOKEN_URL,
-                json={
+                params={
                     "dhanClientId": client_id,
                     "pin": self._pin,
                     "totp": totp,
@@ -744,7 +745,7 @@ class DhanAuthProvider(IAuthProvider):
             except DhanAuthError as e:
                 error_msg = str(e).lower()
                 # Rate limit — set cooldown and stop retrying
-                if "2 minutes" in error_msg or "rate limit" in error_msg:
+                if "2 minutes" in error_msg or "rate limit" in error_msg or "too many" in error_msg:
                     self.__class__._token_generation_cooldown_until = time.time() + TOKEN_GENERATION_COOLDOWN_SECONDS
                     raise
                 # Invalid TOTP — try next window offset
@@ -762,6 +763,187 @@ class DhanAuthProvider(IAuthProvider):
         # All TOTP windows exhausted
         raise last_error or DhanAuthError(message="Token generation failed after all TOTP window retries")
     
+    def ensure_valid_token_sync(self, client_id: str | None = None) -> str:
+        """
+        Synchronous token management — called during broker creation.
+
+        Flow:
+        1. No token → generate via TOTP+PIN (produces APP token — WS only)
+        2. Token expired → try renew first (preserves SELF type), fallback to generate
+        3. Token near-expiry (<1h) → renew → save to .env
+        4. Token valid → return as-is
+
+        NOTE: generateAccessToken produces tokenConsumerType=APP tokens which
+        only work for WebSocket feeds. For REST API (orders, positions), you
+        need a SELF token from the Dhan web portal consent flow.
+        Renew preserves the original token type (SELF stays SELF).
+
+        This avoids asyncio entirely — uses sync HTTP (requests) which
+        the auth endpoints already use internally.
+        """
+        if client_id:
+            self._client_id = client_id
+
+        access_token = self._access_token
+
+        # 1. No token → generate (will be APP type — WS only)
+        if not access_token:
+            logger.warning(
+                "No access token available. Generating via TOTP (APP type — WS feeds only). "
+                "For REST API access, generate a SELF token from https://web.dhan.co"
+            )
+            return self._generate_token_sync()
+
+        # 2. Parse JWT exp
+        now = int(time.time())
+        exp_ts = self._jwt_exp_timestamp(access_token)
+
+        if exp_ts is None:
+            logger.debug("Token is not a JWT, assuming valid")
+            return access_token
+
+        seconds_to_expiry = exp_ts - now
+
+        # 3. Expired → try renew first (preserves SELF type), fallback to generate
+        if seconds_to_expiry <= 0:
+            logger.info(f"Token expired {-seconds_to_expiry}s ago")
+            # Try renew first — if it was a SELF token, renew keeps it SELF
+            try:
+                return self._refresh_token_sync()
+            except Exception:
+                logger.warning(
+                    "Renewal failed. Generating via TOTP (APP type — WS feeds only). "
+                    "For REST API, generate a SELF token from https://web.dhan.co"
+                )
+                return self._generate_token_sync()
+
+        # 4. Near expiry → try renew (preserves token type)
+        if seconds_to_expiry <= NEAR_EXPIRY_SECONDS:
+            logger.info(f"Token near expiry ({seconds_to_expiry}s remaining), renewing...")
+            try:
+                return self._refresh_token_sync()
+            except Exception as e:
+                logger.warning(f"Renewal failed ({e})")
+                if seconds_to_expiry > 60:
+                    return access_token  # still usable
+                return self._generate_token_sync()
+
+        # 5. Valid
+        logger.info(f"Token valid for {seconds_to_expiry}s ({seconds_to_expiry // 3600}h), reusing")
+        return access_token
+
+    def _generate_token_sync(self) -> str:
+        """Synchronous token generation via TOTP+PIN."""
+        if not self._totp_generator:
+            raise DhanAuthError(
+                message="Cannot generate token: TOTP secret not configured",
+                details={"hint": "Set TOTP_SECRET in .env"},
+            )
+        if not self._pin:
+            raise DhanAuthError(
+                message="Cannot generate token: PIN not configured",
+                details={"hint": "Set PIN in .env"},
+            )
+        if not self._client_id:
+            raise DhanAuthError(message="Cannot generate token: client_id not set")
+
+        # Check rate limit cooldown
+        now = time.time()
+        if now < self.__class__._token_generation_cooldown_until:
+            remaining = int(self.__class__._token_generation_cooldown_until - now)
+            raise DhanAuthError(
+                message=f"Rate limit: wait {remaining}s before generating a new token",
+            )
+
+        # Try TOTP with window offsets for clock drift
+        offsets = [0, -1, 1, -2, 2]
+        last_error = None
+
+        for offset in offsets:
+            try:
+                totp_code = self._totp_generator.generate(window_offset=offset)
+                if offset != 0:
+                    logger.debug(f"Retrying TOTP with window_offset={offset}")
+
+                # Dhan uses query parameters, NOT JSON body
+                response = _requests.post(
+                    AUTH_GENERATE_TOKEN_URL,
+                    params={
+                        "dhanClientId": self._client_id,
+                        "pin": self._pin,
+                        "totp": totp_code,
+                    },
+                    timeout=15,
+                )
+                data = response.json()
+
+                if response.status_code != 200 or data.get("status") == "error":
+                    error_msg = data.get("message", data.get("data", "Auth failed"))
+                    err = DhanAuthError(message=f"Auth failed: {error_msg}")
+                    error_lower = error_msg.lower()
+                    if "2 minutes" in error_lower or "rate limit" in error_lower or "too many" in error_lower:
+                        self.__class__._token_generation_cooldown_until = (
+                            time.time() + TOKEN_GENERATION_COOLDOWN_SECONDS
+                        )
+                        raise err
+                    if "invalid totp" in error_lower or "invalid otp" in error_lower:
+                        last_error = err
+                        continue
+                    raise err
+
+                token = (
+                    data.get("accessToken")
+                    or data.get("access_token")
+                    or data.get("token")
+                )
+                if not token:
+                    raise DhanAuthError(message="No access token in response")
+
+                self._access_token = token
+                self._authenticated_at = time.time()
+                self._refresh_attempt_count = 0
+                self._save_token_to_env(token)
+                logger.info("Token generated successfully via TOTP")
+                return token
+
+            except DhanAuthError:
+                raise
+            except Exception as e:
+                raise DhanAuthError(message=f"Token generation failed: {e}")
+
+        raise last_error or DhanAuthError(message="Token generation failed after all TOTP retries")
+
+    def _refresh_token_sync(self) -> str:
+        """Synchronous token renewal via Dhan RenewToken API."""
+        if not self._access_token or not self._client_id:
+            raise DhanAuthError(message="No token/client_id to refresh")
+
+        response = _requests.get(
+            RENEW_TOKEN_URL,
+            headers={
+                "access-token": self._access_token,
+                "dhanClientId": self._client_id,
+            },
+            timeout=15,
+        )
+        data = response.json()
+
+        if response.status_code == 401:
+            raise DhanTokenExpiredError(message="Session expired, need re-auth")
+        if response.status_code != 200:
+            raise DhanAuthError(message=data.get("message", "Renewal failed"))
+
+        token = data.get("accessToken") or data.get("access_token") or data.get("token")
+        if not token:
+            raise DhanAuthError(message="No token in renewal response")
+
+        self._access_token = token
+        self._authenticated_at = time.time()
+        self._refresh_attempt_count = 0
+        self._save_token_to_env(token)
+        logger.info("Token renewed successfully")
+        return token
+
     @classmethod
     def _save_token_to_env(cls, access_token: str) -> None:
         """Save access token to .env file for reuse across restarts."""

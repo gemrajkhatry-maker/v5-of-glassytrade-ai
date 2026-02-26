@@ -188,11 +188,12 @@ class TestSessionContext:
         assert opening_relation(90, 105, 95) == "OUT_BELOW"
 
     def test_session_info_london_favors_reversion(self):
+        # 04:30 UTC -> 10:00 IST -> NSE_PRIMARY
         info = get_session_info(
-            "2025-01-15T10:00:00+00:00", open_price=100, prior_vah=105, prior_val=95,
+            "2025-01-15T04:30:00+00:00", open_price=100, prior_vah=105, prior_val=95,
         )
-        assert info.session == "LONDON"
-        assert info.favor_strategy == "MEAN_REVERSION"
+        assert info.session == "NSE_PRIMARY"
+        assert info.favor_strategy == "TREND_CONTINUATION"
 
 
 # ===================================
@@ -380,9 +381,9 @@ class TestAMTObservation:
         obs = analyzer.compute_observation(data)
         assert isinstance(obs, AMTObservation)
         assert isinstance(obs.dist_to_poc, float)
-        assert obs.profile_shape in ("D", "P", "b")
+        assert obs.profile_shape in ("D", "P", "b", "B", "")
         assert obs.poc_migration in ("RISING", "FALLING", "STABLE")
-        assert obs.session in ("ASIA", "LONDON", "NEW_YORK", "OVERLAP")
+        assert obs.session in ("ASIA", "LONDON", "NEW_YORK", "OVERLAP", "PRE_MARKET", "NSE_PRIMARY", "NSE_MIDDAY", "NSE_POWER_HOUR", "POST_MARKET")
 
     def test_observation_with_order_book(self):
         from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer

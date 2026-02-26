@@ -560,3 +560,115 @@ def test_session_time_stop_afternoon_balanced():
         is_expiry=False, time_to_close=0.0,
     )
     assert stop == 900.0
+
+
+# ---- VWAP Trail Tests ----
+
+def test_vwap_trail_at_1_5r_long():
+    """At 1.5R profit, SL moves to nearest VWAP band above entry."""
+    mgr = TradeManager()
+    # Entry=100, SL=95 -> risk=5. 1.5R profit at price=107.5
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0, allow_trail=True)
+    # VWAP bands: vwap=100, upper1=103, upper2=106, lower1=97, lower2=94
+    mgr.apply_vwap_trail(
+        "P1", current_price=107.5,
+        vwap=100.0, vwap_upper_1=103.0, vwap_lower_1=97.0,
+        vwap_upper_2=106.0, vwap_lower_2=94.0,
+    )
+    mp = mgr._positions["P1"]
+    # Should trail to highest band below price and above entry: 106
+    # But 1.5R floor = 100 + 7.5 = 107.5, so floor dominates
+    assert mp.stop_loss >= 107.5
+
+
+def test_vwap_trail_at_2sigma_tighten():
+    """At 2 sigma overextension, SL tightened to 50% of current distance."""
+    mgr = TradeManager()
+    # Entry=100, SL=95 -> risk=5.
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0, allow_trail=True)
+    # Price at vwap_upper_2 (110) -> overextended, triggers 2sigma tighten
+    # unrealised_r = (110 - 100) / 5 = 2.0 >= 1.5
+    mgr.apply_vwap_trail(
+        "P1", current_price=110.0,
+        vwap=100.0, vwap_upper_1=103.0, vwap_lower_1=97.0,
+        vwap_upper_2=110.0, vwap_lower_2=90.0,
+    )
+    mp = mgr._positions["P1"]
+    # 2sigma tighten: current_distance = 110 - 95 = 15, tightened = 110 - 7.5 = 102.5
+    # 1.5R floor = 100 + 7.5 = 107.5
+    # max(107.5, 102.5) = 107.5
+    assert mp.stop_loss >= 107.5
+
+
+# ---- Imbalance Tighten Tests (Task 21) ----
+
+class TestImbalanceTighten:
+    def test_opposing_imbalance_tightens_sl_long(self):
+        """LONG position + SELL imbalance -> SL tightened by 30% of distance."""
+        from app.domain.trading.models.value_objects import StackedImbalance
+        mgr = TradeManager()
+        mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+        imbalances = [
+            StackedImbalance(direction="SELL", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+        ]
+        result = mgr.check_imbalance_tighten("P1", imbalances, current_price=102.0)
+        assert result is True
+        mp = mgr._positions["P1"]
+        # distance = 102 - 95 = 7, tighten by 30% = 2.1, new SL = 95 + 2.1 = 97.1
+        assert mp.stop_loss == pytest.approx(97.1)
+
+    def test_aligned_imbalance_no_tighten(self):
+        """LONG position + BUY imbalance -> no tighten."""
+        from app.domain.trading.models.value_objects import StackedImbalance
+        mgr = TradeManager()
+        mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+        imbalances = [
+            StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+        ]
+        result = mgr.check_imbalance_tighten("P1", imbalances, current_price=102.0)
+        assert result is False
+        assert mgr._positions["P1"].stop_loss == 95.0
+
+    def test_no_imbalances_no_tighten(self):
+        """Empty list -> False."""
+        mgr = TradeManager()
+        mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+        assert mgr.check_imbalance_tighten("P1", [], current_price=102.0) is False
+
+    def test_unknown_position_returns_false(self):
+        """Bad position_id -> False."""
+        mgr = TradeManager()
+        assert mgr.check_imbalance_tighten("UNKNOWN", [], current_price=102.0) is False
+
+    def test_opposing_imbalance_tightens_sl_short(self):
+        """SHORT position + BUY imbalance -> SL tightened by 30%."""
+        from app.domain.trading.models.value_objects import StackedImbalance
+        mgr = TradeManager()
+        mgr.register_position("P1", "SHORT", 100.0, 105.0, 90.0)
+        imbalances = [
+            StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+        ]
+        result = mgr.check_imbalance_tighten("P1", imbalances, current_price=98.0)
+        assert result is True
+        mp = mgr._positions["P1"]
+        # distance = 105 - 98 = 7, tighten by 30% = 2.1, new SL = 105 - 2.1 = 102.9
+        assert mp.stop_loss == pytest.approx(102.9)
+
+
+def test_vwap_trail_cap_at_1_5r():
+    """High-vol wide bands: trail capped at 1.5R distance from entry."""
+    mgr = TradeManager()
+    # Entry=100, SL=95 -> risk=5
+    mgr.register_position("P1", "LONG", 100.0, 95.0, 120.0, allow_trail=True)
+    # Very wide VWAP bands — nearest valid band is far below
+    # Price at 108 -> unrealised_r = 8/5 = 1.6 >= 1.5
+    mgr.apply_vwap_trail(
+        "P1", current_price=108.0,
+        vwap=100.0, vwap_upper_1=101.0, vwap_lower_1=99.0,
+        vwap_upper_2=102.0, vwap_lower_2=98.0,
+    )
+    mp = mgr._positions["P1"]
+    # Valid bands below price and above entry: 100, 101, 102
+    # max valid = 102, but 1.5R floor = 100 + 7.5 = 107.5
+    # max(102, 107.5) = 107.5
+    assert mp.stop_loss >= 107.5

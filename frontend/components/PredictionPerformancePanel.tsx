@@ -127,7 +127,7 @@ const PredictionPerformancePanel: React.FC<PredictionPerformancePanelProps> = ({
                     <div className="flex justify-between items-end mb-1">
                         <span className="text-xs text-white/60">Current PnL</span>
                         <span className={`font-mono text-lg font-bold ${activeTrade.pnl >= 0 ? 'text-white' : 'text-red-300'}`}>
-                            {activeTrade.pnl >= 0 ? '+' : ''}${activeTrade.pnl.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                            {activeTrade.pnl >= 0 ? '+' : ''}₹{activeTrade.pnl.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                         </span>
                     </div>
 

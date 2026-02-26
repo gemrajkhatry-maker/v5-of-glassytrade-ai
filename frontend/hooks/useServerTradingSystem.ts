@@ -60,6 +60,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     const [instruments, setInstruments] = useState<Record<string, InstrumentState>>({});
     const [activeSymbol, setActiveSymbol] = useState<string>('');
     const [connected, setConnected] = useState(false);
+    const [connectionStatus, setConnectionStatus] = useState<string>('');
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const latestFootprint = useRef<Record<string, FootprintCandle> | null>(null);
@@ -119,6 +120,13 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     const handleWsMessage = useCallback((event: MessageEvent) => {
         try {
             const state = JSON.parse(event.data);
+
+            // Handle backend error messages
+            if (state.error) {
+                console.error('[TradingSystem] Backend error:', state.error);
+                setConnectionStatus(state.error);
+                return;
+            }
 
             // Server mode init
             if (state.status === 'server_mode') {
@@ -242,6 +250,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             console.log('[TradingSystem] WS connected');
             setRetryCount(0);
             setConnected(true);
+            setConnectionStatus('');
 
             // Subscribe to server-driven stream
             if (activeSymbol) {
@@ -256,6 +265,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             setConnected(false);
             if (e.code !== 1000 && wsRef.current) {
                 const delay = Math.min(500 * Math.pow(2, retryCount), 5000);
+                setConnectionStatus(`Disconnected — reconnecting in ${Math.round(delay / 1000)}s...`);
                 console.warn(`[TradingSystem] WS disconnected, reconnecting in ${delay}ms…`);
                 reconnectTimer.current = setTimeout(() => {
                     setRetryCount(c => c + 1);
@@ -310,5 +320,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             cumulativeDeltas,
         },
         connected,
+        connectionStatus,
     };
 };

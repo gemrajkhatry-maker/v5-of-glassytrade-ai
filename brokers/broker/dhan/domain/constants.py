@@ -230,7 +230,7 @@ WS_PING_INTERVAL_SECONDS: float = 30.0
 WS_RECONNECT_DELAY_SECONDS: float = 5.0
 
 # Maximum reconnection attempts
-WS_MAX_RECONNECT_ATTEMPTS: int = 10
+WS_MAX_RECONNECT_ATTEMPTS: int = 30
 
 
 # =============================================================================

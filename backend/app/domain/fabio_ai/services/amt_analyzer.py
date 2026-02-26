@@ -26,7 +26,9 @@ from app.domain.fabio_ai.services.profile_classifier import (
     classify_shape, POCMigrationTracker,
 )
 from app.domain.fabio_ai.services.market_structure_classifier import MarketStructureClassifier
-from app.domain.fabio_ai.services.session_context import get_session_info
+from app.domain.fabio_ai.services.session_context import (
+    classify_gap, get_session_info, opening_inventory_bias,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -944,6 +946,9 @@ class AMTAnalyzer:
         data: list[OHLC],
         order_book: OrderBook | None = None,
         incremental_profile: IncrementalVolumeProfile | None = None,
+        prior_poc: float = 0.0,
+        prior_vah: float = 0.0,
+        prior_val: float = 0.0,
     ) -> AMTResult:
         """Run the full AMT analysis pipeline."""
         empty = AMTResult(
@@ -1064,7 +1069,10 @@ class AMTAnalyzer:
 
         # Require EITHER (displacement + acceptance) OR low balance ratio + acceptance
         # OR persistent price outside VA (slow drift / sustained breakout)
-        if (has_displacement and has_acceptance) or (ratio_imbalanced and has_acceptance):
+        # Safety override: zero candles in VA = definitive imbalance
+        if balance_ratio == 0.0 and balance_window >= 5:
+            market_state = MarketState.IMBALANCED
+        elif (has_displacement and has_acceptance) or (ratio_imbalanced and has_acceptance):
             market_state = MarketState.IMBALANCED
 
         # Persistent outside-VA check: if price is clearly outside VA without
@@ -1228,11 +1236,19 @@ class AMTAnalyzer:
             ib_high=ib_high,
             ib_low=ib_low if ib_low != float("inf") else 0.0,
             ib_complete=ib_complete,
-            prior_poc=0.0,
-            prior_vah=0.0,
-            prior_val=0.0,
-            gap_type="",
-            opening_bias="",
+            prior_poc=prior_poc,
+            prior_vah=prior_vah,
+            prior_val=prior_val,
+            gap_type=classify_gap(
+                open_price=data[0].open if data else 0.0,
+                prior_close=prior_poc,  # Use POC as proxy for prior close
+                prior_range=prior_vah - prior_val if prior_vah > 0 and prior_val > 0 else 0.0,
+            ) if prior_poc > 0 else "",
+            opening_bias=opening_inventory_bias(
+                open_price=data[0].open if data else 0.0,
+                prior_vah=prior_vah,
+                prior_val=prior_val,
+            ) if prior_vah > 0 else "",
             acceptance_above=ar_state["acceptance_above"],
             acceptance_below=ar_state["acceptance_below"],
             rejection_at_high=ar_state["rejection_at_high"],

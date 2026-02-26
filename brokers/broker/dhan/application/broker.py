@@ -160,10 +160,9 @@ class DhanBroker(IBrokerPort):
         if not access_token:
             access_token = env_config.access_token if env_config else None
 
-        if not client_id or not access_token:
+        if not client_id:
             raise ValueError(
-                "Dhan credentials not provided. Either pass client_id and access_token, "
-                "or set DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN environment variables."
+                "Dhan client_id not provided. Pass client_id or set DHAN_CLIENT_ID."
             )
 
         # Build config: merge env defaults with explicit overrides
@@ -172,8 +171,47 @@ class DhanBroker(IBrokerPort):
             config_kwargs["totp_secret"] = env_config.totp_secret
             config_kwargs["pin"] = env_config.pin
         config_kwargs.update(kwargs)
-        config = DhanConfig(client_id=client_id, access_token=access_token, **config_kwargs)
 
+        # Allow empty access_token — auth provider will handle it
+        config = DhanConfig(
+            client_id=client_id,
+            access_token=access_token or "",
+            **config_kwargs,
+        )
+
+        # -----------------------------------------------------------------
+        # Token management: ensure valid token BEFORE building clients
+        # Flow: valid token → reuse | near-expiry → renew | expired/empty → generate
+        # -----------------------------------------------------------------
+        from brokers.broker.dhan.infrastructure.auth_provider import DhanAuthProvider
+        auth_provider = DhanAuthProvider(http_client=None)  # no HTTP client yet
+
+        if config.totp_secret:
+            auth_provider.set_totp_secret(config.totp_secret)
+        if config.pin:
+            auth_provider.set_pin(config.pin)
+
+        if config.access_token:
+            auth_provider.set_token(
+                access_token=config.access_token,
+                client_id=config.client_id,
+            )
+
+        # Only run token flow if token is missing or expired
+        valid_token = config.access_token
+        if not valid_token or auth_provider.is_expired:
+            valid_token = auth_provider.ensure_valid_token_sync(client_id=client_id)
+        else:
+            logger.info("Existing token is valid, skipping auth flow")
+
+        # Rebuild config with the valid token
+        if valid_token != config.access_token:
+            config = config.with_access_token(valid_token)
+            logger.info("Token refreshed/generated during broker creation")
+
+        # -----------------------------------------------------------------
+        # Build infrastructure clients with valid token
+        # -----------------------------------------------------------------
         from brokers.broker.dhan.infrastructure import (
             DhanHttpClient,
             DhanWebSocketClient,
@@ -192,7 +230,7 @@ class DhanBroker(IBrokerPort):
             ws_url=config.ws_url,
             access_token=config.access_token,
             client_id=config.client_id,
-            auth_provider=None,  # set below after auth_provider is created
+            auth_provider=None,  # set below
         )
 
         symbol_mapper = DhanSymbolMapper()
@@ -201,18 +239,8 @@ class DhanBroker(IBrokerPort):
         from brokers.broker.dhan.infrastructure.resilience import DhanCircuitBreaker
         circuit_breaker = DhanCircuitBreaker()
 
-        # Wire auth provider for auto token refresh / TOTP regeneration
-        from brokers.broker.dhan.infrastructure.auth_provider import DhanAuthProvider
-        auth_provider = DhanAuthProvider(http_client=http_client)
-        auth_provider.set_token(
-            access_token=config.access_token,
-            client_id=config.client_id,
-        )
-        if config.totp_secret:
-            auth_provider.set_totp_secret(config.totp_secret)
-        if config.pin:
-            auth_provider.set_pin(config.pin)
-        # Connect auth_provider to HTTP + WS clients
+        # Connect auth_provider to HTTP + WS clients for runtime refresh
+        auth_provider._http = http_client
         http_client._auth_provider = auth_provider
         ws_client._auth_provider = auth_provider
 

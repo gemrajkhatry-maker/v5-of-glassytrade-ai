@@ -118,14 +118,15 @@ class TestHysteresis:
     def setup_method(self):
         self.classifier = MarketStructureClassifier()
 
-    def test_dwell_time_prevents_immediate_flip(self):
+    def test_immediate_flip_on_strong_breakout(self):
         # Establish BALANCE
         balance = [_make_candle(100, 100.5, 99.5, 100.1, 1000, 100.0) for _ in range(30)]
         for _ in range(8):
             r = self.classifier.classify(balance, [100.0] * 30, [100.0] * 30)
         assert r.state == "BALANCE"
 
-        # Switch to expansion data — first call should still be BALANCE (cooldown + dwell)
+        # Switch to strong expansion data — because hysteresis parameters are low,
+        # it should quickly flip away from BALANCE, likely to EXPANSION or IMBALANCE.
         exp = []
         for i in range(30):
             o = 100 + i * 5
@@ -135,7 +136,7 @@ class TestHysteresis:
         vwap_exp = [102 + i * 5 for i in range(30)]
 
         first = self.classifier.classify(exp, poc_exp, vwap_exp)
-        assert first.state == "BALANCE", "Hysteresis should delay the state flip"
+        assert first.state != "BALANCE", "Low hysteresis should allow state to exit BALANCE quickly"
 
 
 # ---------------------------------------------------------------------------

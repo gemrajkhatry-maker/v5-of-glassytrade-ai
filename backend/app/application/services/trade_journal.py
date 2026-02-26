@@ -217,6 +217,40 @@ class TradeJournal:
         )
         self._write(entry)
 
+    def log_partial_exit(
+        self,
+        *,
+        symbol: str,
+        position_id: str,
+        side: str,
+        entry_price: float,
+        exit_price: float,
+        partial_pct: float,
+        size_closed: float,
+        size_remaining: float,
+        realized_pnl: float,
+        amt: dict | None = None,
+    ) -> None:
+        """Log a partial position close (e.g. 50% at TP1)."""
+        pnl_pct = (realized_pnl / entry_price * 100) if entry_price > 0 else 0.0
+        entry = JournalEntry(
+            timestamp=self._now_ist(),
+            event_type="PARTIAL_EXIT",
+            symbol=symbol,
+            position_id=position_id,
+            side=side,
+            entry_price=entry_price,
+            exit_price=exit_price,
+            exit_reason=f"PARTIAL_{partial_pct:.0%}",
+            pnl=round(realized_pnl, 4),
+            pnl_pct=round(pnl_pct, 4),
+            **self._market_fields(amt),
+        )
+        # Store size info in metadata-like fields
+        entry.stop_loss = size_closed  # repurpose for CSV compat
+        entry.take_profit = size_remaining
+        self._write(entry)
+
     def log_overseer(
         self,
         *,
@@ -274,6 +308,7 @@ class TradeJournal:
         """Return trade summary for a given date."""
         entries = self.read_entries(target_date)
         exits = [e for e in entries if e.get("event_type") == "EXIT"]
+        partials = [e for e in entries if e.get("event_type") == "PARTIAL_EXIT"]
         signals = [e for e in entries if e.get("event_type") == "SIGNAL_GENERATED"]
         rejections = [e for e in entries if e.get("event_type") == "ENTRY_REJECTED"]
 
@@ -297,4 +332,6 @@ class TradeJournal:
             ) if exits else 0.0,
             "avg_mfe": round(sum(e.get("mfe", 0) for e in exits) / len(exits), 4) if exits else 0.0,
             "avg_mae": round(sum(e.get("mae", 0) for e in exits) / len(exits), 4) if exits else 0.0,
+            "total_partial_exits": len(partials),
+            "total_partial_pnl": round(sum(e.get("pnl", 0) for e in partials), 4),
         }

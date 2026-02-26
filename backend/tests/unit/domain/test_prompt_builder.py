@@ -9,7 +9,8 @@ from app.domain.fabio_ai.services.prompt_builder import (
     compute_tighten_sl,
     OverseerAction,
 )
-from app.domain.trading.models.value_objects import OHLC, AMTResult
+from app.domain.trading.models.value_objects import OHLC, AMTResult, FootprintCandle, FootprintLevel
+from app.domain.fabio_ai.services.session_context import SessionInfo
 
 
 def _tick(close=100, delta=50, volume=500, vwap=100):
@@ -125,3 +126,86 @@ class TestComputeTightenSL:
     def test_short_midpoint(self):
         sl = compute_tighten_sl({"side": "SHORT", "current_price": 90, "stop_loss": 110})
         assert sl == 100.0
+
+
+class TestOverseerContextEnrichment:
+    """Tests for overseer prompt enrichment with session, profile, OI, footprint data."""
+
+    def _session_info(self, **overrides):
+        defaults = dict(
+            session="NSE_PRIMARY", phase=2, is_london=False, is_new_york=False,
+            opening_relation="IN_BALANCE", favor_strategy="TREND_CONTINUATION",
+            allow_entry=True, allow_trend=True, allow_reversion=True,
+            force_exit=False, market="NSE",
+        )
+        defaults.update(overrides)
+        return SessionInfo(**defaults)
+
+    def test_prompt_includes_session_phase(self):
+        """Session info provided -> prompt contains session line."""
+        si = self._session_info(session="NSE_PRIMARY", phase=2, favor_strategy="TREND_CONTINUATION")
+        prompt = build_overseer_prompt(_pos_state(), _tick(), _amt(), session_info=si)
+        assert "Session: NSE_PRIMARY" in prompt
+        assert "TREND_CONTINUATION" in prompt
+
+    def test_prompt_includes_profile_shape(self):
+        """AMTResult with profile_shape='b' -> prompt contains 'Profile shape: b'."""
+        amt = _amt()
+        # Create AMTResult with profile_shape set
+        amt = AMTResult(
+            market_state="BALANCED", poc=100, value_area_high=105,
+            value_area_low=95, profile_shape="b",
+        )
+        prompt = build_overseer_prompt(_pos_state(), _tick(), amt)
+        assert "Profile shape: b" in prompt
+
+    def test_prompt_includes_oi_pcr(self):
+        """OI analysis dict provided -> prompt contains OI interpretation and PCR."""
+        oi = {"interpretation": "LONG_BUILD", "pcr": 1.25}
+        prompt = build_overseer_prompt(_pos_state(), _tick(), _amt(), oi_analysis=oi)
+        assert "LONG_BUILD" in prompt
+        assert "1.25" in prompt
+
+    def test_prompt_includes_stacked_imbalances(self):
+        """Footprint with stacked levels -> prompt contains imbalance text."""
+        # Create footprint candle with stacked imbalance levels
+        levels = tuple(
+            FootprintLevel(price=100 + i, bid=10, ask=50, delta=40, imbalance=True, stacked=True)
+            for i in range(4)
+        )
+        fp = FootprintCandle(time="t", levels=levels, poc_price=102, total_delta=160, step_price=1.0)
+        prompt = build_overseer_prompt(_pos_state(), _tick(), _amt(), footprint_candle=fp)
+        assert "Stacked imbalances" in prompt
+
+    def test_prompt_includes_lvn_play(self):
+        """AMTResult with lvn_play -> prompt contains LVN play info."""
+        amt = AMTResult(
+            market_state="BALANCED", poc=100, value_area_high=105,
+            value_area_low=95,
+            lvn_play={"direction": "LONG", "lvn_price": 98.0,
+                      "velocity_ratio": 2.1, "has_rejection": True,
+                      "has_delta_flip": False, "target": 103.0},
+        )
+        prompt = build_overseer_prompt(_pos_state(), _tick(), amt)
+        assert "LVN PLAY" in prompt
+        assert "LONG" in prompt
+
+    def test_missing_sources_no_crash(self):
+        """All optional params None -> prompt still valid, no crash."""
+        prompt = build_overseer_prompt(_pos_state(), _tick(), _amt())
+        assert isinstance(prompt, str)
+        assert "Open LONG" in prompt
+        assert "JSON" in prompt
+
+    def test_existing_overseer_prompt_unchanged(self):
+        """Without new params, prompt output identical to before (regression)."""
+        # Call without any new params — should produce same output as original
+        prompt_new = build_overseer_prompt(_pos_state(), _tick(), _amt())
+        # Verify core sections still present
+        assert "Open LONG position" in prompt_new
+        assert "Market state:" in prompt_new
+        assert "Respond ONLY with a JSON" in prompt_new
+        # Verify no enrichment sections leaked in
+        assert "Session:" not in prompt_new
+        assert "Profile shape:" not in prompt_new
+        assert "Stacked imbalances" not in prompt_new

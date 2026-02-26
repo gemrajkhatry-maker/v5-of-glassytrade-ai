@@ -13,7 +13,8 @@ from typing import TYPE_CHECKING, Any, Dict, Literal, Optional
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.value_objects import OHLC, AMTResult
+    from app.domain.trading.models.value_objects import OHLC, AMTResult, FootprintCandle
+    from app.domain.fabio_ai.services.session_context import SessionInfo
 
 logger = logging.getLogger(__name__)
 
@@ -275,9 +276,15 @@ def build_entry_prompt(data: Dict[str, Any]) -> str:
 
     narrative = " ".join(parts)
 
+    from app.config import settings
+    if settings.ALLOW_SHORT:
+        dir_choices = '"LONG" | "SHORT" | "FLAT"'
+    else:
+        dir_choices = '"LONG" | "FLAT"'
+
     json_instruction = (
         "\n\nRespond ONLY with a JSON object:\n"
-        '{"direction": "LONG" | "SHORT" | "FLAT", '
+        '{"direction": ' + dir_choices + ', '
         '"rationale": "<brief explanation referencing market state + location + aggression>", '
         '"confidence": "High" | "Medium" | "Low", '
         '"market_state": "<Balance or Imbalance>"}'
@@ -452,6 +459,9 @@ class OverseerAction(BaseModel):
 
 def build_overseer_prompt(
     pos_state: dict, tick: OHLC, amt_result: AMTResult,
+    session_info: SessionInfo | None = None,
+    footprint_candle: FootprintCandle | None = None,
+    oi_analysis: dict | None = None,
 ) -> str:
     """Build rich context prompt for position management."""
     side = pos_state["side"]
@@ -525,6 +535,45 @@ def build_overseer_prompt(
             parts.append(f"Exit probability model: {ep:.0%} chance of adverse move — consider exiting.")
         else:
             parts.append(f"Exit probability model: {ep:.0%} chance of adverse move — low risk.")
+
+    # ── ENRICHMENT: Session info ─────────────────────────────────────
+    if session_info is not None:
+        parts.append(f"Session: {session_info.session}. Favor {session_info.favor_strategy}.")
+
+    # ── ENRICHMENT: Profile shape from AMTResult ─────────────────────
+    if amt_result.profile_shape:
+        parts.append(f"Profile shape: {amt_result.profile_shape}.")
+
+    # ── ENRICHMENT: LVN play from AMTResult ──────────────────────────
+    if amt_result.lvn_play:
+        lp = amt_result.lvn_play
+        parts.append(
+            f"LVN PLAY: {lp['direction']} at {lp['lvn_price']:.0f} "
+            f"(vel {lp['velocity_ratio']:.1f}x, "
+            f"rej={'Y' if lp['has_rejection'] else 'N'}, "
+            f"flip={'Y' if lp['has_delta_flip'] else 'N'}) "
+            f"-> target {lp['target']:.0f}."
+        )
+
+    # ── ENRICHMENT: OI analysis ──────────────────────────────────────
+    if oi_analysis is not None:
+        oi_interp = oi_analysis.get("interpretation", "")
+        oi_pcr = oi_analysis.get("pcr", 0)
+        parts.append(f"OI: {oi_interp}. PCR: {oi_pcr}.")
+
+    # ── ENRICHMENT: Stacked imbalances from footprint ────────────────
+    if footprint_candle is not None and footprint_candle.levels:
+        stacked_levels = [lv for lv in footprint_candle.levels if lv.stacked]
+        if stacked_levels:
+            # Determine direction from net delta of stacked levels
+            net_delta = sum(lv.delta for lv in stacked_levels)
+            direction = "buy" if net_delta > 0 else "sell"
+            prices = [lv.price for lv in stacked_levels]
+            price_range = f"{min(prices):.0f}-{max(prices):.0f}"
+            parts.append(
+                f"Stacked imbalances: {len(stacked_levels)} consecutive "
+                f"{direction} imbalances at {price_range}."
+            )
 
     narrative = " ".join(parts)
 

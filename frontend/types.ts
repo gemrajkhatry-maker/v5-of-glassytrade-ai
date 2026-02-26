@@ -90,6 +90,8 @@ export interface TradePosition {
   exitPrice?: number;
   exitTime?: string;
   closeReason?: string;
+  partialRealizedPnl?: number;
+  originalSize?: number;
   metadata?: {
     factorBreakdown: FactorBreakdown;
     generation: number;
@@ -190,6 +192,45 @@ export interface AMTAnalysis {
   cvdSlope?: number;
   cvdDivergence?: string;
   sessionVwap?: number;
+  // VWAP bands
+  vwapUpper1?: number;
+  vwapLower1?: number;
+  vwapUpper2?: number;
+  vwapLower2?: number;
+  // Market structure (5-state classifier)
+  marketStructure?: string;
+  structureConfidence?: number;
+  // Initial Balance
+  ibHigh?: number;
+  ibLow?: number;
+  ibComplete?: boolean;
+  // Prior day levels
+  priorPoc?: number;
+  priorVah?: number;
+  priorVal?: number;
+  gapType?: string;
+  openingBias?: string;
+  // Acceptance / Rejection
+  acceptanceAbove?: boolean;
+  acceptanceBelow?: boolean;
+  rejectionAtHigh?: boolean;
+  rejectionAtLow?: boolean;
+  priceVelocity?: number;
+  // Break detection
+  breakDirection?: string;
+  breakType?: string;
+  breakLevel?: number;
+  // POC migration + LVN play
+  pocSignal?: string;
+  pocVsPrice?: string;
+  lvnPlay?: {
+    lvn_price: number;
+    direction: string;
+    target: number;
+    velocity_ratio: number;
+    has_rejection: boolean;
+    has_delta_flip: boolean;
+  } | null;
 }
 
 export interface TradeSignal {

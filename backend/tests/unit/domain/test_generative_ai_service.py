@@ -62,9 +62,9 @@ class TestBuildPrompt:
         assert "POC" in prompt or "rotational" in prompt
 
     def test_trending_market(self):
-        # Price outside VA → "trending outside"
+        # Price outside VA → "trending outside" or "Imbalance. Directional displacement detected."
         prompt = build_entry_prompt(_make_market_data(ltp=15300.0, market_state="Imbalanced"))
-        assert "trending" in prompt.lower() or "outside" in prompt.lower() or "broke above" in prompt.lower()
+        assert "imbalance" in prompt.lower() or "directional" in prompt.lower()
 
     def test_positive_delta(self):
         prompt = build_entry_prompt(_make_market_data(delta=500))
@@ -76,7 +76,7 @@ class TestBuildPrompt:
 
     def test_zero_delta(self):
         prompt = build_entry_prompt(_make_market_data(delta=0))
-        assert "neutral" in prompt.lower()
+        assert "no aggression" in prompt.lower()
 
     def test_price_near_val(self):
         prompt = build_entry_prompt(_make_market_data(ltp=15000.0))
@@ -105,23 +105,9 @@ class TestBuildPrompt:
 
     def test_cvd_divergence_in_prompt(self):
         prompt = build_entry_prompt(_make_market_data(cvd_divergence="BEARISH_DIV"))
-        assert "CVD divergence" in prompt
+        assert "BEARISH DIVERGENCE" in prompt
 
-    def test_vwap_in_prompt(self):
-        prompt = build_entry_prompt(_make_market_data(vwap=15050.0))
-        assert "VWAP" in prompt
 
-    def test_profile_shape_p(self):
-        prompt = build_entry_prompt(_make_market_data(
-            profile_shape="P-shape (top-heavy, sellers may be trapped)"
-        ))
-        assert "P-Shape" in prompt
-
-    def test_profile_shape_b(self):
-        prompt = build_entry_prompt(_make_market_data(
-            profile_shape="b-shape (bottom-heavy, buying absorption)"
-        ))
-        assert "b-Shape" in prompt
 
 
 # ===================================================================

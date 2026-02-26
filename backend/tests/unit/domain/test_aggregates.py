@@ -30,7 +30,7 @@ class TestPortfolioCreate:
         from app.domain.trading.models.aggregates import INITIAL_CAPITAL
         assert p.balance == INITIAL_CAPITAL
         assert p.equity == INITIAL_CAPITAL
-        assert p.leverage == 10
+        assert p.leverage == 1
         assert p.positions == []
         assert p.closed_trades == []
 

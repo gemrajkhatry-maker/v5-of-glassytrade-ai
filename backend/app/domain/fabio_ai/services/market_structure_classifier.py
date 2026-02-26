@@ -38,10 +38,10 @@ class MarketStructure:
 _STATES = ("BALANCE", "IMBALANCE", "TRANSITION", "EXPANSION", "CHOP")
 
 # Hysteresis parameters
-_DWELL_TICKS = 3        # new state must persist this many consecutive ticks
+_DWELL_TICKS = 1        # new state must persist this many consecutive ticks
 _CONFIDENCE_GATE = 60   # minimum confidence to accept a new state
-_COOLDOWN_TICKS = 5     # hold after a state change before allowing another
-_BYPASS_CONFIDENCE = 85  # skip TRANSITION buffer if confidence exceeds this
+_COOLDOWN_TICKS = 2     # hold after a state change before allowing another
+_BYPASS_CONFIDENCE = 70  # skip TRANSITION buffer if confidence exceeds this
 
 
 # ---------------------------------------------------------------------------

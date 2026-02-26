@@ -128,8 +128,162 @@ class TestSLFromAggressivePrint:
         amt = _amt(aggressive_prints=())
         assert sl_from_aggressive_print(amt, _tick(), True, 0.1) is None
 
+
+# ---- VWAP Bias Tests ----
+
+class TestCheckVWAPBias:
+    def test_long_below_vwap_warning(self):
+        from app.domain.fabio_ai.services.entry_gate import check_vwap_bias
+        result = check_vwap_bias("LONG", price=98.0, vwap=100.0, vwap_upper_2=104.0, vwap_lower_2=96.0)
+        assert result["warning"] is True
+        assert result["overextended"] is False
+
+    def test_short_above_vwap_warning(self):
+        from app.domain.fabio_ai.services.entry_gate import check_vwap_bias
+        result = check_vwap_bias("SHORT", price=102.0, vwap=100.0, vwap_upper_2=104.0, vwap_lower_2=96.0)
+        assert result["warning"] is True
+        assert result["overextended"] is False
+
+    def test_long_at_vwap_2sigma_overextended(self):
+        from app.domain.fabio_ai.services.entry_gate import check_vwap_bias
+        result = check_vwap_bias("LONG", price=104.0, vwap=100.0, vwap_upper_2=104.0, vwap_lower_2=96.0)
+        assert result["overextended"] is True
+
+    def test_short_at_vwap_minus_2sigma_overextended(self):
+        from app.domain.fabio_ai.services.entry_gate import check_vwap_bias
+        result = check_vwap_bias("SHORT", price=96.0, vwap=100.0, vwap_upper_2=104.0, vwap_lower_2=96.0)
+        assert result["overextended"] is True
+
+    def test_long_above_vwap_no_warning(self):
+        from app.domain.fabio_ai.services.entry_gate import check_vwap_bias
+        result = check_vwap_bias("LONG", price=101.0, vwap=100.0, vwap_upper_2=104.0, vwap_lower_2=96.0)
+        assert result["warning"] is False
+        assert result["overextended"] is False
+
     def test_ignores_distant_prints(self):
         tick = _tick(close=100)
         ap = AggressivePrint(price=90, time="t", volume=500, delta=-200, side="SELL")
         amt = _amt(aggressive_prints=(ap,))
         assert sl_from_aggressive_print(amt, tick, True, 0.1) is None
+
+
+# ---- Aggressive Prints as Structural Levels (Tasks 12-13) ----
+
+class TestClusterAggressivePrints:
+    def test_merges_nearby(self):
+        """Prints within 0.1% of each other merge into VWAP of cluster."""
+        from app.domain.fabio_ai.services.entry_gate import cluster_aggressive_prints
+        prints = (
+            AggressivePrint(price=100.0, time="t", volume=300, delta=100, side="BUY"),
+            AggressivePrint(price=100.05, time="t", volume=200, delta=50, side="BUY"),
+        )
+        result = cluster_aggressive_prints(prints)
+        assert len(result) == 1
+        # VWAP = (100*300 + 100.05*200) / 500 = 100.02
+        assert result[0] == pytest.approx(100.02)
+
+    def test_separate_far(self):
+        """Prints far apart stay as separate clusters."""
+        from app.domain.fabio_ai.services.entry_gate import cluster_aggressive_prints
+        prints = (
+            AggressivePrint(price=100.0, time="t", volume=300, delta=100, side="BUY"),
+            AggressivePrint(price=105.0, time="t", volume=200, delta=50, side="BUY"),
+        )
+        result = cluster_aggressive_prints(prints)
+        assert len(result) == 2
+
+    def test_cap_at_5(self):
+        """More than 5 clusters returns only top 5 by volume."""
+        from app.domain.fabio_ai.services.entry_gate import cluster_aggressive_prints
+        # 7 prints far apart -> 7 clusters, capped to 5
+        prints = tuple(
+            AggressivePrint(price=100.0 + i * 10, time="t", volume=(i + 1) * 100, delta=50, side="BUY")
+            for i in range(7)
+        )
+        result = cluster_aggressive_prints(prints)
+        assert len(result) == 5
+
+    def test_empty(self):
+        """Empty tuple returns empty list."""
+        from app.domain.fabio_ai.services.entry_gate import cluster_aggressive_prints
+        assert cluster_aggressive_prints(()) == []
+
+
+class TestThreeAlignAggressiveLevels:
+    def test_near_aggressive_level(self):
+        """Price near an aggressive print cluster level counts as near level."""
+        data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
+        # tick at 102.5 is NOT near POC=100/VAH=105/VAL=95, but IS near aggressive level 102.5
+        tick = _tick(close=102.5, volume=500, delta=200)
+        amt = _amt(poc=100, vah=105, val=95)
+        # Without aggressive levels, this fails (existing test confirms)
+        assert three_align_check(data, amt, tick) is False
+        # With aggressive level at 102.5, it should pass
+        assert three_align_check(data, amt, tick, aggressive_levels=[102.5]) is True
+
+# ---- Imbalance Alignment Tests (Task 21) ----
+
+class TestImbalanceAlignment:
+    def test_aligned_long_buy_imbalances(self):
+        """LONG + mostly BUY imbalances -> +1."""
+        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.trading.models.value_objects import StackedImbalance
+        imbalances = [
+            StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+            StackedImbalance(direction="BUY", price_low=100, price_high=102, magnitude=4, candle_time="t2"),
+        ]
+        assert check_imbalance_alignment("LONG", imbalances) == 1
+
+    def test_opposing_long_sell_imbalances(self):
+        """LONG + mostly SELL imbalances -> -2."""
+        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.trading.models.value_objects import StackedImbalance
+        imbalances = [
+            StackedImbalance(direction="SELL", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+            StackedImbalance(direction="SELL", price_low=100, price_high=102, magnitude=4, candle_time="t2"),
+        ]
+        assert check_imbalance_alignment("LONG", imbalances) == -2
+
+    def test_empty_imbalances(self):
+        """No imbalances -> 0."""
+        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        assert check_imbalance_alignment("LONG", []) == 0
+
+    def test_mixed_equal_imbalances(self):
+        """Equal BUY and SELL -> 0."""
+        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.trading.models.value_objects import StackedImbalance
+        imbalances = [
+            StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+            StackedImbalance(direction="SELL", price_low=100, price_high=102, magnitude=4, candle_time="t2"),
+        ]
+        assert check_imbalance_alignment("LONG", imbalances) == 0
+
+    def test_short_aligned_with_sell(self):
+        """SHORT + mostly SELL imbalances -> +1."""
+        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.trading.models.value_objects import StackedImbalance
+        imbalances = [
+            StackedImbalance(direction="SELL", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+            StackedImbalance(direction="SELL", price_low=100, price_high=102, magnitude=4, candle_time="t2"),
+            StackedImbalance(direction="BUY", price_low=98, price_high=100, magnitude=2, candle_time="t3"),
+        ]
+        assert check_imbalance_alignment("SHORT", imbalances) == 1
+
+    def test_short_opposing_buy_imbalances(self):
+        """SHORT + mostly BUY imbalances -> -2."""
+        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.trading.models.value_objects import StackedImbalance
+        imbalances = [
+            StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+        ]
+        assert check_imbalance_alignment("SHORT", imbalances) == -2
+
+
+    def test_existing_levels_still_work(self):
+        """Existing VAH/VAL/POC/HVN near-level detection still works with aggressive_levels=None."""
+        data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
+        tick = _tick(close=100, volume=500, delta=200)  # near POC
+        amt = _amt(poc=100, vah=105, val=95)
+        # Should pass without aggressive_levels (backward compatible)
+        assert three_align_check(data, amt, tick, aggressive_levels=None) is True
