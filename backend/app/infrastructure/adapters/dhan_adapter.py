@@ -104,13 +104,17 @@ class DhanMarketDataAdapter(MarketDataPort):
             broker = self.get_broker()
             if not broker.is_initialized:
                 logger.info("Initializing DhanBroker (sync path, timeout=%ss)...", timeout)
-                loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(
-                        asyncio.wait_for(broker.initialize(), timeout=timeout)
-                    )
-                finally:
-                    loop.close()
+                    loop = asyncio.new_event_loop()
+                    try:
+                        loop.run_until_complete(
+                            asyncio.wait_for(broker.initialize(), timeout=timeout)
+                        )
+                    finally:
+                        loop.close()
+                except Exception as e:
+                    logger.error("DhanBroker initialization failed: %s", e)
+                    raise  # Propagate so caller knows init failed
             self._initialized = True
             logger.info("DhanBroker initialized (instrument cache ready)")
 
@@ -124,19 +128,32 @@ class DhanMarketDataAdapter(MarketDataPort):
             broker = self.get_broker()
             if not broker.is_initialized:
                 logger.info("Initializing DhanBroker (async path)...")
-                await broker.initialize()
+                try:
+                    await broker.initialize()
+                except Exception as e:
+                    logger.error("DhanBroker initialization failed (async): %s", e)
+                    raise  # Propagate so caller knows init failed
             self._initialized = True
             logger.info("DhanBroker initialized (instrument cache ready)")
+
+    _MCX_UNDERLYINGS = frozenset({
+        "CRUDEOIL", "GOLD", "SILVER", "NATURALGAS", "GOLDM", "SILVERM",
+        "CRUDEOILM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "COTTONCANDY",
+    })
 
     def _make_instrument(self, symbol: str):
         """Build Instrument for the given display symbol.
 
-        Auto-detects option symbols (containing CALL/PUT) and routes to NFO/MCX-OPT.
+        Auto-detects option symbols (containing CALL/PUT) and routes to
+        the correct exchange: NFO for NSE underlyings, MCX for commodity underlyings.
         """
         from brokers.broker.entities import Instrument
         is_option = "CALL" in symbol.upper() or "PUT" in symbol.upper()
-        if is_option and self._exchange_str.upper() in ("NSE", "NFO"):
-            exchange = _exchange_enum("NFO")
+        if is_option:
+            # Detect exchange from the underlying name embedded in the symbol
+            sym_upper = symbol.upper()
+            is_mcx = any(sym_upper.startswith(u) for u in self._MCX_UNDERLYINGS)
+            exchange = _exchange_enum("MCX" if is_mcx else "NFO")
         else:
             exchange = _exchange_enum(self._exchange_str)
         return Instrument(symbol=symbol, exchange=exchange)

@@ -59,6 +59,7 @@ class ManagedPosition:
     """Internal state for a position being managed by the TradeManager."""
 
     position_id: str
+    symbol: str            # The trading symbol (e.g. NIFTY24DEC20000CE)
     side: str              # "LONG" or "SHORT"
     entry_price: float
     stop_loss: float
@@ -160,12 +161,13 @@ class TradeManager:
 
     MAX_DAILY_LOSSES = 3
 
-    def __init__(self, config: TradeManagerConfig | None = None) -> None:
+    def __init__(self, config: TradeManagerConfig | None = None, persist_fn=None) -> None:
         self.config = config or TradeManagerConfig()
         self._lock = threading.Lock()
         self._positions: dict[str, ManagedPosition] = {}
-        self._last_exit_time: float = 0.0
-        self._daily_losses: int = 0
+        self._last_exit_time: dict[str, float] = {}  # Per-symbol exit time
+        self._persist_fn = persist_fn  # Optional callback: (key, value) → persists crash-safe state
+        self._daily_losses: int = self._load_daily_losses()
         self._daily_loss_reset_time: float = self._next_utc_midnight()
 
     # ------------------------------------------------------------------
@@ -182,11 +184,41 @@ class TradeManager:
             tomorrow += timedelta(days=1)
         return tomorrow.timestamp()
 
+    def _load_daily_losses(self) -> int:
+        """Load persisted daily loss count (crash-safe recovery)."""
+        if not self._persist_fn:
+            return 0
+        try:
+            import json
+            raw = self._persist_fn("daily_losses", None)  # get mode
+            if raw:
+                data = json.loads(raw)
+                # Only restore if same UTC date
+                today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+                if data.get("date") == today:
+                    logger.info("Restored daily_losses=%d from DB (date=%s)", data["count"], today)
+                    return data["count"]
+        except Exception:
+            logger.debug("Failed to load daily losses from DB", exc_info=True)
+        return 0
+
+    def _save_daily_losses(self) -> None:
+        """Persist daily loss count to survive crashes."""
+        if not self._persist_fn:
+            return
+        try:
+            import json
+            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            self._persist_fn("daily_losses", json.dumps({"date": today, "count": self._daily_losses}))
+        except Exception:
+            logger.debug("Failed to persist daily losses", exc_info=True)
+
     def _maybe_reset_daily(self) -> None:
         """Reset daily loss counter if we have passed midnight UTC."""
         if time.time() >= self._daily_loss_reset_time:
             self._daily_losses = 0
             self._daily_loss_reset_time = self._next_utc_midnight()
+            self._save_daily_losses()
 
     def record_loss(self) -> None:
         """Record a stop-loss exit for daily loss tracking."""
@@ -194,6 +226,7 @@ class TradeManager:
             self._maybe_reset_daily()
             self._daily_losses += 1
             logger.info(f"TradeManager: daily losses = {self._daily_losses}/{self.MAX_DAILY_LOSSES}")
+            self._save_daily_losses()
 
     def is_daily_limit_reached(self) -> bool:
         """True if the daily loss limit has been reached."""
@@ -264,9 +297,11 @@ class TradeManager:
         Returns True if the trade offers sufficient reward relative to risk.
         Threshold slightly below 2.0 to avoid floating-point edge rejections.
         """
+        if entry <= 0:
+            return False
         risk = abs(entry - sl)
         reward = abs(tp - entry)
-        if risk <= 0:
+        if risk <= 0 or reward <= 0:
             return False
         return (reward / risk) >= min_rr
 
@@ -277,6 +312,7 @@ class TradeManager:
     def register_position(
         self,
         position_id: str,
+        symbol: str,
         side: str,
         entry_price: float,
         stop_loss: float,
@@ -310,6 +346,7 @@ class TradeManager:
 
         mp = ManagedPosition(
             position_id=position_id,
+            symbol=symbol,
             side=side,
             entry_price=entry_price,
             stop_loss=stop_loss,
@@ -337,9 +374,10 @@ class TradeManager:
         """Stop managing a position (call after exit is executed)."""
         with self._lock:
             if position_id in self._positions:
+                symbol = self._positions[position_id].symbol
                 del self._positions[position_id]
-                self._last_exit_time = current_time if current_time is not None else time.time()
-                logger.info(f"TradeManager: unregistered {position_id}")
+                self._last_exit_time[symbol] = current_time if current_time is not None else time.time()
+                logger.info(f"TradeManager: unregistered {position_id} ({symbol})")
 
     # ------------------------------------------------------------------
     # Tick-level check
@@ -450,9 +488,10 @@ class TradeManager:
                 mp.peak_price = max(mp.peak_price, current_price)
             else:
                 # For shorts, "peak" is the lowest price reached
-                if mp.peak_price == mp.entry_price:
+                if mp.peak_price == mp.entry_price and current_price < mp.entry_price:
                     mp.peak_price = current_price
-                mp.peak_price = min(mp.peak_price, current_price)
+                elif current_price < mp.peak_price:
+                    mp.peak_price = current_price
 
             # Activation check — activate at 1R (risk distance) instead of 50% TP
             if mp.allow_trail and not mp.trailing_active:
@@ -972,15 +1011,19 @@ class TradeManager:
                     return True
             return False
 
-    def in_cooldown(self, current_time: float | None = None) -> bool:
-        """True if a recent exit was taken and we should not re-enter yet."""
+    def in_cooldown(self, symbol: str, current_time: float | None = None) -> bool:
+        """True if a recent exit was taken on this symbol and we should not re-enter yet."""
         with self._lock:
-            if self._last_exit_time == 0:
+            last_exit = self._last_exit_time.get(symbol, 0.0)
+            if last_exit == 0.0:
                 return False
             now = current_time if current_time is not None else time.time()
-            return (now - self._last_exit_time) < self.config.cooldown_seconds
+            return (now - last_exit) < self.config.cooldown_seconds
 
-    @property
-    def has_managed_positions(self) -> bool:
+    def has_managed_positions(self, symbol: str) -> bool:
+        """True if this specific symbol currently has an actively managed position."""
         with self._lock:
-            return len(self._positions) > 0
+            for mp in self._positions.values():
+                if mp.symbol == symbol:
+                    return True
+            return False

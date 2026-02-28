@@ -22,7 +22,7 @@ def app():
         mock.llm_inference.is_ready.return_value = True
         mock.probability_engine = MagicMock()
         mock.probability_engine.is_ready.return_value = True
-        mock.active_symbol = "NIFTY 24 FEB 25750 CALL"
+        mock.active_symbols = ["NIFTY 24 FEB 25750 CALL"]
         mock.market_data = MagicMock()
         mock_graph.return_value = mock
 
@@ -56,6 +56,10 @@ class TestHealthEndpoints:
         assert "dataSource" in data
         assert "serverDriven" in data
         assert "defaultSymbol" in data
+        assert "activeSymbols" in data
+        assert isinstance(data["activeSymbols"], list)
+        assert len(data["activeSymbols"]) >= 1
+        assert data["defaultSymbol"] == data["activeSymbols"][0]
         assert "llmReady" in data
         assert "probabilityReady" in data
 

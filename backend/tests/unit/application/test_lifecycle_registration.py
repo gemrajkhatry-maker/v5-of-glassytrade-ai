@@ -69,7 +69,7 @@ class TestRegisterPositionAllSources:
         pos = _make_position(source=source)
         sig = _make_signal(source=source)
 
-        handler.register_position(pos, sig)
+        handler.register_position("NIFTY", pos, sig)
 
         assert handler.has_managed_positions
         assert pos.id in handler.trade_manager._positions
@@ -83,7 +83,7 @@ class TestRegisterPositionAllSources:
             "probability": 0.62,
         })
 
-        handler.register_position(pos, sig)
+        handler.register_position("NIFTY", pos, sig)
 
         mp = handler.trade_manager._positions.get(pos.id)
         assert mp is not None
@@ -95,7 +95,7 @@ class TestRegisterPositionAllSources:
         pos = _make_position(source=Source.AMT)
         sig = _make_signal(source=Source.AMT)
 
-        handler.register_position(pos, sig)
+        handler.register_position("NIFTY", pos, sig)
 
         assert pos.id in handler.trade_manager._positions
 
@@ -104,7 +104,7 @@ class TestRegisterPositionAllSources:
         pos = _make_position(side=Side.SHORT)
         sig = _make_signal(signal_type=SignalType.SELL)
 
-        handler.register_position(pos, sig)
+        handler.register_position("NIFTY", pos, sig)
 
         mp = handler.trade_manager._positions[pos.id]
         assert mp.side == "SHORT"
@@ -120,7 +120,7 @@ class TestRegisterPositionAllSources:
             "is_expiry": True,
         })
 
-        handler.register_position(pos, sig)
+        handler.register_position("NIFTY", pos, sig)
 
         mp = handler.trade_manager._positions[pos.id]
         assert mp.allow_trail is True
@@ -133,13 +133,13 @@ class TestRegisterPositionAllSources:
             pos = _make_position()
             pos.id = f"pos-{label}"
             sig = _make_signal(metadata={"market_state_model": label})
-            handler.register_position(pos, sig)
+            handler.register_position("NIFTY", pos, sig)
             assert handler.trade_manager._positions[pos.id].market_state == "IMBALANCED"
 
         pos2 = _make_position()
         pos2.id = "pos-balanced"
         sig2 = _make_signal(metadata={"market_state_model": "BALANCED"})
-        handler.register_position(pos2, sig2)
+        handler.register_position("NIFTY", pos2, sig2)
         assert handler.trade_manager._positions["pos-balanced"].market_state == "BALANCED"
 
 
@@ -154,7 +154,7 @@ class TestCheckExitsAllSources:
         handler = TradeLifecycleHandler()
         pos = _make_position(source=Source.AGENT, entry_price=100.0)
         sig = _make_signal(source=Source.AGENT)
-        handler.register_position(pos, sig)
+        handler.register_position("NIFTY", pos, sig)
 
         # Create a mock portfolio with the position
         portfolio = MagicMock()

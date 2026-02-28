@@ -128,6 +128,7 @@ export interface InstrumentState {
   overseerReason: string;
   stats: StrategyStats | null;
   depth20Active: boolean;
+  stale?: boolean;
   lastUpdate: number;
 }
 

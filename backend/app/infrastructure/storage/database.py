@@ -111,6 +111,12 @@ CREATE INDEX IF NOT EXISTS idx_trades_closed_at ON trades(closed_at);
 CREATE INDEX IF NOT EXISTS idx_llm_created ON llm_decisions(created_at);
 CREATE INDEX IF NOT EXISTS idx_perf_created ON performance_snapshots(created_at);
 CREATE INDEX IF NOT EXISTS idx_session_profiles ON session_profiles(symbol, market, session_date);
+
+CREATE TABLE IF NOT EXISTS kv_store (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 # Tick batch settings
@@ -137,6 +143,7 @@ class SQLiteStorageAdapter(StoragePort):
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA wal_autocheckpoint=500")
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
             logger.info("SQLite database initialized at %s (WAL mode)", self._db_path)
@@ -151,23 +158,25 @@ class SQLiteStorageAdapter(StoragePort):
     def _flush_ticks(self) -> None:
         """Flush the tick buffer to the database in a single transaction."""
         with self._lock:
-            if not self._tick_buffer:
-                return
-            batch = self._tick_buffer[:]
-            self._tick_buffer.clear()
-            self._last_flush_time = time.time()
-        # Write outside the buffer lock but inside db access
-        # (the lock already covers the connection since it's single-threaded access)
-        with self._lock:
-            try:
-                self._conn.executemany(
-                    "INSERT INTO ticks (symbol, time, open, high, low, close, volume, delta, extra) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    batch,
-                )
-                self._conn.commit()
-            except Exception:
-                logger.debug("Failed to flush tick batch", exc_info=True)
+            self._flush_ticks_unlocked()
+
+    def _flush_ticks_unlocked(self) -> None:
+        """Internal flush — caller MUST hold self._lock."""
+        if not self._tick_buffer:
+            return
+        batch = self._tick_buffer[:]
+        self._tick_buffer.clear()
+        self._last_flush_time = time.time()
+        try:
+            self._conn.executemany(
+                "INSERT INTO ticks (symbol, time, open, high, low, close, volume, delta, extra) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                batch,
+            )
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            logger.debug("Failed to flush tick batch", exc_info=True)
 
     # ------------------------------------------------------------------
     # Writes
@@ -188,90 +197,101 @@ class SQLiteStorageAdapter(StoragePort):
         )
         with self._lock:
             self._tick_buffer.append(row)
-            should_flush = len(self._tick_buffer) >= _TICK_BATCH_SIZE
-        if should_flush:
-            self._flush_ticks()
-        else:
-            self._schedule_flush()
+            if len(self._tick_buffer) >= _TICK_BATCH_SIZE:
+                self._flush_ticks_unlocked()
+            else:
+                self._schedule_flush()
 
     def save_trade(self, trade_data: dict[str, Any]) -> None:
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO trades (position_id, symbol, side, entry_price, exit_price, "
-                "size, pnl, source, reason, opened_at, closed_at, extra) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    trade_data.get("position_id", ""),
-                    trade_data.get("symbol", ""),
-                    trade_data.get("side", ""),
-                    trade_data.get("entry_price", 0),
-                    trade_data.get("exit_price", 0),
-                    trade_data.get("size", 0),
-                    trade_data.get("pnl", 0),
-                    trade_data.get("source", ""),
-                    trade_data.get("reason", ""),
-                    trade_data.get("opened_at", ""),
-                    trade_data.get("closed_at", ""),
-                    json.dumps({k: v for k, v in trade_data.items()
-                                if k not in ("position_id", "symbol", "side", "entry_price",
-                                             "exit_price", "size", "pnl", "source", "reason",
-                                             "opened_at", "closed_at")}),
-                ),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute(
+                    "INSERT INTO trades (position_id, symbol, side, entry_price, exit_price, "
+                    "size, pnl, source, reason, opened_at, closed_at, extra) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        trade_data.get("position_id", ""),
+                        trade_data.get("symbol", ""),
+                        trade_data.get("side", ""),
+                        trade_data.get("entry_price", 0),
+                        trade_data.get("exit_price", 0),
+                        trade_data.get("size", 0),
+                        trade_data.get("pnl", 0),
+                        trade_data.get("source", ""),
+                        trade_data.get("reason", ""),
+                        trade_data.get("opened_at", ""),
+                        trade_data.get("closed_at", ""),
+                        json.dumps({k: v for k, v in trade_data.items()
+                                    if k not in ("position_id", "symbol", "side", "entry_price",
+                                                 "exit_price", "size", "pnl", "source", "reason",
+                                                 "opened_at", "closed_at")}),
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def save_llm_decision(self, decision_data: dict[str, Any]) -> None:
         _KNOWN_KEYS = {"symbol", "direction", "confidence", "rationale",
                         "input_prompt", "raw_output", "market_state", "aggression",
                         "price", "vah", "val", "poc", "delta", "volume", "profile_shape"}
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO llm_decisions (symbol, direction, confidence, rationale, "
-                "input_prompt, raw_output, market_state, aggression, "
-                "price, vah, val, poc, delta, volume, profile_shape, extra) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    decision_data.get("symbol", ""),
-                    decision_data.get("direction", ""),
-                    decision_data.get("confidence", ""),
-                    decision_data.get("rationale", ""),
-                    decision_data.get("input_prompt", ""),
-                    decision_data.get("raw_output", ""),
-                    decision_data.get("market_state", ""),
-                    decision_data.get("aggression", ""),
-                    decision_data.get("price", 0),
-                    decision_data.get("vah", 0),
-                    decision_data.get("val", 0),
-                    decision_data.get("poc", 0),
-                    decision_data.get("delta", 0),
-                    decision_data.get("volume", 0),
-                    decision_data.get("profile_shape", ""),
-                    json.dumps({k: v for k, v in decision_data.items()
-                                if k not in _KNOWN_KEYS}),
-                ),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute(
+                    "INSERT INTO llm_decisions (symbol, direction, confidence, rationale, "
+                    "input_prompt, raw_output, market_state, aggression, "
+                    "price, vah, val, poc, delta, volume, profile_shape, extra) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        decision_data.get("symbol", ""),
+                        decision_data.get("direction", ""),
+                        decision_data.get("confidence", ""),
+                        decision_data.get("rationale", ""),
+                        decision_data.get("input_prompt", ""),
+                        decision_data.get("raw_output", ""),
+                        decision_data.get("market_state", ""),
+                        decision_data.get("aggression", ""),
+                        decision_data.get("price", 0),
+                        decision_data.get("vah", 0),
+                        decision_data.get("val", 0),
+                        decision_data.get("poc", 0),
+                        decision_data.get("delta", 0),
+                        decision_data.get("volume", 0),
+                        decision_data.get("profile_shape", ""),
+                        json.dumps({k: v for k, v in decision_data.items()
+                                    if k not in _KNOWN_KEYS}),
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def save_performance_snapshot(self, snapshot: dict[str, Any]) -> None:
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO performance_snapshots (symbol, equity, balance, open_pnl, "
-                "open_positions, total_trades, win_rate, extra) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    snapshot.get("symbol", ""),
-                    snapshot.get("equity", 0),
-                    snapshot.get("balance", 0),
-                    snapshot.get("open_pnl", 0),
-                    snapshot.get("open_positions", 0),
-                    snapshot.get("total_trades", 0),
-                    snapshot.get("win_rate", 0),
-                    json.dumps({k: v for k, v in snapshot.items()
-                                if k not in ("symbol", "equity", "balance", "open_pnl",
-                                             "open_positions", "total_trades", "win_rate")}),
-                ),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute(
+                    "INSERT INTO performance_snapshots (symbol, equity, balance, open_pnl, "
+                    "open_positions, total_trades, win_rate, extra) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        snapshot.get("symbol", ""),
+                        snapshot.get("equity", 0),
+                        snapshot.get("balance", 0),
+                        snapshot.get("open_pnl", 0),
+                        snapshot.get("open_positions", 0),
+                        snapshot.get("total_trades", 0),
+                        snapshot.get("win_rate", 0),
+                        json.dumps({k: v for k, v in snapshot.items()
+                                    if k not in ("symbol", "equity", "balance", "open_pnl",
+                                                 "open_positions", "total_trades", "win_rate")}),
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     # ------------------------------------------------------------------
     # Queries
@@ -331,24 +351,28 @@ class SQLiteStorageAdapter(StoragePort):
 
     def save_session_profile(self, profile_data: dict[str, Any]) -> None:
         with self._lock:
-            self._conn.execute(
-                "INSERT INTO session_profiles (symbol, market, session_date, poc, vah, val, "
-                "profile_shape, total_volume, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    profile_data.get("symbol", ""),
-                    profile_data.get("market", "NSE"),
-                    profile_data.get("session_date", ""),
-                    profile_data.get("poc", 0),
-                    profile_data.get("vah", 0),
-                    profile_data.get("val", 0),
-                    profile_data.get("profile_shape", ""),
-                    profile_data.get("total_volume", 0),
-                    json.dumps({k: v for k, v in profile_data.items()
-                                if k not in ("symbol", "market", "session_date", "poc",
-                                             "vah", "val", "profile_shape", "total_volume")}),
-                ),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute(
+                    "INSERT INTO session_profiles (symbol, market, session_date, poc, vah, val, "
+                    "profile_shape, total_volume, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        profile_data.get("symbol", ""),
+                        profile_data.get("market", "NSE"),
+                        profile_data.get("session_date", ""),
+                        profile_data.get("poc", 0),
+                        profile_data.get("vah", 0),
+                        profile_data.get("val", 0),
+                        profile_data.get("profile_shape", ""),
+                        profile_data.get("total_volume", 0),
+                        json.dumps({k: v for k, v in profile_data.items()
+                                    if k not in ("symbol", "market", "session_date", "poc",
+                                                 "vah", "val", "profile_shape", "total_volume")}),
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def get_previous_session_profile(
         self, symbol: str, market: str = "NSE",
@@ -367,31 +391,39 @@ class SQLiteStorageAdapter(StoragePort):
 
     def save_open_position(self, position: dict[str, Any]) -> None:
         with self._lock:
-            self._conn.execute(
-                "INSERT OR REPLACE INTO open_positions "
-                "(id, symbol, side, entry_price, size, stop_loss, take_profit, source, opened_at, extra) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    position.get("id", ""),
-                    position.get("symbol", ""),
-                    position.get("side", ""),
-                    position.get("entry_price", 0.0),
-                    position.get("size", 0.0),
-                    position.get("stop_loss", 0.0),
-                    position.get("take_profit", 0.0),
-                    position.get("source", ""),
-                    position.get("opened_at", ""),
-                    json.dumps({k: v for k, v in position.items()
-                                if k not in ("id", "symbol", "side", "entry_price", "size",
-                                             "stop_loss", "take_profit", "source", "opened_at")}),
-                ),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO open_positions "
+                    "(id, symbol, side, entry_price, size, stop_loss, take_profit, source, opened_at, extra) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        position.get("id", ""),
+                        position.get("symbol", ""),
+                        position.get("side", ""),
+                        position.get("entry_price", 0.0),
+                        position.get("size", 0.0),
+                        position.get("stop_loss", 0.0),
+                        position.get("take_profit", 0.0),
+                        position.get("source", ""),
+                        position.get("opened_at", ""),
+                        json.dumps({k: v for k, v in position.items()
+                                    if k not in ("id", "symbol", "side", "entry_price", "size",
+                                                 "stop_loss", "take_profit", "source", "opened_at")}),
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def delete_open_position(self, position_id: str) -> None:
         with self._lock:
-            self._conn.execute("DELETE FROM open_positions WHERE id = ?", (position_id,))
-            self._conn.commit()
+            try:
+                self._conn.execute("DELETE FROM open_positions WHERE id = ?", (position_id,))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def load_open_positions(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -412,3 +444,29 @@ class SQLiteStorageAdapter(StoragePort):
                 (limit,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Key-Value store (crash-safe state persistence)
+    # ------------------------------------------------------------------
+
+    def kv_set(self, key: str, value: str) -> None:
+        """Persist a key-value pair (upsert)."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime('now')) "
+                    "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                    (key, value),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def kv_get(self, key: str) -> str | None:
+        """Retrieve a value by key, or None if not found."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM kv_store WHERE key = ?", (key,),
+            ).fetchone()
+            return row[0] if row else None

@@ -82,7 +82,8 @@ class TestTradingSessionPipeline:
         assert isinstance(portfolio["equity"], (int, float))
 
     def test_data_capped_at_1000(self):
-        """Data buffer should not grow past 1000 entries."""
+        """Data buffer should not grow past MAX_CANDLES_PER_SYMBOL entries."""
+        from app.application.services.trading_session import MAX_CANDLES_PER_SYMBOL
         data = generate_market_data(500, 100, "sideways")
         for tick in data:
             self.session.process_tick("BTCUSDT", tick)
@@ -90,12 +91,12 @@ class TestTradingSessionPipeline:
         session = self.session.get_or_create_session("BTCUSDT")
         assert len(session.data) == 500
 
-        # Add 600 more
-        data2 = generate_market_data(600, 100, "sideways")
+        # Add more than the cap
+        data2 = generate_market_data(MAX_CANDLES_PER_SYMBOL, 100, "sideways")
         for tick in data2:
             self.session.process_tick("BTCUSDT", tick)
 
-        assert len(session.data) == 1000
+        assert len(session.data) == MAX_CANDLES_PER_SYMBOL
 
     def test_with_order_book(self):
         tick = OHLC(time="t", open=100, high=101, low=99, close=100,

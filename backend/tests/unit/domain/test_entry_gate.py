@@ -45,7 +45,7 @@ class TestThreeAlignCheck:
 
     def test_fails_not_near_level(self):
         data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
-        tick = _tick(close=102.5, volume=500, delta=200)  # not near any level
+        tick = _tick(close=110, volume=500, delta=200)  # not near any level
         amt = _amt(poc=100, vah=105, val=95)
         assert three_align_check(data, amt, tick) is False
 
@@ -213,13 +213,13 @@ class TestThreeAlignAggressiveLevels:
     def test_near_aggressive_level(self):
         """Price near an aggressive print cluster level counts as near level."""
         data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
-        # tick at 102.5 is NOT near POC=100/VAH=105/VAL=95, but IS near aggressive level 102.5
-        tick = _tick(close=102.5, volume=500, delta=200)
+        # tick at 110 is NOT near POC=100/VAH=105/VAL=95, but IS near aggressive level 110
+        tick = _tick(close=110, volume=500, delta=200)
         amt = _amt(poc=100, vah=105, val=95)
         # Without aggressive levels, this fails (existing test confirms)
         assert three_align_check(data, amt, tick) is False
-        # With aggressive level at 102.5, it should pass
-        assert three_align_check(data, amt, tick, aggressive_levels=[102.5]) is True
+        # With aggressive level at 110, it should pass
+        assert three_align_check(data, amt, tick, aggressive_levels=[110]) is True
 
 # ---- Imbalance Alignment Tests (Task 21) ----
 

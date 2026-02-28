@@ -10,6 +10,13 @@ from __future__ import annotations
 import logging
 import json
 import sys
+import os
+import time as _time
+import tracemalloc
+from collections import defaultdict
+
+if os.getenv("DEBUG_MEMORY", "").lower() == "true":
+    tracemalloc.start()
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -80,9 +87,49 @@ async def lifespan(app: FastAPI):
         else:
             log.error("LLM validation inference failed! Model may produce bad outputs.")
 
+    # Start the standalone trading engine (trades independently of frontend)
+    from app.application.engine import TradingEngine
+    engine = TradingEngine(graph)
+    graph.engine = engine
+    try:
+        await engine.start()
+        log.info("Trading engine started — backend trades independently of frontend.")
+    except Exception:
+        log.error("Trading engine failed to start!", exc_info=True)
+
     yield  # Server is running
 
-    log.info("Shutting down GlassyTrade AI backend.")
+    # Graceful shutdown
+    log.info("Shutting down GlassyTrade AI backend...")
+
+    # Stop trading engine first
+    if graph.engine:
+        try:
+            await graph.engine.stop()
+        except Exception:
+            log.debug("Engine stop failed", exc_info=True)
+
+    # Flush pending database ticks
+    try:
+        storage = graph.storage
+        if hasattr(storage, '_flush_ticks'):
+            try:
+                storage._flush_ticks()
+            except Exception:
+                pass
+    except Exception:
+        log.debug("Tick flush on shutdown failed", exc_info=True)
+
+    # Shutdown handler thread pools via cleanup()
+    try:
+        ts = graph.trading_session
+        for attr in ('_llm_handler', '_overseer_handler'):
+            handler = getattr(ts, attr, None)
+            if handler and hasattr(handler, 'cleanup'):
+                handler.cleanup()
+        log.info("Thread pools shut down.")
+    except Exception:
+        log.debug("Thread pool cleanup failed", exc_info=True)
 
 
 app = FastAPI(
@@ -100,6 +147,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# Simple in-memory rate limiter (100 req/min per client IP)
+# ---------------------------------------------------------------------------
+_request_counts: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMIT = 100   # max requests per window
+_RATE_WINDOW = 60   # window in seconds
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request, call_next):
+    """Reject requests exceeding _RATE_LIMIT per _RATE_WINDOW seconds."""
+    client_ip = request.client.host if request.client else "unknown"
+    now = _time.time()
+    # Evict timestamps outside the current window
+    _request_counts[client_ip] = [
+        t for t in _request_counts[client_ip] if now - t < _RATE_WINDOW
+    ]
+    if len(_request_counts[client_ip]) >= _RATE_LIMIT:
+        from starlette.responses import JSONResponse
+        return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
+    _request_counts[client_ip].append(now)
+    return await call_next(request)
+
 
 # Mount routers
 app.include_router(health_router, prefix="/api")

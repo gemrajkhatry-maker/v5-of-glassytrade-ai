@@ -24,6 +24,7 @@ class MLXInferenceAdapter(LLMInferencePort):
         self.model = None
         self.tokenizer = None
         self._is_loading = False
+        self._load_error: str | None = None
         self._start_background_loading()
         self._initialized = True
 
@@ -47,6 +48,7 @@ class MLXInferenceAdapter(LLMInferencePort):
             logger.info("MLX model loaded successfully!")
         except Exception as e:
             logger.error(f"Failed to load MLX model: {e}")
+            self._load_error = str(e)
             self._is_loading = False
 
     def predict(self, instruction: str, input_text: str, temperature: float | None = None) -> str:
@@ -114,7 +116,7 @@ class MLXInferenceAdapter(LLMInferencePort):
 
     def is_ready(self) -> bool:
         """Return True when the model is fully loaded and ready for inference."""
-        return self.model is not None and not self._is_loading
+        return self.model is not None and not self._is_loading and self._load_error is None
 
     def wait_until_ready(self, timeout: float = 120.0) -> bool:
         """Block until model is loaded or timeout. Returns True if ready."""

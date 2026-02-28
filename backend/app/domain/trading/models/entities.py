@@ -30,6 +30,7 @@ class Signal:
     setup: SetupType
     source: Source
     metadata: dict[str, Any] | None = None
+    signal_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     @property
     def is_buy(self) -> bool:

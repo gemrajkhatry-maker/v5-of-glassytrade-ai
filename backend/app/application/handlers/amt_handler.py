@@ -53,6 +53,9 @@ class AMTHandler:
         self._session_only_vp = session_only_vp
         # Track current trading date (IST) to force VP rebuild on day boundary
         self._trading_date: str = datetime.now(_IST).strftime("%Y-%m-%d")
+        # Cache profile arrays to avoid new list objects on sub-candle updates
+        self._cached_profile: list | None = None
+        self._cached_leg_profile: list | None = None
 
     def analyze(
         self,
@@ -102,6 +105,7 @@ class AMTHandler:
             self._inc_profile.update(new_candle, oldest)
         # data_grew_by == 0: sub-candle update — skip VP rebuild (noise)
 
+        is_new_candle = data_grew_by != 0
         self._prev_data_len = data_len
 
         amt_result = self._amt_analyzer.analyze(
@@ -109,6 +113,16 @@ class AMTHandler:
             prior_poc=prior_poc, prior_vah=prior_vah, prior_val=prior_val,
         )
         amt_dto = amt_result_to_dto(amt_result)
+
+        # On sub-candle updates, reuse cached profile arrays to prevent
+        # unnecessary delta diffs and frontend redraws (profiles don't change
+        # until a new candle arrives).
+        if is_new_candle:
+            self._cached_profile = amt_dto.get("profile")
+            self._cached_leg_profile = amt_dto.get("legProfile")
+        elif self._cached_profile is not None:
+            amt_dto["profile"] = self._cached_profile
+            amt_dto["legProfile"] = self._cached_leg_profile
 
         fp_data = data[-50:] if len(data) >= 50 else data
         fp_result = self._footprint_analyzer.generate(fp_data)

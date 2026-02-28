@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook } from '../types';
 import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Settings, Zap, AlertTriangle, Clock, BarChart3, Shield, Eye, Layers, ArrowUpDown, Crosshair, Navigation } from 'lucide-react';
+import { EquityPanel, RiskStateDisplay, ModelIOPanel, DecisionHistoryPanel } from './ai';
 
 interface AIAnalysisPanelProps {
     analysis: GenAIAnalysis | null;
@@ -98,61 +99,10 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
             </div>
 
             {/* Equity Panel */}
-            {(() => {
-                const totalPartialPnl = portfolio.positions.reduce((acc, p) => acc + (p.partialRealizedPnl || 0), 0);
-                const sessionRealizedPnl = portfolio.equity - 1000000; // vs initial capital
-                return (
-                    <div className="pb-4 border-b border-white/5 space-y-2">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <div className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Equity</div>
-                                <div className="text-sm font-bold font-mono text-white">
-                                    ₹{portfolio.equity.toLocaleString('en-IN')}
-                                </div>
-                            </div>
-                            <div className="text-right">
-                                <div className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Open PNL</div>
-                                <div className={`text-sm font-bold font-mono ${openPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                    {openPnl >= 0 ? '+' : ''}₹{openPnl.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                </div>
-                            </div>
-                        </div>
-                        {/* Session P&L breakdown */}
-                        <div className="flex justify-between text-[9px] px-1">
-                            <span className="text-white/30">Session P&L: <span className={`font-mono font-bold ${sessionRealizedPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                {sessionRealizedPnl >= 0 ? '+' : ''}₹{sessionRealizedPnl.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                            </span></span>
-                            <span className="text-white/30">Closed: <span className="text-white/60 font-mono">{portfolio.closedTrades.length}</span></span>
-                        </div>
-                        {/* Partial exit info for open positions */}
-                        {totalPartialPnl !== 0 && (
-                            <div className="px-2 py-1.5 rounded bg-orange-500/10 border border-orange-500/20 flex items-center justify-between">
-                                <span className="text-[9px] text-orange-300/80 uppercase tracking-wider">Partial TP Booked</span>
-                                <span className={`text-[10px] font-mono font-bold ${totalPartialPnl >= 0 ? 'text-orange-400' : 'text-red-400'}`}>
-                                    +₹{totalPartialPnl.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                </span>
-                            </div>
-                        )}
-                    </div>
-                );
-            })()}
+            <EquityPanel portfolio={portfolio} openPnl={openPnl} />
 
             {/* Risk State Warning */}
-            {riskState?.halted && (
-                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 flex items-center gap-2">
-                    <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
-                    <div>
-                        <div className="text-[10px] uppercase tracking-widest text-red-400 font-bold">Trading Halted</div>
-                        <div className="text-[10px] text-red-300/70">{riskState.haltReason}</div>
-                    </div>
-                </div>
-            )}
-            {riskState && !riskState.halted && riskState.consecutiveLosses > 0 && (
-                <div className="flex justify-between text-[10px] px-1">
-                    <span className="text-white/40">Consecutive Losses: <span className="text-yellow-400 font-bold">{riskState.consecutiveLosses}</span></span>
-                    <span className="text-white/40">Daily P&L: <span className={riskState.dailyPnl >= 0 ? 'text-green-400' : 'text-red-400'}>₹{riskState.dailyPnl.toFixed(2)}</span></span>
-                </div>
-            )}
+            <RiskStateDisplay riskState={riskState} />
 
             {/* 01. STATE */}
             <div className="flex flex-col gap-2">
@@ -784,67 +734,8 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                 </div>
             </div>
 
-            {/* 04. MODEL I/O LOG */}
-            <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
-                <div className="text-[10px] text-white/40 uppercase tracking-widest">05. Model I/O</div>
-                <div className="p-2 rounded-lg bg-black/30 border border-white/5 space-y-2 max-h-[200px] overflow-y-auto">
-                    <div>
-                        <div className="text-[9px] text-cyan-400/60 uppercase font-bold mb-1">Prompt → Model</div>
-                        <div className="text-[9px] font-mono text-white/50 leading-relaxed whitespace-pre-wrap break-words">
-                            {displayAnalysis.inputPrompt || "Waiting for first LLM call..."}
-                        </div>
-                    </div>
-                    <div className="border-t border-white/5 pt-2">
-                        <div className="text-[9px] text-amber-400/60 uppercase font-bold mb-1">Model → Output</div>
-                        <div className="text-[9px] font-mono text-white/50 leading-relaxed whitespace-pre-wrap break-words">
-                            {displayAnalysis.rawOutput || "No output yet."}
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* 05. LLM DECISION HISTORY */}
-            {llmHistory.length > 0 && (
-                <div className="flex flex-col gap-2 pt-2 border-t border-white/5">
-                    <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
-                        <span>06. Decision History ({llmHistory.length})</span>
-                        <Clock className="w-3 h-3" />
-                    </div>
-                    <div className="space-y-1 max-h-[250px] overflow-y-auto">
-                        {[...llmHistory].reverse().map((entry, i) => {
-                            const dirColor = entry.direction === 'LONG' ? 'text-green-400' : entry.direction === 'SHORT' ? 'text-red-400' : 'text-blue-300';
-                            const dirBg = entry.direction === 'LONG' ? 'border-green-500/20' : entry.direction === 'SHORT' ? 'border-red-500/20' : 'border-white/5';
-                            const timeStr = new Date(entry.timestamp).toLocaleTimeString();
-                            return (
-                                <details key={i} className={`p-2 rounded-lg bg-black/20 border ${dirBg} cursor-pointer`}>
-                                    <summary className="flex justify-between items-center text-[10px]">
-                                        <div className="flex items-center gap-2">
-                                            <span className={`font-bold ${dirColor}`}>{entry.direction}</span>
-                                            <span className="text-white/30">{entry.confidence}</span>
-                                        </div>
-                                        <span className="text-white/30 font-mono">{timeStr}</span>
-                                    </summary>
-                                    <div className="mt-2 space-y-2">
-                                        <div className="text-[9px] text-white/50 leading-relaxed">{entry.rationale}</div>
-                                        {entry.inputPrompt && (
-                                            <div>
-                                                <div className="text-[9px] text-cyan-400/60 uppercase font-bold mb-1">Prompt</div>
-                                                <div className="text-[9px] font-mono text-white/40 whitespace-pre-wrap break-words max-h-[100px] overflow-y-auto">{entry.inputPrompt}</div>
-                                            </div>
-                                        )}
-                                        {entry.rawOutput && (
-                                            <div>
-                                                <div className="text-[9px] text-amber-400/60 uppercase font-bold mb-1">Output</div>
-                                                <div className="text-[9px] font-mono text-white/40 whitespace-pre-wrap break-words max-h-[100px] overflow-y-auto">{entry.rawOutput}</div>
-                                            </div>
-                                        )}
-                                    </div>
-                                </details>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
+            {/* 06. LLM DECISION HISTORY */}
+            <DecisionHistoryPanel llmHistory={llmHistory} />
 
         </div>
     );

@@ -22,8 +22,8 @@ def mgr() -> TradeManager:
 # ---- 1. Registration ----
 
 def test_register_position_creates_managed_position(mgr: TradeManager):
-    mgr.register_position("P1", "LONG", 100.0, 99.0, 102.0)
-    assert mgr.has_managed_positions
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 99.0, 102.0)
+    assert mgr.has_managed_positions("NIFTY")
     assert mgr._positions["P1"].entry_price == 100.0
     assert mgr._positions["P1"].side == "LONG"
 
@@ -31,7 +31,7 @@ def test_register_position_creates_managed_position(mgr: TradeManager):
 # ---- 2. Stop Loss — Long ----
 
 def test_stop_loss_long(mgr: TradeManager):
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     sig = mgr.check_position("P1", 95.0)
     assert sig is not None
     assert sig.reason == ExitReason.STOP_LOSS
@@ -41,7 +41,7 @@ def test_stop_loss_long(mgr: TradeManager):
 # ---- 3. Stop Loss — Short ----
 
 def test_stop_loss_short(mgr: TradeManager):
-    mgr.register_position("P1", "SHORT", 100.0, 105.0, 90.0)
+    mgr.register_position("P1", "NIFTY", "SHORT", 100.0, 105.0, 90.0)
     sig = mgr.check_position("P1", 105.0)
     assert sig is not None
     assert sig.reason == ExitReason.STOP_LOSS
@@ -50,7 +50,7 @@ def test_stop_loss_short(mgr: TradeManager):
 # ---- 4. Take Profit — Long ----
 
 def test_take_profit_long(mgr: TradeManager):
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     sig = mgr.check_position("P1", 110.0)
     assert sig is not None
     assert sig.reason == ExitReason.TAKE_PROFIT
@@ -59,7 +59,7 @@ def test_take_profit_long(mgr: TradeManager):
 # ---- 5. Take Profit — Short ----
 
 def test_take_profit_short(mgr: TradeManager):
-    mgr.register_position("P1", "SHORT", 100.0, 105.0, 90.0)
+    mgr.register_position("P1", "NIFTY", "SHORT", 100.0, 105.0, 90.0)
     sig = mgr.check_position("P1", 90.0)
     assert sig is not None
     assert sig.reason == ExitReason.TAKE_PROFIT
@@ -68,7 +68,7 @@ def test_take_profit_short(mgr: TradeManager):
 # ---- 6. No Exit ----
 
 def test_no_exit_when_price_between_sl_and_tp(mgr: TradeManager):
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     # Price at 102 is within SL-TP range and below partial TP threshold (105)
     sig = mgr.check_position("P1", 102.0)
     assert sig is None
@@ -77,7 +77,7 @@ def test_no_exit_when_price_between_sl_and_tp(mgr: TradeManager):
 # ---- 7. Trailing Stop Activation ----
 
 def test_trailing_stop_activation(mgr: TradeManager):
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0, allow_trail=True)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=True)
     # TP distance = 10, 50% = 5, so price 105 triggers partial TP first
     sig = mgr.check_position("P1", 105.0)
     assert sig is not None
@@ -93,7 +93,7 @@ def test_trailing_stop_activation(mgr: TradeManager):
 # ---- 8. Trailing Stop Ratchet ----
 
 def test_trailing_stop_ratchets_up(mgr: TradeManager):
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0, allow_trail=True)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=True)
     mgr.check_position("P1", 105.0)  # partial TP fires
     mgr.check_position("P1", 105.0)  # trail activates
     trail_1 = mgr._positions["P1"].trailing_stop
@@ -110,7 +110,7 @@ def test_trailing_stop_ratchets_up(mgr: TradeManager):
 # ---- 9. Trailing Stop Hit ----
 
 def test_trailing_stop_hit(mgr: TradeManager):
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0, allow_trail=True)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=True)
     mgr.check_position("P1", 105.0)  # partial TP fires
     mgr.check_position("P1", 105.0)  # trail activates
     trail = mgr._positions["P1"].trailing_stop
@@ -124,7 +124,7 @@ def test_trailing_stop_hit(mgr: TradeManager):
 # ---- 10. Trail Not Allowed ----
 
 def test_trail_not_allowed(mgr: TradeManager):
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0, allow_trail=False)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=False)
     mgr.check_position("P1", 105.0)  # partial TP fires at 50% of TP distance
     mgr.check_position("P1", 105.0)  # second check — trail should NOT activate
     mp = mgr._positions["P1"]
@@ -136,7 +136,7 @@ def test_trail_not_allowed(mgr: TradeManager):
 def test_time_stop(mgr: TradeManager):
     config = TradeManagerConfig(max_hold_seconds=60)
     mgr = TradeManager(config)
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     # Backdate entry_time
     mgr._positions["P1"].entry_time = time.time() - 120
     # Advance past grace period (5 ticks)
@@ -150,18 +150,18 @@ def test_time_stop(mgr: TradeManager):
 # ---- 12. Cooldown ----
 
 def test_cooldown_after_unregister(mgr: TradeManager):
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     mgr.unregister_position("P1")
-    assert mgr.in_cooldown() is True
+    assert mgr.in_cooldown("NIFTY") is True
 
 
 def test_cooldown_expires():
     config = TradeManagerConfig(cooldown_seconds=0.05)
     mgr = TradeManager(config)
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     mgr.unregister_position("P1")
     time.sleep(0.1)
-    assert mgr.in_cooldown() is False
+    assert mgr.in_cooldown("NIFTY") is False
 
 
 # ---- 13. Unregistered Position ----
@@ -173,11 +173,11 @@ def test_check_unknown_position(mgr: TradeManager):
 # ---- 14. has_managed_positions ----
 
 def test_has_managed_positions(mgr: TradeManager):
-    assert mgr.has_managed_positions is False
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
-    assert mgr.has_managed_positions is True
+    assert mgr.has_managed_positions("NIFTY") is False
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
+    assert mgr.has_managed_positions("NIFTY") is True
     mgr.unregister_position("P1")
-    assert mgr.has_managed_positions is False
+    assert mgr.has_managed_positions("NIFTY") is False
 
 
 # ---- 15. Runner logic (Trend model) ----
@@ -185,7 +185,7 @@ def test_has_managed_positions(mgr: TradeManager):
 def test_runner_activates_on_tp_with_allow_trail():
     """When allow_trail=True and TP is hit, runner should activate (partial exit)."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0, allow_trail=True, market_state="IMBALANCED")
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=True, market_state="IMBALANCED")
     # Price hits TP
     result = mgr.check_position("P1", 110.0)
     assert result is not None
@@ -200,7 +200,7 @@ def test_runner_activates_on_tp_with_allow_trail():
 def test_no_runner_on_mean_reversion():
     """Mean reversion (allow_trail=False) should close 100% at TP."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0, allow_trail=False, market_state="BALANCED")
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=False, market_state="BALANCED")
     result = mgr.check_position("P1", 110.0)
     assert result is not None
     assert result.reason == ExitReason.TAKE_PROFIT  # full close, not partial
@@ -211,7 +211,7 @@ def test_no_runner_on_mean_reversion():
 def test_mae_mfe_tracking():
     """MAE and MFE should be tracked as price moves."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 90.0, 120.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 90.0, 120.0)
     # Price goes up (MFE) — below partial TP threshold
     mgr.check_position("P1", 104.0)
     mp = mgr._positions["P1"]
@@ -226,7 +226,7 @@ def test_mae_mfe_tracking():
 def test_initial_stop_preserved():
     """Initial stop should be stored separately from current stop."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     mp = mgr._positions["P1"]
     assert mp.initial_stop == 95.0
     # Move stop to break-even
@@ -239,7 +239,7 @@ def test_initial_stop_preserved():
 def test_r_multiple_in_position_state():
     """get_position_state should include r_multiple."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     state = mgr.get_position_state("P1", 105.0)
     assert "r_multiple" in state
     assert state["r_multiple"] == 1.0  # 5.0 unrealised / 5.0 risk = 1R
@@ -264,7 +264,7 @@ def test_breakeven_at_1r_long():
     """When unrealised profit reaches 1R, SL should move to entry price."""
     mgr = TradeManager()
     # Entry=100, SL=95 -> risk=5. 1R profit at price=105.
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0)
     sig = mgr.check_position("P1", 105.0)
     mp = mgr._positions["P1"]
     assert mp.breakeven_set is True
@@ -277,7 +277,7 @@ def test_breakeven_at_1r_short():
     """Short position: 1R profit moves SL to entry."""
     mgr = TradeManager()
     # Entry=100, SL=105 -> risk=5. 1R profit at price=95.
-    mgr.register_position("P1", "SHORT", 100.0, 105.0, 85.0)
+    mgr.register_position("P1", "NIFTY", "SHORT", 100.0, 105.0, 85.0)
     mgr.check_position("P1", 95.0)
     mp = mgr._positions["P1"]
     assert mp.breakeven_set is True
@@ -287,7 +287,7 @@ def test_breakeven_at_1r_short():
 def test_sl_never_below_entry_once_breakeven_set():
     """Once breakeven_set=True, SL must never go below entry for LONG."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0)
     # Trigger breakeven
     mgr.check_position("P1", 105.0)
     mp = mgr._positions["P1"]
@@ -302,7 +302,7 @@ def test_sl_never_below_entry_once_breakeven_set():
 def test_cvd_breakeven_long():
     """CVD confirms LONG direction (positive slope) -> SL moves to entry."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0)
     # Positive CVD slope confirms long
     moved = mgr.apply_cvd_breakeven("P1", cvd_slope=0.5)
     mp = mgr._positions["P1"]
@@ -314,7 +314,7 @@ def test_cvd_breakeven_long():
 def test_cvd_breakeven_short():
     """CVD confirms SHORT direction (negative slope) -> SL moves to entry."""
     mgr = TradeManager()
-    mgr.register_position("P1", "SHORT", 100.0, 105.0, 85.0)
+    mgr.register_position("P1", "NIFTY", "SHORT", 100.0, 105.0, 85.0)
     moved = mgr.apply_cvd_breakeven("P1", cvd_slope=-0.5)
     mp = mgr._positions["P1"]
     assert moved is True
@@ -325,7 +325,7 @@ def test_cvd_breakeven_short():
 def test_cvd_breakeven_wrong_direction_no_move():
     """CVD opposing trade direction should NOT move SL to breakeven."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0)
     moved = mgr.apply_cvd_breakeven("P1", cvd_slope=-0.5)
     mp = mgr._positions["P1"]
     assert moved is False
@@ -337,7 +337,7 @@ def test_partial_tp_still_fires_after_breakeven():
     """Partial TP should still fire at correct distance (no regression)."""
     mgr = TradeManager()
     # Entry=100, SL=95, TP=110 -> risk=5, partial at 50% of TP dist = 5
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     # First reach 1R (price=105) -> breakeven set, partial also fires (50% of 10 = 5)
     sig = mgr.check_position("P1", 105.0)
     mp = mgr._positions["P1"]
@@ -352,7 +352,7 @@ def test_trailing_activates_at_1r():
     mgr = TradeManager()
     # Entry=100, SL=95, TP=120 -> risk=5, 1R at 105
     # Old 50% TP activation = 110, new 1R activation = 105
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 120.0, allow_trail=True)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 120.0, allow_trail=True)
     # Price at 105 = 1R profit. Trail should activate.
     mgr.check_position("P1", 105.0)  # breakeven + partial
     mgr.check_position("P1", 105.0)  # trail activation
@@ -364,7 +364,7 @@ def test_tight_sl_wide_spread_edge_case():
     """Tight SL (small risk) should still trigger breakeven at 1R."""
     mgr = TradeManager()
     # Entry=100, SL=99.5 -> risk=0.5. 1R at 100.5.
-    mgr.register_position("P1", "LONG", 100.0, 99.5, 105.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 99.5, 105.0)
     mgr.check_position("P1", 100.5)
     mp = mgr._positions["P1"]
     assert mp.breakeven_set is True
@@ -374,7 +374,7 @@ def test_tight_sl_wide_spread_edge_case():
 def test_cvd_breakeven_then_doji_holds():
     """After CVD triggers breakeven, a doji candle should hold at BE."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0)
     mgr.apply_cvd_breakeven("P1", cvd_slope=0.5)
     mp = mgr._positions["P1"]
     assert mp.breakeven_set is True
@@ -388,7 +388,7 @@ def test_cvd_breakeven_then_doji_holds():
 def test_spread_below_threshold_no_exit():
     """Spread < 3% of premium should not trigger exit."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     # Premium=100, spread=2 (2% < 3%)
     sig = mgr.check_spread_blowout("P1", best_bid=99.0, best_ask=101.0, premium=100.0)
     assert sig is None
@@ -397,7 +397,7 @@ def test_spread_below_threshold_no_exit():
 def test_spread_at_threshold_triggers_exit():
     """Spread exactly at 3% of premium should trigger SPREAD_BLOWOUT exit."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     # Premium=100, spread=3 (3% == 3%)
     sig = mgr.check_spread_blowout("P1", best_bid=98.5, best_ask=101.5, premium=100.0)
     assert sig is not None
@@ -408,7 +408,7 @@ def test_spread_at_threshold_triggers_exit():
 def test_spread_above_threshold_triggers_exit():
     """Spread > 3% of premium should trigger SPREAD_BLOWOUT exit."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     # Premium=100, spread=5 (5% > 3%)
     sig = mgr.check_spread_blowout("P1", best_bid=97.5, best_ask=102.5, premium=100.0)
     assert sig is not None
@@ -418,7 +418,7 @@ def test_spread_above_threshold_triggers_exit():
 def test_spread_no_order_book_data_skips():
     """Missing order book data (bid/ask <= 0) should skip gracefully."""
     mgr = TradeManager()
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     # Zero bid/ask
     assert mgr.check_spread_blowout("P1", best_bid=0, best_ask=0, premium=100.0) is None
     # Negative values
@@ -488,7 +488,7 @@ def test_session_time_stop_never_shrinks():
     mgr = TradeManager()
     entry_time = time.time() - 100  # entered 100s ago
     mgr.register_position(
-        "P1", "LONG", 100.0, 95.0, 110.0,
+        "P1", "NIFTY", "LONG", 100.0, 95.0, 110.0,
         market_state="BALANCED", session_phase="MORNING",
         entry_time=entry_time,
     )
@@ -532,7 +532,7 @@ def test_session_time_stop_fires_at_correct_time():
     mgr = TradeManager(config)
     entry_time = time.time() - 1300  # 1300s ago (>1200s morning balanced)
     mgr.register_position(
-        "P1", "LONG", 100.0, 95.0, 110.0,
+        "P1", "NIFTY", "LONG", 100.0, 95.0, 110.0,
         market_state="BALANCED", session_phase="MORNING",
         entry_time=entry_time,
     )
@@ -568,7 +568,7 @@ def test_vwap_trail_at_1_5r_long():
     """At 1.5R profit, SL moves to nearest VWAP band above entry."""
     mgr = TradeManager()
     # Entry=100, SL=95 -> risk=5. 1.5R profit at price=107.5
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0, allow_trail=True)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0, allow_trail=True)
     # VWAP bands: vwap=100, upper1=103, upper2=106, lower1=97, lower2=94
     mgr.apply_vwap_trail(
         "P1", current_price=107.5,
@@ -585,7 +585,7 @@ def test_vwap_trail_at_2sigma_tighten():
     """At 2 sigma overextension, SL tightened to 50% of current distance."""
     mgr = TradeManager()
     # Entry=100, SL=95 -> risk=5.
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 115.0, allow_trail=True)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0, allow_trail=True)
     # Price at vwap_upper_2 (110) -> overextended, triggers 2sigma tighten
     # unrealised_r = (110 - 100) / 5 = 2.0 >= 1.5
     mgr.apply_vwap_trail(
@@ -607,7 +607,7 @@ class TestImbalanceTighten:
         """LONG position + SELL imbalance -> SL tightened by 30% of distance."""
         from app.domain.trading.models.value_objects import StackedImbalance
         mgr = TradeManager()
-        mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+        mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
         imbalances = [
             StackedImbalance(direction="SELL", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
         ]
@@ -621,7 +621,7 @@ class TestImbalanceTighten:
         """LONG position + BUY imbalance -> no tighten."""
         from app.domain.trading.models.value_objects import StackedImbalance
         mgr = TradeManager()
-        mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+        mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
         imbalances = [
             StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
         ]
@@ -632,7 +632,7 @@ class TestImbalanceTighten:
     def test_no_imbalances_no_tighten(self):
         """Empty list -> False."""
         mgr = TradeManager()
-        mgr.register_position("P1", "LONG", 100.0, 95.0, 110.0)
+        mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
         assert mgr.check_imbalance_tighten("P1", [], current_price=102.0) is False
 
     def test_unknown_position_returns_false(self):
@@ -644,7 +644,7 @@ class TestImbalanceTighten:
         """SHORT position + BUY imbalance -> SL tightened by 30%."""
         from app.domain.trading.models.value_objects import StackedImbalance
         mgr = TradeManager()
-        mgr.register_position("P1", "SHORT", 100.0, 105.0, 90.0)
+        mgr.register_position("P1", "NIFTY", "SHORT", 100.0, 105.0, 90.0)
         imbalances = [
             StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
         ]
@@ -659,7 +659,7 @@ def test_vwap_trail_cap_at_1_5r():
     """High-vol wide bands: trail capped at 1.5R distance from entry."""
     mgr = TradeManager()
     # Entry=100, SL=95 -> risk=5
-    mgr.register_position("P1", "LONG", 100.0, 95.0, 120.0, allow_trail=True)
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 120.0, allow_trail=True)
     # Very wide VWAP bands — nearest valid band is far below
     # Price at 108 -> unrealised_r = 8/5 = 1.6 >= 1.5
     mgr.apply_vwap_trail(

@@ -41,6 +41,22 @@ class _FailedEntry:
     session_phase: int    # session phase when the failure occurred
 
 
+@dataclass(frozen=True)
+class _LevelTouch:
+    """Records when price approached a key level."""
+    level: float
+    timestamp: float
+    retreated: bool = False  # True once price moved >0.5% away
+
+
+@dataclass(frozen=True)
+class SqueezeSignal:
+    """Squeeze setup: trapped participants + recovery = entry catalyst."""
+    direction: str  # "LONG" or "SHORT"
+    trapped_level: float
+    recovery_price: float
+
+
 @dataclass
 class ContractionConfig:
     """Tunable thresholds for contraction detection (Fabio Rule 8)."""
@@ -73,6 +89,9 @@ class RegimeDetector:
 
         # Failed auction re-entry state (Fabio Rule 11)
         self._failed_entries: list[_FailedEntry] = []
+
+        # Second drive tracking (Gap #6)
+        self._level_touches: dict[float, _LevelTouch] = {}
 
     # ------------------------------------------------------------------
     # LLM trigger detection (existing behaviour)
@@ -192,6 +211,9 @@ class RegimeDetector:
         self._failed_entries.append(
             _FailedEntry(level=level, direction=direction, session_phase=session_phase)
         )
+        # Cap to prevent unbounded growth in long sessions
+        if len(self._failed_entries) > 50:
+            self._failed_entries = self._failed_entries[-50:]
         logger.info(
             "Recorded failed entry: level=%.2f dir=%s phase=%d",
             level, direction, session_phase,
@@ -203,6 +225,7 @@ class RegimeDetector:
         direction: str,
         session_phase: int,
         buffer_pct: float = 0.003,
+        squeeze_active: bool = False,
     ) -> bool:
         """Check whether re-entry at *level* in *direction* is blocked.
 
@@ -211,9 +234,15 @@ class RegimeDetector:
         the same session phase.
 
         Re-entry is allowed if:
+        - A squeeze is active (trapped participants' forced exit IS the catalyst).
         - The session phase has changed (new structure).
         - The price is outside the buffer of all failed levels.
         """
+        # Squeeze override: if squeeze detected at this level, ALLOW re-entry
+        # Fabio: failed sellers' forced exit IS the entry catalyst
+        if squeeze_active:
+            return False
+
         for fe in self._failed_entries:
             if fe.direction != direction:
                 continue
@@ -232,6 +261,83 @@ class RegimeDetector:
         """Clear all failed entry records.  Call on new session start."""
         self._failed_entries.clear()
         logger.debug("Cleared failed entries")
+
+    # ------------------------------------------------------------------
+    # Gap #6 — Second Drive Tracking
+    # ------------------------------------------------------------------
+
+    def record_level_approach(self, price: float, key_levels: list[float], timestamp: float) -> None:
+        """Record when price reaches within 0.3% of a key level."""
+        for level in key_levels:
+            if level <= 0:
+                continue
+            proximity = abs(price - level) / level
+            bucket = round(level, 1)  # normalize to avoid float drift
+            if proximity <= 0.003:  # within 0.3%
+                if bucket not in self._level_touches:
+                    self._level_touches[bucket] = _LevelTouch(level=level, timestamp=timestamp)
+            elif proximity > 0.005 and bucket in self._level_touches:
+                # Price moved >0.5% away — mark as retreated
+                existing = self._level_touches[bucket]
+                if not existing.retreated:
+                    self._level_touches[bucket] = _LevelTouch(
+                        level=existing.level, timestamp=existing.timestamp, retreated=True,
+                    )
+        # Cap to prevent unbounded growth in long sessions
+        if len(self._level_touches) > 100:
+            oldest_key = min(self._level_touches, key=lambda k: self._level_touches[k].timestamp)
+            del self._level_touches[oldest_key]
+
+    def is_second_drive(self, price: float, key_levels: list[float]) -> bool:
+        """Check if price is re-approaching a level it already tested and retreated from."""
+        for level in key_levels:
+            if level <= 0:
+                continue
+            bucket = round(level, 1)
+            touch = self._level_touches.get(bucket)
+            if touch and touch.retreated:
+                proximity = abs(price - level) / level
+                if proximity <= 0.003:
+                    return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Gap #7 — Squeeze Detection
+    # ------------------------------------------------------------------
+
+    def detect_squeeze(self, data: list, amt_result) -> SqueezeSignal | None:
+        """Detect squeeze: ATR compression + failed level recovery.
+
+        Fabio's primary live setup: trapped participants forced to cover = entry fuel.
+        """
+        if len(data) < 20:
+            return None
+
+        if not self.is_contracting(data):
+            return None
+
+        val = amt_result.value_area_low
+        vah = amt_result.value_area_high
+
+        if val <= 0 or vah <= 0:
+            return None
+
+        recent = data[-5:]
+        current_price = data[-1].close
+
+        # Long squeeze: price broke below VAL then recovered above it
+        broke_low = any(c.low < val for c in recent)
+        recovered_above = current_price > val
+        if broke_low and recovered_above:
+            return SqueezeSignal(direction="LONG", trapped_level=val, recovery_price=current_price)
+
+        # Short squeeze: price broke above VAH then recovered below it
+        broke_high = any(c.high > vah for c in recent)
+        recovered_below = current_price < vah
+        if broke_high and recovered_below:
+            return SqueezeSignal(direction="SHORT", trapped_level=vah, recovery_price=current_price)
+
+        return None
 
     # ------------------------------------------------------------------
     # Internal helpers

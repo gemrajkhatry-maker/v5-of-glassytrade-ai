@@ -63,28 +63,56 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     const [connectionStatus, setConnectionStatus] = useState<string>('');
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const heartbeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+    const lastPongRef = useRef<number>(Date.now());
     const latestFootprint = useRef<Record<string, FootprintCandle> | null>(null);
+    const activeSymbolRef = useRef<string>(activeSymbol);
+    const parseErrorCount = useRef<number>(0);
+    const pendingSubscribeRef = useRef<string | null>(null);
 
     // ----------------------------------------------------------------
-    // 0.  Fetch backend config on mount
+    // 0.  Fetch backend config on mount (retries if backend not ready)
     // ----------------------------------------------------------------
     useEffect(() => {
-        fetch('/api/system/config')
-            .then(res => res.json())
-            .then(cfg => {
-                console.log('[TradingSystem] Backend config:', cfg);
-                if (cfg.defaultSymbol) {
-                    const sym = cfg.defaultSymbol;
-                    setInstruments(prev => ({
-                        ...prev,
-                        [sym]: createInstrumentState(sym),
-                    }));
-                    setActiveSymbol(sym);
-                }
-            })
-            .catch(() => {
-                console.warn('[TradingSystem] Backend not available');
-            });
+        let cancelled = false;
+        let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const fetchConfig = (attempt: number) => {
+            fetch('/api/system/config')
+                .then(res => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json();
+                })
+                .then(cfg => {
+                    if (cancelled) return;
+                    console.log('[TradingSystem] Backend config:', cfg);
+                    const symbols: string[] = cfg.activeSymbols || (cfg.defaultSymbol ? [cfg.defaultSymbol] : []);
+                    if (symbols.length > 0) {
+                        setInstruments(prev => {
+                            const next = { ...prev };
+                            for (const sym of symbols) {
+                                if (!next[sym]) next[sym] = createInstrumentState(sym);
+                            }
+                            return next;
+                        });
+                        setActiveSymbol(symbols[0]);
+                    }
+                })
+                .catch(() => {
+                    if (cancelled) return;
+                    const delay = Math.min(2000 * Math.pow(1.5, attempt), 10000);
+                    console.warn(`[TradingSystem] Backend not available, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1})`);
+                    setConnectionStatus('Waiting for backend...');
+                    retryTimer = setTimeout(() => fetchConfig(attempt + 1), delay);
+                });
+        };
+
+        fetchConfig(0);
+
+        return () => {
+            cancelled = true;
+            if (retryTimer) clearTimeout(retryTimer);
+        };
     }, []);
 
     // ----------------------------------------------------------------
@@ -95,23 +123,35 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             .then(res => res.json())
             .then(data => {
                 if (!data.decisions || data.decisions.length === 0) return;
-                const entries: LLMHistoryEntry[] = data.decisions.map((d: any) => ({
-                    timestamp: new Date(d.created_at + 'Z').getTime(),
-                    direction: d.direction || 'FLAT',
-                    confidence: d.confidence || 'Medium',
-                    rationale: d.rationale || '',
-                    inputPrompt: d.input_prompt || '',
-                    rawOutput: d.raw_output || '',
-                }));
+
+                // Group entries by symbol
+                const entriesBySymbol: Record<string, LLMHistoryEntry[]> = {};
+                for (const d of data.decisions) {
+                    const sym = d.symbol || 'UNKNOWN';
+                    if (!entriesBySymbol[sym]) entriesBySymbol[sym] = [];
+
+                    entriesBySymbol[sym].push({
+                        timestamp: new Date(d.created_at + 'Z').getTime(),
+                        direction: d.direction || 'FLAT',
+                        confidence: d.confidence || 'Medium',
+                        rationale: d.rationale || '',
+                        inputPrompt: d.input_prompt || '',
+                        rawOutput: d.raw_output || '',
+                    });
+                }
+
                 setInstruments(prev => {
                     const next = { ...prev };
-                    for (const sym of Object.keys(next)) {
-                        next[sym] = { ...next[sym], llmHistory: entries.slice(-20) };
+                    for (const sym of Object.keys(entriesBySymbol)) {
+                        if (!next[sym]) next[sym] = createInstrumentState(sym);
+                        // Sort by timestamp and keep last 20
+                        const sorted = entriesBySymbol[sym].sort((a, b) => a.timestamp - b.timestamp);
+                        next[sym] = { ...next[sym], llmHistory: sorted.slice(-20) };
                     }
                     return next;
                 });
             })
-            .catch(() => {}); // Silently fail if backend not ready
+            .catch(() => { }); // Silently fail if backend not ready
     }, []);
 
     // ----------------------------------------------------------------
@@ -121,6 +161,9 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         try {
             const state = JSON.parse(event.data);
 
+            // Any message from backend = connection alive (reset heartbeat)
+            lastPongRef.current = Date.now();
+
             // Handle backend error messages
             if (state.error) {
                 console.error('[TradingSystem] Backend error:', state.error);
@@ -128,15 +171,39 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 return;
             }
 
-            // Server mode init
+            // Symbol switch acknowledgement (no-op, purely informational)
+            if (state.status === 'symbol_switched') {
+                console.log(`[TradingSystem] Symbol switched to ${state.symbol}`);
+                return;
+            }
+
+            // Server mode init (multi-symbol)
             if (state.status === 'server_mode') {
-                console.log(`[TradingSystem] Server mode: symbol=${state.symbol}`);
-                const sym = state.symbol;
-                setInstruments(prev => ({
-                    ...prev,
-                    [sym]: prev[sym] || createInstrumentState(sym),
-                }));
-                setActiveSymbol(sym);
+                const symbols: string[] = state.activeSymbols || [state.symbol];
+                console.log(`[TradingSystem] Server mode: ${symbols.length} symbols`, symbols);
+                setInstruments(prev => {
+                    const next = { ...prev };
+
+                    // Add new symbols
+                    for (const sym of symbols) {
+                        if (!next[sym]) next[sym] = createInstrumentState(sym);
+                    }
+
+                    // Purge stale symbols (like Crude Oil from a previous session)
+                    for (const existingSym of Object.keys(next)) {
+                        if (!symbols.includes(existingSym)) {
+                            console.log(`[TradingSystem] Purging stale symbol: ${existingSym}`);
+                            delete next[existingSym];
+                        }
+                    }
+
+                    return next;
+                });
+
+                setActiveSymbol(prev => {
+                    if (prev && symbols.includes(prev)) return prev;
+                    return symbols[0];
+                });
                 return;
             }
 
@@ -156,10 +223,92 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 return;
             }
 
-            // Full state snapshot from backend
+            // Handle stale-data notification from backend
+            if (state._type === 'stale' && state._symbol) {
+                setInstruments(prev => {
+                    const existing = prev[state._symbol];
+                    if (!existing) return prev;
+                    return { ...prev, [state._symbol]: { ...existing, stale: true } };
+                });
+                return;
+            }
+
+            // Handle pong (heartbeat response)
+            if (state.pong) {
+                lastPongRef.current = Date.now();
+                return;
+            }
+
+            // State update from backend (full or delta)
             const symbol: string = state._symbol;
             if (!symbol) return;
 
+            // Delta compression: merge only changed fields into existing state
+            if (state._type === 'delta') {
+                setInstruments(prev => {
+                    const existing = prev[symbol];
+                    if (!existing) return prev;
+
+                    // Merge delta fields into existing instrument state
+                    const merged: any = { ...existing, lastUpdate: Date.now(), stale: false };
+
+                    // Handle tick/chart data update from delta
+                    if (state.tick) {
+                        const newData = [...existing.data];
+                        const last = newData[newData.length - 1];
+                        if (last && state.tick.time === last.time) {
+                            newData[newData.length - 1] = state.tick;
+                        } else {
+                            newData.push(state.tick);
+                            if (newData.length > 1000) newData.shift();
+                        }
+                        merged.data = newData;
+                    }
+
+                    // Apply all non-internal changed fields (deep-merge nested objects)
+                    if (state.portfolio !== undefined) merged.portfolio = { ...existing.portfolio, ...state.portfolio };
+                    if (state.amt !== undefined) merged.amtAnalysis = { ...existing.amtAnalysis, ...state.amt };
+                    if (state.genAIAnalysis !== undefined) merged.genAIAnalysis = { ...existing.genAIAnalysis, ...state.genAIAnalysis };
+                    if (state.prediction?.predictions !== undefined) merged.predictions = state.prediction.predictions;
+                    if (state.prediction?.analysis !== undefined) merged.aiAnalysis = state.prediction.analysis;
+                    if (state.modelWeights !== undefined) merged.modelWeights = { ...existing.modelWeights, ...state.modelWeights };
+                    if (state.generation !== undefined) merged.generation = state.generation;
+                    if (state.riskState !== undefined) merged.riskState = { ...existing.riskState, ...state.riskState };
+                    if (state.agentDecision !== undefined) merged.agentDecision = state.agentDecision;
+                    if (state.overseerAction !== undefined) merged.overseerAction = state.overseerAction;
+                    if (state.overseerReason !== undefined) merged.overseerReason = state.overseerReason;
+                    if (state.depth !== undefined) merged.orderBook = state.depth;
+                    if (state.depth20Active !== undefined) merged.depth20Active = state.depth20Active;
+                    if (state.stats !== undefined) merged.stats = { ...existing.stats, ...state.stats };
+                    if (state.ltp !== undefined) merged.ltp = state.ltp;
+                    if (state.oi !== undefined) merged.oi = state.oi;
+
+                    // LLM history append (same logic as full path)
+                    if (state.genAIAnalysis?.inputPrompt) {
+                        const newAi = state.genAIAnalysis;
+                        const lastEntry = existing.llmHistory[existing.llmHistory.length - 1];
+                        if (!lastEntry || lastEntry.inputPrompt !== newAi.inputPrompt) {
+                            merged.llmHistory = [...existing.llmHistory, {
+                                timestamp: Date.now(),
+                                direction: newAi.direction,
+                                confidence: newAi.confidence,
+                                rationale: newAi.rationale,
+                                inputPrompt: newAi.inputPrompt,
+                                rawOutput: newAi.rawOutput,
+                            }].slice(-20);
+                        }
+                    }
+
+                    return { ...prev, [symbol]: merged };
+                });
+
+                if (state.footprint) {
+                    latestFootprint.current = state.footprint;
+                }
+                return;
+            }
+
+            // Full state (_type === 'full' or no _type) — replace entirely
             setInstruments(prev => {
                 const inst = prev[symbol] || createInstrumentState(symbol);
 
@@ -230,15 +379,29 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             if (state.footprint) {
                 latestFootprint.current = state.footprint;
             }
+            // Successful parse — reset consecutive error counter
+            parseErrorCount.current = 0;
+
+            // Clear pending subscribe when we receive state for the subscribed symbol
+            if (symbol && pendingSubscribeRef.current === symbol) {
+                pendingSubscribeRef.current = null;
+            }
         } catch (e) {
             console.error('[TradingSystem] WS parse error', e);
+            parseErrorCount.current += 1;
+            // If 3+ consecutive parse errors, connection is likely desynchronized
+            if (parseErrorCount.current >= 3) {
+                console.warn('[TradingSystem] 3+ consecutive parse errors, reconnecting WS');
+                parseErrorCount.current = 0;
+                wsRef.current?.close();
+            }
         }
     }, []);
 
     // ----------------------------------------------------------------
     // 3.  WebSocket connection
     // ----------------------------------------------------------------
-    const [retryCount, setRetryCount] = useState(0);
+    const retryCountRef = useRef(0);
 
     const connect = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -248,41 +411,72 @@ export const useServerTradingSystem = (config: ChartConfig) => {
 
         ws.onopen = () => {
             console.log('[TradingSystem] WS connected');
-            setRetryCount(0);
+            retryCountRef.current = 0;
             setConnected(true);
             setConnectionStatus('');
-
-            // Subscribe to server-driven stream
-            if (activeSymbol) {
-                ws.send(JSON.stringify({ subscribe: activeSymbol }));
-                console.log(`[TradingSystem] Subscribed to ${activeSymbol}`);
+            lastPongRef.current = Date.now();
+            // Send initial subscribe for current activeSymbol
+            if (activeSymbolRef.current) {
+                if (pendingSubscribeRef.current) {
+                    // Already subscribing, update the pending target
+                    pendingSubscribeRef.current = activeSymbolRef.current;
+                } else {
+                    pendingSubscribeRef.current = activeSymbolRef.current;
+                    ws.send(JSON.stringify({ subscribe: activeSymbolRef.current }));
+                    console.log(`[TradingSystem] Initial subscribe: ${activeSymbolRef.current}`);
+                }
             }
+            // Start heartbeat: ping every 15s, detect dead connection if no pong in 20s
+            if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
+            heartbeatTimer.current = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ ping: true }));
+                    // If no pong received within 45s (3x heartbeat interval), connection is dead
+                    if (Date.now() - lastPongRef.current > 45_000) {
+                        console.warn('[TradingSystem] Heartbeat timeout, closing WS');
+                        ws.close();
+                    }
+                }
+            }, 15_000);
         };
 
         ws.onmessage = handleWsMessage;
 
         ws.onclose = (e) => {
             setConnected(false);
+            if (heartbeatTimer.current) {
+                clearInterval(heartbeatTimer.current);
+                heartbeatTimer.current = null;
+            }
             if (e.code !== 1000 && wsRef.current) {
-                const delay = Math.min(500 * Math.pow(2, retryCount), 5000);
+                retryCountRef.current += 1;
+                const delay = Math.min(500 * Math.pow(2, retryCountRef.current), 5000);
                 setConnectionStatus(`Disconnected — reconnecting in ${Math.round(delay / 1000)}s...`);
                 console.warn(`[TradingSystem] WS disconnected, reconnecting in ${delay}ms…`);
                 reconnectTimer.current = setTimeout(() => {
-                    setRetryCount(c => c + 1);
                     connect();
                 }, delay);
             }
         };
 
-        ws.onerror = () => {};
+        ws.onerror = () => { };
 
         wsRef.current = ws;
-    }, [activeSymbol, retryCount, handleWsMessage]);
+    }, [handleWsMessage]);
 
+    // Connect once after config loads activeSymbol
+    const hasConnected = useRef(false);
     useEffect(() => {
-        if (!activeSymbol) return; // Wait for config to load
+        if (!activeSymbol || hasConnected.current) return;
+        hasConnected.current = true;
         connect();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeSymbol]);
+
+    // Unmount cleanup ONLY
+    useEffect(() => {
         return () => {
+            if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
             if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
             if (wsRef.current) {
                 const ws = wsRef.current;
@@ -290,7 +484,18 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 ws.close(1000, "Component Unmounted");
             }
         };
-    }, [activeSymbol]);
+    }, []);
+
+    // When activeSymbol changes, keep ref in sync and subscribe if connected
+    useEffect(() => {
+        // Keep ref in sync for use in onopen callback
+        activeSymbolRef.current = activeSymbol;
+
+        if (connected && wsRef.current?.readyState === WebSocket.OPEN && activeSymbol) {
+            wsRef.current.send(JSON.stringify({ subscribe: activeSymbol }));
+            console.log(`[TradingSystem] Subscribed to new symbol: ${activeSymbol}`);
+        }
+    }, [activeSymbol, connected]);
 
     // ----------------------------------------------------------------
     // 4.  Derived state

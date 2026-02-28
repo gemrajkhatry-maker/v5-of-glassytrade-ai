@@ -143,6 +143,14 @@ async def get_journal(date: Optional[str] = Query(None)):
     return {"entries": journal.read_entries(date)}
 
 
+@router.get("/journal/trades")
+async def get_journal_trades(date: Optional[str] = Query(None)):
+    """Returns completed trades (entry+exit pairs) for a given date."""
+    from app.application.services.trade_journal import TradeJournal
+    journal = TradeJournal()
+    return {"trades": journal.get_completed_trades(date)}
+
+
 @router.get("/journal/summary")
 async def get_journal_summary(date: Optional[str] = Query(None)):
     """Returns trade summary for a given date."""

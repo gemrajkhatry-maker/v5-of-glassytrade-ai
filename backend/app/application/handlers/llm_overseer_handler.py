@@ -20,6 +20,8 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import time
+import queue
+import threading
 from typing import TYPE_CHECKING
 
 from app.config import settings
@@ -40,7 +42,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Minimum seconds between overseer calls
-OVERSEER_COOLDOWN = 10.0
+OVERSEER_COOLDOWN = 5.0
 
 # ADD rate-limiting
 ADD_COOLDOWN = 120.0          # 2 minutes between ADD actions
@@ -69,14 +71,21 @@ class LLMOverseerHandler:
         trade_manager: TradeManager,
         storage: StoragePort | None = None,
         probability_engine: ProbabilityInferencePort | None = None,
+        session_risk_manager=None,
     ) -> None:
         self._gen_ai_service = gen_ai_service
         self._event_bus = event_bus
         self._trade_manager = trade_manager
         self._storage = storage
         self._probability_engine = probability_engine
+        self._session_risk_manager = session_risk_manager
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._predict_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+        # Actor Model worker queue for overseer inference
+        self._llm_queue: queue.Queue = queue.Queue()
+        self._worker_thread = threading.Thread(target=self._llm_worker_loop, daemon=True, name="LLM-Overseer-Worker")
+        self._worker_thread.start()
 
         # ADD rate-limiting state
         self._last_add_time: float = 0.0
@@ -111,6 +120,9 @@ class LLMOverseerHandler:
         symbol: str,
         tick: OHLC,
         amt_result: AMTResult,
+        session_info=None,
+        footprint_candle=None,
+        oi_analysis=None,
     ) -> None:
         """Run overseer analysis in background thread."""
         with session._lock:
@@ -132,17 +144,66 @@ class LLMOverseerHandler:
         mp = managed_positions[0]
         position_id = mp.position_id
 
-        def _worker():
+        item = {
+            "session": session,
+            "symbol": symbol,
+            "tick": tick,
+            "amt_result": amt_result,
+            "session_info": session_info,
+            "footprint_candle": footprint_candle,
+            "oi_analysis": oi_analysis,
+            "position_id": position_id,
+            "enqueue_time": time.time(),
+        }
+        try:
+            self._llm_queue.put_nowait(item)
+            logger.debug(f"Queued LLM overseer analysis for {symbol}")
+        except queue.Full:
+            logger.warning(f"LLM Overseer queue full, dropping tracking for {symbol}")
+            with session._lock:
+                session._overseer_running = False
+
+    def _llm_worker_loop(self) -> None:
+        """Dedicated background thread that processes LLM overseer requests sequentially."""
+        from app.config import settings as _settings
+        while True:
             try:
-                # Capture fresh position state INSIDE worker thread.
-                # Between dispatch and execution (~300ms), check_exits() on the main
-                # thread may have partially closed or fully closed this position.
+                item = self._llm_queue.get()
+                if item is None:
+                    break  # shutdown signal
+                
+                enqueue_time = item["enqueue_time"]
+                session = item["session"]
+                symbol = item["symbol"]
+                tick = item["tick"]
+                amt_result = item["amt_result"]
+                session_info = item["session_info"]
+                footprint_candle = item["footprint_candle"]
+                oi_analysis = item["oi_analysis"]
+                position_id = item["position_id"]
+
+                # Staleness check: Drop if sitting in queue > 30 seconds
+                if time.time() - enqueue_time > 30.0:
+                    logger.warning(f"Dropping stale LLM overseer request for {symbol}")
+                    with session._lock:
+                        session._overseer_running = False
+                    self._llm_queue.task_done()
+                    continue
+
+                if not self._gen_ai_service.is_ready():
+                    with session._lock:
+                        session._overseer_running = False
+                    self._llm_queue.task_done()
+                    continue
+
                 pos_state = self._trade_manager.get_position_state(position_id, tick.close)
                 if pos_state is None:
                     logger.debug("Overseer: position %s closed before worker started", position_id)
-                    return
+                    with session._lock:
+                        session._overseer_running = False
+                    self._llm_queue.task_done()
+                    continue
 
-                # Probability engine: compute exit probability if available
                 exit_probability = None
                 if self._probability_engine and self._probability_engine.is_ready():
                     try:
@@ -151,18 +212,29 @@ class LLMOverseerHandler:
                         if len(data) >= 20:
                             features = extract_features(data, amt_result, tick, getattr(session, 'order_book', None))
                             side = pos_state["side"]
-                            if side == "LONG":
-                                proba = self._probability_engine.predict_proba(features)
-                                exit_probability = 1.0 - proba.get("long", 0.5)
-                            else:
-                                proba = self._probability_engine.predict_proba(features)
-                                exit_probability = 1.0 - proba.get("short", 0.5)
-                            pos_state["exit_probability"] = exit_probability
+                            prob_future = self._predict_executor.submit(
+                                self._probability_engine.estimate, features
+                            )
+                            try:
+                                estimate = prob_future.result(timeout=2.0)
+                            except concurrent.futures.TimeoutError:
+                                logger.warning("Probability inference timed out in overseer")
+                                estimate = None
+                            if estimate is not None:
+                                if side == "LONG":
+                                    exit_probability = 1.0 - getattr(estimate, 'p_long_target', 0.5)
+                                else:
+                                    exit_probability = 1.0 - getattr(estimate, 'p_short_target', 0.5)
+                                pos_state["exit_probability"] = exit_probability
                     except Exception:
-                        logger.debug("Probability engine failed in overseer", exc_info=True)
+                        logger.warning("Probability engine failed in overseer", exc_info=True)
 
-                # Build the overseer prompt (pure quant)
-                prompt = build_overseer_prompt(pos_state, tick, amt_result)
+                prompt = build_overseer_prompt(
+                    pos_state, tick, amt_result,
+                    session_info=session_info,
+                    footprint_candle=footprint_candle,
+                    oi_analysis=oi_analysis,
+                )
 
                 logger.info(
                     "LLM overseer starting for %s (%s from %.2f, unrealized=%.2f%%)",
@@ -170,24 +242,33 @@ class LLMOverseerHandler:
                     pos_state["unrealized_pnl_pct"] * 100,
                 )
 
-                # Use nested executor with timeout to prevent infinite hangs
-                adapter = self._gen_ai_service.llm_adapter
-                predict_future = self._predict_executor.submit(
-                    adapter.predict, self.OVERSEER_INSTRUCTION, prompt,
-                )
                 try:
-                    raw = predict_future.result(timeout=settings.LLM_TIMEOUT_SECONDS)
-                except concurrent.futures.TimeoutError:
-                    logger.warning(
-                        "Overseer LLM timed out after %.0fs — defaulting to HOLD",
-                        settings.LLM_TIMEOUT_SECONDS,
+                    adapter = self._gen_ai_service.llm_adapter
+                    predict_future = self._predict_executor.submit(
+                        adapter.predict, self.OVERSEER_INSTRUCTION, prompt,
                     )
-                    return  # no action = HOLD
+                    try:
+                        raw = predict_future.result(timeout=_settings.LLM_TIMEOUT_SECONDS)
+                    except concurrent.futures.TimeoutError:
+                        predict_future.cancel()
+                        logger.warning(
+                            "Overseer LLM timed out after %.0fs — defaulting to HOLD",
+                            _settings.LLM_TIMEOUT_SECONDS,
+                        )
+                        raw = None
+                except Exception as e:
+                    logger.error(f"LLM inference exception: {e}", exc_info=True)
+                    raw = None
+
+                if not raw:
+                    with session._lock:
+                        session._overseer_running = False
+                    self._llm_queue.task_done()
+                    continue
 
                 decision = parse_overseer_response(raw, pos_state)
                 logger.info("LLM overseer: %s (reason: %s)", decision.action, decision.reason[:80])
 
-                # Probability override: high P(reversal) forces exit
                 if exit_probability is not None and exit_probability > 0.65 and decision.action == "HOLD":
                     logger.info(
                         "Probability override: P(adverse)=%.2f > 0.65 — overriding HOLD→FULL_EXIT",
@@ -198,7 +279,6 @@ class LLMOverseerHandler:
                         reason=f"Probability model: {exit_probability:.0%} chance of adverse move",
                     )
 
-                # Probability gate for ADD: only allow if P(continuation) > 0.7
                 if decision.action == "ADD" and exit_probability is not None:
                     continuation_prob = 1.0 - exit_probability
                     if continuation_prob < 0.7:
@@ -208,17 +288,16 @@ class LLMOverseerHandler:
                         )
                         decision = OverseerAction(action="HOLD", reason="ADD blocked — insufficient continuation probability")
 
-                # Execute the decision
                 self._execute_decision(decision, session, symbol, tick.close, pos_state)
 
-                # Update session state for UI
                 with session._lock:
                     overseer_info = session.last_ai_analysis or {}
                     overseer_info["overseer_action"] = decision.action
                     overseer_info["overseer_reason"] = decision.reason
+                    overseer_info["input_prompt"] = prompt
+                    overseer_info["raw_output"] = raw
                     session.last_ai_analysis = overseer_info
 
-                # Persist
                 if self._storage:
                     try:
                         self._storage.save_llm_decision({
@@ -232,15 +311,15 @@ class LLMOverseerHandler:
                             "price": tick.close,
                         })
                     except Exception:
-                        logger.debug("Failed to persist overseer decision", exc_info=True)
+                        pass
 
-            except Exception as e:
-                logger.error("LLM overseer failed: %s", e)
-            finally:
                 with session._lock:
                     session._overseer_running = False
 
-        self._executor.submit(_worker)
+                self._llm_queue.task_done()
+
+            except Exception as e:
+                logger.error(f"Worker loop fatal error: {e}", exc_info=True)
 
     # Prompt building and response parsing extracted to prompt_builder.py
     # Delegated via: build_overseer_prompt(), parse_overseer_response()
@@ -265,7 +344,8 @@ class LLMOverseerHandler:
 
         elif decision.action == "TIGHTEN_SL":
             if decision.new_sl_price and decision.new_sl_price > 0:
-                adjusted = self._trade_manager.adjust_stop_loss(position_id, decision.new_sl_price)
+                with session._lock:
+                    adjusted = self._trade_manager.adjust_stop_loss(position_id, decision.new_sl_price)
                 if adjusted:
                     logger.info("Overseer: tightened SL to %.2f for %s", decision.new_sl_price, position_id)
                 else:
@@ -293,8 +373,16 @@ class LLMOverseerHandler:
                     portfolio.close_position(position_id, current_price, ExitReason.OVERSEER_EXIT)
                     self._trade_manager.unregister_position(position_id)
                     logger.info("Overseer: full exit for %s at %.2f", position_id, current_price)
+            self.reset_position_state()
 
         elif decision.action == "ADD":
+            # Risk tier gate: block ADDs in cautious/defensive tiers
+            if self._session_risk_manager:
+                tier = self._session_risk_manager.current_tier
+                if hasattr(tier, 'name') and tier.name in ("CAUTIOUS", "DEFENSIVE"):
+                    logger.info("Overseer: ADD blocked by risk tier %s", tier.name)
+                    return
+
             # Rate-limiting: cooldown + max count
             now = time.time()
             if self._add_count >= MAX_ADDS_PER_POSITION:
@@ -305,9 +393,18 @@ class LLMOverseerHandler:
                 return
 
             if pos_state["unrealized_pnl_pct"] > 0 and not pos_state.get("partial_taken"):
-                self._last_add_time = now
-                self._add_count += 1
+                with session._lock:
+                    self._last_add_time = now
+                    self._add_count += 1
                 logger.info("Overseer: ADD signal for %s — publishing pyramid signal (%d/%d)",
                            position_id, self._add_count, MAX_ADDS_PER_POSITION)
             else:
                 logger.info("Overseer: ADD rejected — not profitable or partial already taken")
+
+    def cleanup(self) -> None:
+        """Shutdown thread pools on handler destruction."""
+        for pool_attr in ('_executor', '_predict_executor'):
+            pool = getattr(self, pool_attr, None)
+            if pool:
+                pool.shutdown(wait=False)
+        self._llm_queue.put(None)

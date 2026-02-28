@@ -1,9 +1,10 @@
 
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import ChartScene from './components/ChartScene';
 import AIControls from './components/AIControls';
 import { AIAnalysisPanel } from './components/AIAnalysisPanel';
 import MarketSidebar from './components/MarketSidebar';
+import ErrorBoundary from './components/ErrorBoundary';
 import { DEFAULT_CONFIG } from './constants';
 import { ChartConfig, ChatMessage, MessageRole, ChartMode } from './types';
 import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, Grid, BookOpen, Eye } from 'lucide-react';
@@ -26,6 +27,8 @@ function App() {
     const [overseerPos, setOverseerPos] = useState({ x: -1, y: 16 }); // -1 = auto right
     const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
     const overseerBoxRef = useRef<HTMLDivElement>(null);
+    // Track active drag listeners for cleanup on unmount
+    const dragCleanupRef = useRef<(() => void) | null>(null);
     const onOverseerMouseDown = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
         const box = overseerBoxRef.current;
@@ -43,9 +46,19 @@ function App() {
                 y: dragRef.current.origY + (ev.clientY - dragRef.current.startY),
             });
         };
-        const onUp = () => { dragRef.current = null; window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+        const cleanup = () => {
+            dragRef.current = null;
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', cleanup);
+            dragCleanupRef.current = null;
+        };
+        dragCleanupRef.current = cleanup;
         window.addEventListener('mousemove', onMove);
-        window.addEventListener('mouseup', onUp);
+        window.addEventListener('mouseup', cleanup);
+    }, []);
+    // Clean up drag listeners on unmount to prevent memory leaks
+    useEffect(() => {
+        return () => { dragCleanupRef.current?.(); };
     }, []);
 
     // 2. Server-driven trading system (all logic on backend)
@@ -60,6 +73,11 @@ function App() {
     } = useTradingSystem(config);
 
     // --- Handlers ---
+
+    /** Stable callback for symbol selection, avoids re-renders of MarketSidebar */
+    const handleSymbolSelect = useCallback((symbol: string) => {
+        setActiveSymbol(symbol);
+    }, [setActiveSymbol]);
 
     const handleSendMessage = async (text: string) => {
         setChatHistory(prev => [...prev, { id: simpleId(), role: MessageRole.USER, text }]);
@@ -101,7 +119,7 @@ function App() {
     // --- Rendering ---
 
     if (currentPage === 'journal') {
-        return <JournalPage onBack={() => setCurrentPage('trading')} />;
+        return <ErrorBoundary name="Journal"><JournalPage onBack={() => setCurrentPage('trading')} /></ErrorBoundary>;
     }
 
     if (!activeInstrument) {
@@ -131,11 +149,13 @@ function App() {
           absolute left-0 top-0 h-full z-20 transition-all duration-300
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
-                <MarketSidebar
-                    instruments={instruments}
-                    activeSymbol={activeSymbol}
-                    onSelect={setActiveSymbol}
-                />
+                <ErrorBoundary name="Sidebar">
+                    <MarketSidebar
+                        instruments={instruments}
+                        activeSymbol={activeSymbol}
+                        onSelect={handleSymbolSelect}
+                    />
+                </ErrorBoundary>
             </div>
 
             {/* CENTER: Main Content */}
@@ -147,6 +167,7 @@ function App() {
 
                 {/* Chart Layer */}
                 <div className="absolute inset-0 z-0">
+                <ErrorBoundary name="Chart">
                     {/* Instance 1: Standard Candles */}
                     <ChartScene
                         key={`standard-${activeInstrument.symbol}`}
@@ -177,6 +198,7 @@ function App() {
                         footprintData={activeFootprint.data}
                         cumulativeDeltas={activeFootprint.cumulativeDeltas}
                     />
+                </ErrorBoundary>
                 </div>
 
                 {/* Overlay UI Layer */}
@@ -247,16 +269,13 @@ function App() {
                         </div>
                     </div>
 
-                    {/* Floating Info Box — Overseer (position open + has action) OR Model I/O (LLM signaled non-FLAT) */}
+                    {/* Floating Info Box — Overseer (position open) OR Model I/O (always show LLM output) */}
                     {(() => {
                         const hasOpenPos = activeInstrument.portfolio.positions.some(p => p.status === 'OPEN');
-                        const hasOverseer = !!activeInstrument.overseerAction;
                         const genAI = activeInstrument.genAIAnalysis;
-                        // Only show Model I/O when LLM actually signaled a direction (not stale FLAT)
-                        const hasActiveSignal = !!(genAI?.direction && genAI.direction !== 'FLAT' && genAI.rawOutput);
-                        // Show overseer when position is open (awaiting or active), show Model I/O when LLM signals
+                        const hasModelOutput = !!(genAI?.rawOutput || genAI?.direction);
                         const showOverseer = hasOpenPos;
-                        const showBox = showOverseer || hasActiveSignal;
+                        const showBox = showOverseer || hasModelOutput;
                         if (!showBox) return null;
                         return (
                             <div
@@ -305,17 +324,20 @@ function App() {
                                             <div className="flex items-center gap-2 mb-2">
                                                 <Brain className="w-3.5 h-3.5 text-cyan-400" />
                                                 <span className="text-[10px] font-bold text-white/60 uppercase tracking-widest">Model I/O</span>
-                                                <div className="ml-auto h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                                                {genAI?.direction && (
+                                                    <span className={`text-[10px] font-bold ml-auto ${
+                                                        genAI.direction === 'LONG' ? 'text-emerald-400' :
+                                                        genAI.direction === 'SHORT' ? 'text-red-400' :
+                                                        'text-white/40'
+                                                    }`}>{genAI.direction}</span>
+                                                )}
                                             </div>
-                                            {genAI?.direction && genAI.direction !== 'FLAT' && (
-                                                <div className={`text-xs font-bold mb-1 ${genAI.direction === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
-                                                    {genAI.direction} — {genAI.confidence}
-                                                </div>
-                                            )}
-                                            {genAI?.rawOutput && (
+                                            {genAI?.rawOutput ? (
                                                 <div className="text-[9px] text-amber-400/70 font-mono leading-relaxed line-clamp-4 mb-1">
                                                     {genAI.rawOutput}
                                                 </div>
+                                            ) : (
+                                                <div className="text-[9px] text-white/25 font-mono">Waiting for LLM call...</div>
                                             )}
                                             {genAI?.inputPrompt && (
                                                 <details className="group">
@@ -382,6 +404,7 @@ function App() {
 
                 {/* Content Scroll */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                    <ErrorBoundary name="Analysis">
                     <AIAnalysisPanel
                         analysis={activeInstrument.genAIAnalysis}
                         amtResult={activeInstrument.amtAnalysis}
@@ -394,6 +417,7 @@ function App() {
                         overseerAction={activeInstrument.overseerAction}
                         overseerReason={activeInstrument.overseerReason}
                     />
+                    </ErrorBoundary>
                 </div>
             </div>
 

@@ -272,3 +272,70 @@ class TickFootprintAccumulator:
                 self._current_candle_time, self._levels
             )
         return result
+
+
+def detect_absorption(candle: FootprintCandle, price_change_pct: float) -> dict | None:
+    """Detect absorption: high aggressive volume with minimal price movement.
+
+    Absorption = big aggression on one side but price doesn't move = hidden
+    institutional activity on the opposite side absorbing the flow.
+    """
+    if not candle.levels:
+        return None
+
+    total_bid = sum(lv.bid for lv in candle.levels)
+    total_ask = sum(lv.ask for lv in candle.levels)
+    total_vol = total_bid + total_ask
+    if total_vol == 0:
+        return None
+
+    # Need significant volume (at least 2x the average per-level volume)
+    avg_per_level = total_vol / len(candle.levels)
+    dominant_side_vol = max(total_bid, total_ask)
+
+    # Absorption criteria:
+    # 1. One side has >65% of volume (strong aggression)
+    # 2. Price moved <0.15% (absorbed — no impact)
+    dominance_ratio = dominant_side_vol / total_vol
+    if dominance_ratio < 0.65:
+        return None
+    if abs(price_change_pct) > 0.15:
+        return None
+
+    side = "SELL" if total_bid > total_ask else "BUY"
+    # Absorption is OPPOSITE to the aggressive side:
+    # Aggressive sellers absorbed by hidden buyers → bullish absorption
+    absorbed_by = "BUY" if side == "SELL" else "SELL"
+    return {
+        "detected": True,
+        "aggressive_side": side,
+        "absorbed_by": absorbed_by,
+        "volume": dominant_side_vol,
+        "dominance_ratio": dominance_ratio,
+        "price_change_pct": price_change_pct,
+    }
+
+
+def detect_contested_zone(candles: list[FootprintCandle], window: int = 5) -> bool:
+    """Detect contested zone: both BUY and SELL stacked imbalances in recent candles.
+
+    When both sides show stacked imbalances, the market is contested —
+    neither side has control. Best action is FLAT.
+    """
+    recent = candles[-window:] if len(candles) >= window else candles
+    has_buy_stacked = False
+    has_sell_stacked = False
+
+    for candle in recent:
+        if not candle.levels:
+            continue
+        for lv in candle.levels:
+            if lv.stacked:
+                if lv.delta > 0:
+                    has_buy_stacked = True
+                elif lv.delta < 0:
+                    has_sell_stacked = True
+        if has_buy_stacked and has_sell_stacked:
+            return True
+
+    return False

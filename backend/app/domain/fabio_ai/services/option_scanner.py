@@ -184,14 +184,137 @@ class OptionScannerService:
         preferred_option_type: str | None = None,
     ) -> ScanResult | None:
         """Scan multiple underlyings, return highest-scored contract."""
-        results = []
+        results = self.scan_top_n(n=1, underlyings=underlyings,
+                                   preferred_option_type=preferred_option_type)
+        return results[0] if results else None
+
+    def scan_top_n(
+        self,
+        n: int = 10,
+        underlyings: list[str] | None = None,
+        preferred_option_type: str | None = None,
+        top_per_underlying: int = 3,
+        exchange: str | None = None,
+        expiry_index: int = 0,
+    ) -> list[ScanResult]:
+        """Scan all underlyings, return top N contracts sorted by score.
+
+        *top_per_underlying* controls how many runner-up strikes per underlying
+        are considered (default 3). This allows returning 10 contracts even
+        with only 4 underlyings.
+        """
+        from app.config import settings
+        _MCX_UNDERLYINGS = {"CRUDEOIL", "GOLD", "SILVER", "NATURALGAS", "GOLDM", "SILVERM", "CRUDEOILM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "COTTONCANDY"}
+        _default_exchange = exchange or settings.DEFAULT_EXCHANGE
+        
+        # Enforce SCANNER_MODE strict isolation mapping:
+        # If nse_options, drop any MCX underlyings. If mcx_options, drop any NSE underlyings.
+        active_underlyings = []
         for u in (underlyings or ["NIFTY", "BANKNIFTY"]):
-            r = self.scan(u, preferred_option_type=preferred_option_type)
-            if r:
-                results.append(r)
-        if not results:
-            return None
-        return sorted(results, key=lambda r: r.score, reverse=True)[0]
+            is_mcx = u.upper() in _MCX_UNDERLYINGS
+            if settings.SCANNER_MODE == "nse_options" and is_mcx:
+                logger.warning(f"SCANNER_MODE isolation: Dropping MCX underlying '{u}' from NSE scan list.")
+                continue
+            if settings.SCANNER_MODE == "mcx_options" and not is_mcx:
+                logger.warning(f"SCANNER_MODE isolation: Dropping NSE underlying '{u}' from MCX scan list.")
+                continue
+            active_underlyings.append(u)
+            
+        if not active_underlyings:
+            logger.warning(f"SCANNER_MODE '{settings.SCANNER_MODE}' filtered out all underlyings.")
+            return []
+
+        results: list[ScanResult] = []
+        for u in active_underlyings:
+            # Auto-detect exchange: MCX for commodity underlyings, otherwise default
+            _exchange = "MCX" if u.upper() in _MCX_UNDERLYINGS else _default_exchange
+            try:
+                chain = self._broker.get_option_chain(
+                    underlying=u, exchange=_exchange, expiry_index=expiry_index,
+                )
+                if chain is None:
+                    continue
+
+                expiry_date = chain.expiry.date().isoformat()
+                atm = chain.atm_strike
+                interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
+
+                bias, bias_strength, bias_reason = self._detect_momentum(chain, atm, interval)
+
+                # Scan BOTH CE and PE sides to find strongest momentum contracts
+                strikes = [atm + i * interval for i in range(-5, 6)]
+                scored: list[tuple[float, float, dict, str]] = []
+
+                for side in ("CE", "PE"):
+                    option_map = chain.calls if side == "CE" else chain.puts
+                    for strike in strikes:
+                        opt = option_map.get(float(strike))
+                        if opt is None:
+                            continue
+                        sc, details = self._score_for_scalp(opt, atm, interval, u, side)
+                        if sc > 0:
+                            scored.append((strike, sc, details, side))
+
+                scored.sort(key=lambda x: x[1], reverse=True)
+
+                for strike, sc, details, opt_type in scored[:top_per_underlying]:
+                    _map = chain.calls if opt_type == "CE" else chain.puts
+                    opt = _map[float(strike)]
+                    ltp = float(opt.ltp or 0)
+                    oi = int(opt.oi or 0)
+                    volume = int(opt.volume or 0)
+                    bid = float(opt.bid or 0)
+                    ask = float(opt.ask or 0)
+                    spread = (ask - bid) if bid > 0 and ask > 0 else 0.0
+                    delta_val = float(opt.delta or 0) if hasattr(opt, 'delta') and opt.delta else 0.0
+                    iv_val = float(opt.iv or 0) if hasattr(opt, 'iv') and opt.iv else 0.0
+
+                    results.append(ScanResult(
+                        symbol=opt.symbol,
+                        underlying=u,
+                        strike=int(strike),
+                        option_type=opt_type,
+                        expiry=expiry_date,
+                        ltp=ltp, oi=oi, volume=volume, spread=spread,
+                        score=sc, bias=bias, bias_reason=bias_reason,
+                        delta=delta_val, iv=iv_val,
+                    ))
+
+            except Exception:
+                logger.exception("scan_top_n: failed for %s", u)
+
+        # Filter out junk contracts: near-expiry with no history, zero OI, or zero LTP
+        good = [r for r in results if r.ltp > 0 and r.score >= 20]
+        # Ensure at least 1 contract per underlying that had any results
+        seen_underlyings = {r.underlying for r in good}
+        for r in sorted(results, key=lambda x: x.score, reverse=True):
+            if r.underlying not in seen_underlyings and r.ltp > 0:
+                good.append(r)
+                seen_underlyings.add(r.underlying)
+        results = good
+        results.sort(key=lambda r: r.score, reverse=True)
+        # Guarantee at least 1 contract per underlying in final selection
+        final: list[ScanResult] = []
+        seen_u: set[str] = set()
+        # First pass: best contract per underlying
+        for r in results:
+            if r.underlying not in seen_u:
+                final.append(r)
+                seen_u.add(r.underlying)
+                if len(final) >= n:
+                    break
+        # Second pass: fill remaining slots with highest-scored
+        if len(final) < n:
+            for r in results:
+                if r not in final:
+                    final.append(r)
+                    if len(final) >= n:
+                        break
+        logger.info("scan_top_n: %d candidates across %s, returning top %d",
+                     len(results), underlyings, min(n, len(final)))
+        for i, r in enumerate(final, 1):
+            logger.info("  #%d %s Score=%.1f Bias=%s", i, r.symbol, r.score, r.bias)
+        return final
 
     # ------------------------------------------------------------------
     # Momentum detection (scalping-optimized)

@@ -65,41 +65,48 @@ class ServiceGraph:
         # the async gameloop path that calls _ensure_initialized() later.
         import concurrent.futures as _cf
 
-        # Pre-warm broker with hard timeout (don't block startup if market is closed)
+        # Pre-warm broker: block until instrument cache is ready (required for scanner)
         _init_pool = _cf.ThreadPoolExecutor(max_workers=1)
         try:
-            _fut = _init_pool.submit(self.market_data.ensure_initialized_sync, 30)
-            _fut.result(timeout=35)
+            _fut = _init_pool.submit(self.market_data.ensure_initialized_sync, 300)
+            _fut.result(timeout=300)
+            logger.info("Broker pre-warm complete (instrument cache ready)")
         except (_cf.TimeoutError, Exception):
             logger.warning("Broker pre-warm failed/timed out (non-critical — market may be closed)")
         finally:
             _init_pool.shutdown(wait=False)
 
-        # Auto-select option contract on startup
-        self.active_symbol: str = settings.DEFAULT_SYMBOL
+        # Auto-select option contracts on startup (multi-symbol)
+        self.engine = None  # Set by lifespan after TradingEngine.start()
+        self.active_symbols: list[str] = [settings.DEFAULT_SYMBOL]
         _scan_pool = _cf.ThreadPoolExecutor(max_workers=1)
         try:
             from app.domain.fabio_ai.services.option_scanner import OptionScannerService
 
             def _scan():
                 _scanner = OptionScannerService(self.market_data)
-                return _scanner.scan(
-                    underlying=settings.SCANNER_UNDERLYING,
-                    preferred_option_type=settings.SCANNER_OPTION_TYPE,
+                return _scanner.scan_top_n(
+                    n=settings.SCANNER_TOP_N,
+                    underlyings=settings.SCANNER_UNDERLYINGS,
+                    preferred_option_type=settings.SCANNER_OPTION_TYPE or None,
                     exchange=settings.DEFAULT_EXCHANGE,
                     expiry_index=settings.SCANNER_EXPIRY_INDEX,
+                    top_per_underlying=settings.SCANNER_TOP_N,
                 )
 
-            _result = _scan_pool.submit(_scan).result(timeout=30)
+            _results = _scan_pool.submit(_scan).result(timeout=120)
 
-            if _result:
-                self.active_symbol = _result.symbol
-                logger.info("Auto-selected option contract: %s (LTP=%.2f, OI=%d, Score=%.1f, Bias=%s)",
-                           _result.symbol, _result.ltp, _result.oi, _result.score, _result.bias)
-                if _result.bias_reason:
-                    logger.info("Selection reason: %s", _result.bias_reason)
+            if _results:
+                # Scanner already validates LTP from chain — no redundant API calls
+                _final = [r for r in _results if r.ltp > 0]
+                if not _final:
+                    _final = _results
+                self.active_symbols = [r.symbol for r in _final]
+                for i, r in enumerate(_final, 1):
+                    logger.info("Auto-selected #%d: %s (LTP=%.2f, OI=%d, Score=%.1f, Bias=%s)",
+                               i, r.symbol, r.ltp, r.oi, r.score, r.bias)
             else:
-                logger.warning("Option scan returned no result — using DEFAULT_SYMBOL=%s", settings.DEFAULT_SYMBOL)
+                logger.warning("Option scan returned no results — using DEFAULT_SYMBOL=%s", settings.DEFAULT_SYMBOL)
         except (_cf.TimeoutError, Exception):
             logger.warning("Option scanner failed/timed out — using DEFAULT_SYMBOL=%s", settings.DEFAULT_SYMBOL)
         finally:
@@ -131,4 +138,9 @@ def get_storage() -> StoragePort:
 
 
 def get_active_symbol() -> str:
-    return get_service_graph().active_symbol
+    """Backward compat: return first (highest-scored) symbol."""
+    return get_service_graph().active_symbols[0]
+
+
+def get_active_symbols() -> list[str]:
+    return get_service_graph().active_symbols

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import threading
 import time
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Callable
+import queue
+from typing import TYPE_CHECKING, Callable, Optional
 
 from app.domain.trading.models.enums import SignalType, Source, SetupType
 from app.domain.trading.models.entities import Signal
@@ -20,7 +22,12 @@ from app.domain.fabio_ai.services.entry_gate import (
     check_delta_filter,
     classify_oi_action,
     check_momentum_fade,
+    check_vwap_bias,
+    check_imbalance_alignment,
+    three_align_check,
+    cluster_aggressive_prints,
 )
+from app.domain.fabio_ai.services.footprint_analyzer import detect_absorption, detect_contested_zone
 
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
@@ -47,9 +54,20 @@ class LLMEntryHandler:
         self._storage = storage
         self._trade_manager = trade_manager
         self._journal = journal
-        self._regime_detector = RegimeDetector()
+        self._regime_detectors: dict[str, RegimeDetector] = {}
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._predict_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+        # Actor Model: single background thread processes LLM inferences sequentially
+        self._llm_queue: queue.Queue = queue.Queue()
+        self._worker_thread = threading.Thread(target=self._llm_worker_loop, daemon=True, name="LLM-Worker")
+        self._worker_thread.start()
+
+    def _get_regime_detector(self, symbol: str) -> RegimeDetector:
+        """Return per-symbol RegimeDetector, creating one if needed."""
+        if symbol not in self._regime_detectors:
+            self._regime_detectors[symbol] = RegimeDetector()
+        return self._regime_detectors[symbol]
 
     def should_run(
         self,
@@ -74,22 +92,12 @@ class LLMEntryHandler:
         if ai_running:
             return False  # already running, silent skip
 
-        if has_position or has_managed_positions:
-            logger.debug("LLM blocked: has_position=%s has_managed=%s", has_position, has_managed_positions)
-            return False
-
-        if in_cooldown:
-            logger.debug("LLM blocked: in cooldown")
-            return False
-
-        # Minimum 60s between entries to prevent rapid re-entries
-        if last_entry_time and (_time.time() - last_entry_time) < 60:
-            logger.debug("LLM blocked: entry cooldown (%.0fs since last entry)", _time.time() - last_entry_time)
-            return False
-
-        # Block entries if daily loss limit reached
-        if self._trade_manager and self._trade_manager.should_block_entry():
-            logger.info("LLM blocked: daily loss limit reached")
+        # Only block the LLM if THIS specific symbol already has an open position.
+        # Global locks (has_managed_positions, in_cooldown, daily loss limits) 
+        # should only stop the EXECUTION layer, not the LLM analysis itself, 
+        # so the frontend UI can continue displaying real-time rationale.
+        if has_position:
+            logger.debug("LLM blocked: symbol already has an open position")
             return False
 
         # Don't call until model is loaded
@@ -146,6 +154,30 @@ class LLMEntryHandler:
                 session._ai_running = False
             return
 
+        # Three-Align Gate: Market State + Near Level + Confirmation Bundle
+        aggressive_levels = cluster_aggressive_prints(amt_result.aggressive_prints)
+        gate_passed = three_align_check(
+            session.data, amt_result, tick,
+            aggressive_levels=aggressive_levels,
+        )
+        if not gate_passed:
+            gate_msg = (f"Three-Align gate: state={amt_result.market_state}, "
+                        f"price={tick.close:.1f}, POC={amt_result.poc:.1f}, "
+                        f"VAH={amt_result.value_area_high:.1f}, VAL={amt_result.value_area_low:.1f}")
+            logger.info("Three-Align gate BLOCKED for %s (%s, agg_levels=%s)",
+                        symbol, gate_msg,
+                        aggressive_levels[:3] if aggressive_levels else [])
+            with session._lock:
+                session.last_ai_analysis = {
+                    "direction": "FLAT",
+                    "rationale": gate_msg,
+                    "confidence": "Low",
+                    "raw_output": f"BLOCKED — {gate_msg}",
+                    "market_state": amt_result.market_state,
+                }
+                session._ai_running = False
+            return
+
         if amt_result.market_state == "IMBALANCED" and session_info.allow_trend:
             setup_type = SetupType.TREND_MODEL
             strategy_hint = "Market is IMBALANCED (trending). Favor trend continuation setups. Look for breakouts beyond VA boundaries."
@@ -168,7 +200,7 @@ class LLMEntryHandler:
             strategy_hint += f" {hint}"
 
         # Contraction advisory — inform model, let it decide
-        if session.data and self._regime_detector.is_contracting(session.data):
+        if session.data and self._get_regime_detector(symbol).is_contracting(session.data):
             strategy_hint += " [CAUTION: Market is contracting after expansion — prefer Stay Flat or mean reversion only.]"
 
         # Profile shape — read from AMTResult (already computed once in analyzer)
@@ -201,6 +233,25 @@ class LLMEntryHandler:
                 bubble_parts.append(f"{ap.side} bubble at {ap.price:.0f} ({ap.volume:.0f} vol, delta {ap.delta:+.0f})")
             volume_bubble_desc = "; ".join(bubble_parts)
 
+        # Stacked imbalances from footprint (Gap #2)
+        imbalance_desc = ""
+        fp_domain = getattr(session, '_last_fp_domain', None)
+        if fp_domain:
+            try:
+                fp_vals = list(fp_domain.values()) if isinstance(fp_domain, dict) else None
+                latest_fp = fp_vals[-1] if fp_vals else None
+                if latest_fp and hasattr(latest_fp, 'levels'):
+                    stacked = [lv for lv in latest_fp.levels if getattr(lv, 'stacked', False)]
+                    if stacked:
+                        parts = []
+                        for lv in stacked[:3]:
+                            side = getattr(lv, 'direction', getattr(lv, 'side', 'UNKNOWN'))
+                            price = getattr(lv, 'price', 0)
+                            parts.append(f"{side} imbalance at {price:.0f}")
+                        imbalance_desc = "STACKED IMBALANCES: " + ", ".join(parts)
+            except Exception:
+                pass
+
         # Episodic memory — feed last 5 trade outcomes to the LLM prompt
         episodic_memory = ""
         if self._storage:
@@ -230,6 +281,7 @@ class LLMEntryHandler:
             "profile_shape": profile_shape_str,
             "strategy_hint": strategy_hint,
             "volume_bubbles": volume_bubble_desc,
+            "stacked_imbalances": imbalance_desc,
             "hvns": amt_result.hvns[:3] if amt_result.hvns else (),
             "lvns": amt_result.lvns[:3] if amt_result.lvns else (),
             "cvd_slope": amt_result.cvd_slope,
@@ -288,9 +340,58 @@ class LLMEntryHandler:
             market_data_ai["oi_nearest_support"] = oi_analysis.get("nearest_support", 0)
             market_data_ai["oi_nearest_resistance"] = oi_analysis.get("nearest_resistance", 0)
 
-        def _worker():
+        # Enqueue the job for the dedicated LLM worker thread
+        # 30-second staleness timeout (if it sits in queue longer, it's dropped)
+        item = {
+            "session": session,
+            "symbol": symbol,
+            "tick": tick,
+            "amt_result": amt_result,
+            "market_data_ai": market_data_ai,
+            "setup_type": setup_type,
+            "session_info": session_info,
+            "strategy_hint": strategy_hint,
+            "profile_shape_str": profile_shape_str,
+            "market_state_str": market_state_str,
+            "enqueue_time": time.time(),
+        }
+        try:
+            self._llm_queue.put_nowait(item)
+            logger.debug(f"Queued LLM analysis for {symbol} (Queue size: {self._llm_queue.qsize()})")
+        except queue.Full:
+            logger.warning(f"LLM Queue full, dropping analysis for {symbol}")
+            with session._lock:
+                session._ai_running = False
+
+    def _llm_worker_loop(self) -> None:
+        """Dedicated background thread that processes LLM requests sequentially."""
+        from app.config import settings as _settings
+        while True:
             try:
-                # Check if the LLM adapter is ready before calling
+                item = self._llm_queue.get()
+                if item is None:
+                    break  # shutdown signal
+
+                enqueue_time = item["enqueue_time"]
+                session = item["session"]
+                symbol = item["symbol"]
+                tick = item["tick"]
+                amt_result = item["amt_result"]
+                market_data_ai = item["market_data_ai"]
+                setup_type = item["setup_type"]
+                session_info = item["session_info"]
+                strategy_hint = item["strategy_hint"]
+                profile_shape_str = item["profile_shape_str"]
+                market_state_str = item["market_state_str"]
+
+                # Staleness check: Drop if sitting in queue > 30 seconds
+                if time.time() - enqueue_time > 30.0:
+                    logger.warning(f"Dropping stale LLM request for {symbol} (queued {time.time() - enqueue_time:.1f}s ago)")
+                    with session._lock:
+                        session._ai_running = False
+                    self._llm_queue.task_done()
+                    continue
+
                 if not self._gen_ai_service.is_ready():
                     with session._lock:
                         session.last_ai_analysis = {
@@ -298,22 +399,35 @@ class LLMEntryHandler:
                             "rationale": "Model loading...",
                             "confidence": "Low",
                         }
-                    return
+                        session._ai_running = False
+                    self._llm_queue.task_done()
+                    continue
 
                 logger.info("LLM inference starting for %s (price=%.2f, state=%s, setup=%s)",
                             symbol, tick.close, market_state_str, setup_type.value)
-                from app.config import settings as _settings
-                predict_future = self._predict_executor.submit(
-                    self._gen_ai_service.analyze_market, market_data_ai,
-                )
+
                 try:
+                    predict_future = self._predict_executor.submit(
+                        self._gen_ai_service.analyze_market, market_data_ai,
+                    )
                     ai_result = predict_future.result(timeout=_settings.LLM_TIMEOUT_SECONDS)
                 except concurrent.futures.TimeoutError:
+                    predict_future.cancel()
                     logger.warning(
                         "Entry LLM timed out after %.0fs — skipping",
                         _settings.LLM_TIMEOUT_SECONDS,
                     )
-                    return
+                    with session._lock:
+                        session._ai_running = False
+                    self._llm_queue.task_done()
+                    continue
+                except Exception as e:
+                    logger.error(f"LLM inference exception: {e}", exc_info=True)
+                    with session._lock:
+                        session._ai_running = False
+                    self._llm_queue.task_done()
+                    continue
+
                 direction = ai_result["direction"]
                 # BUY-only gate: block SHORT when ALLOW_SHORT=false
                 if direction == "SHORT" and not _settings.ALLOW_SHORT:
@@ -372,53 +486,94 @@ class LLMEntryHandler:
                     direction = "FLAT"
 
                 # A/B/C Setup Grading (Fabio methodology)
-                # A: full confluence (gate + volume bubble + CVD + session aligns)
-                # B: partial confluence (gate + 1 confirmation)
-                # C: gate only
                 if direction in ("LONG", "SHORT"):
                     grade_score = 0
-                    # Volume bubble confirms direction
-                    if volume_bubble_desc:
-                        if (direction == "LONG" and "BUY" in volume_bubble_desc.upper()) or \
-                           (direction == "SHORT" and "SELL" in volume_bubble_desc.upper()):
+                    if item.get("volume_bubbles"):
+                        if (direction == "LONG" and "BUY" in item["volume_bubbles"].upper()) or \
+                           (direction == "SHORT" and "SELL" in item["volume_bubbles"].upper()):
                             grade_score += 1
-                    # CVD confirms direction
                     if (direction == "LONG" and amt_result.cvd_slope > 0.3) or \
                        (direction == "SHORT" and amt_result.cvd_slope < -0.3):
                         grade_score += 1
-                    # No CVD divergence against direction
                     if not amt_result.cvd_divergence:
                         grade_score += 1
                     elif (direction == "LONG" and amt_result.cvd_divergence == "BEARISH_DIV") or \
                          (direction == "SHORT" and amt_result.cvd_divergence == "BULLISH_DIV"):
-                        grade_score -= 2  # strong contra-signal
+                        grade_score -= 2
 
-                    # Session alignment
                     if (session_info.favor_strategy == "MEAN_REVERSION" and setup_type == SetupType.MEAN_REVERSION) or \
                        (session_info.favor_strategy == "TREND_CONTINUATION" and setup_type == SetupType.TREND_MODEL):
                         grade_score += 1
 
-                    # Profile shape alignment
                     shape_code = profile_shape_str[0] if profile_shape_str else ""
                     if (shape_code == "b" and direction == "LONG") or (shape_code == "P" and direction == "SHORT"):
                         grade_score += 1
                     elif (shape_code == "b" and direction == "SHORT") or (shape_code == "P" and direction == "LONG"):
                         grade_score -= 1
 
-                    # Map score to grade
-                    if grade_score >= 3:
-                        confidence = "High"  # A-grade setup
-                    elif grade_score >= 1:
-                        confidence = "Medium"  # B-grade setup
-                    else:
-                        confidence = "Low"  # C-grade setup
+                    vwap_bias = check_vwap_bias(
+                        direction, tick.close,
+                        amt_result.session_vwap if amt_result.session_vwap > 0 else tick.vwap,
+                        getattr(amt_result, 'vwap_upper_2', 0),
+                        getattr(amt_result, 'vwap_lower_2', 0),
+                    )
+                    if vwap_bias.get("overextended"):
+                        grade_score -= 2
+                    elif vwap_bias.get("warning"):
+                        grade_score -= 1
 
-                    # Midday consolidation: downgrade one level (less favorable conditions)
+                    fp_domain = getattr(session, '_last_fp_domain', None)
+                    if fp_domain:
+                        try:
+                            latest_fp = list(fp_domain.values())[-1] if fp_domain else None
+                            if latest_fp and hasattr(latest_fp, 'levels'):
+                                stacked = [lv for lv in latest_fp.levels if getattr(lv, 'stacked', False)]
+                                if stacked:
+                                    imb_adj = check_imbalance_alignment(direction, stacked)
+                                    grade_score += imb_adj
+                        except Exception:
+                            pass
+
+                    if fp_domain:
+                        try:
+                            _fp_vals = list(fp_domain.values()) if isinstance(fp_domain, dict) else []
+                            if _fp_vals:
+                                _latest_fp = _fp_vals[-1]
+                                _price_chg = ((tick.close - tick.open) / tick.open * 100) if tick.open > 0 else 0
+                                _absorption = detect_absorption(_latest_fp, _price_chg)
+                                if _absorption:
+                                    market_data_ai["absorption"] = f"ABSORPTION: {_absorption['absorbed_by']} absorbing {_absorption['aggressive_side']} aggression"
+                        except Exception:
+                            pass
+
+                    # Second drive bonus
+                    key_levels = [amt_result.poc, amt_result.value_area_high, amt_result.value_area_low]
+                    key_levels.extend(amt_result.lvns[:3] if amt_result.lvns else [])
+                    if self._get_regime_detector(symbol).is_second_drive(tick.close, key_levels):
+                        grade_score += 2
+
+                    # Squeeze bonus
+                    squeeze = self._get_regime_detector(symbol).detect_squeeze(session.data, amt_result)
+                    if squeeze and squeeze.direction == direction:
+                        grade_score += 2
+
+                    if fp_domain:
+                        try:
+                            _fp_vals = list(fp_domain.values()) if isinstance(fp_domain, dict) else []
+                            if _fp_vals and detect_contested_zone(_fp_vals):
+                                grade_score -= 3
+                        except Exception:
+                            pass
+
+                    if grade_score >= 3:
+                        confidence = "High"
+                    elif grade_score >= 1:
+                        confidence = "Medium"
+                    else:
+                        confidence = "Low"
+
                     if session_info.session == "NSE_MIDDAY":
                         confidence = "Low" if confidence in ("Medium", "Low") else "Medium"
-
-                    logger.info("Setup grade: score=%d confidence=%s (session=%s)",
-                                grade_score, confidence, session_info.session)
 
                 with session._lock:
                     session.last_ai_analysis = {
@@ -431,7 +586,7 @@ class LLMEntryHandler:
                         "aggression": ai_result.get("aggression", "0.00"),
                     }
 
-                # Persist full LLM decision for fine-tuning dataset
+                # Persist full LLM decision
                 if self._storage:
                     try:
                         self._storage.save_llm_decision({
@@ -454,48 +609,40 @@ class LLMEntryHandler:
                             "strategy_hint": strategy_hint,
                         })
                     except Exception:
-                        logger.debug("Failed to persist LLM decision", exc_info=True)
+                        pass
 
                 if direction in ("LONG", "SHORT"):
-                    # Agent direction agreement check: if agent has a directional
-                    # opinion, LLM must agree. Prevents contradictory entries.
                     _ad = getattr(session, '_agent_decision', None)
                     if _ad and _ad.direction in ("LONG", "SHORT") and _ad.direction != direction:
-                        logger.info("LLM %s contradicts agent %s — skipping entry", direction, _ad.direction)
                         if self._journal:
                             self._journal.log_rejection(symbol=symbol, reason="AGENT_DIRECTION_MISMATCH", amt=session.last_amt, llm_direction=direction)
                         with session._lock:
                             session._ai_running = False
-                        return
+                        self._llm_queue.task_done()
+                        continue
 
                     with session._lock:
                         live_positions = [
                             p for p in session.portfolio.positions if p.status == "OPEN"
                         ]
-                        if live_positions:
-                            logger.info("LLM wanted to enter but position already exists — skipping")
-                        else:
-                            # Fabio Rule 11: block re-entry at same failed level
-                            if self._regime_detector.is_re_entry_blocked(
+                        if not live_positions:
+                            _squeeze = self._get_regime_detector(symbol).detect_squeeze(session.data, amt_result)
+                            if self._get_regime_detector(symbol).is_re_entry_blocked(
                                 tick.close, direction, session_info.phase,
+                                squeeze_active=bool(_squeeze and _squeeze.direction == direction),
                             ):
-                                logger.info("Re-entry blocked at %.2f %s (Rule 11)", tick.close, direction)
                                 if self._journal:
                                     self._journal.log_rejection(symbol=symbol, reason="RE_ENTRY_BLOCKED", amt=session.last_amt, llm_direction=direction)
                             else:
-                                entry_signal = build_entry_signal(direction, tick, amt_result, ai_result, setup_type, data=session.data)
-                                # RR filter: reject signals with risk:reward < 1:2
+                                _risk_mgr = getattr(session, '_session_risk_manager', None)
+                                _cushion_sl = _risk_mgr.stop_loss_pct if _risk_mgr else None
+                                entry_signal = build_entry_signal(direction, tick, amt_result, ai_result, setup_type, data=session.data, risk_sl_pct=_cushion_sl)
                                 if not TradeManager.is_valid_rr(
                                     entry_signal.price, entry_signal.stop_loss, entry_signal.take_profit
                                 ):
-                                    logger.info("RR filter rejected signal (< 1:2)")
                                     if self._journal:
                                         self._journal.log_rejection(symbol=symbol, reason="RR_FILTER", amt=session.last_amt, llm_direction=direction)
                                 else:
-                                    # Enqueue signal for main thread to execute.
-                                    # DO NOT publish SignalGenerated from worker thread —
-                                    # the synchronous event bus would run the handler here,
-                                    # mutating portfolio without the main thread's lock.
                                     session._pending_signal = (symbol, entry_signal)
                                     session._last_entry_time = time.time()
 
@@ -505,25 +652,41 @@ class LLMEntryHandler:
                     rationale=ai_result["rationale"],
                     confidence=confidence,
                 ))
-            except Exception as e:
-                logger.error(f"AI Analysis failed: {e}")
-            finally:
+
                 with session._lock:
                     session._ai_running = False
 
-        self._executor.submit(_worker)
+                self._llm_queue.task_done()
+
+            except Exception as e:
+                logger.error(f"Worker loop fatal error: {e}", exc_info=True)
 
     # ------------------------------------------------------------------
     # Fabio Rule 11 — Failed entry recording (call on stop-out)
     # ------------------------------------------------------------------
 
-    def record_stop_out(self, level: float, direction: str, session_phase: int) -> None:
+    def record_stop_out(self, level: float, direction: str, session_phase: int, symbol: str = "") -> None:
         """Record a stopped-out position so re-entry at the same level is blocked."""
-        self._regime_detector.record_failed_entry(level, direction, session_phase)
+        self._get_regime_detector(symbol).record_failed_entry(level, direction, session_phase)
 
-    def clear_failed_entries(self) -> None:
-        """Clear failed entry records — call on new session start."""
-        self._regime_detector.clear_failed_entries()
+    def clear_failed_entries(self, symbol: str = "") -> None:
+        """Clear failed entry records — call on new session start.
+
+        If symbol is empty, clears for all symbols.
+        """
+        if symbol:
+            self._get_regime_detector(symbol).clear_failed_entries()
+        else:
+            for det in self._regime_detectors.values():
+                det.clear_failed_entries()
+
+    def cleanup(self) -> None:
+        """Shutdown thread pools on handler destruction."""
+        for pool_attr in ('_executor', '_predict_executor'):
+            pool = getattr(self, pool_attr, None)
+            if pool:
+                pool.shutdown(wait=False)
+        self._llm_queue.put(None)  # shutdown signal
 
     # Gate and signal methods extracted to domain/fabio_ai/services/entry_gate.py
     # Delegated via: three_align_check, check_confirmation_bundle, build_entry_signal

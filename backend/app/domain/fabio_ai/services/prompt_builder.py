@@ -198,6 +198,11 @@ def build_entry_prompt(data: Dict[str, Any]) -> str:
     if volume_bubbles:
         parts.append(f"Volume bubbles: {volume_bubbles}.")
 
+    # Stacked imbalances from footprint
+    stacked = data.get("stacked_imbalances", "")
+    if stacked:
+        parts.append(f"{stacked}.")
+
     # CVD
     cvd_div = data.get("cvd_divergence", "")
     cvd_slope = data.get("cvd_slope", 0.0)
@@ -562,13 +567,17 @@ def build_overseer_prompt(
         parts.append(f"OI: {oi_interp}. PCR: {oi_pcr}.")
 
     # ── ENRICHMENT: Stacked imbalances from footprint ────────────────
-    if footprint_candle is not None and footprint_candle.levels:
-        stacked_levels = [lv for lv in footprint_candle.levels if lv.stacked]
+    _fp_levels = None
+    if footprint_candle is not None:
+        _fp_levels = getattr(footprint_candle, 'levels', None) if not isinstance(footprint_candle, dict) else footprint_candle.get('levels')
+    if _fp_levels:
+        def _get(lv, key, default=None):
+            return getattr(lv, key, default) if not isinstance(lv, dict) else lv.get(key, default)
+        stacked_levels = [lv for lv in _fp_levels if _get(lv, 'stacked', False)]
         if stacked_levels:
-            # Determine direction from net delta of stacked levels
-            net_delta = sum(lv.delta for lv in stacked_levels)
+            net_delta = sum(_get(lv, 'delta', 0) for lv in stacked_levels)
             direction = "buy" if net_delta > 0 else "sell"
-            prices = [lv.price for lv in stacked_levels]
+            prices = [_get(lv, 'price', 0) for lv in stacked_levels]
             price_range = f"{min(prices):.0f}-{max(prices):.0f}"
             parts.append(
                 f"Stacked imbalances: {len(stacked_levels)} consecutive "

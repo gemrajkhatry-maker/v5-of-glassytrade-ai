@@ -292,7 +292,7 @@ class TestTimeout:
             mock_settings.LLM_TIMEOUT_SECONDS = 0.1
             handler.run_overseer(session, "SYM", tick, amt)
 
-        handler._executor.shutdown(wait=True)
+        handler._llm_queue.join()
 
         # No trade actions should have been taken (timeout → HOLD)
         tm.adjust_stop_loss.assert_not_called()
@@ -307,9 +307,13 @@ class TestProbabilityOverride:
     def test_high_reversal_overrides_hold_to_exit(self):
         """When exit_probability > 0.65 and LLM says HOLD, override to FULL_EXIT."""
         # Create mock probability engine that returns low P(long wins) = high P(adverse)
+        from app.domain.ports.probability_inference import ProbabilityEstimate
         prob_engine = MagicMock()
         prob_engine.is_ready.return_value = True
-        prob_engine.predict_proba.return_value = {"long": 0.20, "short": 0.80}
+        prob_engine.estimate.return_value = ProbabilityEstimate(
+            p_long_target=0.20, p_short_target=0.80,
+            expected_mfe_long=0.0, expected_mfe_short=0.0,
+        )
 
         handler, gen_ai, tm, storage = _make_handler(
             predict_return='{"action":"HOLD","reason":"looks fine"}',
@@ -355,9 +359,10 @@ class TestProbabilityOverride:
         amt.leg_poc = 0
         amt.leg_lvns = []
         amt.profile_shape = "D"
+        amt.lvn_play = None
 
         handler.run_overseer(session, "SYM", tick, amt)
-        handler._executor.shutdown(wait=True)
+        handler._llm_queue.join()
 
         # Should have called close_position due to probability override
         # P(long wins) = 0.20, so P(adverse for LONG) = 0.80 > 0.65 → FULL_EXIT

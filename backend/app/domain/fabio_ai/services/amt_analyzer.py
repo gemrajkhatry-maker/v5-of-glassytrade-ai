@@ -43,10 +43,15 @@ class AMTConfig:
     ABSORPTION_THRESHOLD: float = 0.3
     STOP_BUFFER: float = 0.001
     BUBBLE_VOL_MULTIPLIER: float = 1.5
-    AGGRESSION_SIGMA_THRESHOLD: float = 2.5  # Valentini: require 2.5σ spike
     AGGRESSION_EMA_PERIOD: int = 20  # EMA period for dynamic volume threshold
     DELTA_DIRECTIONALITY_THRESHOLD: float = 0.40  # Professional: 40-50% delta ratio
     HVN_THRESHOLD: float = 0.40   # HVN: bins > 40% of max volume (formula: 0.3–0.5)
+
+    # Configurable via env — tune for MCX with lower values
+    from app.config import settings as _settings
+    AGGRESSION_SIGMA_THRESHOLD: float = _settings.AGGRESSION_SIGMA
+    DISPLACEMENT_MULTIPLIER: float = _settings.DISPLACEMENT_MULTIPLIER
+    BALANCE_RATIO_THRESHOLD: float = _settings.BALANCE_RATIO_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -904,7 +909,7 @@ class AMTAnalyzer:
         avg_range = sum(d.high - d.low for d in prev_data) / len(prev_data)
         leg_range = max(c.high for c in recent) - min(c.low for c in recent)
 
-        if leg_range < avg_range * 1.5 * N:
+        if leg_range < avg_range * AMTConfig.DISPLACEMENT_MULTIPLIER * N:
             return False
 
         # Efficiency check: closes near extremes for at least 2/3 of candles
@@ -1065,7 +1070,7 @@ class AMTAnalyzer:
         balance_window = min(len(recent_data), 20)
         inside_count = sum(1 for d in recent_data[-balance_window:] if val <= d.close <= vah)
         balance_ratio = inside_count / balance_window if balance_window > 0 else 0.0
-        ratio_imbalanced = balance_ratio < 0.70 if balance_window >= 5 else False
+        ratio_imbalanced = balance_ratio < AMTConfig.BALANCE_RATIO_THRESHOLD if balance_window >= 5 else False
 
         # Require EITHER (displacement + acceptance) OR low balance ratio + acceptance
         # OR persistent price outside VA (slow drift / sustained breakout)

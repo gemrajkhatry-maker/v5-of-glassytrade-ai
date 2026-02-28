@@ -12,12 +12,20 @@ class Settings:
     # Dhan Broker Config
     DHAN_CLIENT_ID: str = os.getenv("DHAN_CLIENT_ID", "")
     DHAN_ACCESS_TOKEN: str = os.getenv("DHAN_ACCESS_TOKEN", "").strip("'")
+    SCANNER_MODE: str = os.getenv("SCANNER_MODE", "nse_options").lower()
     DEFAULT_SYMBOL: str = os.getenv("DEFAULT_SYMBOL", "NIFTY 27 FEB 25500 CALL")
     DEFAULT_EXCHANGE: str = os.getenv("DEFAULT_EXCHANGE", "NFO")
     DHAN_SYMBOLS: list[str] = os.getenv("DHAN_SYMBOLS", "NIFTY,BANKNIFTY").split(",")
     SCANNER_UNDERLYING: str = os.getenv("SCANNER_UNDERLYING", "NIFTY")
+    SCANNER_UNDERLYINGS: list[str] = os.getenv("SCANNER_UNDERLYINGS", "NIFTY,BANKNIFTY").split(",")
     SCANNER_OPTION_TYPE: str = os.getenv("SCANNER_OPTION_TYPE", "")  # Empty = auto-detect from momentum
     SCANNER_EXPIRY_INDEX: int = int(os.getenv("SCANNER_EXPIRY_INDEX", "0"))  # 0=current week (max gamma for scalping)
+    SCANNER_TOP_N: int = int(os.getenv("SCANNER_TOP_N", "10"))
+
+    # AMT thresholds (tune for MCX: AGGRESSION_SIGMA=2.0 DISPLACEMENT_MULTIPLIER=1.2 BALANCE_RATIO_THRESHOLD=0.55)
+    AGGRESSION_SIGMA: float = float(os.getenv("AGGRESSION_SIGMA", "2.5"))
+    DISPLACEMENT_MULTIPLIER: float = float(os.getenv("DISPLACEMENT_MULTIPLIER", "1.5"))
+    BALANCE_RATIO_THRESHOLD: float = float(os.getenv("BALANCE_RATIO_THRESHOLD", "0.70"))
 
     # Trading settings
     TRADING_MODE: str = os.getenv("TRADING_MODE", "PAPER")
@@ -59,6 +67,19 @@ class Settings:
     # Notifications
     TELEGRAM_BOT_TOKEN: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID: str = os.getenv("TELEGRAM_CHAT_ID", "")
+
+    def validate(self) -> list[str]:
+        """Return list of missing required config values.
+
+        Does not raise — caller decides whether to warn or abort.
+        Paper mode may not need broker credentials.
+        """
+        errors: list[str] = []
+        if not self.DHAN_CLIENT_ID:
+            errors.append("DHAN_CLIENT_ID is empty")
+        if not self.DHAN_ACCESS_TOKEN:
+            errors.append("DHAN_ACCESS_TOKEN is empty")
+        return errors
 
 
 settings = Settings()

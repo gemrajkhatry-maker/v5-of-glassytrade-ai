@@ -304,6 +304,37 @@ class TradeJournal:
                         continue
         return entries
 
+    def get_completed_trades(self, target_date: str | None = None) -> list[dict]:
+        """Return completed trades (entry+exit pairs matched by position_id)."""
+        entries = self.read_entries(target_date)
+        entries_by_pid: dict[str, dict] = {}
+        trades: list[dict] = []
+        for e in entries:
+            if e.get("event_type") == "ENTRY_EXECUTED" and e.get("position_id"):
+                entries_by_pid[e["position_id"]] = e
+            elif e.get("event_type") == "EXIT" and e.get("position_id"):
+                entry_ev = entries_by_pid.get(e["position_id"])
+                trades.append({
+                    "symbol": e.get("symbol", ""),
+                    "side": e.get("side") or (entry_ev or {}).get("side", ""),
+                    "entry_time": (entry_ev or {}).get("timestamp", ""),
+                    "exit_time": e.get("timestamp", ""),
+                    "entry_price": (entry_ev or {}).get("entry_price", 0),
+                    "exit_price": e.get("exit_price", 0),
+                    "stop_loss": (entry_ev or {}).get("stop_loss", 0),
+                    "take_profit": (entry_ev or {}).get("take_profit", 0),
+                    "pnl": e.get("pnl", 0),
+                    "pnl_pct": e.get("pnl_pct", 0),
+                    "duration_s": e.get("time_in_trade_s", 0),
+                    "exit_reason": e.get("exit_reason", ""),
+                    "mfe": e.get("mfe", 0),
+                    "mae": e.get("mae", 0),
+                    "market_state": (entry_ev or {}).get("market_state", ""),
+                    "llm_rationale": (entry_ev or {}).get("llm_rationale", ""),
+                    "position_id": e["position_id"],
+                })
+        return trades
+
     def summary(self, target_date: str | None = None) -> dict:
         """Return trade summary for a given date."""
         entries = self.read_entries(target_date)

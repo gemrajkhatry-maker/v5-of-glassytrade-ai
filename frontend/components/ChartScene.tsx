@@ -69,6 +69,40 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   const amtLinesRef = useRef<IPriceLine[]>([]);
   const initializedRef = useRef(false);
 
+  // Memoize amtAnalysis to prevent overlay redraws when profile data hasn't changed.
+  // The backend sends new AMT objects on every tick, but profile/legProfile arrays
+  // only change on candle boundaries. We fingerprint the visually-relevant fields
+  // so the expensive canvas overlay only redraws when actual drawing data changes.
+  const prevAmtRef = useRef<AMTAnalysis | null | undefined>(null);
+  const stableAmtAnalysis = useMemo(() => {
+    const prev = prevAmtRef.current;
+    if (amtAnalysis === prev) return prev;
+    if (!amtAnalysis) { prevAmtRef.current = amtAnalysis; return amtAnalysis; }
+    if (!prev) { prevAmtRef.current = amtAnalysis; return amtAnalysis; }
+
+    // Compare fields that affect overlay drawing: profiles, levels, aggressive prints
+    const profileSame = prev.profile?.length === amtAnalysis.profile?.length &&
+      JSON.stringify(prev.profile) === JSON.stringify(amtAnalysis.profile);
+    const legSame = prev.legProfile?.length === amtAnalysis.legProfile?.length &&
+      JSON.stringify(prev.legProfile) === JSON.stringify(amtAnalysis.legProfile);
+    const printsSame = prev.aggressivePrints?.length === amtAnalysis.aggressivePrints?.length &&
+      JSON.stringify(prev.aggressivePrints) === JSON.stringify(amtAnalysis.aggressivePrints);
+    const levelsSame = prev.poc === amtAnalysis.poc &&
+      prev.valueAreaHigh === amtAnalysis.valueAreaHigh &&
+      prev.valueAreaLow === amtAnalysis.valueAreaLow &&
+      prev.legPoc === amtAnalysis.legPoc &&
+      prev.legVah === amtAnalysis.legVah &&
+      prev.legVal === amtAnalysis.legVal &&
+      prev.sessionVwap === amtAnalysis.sessionVwap;
+
+    if (profileSame && legSame && printsSame && levelsSame) {
+      return prev; // Return old reference to skip redraw
+    }
+
+    prevAmtRef.current = amtAnalysis;
+    return amtAnalysis;
+  }, [amtAnalysis]);
+
   // 1. Initialize Chart
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -212,18 +246,18 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       try {
-        if (amtAnalysis) {
+        if (stableAmtAnalysis) {
           if (config.showVolumeProfile) {
-            drawVolumeProfile(ctx, canvas, series, amtAnalysis, config);
+            drawVolumeProfile(ctx, canvas, series, stableAmtAnalysis, config);
           }
           // Render Aggressive Bubbles (Fabio Valentini Style)
-          if (amtAnalysis.aggressivePrints && amtAnalysis.aggressivePrints.length > 0) {
-            drawAggressiveBubbles(ctx, canvas, chart, series, amtAnalysis.aggressivePrints, config);
+          if (stableAmtAnalysis.aggressivePrints && stableAmtAnalysis.aggressivePrints.length > 0) {
+            drawAggressiveBubbles(ctx, canvas, chart, series, stableAmtAnalysis.aggressivePrints, config);
           }
         }
 
         if (mode === 'FOOTPRINT' && footprintData && data.length > 0) {
-          drawFootprint(ctx, canvas, chart, series, data, footprintData, cumulativeDeltas, config, amtAnalysis);
+          drawFootprint(ctx, canvas, chart, series, data, footprintData, cumulativeDeltas, config, stableAmtAnalysis);
         }
       } catch (e) {
         console.error("Overlay draw error", e);
@@ -241,7 +275,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRangeChange);
     };
 
-  }, [amtAnalysis, data, footprintData, cumulativeDeltas, config, mode, isHidden]);
+  }, [stableAmtAnalysis, data, footprintData, cumulativeDeltas, config, mode, isHidden]);
 
 
   // Helper: Draw Aggressive Bubbles
@@ -819,11 +853,11 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     // Only add lightweight-chart pricelines if NOT in footprint mode
     const vpMode = config.vpMode || 'combined';
-    if (amtAnalysis && config.showVolumeProfile && mode !== 'FOOTPRINT') {
+    if (stableAmtAnalysis && config.showVolumeProfile && mode !== 'FOOTPRINT') {
       // Session levels (shown in session + combined modes)
       if (vpMode === 'session' || vpMode === 'combined') {
         amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-          price: amtAnalysis.poc,
+          price: stableAmtAnalysis.poc,
           color: '#facc15',
           lineWidth: 2,
           lineStyle: LineStyle.Solid,
@@ -831,7 +865,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           title: 'POC',
         }));
         amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-          price: amtAnalysis.valueAreaHigh,
+          price: stableAmtAnalysis.valueAreaHigh,
           color: '#3b82f6',
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
@@ -839,7 +873,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           title: 'VAH',
         }));
         amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-          price: amtAnalysis.valueAreaLow,
+          price: stableAmtAnalysis.valueAreaLow,
           color: '#3b82f6',
           lineWidth: 1,
           lineStyle: LineStyle.Dashed,
@@ -848,7 +882,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         }));
 
         // LVN lines (amber dotted — thin, low-volume gaps)
-        amtAnalysis.lvns?.forEach((lvn: number) => {
+        stableAmtAnalysis.lvns?.forEach((lvn: number) => {
           amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
             price: lvn,
             color: '#fb923c',
@@ -860,7 +894,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         });
 
         // HVN lines (emerald dashed — high-volume support/resistance)
-        amtAnalysis.hvns?.forEach((hvn: number) => {
+        stableAmtAnalysis.hvns?.forEach((hvn: number) => {
           amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
             price: hvn,
             color: '#34d399',
@@ -873,10 +907,10 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       }
 
       // Leg levels (shown in leg + combined modes when leg profile exists)
-      if ((vpMode === 'leg' || vpMode === 'combined') && amtAnalysis.legProfile && amtAnalysis.legProfile.length > 0) {
-        if (amtAnalysis.legPoc > 0) {
+      if ((vpMode === 'leg' || vpMode === 'combined') && stableAmtAnalysis.legProfile && stableAmtAnalysis.legProfile.length > 0) {
+        if (stableAmtAnalysis.legPoc > 0) {
           amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: amtAnalysis.legPoc,
+            price: stableAmtAnalysis.legPoc,
             color: '#FF9900',
             lineWidth: 2,
             lineStyle: LineStyle.Solid,
@@ -884,9 +918,9 @@ const ChartScene: React.FC<ChartSceneProps> = ({
             title: 'Leg POC',
           }));
         }
-        if (amtAnalysis.legVah > 0) {
+        if (stableAmtAnalysis.legVah > 0) {
           amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: amtAnalysis.legVah,
+            price: stableAmtAnalysis.legVah,
             color: '#FF6600',
             lineWidth: 1,
             lineStyle: LineStyle.Dashed,
@@ -894,9 +928,9 @@ const ChartScene: React.FC<ChartSceneProps> = ({
             title: 'Leg VAH',
           }));
         }
-        if (amtAnalysis.legVal > 0) {
+        if (stableAmtAnalysis.legVal > 0) {
           amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: amtAnalysis.legVal,
+            price: stableAmtAnalysis.legVal,
             color: '#FF6600',
             lineWidth: 1,
             lineStyle: LineStyle.Dashed,
@@ -905,7 +939,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           }));
         }
         // Leg LVN lines (warm yellow dotted)
-        amtAnalysis.legLvns?.forEach((lvn: number) => {
+        stableAmtAnalysis.legLvns?.forEach((lvn: number) => {
           amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
             price: lvn,
             color: '#fbbf24',
@@ -1020,7 +1054,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       activePriceLinesRef.current.set(pos.id, lines);
     });
 
-  }, [positions, closedTrades, activeSignal, amtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
+  }, [positions, closedTrades, activeSignal, stableAmtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
 
   return (
     <div className="w-full h-full relative bg-[#0f172a] overflow-hidden" style={{ display: isHidden ? 'none' : 'block' }}>

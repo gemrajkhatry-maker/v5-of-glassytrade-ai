@@ -87,7 +87,11 @@ def three_align_check(
         return False
 
     near_level = False
-    threshold = tick.close * 0.003  # 0.3% — meaningful with proper VP lookback
+    # Dynamic near-level threshold: 50% of VA width (capped at 3% of price).
+    # Options VA can be wide (10-20% of price), so fixed 0.3% is too tight.
+    # Using half VA width means "price is in the outer half of the value area"
+    # which is exactly where Fabio wants entries (near VA edges / POC).
+    threshold = min(va_range * 0.5, tick.close * 0.03) if va_range > 0 else tick.close * 0.003
     for level in [amt_result.value_area_high, amt_result.value_area_low, amt_result.poc]:
         if abs(tick.close - level) < threshold:
             near_level = True
@@ -115,7 +119,12 @@ def three_align_check(
                 break
 
     agg_ok = check_confirmation_bundle(data, tick, order_book)
-    return state_ok and near_level and agg_ok
+    if not agg_ok:
+        logger.debug("Three-Align: confirmation bundle weak (vol/delta low) — proceeding with near_level=%s", near_level)
+    # Confirmation bundle is advisory — Market State + Near Level are the hard gates.
+    # Low vol/delta at MCX option candle boundaries is normal; the LLM + grade score
+    # handle quality filtering downstream.
+    return state_ok and near_level
 
 
 # ------------------------------------------------------------------
@@ -168,11 +177,11 @@ def check_confirmation_bundle(data: list[OHLC], tick: OHLC, order_book=None) -> 
             spread_bps = spread / mid * 10000
             spread_tight = spread_bps <= 5.0
     else:
-        spread_tight = False  # No order book = cannot confirm spread tightness
+        spread_tight = True  # Assume OK when order book unavailable
 
     score = sum([vol_impulse, delta_pressure, spread_tight])
-    logger.debug("Confirmation bundle: vol_impulse=%s, delta_pressure=%s, spread_tight=%s -> %d/3",
-                 vol_impulse, delta_pressure, spread_tight, score)
+    logger.debug("Confirmation bundle: vol_impulse=%s (vol=%.0f ema=%.0f), delta_pressure=%s (ratio=%.3f), spread_tight=%s -> %d/3",
+                 vol_impulse, tick.volume, ema_vol, delta_pressure, delta_ratio, spread_tight, score)
     return score >= 2
 
 
@@ -260,6 +269,7 @@ def build_entry_signal(
     ai_result: dict,
     setup_type: SetupType = SetupType.TREND_MODEL,
     data: list[OHLC] | None = None,
+    risk_sl_pct: float | None = None,
 ) -> Signal:
     """Build Signal from LLM decision using Fabio Playbook SL/TP.
 
@@ -342,6 +352,18 @@ def build_entry_signal(
         else:
             stop_price = tick.close + min_sl_dist
 
+    # ---- Cushion SL override ----
+    # SessionRiskManager computes dynamic SL% based on session P&L.
+    # Apply it if tighter than the current SL (never widen beyond quant SL).
+    # IMPORTANT: Never tighten below min_sl_dist — prevents instant stop-outs on MCX options.
+    if risk_sl_pct is not None and risk_sl_pct > 0:
+        cushion_dist = max(tick.close * risk_sl_pct, min_sl_dist)
+        if cushion_dist < abs(tick.close - stop_price):
+            if is_buy:
+                stop_price = tick.close - cushion_dist
+            else:
+                stop_price = tick.close + cushion_dist
+
     setup_label = "MeanRev" if setup_type == SetupType.MEAN_REVERSION else "Trend"
     risk = abs(tick.close - stop_price)
     reward = abs(tp_price - tick.close)
@@ -402,6 +424,84 @@ def sl_from_aggressive_print(
 # VWAP Bias Check
 # ------------------------------------------------------------------
 
+def compute_grade_score(
+    direction: str,
+    tick: OHLC,
+    amt_result: AMTResult,
+    setup_type: SetupType,
+    session_phase: str = "",
+    favor_strategy: str = "",
+    profile_shape: str = "",
+    footprint_candle=None,
+) -> int:
+    """Compute A/B/C setup grade score from market confluence.
+
+    Returns integer score:
+      >= 3 → A-grade (High confidence)
+      >= 1 → B-grade (Medium confidence)
+      <  1 → C-grade (Low confidence)
+
+    Used by both LLM entry path and agent fast-entry path to ensure
+    consistent quality gates across all entry mechanisms.
+    """
+    score = 0
+
+    # CVD confirms direction
+    if (direction == "LONG" and amt_result.cvd_slope > 0.3) or \
+       (direction == "SHORT" and amt_result.cvd_slope < -0.3):
+        score += 1
+    # No CVD divergence against direction
+    if not amt_result.cvd_divergence:
+        score += 1
+    elif (direction == "LONG" and amt_result.cvd_divergence == "BEARISH_DIV") or \
+         (direction == "SHORT" and amt_result.cvd_divergence == "BULLISH_DIV"):
+        score -= 2
+
+    # Session alignment
+    if (favor_strategy == "MEAN_REVERSION" and setup_type == SetupType.MEAN_REVERSION) or \
+       (favor_strategy == "TREND_CONTINUATION" and setup_type == SetupType.TREND_MODEL):
+        score += 1
+
+    # Profile shape alignment
+    shape_code = profile_shape[0] if profile_shape else ""
+    if (shape_code == "b" and direction == "LONG") or (shape_code == "P" and direction == "SHORT"):
+        score += 1
+    elif (shape_code == "b" and direction == "SHORT") or (shape_code == "P" and direction == "LONG"):
+        score -= 1
+
+    # VWAP bias
+    vwap = amt_result.session_vwap if amt_result.session_vwap > 0 else (tick.vwap if tick.vwap > 0 else 0)
+    vwap_check = check_vwap_bias(
+        direction, tick.close, vwap,
+        getattr(amt_result, 'vwap_upper_2', 0),
+        getattr(amt_result, 'vwap_lower_2', 0),
+    )
+    if vwap_check.get("overextended"):
+        score -= 2
+    elif vwap_check.get("warning"):
+        score -= 1
+
+    # Stacked imbalance alignment from footprint
+    if footprint_candle and hasattr(footprint_candle, 'levels') and footprint_candle.levels:
+        stacked = [lv for lv in footprint_candle.levels if getattr(lv, 'stacked', False)]
+        if stacked:
+            score += check_imbalance_alignment(direction, stacked)
+
+    # Contested zone (both sides stacked)
+    if footprint_candle and hasattr(footprint_candle, 'levels') and footprint_candle.levels:
+        stacked = [lv for lv in footprint_candle.levels if getattr(lv, 'stacked', False)]
+        has_buy = any(lv.delta > 0 for lv in stacked)
+        has_sell = any(lv.delta < 0 for lv in stacked)
+        if has_buy and has_sell:
+            score -= 3
+
+    # Midday downgrade
+    if session_phase == "NSE_MIDDAY":
+        score -= 1
+
+    return score
+
+
 def check_vwap_bias(
     direction: str, price: float, vwap: float,
     vwap_upper_2: float, vwap_lower_2: float,
@@ -412,6 +512,8 @@ def check_vwap_bias(
     - warning: True if entering against VWAP bias (LONG below VWAP, SHORT above).
     - overextended: True if price is at or beyond the 2-sigma VWAP band.
     """
+    if vwap <= 0:
+        return {"warning": False, "overextended": False}
     warning = False
     overextended = False
     if direction == "LONG":

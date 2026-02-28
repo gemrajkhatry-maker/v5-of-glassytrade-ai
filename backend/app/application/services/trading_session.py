@@ -38,9 +38,13 @@ from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
 from app.domain.fabio_ai.services.option_selector import OptionSelector
 
 from app.application.services.trade_journal import TradeJournal
+from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager
 from app.infrastructure.serialization.schemas import portfolio_to_dto, stats_to_dto
 
 log = logging.getLogger(__name__)
+
+# Cap candle history per symbol to bound memory in long-running sessions.
+MAX_CANDLES_PER_SYMBOL = 2000
 
 
 @dataclass
@@ -76,6 +80,9 @@ class SessionState:
     # This ensures portfolio mutations always happen on the main thread.
     _pending_signal: tuple | None = None  # (symbol, Signal) or None
 
+    # Idempotency: track executed signal IDs to prevent duplicate position openings
+    _executed_signal_ids: set = field(default_factory=set)
+
     # Track last candle time — LLM only fires on new candle boundaries
     _last_candle_time: str = ""
 
@@ -100,8 +107,9 @@ class TradingSessionService:
         # Domain services
         self._risk_manager = RiskManager()
 
-        # Focused handlers
-        self._amt_handler = amt_handler or AMTHandler()
+        # Focused handlers — per-symbol AMT handlers (VP state is per-instrument)
+        self._amt_handlers: dict[str, AMTHandler] = {}
+        self._default_amt_handler = amt_handler  # used as template for config
         # Trading journal — comprehensive JSONL trade logging
         self._journal = TradeJournal()
         self._forward_logger: ForwardTestLogger | None = None
@@ -111,9 +119,19 @@ class TradingSessionService:
         except Exception:
             pass
 
+        # Crash-safe state persistence via storage kv_set/kv_get
+        def _persist_fn(key: str, value: str | None = None) -> str | None:
+            if not self._storage or not hasattr(self._storage, 'kv_set'):
+                return None
+            if value is None:
+                return self._storage.kv_get(key)
+            self._storage.kv_set(key, value)
+            return None
+
         self._lifecycle_handler = TradeLifecycleHandler(
             on_stop_out=self._on_stop_out,
             on_partial_exit=self._on_partial_exit,
+            persist_fn=_persist_fn,
         )
 
         self._llm_handler = LLMEntryHandler(
@@ -122,11 +140,29 @@ class TradingSessionService:
             journal=self._journal,
         )
         self._rl_handler = RLHandler()
+
+        # Session risk manager — Fabio cushion system (Gap #4)
+        self._session_risk_manager = SessionRiskManager()
+        # Restore persisted risk state (crash-safe recovery)
+        if self._storage and hasattr(self._storage, 'kv_get'):
+            try:
+                import json
+                from datetime import date
+                saved = self._storage.kv_get(f"risk_state_{date.today().isoformat()}")
+                if saved:
+                    self._session_risk_manager.load_from_dict(json.loads(saved))
+                    log.info("Restored risk state: tier=%s, pnl=%.2f",
+                             self._session_risk_manager.risk_tier.name,
+                             self._session_risk_manager.session_pnl)
+            except Exception:
+                log.debug("Could not load risk state", exc_info=True)
+
         self._overseer_handler = LLMOverseerHandler(
             gen_ai_service, event_bus,
             trade_manager=self._lifecycle_handler.trade_manager,
             storage=storage,
             probability_engine=self._probability_engine,
+            session_risk_manager=self._session_risk_manager,
         )
 
         # Option selector for NSE options signal enrichment
@@ -134,84 +170,122 @@ class TradingSessionService:
 
         # Session state per symbol
         self._sessions: dict[str, SessionState] = {}
+        self._session_creation_lock = threading.Lock()
+
+        # Session eviction — prevent unbounded memory growth
+        self._session_eviction_interval = 3600  # check every hour
+        self._last_eviction_check = time.time()
+        self._session_idle_timeout = 86400  # 24 hours
 
         # Wire event subscriptions
         self._event_bus.subscribe(TickReceived, self._on_tick)
         self._event_bus.subscribe(SignalGenerated, self._on_signal_generated)
         self._event_bus.subscribe(PositionClosed, self._on_position_closed)
 
+    def _evict_idle_sessions(self) -> None:
+        """Remove sessions idle for > 24 hours with no open positions."""
+        now = time.time()
+        if now - self._last_eviction_check < self._session_eviction_interval:
+            return
+        self._last_eviction_check = now
+        to_evict = []
+        for symbol, session in self._sessions.items():
+            last_tick = getattr(session, '_last_tick_time', 0)
+            has_positions = any(
+                p.status == "OPEN" for p in session.portfolio.positions
+            ) if hasattr(session, 'portfolio') else False
+            if not has_positions and (now - last_tick) > self._session_idle_timeout:
+                to_evict.append(symbol)
+        for symbol in to_evict:
+            del self._sessions[symbol]
+            logger.info("Evicted idle session: %s", symbol)
+
     def get_or_create_session(self, symbol: str) -> SessionState:
+        self._evict_idle_sessions()
         if symbol not in self._sessions:
-            new_session = SessionState(symbol=symbol)
-            new_session.last_ai_analysis = {
-                "direction": "FLAT",
-                "rationale": "Waiting for first LLM call.",
-                "confidence": "Low",
-                "input_prompt": "",
-                "raw_output": "",
-            }
-            # Load prior session profile for gap analysis
-            if self._storage:
-                try:
-                    prior = self._storage.get_previous_session_profile(symbol, "NSE")
-                    if prior:
-                        new_session._prior_profile = prior
-                        log.info(
-                            "Loaded prior session profile for %s: POC=%.1f VAH=%.1f VAL=%.1f",
-                            symbol, prior.get("poc", 0), prior.get("vah", 0), prior.get("val", 0),
-                        )
-                except Exception:
-                    log.debug("Failed to load prior session profile", exc_info=True)
+            with self._session_creation_lock:
+                if symbol not in self._sessions:  # double-check after acquiring lock
+                    new_session = SessionState(symbol=symbol)
+                    new_session.last_ai_analysis = {
+                        "direction": "FLAT",
+                        "rationale": "Waiting for first LLM call.",
+                        "confidence": "Low",
+                        "input_prompt": "",
+                        "raw_output": "",
+                    }
+                    # Load prior session profile for gap analysis
+                    if self._storage:
+                        try:
+                            prior = self._storage.get_previous_session_profile(symbol, "NSE")
+                            if prior:
+                                new_session._prior_profile = prior
+                                log.info(
+                                    "Loaded prior session profile for %s: POC=%.1f VAH=%.1f VAL=%.1f",
+                                    symbol, prior.get("poc", 0), prior.get("vah", 0), prior.get("val", 0),
+                                )
+                        except Exception:
+                            log.debug("Failed to load prior session profile", exc_info=True)
 
-            # Recover open positions from storage (crash recovery)
-            if self._storage:
-                try:
-                    saved_positions = self._storage.load_open_positions()
-                    for pos_data in saved_positions:
-                        if pos_data.get("symbol") != symbol:
-                            continue
-                        from app.domain.trading.models.entities import Position
-                        from app.domain.trading.models.enums import Side, PositionStatus
-                        pos = Position(
-                            id=pos_data["id"],
-                            symbol=pos_data["symbol"],
-                            side=Side(pos_data["side"]),
-                            source=Source.LLM,
-                            entry_price=pos_data["entry_price"],
-                            size=pos_data["size"],
-                            stop_loss=pos_data["stop_loss"],
-                            take_profit=pos_data["take_profit"],
-                            entry_time=pos_data.get("opened_at", ""),
-                            status=PositionStatus.OPEN,
-                        )
-                        new_session.portfolio.positions.append(pos)
-                        # Re-register with TradeManager for exit monitoring
-                        self._lifecycle_handler._trade_manager.register_position(
-                            position_id=pos.id,
-                            side=pos_data["side"],
-                            entry_price=pos.entry_price,
-                            stop_loss=pos.stop_loss,
-                            take_profit=pos.take_profit,
-                        )
-                        log.info(
-                            "Recovered position %s: %s %s @ %.2f (SL=%.2f, TP=%.2f)",
-                            pos.id, pos_data["side"], symbol,
-                            pos.entry_price, pos.stop_loss, pos.take_profit,
-                        )
-                except Exception:
-                    log.error("Failed to recover open positions", exc_info=True)
+                    # Recover open positions from storage (crash recovery)
+                    if self._storage:
+                        try:
+                            saved_positions = self._storage.load_open_positions()
+                            for pos_data in saved_positions:
+                                if pos_data.get("symbol") != symbol:
+                                    continue
+                                from app.domain.trading.models.entities import Position
+                                from app.domain.trading.models.enums import Side, PositionStatus
+                                pos = Position(
+                                    id=pos_data["id"],
+                                    symbol=pos_data["symbol"],
+                                    side=Side(pos_data["side"]),
+                                    source=Source.LLM,
+                                    entry_price=pos_data["entry_price"],
+                                    size=pos_data["size"],
+                                    stop_loss=pos_data["stop_loss"],
+                                    take_profit=pos_data["take_profit"],
+                                    entry_time=pos_data.get("opened_at", ""),
+                                    status=PositionStatus.OPEN,
+                                )
+                                new_session.portfolio.positions.append(pos)
+                                # Re-register with TradeManager for exit monitoring
+                                self._lifecycle_handler._trade_manager.register_position(
+                                    position_id=pos.id,
+                                    symbol=symbol,
+                                    side=pos_data["side"],
+                                    entry_price=pos.entry_price,
+                                    stop_loss=pos.stop_loss,
+                                    take_profit=pos.take_profit,
+                                )
+                                log.info(
+                                    "Recovered position %s: %s %s @ %.2f (SL=%.2f, TP=%.2f)",
+                                    pos.id, pos_data["side"], symbol,
+                                    pos.entry_price, pos.stop_loss, pos.take_profit,
+                                )
+                        except Exception:
+                            log.critical(
+                                "POSITION RECOVERY FAILED for %s — manual check required",
+                                symbol, exc_info=True,
+                            )
 
-            # Clear failed entry records from previous session
-            self._llm_handler.clear_failed_entries()
+                    # Clear failed entry records from previous session
+                    self._llm_handler.clear_failed_entries()
 
-            self._sessions[symbol] = new_session
+                    new_session._session_risk_manager = self._session_risk_manager
+
+                    self._sessions[symbol] = new_session
         return self._sessions[symbol]
 
     def process_tick(
         self, symbol: str, tick: OHLC, order_book: OrderBook | None = None,
+        oi_data: dict | None = None,
     ) -> dict:
         """Process a new tick and return the current state snapshot."""
         session = self.get_or_create_session(symbol)
+        session._last_tick_time = time.time()
+
+        if oi_data is not None:
+            session._oi_analysis = oi_data
 
         # Drain pending signal from LLM worker thread.
         # This ensures portfolio mutations always happen on the main thread,
@@ -235,8 +309,8 @@ class TradingSessionService:
         else:
             session.data.append(tick)        # new candle
             session._last_candle_time = tick.time
-            if len(session.data) > 1000:
-                del session.data[:len(session.data) - 1000]
+            if len(session.data) > MAX_CANDLES_PER_SYMBOL:
+                del session.data[:len(session.data) - MAX_CANDLES_PER_SYMBOL]
         session.order_book = order_book
 
         # Persist tick
@@ -248,7 +322,7 @@ class TradingSessionService:
                     "delta": tick.delta,
                 })
             except Exception:
-                log.debug("Failed to persist tick", exc_info=True)
+                log.warning("Failed to persist tick for %s — audit trail gap", symbol, exc_info=True)
 
         # Process tick in portfolio (SL/TP exits from Portfolio itself)
         with session._lock:
@@ -274,7 +348,7 @@ class TradingSessionService:
                         "opened_at": pos.entry_time, "closed_at": pos.exit_time,
                     })
                 except Exception:
-                    log.debug("Failed to persist trade", exc_info=True)
+                    log.warning("Failed to persist trade for %s — audit trail gap", symbol, exc_info=True)
 
         # Sync portfolio-closed positions to TradeManager to prevent double-close
         if closed_positions:
@@ -325,6 +399,7 @@ class TradingSessionService:
         if _market in ("NFO", "BSE"):
             _market = "NSE"
         session_phase = _get_si(timestamp=event.tick.time, market=_market)
+        session._last_session_info = session_phase
         if session_phase.force_exit:
             with session._lock:
                 open_positions = [p for p in session.portfolio.positions if p.status == "OPEN"]
@@ -365,14 +440,29 @@ class TradingSessionService:
         # 1. AMT Analysis + Footprint
         # Pass prior session data for gap/bias computation
         prior = getattr(session, '_prior_profile', None)
-        amt_result, amt_dto, fp_dto = self._amt_handler.analyze(
+        # Per-symbol AMT handler (each symbol needs its own VP state)
+        if event.symbol not in self._amt_handlers:
+            self._amt_handlers[event.symbol] = AMTHandler()
+        amt_result, amt_dto, fp_dto = self._amt_handlers[event.symbol].analyze(
             list(event.data), event.order_book,
             prior_poc=prior.get("poc", 0.0) if prior else 0.0,
             prior_vah=prior.get("vah", 0.0) if prior else 0.0,
             prior_val=prior.get("val", 0.0) if prior else 0.0,
         )
-        session.last_amt = amt_dto
-        session.last_footprint = fp_dto
+        with session._lock:
+            session.last_amt = amt_dto
+            session.last_footprint = fp_dto
+            # Store domain footprint for overseer and exit management
+            session._last_fp_domain = fp_dto  # will be None if no footprint available
+
+        # Record level approaches for second drive tracking (Gap #6)
+        if hasattr(self._llm_handler, '_regime_detector'):
+            key_levels = [amt_result.poc, amt_result.value_area_high, amt_result.value_area_low]
+            if amt_result.lvns:
+                key_levels.extend(amt_result.lvns[:3])
+            self._llm_handler._regime_detector.record_level_approach(
+                event.tick.close, key_levels, time.time(),
+            )
 
         # 1b. Micro-agent pipeline (LightGBM probability, <1ms)
         agent_decision = None
@@ -400,11 +490,25 @@ class TradingSessionService:
         # Store agent decision on session for LLM enrichment
         session._agent_decision = agent_decision
 
+        # Extract stacked imbalances from footprint for exit management
+        _imbalances = None
+        _fp_domain = getattr(session, '_last_fp_domain', None)
+        if _fp_domain:
+            try:
+                _latest_fp = list(_fp_domain.values())[-1] if _fp_domain else None
+                if _latest_fp and hasattr(_latest_fp, 'levels'):
+                    _imbalances = [lv for lv in _latest_fp.levels if getattr(lv, 'stacked', False)]
+            except Exception:
+                pass
+
         # 2. Trade Lifecycle (exits via TradeManager)
         with session._lock:
             position_closed = self._lifecycle_handler.check_exits(
                 session.portfolio, event.tick.close,
                 cvd_divergence=amt_result.cvd_divergence,
+                order_book=event.order_book,
+                amt_result=amt_result,
+                imbalances=_imbalances,
             )
             has_position = any(p.status == "OPEN" for p in session.portfolio.positions)
 
@@ -435,8 +539,8 @@ class TradingSessionService:
                 last_ai_time=ai_time,
                 ai_running=ai_running,
                 has_position=has_position,
-                has_managed_positions=self._lifecycle_handler.has_managed_positions,
-                in_cooldown=self._lifecycle_handler.in_cooldown(),
+                has_managed_positions=self._lifecycle_handler.has_managed_positions(event.symbol),
+                in_cooldown=self._lifecycle_handler.in_cooldown(event.symbol),
                 last_entry_time=session._last_entry_time,
                 data=session.data,
                 amt_result=amt_result,
@@ -445,7 +549,26 @@ class TradingSessionService:
             )
 
         if run_overseer:
-            self._overseer_handler.run_overseer(session, event.symbol, event.tick, amt_result)
+            # Compute session info for overseer context (Gap #3)
+            from app.config import Settings as _Settings
+            _mkt = _Settings().DEFAULT_EXCHANGE
+            if _mkt in ("NFO", "BSE"):
+                _mkt = "NSE"
+            _si = _get_si(timestamp=event.tick.time, market=_mkt)
+            # Get latest footprint candle
+            _fp_candle = None
+            _fp_domain = getattr(session, '_last_fp_domain', None)
+            if _fp_domain:
+                try:
+                    _fp_vals = list(_fp_domain.values()) if isinstance(_fp_domain, dict) else None
+                    _fp_candle = _fp_vals[-1] if _fp_vals else None
+                except Exception:
+                    pass
+            _oi = getattr(session, '_oi_analysis', None)
+            self._overseer_handler.run_overseer(
+                session, event.symbol, event.tick, amt_result,
+                session_info=_si, footprint_candle=_fp_candle, oi_analysis=_oi,
+            )
 
         # 4a. Agent-driven fast entry (LightGBM probability — bypasses slow LLM)
         # When agent pipeline says ENTER_NOW with high probability, create entry directly.
@@ -460,24 +583,58 @@ class TradingSessionService:
                 and agent_decision.timing == "ENTER_NOW"
                 and agent_decision.probability >= 0.55
                 and agent_decision.size_fraction > 0
-                and not self._lifecycle_handler.in_cooldown()
-                and not self._lifecycle_handler.has_managed_positions):
+                and not self._lifecycle_handler.in_cooldown(event.symbol)
+                and not self._lifecycle_handler.has_managed_positions(event.symbol)
+                # --- Risk guards (prevent overtrading into losing streaks) ---
+                and not (hasattr(self._lifecycle_handler, '_trade_manager')
+                         and self._lifecycle_handler._trade_manager.should_block_entry())
+                and self._session_risk_manager.risk_tier.name != "DEFENSIVE"):
             try:
                 from app.domain.trading.models.enums import SignalType, SetupType
                 from app.domain.trading.models.entities import Signal
-                from app.domain.fabio_ai.services.entry_gate import build_entry_signal
+                from app.domain.fabio_ai.services.entry_gate import build_entry_signal, compute_grade_score
                 # Level-based SL/TP from Fabio playbook (VP levels, aggressive prints, ATR floor)
                 setup = SetupType.TREND_MODEL if agent_decision.regime == "TRENDING" else SetupType.MEAN_REVERSION
+
+                # A/B/C Setup Grading — same quality gate as LLM path
+                # Agent requires B-grade minimum (score >= 1) to enter
+                _si = getattr(session, '_last_session_info', None)
+                _fp_domain = getattr(session, '_last_fp_domain', None)
+                _fp_candle = None
+                if _fp_domain:
+                    try:
+                        _fp_vals = list(_fp_domain.values()) if isinstance(_fp_domain, dict) else []
+                        _fp_candle = _fp_vals[-1] if _fp_vals else None
+                    except Exception:
+                        pass
+                _grade = compute_grade_score(
+                    direction=agent_decision.direction,
+                    tick=event.tick,
+                    amt_result=amt_result,
+                    setup_type=setup,
+                    session_phase=_si.session if _si else "",
+                    favor_strategy=_si.favor_strategy if _si else "",
+                    profile_shape=getattr(amt_result, 'profile_shape', "") or "",
+                    footprint_candle=_fp_candle,
+                )
+                if _grade < 1:
+                    log.info("Agent blocked: grade_score=%d < 1 (C-grade, need B+)", _grade)
+                    raise ValueError("Grade too low")
+
                 is_buy = agent_decision.direction == "LONG"
+                _risk_mgr = getattr(session, '_session_risk_manager', None)
+                _cushion_sl = _risk_mgr.stop_loss_pct if _risk_mgr else None
                 sig = build_entry_signal(
                     direction=agent_decision.direction,
                     tick=event.tick,
                     amt_result=amt_result,
                     ai_result={"rationale": f"[Agent] {agent_decision.rationale[:80]}",
-                               "confidence": "High" if agent_decision.probability >= 0.60 else "Medium"},
+                               "confidence": "High" if _grade >= 3 else "Medium"},
                     setup_type=setup,
                     data=session.data,
+                    risk_sl_pct=_cushion_sl,
                 )
+                _agent_confidence = "High" if _grade >= 3 else "Medium"
                 # Override source + metadata for agent path
                 sig = Signal(
                     type=sig.type, price=sig.price, reason=sig.reason,
@@ -486,7 +643,8 @@ class TradingSessionService:
                     timestamp=sig.timestamp,
                     metadata={"agent_entry": True, "probability": agent_decision.probability,
                               "kelly": agent_decision.size_fraction,
-                              "confidence": "High" if agent_decision.probability >= 0.60 else "Medium"},
+                              "grade_score": _grade,
+                              "confidence": _agent_confidence},
                 )
 
                 from app.domain.fabio_ai.services.trade_manager import TradeManager
@@ -525,7 +683,7 @@ class TradingSessionService:
             session._last_entry_candle_time = event.tick.time
             self._llm_handler.run_entry(session, event.symbol, event.tick, amt_result)
         elif not has_position and not ai_running:
-            if self._lifecycle_handler.in_cooldown():
+            if self._lifecycle_handler.in_cooldown(event.symbol):
                 cooldown_status = session.last_ai_analysis or {}
                 cooldown_status["direction"] = "FLAT"
                 base_rationale = cooldown_status.get("rationale", "")
@@ -553,8 +711,24 @@ class TradingSessionService:
         """
         import time as _time
 
-        log.info("Signal received: %s @ %.2f (SL=%.2f, TP=%.2f, source=%s)",
-                 sig.type, sig.price, sig.stop_loss, sig.take_profit, sig.source)
+        # Idempotency guard: prevent duplicate position openings on crash/retry.
+        # Each Signal carries a unique signal_id (UUID). If the same signal_id
+        # is seen twice (e.g. network glitch, LLM fires twice), skip execution.
+        sig_id = getattr(sig, 'signal_id', None)
+        if sig_id:
+            with session._lock:
+                if sig_id in session._executed_signal_ids:
+                    log.warning("Duplicate signal %s — skipping execution", sig_id)
+                    return
+                session._executed_signal_ids.add(sig_id)
+                # Cap set size to prevent unbounded memory growth
+                if len(session._executed_signal_ids) > 1000:
+                    session._executed_signal_ids = set(
+                        list(session._executed_signal_ids)[-500:]
+                    )
+
+        log.info("Signal received: %s @ %.2f (SL=%.2f, TP=%.2f, source=%s, id=%s)",
+                 sig.type, sig.price, sig.stop_loss, sig.take_profit, sig.source, sig_id)
 
         with session._lock:
             if not self._risk_manager.validate(sig, session.portfolio):
@@ -603,7 +777,7 @@ class TradingSessionService:
             position = self._broker.execute_order(sig, session.portfolio, symbol)
 
         if position:
-            self._lifecycle_handler.register_position(position, sig)
+            self._lifecycle_handler.register_position(symbol, position, sig)
             self._event_bus.publish(PositionOpened(symbol=symbol, position=position))
             _meta = sig.metadata or {}
             _is_agent = _meta.get("agent_entry", False)
@@ -725,6 +899,26 @@ class TradingSessionService:
                 time_in_trade_s=time_in_trade,
                 exit_reason=pos.close_reason or "UNKNOWN",
             )
+        # Update session risk manager (Gap #4 — cushion system)
+        self._session_risk_manager.record_trade(pos.pnl)
+        log.info("SessionRisk: tier=%s sl_pct=%.4f pnl=%.2f wins=%d losses=%d",
+                 self._session_risk_manager.risk_tier.value,
+                 self._session_risk_manager.stop_loss_pct,
+                 self._session_risk_manager.session_pnl,
+                 self._session_risk_manager.consecutive_wins,
+                 self._session_risk_manager.consecutive_losses)
+        # Persist updated risk state (crash-safe)
+        if self._storage and hasattr(self._storage, 'kv_set'):
+            try:
+                import json
+                from datetime import date
+                self._storage.kv_set(
+                    f"risk_state_{date.today().isoformat()}",
+                    json.dumps(self._session_risk_manager.to_dict()),
+                )
+            except Exception:
+                log.debug("Could not persist risk state", exc_info=True)
+
         # Remove persisted open position (crash recovery cleanup)
         if self._storage:
             try:
