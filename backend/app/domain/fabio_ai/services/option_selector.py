@@ -54,9 +54,10 @@ class ThetaCheck:
 class OptionSelectorConfig:
     """Tuneable knobs for the option selection pipeline."""
 
-    min_days_to_expiry: int = 3
+    min_days_to_expiry: int = 1           # Scalping: allow 1-DTE for max gamma
     max_spread_pct: float = 0.02        # 2% of premium
-    min_oi: int = 1_000_000             # 10 lakh for NIFTY
+    min_oi: int = 200_000               # Lower for current-week early buildup
+    min_oi_next_week: int = 500_000     # Stricter for next-week expiry
     min_volume: int = 50_000
     max_theta_ratio: float = 0.20       # theta cost < 20% of expected profit
     nifty_lot_size: int = 25
@@ -132,20 +133,40 @@ class OptionSelector:
         underlying: str,
         spot_price: float,
         direction: str,
+        chain=None,
     ) -> int:
-        """Pick ATM or 1-strike OTM based on signal direction.
+        """Pick ATM strike for maximum gamma sensitivity (scalping-optimized).
 
-        LONG signal -> buy CE (1 strike OTM above spot).
-        SHORT signal -> buy PE (1 strike OTM below spot).
+        For scalping, ATM provides the highest gamma (fastest delta
+        acceleration on small moves) and tightest spreads.  If a live
+        option chain is supplied, selects the strike with the highest
+        gamma × volume product near ATM for optimal scalping response.
+
+        Falls back to pure ATM when chain/greeks are unavailable.
         """
         interval = self._strike_interval(underlying)
         atm = self._round_to_strike(spot_price, interval)
 
-        if direction.upper() == "LONG":
-            # CE: one strike OTM (above spot)
-            return atm + interval
-        # PE: one strike OTM (below spot)
-        return atm - interval
+        # If chain with greeks available, pick best gamma×volume strike near ATM
+        if chain is not None:
+            opt_map = chain.calls if direction.upper() == "LONG" else chain.puts
+            best_strike = atm
+            best_gv = -1.0
+            for offset in range(-1, 2):  # ATM-1, ATM, ATM+1
+                s = atm + offset * interval
+                opt = opt_map.get(float(s))
+                if opt is None:
+                    continue
+                gamma = float(opt.gamma or 0) if hasattr(opt, 'gamma') and opt.gamma else 0.0
+                vol = int(opt.volume or 0)
+                gv = gamma * (vol + 1)  # +1 to avoid zero
+                if gv > best_gv:
+                    best_gv = gv
+                    best_strike = s
+            return int(best_strike)
+
+        # No chain — return ATM directly (not OTM)
+        return atm
 
     def build_symbol(
         self,
@@ -267,19 +288,19 @@ class OptionSelector:
         self,
         available_expiries: list[str],
         current_date: str,
+        current_hour: int = 10,
     ) -> str | None:
         """Pick the optimal weekly expiry from *available_expiries*.
 
-        Strategy:
-        - Mon/Tue -> current week expiry (if it has >= ``min_days_to_expiry``
-          trading days remaining).
-        - Wed-Fri -> next week expiry.
-        - Always enforce a minimum of ``min_days_to_expiry`` calendar days.
+        Scalping-optimized strategy:
+        - ALWAYS prefer current-week expiry for maximum gamma.
+        - Only skip to next week if today IS expiry day AND after 14:30
+          (gamma trap zone in last 45 min).
+        - Minimum DTE=1 (allow 1-day expiry for gamma scalping).
 
         Returns ``None`` when no suitable expiry is available.
         """
         today = date.fromisoformat(current_date)
-        weekday = today.weekday()  # 0=Mon ... 6=Sun
 
         # Parse and sort available expiries chronologically
         parsed: list[date] = sorted(
@@ -289,25 +310,26 @@ class OptionSelector:
         if not parsed:
             return None
 
-        min_dte = self.cfg.min_days_to_expiry
+        min_dte = self.cfg.min_days_to_expiry  # default 1
 
-        if weekday <= 1:
-            # Monday or Tuesday — prefer current-week expiry
-            for exp in parsed:
-                dte = (exp - today).days
-                if dte >= min_dte:
-                    return exp.isoformat()
-        else:
-            # Wednesday through Friday — skip to next week
-            next_week_start = today + timedelta(days=(7 - weekday))
-            for exp in parsed:
-                dte = (exp - today).days
-                if dte >= min_dte and exp >= next_week_start:
-                    return exp.isoformat()
+        # Check if today is expiry day and we're in gamma-trap zone (after 14:30 IST)
+        is_expiry_day = parsed[0] == today
+        in_gamma_trap = is_expiry_day and current_hour >= 15  # 3 PM IST — last 15 min
 
-        # Fallback: first expiry meeting the minimum DTE requirement
-        for exp in parsed:
-            if (exp - today).days >= min_dte:
+        if is_expiry_day and in_gamma_trap:
+            # Skip today's expiry, use next available
+            for exp in parsed[1:]:
                 return exp.isoformat()
+            return None
+
+        # Default: use nearest expiry (current week) for maximum gamma
+        for exp in parsed:
+            dte = (exp - today).days
+            if dte >= min_dte:
+                return exp.isoformat()
+
+        # Even DTE=0 is acceptable for intraday scalping (before gamma trap)
+        if parsed:
+            return parsed[0].isoformat()
 
         return None

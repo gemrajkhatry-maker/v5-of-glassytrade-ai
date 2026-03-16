@@ -11,7 +11,6 @@ from app.domain.trading.models.aggregates import Portfolio
 class BrokerPort(ABC):
     """Abstract broker for executing trade orders (paper or live)."""
 
-    @abstractmethod
     def execute_order(
         self, signal: Signal, portfolio: Portfolio, symbol: str
     ) -> Position | None:
@@ -19,4 +18,9 @@ class BrokerPort(ABC):
 
         Returns the opened Position, or None if the order was rejected.
         """
+        ...
+        
+    @abstractmethod
+    def cancel_order(self, order_id: str) -> bool:
+        """Cancel an open order (like a standalone Stop-Loss bracket) by its ID."""
         ...

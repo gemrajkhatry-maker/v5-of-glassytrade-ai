@@ -1,18 +1,23 @@
-"""Feature extraction for first-passage probability model.
+"""Feature extraction for the first-passage probability model.
 
-Extracts 36 numeric microstructure features from OHLC candles,
-AMTResult, and OrderBook. All features are pure computations
-with no side effects.
+The active production model contract is a 42-feature schema defined by
+``FEATURE_NAMES``. Some additional runtime diagnostics can be computed, but
+they must not silently enter the model vector unless the trained artifacts are
+rebuilt and the schema version is promoted.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.domain.trading.models.enums import MarketStateCodec, ProfileShapeCodec
+
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook
 
-# Canonical feature order — must match training and inference.
+PROBABILITY_FEATURE_SCHEMA_VERSION = "fp-42-v1"
+
+# Canonical feature order — must match training artifacts and inference.
 FEATURE_NAMES: tuple[str, ...] = (
     # Group A — Price Microstructure (12)
     "close_vs_poc_pct",
@@ -65,6 +70,7 @@ FEATURE_NAMES: tuple[str, ...] = (
 )
 
 
+
 def extract_features(
     data: list[OHLC],
     amt_result: AMTResult,
@@ -76,8 +82,9 @@ def extract_features(
     dte_normalized: float = 0.0,
     oi: float = 0.0,
     prev_oi: float = 0.0,
+    is_mcx: bool = False,
 ) -> dict[str, float]:
-    """Extract 42 numeric features for the probability model.
+    """Extract active model features plus any runtime-only diagnostic extras.
 
     All values are floats. Missing data defaults to 0.0.
     Options-specific params (option_type_flag, moneyness_pct, etc.)
@@ -145,14 +152,13 @@ def extract_features(
     f["aggressive_print_imbalance"] = (buy_agg - sell_agg) / total_agg if total_agg > 0 else 0.0
 
     # --- Group C: Volume Profile Structure ---
-    shape = amt_result.profile_shape
-    f["profile_shape_encoded"] = 1.0 if shape == "P" else (-1.0 if shape == "b" else (0.5 if shape == "B" else 0.0))
+    f["profile_shape_encoded"] = ProfileShapeCodec.encode(str(amt_result.profile_shape))
     f["balance_ratio"] = amt_result.balance_ratio
     va_width = amt_result.value_area_high - amt_result.value_area_low
     f["va_width_pct"] = va_width / close if close > 0 else 0.0
-    f["market_state_encoded"] = 1.0 if str(amt_result.market_state) in ("IMBALANCED", "MarketState.IMBALANCED") else 0.0
+    f["market_state_encoded"] = MarketStateCodec.encode(amt_result.market_state)
     f["hvn_count"] = float(len(amt_result.hvns))
-
+    
     if amt_result.lvns:
         nearest_lvn_dist = min(abs(close - lvn) for lvn in amt_result.lvns)
         f["nearest_lvn_distance_pct"] = nearest_lvn_dist / close
@@ -176,9 +182,12 @@ def extract_features(
         total_q5 = bid_q5 + ask_q5
         f["book_imbalance_l5"] = (bid_q5 - ask_q5) / total_q5 if total_q5 > 0 else 0.0
 
-        f["bid_depth_total"] = bid_q5
-        f["ask_depth_total"] = ask_q5
-        f["book_pressure_ratio"] = bid_q5 / ask_q5 if ask_q5 > 0 else 1.0
+        bid_q20 = sum(l.quantity for l in order_book.bids[:20])
+        ask_q20 = sum(l.quantity for l in order_book.asks[:20])
+
+        f["bid_depth_total"] = bid_q20
+        f["ask_depth_total"] = ask_q20
+        f["book_pressure_ratio"] = bid_q20 / ask_q20 if ask_q20 > 0 else 1.0
     else:
         f["bid_ask_spread_bps"] = 0.0
         f["book_imbalance_l1"] = 0.0
@@ -188,8 +197,8 @@ def extract_features(
         f["book_pressure_ratio"] = 1.0
 
     # --- Group E: Temporal ---
-    f["minutes_since_open"] = _minutes_since_open(tick.time)
-    f["session_flag"] = _session_flag(tick.time)
+    f["minutes_since_open"] = _minutes_since_open(tick.time, is_mcx)
+    f["session_flag"] = _session_flag(tick.time, is_mcx)
     f["day_of_week"] = _day_of_week(tick.time)
     f["bars_since_last_displacement"] = _bars_since_displacement(data, amt_result)
 
@@ -197,8 +206,15 @@ def extract_features(
     oi_change = oi - prev_oi
     f["oi_change_pct"] = (oi_change / prev_oi * 100) if prev_oi > 0 else 0.0
     f["option_type_flag"] = option_type_flag
-    # underlying_return_5bar not available in live tick, default 0
-    f["underlying_return_5bar"] = 0.0
+    
+    # Calculate underlying_return_5bar from data array as a proxy
+    if len(data) >= 5:
+        past_close = data[-5].close
+        ur_5 = (close - past_close) / past_close if past_close > 0 else 0.0
+    else:
+        ur_5 = 0.0
+    f["underlying_return_5bar"] = float(ur_5)
+    
     f["moneyness_pct"] = moneyness_pct
     f["dte_normalized"] = dte_normalized
     f["oi_volume_ratio"] = oi / tick.volume if tick.volume > 0 and oi > 0 else 0.0
@@ -213,6 +229,7 @@ def extract_features(
 def extract_features_from_row(
     row: dict,
     data_window: list[OHLC] | None = None,
+    is_mcx: bool = False,
 ) -> dict[str, float]:
     """Extract features from a labeled DataFrame row (training pipeline).
 
@@ -274,13 +291,11 @@ def extract_features_from_row(
     f["aggressive_print_imbalance"] = 0.0  # not available in row
 
     # Volume profile
-    shape = str(row.get("profile_shape", ""))
-    f["profile_shape_encoded"] = 1.0 if shape == "P" else (-1.0 if shape == "b" else (0.5 if shape == "B" else 0.0))
+    f["profile_shape_encoded"] = ProfileShapeCodec.encode(str(row.get("profile_shape", "D")))
     f["balance_ratio"] = float(row.get("balance_ratio", 0))
     va_width = vah - val
     f["va_width_pct"] = va_width / close if close > 0 else 0.0
-    ms = str(row.get("market_state", ""))
-    f["market_state_encoded"] = 1.0 if "IMBALANCED" in ms.upper() else 0.0
+    f["market_state_encoded"] = MarketStateCodec.encode(row.get("market_state", ""))
     hvns_str = str(row.get("hvns", ""))
     f["hvn_count"] = float(len([x for x in hvns_str.split(",") if x.strip()])) if hvns_str else 0.0
     lvns_str = str(row.get("lvns", ""))
@@ -303,8 +318,8 @@ def extract_features_from_row(
 
     # Temporal
     ts = str(row.get("timestamp", ""))
-    f["minutes_since_open"] = _minutes_since_open(ts)
-    f["session_flag"] = _session_flag(ts)
+    f["minutes_since_open"] = _minutes_since_open(ts, is_mcx)
+    f["session_flag"] = _session_flag(ts, is_mcx)
     f["day_of_week"] = _day_of_week(ts)
     f["bars_since_last_displacement"] = float(row.get("bars_since_displacement", 0))
 
@@ -317,6 +332,11 @@ def extract_features_from_row(
     f["oi_volume_ratio"] = float(row.get("oi_volume_ratio", 0))
 
     return f
+
+
+def active_model_features(features: dict[str, float]) -> dict[str, float]:
+    """Return only the active schema features used by the trained models."""
+    return {name: float(features.get(name, 0.0)) for name in FEATURE_NAMES}
 
 
 # ---------------------------------------------------------------------------
@@ -342,30 +362,43 @@ def _parse_time(time_str: str):
         return None
 
 
-def _minutes_since_open(time_str: str) -> float:
-    """Minutes since NSE market open (9:15 IST)."""
+def _minutes_since_open(time_str: str, is_mcx: bool = False) -> float:
+    """Minutes since market open. NSE=09:15, MCX=09:00 IST."""
     parsed = _parse_time(time_str)
     if not parsed:
         return 0.0
     hour, minute, _ = parsed
+    if is_mcx:
+        return max(0.0, (hour - 9) * 60 + minute)
     return max(0.0, (hour - 9) * 60 + (minute - 15))
 
 
-def _session_flag(time_str: str) -> float:
-    """NSE session: 0=opening(9:15-10:00), 1=morning(10-12), 2=midday(12-14), 3=closing(14-15:30)."""
+def _session_flag(time_str: str, is_mcx: bool = False) -> float:
+    """NSE/MCX session flags based on market structure."""
     parsed = _parse_time(time_str)
     if not parsed:
         return 0.0
     hour, minute, _ = parsed
     total_min = hour * 60 + minute
-    if total_min < 600:  # before 10:00
-        return 0.0
-    elif total_min < 720:  # 10:00-12:00
-        return 1.0
-    elif total_min < 840:  # 12:00-14:00
-        return 2.0
+    
+    if is_mcx:
+        # MCX sessions: 0=morning(09-14), 1=midday(14-17), 2=ny(17-23:30)
+        if total_min < 840:    # < 14:00
+            return 0.0
+        elif total_min < 1020: # < 17:00
+            return 1.0
+        else:
+            return 2.0
     else:
-        return 3.0
+        # NSE session: 0=opening(9:15-10:00), 1=morning(10-12), 2=midday(12-14), 3=closing(14-15:30)
+        if total_min < 600:    # before 10:00
+            return 0.0
+        elif total_min < 720:  # 10:00-12:00
+            return 1.0
+        elif total_min < 840:  # 12:00-14:00
+            return 2.0
+        else:
+            return 3.0
 
 
 def _day_of_week(time_str: str) -> float:

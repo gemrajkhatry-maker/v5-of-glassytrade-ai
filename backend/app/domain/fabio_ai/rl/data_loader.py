@@ -59,6 +59,7 @@ def generate_synthetic(count: int = 5000, seed: int = 42) -> list[OHLC]:
     Uses a simple random walk with realistic volume and delta.
     """
     import math
+    from datetime import timedelta
 
     candles: list[OHLC] = []
     price = 100.0
@@ -88,7 +89,6 @@ def generate_synthetic(count: int = 5000, seed: int = 42) -> list[OHLC]:
         delta = vol * (r / 0.5) * 0.3  # correlated with price move
 
         dt = datetime(2025, 1, 1, tzinfo=timezone.utc)
-        from datetime import timedelta
         t = dt + timedelta(minutes=5 * i)
 
         candles.append(OHLC(

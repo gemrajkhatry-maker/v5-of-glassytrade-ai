@@ -8,8 +8,10 @@ daily loss limits, consecutive losses, and max concurrent positions.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone, timedelta
+from decimal import Decimal
 
 # IST (UTC+5:30) — NSE/NFO trading timezone
 _IST = timezone(timedelta(hours=5, minutes=30))
@@ -50,15 +52,19 @@ class RiskManager:
     """Validates trade signals against portfolio risk constraints."""
 
     # Circuit-breaker thresholds
-    MAX_DAILY_DRAWDOWN_PCT: float = 0.02  # 2% from day's peak equity
-    MAX_CONSECUTIVE_LOSSES: int = 10
+    # 5% drawdown from peak — 2% was too tight for options (normal candle swings hit it)
+    MAX_DAILY_DRAWDOWN_PCT: float = 0.05  # 5% from day's peak equity
+    # 5 consecutive losses is a clear signal — 10 was too permissive for scalping
+    MAX_CONSECUTIVE_LOSSES: int = 5
     MAX_CONCURRENT_POSITIONS: int = 5
-    MAX_PORTFOLIO_NOTIONAL_PCT: float = 0.60  # 60% of equity
-    MAX_PER_SYMBOL_NOTIONAL_PCT: float = 0.20  # 20% of equity
+    MAX_PORTFOLIO_NOTIONAL_PCT: Decimal = Decimal("0.60")  # 60% of equity total
+    MAX_PER_SYMBOL_NOTIONAL_PCT: Decimal = Decimal("0.20")  # 20% of equity per symbol
+
+    # Emergency kill switch shared across all per-symbol instances
+    _global_halt: bool = False
 
     def __init__(self) -> None:
         self._daily = DailyRiskState()
-        self._force_halted: bool = False  # Emergency kill switch
 
         # Drift detection — rolling win rate vs historical baseline
         self._recent_outcomes: list[bool] = []  # True=win, False=loss (last 50 trades)
@@ -68,11 +74,11 @@ class RiskManager:
 
     @property
     def is_halted(self) -> bool:
-        return self._force_halted or self._daily.halted
+        return RiskManager._global_halt or self._daily.halted
 
     @property
     def halt_reason(self) -> str:
-        if self._force_halted:
+        if RiskManager._global_halt:
             return "Emergency kill switch active"
         return self._daily.halt_reason
 
@@ -84,14 +90,16 @@ class RiskManager:
     # Emergency kill switch
     # ------------------------------------------------------------------
 
-    def halt_trading(self) -> None:
+    @classmethod
+    def halt_trading(cls) -> None:
         """Immediately halt all trading until manually resumed."""
-        self._force_halted = True
+        cls._global_halt = True
         logger.warning("Trading FORCE HALTED via emergency kill switch")
 
-    def resume_trading(self) -> None:
+    @classmethod
+    def resume_trading(cls) -> None:
         """Clear the emergency kill switch (does NOT clear daily halts)."""
-        self._force_halted = False
+        cls._global_halt = False
         logger.info("Emergency kill switch cleared")
 
     # ------------------------------------------------------------------
@@ -101,7 +109,7 @@ class RiskManager:
     def validate(self, signal: Signal, portfolio: Portfolio) -> bool:
         """Return True if *signal* passes all risk checks."""
         # Emergency kill switch — always checked first
-        if self._force_halted:
+        if RiskManager._global_halt:
             logger.warning("Trade rejected: emergency kill switch active")
             return False
 
@@ -121,8 +129,10 @@ class RiskManager:
         if risk_per_unit == 0:
             return False
 
-        # Max concurrent positions
+        # Pre-compute open positions once — used for multiple checks below
         open_positions = [p for p in portfolio.positions if p.is_open]
+
+        # Max concurrent positions
         if len(open_positions) >= self.MAX_CONCURRENT_POSITIONS:
             logger.warning("Trade rejected: max concurrent positions (%d)", self.MAX_CONCURRENT_POSITIONS)
             return False
@@ -133,6 +143,22 @@ class RiskManager:
         if total_notional >= max_notional:
             logger.warning("Trade rejected: portfolio notional cap (%.0f >= %.0f)", total_notional, max_notional)
             return False
+
+        # Per-symbol notional cap (20% of equity) — prevents one symbol eating the whole book
+        # Uses signal.symbol if available, else falls back to position symbol
+        sig_symbol = getattr(signal, 'symbol', None)
+        if sig_symbol and portfolio.equity > 0:
+            symbol_notional = sum(
+                p.size * p.entry_price for p in open_positions
+                if getattr(p, 'symbol', None) == sig_symbol
+            )
+            max_sym_notional = portfolio.equity * self.MAX_PER_SYMBOL_NOTIONAL_PCT
+            if symbol_notional >= max_sym_notional:
+                logger.warning(
+                    "Trade rejected: per-symbol notional cap for %s (%.0f >= %.0f)",
+                    sig_symbol, symbol_notional, max_sym_notional
+                )
+                return False
 
         return True
 
@@ -146,9 +172,13 @@ class RiskManager:
         self._daily.realized_pnl += pnl
         self._daily.total_trades += 1
 
-        # Initialize peak equity on first call (lazy init for fresh sessions)
+        # Initialize peak equity on first call (lazy init for fresh sessions).
+        # If the first trade is a loss, reconstruct pre-loss equity so the
+        # drawdown denominator correctly reflects where we started the day.
         if self._daily.peak_equity <= 0:
-            self._daily.peak_equity = portfolio.equity + abs(pnl) if pnl < 0 else portfolio.equity
+            pre_trade_equity = portfolio.equity + abs(pnl) if pnl < 0 else portfolio.equity
+            self._daily.peak_equity = pre_trade_equity
+            self._daily.starting_equity = pre_trade_equity
 
         # Update current equity and high-water mark
         self._daily.current_equity = portfolio.equity
@@ -176,7 +206,7 @@ class RiskManager:
             self._recent_outcomes = self._recent_outcomes[-50:]
 
         if len(self._recent_outcomes) >= 20:
-            import math
+            # math imported at top of module — no per-call import overhead
             n = len(self._recent_outcomes)
             rolling_wr = sum(self._recent_outcomes) / n
             sigma = math.sqrt(self._baseline_win_rate * (1 - self._baseline_win_rate) / n)

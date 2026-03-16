@@ -8,9 +8,17 @@ import tracemalloc
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from app.infrastructure.metrics import MetricsCollector
 from app.config import settings
+from app.domain.fabio_ai.services.llm_contract import (
+    CANONICAL_RUNTIME_MODEL_FAMILY,
+    ENTRY_CONTRACT_VERSION,
+)
+from app.domain.probability.features import (
+    FEATURE_NAMES,
+    PROBABILITY_FEATURE_SCHEMA_VERSION,
+)
 
 router = APIRouter(tags=["health"])
 
@@ -52,10 +60,13 @@ async def health_check():
         checks["probability"] = f"error: {e}"
 
     # Determine overall status
-    critical = [checks["database"], checks["llm"]]
-    if any(v.startswith("error") for v in critical):
+    # Database is strictly critical
+    # LLM/Probability are allowed to be 'not_ready' (still loading) without failing health
+    if checks["database"].startswith("error"):
         overall = "unhealthy"
-    elif all(v == "ok" for v in checks.values()):
+    elif any(v.startswith("error") for v in checks.values()):
+        overall = "unhealthy"
+    elif all(v in ["ok", "not_ready"] for v in checks.values()):
         overall = "ok"
     else:
         overall = "degraded"
@@ -74,7 +85,7 @@ async def system_halt():
     """Emergency kill switch — immediately halt all trading."""
     from app.api.dependencies import get_service_graph
     graph = get_service_graph()
-    graph.trading_session._risk_manager.halt_trading()
+    graph.trading_session.halt_trading()
     return {"status": "halted"}
 
 
@@ -83,8 +94,17 @@ async def system_resume():
     """Clear the emergency kill switch and resume trading."""
     from app.api.dependencies import get_service_graph
     graph = get_service_graph()
-    graph.trading_session._risk_manager.resume_trading()
+    graph.trading_session.resume_trading()
     return {"status": "resumed"}
+
+
+@router.post("/system/playbook-guard/reset")
+async def system_playbook_guard_reset(symbol: str | None = Query(None)):
+    """Clear playbook-guard rejections for one symbol or all active sessions."""
+    from app.api.dependencies import get_service_graph
+    graph = get_service_graph()
+    result = graph.trading_session.reset_playbook_guard(symbol=symbol)
+    return {"status": "reset", **result}
 
 
 @router.get("/system/risk-state")
@@ -92,20 +112,16 @@ async def system_risk_state():
     """Return current risk manager state."""
     from app.api.dependencies import get_service_graph
     graph = get_service_graph()
-    rm = graph.trading_session._risk_manager
-    ds = rm.daily_state
-    daily_dd = 0.0
-    if ds.peak_equity > 0:
-        daily_dd = (ds.peak_equity - ds.current_equity) / ds.peak_equity
+    state = graph.trading_session.get_system_risk_state()
     return {
-        "halted": rm.is_halted,
-        "haltReason": rm.halt_reason,
-        "dailyDrawdownPct": round(daily_dd, 6),
-        "consecutiveLosses": ds.consecutive_losses,
-        "peakEquity": ds.peak_equity,
-        "currentEquity": ds.current_equity,
-        "driftAlert": rm._drift_alert,
-        "driftMessage": rm._drift_message,
+        "halted": state.halted,
+        "haltReason": state.halt_reason,
+        "dailyDrawdownPct": round(state.daily_drawdown_pct, 6),
+        "consecutiveLosses": state.consecutive_losses,
+        "peakEquity": state.peak_equity,
+        "currentEquity": state.current_equity,
+        "driftAlert": state.drift_alert,
+        "driftMessage": state.drift_message,
     }
 
 
@@ -125,10 +141,76 @@ async def system_config():
         "symbols": settings.DHAN_SYMBOLS,
         "interval": settings.STREAM_INTERVAL,
         "tradingMode": settings.TRADING_MODE,
+        "llmExecutionEnabled": settings.LLM_EXECUTION_ENABLED,
+        "playbookGuardMaxRejections": settings.PLAYBOOK_GUARD_MAX_REJECTIONS,
+        "explainabilityAlertMinTrades": settings.EXPLAINABILITY_ALERT_MIN_TRADES,
+        "explainabilityMinCoverageRate": settings.EXPLAINABILITY_MIN_DRIVER_COVERAGE_PCT,
+        "explainabilityMinAggressionRate": settings.EXPLAINABILITY_MIN_AGGRESSION_DRIVER_PCT,
         "llmReady": llm_ready,
         "probabilityReady": prob_ready,
+        "probabilityFeatureSchemaVersion": PROBABILITY_FEATURE_SCHEMA_VERSION,
+        "probabilityFeatureCount": len(FEATURE_NAMES),
+        "llmModelFamily": CANONICAL_RUNTIME_MODEL_FAMILY,
+        "llmEntryContractVersion": ENTRY_CONTRACT_VERSION,
+        "llmEntryOutputFormat": "json",
+        "llmModelPath": settings.MLX_MODEL_PATH,
+        "runId": getattr(graph.trading_session, "_experiment", None).run_id if getattr(graph.trading_session, "_experiment", None) else "",
+        "configFingerprint": getattr(graph.trading_session, "_experiment", None).config_fingerprint if getattr(graph.trading_session, "_experiment", None) else "",
         "serverDriven": bool(settings.DHAN_CLIENT_ID),
+        "backendPort": settings.PORT,
     }
+
+
+@router.post("/scanner/rescan")
+async def scanner_rescan():
+    """Trigger a fresh option scan and update active symbols."""
+    from app.api.dependencies import get_service_graph
+    from app.domain.fabio_ai.services.option_scanner import OptionScannerService
+    import concurrent.futures as _cf
+
+    graph = get_service_graph()
+    scanner = OptionScannerService(graph.market_data)
+
+    pool = _cf.ThreadPoolExecutor(max_workers=1)
+    try:
+        results = pool.submit(
+            scanner.scan_top_n,
+            n=settings.SCANNER_TOP_N,
+            underlyings=settings.SCANNER_UNDERLYINGS,
+            preferred_option_type=settings.SCANNER_OPTION_TYPE or None,
+            exchange=settings.DEFAULT_EXCHANGE,
+            expiry_index=settings.SCANNER_EXPIRY_INDEX,
+            strikes_around_atm=settings.STRIKES_AROUND_ATM,
+        ).result(timeout=60)
+    finally:
+        pool.shutdown(wait=False)
+
+    if results:
+        final = [r for r in results if r.ltp > 0] or results
+        graph.active_symbols = [r.symbol for r in final]
+        return {
+            "count": len(final),
+            "contracts": [
+                {
+                    "symbol": r.symbol,
+                    "underlying": r.underlying,
+                    "strike": r.strike,
+                    "type": r.option_type,
+                    "expiry": r.expiry,
+                    "ltp": r.ltp,
+                    "oi": r.oi,
+                    "volume": r.volume,
+                    "spread": round(r.spread, 2),
+                    "score": r.score,
+                    "bias": r.bias,
+                    "biasReason": r.bias_reason,
+                    "delta": r.delta,
+                    "iv": r.iv,
+                }
+                for r in final
+            ],
+        }
+    return {"count": 0, "contracts": []}
 
 
 @router.get("/debug/memory")

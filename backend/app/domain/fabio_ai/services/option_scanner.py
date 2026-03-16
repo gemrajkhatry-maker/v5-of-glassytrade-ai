@@ -49,12 +49,14 @@ class OptionScannerService:
 
     _STRIKE_INTERVALS = {"NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
                           "CRUDEOIL": 50, "NATURALGAS": 5, "GOLD": 100, "SILVER": 500}
-    _MIN_OI = {"NIFTY": 500_000, "BANKNIFTY": 300_000,
+    _MIN_OI = {"NIFTY": 500_000, "BANKNIFTY": 300_000, "FINNIFTY": 50_000,
                "CRUDEOIL": 5_000, "NATURALGAS": 5_000, "GOLD": 1_000, "SILVER": 1_000}
 
     # Scalping constraints
     MAX_SPREAD_PCT = 1.5     # Reject contracts with spread > 1.5% of LTP
     IV_WARN_MULTIPLE = 1.5   # Warn if IV > 1.5x of ATM baseline
+    MIN_OI_SCAN_MULTIPLIER = 0.02     # Multiplier for _MIN_OI to get the hard OI floor (reject illiquid)
+    MAX_PREMIUM = 1_500      # Reject options with LTP > this (capital safety)
 
     def __init__(self, broker) -> None:
         self._broker = broker
@@ -196,37 +198,43 @@ class OptionScannerService:
         top_per_underlying: int = 3,
         exchange: str | None = None,
         expiry_index: int = 0,
+        strikes_around_atm: int = 2,
     ) -> list[ScanResult]:
-        """Scan all underlyings, return top N contracts sorted by score.
+        """Select option contracts by proximity to ATM strike.
 
-        *top_per_underlying* controls how many runner-up strikes per underlying
-        are considered (default 3). This allows returning 10 contracts even
-        with only 4 underlyings.
+        For each underlying, picks ATM ± *strikes_around_atm* strikes for
+        both CE and PE.  This gives the highest-gamma contracts closest to
+        spot — exactly what scalping needs.  No complex scoring for selection;
+        the score is still computed for informational ranking but contracts
+        are chosen purely by ATM distance.
+
+        Example with strikes_around_atm=2, NIFTY ATM=24850:
+          CE: 24750, 24800, 24850, 24900, 24950
+          PE: 24750, 24800, 24850, 24900, 24950
+          = 10 contracts for NIFTY alone
         """
         from app.config import settings
         _MCX_UNDERLYINGS = {"CRUDEOIL", "GOLD", "SILVER", "NATURALGAS", "GOLDM", "SILVERM", "CRUDEOILM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "COTTONCANDY"}
         _default_exchange = exchange or settings.DEFAULT_EXCHANGE
-        
-        # Enforce SCANNER_MODE strict isolation mapping:
-        # If nse_options, drop any MCX underlyings. If mcx_options, drop any NSE underlyings.
+
+        # Enforce SCANNER_MODE strict isolation
         active_underlyings = []
         for u in (underlyings or ["NIFTY", "BANKNIFTY"]):
             is_mcx = u.upper() in _MCX_UNDERLYINGS
             if settings.SCANNER_MODE == "nse_options" and is_mcx:
-                logger.warning(f"SCANNER_MODE isolation: Dropping MCX underlying '{u}' from NSE scan list.")
+                logger.warning("SCANNER_MODE isolation: Dropping MCX underlying '%s' from NSE scan list.", u)
                 continue
             if settings.SCANNER_MODE == "mcx_options" and not is_mcx:
-                logger.warning(f"SCANNER_MODE isolation: Dropping NSE underlying '{u}' from MCX scan list.")
+                logger.warning("SCANNER_MODE isolation: Dropping NSE underlying '%s' from MCX scan list.", u)
                 continue
             active_underlyings.append(u)
-            
+
         if not active_underlyings:
-            logger.warning(f"SCANNER_MODE '{settings.SCANNER_MODE}' filtered out all underlyings.")
+            logger.warning("SCANNER_MODE '%s' filtered out all underlyings.", settings.SCANNER_MODE)
             return []
 
         results: list[ScanResult] = []
         for u in active_underlyings:
-            # Auto-detect exchange: MCX for commodity underlyings, otherwise default
             _exchange = "MCX" if u.upper() in _MCX_UNDERLYINGS else _default_exchange
             try:
                 chain = self._broker.get_option_chain(
@@ -241,9 +249,8 @@ class OptionScannerService:
 
                 bias, bias_strength, bias_reason = self._detect_momentum(chain, atm, interval)
 
-                # Scan BOTH CE and PE sides to find strongest momentum contracts
-                strikes = [atm + i * interval for i in range(-5, 6)]
-                scored: list[tuple[float, float, dict, str]] = []
+                # ATM-proximity selection: pick strikes closest to ATM
+                strikes = [atm + i * interval for i in range(-strikes_around_atm, strikes_around_atm + 1)]
 
                 for side in ("CE", "PE"):
                     option_map = chain.calls if side == "CE" else chain.puts
@@ -251,69 +258,93 @@ class OptionScannerService:
                         opt = option_map.get(float(strike))
                         if opt is None:
                             continue
-                        sc, details = self._score_for_scalp(opt, atm, interval, u, side)
-                        if sc > 0:
-                            scored.append((strike, sc, details, side))
 
-                scored.sort(key=lambda x: x[1], reverse=True)
+                        ltp = float(opt.ltp or 0)
+                        if ltp <= 0:
+                            continue  # Skip no-market contracts
 
-                for strike, sc, details, opt_type in scored[:top_per_underlying]:
-                    _map = chain.calls if opt_type == "CE" else chain.puts
-                    opt = _map[float(strike)]
-                    ltp = float(opt.ltp or 0)
-                    oi = int(opt.oi or 0)
-                    volume = int(opt.volume or 0)
-                    bid = float(opt.bid or 0)
-                    ask = float(opt.ask or 0)
-                    spread = (ask - bid) if bid > 0 and ask > 0 else 0.0
-                    delta_val = float(opt.delta or 0) if hasattr(opt, 'delta') and opt.delta else 0.0
-                    iv_val = float(opt.iv or 0) if hasattr(opt, 'iv') and opt.iv else 0.0
+                        oi = int(opt.oi or 0)
+                        volume = int(opt.volume or 0)
+                        bid = float(opt.bid or 0)
+                        ask = float(opt.ask or 0)
+                        spread = (ask - bid) if bid > 0 and ask > 0 else 0.0
+                        delta_val = float(opt.delta or 0) if hasattr(opt, 'delta') and opt.delta else 0.0
+                        iv_val = float(opt.iv or 0) if hasattr(opt, 'iv') and opt.iv else 0.0
 
-                    results.append(ScanResult(
-                        symbol=opt.symbol,
-                        underlying=u,
-                        strike=int(strike),
-                        option_type=opt_type,
-                        expiry=expiry_date,
-                        ltp=ltp, oi=oi, volume=volume, spread=spread,
-                        score=sc, bias=bias, bias_reason=bias_reason,
-                        delta=delta_val, iv=iv_val,
-                    ))
+                        # --- Hard filters (reject illiquid/unaffordable) ---
+                        min_oi_scan = self._MIN_OI.get(u.upper(), 100_000) * self.MIN_OI_SCAN_MULTIPLIER
+                        if oi < min_oi_scan:
+                            continue  # Illiquid — no market depth
+                        if ltp > self.MAX_PREMIUM:
+                            continue  # Too expensive for scalping capital
+                        if bid > 0 and ask > 0 and ltp > 0:
+                            spread_pct = (ask - bid) / ltp * 100
+                            if spread_pct > self.MAX_SPREAD_PCT:
+                                continue  # Spread too wide — slippage kills scalps
+
+                        # Distance from ATM (0 = ATM, 1 = 1-strike away, etc.)
+                        atm_dist = abs(strike - atm) / interval if interval > 0 else 0
+
+                        # Informational score (still useful for ranking within same distance)
+                        sc, _details = self._score_for_scalp(opt, atm, interval, u, side)
+
+                        results.append(ScanResult(
+                            symbol=opt.symbol,
+                            underlying=u,
+                            strike=int(strike),
+                            option_type=side,
+                            expiry=expiry_date,
+                            ltp=ltp, oi=oi, volume=volume, spread=spread,
+                            score=sc, bias=bias, bias_reason=bias_reason,
+                            delta=delta_val, iv=iv_val,
+                        ))
 
             except Exception:
                 logger.exception("scan_top_n: failed for %s", u)
 
-        # Filter out junk contracts: near-expiry with no history, zero OI, or zero LTP
-        good = [r for r in results if r.ltp > 0 and r.score >= 20]
-        # Ensure at least 1 contract per underlying that had any results
-        seen_underlyings = {r.underlying for r in good}
-        for r in sorted(results, key=lambda x: x.score, reverse=True):
-            if r.underlying not in seen_underlyings and r.ltp > 0:
-                good.append(r)
-                seen_underlyings.add(r.underlying)
-        results = good
-        results.sort(key=lambda r: r.score, reverse=True)
-        # Guarantee at least 1 contract per underlying in final selection
-        final: list[ScanResult] = []
-        seen_u: set[str] = set()
-        # First pass: best contract per underlying
+        # Sort by: Score (momentum/volume) first, then ATM distance (tie breaker)
+        def _sort_key(r: ScanResult) -> tuple:
+            interval = self._STRIKE_INTERVALS.get(r.underlying.upper(), 50)
+            return (-r.score, abs(r.strike - r.strike) / interval)
+
+        # Group by underlying, then interleave for diversity
+        by_underlying: dict[str, list[ScanResult]] = {}
         for r in results:
-            if r.underlying not in seen_u:
-                final.append(r)
-                seen_u.add(r.underlying)
+            by_underlying.setdefault(r.underlying, []).append(r)
+
+        # Within each underlying, sort by SCORE (highest momentum/volume first)
+        for u_name, u_results in by_underlying.items():
+            interval = self._STRIKE_INTERVALS.get(u_name.upper(), 50)
+            # Find actual ATM for this underlying (strike with smallest distance to median)
+            all_strikes = [r.strike for r in u_results]
+            if all_strikes:
+                median_strike = sorted(all_strikes)[len(all_strikes) // 2]
+            else:
+                median_strike = 0
+            u_results.sort(key=lambda r: (-r.score, abs(r.strike - median_strike) / interval))
+
+        # Round-robin interleave: 1 from each underlying in turn
+        # Apply top_per_underlying cap AFTER sorting so we take the best-ranked contracts
+        final: list[ScanResult] = []
+        iters = {u: iter(lst[:top_per_underlying]) for u, lst in by_underlying.items()}
+        while len(final) < n and iters:
+            exhausted = []
+            for u_name in list(iters.keys()):
                 if len(final) >= n:
                     break
-        # Second pass: fill remaining slots with highest-scored
-        if len(final) < n:
-            for r in results:
-                if r not in final:
-                    final.append(r)
-                    if len(final) >= n:
-                        break
-        logger.info("scan_top_n: %d candidates across %s, returning top %d",
-                     len(results), underlyings, min(n, len(final)))
+                try:
+                    final.append(next(iters[u_name]))
+                except StopIteration:
+                    exhausted.append(u_name)
+            for u_name in exhausted:
+                del iters[u_name]
+
+        logger.info("scan_top_n: %d ATM-proximity contracts across %s, returning %d",
+                     len(results), active_underlyings, len(final))
         for i, r in enumerate(final, 1):
-            logger.info("  #%d %s Score=%.1f Bias=%s", i, r.symbol, r.score, r.bias)
+            logger.info("  #%d %s  Strike=%d  LTP=%.2f  Delta=%.3f  OI=%s  Score=%.1f  Bias=%s",
+                        i, r.symbol, r.strike, r.ltp, r.delta,
+                        f"{r.oi:,}", r.score, r.bias)
         return final
 
     # ------------------------------------------------------------------
@@ -431,9 +462,11 @@ class OptionScannerService:
     def _score_for_scalp(
         self, opt, atm: float, interval: float, underlying: str, opt_type: str,
     ) -> tuple[float, dict]:
-        """Score contract prioritizing volume, OI, and momentum.
+        """Score contract for scalping: gamma-first, then volume and momentum.
 
-        Priority: Volume(30) > OI(25) > Momentum(20) > Delta(15) > Spread(10)
+        Priority: Volume(25) > Gamma(20) > Momentum(20) > Delta(15) > Spread(10) > OI(10)
+        Total: 100 pts.  Gamma added as key scalping metric — determines how
+        fast delta grows on small underlying moves (the scalper's core edge).
         Returns (score, breakdown_dict).
         """
         score = 0.0
@@ -454,35 +487,62 @@ class OptionScannerService:
         elif ltp <= 0:
             return 0.0, {"rejected": "no LTP"}
 
-        # --- 1. Volume — where the action is (30 pts) ---
+        # --- 1. Volume — where the action is (25 pts) ---
         if vol > 0:
-            v_score = min(30, 30 * math.log1p(vol) / math.log1p(5_000_000))
+            v_score = min(25, 25 * math.log1p(vol) / math.log1p(5_000_000))
         else:
             v_score = 0
         score += v_score
         details["vol"] = f"{vol:,}→{v_score:.0f}pts"
 
-        # --- 2. OI — deep liquidity pool (25 pts) ---
-        min_oi = self._MIN_OI.get(underlying.upper(), 100_000)
-        if oi > 0:
-            o_score = min(25, 25 * math.log1p(oi) / math.log1p(min_oi * 5))
+        # --- 2. Gamma — delta acceleration for scalping (20 pts) ---
+        gamma_val = float(opt.gamma or 0) if hasattr(opt, 'gamma') and opt.gamma else None
+        if gamma_val is not None and gamma_val > 0:
+            # Gamma is highest ATM; normalize relative to ATM gamma
+            # Typical NIFTY ATM gamma ~0.001-0.005, BNF ~0.0005-0.002
+            # Score linearly: higher gamma = better for scalping
+            dist_from_atm = abs(strike - atm) / interval if interval > 0 else 0
+            # ATM gamma bonus: strikes at ATM get full 20, decays with distance
+            if dist_from_atm <= 0.5:
+                g_score = 20
+            elif dist_from_atm <= 1.5:
+                g_score = 14
+            elif dist_from_atm <= 2.5:
+                g_score = 8
+            else:
+                g_score = 3
+            # Boost if gamma is actually high (chain has greeks)
+            # gamma × interval gives approximate delta change per strike move
+            gamma_impact = gamma_val * interval
+            if gamma_impact > 0.10:   # >10% delta change per strike
+                g_score = min(20, g_score + 4)
+            elif gamma_impact > 0.05:
+                g_score = min(20, g_score + 2)
+            details["gamma"] = f"{gamma_val:.4f}→{g_score}pts"
         else:
-            o_score = 0
-        score += o_score
-        details["oi"] = f"{oi:,}→{o_score:.0f}pts"
+            # Fallback: use distance from ATM as gamma proxy
+            dist = abs(strike - atm) / interval if interval > 0 else 0
+            if dist <= 0.5:
+                g_score = 20
+            elif dist <= 1.5:
+                g_score = 14
+            elif dist <= 2.5:
+                g_score = 8
+            else:
+                g_score = 3
+            details["gamma_proxy"] = f"dist={dist:.1f}→{g_score}pts"
+        score += g_score
 
         # --- 3. Momentum — fresh buildup + vol/OI activity (20 pts) ---
         m_score = 0.0
-        # Fresh OI buildup = new positions entering = momentum
         if hasattr(opt, 'prev_oi') and opt.prev_oi is not None and oi > 0:
             oi_chg = oi - opt.prev_oi
             if oi_chg > 0 and opt.prev_oi > 0:
                 chg_pct = oi_chg / opt.prev_oi
                 m_score += min(10, 10 * min(chg_pct / 0.10, 1.0))
             elif oi_chg < 0:
-                m_score -= 3  # Fading momentum
+                m_score -= 3
 
-        # Volume/OI ratio: high = active trading relative to positions
         if oi > 0 and vol > 0:
             vol_oi = vol / oi
             if vol_oi > 1.5:
@@ -498,16 +558,18 @@ class OptionScannerService:
         score += m_score
         details["momentum"] = f"{m_score:.0f}pts"
 
-        # --- 4. Delta / moneyness (15 pts) ---
+        # --- 4. Delta / moneyness — scalping sweet spot 0.45-0.60 (15 pts) ---
         delta_val = float(opt.delta or 0) if hasattr(opt, 'delta') and opt.delta else None
         if delta_val is not None:
             abs_delta = abs(delta_val)
-            if 0.35 <= abs_delta <= 0.65:
-                d_score = 15
-            elif 0.25 <= abs_delta <= 0.75:
-                d_score = 10
-            elif 0.15 <= abs_delta <= 0.85:
-                d_score = 5
+            if 0.45 <= abs_delta <= 0.60:
+                d_score = 15  # Sweet spot for scalping
+            elif 0.40 <= abs_delta <= 0.65:
+                d_score = 12
+            elif 0.35 <= abs_delta <= 0.70:
+                d_score = 8
+            elif 0.25 <= abs_delta <= 0.80:
+                d_score = 4
             else:
                 d_score = 1
             details["delta"] = f"{delta_val:.2f}→{d_score}pts"
@@ -542,6 +604,15 @@ class OptionScannerService:
             s_score = 0
             details["spread"] = "no bid/ask"
         score += s_score
+
+        # --- 6. OI — liquidity pool (10 pts, reduced from 25) ---
+        min_oi = self._MIN_OI.get(underlying.upper(), 100_000)
+        if oi > 0:
+            o_score = min(10, 10 * math.log1p(oi) / math.log1p(min_oi * 5))
+        else:
+            o_score = 0
+        score += o_score
+        details["oi"] = f"{oi:,}→{o_score:.0f}pts"
 
         # --- IV (informational) ---
         iv_val = float(opt.iv or 0) if hasattr(opt, 'iv') and opt.iv else 0

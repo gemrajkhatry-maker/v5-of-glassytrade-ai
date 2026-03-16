@@ -32,6 +32,13 @@ async def _safe_send(ws: WebSocket, data: dict) -> bool:
     try:
         await ws.send_json(data)
         return True
+    except (WebSocketDisconnect, asyncio.TimeoutError) as e:
+        logger.debug("WS send failed (client disconnected): %s", type(e).__name__)
+        return False
+    except RuntimeError as e:
+        # Session closed or invalid state
+        logger.debug("WS send failed (runtime): %s", e)
+        return False
     except Exception as e:
         logger.warning("WS send failed: %s (keys=%s)", type(e).__name__, list(data.keys())[:5])
         return False
@@ -158,11 +165,25 @@ async def gameloop_ws(ws: WebSocket):
             await ws.send_json(state)
 
     except WebSocketDisconnect:
-        pass
-    except Exception:
-        logger.debug("WS handler error", exc_info=True)
+        logger.debug("WebSocket client disconnected gracefully")
+    except json.JSONDecodeError as e:
+        logger.warning("Invalid JSON received from client: %s", e)
         try:
-            await ws.close()
+            await ws.send_json({"error": "Invalid JSON format"})
+            await ws.close(code=1003)  # Unsupported Data
+        except Exception:
+            pass
+    except OSError as e:
+        # Network errors, pipe errors, etc.
+        logger.warning("OS error in WS handler: %s", e)
+        try:
+            await ws.close(code=1006)  # Abnormal closure
+        except Exception:
+            pass
+    except Exception:
+        logger.error("Unexpected error in WS handler", exc_info=True)
+        try:
+            await ws.close(code=1011)  # Internal error
         except Exception:
             pass
 
@@ -218,10 +239,14 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
     previous_states: dict[str, dict] = {}
     keyframe_times: dict[str, float] = {}
     known_gen = engine.generation
+    _send_count = 0
+
+    logger.info("Viewer loop: entering polling (gen=%d, symbols=%d)", known_gen, len(active_symbols))
 
     try:
         while True:
             if client_task.done():
+                logger.info("Viewer loop: client task done, exiting")
                 break
 
             # Wait for engine to produce new data
@@ -244,7 +269,11 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
                     if not await _safe_send(ws, {**state, "_type": "full"}):
                         send_ok = False
                         break
-                    previous_states[sym] = copy.deepcopy(state)
+                    # Shallow copy + selective deep copy of mutable portfolio
+                    _snap = dict(state)
+                    if "portfolio" in _snap:
+                        _snap["portfolio"] = copy.deepcopy(_snap["portfolio"])
+                    previous_states[sym] = _snap
                     keyframe_times[sym] = now_kf
                 else:
                     delta = _compute_delta(previous_states.get(sym), state)
@@ -252,20 +281,34 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
                         if not await _safe_send(ws, delta):
                             send_ok = False
                             break
-                        previous_states[sym] = copy.deepcopy(state)
+                        # Shallow copy + selective deep copy of mutable portfolio
+                        _snap = dict(state)
+                        if "portfolio" in _snap:
+                            _snap["portfolio"] = copy.deepcopy(_snap["portfolio"])
+                        previous_states[sym] = _snap
+                _send_count += 1
             if not send_ok:
+                logger.warning("Viewer loop: send failed after %d successful sends", _send_count)
                 break
     except asyncio.CancelledError:
-        pass
+        logger.debug("Viewer loop cancelled (client disconnect)")
+    except asyncio.TimeoutError as e:
+        logger.warning("Viewer loop timeout waiting for engine update: %s", e)
+    except OSError as e:
+        # Network errors during streaming
+        logger.warning("Viewer loop OS error: %s", e)
+    except RuntimeError as e:
+        # Engine state errors
+        logger.warning("Viewer loop runtime error: %s", e)
     except Exception:
-        logger.debug("Viewer loop error", exc_info=True)
+        logger.error("Unexpected error in viewer loop", exc_info=True)
     finally:
         client_task.cancel()
         try:
             await client_task
         except (asyncio.CancelledError, Exception):
             pass
-        logger.info("WS viewer disconnected — engine continues trading")
+        logger.info("WS viewer disconnected (sent %d updates) — engine continues trading", _send_count)
 
 
 async def _listen_for_client(ws: WebSocket) -> None:

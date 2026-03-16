@@ -44,6 +44,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from app.domain.trading.models.enums import MarketStateCodec
+
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook
     from app.domain.ports.probability_inference import ProbabilityInferencePort
@@ -61,12 +63,14 @@ class AgentDecision:
     direction: str          # "LONG", "SHORT", or "FLAT"
     probability: float      # P(target hit) for chosen direction
     regime: str             # "TRENDING", "BALANCED", "VOLATILE", "DEAD"
+    playbook: str           # "imbalance_continuation" | "return_to_value" | ""
     timing: str             # "ENTER_NOW", "WAIT", "SKIP"
     size_fraction: float    # Kelly-optimal fraction of capital [0, 1]
     sl_adjust: float        # Multiplier for SL distance (1.0 = default)
     tp_adjust: float        # Multiplier for TP distance (1.0 = default)
     latency_us: int         # Pipeline latency in microseconds
     rationale: str          # Human-readable summary
+    feature_drivers: tuple[str, ...] = ()  # Top auction/order-flow drivers
 
 
 # ---------------------------------------------------------------------------
@@ -131,8 +135,7 @@ def classify_regime(
     # Trending vs balanced — for OPTIONS, allow both directions in all regimes.
     # The probability model already accounts for direction edge.
     # Regime agent's job: kill dead markets, reduce size in volatile, inform SL/TP.
-    ms = str(amt_result.market_state)
-    if "IMBALANCED" in ms.upper():
+    if MarketStateCodec.is_imbalanced(amt_result.market_state):
         return RegimeState("TRENDING", True, True, 1.0 * atr_pct_scale)
 
     return RegimeState("BALANCED", True, True, 1.0 * atr_pct_scale)
@@ -154,6 +157,7 @@ def pick_direction(
     features: dict[str, float],
     probability_engine: ProbabilityInferencePort,
     regime: RegimeState,
+    playbook: str,
     p_threshold_long: float = 0.52,   # positive edge at 2:1 R/R
     p_threshold_short: float = 0.50,  # positive edge
     margin: float = 0.03,
@@ -195,6 +199,7 @@ def assess_timing(
     tick: OHLC,
     amt_result: AMTResult,
     direction: str,
+    playbook: str,
 ) -> str:
     """Decide whether to enter NOW or WAIT for a better price.
 
@@ -215,6 +220,23 @@ def assess_timing(
     if atr5 > 0 and bar_range > 3.0 * atr5:
         return "WAIT"
 
+    # Mean reversion must not enter back at fair value.
+    if playbook == "return_to_value":
+        va_width = abs(amt_result.value_area_high - amt_result.value_area_low)
+        if va_width > 0 and abs(tick.close - amt_result.poc) < va_width * 0.25:
+            return "SKIP"
+        if direction == "LONG" and tick.close > amt_result.poc:
+            return "WAIT"
+        if direction == "SHORT" and tick.close < amt_result.poc:
+            return "WAIT"
+
+    # Trend continuation should not trigger back inside balance.
+    if playbook == "imbalance_continuation":
+        if direction == "LONG" and tick.close < amt_result.poc:
+            return "WAIT"
+        if direction == "SHORT" and tick.close > amt_result.poc:
+            return "WAIT"
+
     # Aggressive print momentum — enter NOW
     if amt_result.aggressive_prints:
         last_print = amt_result.aggressive_prints[-1]
@@ -224,6 +246,97 @@ def assess_timing(
             return "ENTER_NOW"
 
     return "ENTER_NOW"
+
+
+def select_playbook(regime: RegimeState, amt_result: AMTResult) -> str:
+    """Map regime and auction state to one of the canonical playbooks."""
+    ms = getattr(amt_result, "market_state", "")
+    if regime.regime == "TRENDING" and MarketStateCodec.is_imbalanced(ms):
+        return "imbalance_continuation"
+    if regime.regime == "BALANCED" and MarketStateCodec.is_balanced(ms):
+        return "return_to_value"
+    return ""
+
+
+def playbook_thresholds(playbook: str) -> tuple[float, float, float]:
+    """Return (p_threshold_long, p_threshold_short, margin) for a playbook."""
+    if playbook == "imbalance_continuation":
+        return 0.55, 0.53, 0.04
+    if playbook == "return_to_value":
+        return 0.51, 0.51, 0.02
+    return 0.60, 0.60, 0.05
+
+
+def summarize_feature_drivers(
+    features: dict[str, float],
+    direction: str,
+    playbook: str,
+    amt_result: AMTResult,
+) -> tuple[str, ...]:
+    """Return concise, auction-aware reasons behind the current signal."""
+    is_long = direction == "LONG"
+    ms = getattr(amt_result, "market_state", "")
+    drivers: list[tuple[float, str]] = []
+
+    if playbook == "imbalance_continuation" and MarketStateCodec.is_imbalanced(ms):
+        drivers.append((1.2, "auction: imbalance accepted"))
+    elif playbook == "return_to_value" and MarketStateCodec.is_balanced(ms):
+        drivers.append((1.2, "auction: balanced rotation"))
+
+    if abs(features.get("nearest_lvn_distance_pct", 1.0)) <= 0.003:
+        drivers.append((1.0, "location: near LVN"))
+
+    if playbook == "imbalance_continuation":
+        vah_gap = abs(features.get("close_vs_vah_pct", 1.0))
+        if vah_gap <= 0.004:
+            drivers.append((0.9, "location: pressing VAH"))
+    elif playbook == "return_to_value":
+        val_gap = abs(features.get("close_vs_val_pct", 1.0))
+        if val_gap <= 0.004:
+            drivers.append((0.9, "location: probing VAL"))
+
+    directional_checks = [
+        ("delta_normalized", "orderflow: positive delta", "orderflow: negative delta"),
+        ("cvd_slope", "orderflow: rising CVD", "orderflow: falling CVD"),
+        ("aggressive_print_imbalance", "aggression: buy prints dominate", "aggression: sell prints dominate"),
+        ("book_imbalance_l1", "liquidity: bid stack stronger", "liquidity: ask stack stronger"),
+        ("book_imbalance_l5", "liquidity: depth supports bid", "liquidity: depth supports ask"),
+    ]
+    for feature_name, long_label, short_label in directional_checks:
+        value = float(features.get(feature_name, 0.0))
+        aligned = value if is_long else -value
+        if aligned > 0.05:
+            drivers.append((min(aligned, 1.0), long_label if is_long else short_label))
+
+    volume_expansion = float(features.get("volume_vs_ema20", 1.0))
+    if volume_expansion > 1.1:
+        drivers.append((min(volume_expansion - 1.0, 1.0), "participation: volume expansion"))
+
+    atr_ratio = float(features.get("atr_ratio", 1.0))
+    if playbook == "imbalance_continuation" and atr_ratio > 1.15:
+        drivers.append((min(atr_ratio - 1.0, 1.0), "range: volatility expanding"))
+
+    if playbook == "return_to_value":
+        balance_ratio = float(features.get("balance_ratio", 0.0))
+        if balance_ratio >= 0.55:
+            drivers.append((min(balance_ratio, 1.0), "auction: value holding"))
+
+    ordered = sorted(drivers, key=lambda item: item[0], reverse=True)
+    top_labels: list[str] = []
+    for _, label in ordered:
+        if label not in top_labels:
+            top_labels.append(label)
+        if len(top_labels) == 3:
+            break
+    if top_labels and not any(
+        label.startswith(("orderflow:", "aggression:", "liquidity:"))
+        for label in top_labels
+    ):
+        for _, label in ordered:
+            if label.startswith(("orderflow:", "aggression:", "liquidity:")) and label not in top_labels:
+                top_labels[-1] = label
+                break
+    return tuple(top_labels)
 
 
 # ---------------------------------------------------------------------------
@@ -313,8 +426,6 @@ def run_agent_pipeline(
     probability_engine: ProbabilityInferencePort,
     features: dict[str, float],
     order_book: "OrderBook | None" = None,
-    p_threshold: float = 0.35,
-    margin: float = 0.05,
 ) -> AgentDecision:
     """Run the full 4-agent pipeline. Target: <1ms total."""
     t0 = time.perf_counter_ns()
@@ -325,25 +436,52 @@ def run_agent_pipeline(
         elapsed_us = (time.perf_counter_ns() - t0) // 1000
         return AgentDecision(
             direction="FLAT", probability=0.0, regime="DEAD",
-            timing="SKIP", size_fraction=0.0, sl_adjust=1.0, tp_adjust=1.0,
+            playbook="", timing="SKIP", size_fraction=0.0, sl_adjust=1.0, tp_adjust=1.0,
             latency_us=elapsed_us,
             rationale="Dead market — volume < 5% of average",
         )
 
+    playbook = select_playbook(regime, amt_result)
+    if not playbook:
+        elapsed_us = (time.perf_counter_ns() - t0) // 1000
+        return AgentDecision(
+            direction="FLAT",
+            probability=0.0,
+            regime=regime.regime,
+            playbook="",
+            timing="SKIP",
+            size_fraction=0.0,
+            sl_adjust=1.0,
+            tp_adjust=1.0,
+            latency_us=elapsed_us,
+            rationale=f"No canonical playbook for regime={regime.regime} market_state={amt_result.market_state}",
+        )
+
     # Agent 2: Direction
-    signal = pick_direction(features, probability_engine, regime,
-                            p_threshold_long=0.52, p_threshold_short=0.50, margin=margin)
+    p_threshold_long, p_threshold_short, margin = playbook_thresholds(playbook)
+    signal = pick_direction(
+        features,
+        probability_engine,
+        regime,
+        playbook,
+        p_threshold_long=p_threshold_long,
+        p_threshold_short=p_threshold_short,
+        margin=margin,
+    )
     if signal.direction == "FLAT":
         elapsed_us = (time.perf_counter_ns() - t0) // 1000
         return AgentDecision(
             direction="FLAT", probability=max(signal.p_long, signal.p_short),
-            regime=regime.regime, timing="SKIP", size_fraction=0.0,
+            regime=regime.regime, playbook=playbook, timing="SKIP", size_fraction=0.0,
             sl_adjust=1.0, tp_adjust=1.0, latency_us=elapsed_us,
-            rationale=f"No edge — P(long)={signal.p_long:.3f} P(short)={signal.p_short:.3f}",
+            rationale=(
+                f"{playbook} | No edge — P(long)={signal.p_long:.3f} "
+                f"P(short)={signal.p_short:.3f}"
+            ),
         )
 
     # Agent 3: Timing
-    timing = assess_timing(data, tick, amt_result, signal.direction)
+    timing = assess_timing(data, tick, amt_result, signal.direction, playbook)
 
     # Agent 4: Sizing
     chosen_p = signal.p_long if signal.direction == "LONG" else signal.p_short
@@ -353,11 +491,12 @@ def run_agent_pipeline(
     est = probability_engine.estimate(features)
     predicted_mfe = est.expected_mfe_long if signal.direction == "LONG" else est.expected_mfe_short
     sl_mult, tp_mult = adjust_sl_tp(signal.direction, regime.regime, chosen_p, predicted_mfe=predicted_mfe)
+    feature_drivers = summarize_feature_drivers(features, signal.direction, playbook, amt_result)
 
     elapsed_us = (time.perf_counter_ns() - t0) // 1000
 
     rationale = (
-        f"{regime.regime} regime | {signal.direction} P={chosen_p:.3f} edge={signal.edge:+.3f} | "
+        f"{playbook} | {regime.regime} regime | {signal.direction} P={chosen_p:.3f} edge={signal.edge:+.3f} | "
         f"{timing} | Kelly={size:.1%} | SL×{sl_mult:.2f} TP×{tp_mult:.2f}"
     )
 
@@ -365,10 +504,12 @@ def run_agent_pipeline(
         direction=signal.direction if timing == "ENTER_NOW" else "FLAT",
         probability=chosen_p,
         regime=regime.regime,
+        playbook=playbook,
         timing=timing,
         size_fraction=size,
         sl_adjust=sl_mult,
         tp_adjust=tp_mult,
         latency_us=elapsed_us,
         rationale=rationale,
+        feature_drivers=feature_drivers,
     )

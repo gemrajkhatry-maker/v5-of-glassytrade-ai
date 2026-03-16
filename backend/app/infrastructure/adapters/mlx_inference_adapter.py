@@ -1,8 +1,11 @@
 import logging
+import os
 import threading
 
 from app.config import settings
+from app.domain.fabio_ai.services.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
 from app.domain.ports.llm_inference import LLMInferencePort, LLMNotReadyError
+from app.infrastructure.mlx_gpu_lock import MLX_GPU_LOCK
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +45,16 @@ class MLXInferenceAdapter(LLMInferencePort):
             from mlx_lm import load
 
             model_path = settings.MLX_MODEL_PATH
-            logger.info(f"Loading MLX model from {model_path}...")
-            self.model, self.tokenizer = load(model_path)
+            adapter_path = getattr(settings, 'MLX_ADAPTER_PATH', '')
+
+            with MLX_GPU_LOCK:
+                if adapter_path and os.path.exists(adapter_path):
+                    logger.info(f"Loading MLX model from {model_path} with adapter {adapter_path}...")
+                    self.model, self.tokenizer = load(model_path, adapter_path=adapter_path)
+                else:
+                    logger.info(f"Loading MLX model from {model_path} (no adapter)...")
+                    self.model, self.tokenizer = load(model_path)
+
             self._is_loading = False
             logger.info("MLX model loaded successfully!")
         except Exception as e:
@@ -51,14 +62,15 @@ class MLXInferenceAdapter(LLMInferencePort):
             self._load_error = str(e)
             self._is_loading = False
 
-    def predict(self, instruction: str, input_text: str, temperature: float | None = None) -> str:
-        """Generate a prediction using the ChatML prompt format.
+    def predict(self, instruction: str, input_text: str, temperature: float | None = None, max_tokens: int | None = None, prefill: str | None = None) -> str:
+        """Generate a prediction using the active runtime contract.
 
         Args:
             instruction: System instruction for the model.
             input_text: User input text (market data prompt).
-            temperature: Sampling temperature override. If None, falls back to
-                settings.LLM_TEMPERATURE for backward compatibility.
+            temperature: Sampling temperature override.
+            max_tokens: Max new tokens override.
+            prefill: Optional prefill for assistant response.
         """
         if not self.model:
             if self._is_loading:
@@ -68,51 +80,144 @@ class MLXInferenceAdapter(LLMInferencePort):
         from mlx_lm import generate
         from mlx_lm.sample_utils import make_sampler
 
-        # ChatML format with response prefill to skip <think> and get structured output.
-        # The model was fine-tuned on Market State:/Logic:/Trigger: format.
-        # Strip any JSON instructions appended by prompt_builder — model doesn't understand JSON.
-        clean_input = input_text.split("\n\nRespond ONLY with a JSON")[0]
-        prompt = (
-            "<|im_start|>system\n"
-            f"{instruction} Always respond with exactly three lines:\n"
-            "Market State: Balance or Imbalance\n"
-            "Logic: brief reasoning\n"
-            "Trigger: Enter Long, Enter Short, or Stay Flat<|im_end|>\n"
-            f"<|im_start|>user\n{clean_input}<|im_end|>\n"
-            "<|im_start|>assistant\nMarket State:"
-        )
+        # ChatML format with response prefill to keep output aligned with the
+        # canonical runtime contract. Legacy structured parsing still exists as
+        # a fallback, but JSON is the active paper-trading format.
+        clean_input = input_text.strip()
+        # Detect if this is an Overseer prompt or an Entry prompt
+        is_overseer = "HOLD" in instruction and "FULL_EXIT" in instruction
+
+        if prefill is not None:
+            prompt = (
+                "<|im_start|>system\n"
+                f"{instruction}<|im_end|>\n"
+                f"<|im_start|>user\n{clean_input}<|im_end|>\n"
+                f"<|im_start|>assistant\n{prefill}"
+            )
+        elif is_overseer:
+            prompt = (
+                "<|im_start|>system\n"
+                f"{instruction}<|im_end|>\n"
+                f"<|im_start|>user\n{clean_input}<|im_end|>\n"
+                "<|im_start|>assistant\n{"
+            )
+            prefill = "{"
+        else:
+            prompt = (
+                "<|im_start|>system\n"
+                f"{instruction}\n{ENTRY_JSON_RUNTIME_REMINDER}<|im_end|>\n"
+                f"<|im_start|>user\n{clean_input}<|im_end|>\n"
+                "<|im_start|>assistant\n{"
+            )
+            prefill = "{"
+        
         temp = temperature if temperature is not None else settings.LLM_TEMPERATURE
         sampler = make_sampler(temp=temp)
-        response = generate(
-            self.model,
-            self.tokenizer,
-            prompt=prompt,
-            max_tokens=settings.LLM_MAX_NEW_TOKENS,
-            sampler=sampler,
-        )
-        return self._truncate_repetition("Market State:" + response.strip())
+        max_t = max_tokens if max_tokens is not None else settings.LLM_MAX_NEW_TOKENS
+        
+        target = "OVERSEER" if is_overseer else ("REASONING" if prefill and "think" in prefill else "ENTRY")
+
+        # Metal GPU crashes on concurrent generate() calls — serialize with lock
+        import time as _time
+        t0 = _time.time()
+        with MLX_GPU_LOCK:
+            logger.info(f"[{target}] Starting generation (max_tokens={max_t})...")
+            response = generate(
+                self.model,
+                self.tokenizer,
+                prompt=prompt,
+                max_tokens=max_t,
+                sampler=sampler,
+                verbose=False
+            )
+            duration = _time.time() - t0
+            logger.info(f"[{target}] Generation complete in {duration:.2f}s.")
+            
+        rendered = prefill + response.strip()
+        if is_overseer:
+            return self._truncate_repetition(rendered)
+        return self._extract_json_candidate(rendered)
 
     @staticmethod
     def _truncate_repetition(text: str) -> str:
-        """Cut off output if a sentence repeats more than twice.
-
-        Preserves all sentences containing 'trigger:' to avoid losing
-        the directional decision that the parser relies on.
+        """Robustly truncate rambling/repetitive thinking blocks.
+        
+        Uses a multi-delimiter split for sentence-level duplication and enforces
+        a hard character limit for the 'thinking' portion.
+        Specific logic added to catch 'Incremental List Rambling' (1., 2., 3...).
         """
-        sentences = [s.strip() for s in text.split('.') if s.strip()]
-        seen: dict[str, int] = {}
-        result = []
-        for s in sentences:
-            key = s.lower()
-            # Always keep Trigger lines regardless of repetition
-            if 'trigger' in key:
-                result.append(s)
+        if not text:
+            return text
+            
+        # Split into thinking and JSON if possible
+        parts = text.split("```json")
+        thinking = parts[0]
+        json_part = "```json" + parts[1] if len(parts) > 1 else ""
+        
+        # 1. Hard character limit for thinking (rambling prevention)
+        MAX_THINK_CHARS = 2500
+        if len(thinking) > MAX_THINK_CHARS:
+            thinking = thinking[:MAX_THINK_CHARS] + "\n...[thinking truncated]...\n"
+
+        # 2. Multi-delimiter sentence repetition detection
+        import re as _re
+        # Split by periods, double dashes, or newlines
+        segments = _re.split(r'[.\n]|--', thinking)
+        
+        result_segments = []
+        seen_pattern_count = {}
+        list_item_count = 0
+        
+        for s in segments:
+            clean = s.strip()
+            if not clean:
                 continue
-            seen[key] = seen.get(key, 0) + 1
-            if seen[key] > 2:
-                break
-            result.append(s)
-        return '. '.join(result) + '.' if result else text
+            
+            # Use a normalized key for duplicate detection
+            # Ignore numbers/prices to catch "Price at POC: [X]" rambling
+            norm_key = _re.sub(r'\d+', '#', clean.lower())
+            
+            # Detect numbered list items (e.g., "14. **OI patterns**")
+            is_numbered_list = _re.match(r'^[\*]*#[\.\)]', norm_key)
+            if is_numbered_list:
+                list_item_count += 1
+                # If we have more than 15 list items in one reasoning block, it's likely rambling
+                if list_item_count > 15:
+                    result_segments.append("...[excessive list truncated]...")
+                    break
+
+            seen_pattern_count[norm_key] = seen_pattern_count.get(norm_key, 0) + 1
+            if seen_pattern_count[norm_key] > 2:
+                # If we've seen this exact pattern twice, skip it unless it's very short
+                if len(clean) > 10:
+                    continue
+            
+            result_segments.append(clean)
+            
+        # Reconstruct with reasonable spacing
+        thinking_truncated = ". ".join(result_segments[:100])
+        if thinking_truncated and not thinking_truncated.endswith('.'):
+            thinking_truncated += "."
+            
+        return thinking_truncated + "\n\n" + json_part if json_part else thinking_truncated
+
+    @staticmethod
+    def _extract_json_candidate(text: str) -> str:
+        """Return the first balanced JSON object if one is present."""
+        start = text.find("{")
+        if start == -1:
+            return text
+
+        depth = 0
+        for idx in range(start, len(text)):
+            char = text[idx]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start:idx + 1]
+        return text
 
     def is_ready(self) -> bool:
         """Return True when the model is fully loaded and ready for inference."""

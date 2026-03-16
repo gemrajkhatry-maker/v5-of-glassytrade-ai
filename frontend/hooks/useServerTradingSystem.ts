@@ -61,6 +61,8 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     const [activeSymbol, setActiveSymbol] = useState<string>('');
     const [connected, setConnected] = useState(false);
     const [connectionStatus, setConnectionStatus] = useState<string>('');
+    // Global event bus for streaming high-frequency data without React renders
+    const tickBusRef = useRef<EventTarget>(new EventTarget());
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const heartbeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -69,6 +71,34 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     const activeSymbolRef = useRef<string>(activeSymbol);
     const parseErrorCount = useRef<number>(0);
     const pendingSubscribeRef = useRef<string | null>(null);
+    // Generation counter to prevent stale subscribe messages from racing with
+    // rapid activeSymbol changes (e.g. user clicks multiple tabs quickly).
+    const subscribeGenRef = useRef(0);
+
+    // --- RAF-batched state updates ---
+    // Queue multiple WS messages into a single React render per animation frame.
+    // Without this, 9 symbols × ~7 generations/sec = ~60 separate setState calls/sec.
+    const pendingUpdatesRef = useRef<Array<(prev: Record<string, InstrumentState>) => Record<string, InstrumentState>>>([]);
+    const batchRafRef = useRef(0);
+
+    const batchedSetInstruments = useCallback(
+        (updater: (prev: Record<string, InstrumentState>) => Record<string, InstrumentState>) => {
+            pendingUpdatesRef.current.push(updater);
+            if (!batchRafRef.current) {
+                batchRafRef.current = requestAnimationFrame(() => {
+                    batchRafRef.current = 0;
+                    const fns = pendingUpdatesRef.current.splice(0);
+                    if (fns.length === 0) return;
+                    setInstruments(prev => {
+                        let state = prev;
+                        for (const fn of fns) state = fn(state);
+                        return state;
+                    });
+                });
+            }
+        },
+        [],
+    );
 
     // ----------------------------------------------------------------
     // 0.  Fetch backend config on mount (retries if backend not ready)
@@ -86,6 +116,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 .then(cfg => {
                     if (cancelled) return;
                     console.log('[TradingSystem] Backend config:', cfg);
+                    if (cfg.backendPort) backendPortRef.current = cfg.backendPort;
                     const symbols: string[] = cfg.activeSymbols || (cfg.defaultSymbol ? [cfg.defaultSymbol] : []);
                     if (symbols.length > 0) {
                         setInstruments(prev => {
@@ -245,14 +276,43 @@ export const useServerTradingSystem = (config: ChartConfig) => {
 
             // Delta compression: merge only changed fields into existing state
             if (state._type === 'delta') {
-                setInstruments(prev => {
+                // Dispatch tick event OUTSIDE React state updater
+                if (state.tick) {
+                    tickBusRef.current.dispatchEvent(new CustomEvent('tick', {
+                        detail: { symbol, tick: state.tick }
+                    }));
+                }
+                if (state.footprint) {
+                    latestFootprint.current = state.footprint;
+                }
+
+                // Tick-only delta (no analytics) — skip React state update.
+                // Chart already updated natively via tickBus; state syncs on next analytics delta (~500ms).
+                const hasAnalytics = state.portfolio !== undefined ||
+                    state.amt !== undefined ||
+                    state.genAIAnalysis !== undefined ||
+                    state.prediction !== undefined ||
+                    state.riskState !== undefined ||
+                    state.agentDecision !== undefined ||
+                    state.overseerAction !== undefined ||
+                    state.overseerReason !== undefined ||
+                    state.depth !== undefined ||
+                    state.depth20Active !== undefined ||
+                    state.stats !== undefined ||
+                    state.ltp !== undefined ||
+                    state.oi !== undefined;
+
+                if (!hasAnalytics) {
+                    return;
+                }
+
+                // Analytics delta: batch into next animation frame
+                batchedSetInstruments(prev => {
                     const existing = prev[symbol];
                     if (!existing) return prev;
 
-                    // Merge delta fields into existing instrument state
                     const merged: any = { ...existing, lastUpdate: Date.now(), stale: false };
 
-                    // Handle tick/chart data update from delta
                     if (state.tick) {
                         const newData = [...existing.data];
                         const last = newData[newData.length - 1];
@@ -265,7 +325,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         merged.data = newData;
                     }
 
-                    // Apply all non-internal changed fields (deep-merge nested objects)
                     if (state.portfolio !== undefined) merged.portfolio = { ...existing.portfolio, ...state.portfolio };
                     if (state.amt !== undefined) merged.amtAnalysis = { ...existing.amtAnalysis, ...state.amt };
                     if (state.genAIAnalysis !== undefined) merged.genAIAnalysis = { ...existing.genAIAnalysis, ...state.genAIAnalysis };
@@ -283,36 +342,45 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.ltp !== undefined) merged.ltp = state.ltp;
                     if (state.oi !== undefined) merged.oi = state.oi;
 
-                    // LLM history append (same logic as full path)
-                    if (state.genAIAnalysis?.inputPrompt) {
-                        const newAi = state.genAIAnalysis;
+                    // History tracking: Listen for both standard generative AI and the new reasoning worker
+                    const newAi = state.genAIAnalysis;
+                    const hasNewReasoning = state.amt?.tradeDecision && state.amt?.tradeDecision !== 'FLAT';
+                    
+                    if (newAi?.inputPrompt || hasNewReasoning) {
                         const lastEntry = existing.llmHistory[existing.llmHistory.length - 1];
-                        if (!lastEntry || lastEntry.inputPrompt !== newAi.inputPrompt) {
+                        const newPrompt = newAi?.inputPrompt || "Reasoning Model Analysis";
+                        
+                        if (!lastEntry || lastEntry.inputPrompt !== newPrompt) {
                             merged.llmHistory = [...existing.llmHistory, {
                                 timestamp: Date.now(),
-                                direction: newAi.direction,
-                                confidence: newAi.confidence,
-                                rationale: newAi.rationale,
-                                inputPrompt: newAi.inputPrompt,
-                                rawOutput: newAi.rawOutput,
+                                direction: newAi?.direction || state.amt.tradeDecision,
+                                confidence: newAi?.confidence || 'High',
+                                rationale: newAi?.rationale || state.amt.llmThinking,
+                                inputPrompt: newPrompt,
+                                rawOutput: newAi?.rawOutput || state.amt.llmThinking,
                             }].slice(-20);
                         }
                     }
 
                     return { ...prev, [symbol]: merged };
                 });
-
-                if (state.footprint) {
-                    latestFootprint.current = state.footprint;
-                }
                 return;
             }
 
-            // Full state (_type === 'full' or no _type) — replace entirely
-            setInstruments(prev => {
+            // Dispatch tick event OUTSIDE React state updater
+            if (state.tick) {
+                tickBusRef.current.dispatchEvent(new CustomEvent('tick', {
+                    detail: { symbol, tick: state.tick }
+                }));
+            }
+            if (state.footprint) {
+                latestFootprint.current = state.footprint;
+            }
+
+            // Full state (_type === 'full' or no _type) — batch into next animation frame
+            batchedSetInstruments(prev => {
                 const inst = prev[symbol] || createInstrumentState(symbol);
 
-                // Update chart data from tick if present
                 let newData = inst.data;
                 if (state.tick) {
                     newData = [...inst.data];
@@ -375,10 +443,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     },
                 };
             });
-
-            if (state.footprint) {
-                latestFootprint.current = state.footprint;
-            }
             // Successful parse — reset consecutive error counter
             parseErrorCount.current = 0;
 
@@ -402,12 +466,18 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // 3.  WebSocket connection
     // ----------------------------------------------------------------
     const retryCountRef = useRef(0);
+    const backendPortRef = useRef<number | null>(null);
 
     const connect = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        const ws = new WebSocket(`${protocol}://${window.location.host}/api/trading/ws/gameloop`);
+        // Connect directly to backend WS (bypass Vite proxy which drops frames)
+        const bport = backendPortRef.current;
+        const wsHost = bport && bport !== Number(window.location.port)
+            ? `${window.location.hostname}:${bport}`
+            : window.location.host;
+        const ws = new WebSocket(`${protocol}://${wsHost}/api/trading/ws/gameloop`);
 
         ws.onopen = () => {
             console.log('[TradingSystem] WS connected');
@@ -476,6 +546,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // Unmount cleanup ONLY
     useEffect(() => {
         return () => {
+            if (batchRafRef.current) cancelAnimationFrame(batchRafRef.current);
             if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
             if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
             if (wsRef.current) {
@@ -486,15 +557,28 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         };
     }, []);
 
-    // When activeSymbol changes, keep ref in sync and subscribe if connected
+    // When activeSymbol changes, keep ref in sync and subscribe if connected.
+    // Debounce by 80ms so rapid tab-clicks only emit one subscribe message.
     useEffect(() => {
+        // Increment generation to invalidate any in-flight stale subscribes
+        subscribeGenRef.current += 1;
+        const gen = subscribeGenRef.current;
+
         // Keep ref in sync for use in onopen callback
         activeSymbolRef.current = activeSymbol;
 
-        if (connected && wsRef.current?.readyState === WebSocket.OPEN && activeSymbol) {
-            wsRef.current.send(JSON.stringify({ subscribe: activeSymbol }));
-            console.log(`[TradingSystem] Subscribed to new symbol: ${activeSymbol}`);
+        if (!connected || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !activeSymbol) {
+            return;
         }
+
+        const timer = setTimeout(() => {
+            // Drop if a newer symbol was selected before the debounce fired
+            if (subscribeGenRef.current !== gen) return;
+            wsRef.current!.send(JSON.stringify({ subscribe: activeSymbol }));
+            console.log(`[TradingSystem] Subscribed to symbol: ${activeSymbol} (gen=${gen})`);
+        }, 80);
+
+        return () => clearTimeout(timer);
     }, [activeSymbol, connected]);
 
     // ----------------------------------------------------------------
@@ -504,7 +588,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
 
     const footprintData = useMemo<Record<string, FootprintCandle> | null>(() => {
         return latestFootprint.current;
-    }, [activeInstrument?.lastUpdate]);
+    }, [activeInstrument?.data?.length]);
 
     const cumulativeDeltas = useMemo(() => {
         if (!activeInstrument) return [];
@@ -526,5 +610,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         },
         connected,
         connectionStatus,
+        tickBus: tickBusRef.current,
     };
 };

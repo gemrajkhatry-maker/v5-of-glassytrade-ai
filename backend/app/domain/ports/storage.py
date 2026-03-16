@@ -40,9 +40,24 @@ class OpenPositionStoragePort(ABC):
     def load_open_positions(self) -> list[dict[str, Any]]: ...
 
 
+class PositionEventStoragePort(ABC):
+    @abstractmethod
+    def save_position_event(self, event: dict[str, Any]) -> None: ...
+    @abstractmethod
+    def query_position_events(
+        self, position_id: str | None = None, symbol: str | None = None,
+    ) -> list[dict[str, Any]]: ...
+
+
 # ---------------------------------------------------------------------------
 
-class StoragePort(TickStoragePort, TradeStoragePort, DecisionStoragePort, OpenPositionStoragePort):
+class StoragePort(
+    TickStoragePort,
+    TradeStoragePort,
+    DecisionStoragePort,
+    OpenPositionStoragePort,
+    PositionEventStoragePort,
+):
     """Abstraction for persisting ticks, trades, and LLM decisions."""
 
     @abstractmethod
@@ -93,3 +108,13 @@ class StoragePort(TickStoragePort, TradeStoragePort, DecisionStoragePort, OpenPo
     @abstractmethod
     def get_recent_trades(self, limit: int = 5) -> list[dict[str, Any]]:
         """Retrieve the most recent closed trades (newest first)."""
+
+    @abstractmethod
+    def save_position_event(self, event: dict[str, Any]) -> None:
+        """Persist an append-only position lifecycle event."""
+
+    @abstractmethod
+    def query_position_events(
+        self, position_id: str | None = None, symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Query append-only position lifecycle events."""

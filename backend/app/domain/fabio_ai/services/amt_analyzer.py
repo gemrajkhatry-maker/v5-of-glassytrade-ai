@@ -17,17 +17,26 @@ from app.domain.fabio_ai.services import mlx_compute as mc
 
 from app.domain.trading.models.enums import MarketState, SignalType, Source, SetupType
 from app.domain.trading.models.value_objects import (
-    OHLC, OrderBook, VolumeProfileLevel, AggressivePrint, AMTResult,
+    OHLC,
+    OrderBook,
+    VolumeProfileLevel,
+    AggressivePrint,
+    AMTResult,
 )
 from app.domain.fabio_ai.models.observation import AMTObservation
 from app.domain.trading.models.entities import Signal
 from app.domain.fabio_ai.services.cvd_tracker import CVDTracker
 from app.domain.fabio_ai.services.profile_classifier import (
-    classify_shape, POCMigrationTracker,
+    classify_shape,
+    POCMigrationTracker,
 )
-from app.domain.fabio_ai.services.market_structure_classifier import MarketStructureClassifier
+from app.domain.fabio_ai.services.market_structure_classifier import (
+    MarketStructureClassifier,
+)
 from app.domain.fabio_ai.services.session_context import (
-    classify_gap, get_session_info, opening_inventory_bias,
+    classify_gap,
+    get_session_info,
+    opening_inventory_bias,
 )
 
 
@@ -35,9 +44,10 @@ from app.domain.fabio_ai.services.session_context import (
 # Configuration
 # ---------------------------------------------------------------------------
 
+
 class AMTConfig:
-    LVN_THRESHOLD: float = 0.40   # LVN: bins < 40% of mean volume (formula: 0.3–0.5)
-    LVN_SMOOTHING: int = 3        # Smooth histogram before LVN/HVN detection
+    LVN_THRESHOLD: float = 0.40  # LVN: bins < 40% of mean volume (formula: 0.3–0.5)
+    LVN_SMOOTHING: int = 3  # Smooth histogram before LVN/HVN detection
     OBI_THRESHOLD: float = 0.25
     DELTA_THRESHOLD: float = 0.3
     ABSORPTION_THRESHOLD: float = 0.3
@@ -45,10 +55,11 @@ class AMTConfig:
     BUBBLE_VOL_MULTIPLIER: float = 1.5
     AGGRESSION_EMA_PERIOD: int = 20  # EMA period for dynamic volume threshold
     DELTA_DIRECTIONALITY_THRESHOLD: float = 0.40  # Professional: 40-50% delta ratio
-    HVN_THRESHOLD: float = 0.40   # HVN: bins > 40% of max volume (formula: 0.3–0.5)
+    HVN_THRESHOLD: float = 0.40  # HVN: bins > 40% of max volume (formula: 0.3–0.5)
 
     # Configurable via env — tune for MCX with lower values
     from app.config import settings as _settings
+
     AGGRESSION_SIGMA_THRESHOLD: float = _settings.AGGRESSION_SIGMA
     DISPLACEMENT_MULTIPLIER: float = _settings.DISPLACEMENT_MULTIPLIER
     BALANCE_RATIO_THRESHOLD: float = _settings.BALANCE_RATIO_THRESHOLD
@@ -58,23 +69,24 @@ class AMTConfig:
 # Pure helpers
 # ---------------------------------------------------------------------------
 
+
 def smooth_array(data: list[float], window: int) -> list[float]:
     """Centered simple moving average smoothing (MLX-accelerated)."""
     return mc.smooth_array(data, window)
 
 
-def create_profile(data: list[OHLC], buckets: int = 100) -> list[VolumeProfileLevel]:
-    """Build a volume profile from OHLCV data using Gaussian-weighted distribution.
+def create_profile(data: list[OHLC], buckets: int = 200) -> list[VolumeProfileLevel]:
+    """Build a volume profile from OHLCV data using real volume-at-price histogram.
 
-    Volume is distributed with a Gaussian centered on each candle's VWAP (or
-    close if VWAP unavailable).  This concentrates volume where actual trading
-    occurred rather than smearing it uniformly across the high-low range.
+    Volume is distributed uniformly across each candle's [low, high] range,
+    representing the real auction (Fabio AMT style).  Gaussian smoothing is
+    applied separately only for LVN/HVN detection — see find_lvns/find_hvns.
     """
     if not data:
         return []
 
-    min_price = min(d.low for d in data)
-    max_price = max(d.high for d in data)
+    min_price = float(min(d.low for d in data))
+    max_price = float(max(d.high for d in data))
 
     buffer = (max_price - min_price) * 0.01
     min_price -= buffer
@@ -84,9 +96,7 @@ def create_profile(data: list[OHLC], buckets: int = 100) -> list[VolumeProfileLe
     if price_range == 0:
         total_vol = sum(d.volume for d in data)
         avg_price = data[0].close
-        return [
-            VolumeProfileLevel(price=avg_price, volume=total_vol)
-        ]
+        return [VolumeProfileLevel(price=avg_price, volume=total_vol)]
 
     step = price_range / buckets
     profile = [
@@ -103,23 +113,18 @@ def create_profile(data: list[OHLC], buckets: int = 100) -> list[VolumeProfileLe
         start_bucket = max(0, min(buckets - 1, start_bucket))
         end_bucket = max(0, min(buckets - 1, end_bucket))
 
-        buy_ratio = d.taker_buy_volume / d.volume if d.volume > 0 else 0.5
+        buy_ratio = (
+            float(d.taker_buy_volume) / float(d.volume) if float(d.volume) > 0 else 0.5
+        )
 
-        # Center of distribution: VWAP if available, else close
-        center = d.vwap if d.vwap > 0 else d.close
-        # Sigma = ~25% of candle range (concentrates ~95% within the range)
-        candle_range = d.high - d.low
-        sigma = max(candle_range * 0.25, step * 0.5)  # floor at half a bucket
+        # Uniform distribution across candle range (real volume-at-price)
+        n_buckets = end_bucket - start_bucket + 1
+        vol_per_bucket = float(d.volume) / n_buckets if n_buckets > 0 else 0.0
 
-        # Compute Gaussian weights (MLX-accelerated)
-        bucket_centers = [profile[i].price for i in range(start_bucket, end_bucket + 1)]
-        weights = mc.gaussian_weights(bucket_centers, center, sigma)
-
-        for idx, i in enumerate(range(start_bucket, end_bucket + 1)):
-            vol = d.volume * weights[idx]
-            profile[i].volume += vol
-            profile[i].buy_volume += vol * buy_ratio
-            profile[i].sell_volume += vol * (1 - buy_ratio)
+        for i in range(start_bucket, end_bucket + 1):
+            profile[i].volume += vol_per_bucket
+            profile[i].buy_volume += vol_per_bucket * float(buy_ratio)
+            profile[i].sell_volume += vol_per_bucket * (1 - float(buy_ratio))
 
     return profile
 
@@ -127,6 +132,7 @@ def create_profile(data: list[OHLC], buckets: int = 100) -> list[VolumeProfileLe
 # ---------------------------------------------------------------------------
 # Incremental Volume Profile
 # ---------------------------------------------------------------------------
+
 
 class IncrementalVolumeProfile:
     """Maintains volume profile bucket state between ticks.
@@ -136,7 +142,7 @@ class IncrementalVolumeProfile:
     then recomputes POC/VA from the bucket totals in O(buckets) time.
     """
 
-    def __init__(self, buckets: int = 100) -> None:
+    def __init__(self, buckets: int = 200) -> None:
         self._buckets = buckets
         # Per-bucket accumulators: [volume, buy_volume, sell_volume]
         self._volumes: list[list[float]] = [[0.0, 0.0, 0.0] for _ in range(buckets)]
@@ -161,8 +167,8 @@ class IncrementalVolumeProfile:
             self._initialized = False
             return
 
-        min_price = min(d.low for d in self._candles)
-        max_price = max(d.high for d in self._candles)
+        min_price = float(min(d.low for d in self._candles))
+        max_price = float(max(d.high for d in self._candles))
         buffer = (max_price - min_price) * 0.01
         self._min_price = min_price - buffer
         self._max_price = max_price + buffer
@@ -171,7 +177,9 @@ class IncrementalVolumeProfile:
         if price_range == 0:
             total_vol = sum(d.volume for d in self._candles)
             vol_per = total_vol / self._buckets
-            self._volumes = [[vol_per, vol_per * 0.5, vol_per * 0.5] for _ in range(self._buckets)]
+            self._volumes = [
+                [vol_per, vol_per * 0.5, vol_per * 0.5] for _ in range(self._buckets)
+            ]
             self._step = 1.0
             self._initialized = True
             return
@@ -182,54 +190,63 @@ class IncrementalVolumeProfile:
             self._add_candle_to_buckets(d)
         self._initialized = True
 
-    def _gaussian_weights(self, candle: OHLC, start_bucket: int, end_bucket: int) -> list[float]:
-        """Compute Gaussian volume distribution weights (MLX-accelerated)."""
-        center = candle.vwap if candle.vwap > 0 else candle.close
-        candle_range = candle.high - candle.low
-        sigma = max(candle_range * 0.25, self._step * 0.5)
-        bucket_centers = [
-            self._min_price + (i * self._step) + (self._step / 2)
-            for i in range(start_bucket, end_bucket + 1)
-        ]
-        return mc.gaussian_weights(bucket_centers, center, sigma)
-
     def _add_candle_to_buckets(self, candle: OHLC) -> None:
-        """Distribute a candle's volume across buckets using Gaussian weighting."""
-        if candle.volume <= 0:
+        """Distribute a candle's volume uniformly across buckets (real volume-at-price)."""
+        c_vol = float(candle.volume)
+        if c_vol <= 0:
             return
-        start_bucket = int((candle.low - self._min_price) / self._step)
-        end_bucket = int((candle.high - self._min_price) / self._step)
+        c_low = float(candle.low)
+        c_high = float(candle.high)
+        start_bucket = int((c_low - self._min_price) / self._step)
+        end_bucket = int((c_high - self._min_price) / self._step)
         start_bucket = max(0, min(self._buckets - 1, start_bucket))
         end_bucket = max(0, min(self._buckets - 1, end_bucket))
 
-        buy_ratio = candle.taker_buy_volume / candle.volume if candle.volume > 0 else 0.5
-        weights = self._gaussian_weights(candle, start_bucket, end_bucket)
+        buy_ratio = (
+            float(candle.taker_buy_volume) / c_vol
+            if c_vol > 0
+            else 0.5
+        )
+        n_buckets = end_bucket - start_bucket + 1
+        vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
 
-        for idx, i in enumerate(range(start_bucket, end_bucket + 1)):
-            vol = candle.volume * weights[idx]
-            self._volumes[i][0] += vol
-            self._volumes[i][1] += vol * buy_ratio
-            self._volumes[i][2] += vol * (1 - buy_ratio)
+        for i in range(start_bucket, end_bucket + 1):
+            self._volumes[i][0] += vol_per_bucket
+            self._volumes[i][1] += vol_per_bucket * float(buy_ratio)
+            self._volumes[i][2] += vol_per_bucket * (1 - float(buy_ratio))
 
     def _remove_candle_from_buckets(self, candle: OHLC) -> None:
-        """Remove a candle's Gaussian-weighted volume contribution from buckets."""
-        if candle.volume <= 0:
+        """Remove a candle's uniform volume contribution from buckets."""
+        c_vol = float(candle.volume)
+        if c_vol <= 0:
             return
-        start_bucket = int((candle.low - self._min_price) / self._step)
-        end_bucket = int((candle.high - self._min_price) / self._step)
+        c_low = float(candle.low)
+        c_high = float(candle.high)
+        start_bucket = int((c_low - self._min_price) / self._step)
+        end_bucket = int((c_high - self._min_price) / self._step)
         start_bucket = max(0, min(self._buckets - 1, start_bucket))
         end_bucket = max(0, min(self._buckets - 1, end_bucket))
 
-        buy_ratio = candle.taker_buy_volume / candle.volume if candle.volume > 0 else 0.5
-        weights = self._gaussian_weights(candle, start_bucket, end_bucket)
+        buy_ratio = (
+            float(candle.taker_buy_volume) / c_vol
+            if c_vol > 0
+            else 0.5
+        )
+        n_buckets = end_bucket - start_bucket + 1
+        vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
 
-        for idx, i in enumerate(range(start_bucket, end_bucket + 1)):
-            vol = candle.volume * weights[idx]
-            self._volumes[i][0] = max(0.0, self._volumes[i][0] - vol)
-            self._volumes[i][1] = max(0.0, self._volumes[i][1] - vol * buy_ratio)
-            self._volumes[i][2] = max(0.0, self._volumes[i][2] - vol * (1 - buy_ratio))
+        for i in range(start_bucket, end_bucket + 1):
+            self._volumes[i][0] = max(0.0, self._volumes[i][0] - vol_per_bucket)
+            self._volumes[i][1] = max(
+                0.0, self._volumes[i][1] - vol_per_bucket * float(buy_ratio)
+            )
+            self._volumes[i][2] = max(
+                0.0, self._volumes[i][2] - vol_per_bucket * (1 - float(buy_ratio))
+            )
 
-    def update(self, new_candle: OHLC, oldest_candle_to_remove: OHLC | None = None) -> None:
+    def update(
+        self, new_candle: OHLC, oldest_candle_to_remove: OHLC | None = None
+    ) -> None:
         """Incrementally update the profile with a new candle.
 
         Args:
@@ -384,9 +401,11 @@ def find_aggressive_prints(
         return list(previous_prints) if previous_prints else []
 
     # Incremental path: only check the last candle
-    if (previous_prints is not None
-            and previous_data_len > 0
-            and len(data) == previous_data_len + 1):
+    if (
+        previous_prints is not None
+        and previous_data_len > 0
+        and len(data) == previous_data_len + 1
+    ):
         prints = list(previous_prints)
         # Expire prints older than 30 candles
         if len(data) > 30:
@@ -394,16 +413,21 @@ def find_aggressive_prints(
             prints = [p for p in prints if p.time >= cutoff_time]
         i = len(data) - 1
         d = data[i]
-        lookback = data[max(0, i - 50):i]
+        lookback = data[max(0, i - 50) : i]
         if len(lookback) >= 10:
             sigma = compute_aggression_sigma(d, lookback, cfg.AGGRESSION_EMA_PERIOD)
             if sigma >= cfg.AGGRESSION_SIGMA_THRESHOLD:
                 delta_ratio = abs(d.delta) / d.volume if d.volume > 0 else 0
                 if delta_ratio >= cfg.DELTA_DIRECTIONALITY_THRESHOLD:
-                    prints.append(AggressivePrint(
-                        price=d.close, time=d.time, volume=d.volume,
-                        delta=d.delta, side="BUY" if d.delta > 0 else "SELL",
-                    ))
+                    prints.append(
+                        AggressivePrint(
+                            price=d.close,
+                            time=d.time,
+                            volume=d.volume,
+                            delta=d.delta,
+                            side="BUY" if d.delta > 0 else "SELL",
+                        )
+                    )
         return prints
 
     # Full rebuild with 30-candle expiry
@@ -412,23 +436,29 @@ def find_aggressive_prints(
     for i, d in enumerate(data):
         if i < cutoff_idx:
             continue  # skip candles older than 30 from end
-        lookback = data[max(0, i - 50):i] if i > 10 else data[:i]
+        lookback = data[max(0, i - 50) : i] if i > 10 else data[:i]
         if len(lookback) < 10:
             continue
         sigma = compute_aggression_sigma(d, lookback, cfg.AGGRESSION_EMA_PERIOD)
         if sigma >= cfg.AGGRESSION_SIGMA_THRESHOLD:
             delta_ratio = abs(d.delta) / d.volume if d.volume > 0 else 0
             if delta_ratio >= cfg.DELTA_DIRECTIONALITY_THRESHOLD:
-                prints.append(AggressivePrint(
-                    price=d.close, time=d.time, volume=d.volume,
-                    delta=d.delta, side="BUY" if d.delta > 0 else "SELL",
-                ))
+                prints.append(
+                    AggressivePrint(
+                        price=d.close,
+                        time=d.time,
+                        volume=d.volume,
+                        delta=d.delta,
+                        side="BUY" if d.delta > 0 else "SELL",
+                    )
+                )
     return prints
 
 
 # ---------------------------------------------------------------------------
 # Initial Balance Tracker
 # ---------------------------------------------------------------------------
+
 
 class InitialBalanceTracker:
     """Tracks Initial Balance (IB) — high/low of the first N minutes of session."""
@@ -474,6 +504,7 @@ class InitialBalanceTracker:
 # Acceptance / Rejection Engine
 # ---------------------------------------------------------------------------
 
+
 class AcceptanceRejectionEngine:
     """Tracks acceptance/rejection at VA boundaries using time, volume, and price action."""
 
@@ -490,7 +521,11 @@ class AcceptanceRejectionEngine:
         self._last_time = ""
 
     def update(
-        self, candle: OHLC, vah: float, val: float, baseline_vol: float,
+        self,
+        candle: OHLC,
+        vah: float,
+        val: float,
+        baseline_vol: float,
     ) -> dict:
         """Update acceptance/rejection state.
 
@@ -502,6 +537,7 @@ class AcceptanceRejectionEngine:
             "acceptance_below": False,
             "rejection_at_high": False,
             "rejection_at_low": False,
+            "liquidity_sweep": "",
             "price_velocity": 0.0,
         }
 
@@ -526,17 +562,25 @@ class AcceptanceRejectionEngine:
         # Time accumulation outside VA
         if candle.close > vah and vah > 0:
             self._time_above_vah += duration
-            self._time_below_val = max(0, self._time_below_val - duration * 0.5)  # decay
+            self._time_below_val = max(
+                0, self._time_below_val - duration * 0.5
+            )  # decay
         elif candle.close < val and val > 0:
             self._time_below_val += duration
-            self._time_above_vah = max(0, self._time_above_vah - duration * 0.5)  # decay
+            self._time_above_vah = max(
+                0, self._time_above_vah - duration * 0.5
+            )  # decay
         else:
             # Inside VA — decay both
             self._time_above_vah = max(0, self._time_above_vah - duration * 0.5)
             self._time_below_val = max(0, self._time_below_val - duration * 0.5)
 
         # Acceptance: enough time outside + volume confirmation
-        vol_ok = candle.volume > baseline_vol * self._acceptance_vol_ratio if baseline_vol > 0 else False
+        vol_ok = (
+            candle.volume > baseline_vol * self._acceptance_vol_ratio
+            if baseline_vol > 0
+            else False
+        )
         if self._time_above_vah >= self._acceptance_time_threshold and vol_ok:
             result["acceptance_above"] = True
         if self._time_below_val >= self._acceptance_time_threshold and vol_ok:
@@ -548,18 +592,46 @@ class AcceptanceRejectionEngine:
             upper_wick = candle.high - max(candle.open, candle.close)
             lower_wick = min(candle.open, candle.close) - candle.low
             body_size = abs(candle.close - candle.open)
-            vol_spike = candle.volume > baseline_vol * 1.5 if baseline_vol > 0 else False
+            vol_spike = (
+                candle.volume > baseline_vol * 1.5 if baseline_vol > 0 else False
+            )
 
             # Rejection at high (near VAH): upper wick > body, price near VAH
             threshold = candle.close * 0.003
-            if (upper_wick > body_size and vol_spike
-                    and vah > 0 and abs(candle.high - vah) < threshold):
+            if (
+                upper_wick > body_size
+                and vol_spike
+                and vah > 0
+                and abs(candle.high - vah) < threshold
+            ):
                 result["rejection_at_high"] = True
 
             # Rejection at low (near VAL): lower wick > body, price near VAL
-            if (lower_wick > body_size and vol_spike
-                    and val > 0 and abs(candle.low - val) < threshold):
+            if (
+                lower_wick > body_size
+                and vol_spike
+                and val > 0
+                and abs(candle.low - val) < threshold
+            ):
                 result["rejection_at_low"] = True
+
+            # Liquidity Sweep High: Pierced VAH, closed below, strong wick
+            if (
+                candle.high > vah > 0
+                and candle.close < vah
+                and upper_wick > body_size
+                and vol_spike
+            ):
+                result["liquidity_sweep"] = "SWEEP_HIGH"
+
+            # Liquidity Sweep Low: Pierced VAL, closed above, strong wick
+            elif (
+                candle.low < val > 0
+                and candle.close > val
+                and lower_wick > body_size
+                and vol_spike
+            ):
+                result["liquidity_sweep"] = "SWEEP_LOW"
 
         return result
 
@@ -567,6 +639,7 @@ class AcceptanceRejectionEngine:
 # ---------------------------------------------------------------------------
 # Break Detection — Initiative vs Responsive
 # ---------------------------------------------------------------------------
+
 
 def detect_break(
     data: list[OHLC],
@@ -580,7 +653,12 @@ def detect_break(
 
     Returns dict with break_direction, break_type, break_level, volume_ratio.
     """
-    empty = {"break_direction": "", "break_type": "", "break_level": 0.0, "volume_ratio": 0.0}
+    empty = {
+        "break_direction": "",
+        "break_type": "",
+        "break_level": 0.0,
+        "volume_ratio": 0.0,
+    }
     if len(data) < 3 or baseline_vol <= 0:
         return empty
 
@@ -591,7 +669,7 @@ def detect_break(
     candle_range = current.high - current.low
 
     # Key levels to check
-    levels_up: list[tuple[str, float]] = []   # levels that indicate upward break
+    levels_up: list[tuple[str, float]] = []  # levels that indicate upward break
     levels_down: list[tuple[str, float]] = []  # levels that indicate downward break
     if vah > 0:
         levels_up.append(("VAH", vah))
@@ -675,6 +753,7 @@ def detect_break(
 # LVN Velocity Play Detection
 # ---------------------------------------------------------------------------
 
+
 def detect_lvn_play(
     candle: OHLC,
     lvns: list[float],
@@ -751,9 +830,34 @@ def detect_lvn_play(
     }
 
 
+class AggressivePrintRegistry:
+    """Registry of high-volume 'bubble' levels for re-test analysis."""
+
+    def __init__(self, proximity_pct: float = 0.001) -> None:
+        self.prints: list[AggressivePrint] = []
+        self.proximity_pct = proximity_pct
+
+    def register(self, prints: list[AggressivePrint]) -> None:
+        """Add new prints to the session registry (prevents duplicates)."""
+        existing_times = {p.time for p in self.prints}
+        for p in prints:
+            if p.time not in existing_times:
+                self.prints.append(p)
+
+    def get_retests(self, current_price: float) -> list[AggressivePrint]:
+        """Return prints that are currently being re-tested by price."""
+        retests = []
+        for p in self.prints:
+            dist = abs(current_price - p.price) / p.price
+            if dist <= self.proximity_pct:
+                retests.append(p)
+        return retests
+
+
 # ---------------------------------------------------------------------------
 # AMT Analyzer Service
 # ---------------------------------------------------------------------------
+
 
 class AMTAnalyzer:
     """Auction Market Theory analysis — pure domain service.
@@ -774,6 +878,7 @@ class AMTAnalyzer:
         # Incremental aggressive prints state
         self._prev_agg_prints: list[AggressivePrint] = []
         self._prev_agg_data_len: int = 0
+        self._bubble_registry = AggressivePrintRegistry()
         # Session VWAP accumulator
         self._vwap_cum_vol: float = 0.0
         self._vwap_cum_quote_vol: float = 0.0
@@ -794,7 +899,15 @@ class AMTAnalyzer:
         (consecutive same-direction candles from the end). The strict displacement
         flag is set when the move also meets range expansion criteria.
         """
-        empty = {"has_displacement": False, "profile": [], "lvns": [], "poc": 0.0, "vah": 0.0, "val": 0.0}
+        empty = {
+            "has_displacement": False,
+            "profile": [],
+            "lvns": [],
+            "poc": 0.0,
+            "vah": 0.0,
+            "val": 0.0,
+            "swing_delta": 0.0,
+        }
         if len(data) < 5:
             return empty
 
@@ -820,19 +933,30 @@ class AMTAnalyzer:
             return empty
 
         is_disp = self.detect_displacement(data)
-        leg_profile = create_profile(leg_candles, buckets=100)
+        leg_profile = create_profile(leg_candles, buckets=200)
         if len(leg_profile) < 3:
-            return {"has_displacement": is_disp, "profile": leg_profile, "lvns": [], "poc": 0.0, "vah": 0.0, "val": 0.0}
+            return {
+                "has_displacement": is_disp,
+                "profile": leg_profile,
+                "lvns": [],
+                "poc": 0.0,
+                "vah": 0.0,
+                "val": 0.0,
+                "swing_delta": sum(c.delta for c in leg_candles),
+            }
         leg_lvns = find_lvns(leg_profile, self.config)
 
         # POC — VWAP tie-break (matches session logic)
         max_vol = max(p.volume for p in leg_profile)
         poc_candidates = [i for i, p in enumerate(leg_profile) if p.volume == max_vol]
-        vwap_ref = (
-            self._vwap_cum_quote_vol / self._vwap_cum_vol
-            if self._vwap_cum_vol > 0 else data[-1].close
+        
+        # Local Leg VWAP for tie-break
+        leg_vol = sum(c.volume for c in leg_candles)
+        leg_vwap = sum(c.close * c.volume for c in leg_candles) / leg_vol if leg_vol > 0 else leg_candles[-1].close
+        
+        poc_idx = min(
+            poc_candidates, key=lambda i: abs(leg_profile[i].price - leg_vwap)
         )
-        poc_idx = min(poc_candidates, key=lambda i: abs(leg_profile[i].price - vwap_ref))
         leg_poc = leg_profile[poc_idx].price
 
         # Value Area (70%) — CME two-row pairs method (matches session logic)
@@ -866,7 +990,9 @@ class AMTAnalyzer:
                         down_idx -= 1
                         current_volume += leg_profile[down_idx].volume
 
-        step = leg_profile[1].price - leg_profile[0].price if len(leg_profile) > 1 else 0
+        step = (
+            leg_profile[1].price - leg_profile[0].price if len(leg_profile) > 1 else 0
+        )
         half_step = step / 2
         leg_vah = leg_profile[up_idx].price + half_step
         leg_val = leg_profile[down_idx].price - half_step
@@ -877,6 +1003,7 @@ class AMTAnalyzer:
             "poc": leg_poc,
             "vah": leg_vah,
             "val": leg_val,
+            "swing_delta": sum(c.delta for c in leg_candles),
         }
 
     def detect_displacement(self, data: list[OHLC]) -> bool:
@@ -902,7 +1029,7 @@ class AMTAnalyzer:
             return False
 
         # Range expansion: leg range >= 1.5 × avg_range × N
-        prev_data = data[-(20 + N):-N]
+        prev_data = data[-(20 + N) : -N]
         if len(prev_data) < 10:
             return False
 
@@ -954,17 +1081,22 @@ class AMTAnalyzer:
         prior_poc: float = 0.0,
         prior_vah: float = 0.0,
         prior_val: float = 0.0,
+        developing_profile: IncrementalVolumeProfile | None = None,
+        cushion_tier: str = "Conservative",
+        session_pnl: float = 0.0,
     ) -> AMTResult:
         """Run the full AMT analysis pipeline."""
         empty = AMTResult(
             market_state=MarketState.BALANCED.value,
-            poc=0, value_area_high=0, value_area_low=0,
+            poc=0,
+            value_area_high=0,
+            value_area_low=0,
         )
 
         if not data or len(data) < 5:
             return empty
 
-        lookback = min(len(data), 200)
+        lookback = len(data)
         recent_data = data[-lookback:]
         current = data[-1]
 
@@ -979,9 +1111,10 @@ class AMTAnalyzer:
         # POC — tie-break: closest to VWAP when multiple bins share max volume
         max_vol = max(p.volume for p in profile)
         poc_candidates = [i for i, p in enumerate(profile) if p.volume == max_vol]
-        vwap_ref = (
+        vwap_ref = float(
             self._vwap_cum_quote_vol / self._vwap_cum_vol
-            if self._vwap_cum_vol > 0 else current.close
+            if self._vwap_cum_vol > 0
+            else current.close
         )
         poc_index = min(poc_candidates, key=lambda i: abs(profile[i].price - vwap_ref))
         poc = profile[poc_index].price
@@ -1030,7 +1163,7 @@ class AMTAnalyzer:
         # VAH = upper edge of top VA bin, VAL = lower edge of bottom VA bin
         step = profile[1].price - profile[0].price if len(profile) > 1 else 0
         half_step = step / 2
-        vah = profile[up_idx].price + half_step    # upper edge
+        vah = profile[up_idx].price + half_step  # upper edge
         val = profile[down_idx].price - half_step  # lower edge
 
         # Note: we no longer artificially expand VA width. A very tight VA
@@ -1042,15 +1175,24 @@ class AMTAnalyzer:
         # LVN/HVN detection complete
         # Incremental aggressive prints — only compute last candle if data grew by 1
         agg_prints = find_aggressive_prints(
-            recent_data, self.config,
+            recent_data,
+            self.config,
             previous_prints=self._prev_agg_prints,
             previous_data_len=self._prev_agg_data_len,
         )
         self._prev_agg_prints = agg_prints
         self._prev_agg_data_len = len(recent_data)
 
+        # Register prints in session registry and check for re-tests
+        self._bubble_registry.register(agg_prints)
+        bubble_retests = self._bubble_registry.get_retests(current.close)
+
         # Baseline volume for acceptance/rejection (mean of last 20 candles)
-        baseline_vol = sum(d.volume for d in recent_data[-20:]) / min(20, len(recent_data)) if recent_data else 0.0
+        baseline_vol = (
+            sum(d.volume for d in recent_data[-20:]) / min(20, len(recent_data))
+            if recent_data
+            else 0.0
+        )
 
         # Acceptance/Rejection engine
         ar_state = self._ar_engine.update(current, vah, val, baseline_vol)
@@ -1068,16 +1210,24 @@ class AMTAnalyzer:
 
         # Balance ratio: fraction of recent candles inside VA (computed early for market state)
         balance_window = min(len(recent_data), 20)
-        inside_count = sum(1 for d in recent_data[-balance_window:] if val <= d.close <= vah)
+        inside_count = sum(
+            1 for d in recent_data[-balance_window:] if val <= d.close <= vah
+        )
         balance_ratio = inside_count / balance_window if balance_window > 0 else 0.0
-        ratio_imbalanced = balance_ratio < AMTConfig.BALANCE_RATIO_THRESHOLD if balance_window >= 5 else False
+        ratio_imbalanced = (
+            balance_ratio < AMTConfig.BALANCE_RATIO_THRESHOLD
+            if balance_window >= 5
+            else False
+        )
 
         # Require EITHER (displacement + acceptance) OR low balance ratio + acceptance
         # OR persistent price outside VA (slow drift / sustained breakout)
         # Safety override: zero candles in VA = definitive imbalance
         if balance_ratio == 0.0 and balance_window >= 5:
             market_state = MarketState.IMBALANCED
-        elif (has_displacement and has_acceptance) or (ratio_imbalanced and has_acceptance):
+        elif (has_displacement and has_acceptance) or (
+            ratio_imbalanced and has_acceptance
+        ):
             market_state = MarketState.IMBALANCED
 
         # Persistent outside-VA check: if price is clearly outside VA without
@@ -1090,6 +1240,7 @@ class AMTAnalyzer:
 
         # 3. Aggression
         obi = 0.0
+        toxicity = 0.0
         if order_book:
             bids_q = sum(b.quantity for b in order_book.bids)
             asks_q = sum(a.quantity for a in order_book.asks)
@@ -1097,7 +1248,18 @@ class AMTAnalyzer:
             if total > 0:
                 obi = (bids_q - asks_q) / total
 
+            # Toxicity: Order Book Depletion / Extreme Top-of-Book Skew
+            if len(order_book.bids) >= 3 and len(order_book.asks) >= 3:
+                top_bids_q = sum(b.quantity for b in order_book.bids[:3])
+                top_asks_q = sum(a.quantity for a in order_book.asks[:3])
+                top_total = top_bids_q + top_asks_q
+                if top_total > 0:
+                    top_obi = (top_bids_q - top_asks_q) / top_total
+                    if abs(top_obi) > 0.7:  # Highly toxic / one-sided top of book
+                        toxicity = top_obi
+
         norm_delta = current.delta / current.volume if current.volume > 0 else 0
+        is_toxic = abs(toxicity) > 0.7
         obi_agg = abs(obi) > self.config.OBI_THRESHOLD
         delta_agg = abs(norm_delta) > self.config.DELTA_THRESHOLD
 
@@ -1108,19 +1270,26 @@ class AMTAnalyzer:
         bullish_abs = norm_delta > self.config.ABSORPTION_THRESHOLD and price_flat
         bearish_abs = norm_delta < -self.config.ABSORPTION_THRESHOLD and price_flat
         is_absorption = bullish_abs or bearish_abs
-        has_aggression = obi_agg or delta_agg or is_absorption
+        has_aggression = obi_agg or delta_agg or is_absorption or is_toxic
 
         aggression_score = 0.0
         if has_aggression:
-            direction = 1 if (obi > 0 or norm_delta > 0) else -1
-            aggression_score = direction * max(
-                abs(obi), abs(norm_delta), 0.5 if is_absorption else 0,
-            )
+            direction = 1 if (obi > 0 or norm_delta > 0 or toxicity > 0) else -1
+            base_agg = max(abs(obi), abs(norm_delta), 0.5 if is_absorption else 0)
+            boost = 0.5 if is_toxic else 0.0
+            aggression_score = direction * min(base_agg + boost, 2.0)  # Cap at 2.0
 
         # 4. Signal Generation
         signal = self._generate_signal(
-            data, current, market_state, has_aggression, aggression_score,
-            lvns, vah, val, poc,
+            data,
+            current,
+            market_state,
+            has_aggression,
+            aggression_score,
+            lvns,
+            vah,
+            val,
+            poc,
         )
 
         # Compute profile shape once and attach to result
@@ -1158,18 +1327,21 @@ class AMTAnalyzer:
             self._ar_engine.reset()
         self._vwap_last_time = current.time
 
-        self._vwap_cum_vol += current.volume
-        self._vwap_cum_quote_vol += quote_vol
-        self._vwap_cum_sq_vol += typical_price * typical_price * current.volume
-        session_vwap = (
+        self._vwap_cum_vol += float(current.volume)
+        self._vwap_cum_quote_vol += float(quote_vol)
+        self._vwap_cum_sq_vol += float(typical_price * typical_price * current.volume)
+        session_vwap = float(
             self._vwap_cum_quote_vol / self._vwap_cum_vol
-            if self._vwap_cum_vol > 0 else current.close
+            if self._vwap_cum_vol > 0
+            else current.close
         )
 
         # VWAP standard deviation bands (±1σ, ±2σ)
         vwap_std = 0.0
         if self._vwap_cum_vol > 0:
-            variance = (self._vwap_cum_sq_vol / self._vwap_cum_vol) - (session_vwap * session_vwap)
+            variance = (self._vwap_cum_sq_vol / self._vwap_cum_vol) - (
+                session_vwap * session_vwap
+            )
             vwap_std = math.sqrt(max(0.0, variance))
         vwap_upper_1 = session_vwap + vwap_std
         vwap_lower_1 = session_vwap - vwap_std
@@ -1190,7 +1362,9 @@ class AMTAnalyzer:
             if len(self._vwap_history) > 30:
                 self._vwap_history = self._vwap_history[-30:]
         structure = self._structure_classifier.classify(
-            data, self._poc_tracker._poc_history, self._vwap_history,
+            data,
+            self._poc_tracker._poc_history,
+            self._vwap_history,
         )
 
         # Initial Balance tracking
@@ -1201,13 +1375,91 @@ class AMTAnalyzer:
 
         # LVN velocity play detection
         lvn_play = detect_lvn_play(
-            current, list(lvns), list(hvns), poc, baseline_vol,
-            cvd_state.slope, self._prev_cvd_slope,
+            current,
+            list(lvns),
+            list(hvns),
+            poc,
+            baseline_vol,
+            cvd_state.slope,
+            self._prev_cvd_slope,
         )
         self._prev_cvd_slope = cvd_state.slope
 
         # Break detection — initiative vs responsive at key levels
         break_state = detect_break(recent_data, vah, val, ib_high, ib_low, baseline_vol)
+
+        # Developing VA — short-lookback profile for fast adaptation
+        dev_poc, dev_vah, dev_val = 0.0, 0.0, 0.0
+        if developing_profile is not None:
+            dev_profile_data = developing_profile.get_profile()
+            if dev_profile_data and len(dev_profile_data) >= 3:
+                dev_max_vol = max(p.volume for p in dev_profile_data)
+                if dev_max_vol > 0:
+                    dev_poc_idx = next(
+                        i
+                        for i, p in enumerate(dev_profile_data)
+                        if p.volume == dev_max_vol
+                    )
+                    dev_poc = dev_profile_data[dev_poc_idx].price
+                    # Quick 70% VA
+                    dev_total = sum(p.volume for p in dev_profile_data)
+                    dev_target = dev_total * 0.7
+                    dev_acc = dev_max_vol
+                    dev_up, dev_down = dev_poc_idx, dev_poc_idx
+                    while dev_acc < dev_target:
+                        can_up = dev_up + 1 < len(dev_profile_data)
+                        can_down = dev_down - 1 >= 0
+                        if not can_up and not can_down:
+                            break
+                        up_vol = dev_profile_data[dev_up + 1].volume if can_up else -1
+                        dn_vol = (
+                            dev_profile_data[dev_down - 1].volume if can_down else -1
+                        )
+                        if up_vol >= dn_vol:
+                            dev_up += 1
+                            dev_acc += dev_profile_data[dev_up].volume
+                        else:
+                            dev_down -= 1
+                            dev_acc += dev_profile_data[dev_down].volume
+                    dev_step = (
+                        (dev_profile_data[1].price - dev_profile_data[0].price)
+                        if len(dev_profile_data) > 1
+                        else 0
+                    )
+                    dev_vah = dev_profile_data[dev_up].price + dev_step / 2
+                    dev_val = dev_profile_data[dev_down].price - dev_step / 2
+
+        # Extract the current session's open price.
+        # Find the first candle of the current date (used for gap and bias).
+        current_date_prefix = current.time[:10] if len(current.time) >= 10 else ""
+        session_open_price = current.open
+        if current_date_prefix:
+            for d in data:
+                if d.time.startswith(current_date_prefix):
+                    session_open_price = d.open
+                    break
+        else:
+            session_open_price = data[0].open if data else 0.0
+
+        # Day-Type Classification (Fabio Phase 3)
+        day_type = "UNKNOWN"
+        if ib_complete and ib_high > 0 and ib_low > 0:
+            session_high = max(d.high for d in data)
+            session_low = min(d.low for d in data)
+            ib_range = ib_high - ib_low
+            
+            if ib_range > 0:
+                dist_above = max(0.0, session_high - ib_high)
+                dist_below = max(0.0, ib_low - session_low)
+                
+                if dist_above == 0 and dist_below == 0:
+                    day_type = "NORMAL"
+                elif dist_above > 0 and dist_below > 0:
+                    day_type = "NEUTRAL"
+                elif dist_above > ib_range or dist_below > ib_range:
+                    day_type = "TREND"
+                else:
+                    day_type = "NORMAL_VARIATION"
 
         return AMTResult(
             market_state=market_state.value,
@@ -1235,29 +1487,44 @@ class AMTAnalyzer:
             leg_poc=leg_data.get("poc", 0.0),
             leg_vah=leg_data.get("vah", 0.0),
             leg_val=leg_data.get("val", 0.0),
+            swing_delta=leg_data.get("swing_delta", 0.0),
             has_displacement=leg_data.get("has_displacement", False),
             market_structure=structure.state,
             structure_confidence=structure.confidence_score,
+            day_type=day_type,
             ib_high=ib_high,
             ib_low=ib_low if ib_low != float("inf") else 0.0,
             ib_complete=ib_complete,
             prior_poc=prior_poc,
             prior_vah=prior_vah,
             prior_val=prior_val,
-            gap_type=classify_gap(
-                open_price=data[0].open if data else 0.0,
-                prior_close=prior_poc,  # Use POC as proxy for prior close
-                prior_range=prior_vah - prior_val if prior_vah > 0 and prior_val > 0 else 0.0,
-            ) if prior_poc > 0 else "",
-            opening_bias=opening_inventory_bias(
-                open_price=data[0].open if data else 0.0,
-                prior_vah=prior_vah,
-                prior_val=prior_val,
-            ) if prior_vah > 0 else "",
+            gap_type=(
+                classify_gap(
+                    open_price=session_open_price,
+                    prior_close=prior_poc,  # Use POC as proxy for prior close
+                    prior_range=(
+                        prior_vah - prior_val
+                        if prior_vah > 0 and prior_val > 0
+                        else 0.0
+                    ),
+                )
+                if prior_poc > 0
+                else ""
+            ),
+            opening_bias=(
+                opening_inventory_bias(
+                    open_price=session_open_price,
+                    prior_vah=prior_vah,
+                    prior_val=prior_val,
+                )
+                if prior_vah > 0
+                else ""
+            ),
             acceptance_above=ar_state["acceptance_above"],
             acceptance_below=ar_state["acceptance_below"],
             rejection_at_high=ar_state["rejection_at_high"],
             rejection_at_low=ar_state["rejection_at_low"],
+            liquidity_sweep=ar_state.get("liquidity_sweep", ""),
             price_velocity=ar_state["price_velocity"],
             poc_signal=poc_migration.signal,
             poc_vs_price=poc_migration.poc_vs_price,
@@ -1266,6 +1533,12 @@ class AMTAnalyzer:
             break_type=break_state["break_type"],
             break_level=break_state["break_level"],
             ofi=obi,
+            dev_poc=dev_poc,
+            dev_vah=dev_vah,
+            dev_val=dev_val,
+            cushion_tier=cushion_tier,
+            session_pnl=session_pnl,
+            bubble_retests=bubble_retests,
         )
 
     def _generate_signal(
@@ -1290,7 +1563,7 @@ class AMTAnalyzer:
                 (lvn for lvn in lvns if abs(current.close - lvn) / lvn < 0.003),
                 None,
             )
-            
+
             if nearby_lvn:
                 # LONG: Trend is Up (VAH migration or simple price > POC), pullback to LVN
                 # Logic: Price > POC generally, but we are testing an LVN.
@@ -1299,19 +1572,23 @@ class AMTAnalyzer:
                     # Check if this is a pullback? (High > Current)
                     # For now, aggression at LVN in trend direction is the key.
                     return Signal(
-                        type=SignalType.BUY, price=current.close,
+                        type=SignalType.BUY,
+                        price=current.close,
                         reason="Trend Continuation: Aggression at LVN",
-                        setup=SetupType.TREND_MODEL, source=Source.AMT,
-                        stop_loss=val, # Will be refined by TradingSession
-                        take_profit=poc, # Placeholder (TradingSession handles dynamic TP)
+                        setup=SetupType.TREND_MODEL,
+                        source=Source.AMT,
+                        stop_loss=val,  # Will be refined by TradingSession
+                        take_profit=poc,  # Placeholder (TradingSession handles dynamic TP)
                         timestamp=now_iso,
                     )
                 # SHORT: Trend is Down, pullback to LVN
                 if current.close < poc and aggression_score < 0:
-                     return Signal(
-                        type=SignalType.SELL, price=current.close,
+                    return Signal(
+                        type=SignalType.SELL,
+                        price=current.close,
                         reason="Trend Continuation: Aggression at LVN",
-                        setup=SetupType.TREND_MODEL, source=Source.AMT,
+                        setup=SetupType.TREND_MODEL,
+                        source=Source.AMT,
                         stop_loss=vah,
                         take_profit=poc,
                         timestamp=now_iso,
@@ -1320,23 +1597,25 @@ class AMTAnalyzer:
         # B. Mean Reversion (Balanced + Failed Breakout + Reclaim + Aggression)
         if market_state == MarketState.BALANCED and has_aggression and len(data) >= 5:
             # Check for failed breakout
-            recent = data[-10:] # Look further back for the breakout
+            recent = data[-10:]  # Look further back for the breakout
             had_above = any(d.high > vah for d in recent[:-1])
             had_below = any(d.low < val for d in recent[:-1])
 
             # Current state: Inside VA
             is_inside = val <= current.close <= vah
-            
+
             # Reclaim logic: We were OUT, now we are IN
             # (Simplified: if we had excursion and now aggressive inside)
-            
+
             if is_inside:
                 # Failed Low -> Buy Reclaim
                 if had_below and aggression_score > 0 and current.close > val:
-                     return Signal(
-                        type=SignalType.BUY, price=current.close,
+                    return Signal(
+                        type=SignalType.BUY,
+                        price=current.close,
                         reason="Mean Reversion: Confirmed Reclaim",
-                        setup=SetupType.MEAN_REVERSION, source=Source.AMT,
+                        setup=SetupType.MEAN_REVERSION,
+                        source=Source.AMT,
                         stop_loss=val * 0.999,
                         take_profit=poc,
                         timestamp=now_iso,
@@ -1344,9 +1623,11 @@ class AMTAnalyzer:
                 # Failed High -> Sell Reclaim
                 if had_above and aggression_score < 0 and current.close < vah:
                     return Signal(
-                        type=SignalType.SELL, price=current.close,
+                        type=SignalType.SELL,
+                        price=current.close,
                         reason="Mean Reversion: Confirmed Reclaim",
-                        setup=SetupType.MEAN_REVERSION, source=Source.AMT,
+                        setup=SetupType.MEAN_REVERSION,
+                        source=Source.AMT,
                         stop_loss=vah * 1.001,
                         take_profit=poc,
                         timestamp=now_iso,
@@ -1371,7 +1652,11 @@ class AMTAnalyzer:
         Valentini-specific features: CVD, profile shape, session context.
         """
         result = self.analyze(data, order_book)
-        current = data[-1] if data else OHLC(time="", open=0, high=0, low=0, close=0, volume=0)
+        current = (
+            data[-1]
+            if data
+            else OHLC(time="", open=0, high=0, low=0, close=0, volume=0)
+        )
 
         # --- CVD --- (read state only; analyze() already called update())
         cvd_state = self._cvd_tracker.state()
@@ -1403,7 +1688,9 @@ class AMTAnalyzer:
             nearest_lvn = min(result.lvns, key=lambda lvn: abs(current.close - lvn))
 
         # --- Aggression sigma ---
-        agg_sigma = compute_aggression_sigma(current, data[-50:]) if len(data) >= 20 else 0.0
+        agg_sigma = (
+            compute_aggression_sigma(current, data[-50:]) if len(data) >= 20 else 0.0
+        )
 
         # --- OBI ---
         obi = 0.0

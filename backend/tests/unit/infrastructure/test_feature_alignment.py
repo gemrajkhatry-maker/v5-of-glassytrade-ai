@@ -46,6 +46,17 @@ def test_feature_alignment_training_vs_live():
         assert np.isfinite(val), f"Non-finite value for {name}: {val}"
 
 
+def test_probability_feature_contract_metadata():
+    from app.domain.probability.features import (
+        FEATURE_NAMES,
+        PROBABILITY_FEATURE_SCHEMA_VERSION,
+    )
+
+    assert PROBABILITY_FEATURE_SCHEMA_VERSION == "fp-42-v1"
+    assert len(FEATURE_NAMES) == 42
+    assert "book_imbalance_l20" not in FEATURE_NAMES
+
+
 def test_parse_symbol_metadata_call():
     from app.application.utils import parse_symbol_metadata
     meta = parse_symbol_metadata("NIFTY 27 MAR 23500 CALL", spot=23600.0)

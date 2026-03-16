@@ -70,6 +70,7 @@ function App() {
         activeFootprint,
         connected,
         connectionStatus,
+        tickBus,
     } = useTradingSystem(config);
 
     // --- Handlers ---
@@ -167,38 +168,42 @@ function App() {
 
                 {/* Chart Layer */}
                 <div className="absolute inset-0 z-0">
-                <ErrorBoundary name="Chart">
-                    {/* Instance 1: Standard Candles */}
-                    <ChartScene
-                        key={`standard-${activeInstrument.symbol}`}
-                        data={activeInstrument.data}
-                        predictions={activeInstrument.predictions}
-                        config={effectiveConfig}
-                        activeSignal={activeInstrument.amtAnalysis?.signal}
-                        positions={activeInstrument.portfolio.positions}
-                        closedTrades={activeInstrument.portfolio.closedTrades}
-                        amtAnalysis={activeInstrument.amtAnalysis}
-                        mode="STANDARD"
-                        isHidden={chartMode !== 'STANDARD'}
-                        footprintData={null}
-                        cumulativeDeltas={[]}
-                    />
-                    {/* Instance 2: Footprint */}
-                    <ChartScene
-                        key={`footprint-${activeInstrument.symbol}`}
-                        data={activeInstrument.data}
-                        predictions={activeInstrument.predictions}
-                        config={effectiveConfig}
-                        activeSignal={activeInstrument.amtAnalysis?.signal}
-                        positions={activeInstrument.portfolio.positions}
-                        closedTrades={activeInstrument.portfolio.closedTrades}
-                        amtAnalysis={activeInstrument.amtAnalysis}
-                        mode="FOOTPRINT"
-                        isHidden={chartMode !== 'FOOTPRINT'}
-                        footprintData={activeFootprint.data}
-                        cumulativeDeltas={activeFootprint.cumulativeDeltas}
-                    />
-                </ErrorBoundary>
+                    <ErrorBoundary name="Chart">
+                        {/* Instance 1: Standard Candles */}
+                        <ChartScene
+                            key={`standard-${activeInstrument.symbol}`}
+                            data={activeInstrument.data} // Used for initial mount/history
+                            tickBus={tickBus}            // Realtime data feed without React renders
+                            symbol={activeInstrument.symbol}
+                            predictions={activeInstrument.predictions}
+                            config={effectiveConfig}
+                            activeSignal={activeInstrument.amtAnalysis?.signal}
+                            positions={activeInstrument.portfolio.positions}
+                            closedTrades={activeInstrument.portfolio.closedTrades}
+                            amtAnalysis={activeInstrument.amtAnalysis}
+                            mode="STANDARD"
+                            isHidden={chartMode !== 'STANDARD'}
+                            footprintData={null}
+                            cumulativeDeltas={[]}
+                        />
+                        {/* Instance 2: Footprint */}
+                        <ChartScene
+                            key={`footprint-${activeInstrument.symbol}`}
+                            data={activeInstrument.data} // Used for initial mount/history
+                            tickBus={tickBus}            // Realtime data feed
+                            symbol={activeInstrument.symbol}
+                            predictions={activeInstrument.predictions}
+                            config={effectiveConfig}
+                            activeSignal={activeInstrument.amtAnalysis?.signal}
+                            positions={activeInstrument.portfolio.positions}
+                            closedTrades={activeInstrument.portfolio.closedTrades}
+                            amtAnalysis={activeInstrument.amtAnalysis}
+                            mode="FOOTPRINT"
+                            isHidden={chartMode !== 'FOOTPRINT'}
+                            footprintData={activeFootprint.data}
+                            cumulativeDeltas={activeFootprint.cumulativeDeltas}
+                        />
+                    </ErrorBoundary>
                 </div>
 
                 {/* Overlay UI Layer */}
@@ -248,7 +253,7 @@ function App() {
                                         className={`px-3 py-1.5 text-xs font-medium transition-all ${config.vpMode === key
                                             ? key === 'combined' ? 'bg-blue-500/30 text-blue-100 shadow-sm' : 'bg-white/10 text-white'
                                             : 'text-white/40 hover:text-white hover:bg-white/5'
-                                        }`}
+                                            }`}
                                     >
                                         {label}
                                     </button>
@@ -275,6 +280,7 @@ function App() {
                         const genAI = activeInstrument.genAIAnalysis;
                         const hasModelOutput = !!(genAI?.rawOutput || genAI?.direction);
                         const showOverseer = hasOpenPos;
+                        const hasOverseer = !!(activeInstrument.overseerAction && activeInstrument.overseerAction !== 'NONE');
                         const showBox = showOverseer || hasModelOutput;
                         if (!showBox) return null;
                         return (
@@ -299,14 +305,13 @@ function App() {
                                             </div>
                                             {hasOverseer ? (
                                                 <>
-                                                    <div className={`text-sm font-bold uppercase tracking-wide ${
-                                                        activeInstrument.overseerAction === 'HOLD' ? 'text-blue-300' :
+                                                    <div className={`text-sm font-bold uppercase tracking-wide ${activeInstrument.overseerAction === 'HOLD' ? 'text-blue-300' :
                                                         activeInstrument.overseerAction === 'TIGHTEN' ? 'text-yellow-400' :
-                                                        activeInstrument.overseerAction === 'FULL_EXIT' ? 'text-red-400' :
-                                                        activeInstrument.overseerAction === 'PARTIAL' ? 'text-orange-400' :
-                                                        activeInstrument.overseerAction === 'ADD' ? 'text-green-400' :
-                                                        'text-white/60'
-                                                    }`}>
+                                                            activeInstrument.overseerAction === 'FULL_EXIT' ? 'text-red-400' :
+                                                                activeInstrument.overseerAction === 'PARTIAL' ? 'text-orange-400' :
+                                                                    activeInstrument.overseerAction === 'ADD' ? 'text-green-400' :
+                                                                        'text-white/60'
+                                                        }`}>
                                                         {activeInstrument.overseerAction}
                                                     </div>
                                                     {activeInstrument.overseerReason && (
@@ -325,16 +330,19 @@ function App() {
                                                 <Brain className="w-3.5 h-3.5 text-cyan-400" />
                                                 <span className="text-[10px] font-bold text-white/60 uppercase tracking-widest">Model I/O</span>
                                                 {genAI?.direction && (
-                                                    <span className={`text-[10px] font-bold ml-auto ${
-                                                        genAI.direction === 'LONG' ? 'text-emerald-400' :
+                                                    <span className={`text-[10px] font-bold ml-auto ${genAI.direction === 'LONG' ? 'text-emerald-400' :
                                                         genAI.direction === 'SHORT' ? 'text-red-400' :
-                                                        'text-white/40'
-                                                    }`}>{genAI.direction}</span>
+                                                            'text-white/40'
+                                                        }`}>{genAI.direction}</span>
                                                 )}
                                             </div>
                                             {genAI?.rawOutput ? (
                                                 <div className="text-[9px] text-amber-400/70 font-mono leading-relaxed line-clamp-4 mb-1">
                                                     {genAI.rawOutput}
+                                                </div>
+                                            ) : genAI?.rationale ? (
+                                                <div className="text-[9px] text-yellow-400/70 font-mono leading-relaxed mb-1">
+                                                    {genAI.rationale}
                                                 </div>
                                             ) : (
                                                 <div className="text-[9px] text-white/25 font-mono">Waiting for LLM call...</div>
@@ -405,18 +413,18 @@ function App() {
                 {/* Content Scroll */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                     <ErrorBoundary name="Analysis">
-                    <AIAnalysisPanel
-                        analysis={activeInstrument.genAIAnalysis}
-                        amtResult={activeInstrument.amtAnalysis}
-                        portfolio={activeInstrument.portfolio}
-                        riskState={activeInstrument.riskState}
-                        agentDecision={activeInstrument.agentDecision}
-                        llmHistory={activeInstrument.llmHistory}
-                        orderBook={activeInstrument.orderBook}
-                        depth20Active={activeInstrument.depth20Active}
-                        overseerAction={activeInstrument.overseerAction}
-                        overseerReason={activeInstrument.overseerReason}
-                    />
+                        <AIAnalysisPanel
+                            analysis={activeInstrument.genAIAnalysis}
+                            amtResult={activeInstrument.amtAnalysis}
+                            portfolio={activeInstrument.portfolio}
+                            riskState={activeInstrument.riskState}
+                            agentDecision={activeInstrument.agentDecision}
+                            llmHistory={activeInstrument.llmHistory}
+                            orderBook={activeInstrument.orderBook}
+                            depth20Active={activeInstrument.depth20Active}
+                            overseerAction={activeInstrument.overseerAction}
+                            overseerReason={activeInstrument.overseerReason}
+                        />
                     </ErrorBoundary>
                 </div>
             </div>

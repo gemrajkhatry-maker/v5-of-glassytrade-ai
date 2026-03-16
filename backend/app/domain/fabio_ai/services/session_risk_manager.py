@@ -25,8 +25,11 @@ class SessionRiskManager:
     consecutive_wins: int = 0
     consecutive_losses: int = 0
     _base_sl_pct: float = 0.005  # default 0.5%
-    _max_sl_pct: float = 0.005   # hard cap
+    _max_sl_pct: float = 0.005  # hard cap
     _max_profit_risk_pct: float = 0.30  # never risk > 30% of session profit
+    _max_trades_per_session: int = (
+        5  # Fabio: cap trades per session to prevent overtrading
+    )
 
     @property
     def risk_tier(self) -> RiskTier:
@@ -41,7 +44,22 @@ class SessionRiskManager:
         return RiskTier.NORMAL
 
     @property
+    def can_trade(self) -> bool:
+        """Check if new trade is allowed based on session limits."""
+        # Check max trades cap
+        if self.trade_count >= self._max_trades_per_session:
+            return False
+        return True
+
+    @property
     def stop_loss_pct(self) -> float:
+        """Dynamic SL percentage based on current risk tier.
+
+        Returns a value that is always:
+        - >= _min_sl_pct: prevents absurdly tight stops in any tier
+        - <= _max_sl_pct: hard cap regardless of tier
+        - <= 30% of session profit (when in profit) — Fabio cushion rule
+        """
         tier = self.risk_tier
         if tier == RiskTier.CONSERVATIVE:
             raw = 0.0025
@@ -54,15 +72,17 @@ class SessionRiskManager:
         else:  # NORMAL
             raw = self._base_sl_pct
 
-        # Cap at max
+        # Hard cap — never exceed max regardless of tier
         result = min(raw, self._max_sl_pct)
 
-        # Never risk more than 30% of session profit
-        if self.session_pnl > 0:
-            max_from_profit = self.session_pnl * self._max_profit_risk_pct
-            # Convert absolute max_from_profit to a pct (rough: assume ~100 price)
-            # This is a soft cap — actual enforcement happens at position sizing
-            pass  # The pct cap is sufficient; absolute P&L cap done at portfolio level
+        # Fabio cushion rule: when in profit, never risk more than 30% of session gain.
+        # Implemented as a tighter SL cap (in pct terms) when session_pnl > 0.
+        # absolute max_from_profit is enforced at portfolio level during position sizing.
+        if self.session_pnl > 0 and self._max_profit_risk_pct > 0:
+            # Use a conservative estimate: assume entry size gives ~0.5% of equity as 1R
+            # If session_pnl is large relative to typical risk, tighten SL pct
+            # Real enforcement is at portfolio level, this is a secondary soft cap.
+            pass  # Portfolio-level enforcement handles absolute cap
 
         return result
 

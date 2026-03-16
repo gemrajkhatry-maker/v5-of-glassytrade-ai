@@ -1,7 +1,7 @@
 """Phase 5 tests — StoragePort ISP split."""
 from app.domain.ports.storage import (
     StoragePort, TickStoragePort, TradeStoragePort, DecisionStoragePort,
-    OpenPositionStoragePort,
+    OpenPositionStoragePort, PositionEventStoragePort,
 )
 from app.infrastructure.storage.database import SQLiteStorageAdapter
 
@@ -12,6 +12,7 @@ class TestStoragePortSplit:
         assert issubclass(StoragePort, TradeStoragePort)
         assert issubclass(StoragePort, DecisionStoragePort)
         assert issubclass(StoragePort, OpenPositionStoragePort)
+        assert issubclass(StoragePort, PositionEventStoragePort)
 
     def test_sqlite_implements_all(self):
         adapter = SQLiteStorageAdapter(db_path=":memory:")
@@ -19,6 +20,7 @@ class TestStoragePortSplit:
         assert isinstance(adapter, TradeStoragePort)
         assert isinstance(adapter, DecisionStoragePort)
         assert isinstance(adapter, OpenPositionStoragePort)
+        assert isinstance(adapter, PositionEventStoragePort)
         assert isinstance(adapter, StoragePort)
 
     def test_sub_port_has_correct_methods(self):
@@ -31,3 +33,5 @@ class TestStoragePortSplit:
         assert hasattr(OpenPositionStoragePort, 'save_open_position')
         assert hasattr(OpenPositionStoragePort, 'delete_open_position')
         assert hasattr(OpenPositionStoragePort, 'load_open_positions')
+        assert hasattr(PositionEventStoragePort, 'save_position_event')
+        assert hasattr(PositionEventStoragePort, 'query_position_events')

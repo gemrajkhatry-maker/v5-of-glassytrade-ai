@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timezone, timedelta
+from functools import lru_cache
 from typing import Literal
 
 
@@ -30,20 +31,22 @@ from typing import Literal
 # Value Objects
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class SessionInfo:
     """Current trading session context."""
-    session: str            # Phase name (see below)
-    phase: int              # 0=no-trade, 1-5 for NSE, 1-4 for MCX
+
+    session: str  # Phase name (see below)
+    phase: int  # 0=no-trade, 1-5 for NSE, 1-4 for MCX
     is_london: bool
     is_new_york: bool
-    opening_relation: str   # "IN_BALANCE" | "OUT_ABOVE" | "OUT_BELOW"
-    favor_strategy: str     # "MEAN_REVERSION" | "TREND_CONTINUATION" | "NEUTRAL"
-    allow_entry: bool       # Whether new entries are permitted in this phase
-    allow_trend: bool       # Whether trend continuation model is active
-    allow_reversion: bool   # Whether mean reversion model is active
-    force_exit: bool        # Whether all positions should be closed (Phase 5)
-    market: str             # "NSE" | "MCX" | "GLOBAL"
+    opening_relation: str  # "IN_BALANCE" | "OUT_ABOVE" | "OUT_BELOW"
+    favor_strategy: str  # "MEAN_REVERSION" | "TREND_CONTINUATION" | "NEUTRAL"
+    allow_entry: bool  # Whether new entries are permitted in this phase
+    allow_trend: bool  # Whether trend continuation model is active
+    allow_reversion: bool  # Whether mean reversion model is active
+    force_exit: bool  # Whether all positions should be closed (Phase 5)
+    market: str  # "NSE" | "MCX" | "GLOBAL"
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +64,11 @@ def _to_ist(timestamp: str | datetime | None) -> datetime:
         try:
             # Handle epoch timestamps (e.g. "1771832400.0" from Dhan adapter)
             stripped = timestamp.strip()
-            if stripped.replace(".", "", 1).lstrip("-").isdigit() and "T" not in stripped and len(stripped) >= 9:
+            if (
+                stripped.replace(".", "", 1).lstrip("-").isdigit()
+                and "T" not in stripped
+                and len(stripped) >= 9
+            ):
                 dt = datetime.fromtimestamp(float(stripped), tz=timezone.utc)
             else:
                 dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
@@ -79,8 +86,15 @@ def _to_ist(timestamp: str | datetime | None) -> datetime:
 # NSE Session Phases (IST)
 # ---------------------------------------------------------------------------
 
-def _get_nse_phase(ist_hour: int, ist_minute: int) -> tuple[str, int, bool, bool, bool, bool, str]:
-    """Returns (session_name, phase, allow_entry, allow_trend, allow_reversion, force_exit, favor)."""
+
+@lru_cache(maxsize=128)
+def _get_nse_phase(
+    ist_hour: int, ist_minute: int
+) -> tuple[str, int, bool, bool, bool, bool, str]:
+    """Returns (session_name, phase, allow_entry, allow_trend, allow_reversion, force_exit, favor).
+
+    Cached for performance - only 1440 possible minute combinations per day.
+    """
     t = ist_hour * 60 + ist_minute  # minutes since midnight IST
 
     # Before market open
@@ -115,8 +129,15 @@ def _get_nse_phase(ist_hour: int, ist_minute: int) -> tuple[str, int, bool, bool
 # MCX Session Phases (IST)
 # ---------------------------------------------------------------------------
 
-def _get_mcx_phase(ist_hour: int, ist_minute: int) -> tuple[str, int, bool, bool, bool, bool, str]:
-    """Returns (session_name, phase, allow_entry, allow_trend, allow_reversion, force_exit, favor)."""
+
+@lru_cache(maxsize=128)
+def _get_mcx_phase(
+    ist_hour: int, ist_minute: int
+) -> tuple[str, int, bool, bool, bool, bool, str]:
+    """Returns (session_name, phase, allow_entry, allow_trend, allow_reversion, force_exit, favor).
+
+    Cached for performance - only 1440 possible minute combinations per day.
+    """
     t = ist_hour * 60 + ist_minute
 
     if t < 540:  # before 09:00
@@ -155,6 +176,7 @@ _NY_END = 21
 def get_session(timestamp: str) -> str:
     """Return global session name for a UTC timestamp string."""
     from datetime import datetime as _dt
+
     if isinstance(timestamp, str):
         ts = _dt.fromisoformat(timestamp)
     else:
@@ -182,12 +204,17 @@ def _get_global_session(utc_hour: int) -> tuple[str, str]:
 # Opening relation (shared across all markets)
 # ---------------------------------------------------------------------------
 
+
+@lru_cache(maxsize=256)
 def opening_relation(
     open_price: float,
     prior_vah: float,
     prior_val: float,
 ) -> str:
-    """Determine where the market opened relative to yesterday's Value Area."""
+    """Determine where the market opened relative to yesterday's Value Area.
+
+    Cached for performance - typically called with same values within a session.
+    """
     if prior_val <= open_price <= prior_vah:
         return "IN_BALANCE"
     if open_price > prior_vah:
@@ -198,6 +225,7 @@ def opening_relation(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def get_session_info(
     timestamp: str | datetime | None = None,
@@ -220,8 +248,9 @@ def get_session_info(
 
     if market == "NSE":
         ist_dt = _to_ist(timestamp)
-        session_name, phase, allow_entry, allow_trend, allow_rev, force_exit, favor = \
+        session_name, phase, allow_entry, allow_trend, allow_rev, force_exit, favor = (
             _get_nse_phase(ist_dt.hour, ist_dt.minute)
+        )
 
         # Override favor based on opening relation
         if op_rel != "IN_BALANCE" and allow_trend:
@@ -243,8 +272,9 @@ def get_session_info(
 
     elif market == "MCX":
         ist_dt = _to_ist(timestamp)
-        session_name, phase, allow_entry, allow_trend, allow_rev, force_exit, favor = \
+        session_name, phase, allow_entry, allow_trend, allow_rev, force_exit, favor = (
             _get_mcx_phase(ist_dt.hour, ist_dt.minute)
+        )
 
         return SessionInfo(
             session=session_name,
@@ -301,6 +331,7 @@ def get_session_info(
 # Gap Classification & Opening Inventory Bias
 # ---------------------------------------------------------------------------
 
+
 def classify_gap(open_price: float, prior_close: float, prior_range: float) -> str:
     """Classify opening gap size relative to prior session range.
 
@@ -322,6 +353,7 @@ def classify_gap(open_price: float, prior_close: float, prior_range: float) -> s
 # ---------------------------------------------------------------------------
 # Session-Aware Time Stop Helpers
 # ---------------------------------------------------------------------------
+
 
 def is_expiry_day(trade_date: date) -> bool:
     """Check if the given date is an options expiry day.
@@ -349,12 +381,16 @@ def seconds_to_close(current_time: datetime, exchange: str = "NSE") -> float:
     else:
         return 0.0
 
-    close_time = ist_dt.replace(hour=close_hour, minute=close_minute, second=0, microsecond=0)
+    close_time = ist_dt.replace(
+        hour=close_hour, minute=close_minute, second=0, microsecond=0
+    )
     diff = (close_time - ist_dt).total_seconds()
     return max(0.0, diff)
 
 
-def opening_inventory_bias(open_price: float, prior_vah: float, prior_val: float) -> str:
+def opening_inventory_bias(
+    open_price: float, prior_vah: float, prior_val: float
+) -> str:
     """Determine inventory bias from opening price vs prior session value area.
 
     Returns "" (invalid inputs), "LONG_BIAS", "SHORT_BIAS", or "NEUTRAL".

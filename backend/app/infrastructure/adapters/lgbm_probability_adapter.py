@@ -12,7 +12,11 @@ from app.domain.ports.probability_inference import (
     ProbabilityEstimate,
     ProbabilityInferencePort,
 )
-from app.domain.probability.features import FEATURE_NAMES
+from app.domain.probability.features import (
+    FEATURE_NAMES,
+    PROBABILITY_FEATURE_SCHEMA_VERSION,
+    active_model_features,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +32,8 @@ class LGBMProbabilityAdapter(ProbabilityInferencePort):
         self._mfe_short = None
         self._calibrators: dict[str, object] = {}  # direction -> fitted LogisticRegression
         self._ready = False
+        self._feature_names: tuple[str, ...] = FEATURE_NAMES
+        self._schema_version = PROBABILITY_FEATURE_SCHEMA_VERSION
         self._load_models()
 
     def _load_models(self) -> None:
@@ -46,8 +52,15 @@ class LGBMProbabilityAdapter(ProbabilityInferencePort):
 
             self._model_long = lgb.Booster(model_file=long_path)
             self._model_short = lgb.Booster(model_file=short_path)
+            self._feature_names = tuple(self._model_long.feature_name()) or FEATURE_NAMES
             self._ready = True
             logger.info("Loaded probability models from %s", self._model_dir)
+            if tuple(self._feature_names) != FEATURE_NAMES:
+                logger.warning(
+                    "Probability feature schema mismatch: runtime=%s model=%s",
+                    list(FEATURE_NAMES),
+                    list(self._feature_names),
+                )
 
             # Optional Platt scaling calibrators
             self._load_calibrators()
@@ -112,7 +125,8 @@ class LGBMProbabilityAdapter(ProbabilityInferencePort):
                 expected_mfe_short=0.0,
             )
 
-        arr = np.array([[features.get(name, 0.0) for name in FEATURE_NAMES]])
+        feature_payload = active_model_features(features)
+        arr = np.array([[feature_payload.get(name, 0.0) for name in self._feature_names]])
 
         p_long_raw = float(self._model_long.predict(arr)[0])
         p_short_raw = float(self._model_short.predict(arr)[0])
@@ -142,3 +156,11 @@ class LGBMProbabilityAdapter(ProbabilityInferencePort):
 
     def is_ready(self) -> bool:
         return self._ready
+
+    @property
+    def feature_names(self) -> tuple[str, ...]:
+        return self._feature_names
+
+    @property
+    def schema_version(self) -> str:
+        return self._schema_version

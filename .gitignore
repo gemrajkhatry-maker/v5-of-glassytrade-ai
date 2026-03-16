@@ -29,24 +29,47 @@ __pycache__/
 venv/
 .env
 
-# ML models
-poc/models/
+# ML models - exclude all model files
+poc*/models/
+poc*/checkpoint-*/
+poc*/*.safetensors
+poc*/*.bin
+poc*/*.gguf
+poc*/*.pth
+poc*/*.pt
+poc*/*.h5
+poc*/*.pb
+poc*/*.onnx
+**/*.safetensors
+**/*.bin
+**/*.gguf
+**/*.pth
+**/*.pt
+**/*.h5
+**/*.pb
+**/*.onnx
+**/tokenizer.json
 
 # OS
 .DS_Store
-poc/lora_adapter_mac/adapter_model.safetensors
-poc/lora_adapter_mac/checkpoint-*/
-poc/models/
 *.db
 *.db-shm
 *.db-wal
 
-# Large data directories
-poc3/
+# Large data directories and backups
+poc*/
+brokers_backup/
 archive/
 backend/live_trading_logs/
 backend/models/
 backend/.vite/
-*.jsonl
-*.csv
+**/*.jsonl
+**/*.csv
 !backend/tests/**/*.csv
+
+# Environment and large logs
+backend/venv/
+backend/rl_logs/
+*.tfevents.*
+node_modules/
+dist/

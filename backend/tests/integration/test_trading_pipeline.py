@@ -1,3 +1,4 @@
+from decimal import Decimal
 """Integration tests — end-to-end pipeline through TradingSessionService."""
 
 import pytest
@@ -78,8 +79,8 @@ class TestTradingSessionPipeline:
             state = self.session.process_tick("BTCUSDT", tick)
 
         portfolio = state["portfolio"]
-        assert isinstance(portfolio["balance"], (int, float))
-        assert isinstance(portfolio["equity"], (int, float))
+        assert isinstance(portfolio["balance"], (int, float, Decimal))
+        assert isinstance(portfolio["equity"], (int, float, Decimal))
 
     def test_data_capped_at_1000(self):
         """Data buffer should not grow past MAX_CANDLES_PER_SYMBOL entries."""

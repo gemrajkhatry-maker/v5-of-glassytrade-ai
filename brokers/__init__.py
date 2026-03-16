@@ -50,7 +50,14 @@ from brokers.broker.ports import IBrokerPort
 
 # Infrastructure Layer
 from brokers.broker.paper import PaperBroker
-from brokers.broker.dhan import DhanBroker
+
+# DhanBroker is imported lazily to avoid circular imports during
+# partial module initialization when sub-modules import back into this package.
+def __getattr__(name):
+    if name == "DhanBroker":
+        from brokers.broker.dhan import DhanBroker
+        return DhanBroker
+    raise AttributeError(f"module 'brokers' has no attribute {name!r}")
 
 # Application Layer
 from brokers.gateway import (

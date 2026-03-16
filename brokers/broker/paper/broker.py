@@ -380,7 +380,17 @@ class PaperBroker(IBrokerPort):
             self._positions.append(
                 Position(
                     instrument=order.instrument,
+                    side=order.side,
                     quantity=order.quantity,
+                    avg_price=order.price or self._get_price(order.instrument.symbol),
+                )
+            )
+        else:
+            self._positions.append(
+                Position(
+                    instrument=order.instrument,
+                    side=order.side,
+                    quantity=-order.quantity,
                     avg_price=order.price or self._get_price(order.instrument.symbol),
                 )
             )

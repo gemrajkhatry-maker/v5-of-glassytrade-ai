@@ -146,17 +146,22 @@ class DhanMarketDataAdapter(MarketDataPort):
 
         Auto-detects option symbols (containing CALL/PUT) and routes to
         the correct exchange: NFO for NSE underlyings, MCX for commodity underlyings.
+        Sets option_type so Instrument.is_option() returns True for options —
+        this is used downstream by streaming_service to select the correct
+        WS exchange segment (MCX_FNO vs MCX_COMM).
         """
-        from brokers.broker.entities import Instrument
-        is_option = "CALL" in symbol.upper() or "PUT" in symbol.upper()
+        from brokers.broker.entities import Instrument, OptionType
+        sym_upper = symbol.upper()
+        is_option = "CALL" in sym_upper or "PUT" in sym_upper
         if is_option:
             # Detect exchange from the underlying name embedded in the symbol
-            sym_upper = symbol.upper()
             is_mcx = any(sym_upper.startswith(u) for u in self._MCX_UNDERLYINGS)
             exchange = _exchange_enum("MCX" if is_mcx else "NFO")
+            option_type = OptionType.CALL if "CALL" in sym_upper else OptionType.PUT
+            return Instrument(symbol=symbol, exchange=exchange, option_type=option_type)
         else:
             exchange = _exchange_enum(self._exchange_str)
-        return Instrument(symbol=symbol, exchange=exchange)
+            return Instrument(symbol=symbol, exchange=exchange)
 
     def get_option_chain(self, underlying: str, exchange: str = "NFO", expiry_index: int = 0):
         """Fetch option chain, converting string exchange to broker enum."""
@@ -167,30 +172,26 @@ class DhanMarketDataAdapter(MarketDataPort):
             underlying=underlying, exchange=ex, expiry_index=expiry_index,
         )
 
-    def get_greeks(self, symbol: str) -> dict | None:
-        """Get options Greeks (delta, gamma, theta, iv) for the symbol. Returns None if unavailable."""
-        try:
-            self.ensure_initialized_sync()
-            broker = self.get_broker()
-            instrument = self._make_instrument(symbol)
-            quote = broker.get_quote(instrument)
-            # Extract Greeks from quote if available
-            return {
-                "delta": getattr(quote, 'delta', 0) or 0,
-                "gamma": getattr(quote, 'gamma', 0) or 0,
-                "theta": getattr(quote, 'theta', 0) or 0,
-                "iv": getattr(quote, 'iv', 0) or getattr(quote, 'implied_volatility', 0) or 0,
-            }
-        except Exception:
-            logger.debug("Greeks fetch failed for %s", symbol, exc_info=True)
-            return None
-
     async def scan_candidates(self, limit: int = 6) -> list[str]:
         return self._symbols[:limit]
 
     async def fetch_history(
         self, symbol: str, interval: str = "5m", limit: int = 500
     ) -> list[OHLC]:
+        # Dhan's CHARTS_INTRADAY endpoint rejects MCX option contracts (OPTFUT)
+        # with HTTP 400 [DH-906]. Skip the seed and rely on live streaming to
+        # build candles — this prevents the circuit breaker from opening on startup.
+        sym_upper = symbol.upper()
+        if ("CALL" in sym_upper or "PUT" in sym_upper) and any(
+            sym_upper.startswith(u) for u in self._MCX_UNDERLYINGS
+        ):
+            logger.info(
+                "fetch_history: skipping MCX option %s "
+                "(CHARTS_INTRADAY unsupported for OPTFUT — using live feed only)",
+                symbol,
+            )
+            return []
+
         try:
             await self._ensure_initialized()
             broker = self.get_broker()
@@ -316,6 +317,57 @@ class DhanMarketDataAdapter(MarketDataPort):
             if pkt_count <= 3 or pkt_count % 100 == 0:
                 logger.debug("stream_full pkt #%d: ltp=%s", pkt_count, getattr(pkt, 'ltp', '?'))
             yield asdict(pkt)
+
+    async def stream_poll(
+        self, symbols: list[str], poll_interval: float = 3.0
+    ) -> AsyncIterator[dict]:
+        """REST LTP polling fallback when Dhan WS returns no data for MCX OPTFUT.
+
+        Polls broker.get_ltp() for each symbol every poll_interval seconds and
+        yields tick dicts in the same schema as stream_full(). Volume fields are
+        zero because REST LTP doesn't carry volume; the candle builder handles this.
+        """
+        await self._ensure_initialized()
+        broker = self.get_broker()
+        loop = asyncio.get_event_loop()
+        _IST = timezone(timedelta(hours=5, minutes=30))
+
+        logger.info(
+            "stream_poll: REST polling %d symbol(s) every %.1fs (MCX OPTFUT fallback)",
+            len(symbols), poll_interval,
+        )
+
+        while True:
+            poll_start = loop.time()
+            for sym in symbols:
+                try:
+                    instrument = self._make_instrument(sym)
+                    ltp = await loop.run_in_executor(
+                        None, lambda i=instrument: float(broker.get_ltp(i))
+                    )
+                    if ltp > 0:
+                        yield {
+                            "symbol": sym,
+                            "ltp": ltp,
+                            "timestamp": datetime.now(_IST).isoformat(),
+                            # WS-absent fields — candle builder treats vol=0 as "no new volume"
+                            "volume": 0,
+                            "ltq": 0,
+                            "oi": 0,
+                            "total_buy_qty": 0,
+                            "total_sell_qty": 0,
+                            "depth_bids": [],
+                            "depth_asks": [],
+                        }
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.debug("stream_poll: LTP fetch failed for %s", sym, exc_info=True)
+
+            # Sleep the remainder of poll_interval (accounting for fetch time)
+            elapsed = loop.time() - poll_start
+            sleep_for = max(0.0, poll_interval - elapsed)
+            await asyncio.sleep(sleep_for)
 
     async def stream_depth_20(self, symbols: list[str]):
         """Stream 20-level market depth via DhanBroker.stream_depth().

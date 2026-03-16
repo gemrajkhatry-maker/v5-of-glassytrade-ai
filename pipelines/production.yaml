@@ -1,0 +1,57 @@
+name: production
+description: Live trading via Dhan WebSocket with MCX REST polling fallback
+
+channels:
+  raw_ticks:
+    capacity: 2000
+  candles:
+    capacity: 500
+  amt_results:
+    capacity: 200
+  signal_gates:
+    capacity: 100
+  llm_decisions:
+    capacity: 50
+
+processors:
+  - name: dhan_ws_ingestor
+    class: app.pipeline.processors.ingest.DhanWsIngestor
+    outbox:
+      raw_ticks: raw_ticks
+    settings:
+      symbols: []  # populated at runtime from scanner
+
+  - name: candle_builder
+    class: app.pipeline.processors.candle.CandleBuilderProcessor
+    inbox:
+      raw_ticks: raw_ticks
+    outbox:
+      candles: candles
+    settings:
+      interval: 5m
+
+  - name: amt_analyzer
+    class: app.pipeline.processors.analysis.AMTAnalysisProcessor
+    inbox:
+      candles: candles
+    outbox:
+      amt_results: amt_results
+    settings:
+      lookback: 50
+
+  - name: signal_gate
+    class: app.pipeline.processors.gate.SignalGateProcessor
+    inbox:
+      amt_results: amt_results
+    outbox:
+      signal_gates: signal_gates
+    settings: {}
+
+  - name: llm_entry
+    class: app.pipeline.processors.llm_entry.LLMEntryProcessor
+    inbox:
+      signal_gates: signal_gates
+    outbox:
+      llm_decisions: llm_decisions
+    settings:
+      timeout_seconds: 15

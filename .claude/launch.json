@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Backend (MCX mode)",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/apple/Downloads/v5-of-glassytrade-ai/backend && KMP_DUPLICATE_LIB_OK=TRUE DEFAULT_EXCHANGE=MCX PYTHONPATH=/Users/apple/Downloads/v5-of-glassytrade-ai ./venv/bin/python -u -m uvicorn app.main:app --host 0.0.0.0 --port 9090"],
+      "port": 9090
+    },
+    {
+      "name": "Frontend (Vite)",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd /Users/apple/Downloads/v5-of-glassytrade-ai/frontend && /opt/homebrew/bin/node node_modules/.bin/vite --host 0.0.0.0 --port 5190"],
+      "port": 5190
+    }
+  ]
+}

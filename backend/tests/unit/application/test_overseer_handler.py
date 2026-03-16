@@ -22,6 +22,15 @@ from app.domain.fabio_ai.services.prompt_builder import OverseerAction
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
+_created_handlers = []
+
+@pytest.fixture(autouse=True)
+def cleanup_handlers():
+    yield
+    for h in _created_handlers:
+        h.cleanup()
+    _created_handlers.clear()
+
 def _make_handler(predict_return='{"action":"HOLD","reason":"test"}', probability_engine=None):
     adapter = MagicMock()
     adapter.predict.return_value = predict_return
@@ -41,6 +50,7 @@ def _make_handler(predict_return='{"action":"HOLD","reason":"test"}', probabilit
         storage=storage,
         probability_engine=probability_engine,
     )
+    _created_handlers.append(handler)
     return handler, gen_ai, trade_manager, storage
 
 
@@ -292,7 +302,10 @@ class TestTimeout:
             mock_settings.LLM_TIMEOUT_SECONDS = 0.1
             handler.run_overseer(session, "SYM", tick, amt)
 
-        handler._llm_queue.join()
+        # _llm_queues is a per-symbol dict after the multi-symbol refactor
+        q = handler._llm_queues.get("SYM")
+        if q:
+            q.join()
 
         # No trade actions should have been taken (timeout → HOLD)
         tm.adjust_stop_loss.assert_not_called()
@@ -362,7 +375,10 @@ class TestProbabilityOverride:
         amt.lvn_play = None
 
         handler.run_overseer(session, "SYM", tick, amt)
-        handler._llm_queue.join()
+        # _llm_queues is a per-symbol dict after the multi-symbol refactor
+        q = handler._llm_queues.get("SYM")
+        if q:
+            q.join()
 
         # Should have called close_position due to probability override
         # P(long wins) = 0.20, so P(adverse for LONG) = 0.80 > 0.65 → FULL_EXIT

@@ -217,6 +217,38 @@ Items: [2] Second Drive Enforcement, [5] Overseer Context Enrichment, [8] Volume
 
 ---
 
+## Fabio Gap Fixes
+
+- [x] 24. VWAP ±2σ overextension hard gate (Fabio Gap #9)
+  - Upgrade VWAP overextension from grade downgrade to hard block
+  - Add post-LLM gate in `backend/app/application/handlers/llm_entry_handler.py` (after BUY-only gate, before IV/delta gates)
+  - Add same gate to quant Tier 1 path in `backend/app/application/services/trading_session.py` `_execute_quant_entry()`
+  - Add `vwap_upper_2`/`vwap_lower_2` params to test helper `_amt()` in `backend/tests/unit/application/test_llm_entry_handler.py`
+  - Add `test_vwap_overextension_blocks_long` and `test_vwap_overextension_blocks_short` tests
+
+---
+
+## Sprint 3: Frontend Performance Fixes
+
+- [x] 25. ChartScene custom comparator
+  - Add `chartSceneAreEqual` comparator function to `frontend/components/ChartScene.tsx`
+  - Replace `React.memo(ChartScene)` with `React.memo(ChartScene, chartSceneAreEqual)`
+  - Compare data.length, positions.length, closedTrades.length, cumulativeDeltas.length by length
+  - Compare mode, isHidden, symbol, config, amtAnalysis, activeSignal, footprintData by reference
+
+- [x] 26. AIAnalysisPanel memoization
+  - Rename inner component to `AIAnalysisPanelInner` in `frontend/components/AIAnalysisPanel.tsx`
+  - Add `export const AIAnalysisPanel = React.memo(AIAnalysisPanelInner)`
+
+- [x] 27. footprintData useMemo dependency fix
+  - Change `footprintData` useMemo dependency from `[activeInstrument?.lastUpdate]` to `[activeInstrument?.data?.length]` in `frontend/hooks/useServerTradingSystem.ts`
+
+- [x] 28. WS reconnect race guard
+  - Add `subscribeGenRef = useRef(0)` near other refs in `frontend/hooks/useServerTradingSystem.ts`
+  - Increment and log generation in activeSymbol change effect
+
+---
+
 ## Tasks Dependency Diagram
 
 ```mermaid

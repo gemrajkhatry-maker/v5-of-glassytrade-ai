@@ -67,9 +67,9 @@ class CVDTracker:
             self.reset()
         self._last_time = candle.time
 
-        self._cvd += candle.delta
+        self._cvd += float(candle.delta)
         self._history.append(self._cvd)
-        self._price_history.append(candle.close)
+        self._price_history.append(float(candle.close))
 
         # Cap history to prevent unbounded growth
         if len(self._history) > self._MAX_HISTORY:

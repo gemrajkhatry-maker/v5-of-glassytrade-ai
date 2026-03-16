@@ -1,7 +1,5 @@
 """Tests for GenerativeAIService — LLM-based entry decision logic."""
 
-import pytest
-
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 from app.domain.fabio_ai.services.prompt_builder import build_entry_prompt, parse_entry_response
 from app.domain.ports.llm_inference import LLMInferencePort
@@ -28,11 +26,6 @@ class FailingLLMAdapter(LLMInferencePort):
 
     def is_ready(self):
         return False
-
-
-@pytest.fixture
-def svc() -> GenerativeAIService:
-    return GenerativeAIService(MockLLMAdapter())
 
 
 def _make_market_data(**overrides):
@@ -107,6 +100,13 @@ class TestBuildPrompt:
         prompt = build_entry_prompt(_make_market_data(cvd_divergence="BEARISH_DIV"))
         assert "BEARISH DIVERGENCE" in prompt
 
+    def test_prompt_includes_json_response_contract(self):
+        prompt = build_entry_prompt(_make_market_data())
+        assert "Respond ONLY with a JSON object" in prompt
+        # Schema uses structured-text format: Market State / Logic / Trigger lines
+        assert "Trigger" in prompt
+        assert "Market State" in prompt
+
 
 
 
@@ -156,6 +156,20 @@ class TestParseResponse:
         r = parse_entry_response('The quick brown fox jumped over the lazy dog.')
         assert r["direction"] == "FLAT"
 
+    def test_json_response(self):
+        r = parse_entry_response(
+            '{"direction":"LONG","rationale":"Balance at VAL with buyers stepping in","confidence":"High","market_state":"Balance"}'
+        )
+        assert r["direction"] == "LONG"
+        assert r["confidence"] == "High"
+
+    def test_json_response_with_extra_text(self):
+        r = parse_entry_response(
+            'Result follows: {"direction":"FLAT","rationale":"No confluence","confidence":"Low","market_state":"Balance"} trailing note'
+        )
+        assert r["direction"] == "FLAT"
+        assert r["confidence"] == "Low"
+
 
 # ===================================================================
 # Full analyze_market flow
@@ -172,6 +186,16 @@ class TestAnalyzeMarket:
         svc = GenerativeAIService(MockLLMAdapter("Stay Flat"))
         result = svc.analyze_market(_make_market_data())
         assert result["direction"] == "FLAT"
+
+    def test_llm_returns_json_response(self):
+        svc = GenerativeAIService(
+            MockLLMAdapter(
+                '{"direction":"LONG","rationale":"Imbalance with aggressive buying","confidence":"High","market_state":"Imbalance"}'
+            )
+        )
+        result = svc.analyze_market(_make_market_data(market_state="Imbalanced"))
+        assert result["direction"] == "LONG"
+        assert result["confidence"] == "High"
 
     def test_llm_raises_exception(self):
         svc = GenerativeAIService(FailingLLMAdapter())

@@ -7,37 +7,64 @@ EMA variance warm-up, and SL placement from aggressive prints.
 import pytest
 from app.domain.fabio_ai.services import mlx_compute as mc
 from app.domain.fabio_ai.services.amt_analyzer import (
-    find_aggressive_prints, AMTConfig,
+    find_aggressive_prints,
+    AMTConfig,
 )
 from app.domain.fabio_ai.services.entry_gate import sl_from_aggressive_print
 from app.domain.trading.models.value_objects import OHLC, AggressivePrint, AMTResult
 
 
-def _candle(price: float = 100.0, volume: float = 100.0, delta: float = 0.0,
-            time: str = "2026-02-25T10:00:00") -> OHLC:
-    return OHLC(time=time, open=price, high=price + 0.5, low=price - 0.5,
-                close=price, volume=volume, vwap=price, delta=delta)
+def _candle(
+    price: float = 100.0,
+    volume: float = 100.0,
+    delta: float = 0.0,
+    time: str = "2026-02-25T10:00:00",
+) -> OHLC:
+    return OHLC(
+        time=time,
+        open=price,
+        high=price + 0.5,
+        low=price - 0.5,
+        close=price,
+        volume=volume,
+        vwap=price,
+        delta=delta,
+    )
 
 
-def _candles(n: int, volume: float = 100.0, delta: float = 10.0,
-             base_time: int = 0) -> list[OHLC]:
+def _candles(
+    n: int, volume: float = 100.0, delta: float = 10.0, base_time: int = 0
+) -> list[OHLC]:
     """Generate n candles with consistent volume."""
-    return [_candle(volume=volume, delta=delta,
-                    time=f"2026-02-25T{10 + (base_time + i) // 60:02d}:{(base_time + i) % 60:02d}:00")
-            for i in range(n)]
+    return [
+        _candle(
+            volume=volume,
+            delta=delta,
+            time=f"2026-02-25T{10 + (base_time + i) // 60:02d}:{(base_time + i) % 60:02d}:00",
+        )
+        for i in range(n)
+    ]
 
 
 def _amt_result_with_prints(prints: list[AggressivePrint]) -> AMTResult:
     """Minimal AMTResult with aggressive prints."""
     return AMTResult(
-        market_state="BALANCED", poc=100.0, value_area_high=101.0, value_area_low=99.0,
-        lvns=(), hvns=(), aggressive_prints=tuple(prints),
-        aggression=0.0, signal=None, setup=None,
+        market_state="BALANCED",
+        poc=100.0,
+        value_area_high=101.0,
+        value_area_low=99.0,
+        lvns=(),
+        hvns=(),
+        aggressive_prints=tuple(prints),
+        aggression=0.0,
+        signal=None,
+        setup=None,
         session_vwap=100.0,
     )
 
 
 # ─── aggression_sigma() ───────────────────────────────────────────
+
 
 class TestAggressionSigma:
     def test_returns_zero_for_short_data(self):
@@ -49,31 +76,89 @@ class TestAggressionSigma:
 
     def test_normal_volume_low_sigma(self):
         # Realistic volume with ~20% natural variation
-        vols = [80, 120, 95, 110, 85, 130, 100, 115, 90, 105,
-                88, 112, 97, 108, 92, 118, 103, 95, 110, 85,
-                120, 100, 115, 90, 108, 92, 105, 98, 112, 88]
+        vols = [
+            80,
+            120,
+            95,
+            110,
+            85,
+            130,
+            100,
+            115,
+            90,
+            105,
+            88,
+            112,
+            97,
+            108,
+            92,
+            118,
+            103,
+            95,
+            110,
+            85,
+            120,
+            100,
+            115,
+            90,
+            108,
+            92,
+            105,
+            98,
+            112,
+            88,
+        ]
         sigma = mc.aggression_sigma(120, vols, 20)  # volume near mean
         assert sigma < 2.0
 
     def test_spike_volume_high_sigma(self):
         # Same realistic volumes, but 5x spike
-        vols = [80, 120, 95, 110, 85, 130, 100, 115, 90, 105,
-                88, 112, 97, 108, 92, 118, 103, 95, 110, 85,
-                120, 100, 115, 90, 108, 92, 105, 98, 112, 88]
+        vols = [
+            80,
+            120,
+            95,
+            110,
+            85,
+            130,
+            100,
+            115,
+            90,
+            105,
+            88,
+            112,
+            97,
+            108,
+            92,
+            118,
+            103,
+            95,
+            110,
+            85,
+            120,
+            100,
+            115,
+            90,
+            108,
+            92,
+            105,
+            98,
+            112,
+            88,
+        ]
         sigma = mc.aggression_sigma(500, vols, 20)
         assert sigma >= 2.5
 
     def test_warm_up_no_inflated_sigma(self):
         """After fix: seeded variance prevents inflated z-scores on early candles."""
         # Realistic variation — a 2x spike should NOT be wildly inflated
-        vols = [80, 120, 95, 110, 85, 130, 100, 115, 90, 105,
-                88, 112, 97, 108, 92]
+        vols = [80, 120, 95, 110, 85, 130, 100, 115, 90, 105, 88, 112, 97, 108, 92]
         sigma = mc.aggression_sigma(200, vols, 20)
         # With proper variance seeding + std floor, 2x volume should stay reasonable
         assert sigma < 8.0  # Sanity: shouldn't be wildly inflated (was 100+ before fix)
 
 
 # ─── Delta directionality threshold ───────────────────────────────
+
 
 class TestDeltaDirectionalityThreshold:
     """Tests that the 40% delta ratio filter rejects near-balanced candles."""
@@ -83,8 +168,9 @@ class TestDeltaDirectionalityThreshold:
         data = _candles(60, volume=100, delta=10)
         spike_vol = 500.0
         spike_delta = spike_vol * spike_delta_ratio
-        data.append(_candle(volume=spike_vol, delta=spike_delta,
-                            time="2026-02-25T11:00:00"))
+        data.append(
+            _candle(volume=spike_vol, delta=spike_delta, time="2026-02-25T11:00:00")
+        )
         return data
 
     def test_low_delta_ratio_rejected(self):
@@ -114,6 +200,7 @@ class TestDeltaDirectionalityThreshold:
 
 
 # ─── find_aggressive_prints() ────────────────────────────────────
+
 
 class TestFindAggressivePrints:
     def test_empty_data(self):
@@ -148,10 +235,10 @@ class TestFindAggressivePrints:
 
         # Add 35 more candles (pushes print beyond 30-candle window)
         for i in range(35):
-            data.append(_candle(volume=100, delta=10,
-                                time=f"2026-02-25T12:{i:02d}:00"))
+            data.append(_candle(volume=100, delta=10, time=f"2026-02-25T12:{i:02d}:00"))
             prints = find_aggressive_prints(
-                data, previous_prints=prints, previous_data_len=len(data) - 1)
+                data, previous_prints=prints, previous_data_len=len(data) - 1
+            )
 
         # Old print should be expired
         assert len(prints) == 0
@@ -175,31 +262,64 @@ class TestFindAggressivePrints:
 
         # Incremental: build up from 59 candles + add last
         inc = find_aggressive_prints(data[:-1])
-        inc = find_aggressive_prints(data, previous_prints=inc,
-                                     previous_data_len=len(data) - 1)
+        inc = find_aggressive_prints(
+            data, previous_prints=inc, previous_data_len=len(data) - 1
+        )
 
         assert len(full) == len(inc)
 
 
 # ─── EMA Variance Warm-Up ────────────────────────────────────────
 
+
 class TestEMAVarianceWarmUp:
     def test_no_spurious_prints_first_20_candles(self):
         """Candles with natural variation — moderate spike shouldn't trigger."""
         # Create candles with realistic volume variation
-        volumes = [80, 120, 95, 110, 85, 130, 100, 115, 90, 105,
-                   88, 112, 97, 108, 92, 118, 103, 95, 110, 85,
-                   120, 100, 115, 90, 108]
-        data = [_candle(volume=v, delta=v*0.1,
-                        time=f"2026-02-25T{10 + i // 60:02d}:{i % 60:02d}:00")
-                for i, v in enumerate(volumes)]
-        # Candle 21 with 1.3x avg volume — should NOT trigger at 2.5σ
-        data[20] = _candle(volume=135, delta=68, time=data[20].time)
+        volumes = [
+            80,
+            120,
+            95,
+            110,
+            85,
+            130,
+            100,
+            115,
+            90,
+            105,
+            88,
+            112,
+            97,
+            108,
+            92,
+            118,
+            103,
+            95,
+            110,
+            85,
+            120,
+            100,
+            115,
+            90,
+            108,
+        ]
+        data = [
+            _candle(
+                volume=v,
+                delta=v * 0.1,
+                time=f"2026-02-25T{10 + i // 60:02d}:{i % 60:02d}:00",
+            )
+            for i, v in enumerate(volumes)
+        ]
+        # Candle 21 with 1.3x avg volume but low delta ratio (below 40% threshold)
+        # 50/135 = 0.37, which is below 0.40 threshold - should NOT trigger
+        data[20] = _candle(volume=135, delta=50, time=data[20].time)
         prints = find_aggressive_prints(data)
         assert len(prints) == 0
 
 
 # ─── sl_from_aggressive_print() ──────────────────────────────────
+
 
 class TestSlFromAggressivePrint:
     def test_picks_nearest_sell_print_for_long(self):

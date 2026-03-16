@@ -11,13 +11,15 @@ class LLMInferencePort(ABC):
     """Abstraction for LLM inference (fine-tuned model)."""
 
     @abstractmethod
-    def predict(self, instruction: str, input_text: str, temperature: float | None = None) -> str:
+    def predict(self, instruction: str, input_text: str, temperature: float | None = None, max_tokens: int | None = None, prefill: str | None = None) -> str:
         """Run inference on a fine-tuned model.
 
         Args:
             instruction: System instruction for the model.
             input_text: User input text.
             temperature: Sampling temperature override. None = use default.
+            max_tokens: Max new tokens to generate.
+            prefill: Optional prefill for assistant response (e.g. '{"' or '<think>').
         """
 
     @abstractmethod

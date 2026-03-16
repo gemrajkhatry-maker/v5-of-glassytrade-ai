@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal
 
+from app.config import settings
 from app.domain.trading.models.enums import Side, Source, PositionStatus
 from app.domain.trading.models.entities import Position, Signal
 from app.domain.trading.models.value_objects import OHLC, StrategyStats
@@ -19,19 +21,41 @@ from app.domain.trading.models.value_objects import OHLC, StrategyStats
 # Configuration (could be injected; kept as module-level for simplicity)
 # ---------------------------------------------------------------------------
 
-INITIAL_CAPITAL: float = 1_000_000  # 10 lakhs INR
+INITIAL_CAPITAL: Decimal = Decimal("1000000")  # 10 lakhs INR
 LEVERAGE: int = 1
-RISK_PER_TRADE: float = 0.01
+RISK_PER_TRADE: Decimal = Decimal("0.01")
 MAX_HISTORY: int = 1000
 HISTORY_MIN_INTERVAL_SEC: float = 60.0
-MAX_PARTICIPATION_PCT: float = 0.02  # Never be > 2% of avg daily volume
+MAX_PARTICIPATION_PCT: Decimal = Decimal("0.02")  # Never be > 2% of avg daily volume
+
+# Commission & Slippage Model (NFO Options)
+# Round-trip costs: STT (₹17.5/lot), Exchange txn (₹3.2/lot),
+# GST (18% on brokerage+txn), Stamp duty, SEBI charges.
+# Total per-lot round-trip ≈ ₹40-60 for NFO options.
+COMMISSION_PER_LOT: Decimal = Decimal("50.0")  # ₹50 round-trip per lot (conservative)
+DEFAULT_LOT_SIZE: int = 1  # Overridden per-instrument at runtime
+SLIPPAGE_PCT: Decimal = Decimal(str(settings.SLIPPAGE_PCT))  # Configurable per fill (entry + exit)
 
 # Tiered risk by confidence level (Fabio Valentini position sizing)
-RISK_BY_CONFIDENCE: dict[str, float] = {
-    "High": 0.005,    # A setup: 0.5%
-    "Medium": 0.0035, # B setup: 0.35%
-    "Low": 0.0025,    # C setup: 0.25%
+RISK_BY_CONFIDENCE: dict[str, Decimal] = {
+    "High": Decimal("0.005"),  # A setup: 0.5%
+    "Medium": Decimal("0.0035"),  # B setup: 0.35%
+    "Low": Decimal("0.0025"),  # C setup: 0.25%
 }
+
+
+@dataclass
+class PortfolioConfig:
+    """Configuration for Portfolio behavior."""
+
+    initial_capital: Decimal = field(default_factory=lambda: INITIAL_CAPITAL)
+    leverage: int = LEVERAGE
+    risk_per_trade: Decimal = field(default_factory=lambda: RISK_PER_TRADE)
+    slippage_pct: Decimal = field(default_factory=lambda: SLIPPAGE_PCT)
+    commission_per_lot: Decimal = field(default_factory=lambda: COMMISSION_PER_LOT)
+    max_participation_pct: Decimal = field(
+        default_factory=lambda: MAX_PARTICIPATION_PCT
+    )
 
 
 @dataclass
@@ -39,13 +63,16 @@ class Portfolio:
     """Aggregate root for portfolio management.
 
     All mutations go through public methods that enforce domain invariants.
+    All monetary values use Decimal for precision in financial calculations.
     """
-    balance: float = INITIAL_CAPITAL
-    equity: float = INITIAL_CAPITAL
+
+    balance: Decimal = field(default_factory=lambda: INITIAL_CAPITAL)
+    equity: Decimal = field(default_factory=lambda: INITIAL_CAPITAL)
     leverage: int = LEVERAGE
     positions: list[Position] = field(default_factory=list)
     closed_trades: list[Position] = field(default_factory=list)
     history: list[dict] = field(default_factory=list)
+    config: PortfolioConfig | None = field(default_factory=lambda: None)
 
     # ----- factories -----
 
@@ -55,6 +82,7 @@ class Portfolio:
             balance=INITIAL_CAPITAL,
             equity=INITIAL_CAPITAL,
             leverage=LEVERAGE,
+            config=PortfolioConfig(),
         )
 
     # ----- queries -----
@@ -68,19 +96,68 @@ class Portfolio:
         wins = [t for t in trades if t.pnl > 0]
         losses = [t for t in trades if t.pnl <= 0]
         net_profit = sum(t.pnl for t in trades)
+        num_trades = len(trades)
 
         return StrategyStats(
-            total_trades=len(trades),
+            total_trades=num_trades,
             wins=len(wins),
             losses=len(losses),
-            win_rate=(len(wins) / len(trades) * 100) if trades else 0.0,
-            net_profit=net_profit,
-            avg_profit=net_profit / len(trades) if trades else 0.0,
-            largest_win=max((t.pnl for t in wins), default=0.0),
-            largest_loss=min((t.pnl for t in losses), default=0.0),
+            win_rate=(len(wins) / num_trades * 100) if num_trades else 0.0,
+            net_profit=float(net_profit),
+            avg_profit=float(net_profit / num_trades) if num_trades else 0.0,
+            largest_win=float(max((t.pnl for t in wins), default=Decimal("0"))),
+            largest_loss=float(min((t.pnl for t in losses), default=Decimal("0"))),
         )
 
     # ----- commands -----
+
+    def _compute_commission(
+        self, size: float | Decimal, metadata: dict | None = None
+    ) -> Decimal:
+        """Compute round-trip commission for a position.
+
+        Uses lot-based commission when option_lot_size is explicitly known
+        (NFO options), otherwise charges a single flat commission per trade.
+        """
+        size = self._scale_fraction_to_decimal(size)
+        lot_size = Decimal(str((metadata or {}).get("option_lot_size", 0)))
+        if lot_size > 0:
+            num_lots = max(1, int(size / lot_size))
+        else:
+            # No lot info (equities, crypto, or tests) — flat fee per trade
+            num_lots = 1
+        return Decimal(num_lots) * COMMISSION_PER_LOT
+
+    def _scale_fraction_to_decimal(self, value: float | Decimal) -> Decimal:
+        """Convert scale_fraction parameter to Decimal."""
+        if isinstance(value, Decimal):
+            return value
+        return Decimal(str(value))
+
+    @staticmethod
+    def _apply_slippage(
+        price: float | Decimal, side: Side, is_entry: bool, slippage_pct: Decimal = SLIPPAGE_PCT
+    ) -> Decimal:
+        """Apply slippage to a fill price.
+
+        Entry: buy higher / sell lower (adverse).
+        Exit: buy lower / sell higher (adverse).
+        """
+        price = Decimal(str(price)) if not isinstance(price, Decimal) else price
+
+        if is_entry:
+            return (
+                price * (Decimal("1") + slippage_pct)
+                if side == Side.LONG
+                else price * (Decimal("1") - slippage_pct)
+            )
+        else:
+            # Exit long = sell (adverse is lower), Exit short = buy (adverse is higher)
+            return (
+                price * (Decimal("1") - slippage_pct)
+                if side == Side.LONG
+                else price * (Decimal("1") + slippage_pct)
+            )
 
     def process_tick(self, tick: OHLC) -> list[Position]:
         """Update all open positions with a new tick.
@@ -89,7 +166,7 @@ class Portfolio:
         """
         current_price = tick.close
         current_time = tick.time
-        unrealized_pnl = 0.0
+        unrealized_pnl = Decimal("0")
 
         active: list[Position] = []
         newly_closed: list[Position] = []
@@ -105,7 +182,14 @@ class Portfolio:
                 continue
             should_close, reason = pos.should_close(current_price)
             if should_close:
-                pos.close(current_price, current_time, reason)
+                # Apply slippage to exit fill
+                fill_price = self._apply_slippage(
+                    current_price, pos.side, is_entry=False
+                )
+                pos.close(fill_price, current_time, reason)
+                # Deduct commission from P&L
+                commission = self._compute_commission(pos.size, pos.metadata)
+                pos.pnl -= commission
                 newly_closed.append(pos)
                 self.balance += pos.pnl
             else:
@@ -126,7 +210,10 @@ class Portfolio:
         return newly_closed
 
     def open_position(
-        self, signal: Signal, symbol: str, scale_fraction: float = 1.0,
+        self,
+        signal: Signal,
+        symbol: str,
+        scale_fraction: float | Decimal = 1.0,
     ) -> Position | None:
         """Open a new position from *signal*, enforcing risk constraints.
 
@@ -139,8 +226,13 @@ class Portfolio:
         (Fabio 40/30/30 scale-in: first entry uses 0.4, add-ons use 0.3).
         The full size is computed from risk, but only ``scale_fraction`` is deployed.
 
+        Slippage is applied to the entry price to simulate real-world fills.
+
         Returns the created Position, or None if constraints prevent opening.
         """
+        # Convert scale_fraction to Decimal if needed
+        scale_fraction = self._scale_fraction_to_decimal(scale_fraction)
+
         # Invariant: no duplicate source positions
         if self.has_open_position_for_source(signal.source):
             return None
@@ -148,7 +240,7 @@ class Portfolio:
         # Tiered position sizing based on confidence, clamped to 0.25%-0.5%
         confidence = (signal.metadata or {}).get("confidence", "Medium")
         risk_pct = RISK_BY_CONFIDENCE.get(confidence, RISK_PER_TRADE)
-        risk_pct = max(0.0025, min(0.005, risk_pct))  # hard clamp
+        risk_pct = max(Decimal("0.0025"), min(Decimal("0.005"), risk_pct))  # hard clamp
         risk_amount = self.equity * risk_pct
 
         risk_per_unit = abs(signal.price - signal.stop_loss)
@@ -156,44 +248,60 @@ class Portfolio:
             return None
 
         full_size = risk_amount / risk_per_unit
-        max_notional = self.equity * self.leverage
+        max_notional = self.equity * Decimal(self.leverage)
         if full_size * signal.price > max_notional:
             full_size = max_notional / signal.price
 
         # Apply scale-in fraction (Fabio Rule 4: 40/30/30)
-        size = full_size * max(0.0, min(1.0, scale_fraction))
+        size = full_size * max(Decimal("0"), min(Decimal("1"), scale_fraction))
         if size <= 0:
             return None
 
         # Snap to whole lot multiples for options
-        lot_size = (signal.metadata or {}).get("option_lot_size", 0)
+        lot_size = Decimal(str((signal.metadata or {}).get("option_lot_size", 0)))
         if lot_size > 0:
             num_lots = max(1, int(size / lot_size))
-            size = float(num_lots * lot_size)
+            size = Decimal(num_lots) * lot_size
             full_size = max(full_size, size)  # ensure full_size >= deployed
 
+        # Apply slippage to entry price for realistic fill simulation
+        side = Side.LONG if signal.is_buy else Side.SHORT
+        slipped_price = self._apply_slippage(signal.price, side, is_entry=True)
+
         position = Position.from_signal(signal, symbol, size)
+        position.entry_price = slipped_price  # Override with slipped fill price
         # Store full_size in metadata so scale-in adds know the target
         if position.metadata is None:
             position.metadata = {}
-        position.metadata["full_size"] = full_size
-        position.metadata["deployed_fraction"] = scale_fraction
+        position.metadata["full_size"] = float(full_size)
+        position.metadata["deployed_fraction"] = float(scale_fraction)
 
         self.positions.append(position)
         return position
 
-    def add_to_position(self, position_id: str, add_fraction: float, current_price: float) -> bool:
+    def add_to_position(
+        self,
+        position_id: str,
+        add_fraction: float | Decimal,
+        current_price: float | Decimal,
+    ) -> bool:
         """Scale into an existing position (Fabio 40/30/30 rule).
 
         Adds ``add_fraction`` of the original full_size at ``current_price``.
         Uses weighted-average to adjust entry_price.
         Returns True if successful.
         """
+        # Convert to Decimal if needed
+        add_fraction = self._scale_fraction_to_decimal(add_fraction)
+        current_price = self._scale_fraction_to_decimal(current_price)
+
         for pos in self.positions:
             if pos.id == position_id and pos.is_open:
-                full_size = (pos.metadata or {}).get("full_size", 0)
-                deployed = (pos.metadata or {}).get("deployed_fraction", 1.0)
-                if full_size <= 0 or deployed >= 1.0:
+                full_size = Decimal(str((pos.metadata or {}).get("full_size", 0)))
+                deployed = Decimal(
+                    str((pos.metadata or {}).get("deployed_fraction", 1.0))
+                )
+                if full_size <= 0 or deployed >= 1:
                     return False  # already fully deployed
 
                 add_size = full_size * add_fraction
@@ -201,25 +309,35 @@ class Portfolio:
 
                 # Weighted average entry
                 pos.entry_price = (
-                    (pos.entry_price * pos.size + current_price * add_size) / new_total
-                )
+                    pos.entry_price * pos.size + current_price * add_size
+                ) / new_total
                 pos.size = new_total
 
                 # Update metadata
-                new_deployed = min(1.0, deployed + add_fraction)
-                pos.metadata["deployed_fraction"] = new_deployed
+                new_deployed = min(Decimal("1"), deployed + add_fraction)
+                if pos.metadata is None:
+                    pos.metadata = {}
+                pos.metadata["deployed_fraction"] = float(new_deployed)
 
                 return True
         return False
 
     def partial_close_position(
-        self, position_id: str, partial_pct: float, price: float, reason: str
-    ) -> float:
+        self,
+        position_id: str,
+        partial_pct: float | Decimal,
+        price: float | Decimal,
+        reason: str,
+    ) -> Decimal:
         """Close partial_pct of a position. Returns realized PnL from the partial.
 
         The position remains open with reduced size. Stop loss on the Position
         entity is moved to break-even by the TradeManager.
         """
+        # Convert to Decimal if needed
+        partial_pct = self._scale_fraction_to_decimal(partial_pct)
+        price = self._scale_fraction_to_decimal(price)
+
         for pos in self.positions:
             if pos.id == position_id and pos.is_open:
                 # Calculate PnL on the partial size
@@ -243,28 +361,49 @@ class Portfolio:
                 # Track cumulative partial PnL for accurate final close accounting
                 if pos.metadata is None:
                     pos.metadata = {}
-                prev_partial = pos.metadata.get("partial_realized_pnl", 0.0)
-                pos.metadata["partial_realized_pnl"] = prev_partial + partial_pnl
+                prev_partial = Decimal(
+                    str(pos.metadata.get("partial_realized_pnl", 0.0))
+                )
+                pos.metadata["partial_realized_pnl"] = float(prev_partial + partial_pnl)
 
                 # Move stop to break-even on the Position entity
                 pos.stop_loss = pos.entry_price
 
                 return partial_pnl
-        return 0.0
+        return Decimal("0")
 
-    def close_position(self, position_id: str, price: float, reason: str = "LLM_EXIT") -> Position | None:
+    def close_position(
+        self, position_id: str, price: float | Decimal, reason: str = "LLM_EXIT"
+    ) -> Position | None:
         """Close a specific position by ID at the given price.
 
         Used by the LLM trading engine for manual exits.
+        Applies slippage and commission to simulate real-world fills.
         Returns the closed Position, or None if not found.
         """
+        # Convert to Decimal if needed
+        price = self._scale_fraction_to_decimal(price)
+
         for i, pos in enumerate(self.positions):
             if pos.id == position_id and pos.is_open:
-                pos.close(price, datetime.utcnow().isoformat() + "Z", reason)
+                # Apply slippage to exit fill
+                fill_price = self._apply_slippage(price, pos.side, is_entry=False)
+                pos.close(
+                    fill_price,
+                    datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    reason,
+                )
+                # Deduct commission from P&L
+                commission = self._compute_commission(pos.size, pos.metadata)
+                pos.pnl -= commission
                 # Store realized partial PnL in closed trade record for accurate reporting
-                partial_realized = (pos.metadata or {}).get("partial_realized_pnl", 0.0)
+                partial_realized = Decimal(
+                    str((pos.metadata or {}).get("partial_realized_pnl", 0.0))
+                )
                 pos.pnl += partial_realized  # combine partial + runner for display
-                self.balance += pos.pnl - partial_realized  # only credit runner portion (partial already credited)
+                self.balance += (
+                    pos.pnl - partial_realized
+                )  # only credit runner portion (partial already credited)
                 self.closed_trades.append(pos)
                 # Trim to prevent unbounded growth throughout the day
                 if len(self.closed_trades) > 200:
@@ -280,11 +419,15 @@ class Portfolio:
     def _parse_ts(s: str) -> float:
         """Parse a timestamp string to epoch seconds (handles ISO and epoch formats)."""
         stripped = s.strip()
-        if stripped.replace(".", "", 1).lstrip("-").isdigit() and "T" not in stripped and len(stripped) >= 9:
+        if (
+            stripped.replace(".", "", 1).lstrip("-").isdigit()
+            and "T" not in stripped
+            and len(stripped) >= 9
+        ):
             return float(stripped)
         return datetime.fromisoformat(stripped.replace("Z", "+00:00")).timestamp()
 
-    def _append_history(self, time_str: str, pnl: float) -> None:
+    def _append_history(self, time_str: str, pnl: Decimal) -> None:
         should_add = True
         if self.history:
             last_time = self.history[-1].get("time", "")
@@ -296,6 +439,6 @@ class Portfolio:
                 should_add = True
 
         if should_add or not self.history:
-            self.history.append({"time": time_str, "pnl": pnl})
+            self.history.append({"time": time_str, "pnl": float(pnl)})
             if len(self.history) > MAX_HISTORY:
                 self.history.pop(0)

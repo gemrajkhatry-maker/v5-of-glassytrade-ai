@@ -85,9 +85,9 @@ from .resilience import (
     TokenBucketRateLimiter,
     DhanCircuitBreaker,
     RateLimitConfig,
-    CircuitBreakerConfig,
     DEFAULT_RATE_LIMITS,
 )
+from shared.resilience import CircuitBreakerConfig
 
 
 # =============================================================================
@@ -112,6 +112,6 @@ __all__ = [
     "TokenBucketRateLimiter",
     "DhanCircuitBreaker",
     "RateLimitConfig",
-    "CircuitBreakerConfig",
     "DEFAULT_RATE_LIMITS",
+    "CircuitBreakerConfig",
 ]

@@ -41,7 +41,12 @@ class ServiceGraph:
         self.broker = PaperBrokerAdapter()
         self.llm_inference: LLMInferencePort = MLXInferenceAdapter()
         self.gen_ai_service = GenerativeAIService(llm_adapter=self.llm_inference)
-        self.storage = SQLiteStorageAdapter()
+        self._raw_storage = SQLiteStorageAdapter()
+        # Wrap with async persistence bus — all writes go to background thread
+        from app.infrastructure.async_persistence import AsyncPersistenceBus
+        self._persistence_bus = AsyncPersistenceBus(self._raw_storage)
+        self._persistence_bus.start()
+        self.storage = self._persistence_bus  # TradingSessionService uses async writes
 
         # Probability engine (LightGBM first-passage models)
         _model_dir = os.path.join(os.path.dirname(__file__), "..", "..", "models")
@@ -91,7 +96,7 @@ class ServiceGraph:
                     preferred_option_type=settings.SCANNER_OPTION_TYPE or None,
                     exchange=settings.DEFAULT_EXCHANGE,
                     expiry_index=settings.SCANNER_EXPIRY_INDEX,
-                    top_per_underlying=settings.SCANNER_TOP_N,
+                    strikes_around_atm=settings.STRIKES_AROUND_ATM,
                 )
 
             _results = _scan_pool.submit(_scan).result(timeout=120)

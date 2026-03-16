@@ -98,6 +98,32 @@ class TestSessionStorage:
         assert loaded["session_date"] == "2026-02-24"
         assert loaded["poc"] == 24900.0
 
+    def test_save_and_query_position_events(self, storage):
+        storage.save_position_event({
+            "position_id": "P1",
+            "symbol": "NIFTY",
+            "event_type": "OPENED",
+            "event_time": "2026-02-24T09:30:00Z",
+            "entry_price": 250.0,
+        })
+        storage.save_position_event({
+            "position_id": "P1",
+            "symbol": "NIFTY",
+            "event_type": "CLOSED",
+            "event_time": "2026-02-24T09:45:00Z",
+            "exit_price": 270.0,
+        })
+
+        events = storage.query_position_events(position_id="P1")
+
+        assert len(events) == 2
+        assert events[0]["event_type"] == "OPENED"
+        assert events[0]["event_id"]
+        assert events[0]["entry_price"] == 250.0
+        assert events[1]["event_type"] == "CLOSED"
+        assert events[1]["event_id"]
+        assert events[1]["exit_price"] == 270.0
+
 
 # ---------------------------------------------------------------------------
 # Gap classification tests

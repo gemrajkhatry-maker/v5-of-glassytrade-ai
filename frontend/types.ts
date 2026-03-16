@@ -129,6 +129,8 @@ export interface InstrumentState {
   stats: StrategyStats | null;
   depth20Active: boolean;
   stale?: boolean;
+  ltp?: number;
+  oi?: number;
   lastUpdate: number;
 }
 
@@ -232,6 +234,8 @@ export interface AMTAnalysis {
     has_rejection: boolean;
     has_delta_flip: boolean;
   } | null;
+  llmThinking?: string;
+  llmJson?: string;
 }
 
 export interface TradeSignal {

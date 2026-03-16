@@ -180,13 +180,13 @@ class TestAgentDoesNotBlockLLM:
     LLM ~95% of the time due to poor LightGBM calibration (AUC 0.60).
     """
 
-    def test_agent_blocks_is_false(self):
-        """Verify the fix directly in trading_session source."""
+    def test_agent_does_not_block_llm(self):
+        """Verify agent decision does NOT gate LLM entry calls."""
         import inspect
         from app.application.services.trading_session import TradingSessionService
         source = inspect.getsource(TradingSessionService._on_tick)
-        # The fix: agent_blocks = False
-        assert "agent_blocks = False" in source
+        # Agent pipeline feeds into priority score for UI, but never blocks LLM
+        assert "agent_blocks" not in source
 
     def test_llm_entry_runs_when_agent_says_flat(self):
         """Integration: LLM should_run even when agent returned FLAT."""

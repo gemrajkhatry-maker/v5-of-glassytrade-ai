@@ -26,24 +26,27 @@ MIN_COOLDOWN = 5.0
 @dataclass
 class _RegimeSnapshot:
     """Captures the market state at a point in time."""
+
     market_state: str = ""
-    price_zone: str = ""       # "ABOVE_VAH" | "BELOW_VAL" | "INSIDE_VA" | "AT_POC"
+    price_zone: str = ""  # "ABOVE_VAH" | "BELOW_VAL" | "INSIDE_VA" | "AT_POC"
     poc: float = 0.0
-    delta_sign: int = 0        # -1, 0, +1
+    delta_sign: int = 0  # -1, 0, +1
     timestamp: float = 0.0
 
 
 @dataclass(frozen=True)
 class _FailedEntry:
     """Records a stopped-out entry for re-entry blocking (Fabio Rule 11)."""
+
     level: float
-    direction: str        # "LONG" | "SHORT"
-    session_phase: int    # session phase when the failure occurred
+    direction: str  # "LONG" | "SHORT"
+    session_phase: int  # session phase when the failure occurred
 
 
 @dataclass(frozen=True)
 class _LevelTouch:
     """Records when price approached a key level."""
+
     level: float
     timestamp: float
     retreated: bool = False  # True once price moved >0.5% away
@@ -52,6 +55,7 @@ class _LevelTouch:
 @dataclass(frozen=True)
 class SqueezeSignal:
     """Squeeze setup: trapped participants + recovery = entry catalyst."""
+
     direction: str  # "LONG" or "SHORT"
     trapped_level: float
     recovery_price: float
@@ -60,8 +64,11 @@ class SqueezeSignal:
 @dataclass
 class ContractionConfig:
     """Tunable thresholds for contraction detection (Fabio Rule 8)."""
-    contraction_ratio: float = 0.30   # current range < ratio * expansion range => contracting
-    lookback: int = 20                # candles to measure current range
+
+    contraction_ratio: float = (
+        0.30  # current range < ratio * expansion range => contracting
+    )
+    lookback: int = 20  # candles to measure current range
 
 
 class RegimeDetector:
@@ -89,6 +96,12 @@ class RegimeDetector:
 
         # Failed auction re-entry state (Fabio Rule 11)
         self._failed_entries: list[_FailedEntry] = []
+
+        # Consecutive loss circuit breaker
+        self._consecutive_stops: int = 0
+        self._circuit_breaker_until: float = 0.0
+        self.MAX_CONSECUTIVE_STOPS = 3
+        self.CIRCUIT_BREAKER_SECONDS = 900.0  # 15-minute pause
 
         # Second drive tracking (Gap #6)
         self._level_touches: dict[float, _LevelTouch] = {}
@@ -126,7 +139,9 @@ class RegimeDetector:
 
         # 1. Market state transition (BALANCED ↔ IMBALANCED)
         if current.market_state != self._previous.market_state:
-            reasons.append(f"state: {self._previous.market_state} → {current.market_state}")
+            reasons.append(
+                f"state: {self._previous.market_state} → {current.market_state}"
+            )
             triggered = True
 
         # 2. VA boundary crossing
@@ -143,8 +158,13 @@ class RegimeDetector:
 
         # 4. Delta divergence spike
         if len(self._recent_deltas) >= 5:
-            avg_delta = sum(list(self._recent_deltas)[:-1]) / (len(self._recent_deltas) - 1)
-            if avg_delta > 0 and abs(tick.delta) > avg_delta * self.DELTA_SPIKE_MULTIPLIER:
+            avg_delta = sum(list(self._recent_deltas)[:-1]) / (
+                len(self._recent_deltas) - 1
+            )
+            if (
+                avg_delta > 0
+                and abs(tick.delta) > avg_delta * self.DELTA_SPIKE_MULTIPLIER
+            ):
                 reasons.append(f"delta spike: {tick.delta:.0f} vs avg {avg_delta:.0f}")
                 triggered = True
 
@@ -174,7 +194,7 @@ class RegimeDetector:
             return False
 
         # Expansion window: candles before the current lookback window
-        expansion_window = data[-(lookback * 2):-lookback]
+        expansion_window = data[-(lookback * 2) : -lookback]
         exp_high = max(c.high for c in expansion_window)
         exp_low = min(c.low for c in expansion_window)
         expansion_range = exp_high - exp_low
@@ -194,7 +214,9 @@ class RegimeDetector:
         if is_contracted:
             logger.debug(
                 "Contraction detected: range=%.2f expansion=%.2f ratio=%.2f%%",
-                current_range, expansion_range, ratio * 100,
+                current_range,
+                expansion_range,
+                ratio * 100,
             )
 
         return is_contracted
@@ -203,10 +225,13 @@ class RegimeDetector:
     # Fabio Rule 11 — Failed Auction Re-entry Blocking
     # ------------------------------------------------------------------
 
-    def record_failed_entry(self, level: float, direction: str, session_phase: int) -> None:
+    def record_failed_entry(
+        self, level: float, direction: str, session_phase: int
+    ) -> None:
         """Record a stopped-out entry so the same level/direction is blocked.
 
         Call this when a position hits its stop loss.
+        Also increments the consecutive stop counter for circuit breaker.
         """
         self._failed_entries.append(
             _FailedEntry(level=level, direction=direction, session_phase=session_phase)
@@ -214,24 +239,63 @@ class RegimeDetector:
         # Cap to prevent unbounded growth in long sessions
         if len(self._failed_entries) > 50:
             self._failed_entries = self._failed_entries[-50:]
+
+        # Consecutive loss circuit breaker
+        self._consecutive_stops += 1
+        if self._consecutive_stops >= self.MAX_CONSECUTIVE_STOPS:
+            self._circuit_breaker_until = time.time() + self.CIRCUIT_BREAKER_SECONDS
+            logger.warning(
+                "CIRCUIT BREAKER: %d consecutive stops — pausing entries for %.0fs",
+                self._consecutive_stops,
+                self.CIRCUIT_BREAKER_SECONDS,
+            )
+
         logger.info(
-            "Recorded failed entry: level=%.2f dir=%s phase=%d",
-            level, direction, session_phase,
+            "Recorded failed entry: level=%.2f dir=%s phase=%d (consecutive=%d)",
+            level,
+            direction,
+            session_phase,
+            self._consecutive_stops,
         )
+
+    def record_successful_exit(self) -> None:
+        """Reset consecutive stop counter on a profitable exit."""
+        self._consecutive_stops = 0
+
+    def is_circuit_breaker_active(self, current_time: float | None = None) -> bool:
+        """Check if the circuit breaker is currently active."""
+        now = current_time if current_time is not None else time.time()
+        if now < self._circuit_breaker_until:
+            remaining = self._circuit_breaker_until - now
+            logger.info("Circuit breaker active — %.0fs remaining", remaining)
+            return True
+        # Once expired, reset the counter so next stop starts fresh
+        if self._consecutive_stops >= self.MAX_CONSECUTIVE_STOPS:
+            self._consecutive_stops = 0
+        return False
 
     def is_re_entry_blocked(
         self,
         level: float,
         direction: str,
         session_phase: int,
-        buffer_pct: float = 0.003,
+        buffer_pct: float = 0.015,
         squeeze_active: bool = False,
+        atr: float = 0.0,
     ) -> bool:
         """Check whether re-entry at *level* in *direction* is blocked.
 
         Re-entry is blocked when a previous stop-out occurred at the
-        same level (within *buffer_pct*) in the same direction during
-        the same session phase.
+        same level (within buffer) in the same direction during the
+        same session phase.
+
+        The buffer is the wider of:
+        - *buffer_pct* (default 1.5%) of level price
+        - 1x ATR (if provided)
+
+        This wider buffer prevents repeated entries in the same failed
+        price zone, which is critical for options where price clusters
+        span 2-5% easily.
 
         Re-entry is allowed if:
         - A squeeze is active (trapped participants' forced exit IS the catalyst).
@@ -243,16 +307,26 @@ class RegimeDetector:
         if squeeze_active:
             return False
 
+        # Compute absolute buffer distance: max of pct-based and ATR-based
+        abs_buffer = level * buffer_pct
+        if atr > 0:
+            abs_buffer = max(abs_buffer, atr)
+
         for fe in self._failed_entries:
             if fe.direction != direction:
                 continue
             if fe.session_phase != session_phase:
                 continue  # new session phase — allow
             # Check if level is within buffer of the failed level
-            if fe.level > 0 and abs(level - fe.level) / fe.level <= buffer_pct:
-                logger.debug(
-                    "Re-entry blocked: level=%.2f matches failed %.2f (dir=%s phase=%d)",
-                    level, fe.level, direction, session_phase,
+            if fe.level > 0 and abs(level - fe.level) <= abs_buffer:
+                logger.info(
+                    "Re-entry blocked: level=%.2f matches failed %.2f "
+                    "(dir=%s phase=%d buffer=%.2f)",
+                    level,
+                    fe.level,
+                    direction,
+                    session_phase,
+                    abs_buffer,
                 )
                 return True
         return False
@@ -260,13 +334,17 @@ class RegimeDetector:
     def clear_failed_entries(self) -> None:
         """Clear all failed entry records.  Call on new session start."""
         self._failed_entries.clear()
-        logger.debug("Cleared failed entries")
+        self._consecutive_stops = 0
+        self._circuit_breaker_until = 0.0
+        logger.debug("Cleared failed entries and circuit breaker")
 
     # ------------------------------------------------------------------
     # Gap #6 — Second Drive Tracking
     # ------------------------------------------------------------------
 
-    def record_level_approach(self, price: float, key_levels: list[float], timestamp: float) -> None:
+    def record_level_approach(
+        self, price: float, key_levels: list[float], timestamp: float
+    ) -> None:
         """Record when price reaches within 0.3% of a key level."""
         for level in key_levels:
             if level <= 0:
@@ -275,17 +353,23 @@ class RegimeDetector:
             bucket = round(level, 1)  # normalize to avoid float drift
             if proximity <= 0.003:  # within 0.3%
                 if bucket not in self._level_touches:
-                    self._level_touches[bucket] = _LevelTouch(level=level, timestamp=timestamp)
+                    self._level_touches[bucket] = _LevelTouch(
+                        level=level, timestamp=timestamp
+                    )
             elif proximity > 0.005 and bucket in self._level_touches:
                 # Price moved >0.5% away — mark as retreated
                 existing = self._level_touches[bucket]
                 if not existing.retreated:
                     self._level_touches[bucket] = _LevelTouch(
-                        level=existing.level, timestamp=existing.timestamp, retreated=True,
+                        level=existing.level,
+                        timestamp=existing.timestamp,
+                        retreated=True,
                     )
         # Cap to prevent unbounded growth in long sessions
         if len(self._level_touches) > 100:
-            oldest_key = min(self._level_touches, key=lambda k: self._level_touches[k].timestamp)
+            oldest_key = min(
+                self._level_touches, key=lambda k: self._level_touches[k].timestamp
+            )
             del self._level_touches[oldest_key]
 
     def is_second_drive(self, price: float, key_levels: list[float]) -> bool:
@@ -329,21 +413,78 @@ class RegimeDetector:
         broke_low = any(c.low < val for c in recent)
         recovered_above = current_price > val
         if broke_low and recovered_above:
-            return SqueezeSignal(direction="LONG", trapped_level=val, recovery_price=current_price)
+            return SqueezeSignal(
+                direction="LONG", trapped_level=val, recovery_price=current_price
+            )
 
         # Short squeeze: price broke above VAH then recovered below it
         broke_high = any(c.high > vah for c in recent)
         recovered_below = current_price < vah
         if broke_high and recovered_below:
-            return SqueezeSignal(direction="SHORT", trapped_level=vah, recovery_price=current_price)
+            return SqueezeSignal(
+                direction="SHORT", trapped_level=vah, recovery_price=current_price
+            )
 
         return None
+
+    # ------------------------------------------------------------------
+    # Follow-Through Analysis (Fabio)
+    # ------------------------------------------------------------------
+
+    def analyze_follow_through(
+        self, data: list, break_direction: str, break_level: float
+    ) -> dict | None:
+        """Analyze if price continues or reverses after a bubble/break.
+
+        After a big bubble breaks, track next 3 candles:
+        - CONTINUATION: price keeps moving in break direction
+        - REVERSAL: price reverses back toward/through break level
+        - CONSOLIDATION: price stalls
+
+        Returns dict with:
+        - outcome: "CONTINUATION" | "REVERSAL" | "CONSOLIDATION"
+        - strength: 0-1 confidence score
+        """
+        if len(data) < 5 or break_direction not in ("LONG", "SHORT"):
+            return None
+
+        # Get candles after the break (last 3 candles before current)
+        post_break = data[-4:-1]  # 3 candles after break
+        if len(post_break) < 3:
+            return None
+
+        if break_direction == "LONG":
+            # Check if price continued up
+            entry_price = post_break[0].close
+            exit_price = post_break[-1].close
+            continuation = exit_price > entry_price
+            # Check if it reversed (went below break level)
+            reversal = any(c.low < break_level for c in post_break)
+        else:  # SHORT
+            entry_price = post_break[0].close
+            exit_price = post_break[-1].exit_price
+            continuation = exit_price < entry_price
+            reversal = any(c.high > break_level for c in post_break)
+
+        if continuation and not reversal:
+            outcome = "CONTINUATION"
+            strength = 0.8
+        elif reversal:
+            outcome = "REVERSAL"
+            strength = 0.7
+        else:
+            outcome = "CONSOLIDATION"
+            strength = 0.5
+
+        return {"outcome": outcome, "strength": strength}
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _build_snapshot(self, tick: OHLC, amt: AMTResult, now: float) -> _RegimeSnapshot:
+    def _build_snapshot(
+        self, tick: OHLC, amt: AMTResult, now: float
+    ) -> _RegimeSnapshot:
         price = tick.close
         threshold = price * 0.001
 

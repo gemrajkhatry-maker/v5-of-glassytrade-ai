@@ -7,6 +7,7 @@ no FastAPI).  Serialization to/from JSON is handled by the infrastructure layer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 
 # ---------------------------------------------------------------------------
@@ -15,16 +16,49 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class OHLC:
-    """Single OHLCV candlestick with order-flow fields."""
+    """Single OHLCV candlestick with order-flow fields.
+    
+    All monetary values use Decimal for precision in financial calculations.
+    Use OHLC.create() factory for convenient float-to-Decimal conversion.
+    """
     time: str
-    open: float
-    high: float
-    low: float
-    close: float
-    volume: float
-    vwap: float = 0.0
-    taker_buy_volume: float = 0.0
-    delta: float = 0.0
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: Decimal
+    vwap: Decimal = field(default_factory=lambda: Decimal("0"))
+    taker_buy_volume: Decimal = field(default_factory=lambda: Decimal("0"))
+    delta: Decimal = field(default_factory=lambda: Decimal("0"))
+
+    @classmethod
+    def create(
+        cls,
+        time: str,
+        open: float | Decimal,
+        high: float | Decimal,
+        low: float | Decimal,
+        close: float | Decimal,
+        volume: float | Decimal,
+        vwap: float | Decimal = 0,
+        taker_buy_volume: float | Decimal = 0,
+        delta: float | Decimal = 0,
+    ) -> "OHLC":
+        """Factory method that accepts float or Decimal for all numeric fields."""
+        def to_d(v: float | int | str | Decimal) -> Decimal:
+            return Decimal(str(v)) if not isinstance(v, Decimal) else v
+        
+        return cls(
+            time=time,
+            open=to_d(open),
+            high=to_d(high),
+            low=to_d(low),
+            close=to_d(close),
+            volume=to_d(volume),
+            vwap=to_d(vwap),
+            taker_buy_volume=to_d(taker_buy_volume),
+            delta=to_d(delta),
+        )
 
 
 @dataclass(frozen=True)
@@ -90,10 +124,12 @@ class AMTResult:
     leg_poc: float = 0.0
     leg_vah: float = 0.0
     leg_val: float = 0.0
+    swing_delta: float = 0.0
     has_displacement: bool = False
     # Market structure classifier output
     market_structure: str = "BALANCE"
     structure_confidence: int = 0
+    day_type: str = "UNKNOWN"
     # Phase 1: Initial Balance + Prior Day Levels
     ib_high: float = 0.0
     ib_low: float = 0.0
@@ -108,6 +144,7 @@ class AMTResult:
     acceptance_below: bool = False
     rejection_at_high: bool = False
     rejection_at_low: bool = False
+    liquidity_sweep: str = ""  # "SWEEP_HIGH" / "SWEEP_LOW" / ""
     price_velocity: float = 0.0
     # Phase 3: Break Detection
     break_direction: str = ""   # "UP" / "DOWN" / ""
@@ -118,7 +155,14 @@ class AMTResult:
     poc_vs_price: str = ""      # "ALIGNED" / "DIVERGENT" / ""
     lvn_play: dict | None = None
     ofi: float = 0.0  # Order Flow Imbalance from order book (-1 to +1)
-
+    # Developing Value Area (short lookback — adapts fast to large moves)
+    dev_poc: float = 0.0
+    dev_vah: float = 0.0
+    dev_val: float = 0.0
+    # Cushion System State
+    cushion_tier: str = "Conservative"
+    session_pnl: float = 0.0
+    bubble_retests: list[AggressivePrint] = field(default_factory=list)
 
 # ---------------------------------------------------------------------------
 # Strategy Stats
@@ -126,6 +170,11 @@ class AMTResult:
 
 @dataclass(frozen=True)
 class StrategyStats:
+    """Strategy performance statistics.
+    
+    Note: stored as float for JSON serialization compatibility.
+    Internal calculations use Decimal for precision.
+    """
     total_trades: int = 0
     wins: int = 0
     losses: int = 0

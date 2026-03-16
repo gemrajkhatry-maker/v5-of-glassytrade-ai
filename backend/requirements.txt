@@ -17,3 +17,5 @@ mlx>=0.8.0
 mlx-lm>=0.8.0
 # Probability engine
 lightgbm>=4.0.0
+# Config
+pyyaml>=6.0

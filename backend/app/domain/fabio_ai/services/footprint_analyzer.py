@@ -74,9 +74,9 @@ class FootprintAnalyzer:
 
         for i in range(steps + 1):
             price = candle.low + i * actual_step
-            ratio = weights[i]
-            ask_ = round(buy_vol_total * ratio)
-            bid_ = round(sell_vol_total * ratio)
+            ratio = float(weights[i])
+            ask_ = round(float(buy_vol_total) * ratio)
+            bid_ = round(float(sell_vol_total) * ratio)
             if ask_ + bid_ > 0:
                 raw_levels.append((price, bid_, ask_))
                 level_vol = ask_ + bid_

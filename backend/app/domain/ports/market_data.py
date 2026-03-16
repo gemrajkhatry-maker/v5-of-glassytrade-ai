@@ -88,6 +88,21 @@ class MarketDataPort(ABC):
         """
         ...
 
+    async def stream_poll(
+        self, symbols: list[str], poll_interval: float = 3.0
+    ) -> AsyncIterator[dict]:
+        """REST LTP polling fallback when WS produces no data (e.g. MCX OPTFUT).
+
+        Yields the same dict schema as stream_full() but with volume=0.
+        Override in adapters that support REST quote polling.
+        Default raises NotImplementedError so missing overrides are caught early.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not implement stream_poll()"
+        )
+        # Required to satisfy AsyncIterator type — never reached
+        yield {}  # type: ignore[misc]
+
     # ------------------------------------------------------------------
     # Options (optional override)
     # ------------------------------------------------------------------

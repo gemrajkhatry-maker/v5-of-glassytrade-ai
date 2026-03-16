@@ -1,4 +1,4 @@
-"""Incremental fine-tuning — continues training on new examples.
+"""Incremental fine-tuning — legacy adapter path for older training stacks.
 
 Usage:
     python -m scripts.incremental_finetune [--data PATH] [--adapter PATH] [--steps INT]
@@ -33,6 +33,11 @@ def main():
     base_path = args.base_model or os.path.join(poc_dir, "models", "Nanbeige4.1-3B")
     adapter_path = args.adapter or os.path.join(poc_dir, "lora_adapter_mac")
     output_path = args.output or os.path.join(poc_dir, "lora_adapter_mac_incremental")
+
+    print(
+        "WARNING: This script is a legacy Nanbeige/Alpaca incremental fine-tune path. "
+        "The active paper-trading runtime uses the Qwen MLX JSON entry contract."
+    )
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     print(f"Device: {device}")

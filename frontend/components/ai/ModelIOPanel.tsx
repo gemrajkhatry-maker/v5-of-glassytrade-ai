@@ -19,7 +19,15 @@ const ModelIOPanel = React.memo<ModelIOPanelProps>(({ displayAnalysis }) => (
             <div className="border-t border-white/5 pt-2">
                 <div className="text-[9px] text-amber-400/60 uppercase font-bold mb-1">Model &rarr; Output</div>
                 <div className="text-[9px] font-mono text-white/50 leading-relaxed whitespace-pre-wrap break-words">
-                    {displayAnalysis.rawOutput || "No output yet."}
+                    {(() => {
+                        let text = (displayAnalysis.rawOutput || "No output yet.");
+                        // Simple cleanup for structured text
+                        text = text.replace(/^[{\s"']+|[}\s"']+$/g, '')
+                            .replace(/\\n/g, '\n')
+                            .replace(/\\"/g, '"')
+                            .trim();
+                        return text;
+                    })()}
                 </div>
             </div>
         </div>

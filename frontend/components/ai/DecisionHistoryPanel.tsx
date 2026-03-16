@@ -35,7 +35,17 @@ const DecisionHistoryPanel = React.memo<DecisionHistoryPanelProps>(({ llmHistory
                                 <span className="text-white/30 font-mono">{timeStr}</span>
                             </summary>
                             <div className="mt-2 space-y-2">
-                                <div className="text-[9px] text-white/50 leading-relaxed">{entry.rationale}</div>
+                                <div className="text-[9px] text-white/50 leading-relaxed">
+                                    {(() => {
+                                        let text = (entry.rationale || '');
+                                        // Simple cleanup for structured text
+                                        text = text.replace(/Market State:.*?\n/i, '')
+                                            .replace(/Logic:\s*/i, '')
+                                            .replace(/^[{\s"']+|[}\s"']+$/g, '')
+                                            .trim();
+                                        return text;
+                                    })()}
+                                </div>
                                 {entry.inputPrompt && (
                                     <div>
                                         <div className="text-[9px] text-cyan-400/60 uppercase font-bold mb-1">Prompt</div>

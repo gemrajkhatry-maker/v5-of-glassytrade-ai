@@ -51,7 +51,7 @@ class TrainRequest(BaseModel):
     initial_equity: float = Field(100_000.0, gt=0)
     max_risk_pct: float = Field(0.5, gt=0, le=5.0)
     tick_size: float = Field(0.01, gt=0)
-    data_source: str = Field("synthetic", description="'synthetic' or path to CSV")
+    data_source: str = Field(..., description="Path to CSV file with real market data")
     verbose: int = Field(0, ge=0, le=2)
 
 
@@ -93,7 +93,7 @@ class ModelInfo(BaseModel):
 async def start_training(req: TrainRequest, background_tasks: BackgroundTasks):
     """Start an RL training run in the background."""
     from app.domain.fabio_ai.rl.trainer import ValentiniTrainer, TrainingConfig
-    from app.domain.fabio_ai.rl.data_loader import generate_synthetic, load_from_csv
+    from app.domain.fabio_ai.rl.data_loader import load_from_csv
 
     global _trainer
     trainer = _get_trainer()
@@ -114,16 +114,13 @@ async def start_training(req: TrainRequest, background_tasks: BackgroundTasks):
     _trainer = ValentiniTrainer(config=config)
     trainer = _trainer
 
-    # Load data
-    if req.data_source == "synthetic":
-        data = generate_synthetic(5000)
-    else:
-        data = load_from_csv(req.data_source)
-        if not data:
-            raise HTTPException(
-                status_code=400,
-                detail=f"No data found at: {req.data_source}",
-            )
+    # Load data — only real market data from CSV
+    data = load_from_csv(req.data_source)
+    if not data:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No data found at: {req.data_source}",
+        )
 
     def _run_training():
         trainer.train(data=data, verbose=req.verbose)

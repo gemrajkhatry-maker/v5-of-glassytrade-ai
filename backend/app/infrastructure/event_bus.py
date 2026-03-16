@@ -2,11 +2,16 @@
 
 Implements the EventBusPort contract. Handlers are invoked synchronously
 in registration order, keeping the system deterministic and easy to test.
+
+Thread safety: A lock protects the _handlers dict. publish() copies the
+handler list under the lock, then iterates outside it so that handler
+execution does not block subscribe/clear operations.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 from collections import defaultdict
 from typing import Any, Callable
 
@@ -25,13 +30,17 @@ class InMemoryEventBus(EventBusPort):
 
     def __init__(self) -> None:
         self._handlers: dict[type[DomainEvent], list[Callable[..., Any]]] = defaultdict(list)
+        self._lock = threading.Lock()
 
     def subscribe(self, event_type: type[DomainEvent], handler: Callable[..., Any]) -> None:
-        self._handlers[event_type].append(handler)
+        with self._lock:
+            self._handlers[event_type].append(handler)
 
     def publish(self, event: DomainEvent) -> None:
         event_type = type(event)
-        for handler in self._handlers.get(event_type, []):
+        with self._lock:
+            handlers = list(self._handlers.get(event_type, []))
+        for handler in handlers:
             try:
                 handler(event)
             except Exception:
@@ -43,4 +52,5 @@ class InMemoryEventBus(EventBusPort):
 
     def clear(self) -> None:
         """Remove all subscriptions (useful in tests)."""
-        self._handlers.clear()
+        with self._lock:
+            self._handlers.clear()

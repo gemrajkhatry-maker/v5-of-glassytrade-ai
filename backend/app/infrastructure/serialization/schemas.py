@@ -9,6 +9,11 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
+from shared.entities.models import (
+    Side as SharedSide,
+    OrderSide,
+    OrderStatus
+)
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +144,11 @@ class AMTAnalysisDTO(BaseModel):
     poc_signal: str = Field(alias="pocSignal", default="")
     poc_vs_price: str = Field(alias="pocVsPrice", default="")
     lvn_play: Optional[dict[str, Any]] = Field(alias="lvnPlay", default=None)
+    # Cushion System State
+    cushion_tier: str = Field(alias="cushionTier", default="Conservative")
+    llm_thinking: str = Field(alias="llmThinking", default="")
+    llm_json: str = Field(alias="llmJson", default="{}")
+    session_pnl: float = Field(alias="sessionPnl", default=0.0)
 
     model_config = {"populate_by_name": True}
 
@@ -230,6 +240,31 @@ class StrategyStatsDTO(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class PositionEventDTO(BaseModel):
+    id: int
+    event_id: str = Field(alias="eventId", default="")
+    position_id: str = Field(alias="positionId")
+    symbol: str
+    event_type: str = Field(alias="eventType")
+    event_time: str = Field(alias="eventTime", default="")
+    created_at: str = Field(alias="createdAt", default="")
+    side: Optional[str] = None
+    entry_price: Optional[float] = Field(alias="entryPrice", default=None)
+    exit_price: Optional[float] = Field(alias="exitPrice", default=None)
+    stop_loss: Optional[float] = Field(alias="stopLoss", default=None)
+    take_profit: Optional[float] = Field(alias="takeProfit", default=None)
+    source: Optional[str] = None
+    pnl: Optional[float] = None
+    exit_reason: Optional[str] = Field(alias="exitReason", default=None)
+    partial_pct: Optional[float] = Field(alias="partialPct", default=None)
+    size_closed: Optional[float] = Field(alias="sizeClosed", default=None)
+    size_remaining: Optional[float] = Field(alias="sizeRemaining", default=None)
+    realized_pnl: Optional[float] = Field(alias="realizedPnl", default=None)
+    time_in_trade_s: Optional[float] = Field(alias="timeInTradeS", default=None)
+
+    model_config = {"populate_by_name": True}
+
+
 # ---------------------------------------------------------------------------
 # Footprint DTOs
 # ---------------------------------------------------------------------------
@@ -316,10 +351,15 @@ class CommandRequestDTO(BaseModel):
 def ohlc_to_dto(o) -> dict:
     """Convert a domain OHLC to a serialisable dict with camelCase keys."""
     return {
-        "time": o.time, "open": o.open, "high": o.high,
-        "low": o.low, "close": o.close, "volume": o.volume,
-        "vwap": o.vwap, "takerBuyVolume": o.taker_buy_volume,
-        "delta": o.delta,
+        "time": o.time,
+        "open": float(o.open),
+        "high": float(o.high),
+        "low": float(o.low),
+        "close": float(o.close),
+        "volume": float(o.volume),
+        "vwap": float(o.vwap),
+        "takerBuyVolume": float(o.taker_buy_volume),
+        "delta": float(o.delta),
     }
 
 
@@ -355,24 +395,57 @@ def dto_to_weights(d: ModelWeightsDTO):
 def position_to_dto(p) -> dict:
     """Convert a domain Position entity to a serialisable dict."""
     return {
-        "id": p.id, "symbol": p.symbol,
+        "id": p.id,
+        "symbol": p.symbol,
         "side": p.side.value if hasattr(p.side, "value") else p.side,
         "source": p.source.value if hasattr(p.source, "value") else p.source,
-        "entryPrice": p.entry_price, "size": p.size,
-        "stopLoss": p.stop_loss, "takeProfit": p.take_profit,
-        "pnl": p.pnl, "entryTime": p.entry_time,
+        "entryPrice": float(p.entry_price),
+        "size": float(p.size),
+        "stopLoss": float(p.stop_loss),
+        "takeProfit": float(p.take_profit),
+        "pnl": float(p.pnl),
+        "entryTime": p.entry_time,
         "status": p.status.value if hasattr(p.status, "value") else p.status,
-        "exitPrice": p.exit_price, "exitTime": p.exit_time,
-        "closeReason": p.close_reason, "metadata": p.metadata,
-        "partialRealizedPnl": (p.metadata or {}).get("partial_realized_pnl", 0.0),
-        "originalSize": (p.metadata or {}).get("full_size", p.size),
+        "exitPrice": float(p.exit_price) if p.exit_price is not None else None,
+        "exitTime": p.exit_time,
+        "closeReason": p.close_reason,
+        "metadata": p.metadata,
+        "partialRealizedPnl": float((p.metadata or {}).get("partial_realized_pnl", 0.0)),
+        "originalSize": float((p.metadata or {}).get("full_size", p.size)),
     }
+
+
+def position_event_to_dto(event: dict[str, Any]) -> dict:
+    """Convert a persisted lifecycle event row to a serialisable dict."""
+    return PositionEventDTO(
+        id=event.get("id", 0),
+        eventId=event.get("event_id", "") or "",
+        positionId=event.get("position_id", ""),
+        symbol=event.get("symbol", ""),
+        eventType=event.get("event_type", ""),
+        eventTime=event.get("event_time", "") or "",
+        createdAt=event.get("created_at", "") or "",
+        side=event.get("side"),
+        entryPrice=event.get("entry_price"),
+        exitPrice=event.get("exit_price"),
+        stopLoss=event.get("stop_loss"),
+        takeProfit=event.get("take_profit"),
+        source=event.get("source"),
+        pnl=event.get("pnl"),
+        exitReason=event.get("exit_reason"),
+        partialPct=event.get("partial_pct"),
+        sizeClosed=event.get("size_closed"),
+        sizeRemaining=event.get("size_remaining"),
+        realizedPnl=event.get("realized_pnl"),
+        timeInTradeS=event.get("time_in_trade_s"),
+    ).model_dump(by_alias=True)
 
 
 def portfolio_to_dto(p) -> dict:
     """Convert a domain Portfolio aggregate to a serialisable dict."""
     return {
-        "balance": p.balance, "equity": p.equity,
+        "balance": float(p.balance),
+        "equity": float(p.equity),
         "leverage": p.leverage,
         "positions": [position_to_dto(pos) for pos in p.positions],
         "closedTrades": [position_to_dto(ct) for ct in p.closed_trades[-50:]],
@@ -395,8 +468,14 @@ def signal_to_dto(s) -> Optional[dict]:
     }
 
 
-def amt_result_to_dto(r) -> dict:
-    """Convert domain AMTResult to serialisable dict."""
+def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dict:
+    """Convert domain AMTResult to serialisable dict.
+
+    Args:
+        r: AMTResult domain object (frozen).
+        llm_thinking: Reasoning model thinking text (from session state).
+        llm_json: Reasoning model JSON output (from session state).
+    """
     return {
         "marketState": r.market_state, "poc": r.poc,
         "valueAreaHigh": r.value_area_high, "valueAreaLow": r.value_area_low,
@@ -414,53 +493,65 @@ def amt_result_to_dto(r) -> dict:
              "delta": ap.delta, "side": ap.side}
             for ap in r.aggressive_prints
         ],
-        "cvdSlope": getattr(r, "cvd_slope", 0.0),
-        "cvdDivergence": getattr(r, "cvd_divergence", ""),
-        "profileShape": getattr(r, "profile_shape", ""),
-        "sessionVwap": getattr(r, "session_vwap", 0.0),
-        "vwapUpper1": getattr(r, "vwap_upper_1", 0.0),
-        "vwapLower1": getattr(r, "vwap_lower_1", 0.0),
-        "vwapUpper2": getattr(r, "vwap_upper_2", 0.0),
-        "vwapLower2": getattr(r, "vwap_lower_2", 0.0),
-        "balanceRatio": getattr(r, "balance_ratio", 0.0),
+        # All fields below are guaranteed to exist on AMTResult (frozen
+        # dataclass with defaults) — direct access avoids getattr() overhead.
+        "cvdSlope": r.cvd_slope,
+        "cvdDivergence": r.cvd_divergence,
+        "profileShape": r.profile_shape,
+        "sessionVwap": r.session_vwap,
+        "vwapUpper1": r.vwap_upper_1,
+        "vwapLower1": r.vwap_lower_1,
+        "vwapUpper2": r.vwap_upper_2,
+        "vwapLower2": r.vwap_lower_2,
+        "balanceRatio": r.balance_ratio,
         "legProfile": [
             {"price": p.price, "volume": p.volume,
              "buyVolume": p.buy_volume, "sellVolume": p.sell_volume}
-            for p in getattr(r, "leg_profile", ())
+            for p in r.leg_profile
         ],
-        "legLvns": list(getattr(r, "leg_lvns", ())),
-        "legPoc": getattr(r, "leg_poc", 0.0),
-        "legVah": getattr(r, "leg_vah", 0.0),
-        "legVal": getattr(r, "leg_val", 0.0),
-        "hasDisplacement": getattr(r, "has_displacement", False),
-        "ofi": getattr(r, "ofi", 0.0),
+        "legLvns": list(r.leg_lvns),
+        "legPoc": r.leg_poc,
+        "legVah": r.leg_vah,
+        "legVal": r.leg_val,
+        "hasDisplacement": r.has_displacement,
+        "ofi": r.ofi,
         # Market structure
-        "marketStructure": getattr(r, "market_structure", "BALANCE"),
-        "structureConfidence": getattr(r, "structure_confidence", 0),
+        "marketStructure": r.market_structure,
+        "structureConfidence": r.structure_confidence,
         # Initial Balance
-        "ibHigh": getattr(r, "ib_high", 0.0),
-        "ibLow": getattr(r, "ib_low", 0.0),
-        "ibComplete": getattr(r, "ib_complete", False),
+        "ibHigh": r.ib_high,
+        "ibLow": r.ib_low,
+        "ibComplete": r.ib_complete,
         # Prior day levels
-        "priorPoc": getattr(r, "prior_poc", 0.0),
-        "priorVah": getattr(r, "prior_vah", 0.0),
-        "priorVal": getattr(r, "prior_val", 0.0),
-        "gapType": getattr(r, "gap_type", ""),
-        "openingBias": getattr(r, "opening_bias", ""),
+        "priorPoc": r.prior_poc,
+        "priorVah": r.prior_vah,
+        "priorVal": r.prior_val,
+        "gapType": r.gap_type,
+        "openingBias": r.opening_bias,
         # Acceptance / Rejection
-        "acceptanceAbove": getattr(r, "acceptance_above", False),
-        "acceptanceBelow": getattr(r, "acceptance_below", False),
-        "rejectionAtHigh": getattr(r, "rejection_at_high", False),
-        "rejectionAtLow": getattr(r, "rejection_at_low", False),
-        "priceVelocity": getattr(r, "price_velocity", 0.0),
+        "acceptanceAbove": r.acceptance_above,
+        "acceptanceBelow": r.acceptance_below,
+        "rejectionAtHigh": r.rejection_at_high,
+        "rejectionAtLow": r.rejection_at_low,
+        "priceVelocity": r.price_velocity,
         # Break detection
-        "breakDirection": getattr(r, "break_direction", ""),
-        "breakType": getattr(r, "break_type", ""),
-        "breakLevel": getattr(r, "break_level", 0.0),
+        "breakDirection": r.break_direction,
+        "breakType": r.break_type,
+        "breakLevel": r.break_level,
         # POC migration + LVN play
-        "pocSignal": getattr(r, "poc_signal", ""),
-        "pocVsPrice": getattr(r, "poc_vs_price", ""),
-        "lvnPlay": getattr(r, "lvn_play", None),
+        "pocSignal": r.poc_signal,
+        "pocVsPrice": r.poc_vs_price,
+        "lvnPlay": r.lvn_play,
+        # Developing VA (short lookback)
+        "devPoc": r.dev_poc,
+        "devVah": r.dev_vah,
+        "devVal": r.dev_val,
+        # Cushion System State
+        "cushionTier": r.cushion_tier,
+        "sessionPnl": r.session_pnl,
+        # Reasoning model output (injected from session state)
+        "llmThinking": llm_thinking,
+        "llmJson": llm_json,
     }
 
 

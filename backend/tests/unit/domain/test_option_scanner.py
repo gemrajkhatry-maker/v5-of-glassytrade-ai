@@ -61,19 +61,19 @@ class TestOptionSelector:
         self.selector = OptionSelector()
 
     def test_select_strike_long(self):
-        """NIFTY 23450 LONG should return one NIFTY strike above ATM (23500)."""
+        """NIFTY 23450 LONG should return ATM strike (23450) for max gamma."""
         result = self.selector.select_strike("NIFTY", 23450.0, "LONG")
-        assert result == 23500
+        assert result == 23450
 
     def test_select_strike_short(self):
-        """NIFTY 23450 SHORT should return one NIFTY strike below ATM (23400)."""
+        """NIFTY 23450 SHORT should return ATM strike (23450) for max gamma."""
         result = self.selector.select_strike("NIFTY", 23450.0, "SHORT")
-        assert result == 23400
+        assert result == 23450
 
     def test_select_strike_banknifty(self):
-        """BANKNIFTY 51500 LONG should use 100-point interval → 51600."""
+        """BANKNIFTY 51500 LONG should return ATM (51500) for max gamma."""
         result = self.selector.select_strike("BANKNIFTY", 51500.0, "LONG")
-        assert result == 51600
+        assert result == 51500
 
     def test_build_symbol(self):
         """build_symbol should format Dhan-style CE symbol correctly."""
@@ -237,8 +237,11 @@ class TestOptionScannerService:
 
         broker.get_option_chain.side_effect = get_chain
 
-        scanner = self._make_scanner(broker)
-        result = scanner.scan_best(underlyings=["NIFTY", "BANKNIFTY"], preferred_option_type="CE")
+        from unittest.mock import patch
+        import app.config as app_config
+        with patch.object(app_config.settings, "SCANNER_MODE", "nse_options"):
+            scanner = self._make_scanner(broker)
+            result = scanner.scan_best(underlyings=["NIFTY", "BANKNIFTY"], preferred_option_type="CE")
 
         assert result is not None
         # NIFTY has higher volume (500K vs 10K) → higher score

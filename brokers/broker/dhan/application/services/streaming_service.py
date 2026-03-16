@@ -76,7 +76,8 @@ class StreamingService(BaseDhanService):
             inst = instrument_map.get(sid)
             if inst:
                 try:
-                    segments.append(exchange_to_segment_name(inst.exchange))
+                    seg = exchange_to_segment_name(inst.exchange)
+                    segments.append(seg)
                 except Exception:
                     segments.append("NSE_EQ")
             else:
@@ -339,23 +340,14 @@ class StreamingService(BaseDhanService):
 
         exchange_segments = self._exchange_segments_for(security_ids, instrument_map)
 
-        # Decide feed type based on exchange: MCX needs FULL, NSE/NFO use QUOTE
-        has_mcx = any(
-            inst.exchange == Exchange.MCX
-            for inst in instrument_map.values()
-        )
-        if has_mcx:
-            feed_type = FEED_TYPE_FULL
-            accepted_types = ("full",)
-        else:
-            feed_type = FEED_TYPE_QUOTE
-            accepted_types = ("quote", "full")  # accept either
+        # Consolidate: Always use FEED_TYPE_FULL (21) for all exchange segments
+        feed_type = FEED_TYPE_FULL
+        accepted_types = ("full", "quote", "tick")
 
         ws_client = self._make_ws_client()
         await ws_client.connect()
         try:
-            await ws_client.subscribe(security_ids, feed_type=feed_type,
-                                      exchange_segments=exchange_segments)
+            await ws_client.subscribe(security_ids, feed_type=feed_type, exchange_segments=exchange_segments)
             async for msg in ws_client.messages():
                 if msg.type in accepted_types:
                     sid = str(msg.data.get("security_id", ""))

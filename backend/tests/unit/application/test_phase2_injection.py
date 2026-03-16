@@ -10,7 +10,9 @@ class TestConstructorInjection:
         broker = MagicMock()
         gen_ai = MagicMock()
         svc = TradingSessionService(bus, broker, gen_ai)
-        assert svc._amt_handler is not None
+        # After multi-symbol refactor, handlers are created per-symbol on demand.
+        # _amt_handlers is an empty dict at startup, _default_amt_handler holds config template.
+        assert isinstance(svc._amt_handlers, dict)
         assert svc._lifecycle_handler is not None
 
     def test_custom_handler_injection(self):
@@ -20,4 +22,5 @@ class TestConstructorInjection:
         gen_ai = MagicMock()
         mock_amt = MagicMock()
         svc = TradingSessionService(bus, broker, gen_ai, amt_handler=mock_amt)
-        assert svc._amt_handler is mock_amt
+        # The injected handler is stored as the default template for per-symbol creation
+        assert svc._default_amt_handler is mock_amt

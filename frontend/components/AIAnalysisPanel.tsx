@@ -16,7 +16,7 @@ interface AIAnalysisPanelProps {
     overseerReason?: string;
 }
 
-export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, depth20Active, overseerAction, overseerReason }) => {
+const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, depth20Active, overseerAction, overseerReason }) => {
     // 1. Fallback: If both are missing -> Initializing
     if (!analysis && !amtResult) {
         return (
@@ -39,13 +39,20 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
 
     // 2. Monitoring Mode: AMT ready, but no GenAI signal yet
     // We construct a "dummy" analysis object from AMT data to render the panel in "Monitoring" mode
-    const effectiveAnalysis = useMemo<GenAIAnalysis>(() => analysis || {
-        direction: 'FLAT',
-        rationale: "Monitoring market state and order flow. Waiting for Fabio Playbook setup.",
-        confidence: 'Low',
-        marketState: amtResult?.marketState || 'BALANCED',
-        aggression: `Score:${amtResult?.aggression?.toFixed(2) || "0.00"}`
-    }, [analysis, amtResult?.marketState, amtResult?.aggression]);
+    // MODIFIED: Use new reasoning model data if available!
+    const effectiveAnalysis = useMemo<GenAIAnalysis>(() => {
+        if (analysis) return analysis;
+        
+        return {
+            direction: 'FLAT',
+            rationale: amtResult?.llmThinking || "Monitoring market state and order flow. Waiting for Fabio Playbook setup.",
+            confidence: 'Low',
+            marketState: amtResult?.marketState || 'BALANCED',
+            aggression: `Score:${amtResult?.aggression?.toFixed(2) || "0.00"}`,
+            rawOutput: amtResult?.llmThinking || "",
+            inputPrompt: "Reasoning Model Analysis" // Placeholder for now
+        };
+    }, [analysis, amtResult?.marketState, amtResult?.aggression, amtResult?.llmThinking]);
 
     // Always prefer AMT data for market state and aggression (real market data > LLM defaults)
     const displayAnalysis = useMemo(() => ({
@@ -275,16 +282,15 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                     <div className="flex justify-between items-center pt-1 border-t border-white/5">
                         <div className="flex items-center gap-2">
                             <span className="text-[10px] text-white/40">Shape</span>
-                            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                                amtResult?.profileShape === 'B' ? 'bg-purple-500/20 text-purple-400' :
+                            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${amtResult?.profileShape === 'B' ? 'bg-purple-500/20 text-purple-400' :
                                 amtResult?.profileShape === 'P' ? 'bg-red-500/20 text-red-400' :
-                                amtResult?.profileShape === 'b' ? 'bg-green-500/20 text-green-400' :
-                                'bg-white/10 text-white/40'
-                            }`}>
+                                    amtResult?.profileShape === 'b' ? 'bg-green-500/20 text-green-400' :
+                                        'bg-white/10 text-white/40'
+                                }`}>
                                 {amtResult?.profileShape === 'B' ? 'B Bimodal' :
-                                 amtResult?.profileShape === 'P' ? 'P Top-heavy' :
-                                 amtResult?.profileShape === 'b' ? 'b Bottom-heavy' :
-                                 amtResult?.profileShape === 'D' ? 'D Balanced' : '—'}
+                                    amtResult?.profileShape === 'P' ? 'P Top-heavy' :
+                                        amtResult?.profileShape === 'b' ? 'b Bottom-heavy' :
+                                            amtResult?.profileShape === 'D' ? 'D Balanced' : '—'}
                             </span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -315,13 +321,12 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                 </div>
                 <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2">
                     <div className="flex justify-between items-center">
-                        <span className={`text-xs font-bold ${
-                            amtResult?.marketStructure === 'TREND_UP' ? 'text-emerald-400' :
+                        <span className={`text-xs font-bold ${amtResult?.marketStructure === 'TREND_UP' ? 'text-emerald-400' :
                             amtResult?.marketStructure === 'TREND_DOWN' ? 'text-red-400' :
-                            amtResult?.marketStructure === 'BREAKOUT' ? 'text-orange-400' :
-                            amtResult?.marketStructure === 'BREAKDOWN' ? 'text-rose-400' :
-                            'text-blue-300'
-                        }`}>
+                                amtResult?.marketStructure === 'BREAKOUT' ? 'text-orange-400' :
+                                    amtResult?.marketStructure === 'BREAKDOWN' ? 'text-rose-400' :
+                                        'text-blue-300'
+                            }`}>
                             {amtResult?.marketStructure || 'BALANCE'}
                         </span>
                         <span className="text-[10px] font-mono text-white/40">
@@ -373,18 +378,16 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                     </div>
                     {/* Break Detection */}
                     {amtResult?.breakDirection ? (
-                        <div className={`px-2 py-1.5 rounded border flex items-center justify-between ${
-                            amtResult.breakType === 'INITIATIVE' ? 'bg-orange-500/10 border-orange-500/20' :
+                        <div className={`px-2 py-1.5 rounded border flex items-center justify-between ${amtResult.breakType === 'INITIATIVE' ? 'bg-orange-500/10 border-orange-500/20' :
                             amtResult.breakType === 'RESPONSIVE' ? 'bg-cyan-500/10 border-cyan-500/20' :
-                            'bg-purple-500/10 border-purple-500/20'
-                        }`}>
+                                'bg-purple-500/10 border-purple-500/20'
+                            }`}>
                             <div className="flex items-center gap-1.5">
                                 <Navigation className={`w-3 h-3 ${amtResult.breakDirection === 'UP' ? 'text-emerald-400 rotate-0' : 'text-red-400 rotate-180'}`} />
-                                <span className={`text-[9px] font-bold uppercase ${
-                                    amtResult.breakType === 'INITIATIVE' ? 'text-orange-400' :
+                                <span className={`text-[9px] font-bold uppercase ${amtResult.breakType === 'INITIATIVE' ? 'text-orange-400' :
                                     amtResult.breakType === 'RESPONSIVE' ? 'text-cyan-400' :
-                                    'text-purple-400'
-                                }`}>{amtResult.breakType} BREAK {amtResult.breakDirection}</span>
+                                        'text-purple-400'
+                                    }`}>{amtResult.breakType} BREAK {amtResult.breakDirection}</span>
                             </div>
                             <span className="text-[9px] font-mono text-white/40">@ {amtResult.breakLevel?.toFixed(2)}</span>
                         </div>
@@ -395,11 +398,10 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                     {amtResult?.pocSignal && (
                         <div className="flex justify-between items-center pt-1 border-t border-white/5">
                             <span className="text-[10px] text-white/40">POC Signal</span>
-                            <span className={`text-[9px] font-mono font-bold ${
-                                amtResult.pocSignal.includes('BULLISH') ? 'text-emerald-400' :
+                            <span className={`text-[9px] font-mono font-bold ${amtResult.pocSignal.includes('BULLISH') ? 'text-emerald-400' :
                                 amtResult.pocSignal.includes('BEARISH') ? 'text-red-400' :
-                                'text-yellow-400'
-                            }`}>{amtResult.pocSignal.replace('POC_', '').replace('_', ' ')}</span>
+                                    'text-yellow-400'
+                                }`}>{amtResult.pocSignal.replace('POC_', '').replace('_', ' ')}</span>
                         </div>
                     )}
                     {amtResult?.pocVsPrice && (
@@ -480,19 +482,17 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                         {amtResult?.gapType && (
                             <div className="flex justify-between">
                                 <span className="text-white/40">Gap</span>
-                                <span className={`font-mono font-bold ${
-                                    amtResult.gapType === 'LARGE' ? 'text-red-400' :
+                                <span className={`font-mono font-bold ${amtResult.gapType === 'LARGE' ? 'text-red-400' :
                                     amtResult.gapType === 'MEDIUM' ? 'text-orange-400' : 'text-white/50'
-                                }`}>{amtResult.gapType}</span>
+                                    }`}>{amtResult.gapType}</span>
                             </div>
                         )}
                         {amtResult?.openingBias && (
                             <div className="flex justify-between">
                                 <span className="text-white/40">Opening Bias</span>
-                                <span className={`font-mono font-bold ${
-                                    amtResult.openingBias === 'LONG_BIAS' ? 'text-emerald-400' :
+                                <span className={`font-mono font-bold ${amtResult.openingBias === 'LONG_BIAS' ? 'text-emerald-400' :
                                     amtResult.openingBias === 'SHORT_BIAS' ? 'text-red-400' : 'text-white/50'
-                                }`}>{amtResult.openingBias.replace('_BIAS', '')}</span>
+                                    }`}>{amtResult.openingBias.replace('_BIAS', '')}</span>
                             </div>
                         )}
                         {(amtResult?.priceVelocity ?? 0) > 0 && (
@@ -535,12 +535,11 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                             </div>
                             <div className="flex justify-between items-center">
                                 <span className="text-[10px] text-white/40">Regime</span>
-                                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                                    agentDecision.regime === 'TRENDING' ? 'bg-purple-500/20 text-purple-400' :
+                                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${agentDecision.regime === 'TRENDING' ? 'bg-purple-500/20 text-purple-400' :
                                     agentDecision.regime === 'BALANCED' ? 'bg-blue-500/20 text-blue-400' :
-                                    agentDecision.regime === 'VOLATILE' ? 'bg-orange-500/20 text-orange-400' :
-                                    'bg-white/10 text-white/40'
-                                }`}>{agentDecision.regime}</span>
+                                        agentDecision.regime === 'VOLATILE' ? 'bg-orange-500/20 text-orange-400' :
+                                            'bg-white/10 text-white/40'
+                                    }`}>{agentDecision.regime}</span>
                             </div>
                             <div className="flex justify-between items-center">
                                 <span className="text-[10px] text-white/40">Timing</span>
@@ -574,14 +573,13 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                             <>
                                 <div className="flex justify-between items-center">
                                     <span className="text-[10px] text-white/40">Action</span>
-                                    <span className={`text-xs font-bold uppercase ${
-                                        overseerAction === 'HOLD' ? 'text-blue-300' :
+                                    <span className={`text-xs font-bold uppercase ${overseerAction === 'HOLD' ? 'text-blue-300' :
                                         overseerAction === 'TIGHTEN' ? 'text-yellow-400' :
-                                        overseerAction === 'FULL_EXIT' ? 'text-red-400' :
-                                        overseerAction === 'PARTIAL' ? 'text-orange-400' :
-                                        overseerAction === 'ADD' ? 'text-green-400' :
-                                        'text-white/60'
-                                    }`}>{overseerAction}</span>
+                                            overseerAction === 'FULL_EXIT' ? 'text-red-400' :
+                                                overseerAction === 'PARTIAL' ? 'text-orange-400' :
+                                                    overseerAction === 'ADD' ? 'text-green-400' :
+                                                        'text-white/60'
+                                        }`}>{overseerAction}</span>
                                 </div>
                                 {overseerReason && (
                                     <div className="text-[9px] text-white/40 font-mono leading-relaxed">
@@ -705,14 +703,13 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                                         ) : (
                                             <span className="text-white/20">Full exit</span>
                                         )}
-                                        <span className={`font-mono px-1 py-0.5 rounded text-[7px] ${
-                                            t.closeReason === 'TAKE_PROFIT' || t.closeReason === 'PARTIAL_TAKE_PROFIT' ? 'bg-green-500/20 text-green-400' :
+                                        <span className={`font-mono px-1 py-0.5 rounded text-[7px] ${t.closeReason === 'TAKE_PROFIT' || t.closeReason === 'PARTIAL_TAKE_PROFIT' ? 'bg-green-500/20 text-green-400' :
                                             t.closeReason === 'STOP_LOSS' ? 'bg-red-500/20 text-red-400' :
-                                            t.closeReason === 'SCRATCH' ? 'bg-yellow-500/20 text-yellow-400' :
-                                            t.closeReason === 'TRAILING_STOP' ? 'bg-blue-500/20 text-blue-400' :
-                                            t.closeReason === 'TIME_STOP' ? 'bg-purple-500/20 text-purple-400' :
-                                            'bg-white/10 text-white/40'
-                                        }`}>{t.closeReason || '—'}</span>
+                                                t.closeReason === 'SCRATCH' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                    t.closeReason === 'TRAILING_STOP' ? 'bg-blue-500/20 text-blue-400' :
+                                                        t.closeReason === 'TIME_STOP' ? 'bg-purple-500/20 text-purple-400' :
+                                                            'bg-white/10 text-white/40'
+                                            }`}>{t.closeReason || '—'}</span>
                                     </div>
                                 </div>
                             );
@@ -729,7 +726,32 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
                         {displayAnalysis.direction === 'FLAT' ? "MONITORING MARKET" : `ENTRY SIGNAL: ${displayAnalysis.direction}`}
                     </div>
                     <p className="leading-relaxed font-light text-[10px] line-clamp-3">
-                        {displayAnalysis.rationale.split('Trigger:')[0].trim() || "Analyzing order flow and market structure for Fabio Playbook setups."}
+                        {(() => {
+                            let text = displayAnalysis.rationale;
+                            
+                            // 1. Check if the rationale itself is a JSON string
+                            try {
+                                if (text.trim().startsWith('{')) {
+                                    const parsed = JSON.parse(text);
+                                    if (parsed.rationale) {
+                                        text = parsed.rationale;
+                                    } else if (parsed.reason) {
+                                        text = parsed.reason;
+                                    }
+                                }
+                            } catch (e) {
+                                // Not valid JSON or failed to parse, proceed with regex cleanup
+                            }
+
+                            // 2. Existing split/cleanup logic
+                            text = text.split('Trigger:')[0].trim();
+                            text = text.replace(/Market State:.*?\n/i, '')
+                                .replace(/Logic:\s*/i, '')
+                                .replace(/^[{\s"']+|[}\s"']+$/g, '')
+                                .trim();
+                            
+                            return text || "Analyzing market structure...";
+                        })()}
                     </p>
                 </div>
             </div>
@@ -740,3 +762,7 @@ export const AIAnalysisPanel: React.FC<AIAnalysisPanelProps> = ({ analysis, amtR
         </div>
     );
 };
+
+// Wrap in React.memo to avoid re-renders when parent state changes
+// but AIAnalysisPanel props have not changed.
+export const AIAnalysisPanel = React.memo(AIAnalysisPanelInner);

@@ -13,6 +13,7 @@ import {
   Logical
 } from 'lightweight-charts';
 import { OHLCData, ChartConfig, TradeSignal, TradePosition, AIAnalysis, AMTAnalysis, ChartMode, FootprintCandle, AggressivePrint } from '../types';
+import { Brain, Cpu, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ChartSceneProps {
   data: OHLCData[];
@@ -28,6 +29,8 @@ interface ChartSceneProps {
   // New Props for Prepared Data
   footprintData: Record<string, FootprintCandle> | null;
   cumulativeDeltas: number[];
+  tickBus?: EventTarget;
+  symbol?: string;
 }
 
 // Helper to convert Hex to RGBA for intensity
@@ -57,7 +60,9 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   mode = 'STANDARD',
   isHidden = false,
   footprintData,
-  cumulativeDeltas
+  cumulativeDeltas,
+  tickBus,
+  symbol
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -102,6 +107,10 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     prevAmtRef.current = amtAnalysis;
     return amtAnalysis;
   }, [amtAnalysis]);
+
+  // Stabilize data reference — only update when array length changes (new candle boundary).
+  // Prevents canvas overlay from redrawing on every intra-candle tick update.
+  const stableData = useMemo(() => data, [data.length]);
 
   // 1. Initialize Chart
   useEffect(() => {
@@ -211,12 +220,63 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     resizeObserver.observe(chartContainerRef.current);
 
+    // Initial Data Load
+    const IST_OFFSET = 19800; // 5h30m in seconds
+    const toIST = (timeStr: string) => (new Date(timeStr).getTime() / 1000 + IST_OFFSET) as any;
+
+    candleSeries.setData(data.map(d => ({ ...d, time: toIST(d.time as string) })));
+    const volumeData = data.map(d => ({
+      time: toIST(d.time as string),
+      value: d.volume,
+      color: d.close >= d.open ? '#22c55e60' : '#ef444460'
+    }));
+    volumeSeries.setData(volumeData);
+
     return () => {
       resizeObserver.disconnect();
       chart.remove();
       initializedRef.current = false;
     };
-  }, []);
+  }, []); // Only runs once on mount
+
+  // 2. Realtime Subscription via EventBus
+  useEffect(() => {
+    if (!tickBus || !symbol || !candleSeriesRef.current || !volumeSeriesRef.current) return;
+
+    const handleTick = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail.symbol !== symbol) return;
+
+      const { tick, fullData } = customEvent.detail;
+
+      // Common Time
+      const unixTime = (new Date(tick.time).getTime() / 1000 + 19800) as any;
+
+      // Update Candlestick directly Native API
+      candleSeriesRef.current?.update({
+        ...tick,
+        time: unixTime
+      } as any);
+
+      // Update Volume Native API
+      volumeSeriesRef.current?.update({
+        time: unixTime,
+        value: tick.volume,
+        color: tick.close >= tick.open ? '#22c55e80' : '#ef444480'
+      });
+
+      // Optional: Update predictions if we want smooth native rendering there too
+      // But for now, we just update the overlay since we have the data
+      if (overlayRef.current) {
+        // We'll let the standard overlay draw interval handle it, or we could trigger a tiny redraw here
+      }
+    };
+
+    tickBus.addEventListener('tick', handleTick);
+    return () => {
+      tickBus.removeEventListener('tick', handleTick);
+    };
+  }, [tickBus, symbol]);
 
   useEffect(() => {
     if (!isHidden && chartRef.current && chartContainerRef.current) {
@@ -256,8 +316,8 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           }
         }
 
-        if (mode === 'FOOTPRINT' && footprintData && data.length > 0) {
-          drawFootprint(ctx, canvas, chart, series, data, footprintData, cumulativeDeltas, config, stableAmtAnalysis);
+        if (mode === 'FOOTPRINT' && footprintData && stableData.length > 0) {
+          drawFootprint(ctx, canvas, chart, series, stableData, footprintData, cumulativeDeltas, config, stableAmtAnalysis);
         }
       } catch (e) {
         console.error("Overlay draw error", e);
@@ -275,7 +335,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRangeChange);
     };
 
-  }, [stableAmtAnalysis, data, footprintData, cumulativeDeltas, config, mode, isHidden]);
+  }, [stableAmtAnalysis, stableData, footprintData, cumulativeDeltas, config, mode, isHidden]);
 
 
   // Helper: Draw Aggressive Bubbles
@@ -1065,8 +1125,90 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur px-3 py-1 rounded-full border border-white/5 text-[10px] text-white/50 z-30 pointer-events-none uppercase tracking-wider">
         {mode === 'FOOTPRINT' ? 'ORDERFLOW FOOTPRINT' : 'STANDARD CANDLESTICKS'}
       </div>
+
+      {/* LLM Reasoning Card */}
+      {amtAnalysis?.llmThinking && (
+        <div className="absolute top-4 right-4 z-40 w-72 max-h-[80%] overflow-hidden">
+          <ReasoningCard thinking={amtAnalysis.llmThinking} jsonResult={amtAnalysis.llmJson} />
+        </div>
+      )}
     </div>
   );
 };
 
-export default React.memo(ChartScene);
+interface ReasoningCardProps {
+  thinking: string;
+  jsonResult?: string;
+}
+
+const ReasoningCard: React.FC<ReasoningCardProps> = ({ thinking, jsonResult }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+  
+  const parsedJson = useMemo(() => {
+    try {
+      return jsonResult ? JSON.parse(jsonResult) : null;
+    } catch (e) {
+      return null;
+    }
+  }, [jsonResult]);
+
+  const decision = parsedJson?.setup || parsedJson?.direction || "ANALYZING";
+  const isYes = decision.includes("YES") || decision.includes("LONG") || decision.includes("SHORT");
+
+  return (
+    <div className="flex flex-col bg-slate-900/80 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl overflow-hidden font-sans">
+      {/* Header */}
+      <div className="px-3 py-2 bg-blue-600/20 border-b border-white/5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Brain className="w-4 h-4 text-blue-400" />
+          <span className="text-[10px] font-bold text-blue-100 uppercase tracking-widest">AI Reasoning</span>
+        </div>
+        <button 
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="p-1 hover:bg-white/10 rounded-md transition-colors"
+        >
+          {isExpanded ? <ChevronDown className="w-3 h-3 text-white/50" /> : <ChevronUp className="w-3 h-3 text-white/50" />}
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className={`transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-96' : 'max-h-0'} overflow-y-auto custom-scrollbar`}>
+        <div className="p-3 text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap font-mono italic opacity-90 border-b border-white/5 bg-black/20">
+          {thinking}
+        </div>
+      </div>
+
+      {/* Outcome Footer */}
+      <div className="p-3 flex items-center justify-between bg-black/40">
+        <div className="flex flex-col">
+          <span className="text-[9px] text-white/30 uppercase font-bold tracking-tighter italic">Conclusion</span>
+          <span className={`text-xs font-black uppercase tracking-wider ${isYes ? 'text-emerald-400' : 'text-slate-400'}`}>
+            {decision}
+          </span>
+        </div>
+        <div className={`p-1.5 rounded-lg ${isYes ? 'bg-emerald-500/20 border-emerald-500/30' : 'bg-slate-500/20 border-slate-500/30'} border`}>
+          <Cpu className={`w-4 h-4 ${isYes ? 'text-emerald-400' : 'text-slate-400'}`} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Custom comparator to avoid expensive re-renders when only reference identity
+// changes but the visually-relevant data has not actually changed.
+function chartSceneAreEqual(prev: ChartSceneProps, next: ChartSceneProps): boolean {
+    if (prev.mode !== next.mode) return false;
+    if (prev.isHidden !== next.isHidden) return false;
+    if (prev.symbol !== next.symbol) return false;
+    if (prev.config !== next.config) return false;
+    if (prev.data.length !== next.data.length) return false;
+    if (prev.positions.length !== next.positions.length) return false;
+    if ((prev.closedTrades?.length ?? 0) !== (next.closedTrades?.length ?? 0)) return false;
+    if (prev.cumulativeDeltas.length !== next.cumulativeDeltas.length) return false;
+    if (prev.amtAnalysis !== next.amtAnalysis) return false;
+    if (prev.activeSignal !== next.activeSignal) return false;
+    if (prev.footprintData !== next.footprintData) return false;
+    return true;
+}
+
+export default React.memo(ChartScene, chartSceneAreEqual);

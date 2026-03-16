@@ -326,6 +326,7 @@ class DhanWebSocketClient(IWebSocketClient):
             "InstrumentCount": len(security_ids),
             "InstrumentList": instrument_list,
         }
+        logger.info(f"WS SEND subscription: {json.dumps(message)}")
         try:
             await self._ws.send(json.dumps(message))
             logger.debug(f"Subscription sent for {len(security_ids)} instruments")
@@ -516,13 +517,15 @@ class DhanWebSocketClient(IWebSocketClient):
           50 Disconnect 10 bytes  — ReasonCode(u16)
         """
         if len(data) < 8:
-            logger.debug(f"Binary packet too short ({len(data)} bytes), skipping")
+            logger.info(f"Binary packet too short ({len(data)} bytes), skipping")
             return None
 
         rc        = data[0]
         seg_code  = data[1]
         ws_sec_id = struct.unpack_from('<I', data, 4)[0]   # offset 4, NOT 2
         segment   = _SEGMENT_MAP.get(seg_code, str(seg_code))
+
+        logger.debug(f"WS Recv len={len(data)} rc={rc} segment={segment} ws_sec_id={ws_sec_id}")
 
         # Resolve WS internal ID → REST API security_id (set by subscribe caller)
         rest_id = self._ws_sid_to_rest.get(ws_sec_id, str(ws_sec_id))
@@ -639,7 +642,7 @@ class DhanWebSocketClient(IWebSocketClient):
                 )
 
             else:
-                logger.debug(f"Unknown binary packet rc={rc} len={len(data)}")
+                logger.info(f"Unknown binary packet rc={rc} len={len(data)}")
                 return WSMessage(
                     type="binary_unknown",
                     data={**base, "response_code": rc, "raw": data[:32].hex()},

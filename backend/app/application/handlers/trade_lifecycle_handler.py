@@ -44,6 +44,12 @@ class TradeLifecycleHandler:
         Returns:
             True if a position was fully closed (so caller knows the slot is free).
         """
+        consistency = self.ensure_position_consistency(portfolio)
+        if consistency.unmanaged_open_ids:
+            logger.error(
+                "Unmanaged open positions detected; deterministic exits are degraded: %s",
+                ",".join(consistency.unmanaged_open_ids),
+            )
         open_positions = [p for p in portfolio.positions if p.status == "OPEN"]
 
         for pos in open_positions:
@@ -70,8 +76,9 @@ class TradeLifecycleHandler:
 
             # CVD kill signal check (Fabio: exit when CVD diverges against position)
             # Grace period: skip CVD kill for first 3 ticks after entry
-            mp = self._trade_manager._positions.get(pos.id)
-            if cvd_divergence and (mp is None or mp.tick_count >= 3):
+            metrics = self._trade_manager.get_position_metrics(pos.id)
+            tick_count = int(metrics["tick_count"]) if metrics else -1
+            if cvd_divergence and (metrics is None or tick_count >= 3):
                 cvd_exit = self._trade_manager.apply_cvd_kill_signal(
                     pos.id, cvd_divergence, current_price
                 )
@@ -82,7 +89,7 @@ class TradeLifecycleHandler:
                     return True
 
             # CVD-based breakeven: move SL to entry when CVD confirms direction
-            if cvd_slope != 0.0 and mp is not None:
+            if cvd_slope != 0.0 and metrics is not None:
                 self._trade_manager.apply_cvd_breakeven(pos.id, cvd_slope)
 
             # VWAP trail (Gap #9): trail SL to VWAP bands at 1.5R profit
@@ -106,12 +113,12 @@ class TradeLifecycleHandler:
             if exit_sig:
                 logger.info("Exit trigger: pos=%s reason=%s price=%.2f tick=%d",
                             pos.id, exit_sig.reason, exit_sig.exit_price,
-                            mp.tick_count if mp else -1)
+                            tick_count)
                 if exit_sig.reason == ExitReason.PARTIAL_TAKE_PROFIT:
                     # Runner mode: close 75% at target, keep 25% trailing
                     # Standard partial: close 50%
-                    mp = self._trade_manager._positions.get(pos.id)
-                    if mp and mp.runner_active:
+                    metrics = self._trade_manager.get_position_metrics(pos.id)
+                    if metrics and bool(metrics["runner_active"]):
                         partial_pct = self._trade_manager.config.runner_close_pct
                     else:
                         partial_pct = self._trade_manager.config.partial_size_pct
@@ -139,7 +146,7 @@ class TradeLifecycleHandler:
                     self._trade_manager.unregister_position(pos.id)
                     # Track daily losses on stop loss exits
                     if exit_sig.reason == ExitReason.STOP_LOSS:
-                        self._trade_manager.record_loss()
+                        self._trade_manager.record_loss(pos.symbol)
                         # Record stop-out for Rule 11 re-entry blocking
                         if self._on_stop_out:
                             side = "LONG" if pos.side.value == "LONG" else "SHORT"
@@ -184,6 +191,34 @@ class TradeLifecycleHandler:
 
     def has_managed_positions(self, symbol: str) -> bool:
         return self._trade_manager.has_managed_positions(symbol)
+
+    def get_position_consistency(self, portfolio: Portfolio, symbol: str | None = None):
+        """Return a comparison of portfolio-open positions vs lifecycle-managed positions."""
+        open_ids = {
+            p.id for p in portfolio.positions
+            if getattr(p, "status", None) == "OPEN" or getattr(p, "is_open", False)
+        }
+        return self._trade_manager.get_position_consistency(open_ids, symbol=symbol)
+
+    def reconcile_portfolio(self, portfolio: Portfolio, symbol: str | None = None) -> tuple[str, ...]:
+        """Reconcile managed lifecycle state with the portfolio's open positions."""
+        open_ids = {
+            p.id for p in portfolio.positions
+            if getattr(p, "status", None) == "OPEN" or getattr(p, "is_open", False)
+        }
+        return self._trade_manager.sync_with_open_position_ids(open_ids, symbol=symbol)
+
+    def ensure_position_consistency(self, portfolio: Portfolio, symbol: str | None = None):
+        """Reconcile stale manager state and return the resulting consistency view."""
+        stale_ids = self.reconcile_portfolio(portfolio, symbol=symbol)
+        consistency = self.get_position_consistency(portfolio, symbol=symbol)
+        if stale_ids:
+            logger.warning(
+                "Reconciled stale managed positions for %s: %s",
+                symbol or "ALL",
+                ",".join(stale_ids),
+            )
+        return consistency
 
     def sync_closed(self, closed_positions: list) -> None:
         """Unregister positions that were closed by Portfolio (SL/TP hits).

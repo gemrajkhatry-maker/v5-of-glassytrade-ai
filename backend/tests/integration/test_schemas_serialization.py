@@ -20,6 +20,7 @@ from app.infrastructure.serialization.schemas import (
     amt_result_to_dto, stats_to_dto, footprint_to_dto,
     dto_to_order_book, OrderBookDTO, OrderBookLevelDTO,
     dto_to_weights, ModelWeightsDTO,
+    position_event_to_dto,
 )
 
 
@@ -158,6 +159,33 @@ class TestStatsSerialization:
         assert d["winRate"] == 0.7
         assert d["netProfit"] == 5000
         assert d["largestLoss"] == -800
+
+
+class TestPositionEventSerialization:
+    def test_basic(self):
+        d = position_event_to_dto(
+            {
+                "id": 7,
+                "event_id": "evt-7",
+                "position_id": "P1",
+                "symbol": "NIFTY25000CE",
+                "event_type": "PARTIAL_EXIT",
+                "event_time": "2026-01-01T09:45:00Z",
+                "created_at": "2026-01-01T09:45:01Z",
+                "side": "LONG",
+                "entry_price": 100.0,
+                "exit_price": 102.5,
+                "partial_pct": 0.5,
+                "size_closed": 25,
+                "size_remaining": 25,
+                "realized_pnl": 62.5,
+            }
+        )
+        assert d["eventId"] == "evt-7"
+        assert d["positionId"] == "P1"
+        assert d["eventType"] == "PARTIAL_EXIT"
+        assert d["partialPct"] == 0.5
+        assert d["realizedPnl"] == 62.5
 
 
 class TestFootprintSerialization:

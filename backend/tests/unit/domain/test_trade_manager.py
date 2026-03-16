@@ -247,18 +247,70 @@ def test_r_multiple_in_position_state():
     assert "mfe" in state
 
 
-# ---- 18. Volatility filter ----
+def test_position_metrics_public_query_api():
+    """Handlers should be able to query lifecycle metrics without touching _positions."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
+    mgr.check_position("P1", 106.0)
 
-def test_zero_volume_blocks_entry():
-    """Zero-volume tick should block LLM entry."""
-    from app.domain.fabio_ai.services.entry_gate import check_volatility_filter
-    from app.domain.trading.models.value_objects import OHLC
+    metrics = mgr.get_position_metrics("P1")
 
-    tick = OHLC(time="t", open=100, high=101, low=99, close=100, volume=0)
-    assert check_volatility_filter([], tick) is True  # blocked
+    assert metrics is not None
+    assert "tick_count" in metrics
+    assert "runner_active" in metrics
+    assert metrics["tick_count"] >= 1
 
 
-# ---- 19. Breakeven at 1R ----
+def test_get_managed_position_ids_filters_by_symbol_and_open_ids():
+    mgr = TradeManager()
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P2", "BANKNIFTY", "SHORT", 200.0, 210.0, 180.0)
+
+    assert mgr.get_managed_position_ids(symbol="NIFTY") == ("P1",)
+    assert mgr.get_managed_position_ids(open_ids={"P2"}) == ("P2",)
+
+
+def test_sync_with_open_position_ids_removes_stale_managed_positions():
+    mgr = TradeManager()
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P2", "BANKNIFTY", "SHORT", 200.0, 210.0, 180.0)
+
+    stale = mgr.sync_with_open_position_ids({"P1"})
+
+    assert stale == ("P2",)
+    assert mgr.has_managed_positions("BANKNIFTY") is False
+    assert mgr.has_managed_positions("NIFTY") is True
+
+
+def test_get_position_consistency_detects_unmanaged_and_stale_positions():
+    mgr = TradeManager()
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P2", "NIFTY", "LONG", 101.0, 96.0, 111.0)
+
+    consistency = mgr.get_position_consistency({"P1", "P3"})
+
+    assert consistency.open_position_ids == ("P1", "P3")
+    assert consistency.managed_position_ids == ("P1", "P2")
+    assert consistency.unmanaged_open_ids == ("P3",)
+    assert consistency.stale_managed_ids == ("P2",)
+    assert consistency.is_consistent is False
+
+
+def test_get_position_consistency_symbol_filter_excludes_other_symbols():
+    mgr = TradeManager()
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
+    mgr.register_position("P2", "BANKNIFTY", "SHORT", 200.0, 210.0, 180.0)
+
+    consistency = mgr.get_position_consistency({"P1", "P2"}, symbol="NIFTY")
+
+    assert consistency.open_position_ids == ("P1",)
+    assert consistency.managed_position_ids == ("P1",)
+    assert consistency.unmanaged_open_ids == ()
+    assert consistency.stale_managed_ids == ()
+    assert consistency.is_consistent is True
+
+
+# ---- 18. Breakeven at 1R ----
 
 def test_breakeven_at_1r_long():
     """When unrealised profit reaches 1R, SL should move to entry price."""
@@ -672,3 +724,82 @@ def test_vwap_trail_cap_at_1_5r():
     # max valid = 102, but 1.5R floor = 100 + 7.5 = 107.5
     # max(102, 107.5) = 107.5
     assert mp.stop_loss >= 107.5
+
+
+# ---- 23. Per-Symbol Daily Loss Limits (Task 21 Fixes) ----
+
+def test_daily_loss_limit_isolation():
+    """Verify daily losses are isolated per-symbol but respect a global limit multiplier."""
+    mgr = TradeManager()
+    mgr.MAX_DAILY_LOSSES = 2
+    
+    mgr.record_loss("NIFTY")
+    assert not mgr.should_block_entry("NIFTY")
+    assert not mgr.should_block_entry("BANKNIFTY")
+    
+    mgr.record_loss("NIFTY")
+    # NIFTY should be blocked (reached its limit of 2)
+    assert mgr.should_block_entry("NIFTY")
+    # BANKNIFTY should NOT be blocked (has 0 losses)
+    assert not mgr.should_block_entry("BANKNIFTY")
+    
+    # Global limit allows more symbols to trade
+    mgr.record_loss("BANKNIFTY")
+    mgr.record_loss("BANKNIFTY")
+    assert mgr.should_block_entry("BANKNIFTY")
+    
+    # Global limit = MAX_DAILY_LOSSES * 3 = 6
+    assert mgr._global_daily_losses == 4
+    assert not mgr.should_block_entry("FINNIFTY")
+    
+    mgr.record_loss("FINNIFTY")
+    mgr.record_loss("FINNIFTY")
+    assert mgr._global_daily_losses == 6
+    
+    # Now global limit is reached, EVERY symbol should be blocked
+    assert mgr.should_block_entry("MIDCPNIFTY")
+
+# ---- 24. Consecutive Loss Circuit Breaker Tests ----
+
+class TestConsecutiveLossCircuitBreaker:
+    def test_blocks_after_two_consecutive_losses(self):
+        """Should block entry after 2 consecutive stop-outs in the same zone."""
+        mgr = TradeManager()
+        # Record two losses
+        mgr.record_loss("NIFTY", stop_price=100.0)
+        mgr.record_loss("NIFTY", stop_price=99.0)
+        
+        # Checking entry at 99.5, with ATR 1.0 (requires 1.5 distance)
+        # Distance from last stop (99.0) is 0.5. 1.5 * 1.0 = 1.5
+        # Since 0.5 < 1.5, entry should be BLOCKED
+        blocked = mgr.should_block_entry("NIFTY", current_price=99.5, current_atr=1.0)
+        assert blocked is True
+
+    def test_allows_reentry_if_price_moves_beyond_atr_buffer(self):
+        """Should ALLOW entry if price has moved > 1.5 ATR from bloodbath zone."""
+        mgr = TradeManager()
+        # Record two losses
+        mgr.record_loss("NIFTY", stop_price=100.0)
+        mgr.record_loss("NIFTY", stop_price=99.0)
+        
+        # Checking entry at 97.0, with ATR 1.0 (requires 1.5 distance)
+        # Distance from last stop (99.0) is 2.0. 1.5 * 1.0 = 1.5
+        # Since 2.0 >= 1.5, entry should be ALLOWED
+        blocked = mgr.should_block_entry("NIFTY", current_price=97.0, current_atr=1.0)
+        assert blocked is False
+
+    def test_resets_consecutive_losses_on_profit(self):
+        """Should reset consecutive loss counter when a partial or full TP hits."""
+        mgr = TradeManager()
+        # Record one loss
+        mgr.record_loss("NIFTY", stop_price=100.0)
+        
+        # A profit trade clears it
+        mgr.reset_consecutive_losses("NIFTY")
+        
+        # Another single loss happens
+        mgr.record_loss("NIFTY", stop_price=100.0)
+        
+        # Now we only have 1 consecutive loss, so entry shouldn't be blocked!
+        blocked = mgr.should_block_entry("NIFTY", current_price=100.5, current_atr=1.0)
+        assert blocked is False

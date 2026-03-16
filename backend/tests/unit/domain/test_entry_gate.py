@@ -4,7 +4,6 @@ import pytest
 from app.domain.fabio_ai.services.entry_gate import (
     three_align_check,
     check_confirmation_bundle,
-    check_volatility_filter,
     compute_atr,
     build_entry_signal,
     sl_from_aggressive_print,
@@ -21,12 +20,13 @@ def _tick(close=100, volume=500, delta=100, high=None, low=None, vwap=0):
 
 
 def _amt(market_state="BALANCED", poc=100, vah=105, val=95, lvns=(), hvns=(),
-         aggression=0.5, session_vwap=0, aggressive_prints=()):
+         aggression=0.5, session_vwap=0, aggressive_prints=(), cvd_slope=0.0):
     return AMTResult(
         market_state=market_state, poc=poc,
         value_area_high=vah, value_area_low=val,
         lvns=lvns, hvns=hvns, aggression=aggression,
         session_vwap=session_vwap, aggressive_prints=aggressive_prints,
+        cvd_slope=cvd_slope,
     )
 
 
@@ -35,25 +35,25 @@ class TestThreeAlignCheck:
         data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
         tick = _tick(close=100, volume=500, delta=200)  # near POC, high vol+delta
         amt = _amt(poc=100, vah=105, val=95)
-        assert three_align_check(data, amt, tick) is True
+        assert three_align_check(data, amt, tick)[0] is True
 
     def test_fails_zero_poc(self):
         data = [_tick() for _ in range(30)]
         tick = _tick()
         amt = _amt(poc=0, vah=0, val=0)
-        assert three_align_check(data, amt, tick) is False
+        assert three_align_check(data, amt, tick)[0] is False
 
     def test_fails_not_near_level(self):
         data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
         tick = _tick(close=110, volume=500, delta=200)  # not near any level
         amt = _amt(poc=100, vah=105, val=95)
-        assert three_align_check(data, amt, tick) is False
+        assert three_align_check(data, amt, tick)[0] is False
 
     def test_passes_near_lvn(self):
         data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
         tick = _tick(close=98, volume=500, delta=200)
         amt = _amt(poc=100, vah=105, val=95, lvns=(98.0,))
-        assert three_align_check(data, amt, tick) is True
+        assert three_align_check(data, amt, tick)[0] is True
 
 
 class TestConfirmationBundle:
@@ -70,21 +70,6 @@ class TestConfirmationBundle:
         data = [_tick(volume=100, delta=5) for _ in range(30)]
         tick = _tick(volume=100, delta=5)  # no impulse, low delta ratio
         assert check_confirmation_bundle(data, tick) is False
-
-
-class TestVolatilityFilter:
-    def test_blocks_zero_volume(self):
-        assert check_volatility_filter([], _tick(volume=0)) is True
-
-    def test_passes_normal_volume(self):
-        assert check_volatility_filter([], _tick(volume=100)) is False
-
-    def test_blocks_extreme_atr(self):
-        normal = [_tick(high=101, low=99) for _ in range(20)]
-        # Last 5 bars with huge range
-        for i in range(-5, 0):
-            normal[i] = _tick(high=110, low=90)
-        assert check_volatility_filter(normal, _tick()) is True
 
 
 class TestComputeATR:
@@ -114,6 +99,26 @@ class TestBuildEntrySignal:
         sig = build_entry_signal("SHORT", tick, amt, ai, SetupType.MEAN_REVERSION)
         assert sig.type == SignalType.SELL
         assert sig.metadata["allow_trail"] is False
+
+    def test_signal_contains_trade_thesis_metadata(self):
+        tick = _tick(close=95, vwap=99)
+        amt = _amt(poc=100, vah=105, val=95, session_vwap=99, aggression=0.8, cvd_slope=0.5)
+        ai = {"rationale": "value reclaim", "confidence": "High"}
+        sig = build_entry_signal(
+            "LONG",
+            tick,
+            amt,
+            ai,
+            SetupType.MEAN_REVERSION,
+            session_context="NSE_PRIMARY",
+        )
+
+        thesis = sig.metadata["trade_thesis"]
+        assert thesis["market_state"] == "BALANCED"
+        assert thesis["location_type"] == "VAL"
+        assert thesis["aggression_trigger"] in {"DELTA_EXPANSION", "CVD_EXPANSION", "DELTA_PRESSURE"}
+        assert thesis["session_context"] == "NSE_PRIMARY"
+        assert thesis["invalidation_level"] == sig.stop_loss
 
 
 class TestSLFromAggressivePrint:
@@ -217,9 +222,9 @@ class TestThreeAlignAggressiveLevels:
         tick = _tick(close=110, volume=500, delta=200)
         amt = _amt(poc=100, vah=105, val=95)
         # Without aggressive levels, this fails (existing test confirms)
-        assert three_align_check(data, amt, tick) is False
+        assert three_align_check(data, amt, tick)[0] is False
         # With aggressive level at 110, it should pass
-        assert three_align_check(data, amt, tick, aggressive_levels=[110]) is True
+        assert three_align_check(data, amt, tick, aggressive_levels=[110])[0] is True
 
 # ---- Imbalance Alignment Tests (Task 21) ----
 
@@ -286,4 +291,31 @@ class TestImbalanceAlignment:
         tick = _tick(close=100, volume=500, delta=200)  # near POC
         amt = _amt(poc=100, vah=105, val=95)
         # Should pass without aggressive_levels (backward compatible)
-        assert three_align_check(data, amt, tick, aggressive_levels=None) is True
+        assert three_align_check(data, amt, tick, aggressive_levels=None)[0] is True
+
+# ---- CVD Hard Gate Tests ----
+
+class TestCVDHardGate:
+    def test_long_extreme_bearish_cvd_blocked(self):
+        from app.domain.fabio_ai.services.entry_gate import compute_grade_score
+        tick = _tick(close=100)
+        # CVD heavily opposing the LONG direction
+        amt = _amt(poc=100, vah=105, val=95, cvd_slope=-55.0)
+        score = compute_grade_score(direction="LONG", tick=tick, amt_result=amt, setup_type=SetupType.TREND_MODEL)
+        assert score == -10
+        
+    def test_short_extreme_bullish_cvd_blocked(self):
+        from app.domain.fabio_ai.services.entry_gate import compute_grade_score
+        tick = _tick(close=100)
+        # CVD heavily opposing the SHORT direction
+        amt = _amt(poc=100, vah=105, val=95, cvd_slope=55.0)
+        score = compute_grade_score(direction="SHORT", tick=tick, amt_result=amt, setup_type=SetupType.TREND_MODEL)
+        assert score == -10
+        
+    def test_normal_cvd_passes_gate(self):
+        from app.domain.fabio_ai.services.entry_gate import compute_grade_score
+        tick = _tick(close=100)
+        # CVD is normal, does not trigger hard gate
+        amt = _amt(poc=100, vah=105, val=95, cvd_slope=10.0)
+        score = compute_grade_score(direction="LONG", tick=tick, amt_result=amt, setup_type=SetupType.TREND_MODEL)
+        assert score != -10

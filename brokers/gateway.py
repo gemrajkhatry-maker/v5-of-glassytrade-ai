@@ -14,19 +14,18 @@ from datetime import datetime
 import asyncio
 from enum import Enum
 
-from brokers.broker.ports import IBrokerPort, CircuitBreaker, CircuitBreakerError
+from brokers.broker.ports import IBrokerPort
 from brokers.broker.logging import get_logger, setup_logging, correlation_context
-from brokers.broker.resilience import CircuitState, CircuitBreakerConfig  # noqa: F401 – re-exported
-from brokers.broker.entities import (
+from shared.entities.models import (
     Instrument,
     Quote,
     Tick,
     Order,
     Position,
-    OptionChain,
-    MarketDepth,
+    OrderStatus,
+    Exchange
 )
-from brokers.broker.types import Exchange
+from shared.resilience import CircuitBreaker, CircuitBreakerError, CircuitState
 
 logger = get_logger("gateway")
 
@@ -141,9 +140,7 @@ class BrokerFactory:
         return [bt.value for bt in BrokerType]
 
 
-# =============================================================================
-# Circuit Breaker (using unified implementation from broker/ports.py)
-# =============================================================================
+# CircuitBreaker and CircuitBreakerError are imported from shared.resilience
 
 # CircuitBreaker and CircuitBreakerError are imported at the top of this module
 # from broker.ports and thus available as gateway.CircuitBreaker for backward compat.
@@ -190,8 +187,11 @@ class BrokerGateway:
             broker: The broker implementation to use
             circuit_breaker: Optional circuit breaker for fault tolerance
         """
-        self._broker = broker
+        from brokers.broker.ports import CircuitBreakerWrapper
+        
+        self._raw_broker = broker
         self._circuit_breaker = circuit_breaker or CircuitBreaker()
+        self._broker = CircuitBreakerWrapper(broker, self._circuit_breaker)
 
     # -------------------------------------------------------------------------
     # Logging Configuration
@@ -252,8 +252,13 @@ class BrokerGateway:
 
     @property
     def broker(self) -> IBrokerPort:
-        """Access underlying broker."""
+        """Access underlying protected broker."""
         return self._broker
+
+    @property
+    def raw_broker(self) -> IBrokerPort:
+        """Access underlying raw broker (without circuit breaker)."""
+        return self._raw_broker
 
     @property
     def circuit_breaker(self) -> CircuitBreaker:
@@ -268,7 +273,7 @@ class BrokerGateway:
         """Close the gateway and release broker resources."""
         logger.debug("Closing gateway")
         # DhanBroker.close() is async; use close_sync() if available
-        close_fn = getattr(self._broker, "close_sync", None) or self._broker.close
+        close_fn = getattr(self._raw_broker, "close_sync", None) or self._broker.close
         close_fn()
 
     def __enter__(self) -> "BrokerGateway":
@@ -277,93 +282,21 @@ class BrokerGateway:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         self.close()
 
-    # No __del__ — callers must use context manager or call close() explicitly.
-    # DhanBroker has its own __del__ as a last-resort guard.
-
     # -------------------------------------------------------------------------
-    # Synchronous API
+    # Market Data
     # -------------------------------------------------------------------------
 
-    def get_quote(
-        self, symbol: str, exchange: Exchange = Exchange.NSE, security_id: str = ""
-    ) -> Quote:
-        """
-        Get quote for a symbol.
+    def get_quote(self, symbol: str, exchange: Exchange) -> Quote:
+        instrument = Instrument(symbol=symbol, exchange=exchange)
+        return self._broker.get_quote(instrument)
 
-        Args:
-            symbol: Trading symbol
-            exchange: Exchange (default: NSE)
-            security_id: Optional security ID
+    def get_quotes(self, symbols: List[str], exchange: Exchange) -> Dict[str, Quote]:
+        instruments = [Instrument(symbol=s, exchange=exchange) for s in symbols]
+        quotes = self._broker.get_quotes_batch(instruments)
+        return {q.instrument.symbol: q for q in quotes.values()}
 
-        Returns:
-            Quote entity
-        """
-        with correlation_context() as cid:
-            logger.debug("get_quote", extra={"symbol": symbol, "exchange": exchange.value, "cid": cid})
-            instrument = Instrument(
-                symbol=symbol, exchange=exchange, security_id=security_id
-            )
-            with self._circuit_breaker:
-                return self._broker.get_quote(instrument)
-
-    def get_quotes(
-        self, symbols: List[str], exchange: Exchange = Exchange.NSE
-    ) -> Dict[str, Quote]:
-        """
-        Get quotes for multiple symbols.
-
-        Args:
-            symbols: List of trading symbols
-            exchange: Exchange (default: NSE)
-
-        Returns:
-            Dict mapping symbol to Quote
-        """
-        with correlation_context() as cid:
-            logger.debug("get_quotes", extra={"symbols": symbols, "exchange": exchange.value, "cid": cid})
-            instruments = [
-                Instrument(symbol=s, exchange=exchange, security_id="") for s in symbols
-            ]
-            with self._circuit_breaker:
-                quotes = self._broker.get_quotes_batch(instruments)
-                return {q.instrument.symbol: q for q in quotes.values()}
-
-    def get_option_chain(
-        self, underlying: str, exchange: Exchange = Exchange.NFO, expiry_index: int = 0
-    ) -> OptionChain:
-        """
-        Get option chain for an underlying.
-
-        Args:
-            underlying: Underlying symbol (e.g., "NIFTY")
-            exchange: Exchange (default: NFO)
-            expiry_index: Expiry index (0 = nearest)
-
-        Returns:
-            OptionChain entity
-        """
-        with correlation_context() as cid:
-            logger.debug("get_option_chain", extra={"underlying": underlying, "exchange": exchange.value, "cid": cid})
-            with self._circuit_breaker:
-                return self._broker.get_option_chain(underlying, exchange, expiry_index)
-
-    def get_expiries(
-        self, underlying: str, exchange: Exchange = Exchange.NFO
-    ) -> List[datetime]:
-        """
-        Get expiry dates for an underlying.
-
-        Args:
-            underlying: Underlying symbol
-            exchange: Exchange
-
-        Returns:
-            List of expiry dates
-        """
-        with correlation_context() as cid:
-            logger.debug("get_expiries", extra={"underlying": underlying, "cid": cid})
-            with self._circuit_breaker:
-                return self._broker.get_expiry_list(underlying, exchange)
+    def get_quotes_batch(self, instruments: List[Instrument]) -> Dict[Instrument, Quote]:
+        return self._broker.get_quotes_batch(instruments)
 
     def get_historical(
         self,
@@ -372,236 +305,104 @@ class BrokerGateway:
         from_date: datetime,
         to_date: datetime,
         interval: str = "1d",
-        security_id: str = "",
         include_oi: bool = False,
     ):
-        """
-        Get historical OHLCV data for a symbol.
+        instrument = Instrument(symbol=symbol, exchange=exchange)
+        return self._broker.get_historical(
+            instrument, from_date, to_date, interval, include_oi
+        )
 
-        Returns:
-            DataFrame with columns: open, high, low, close, volume (and optionally oi)
-        """
-        with correlation_context() as cid:
-            logger.debug("get_historical", extra={"symbol": symbol, "exchange": exchange.value, "cid": cid})
-            instrument = Instrument(symbol=symbol, exchange=exchange, security_id=security_id)
-            with self._circuit_breaker:
-                return self._broker.get_historical(instrument, from_date, to_date, interval, include_oi)
+    # -------------------------------------------------------------------------
+    # Order Execution (Intercepted when DRY_RUN=True)
+    # -------------------------------------------------------------------------
 
-    def place_order(
-        self,
-        symbol: str,
-        exchange: Exchange,
-        side: str,
-        quantity: int,
-        price: float = 0,
-        security_id: str = "",
-        trigger_price: Optional[float] = None,
-        product_type: str = "INTRADAY",
-    ) -> Order:
-        """
-        Place an order.
-
-        Args:
-            symbol:        Trading symbol
-            exchange:      Exchange
-            side:          "BUY" or "SELL"
-            quantity:      Order quantity
-            price:         Limit price (0 for MARKET orders)
-            security_id:   Optional security ID
-            trigger_price: Stop-loss activation price (for SL / SLM orders)
-            product_type:  INTRADAY | CNC | MARGIN | CO | BO (default: INTRADAY)
-
-        Returns:
-            Order entity with order_id populated by broker
-        """
-        from brokers.broker.types import OrderSide
-
-        with correlation_context() as cid:
-            logger.info("place_order", extra={"symbol": symbol, "side": side, "qty": quantity, "cid": cid})
-            instrument = Instrument(
-                symbol=symbol, exchange=exchange, security_id=security_id
-            )
-            order = Order(
-                instrument=instrument,
-                side=OrderSide.BUY if side.upper() == "BUY" else OrderSide.SELL,
-                quantity=quantity,
-                price=price if price is not None else None,
-                trigger_price=trigger_price,
-                product_type=product_type,
-            )
-            with self._circuit_breaker:
-                return self._broker.place_order(order)
+    def place_order(self, order: Optional[Order] = None, **kwargs) -> Order:
+        if order is None:
+            order = Order(**kwargs)
+        from app.config import settings
+        if settings.DRY_RUN:
+            logger.warning("[DRY_RUN] Intercepted place_order: %s", order)
+            order.status = OrderStatus.COMPLETED
+            order.order_id = f"mock_order_{datetime.now().timestamp()}"
+            return order
+        return self._broker.place_order(order)
 
     def cancel_order(self, order_id: str) -> bool:
-        """
-        Cancel an order via the broker.
-
-        Wraps the call in the circuit breaker so failures count toward the
-        fault-tolerance threshold.
-
-        Args:
-            order_id: Broker-assigned order ID to cancel
-
-        Returns:
-            True if cancellation was accepted
-        """
-        with correlation_context() as cid:
-            logger.info("cancel_order", extra={"order_id": order_id, "cid": cid})
-            with self._circuit_breaker:
-                return self._broker.cancel_order(order_id)
+        from app.config import settings
+        if settings.DRY_RUN:
+            if order_id.startswith("mock_order_"):
+                logger.warning("[DRY_RUN] Intercepted cancel_order for mock ID %s", order_id)
+                return True
+        return self._broker.cancel_order(order_id)
 
     def get_order_status(self, order_id: str) -> Order:
-        """
-        Query the current status of an order.
+        from app.config import settings
+        if settings.DRY_RUN:
+            if order_id.startswith("mock_order_"):
+                # Return a dummy completed order
+                return Order(
+                    symbol="MOCK", exchange=Exchange.NSE, 
+                    quantity=1, side="BUY", order_type="MARKET", 
+                    status=OrderStatus.COMPLETED, order_id=order_id
+                )
+        return self._broker.get_order_status(order_id)
 
-        Args:
-            order_id: Broker-assigned order ID
+    def get_expiry_list(self, symbol: str, exchange: Exchange) -> List[datetime]:
+        """Get expiry list for underlying symbol."""
+        return self._broker.get_expiry_list(symbol, exchange)
 
-        Returns:
-            Order entity with current status
-        """
-        with correlation_context() as cid:
-            logger.debug("get_order_status", extra={"order_id": order_id, "cid": cid})
-            with self._circuit_breaker:
-                return self._broker.get_order_status(order_id)
+    def get_expiries(self, symbol: str, exchange: Exchange) -> List[datetime]:
+        """Alias for get_expiry_list."""
+        return self.get_expiry_list(symbol, exchange)
 
-    def get_positions(self) -> List[Position]:
-        """Get current positions."""
-        with correlation_context() as cid:
-            logger.debug("get_positions", extra={"cid": cid})
-            with self._circuit_breaker:
-                return self._broker.get_positions()
+    def get_option_chain(
+        self, symbol: str, exchange: Exchange, expiry_index: int = 0
+    ) -> OptionChain:
+        """Get option chain for underlying symbol."""
+        return self._broker.get_option_chain(symbol, exchange, expiry_index)
 
     # -------------------------------------------------------------------------
-    # Reactive API (Async)
+    # Streaming
     # -------------------------------------------------------------------------
 
-    async def stream_ticker(
-        self, symbols: List[str], exchange: Exchange = Exchange.NSE
-    ):
-        """
-        Stream ticker data for symbols.
-
-        Args:
-            symbols: List of trading symbols
-            exchange: Exchange
-
-        Yields:
-            Tick entities
-        """
-        instruments = [
-            Instrument(symbol=s, exchange=exchange, security_id="") for s in symbols
-        ]
-
+    async def stream_ticker(self, symbols: Union[str, List[str]], exchange: Exchange):
+        if isinstance(symbols, str):
+            symbols = [symbols]
+        instruments = [Instrument(symbol=s, exchange=exchange) for s in symbols]
         async for tick in self._broker.stream_ticker(instruments):
             yield tick
 
-    async def stream_quotes(
-        self, symbols: List[str], exchange: Exchange = Exchange.NSE
-    ):
-        """
-        Stream quote data for symbols.
-
-        Args:
-            symbols: List of trading symbols
-            exchange: Exchange
-
-        Yields:
-            Quote entities
-        """
-        instruments = [
-            Instrument(symbol=s, exchange=exchange, security_id="") for s in symbols
-        ]
-
+    async def stream_quotes(self, symbols: Union[str, List[str]], exchange: Exchange):
+        if isinstance(symbols, str):
+            symbols = [symbols]
+        instruments = [Instrument(symbol=s, exchange=exchange) for s in symbols]
         async for quote in self._broker.stream_quotes(instruments):
             yield quote
 
-    async def stream_full(
-        self, symbols: List[str], exchange: Exchange = Exchange.MCX
-    ):
-        """
-        Stream full market data (LTP + volume + L1 bid/ask) for symbols.
-        Required for MCX — TICKER and QUOTE feeds are not supported there.
-
-        Yields:
-            Raw dicts with keys: ltp, open, high, low, close, volume, oi, atp,
-            depth_bids, depth_asks, security_id, exchange_segment, symbol, timestamp
-        """
-        instruments = [
-            Instrument(symbol=s, exchange=exchange, security_id="") for s in symbols
-        ]
-        async for pkt in self._broker.stream_full(instruments):
-            yield pkt
-
-    async def stream_depth(
-        self,
-        symbols: List[str],
-        exchange: Exchange = Exchange.NSE,
-        depth_level: int = 20,
-    ):
-        """
-        Stream 20-level market depth data for symbols.
-
-        Args:
-            symbols: List of trading symbols
-            exchange: Exchange
-            depth_level: Number of depth levels (default 20)
-
-        Yields:
-            MarketDepth entities
-        """
-        instruments = [
-            Instrument(symbol=s, exchange=exchange, security_id="") for s in symbols
-        ]
-
+    async def stream_depth(self, symbols: Union[str, List[str]], exchange: Exchange, depth_level: int = 20):
+        if isinstance(symbols, str):
+            symbols = [symbols]
+        instruments = [Instrument(symbol=s, exchange=exchange) for s in symbols]
         async for depth in self._broker.stream_depth(instruments, depth_level):
             yield depth
 
-    async def stream_depth_20(
-        self,
-        symbols: List[str],
-        exchange: Exchange = Exchange.NSE,
-    ):
+    async def stream_full(self, symbols: Union[str, List[str]], exchange: Exchange):
+        if isinstance(symbols, str):
+            symbols = [symbols]
+        instruments = [Instrument(symbol=s, exchange=exchange) for s in symbols]
+        async for pkt in self._broker.stream_full(instruments):
+            yield pkt
+
+    # -------------------------------------------------------------------------
+    # Delegate everything else
+    # -------------------------------------------------------------------------
+
+    def __getattr__(self, name):
         """
-        Stream 20-level market depth via the dedicated depth feed.
-
-        Uses the dedicated depth WebSocket endpoint (up to 50 NSE instruments).
-
-        Args:
-            symbols: List of trading symbols
-            exchange: Exchange
-
-        Yields:
-            MarketDepth entities with 20 bid/ask levels each
+        Delegate any unhandled attributes to the wrapped broker.
+        This provides full access to IBrokerPort methods with circuit breaker protection.
         """
-        instruments = [
-            Instrument(symbol=s, exchange=exchange, security_id="") for s in symbols
-        ]
-
-        async for depth in self._broker.stream_depth_20(instruments):
-            yield depth
-
-    async def stream_depth_200(
-        self,
-        symbol: str,
-        exchange: Exchange = Exchange.NSE,
-    ):
-        """
-        Stream 200-level market depth via the full-depth feed.
-
-        Uses the dedicated full-depth WebSocket endpoint (1 instrument only).
-
-        Args:
-            symbol: Single trading symbol
-            exchange: Exchange
-
-        Yields:
-            MarketDepth entities with up to 200 bid/ask levels each
-        """
-        instruments = [Instrument(symbol=symbol, exchange=exchange, security_id="")]
-
-        async for depth in self._broker.stream_depth_200(instruments):
-            yield depth
+        return getattr(self._broker, name)
 
 
 # =============================================================================

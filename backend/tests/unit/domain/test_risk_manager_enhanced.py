@@ -27,7 +27,8 @@ class TestCircuitBreakers:
 
     def test_halts_after_consecutive_losses(self):
         sig = _make_signal()
-        for _ in range(10):
+        # Threshold is now 5 consecutive losses (was 10 — tightened for scalping)
+        for _ in range(5):
             self.rm.record_trade_result(-100, self.portfolio)
 
         assert self.rm.is_halted
@@ -44,18 +45,19 @@ class TestCircuitBreakers:
         assert self.rm._daily.consecutive_losses == 1
 
     def test_halts_on_daily_drawdown(self):
-        # 2% of 1M = 20k. Simulate equity drop.
-        self.portfolio.balance -= 20_001
+        # 5% of 1M = 50k. Simulate equity drop beyond threshold.
+        self.portfolio.balance -= 51_000
         self.portfolio.equity = self.portfolio.balance
-        self.rm.record_trade_result(-20_001, self.portfolio)
+        self.rm.record_trade_result(-51_000, self.portfolio)
 
         assert self.rm.is_halted
         assert "drawdown" in self.rm.halt_reason
 
     def test_no_halt_under_drawdown_limit(self):
-        self.portfolio.balance -= 10_000
+        # 3% loss (below 5% threshold) — should NOT halt
+        self.portfolio.balance -= 30_000
         self.portfolio.equity = self.portfolio.balance
-        self.rm.record_trade_result(-10_000, self.portfolio)
+        self.rm.record_trade_result(-30_000, self.portfolio)
         assert not self.rm.is_halted
 
 
@@ -85,7 +87,8 @@ class TestDailyReset:
         self.portfolio = Portfolio.create_default()
 
     def test_resets_on_new_day(self):
-        for _ in range(10):
+        # Trigger halt via 5 consecutive losses
+        for _ in range(5):
             self.rm.record_trade_result(-100, self.portfolio)
         assert self.rm.is_halted
 

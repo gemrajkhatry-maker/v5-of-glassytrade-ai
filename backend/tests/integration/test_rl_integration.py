@@ -14,6 +14,13 @@ from unittest.mock import patch, MagicMock
 import numpy as np
 import pytest
 
+# Check if RL dependencies are available
+try:
+    from stable_baselines3 import __version__
+    RL_DEPENDENCIES_AVAILABLE = True
+except ImportError:
+    RL_DEPENDENCIES_AVAILABLE = False
+
 from app.domain.trading.models.value_objects import OHLC
 from app.domain.trading.models.enums import Source, SignalType, SetupType
 from app.domain.trading.events import SignalGenerated
@@ -62,6 +69,7 @@ class TestRLSignalIntegration:
         rl_signals = [s for s in signals if s.signal.source == Source.RL]
         assert len(rl_signals) == 0
 
+    @pytest.mark.skipif(not RL_DEPENDENCIES_AVAILABLE, reason="Requires stable_baselines3")
     def test_state_snapshot_includes_rl_status(self):
         """State snapshot always contains rlStatus and stats.rl."""
         tick = OHLC(time="t", open=100, high=101, low=99, close=100,
@@ -91,7 +99,7 @@ class TestRLSignalIntegration:
     # With mock model loaded
     # ------------------------------------------------------------------
 
-    @pytest.mark.skip(reason="RL signal generation is no longer handled directly in process_tick")
+    @pytest.mark.skipif(not RL_DEPENDENCIES_AVAILABLE, reason="Requires stable_baselines3")
     def test_rl_signal_generated_when_model_loaded(self):
         """When a model is loaded and predicts BUY, an RL signal is emitted."""
         signals: list[SignalGenerated] = []
@@ -117,6 +125,7 @@ class TestRLSignalIntegration:
         assert first_rl.source == Source.RL
         assert "RL" in first_rl.reason
 
+    @pytest.mark.skipif(not RL_DEPENDENCIES_AVAILABLE, reason="Requires stable_baselines3")
     def test_rl_hold_emits_no_signal(self):
         """When the model predicts HOLD, no RL signal is emitted."""
         signals: list[SignalGenerated] = []
@@ -135,7 +144,7 @@ class TestRLSignalIntegration:
         rl_signals = [s for s in signals if s.signal.source == Source.RL]
         assert len(rl_signals) == 0
 
-    @pytest.mark.skip(reason="RL signal generation is no longer handled directly in process_tick")
+    @pytest.mark.skipif(not RL_DEPENDENCIES_AVAILABLE, reason="Requires stable_baselines3")
     def test_rl_sell_signal(self):
         """When the model predicts TREND_SELL, a SELL signal is generated."""
         signals: list[SignalGenerated] = []
@@ -156,7 +165,7 @@ class TestRLSignalIntegration:
         for sig_event in rl_signals:
             assert sig_event.signal.type == SignalType.SELL
 
-    @pytest.mark.skip(reason="RL signal generation is no longer handled directly in process_tick")
+    @pytest.mark.skipif(not RL_DEPENDENCIES_AVAILABLE, reason="Requires stable_baselines3")
     def test_rl_signal_has_metadata(self):
         """RL signals include action and observation in metadata."""
         signals: list[SignalGenerated] = []
@@ -180,6 +189,7 @@ class TestRLSignalIntegration:
             assert isinstance(meta["obs"], list)
             assert len(meta["obs"]) == 12  # 12-feature observation vector
 
+    @pytest.mark.skipif(not RL_DEPENDENCIES_AVAILABLE, reason="Requires stable_baselines3")
     def test_rl_error_does_not_crash_pipeline(self):
         """If the RL predict() throws, the rest of the pipeline continues."""
         self.session._rl_handler.trainer.status.model_path = "/fake/model.zip"

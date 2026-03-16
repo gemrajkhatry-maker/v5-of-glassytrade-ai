@@ -62,6 +62,11 @@ class TestHealthEndpoints:
         assert data["defaultSymbol"] == data["activeSymbols"][0]
         assert "llmReady" in data
         assert "probabilityReady" in data
+        assert "llmExecutionEnabled" in data
+        assert "playbookGuardMaxRejections" in data
+        assert "explainabilityAlertMinTrades" in data
+        assert "explainabilityMinCoverageRate" in data
+        assert "explainabilityMinAggressionRate" in data
 
 
 class TestAICommand:
@@ -173,6 +178,31 @@ class TestWebSocketGameloop:
                 "consecutiveLosses": 0,
                 "dailyPnl": 0,
             },
+            "playbookGuard": {
+                "session": "NSE_PRIMARY",
+                "marketState": "BALANCED",
+                "expectedPlaybook": "return_to_value",
+                "candidatePlaybook": "return_to_value",
+                "guardTripped": False,
+                "maxRejections": 3,
+                "totalRejections": 0,
+                "sessionCompatible": True,
+                "agentAligned": True,
+                "lastRejectionReason": "",
+                "rejections": {},
+            },
+            "explainabilityMonitor": {
+                "entries": 4,
+                "explainedEntries": 3,
+                "aggressionExplainedEntries": 2,
+                "coverageRate": 75.0,
+                "aggressionDriverRate": 50.0,
+                "minTrades": 3,
+                "minCoverageRate": 90.0,
+                "minAggressionRate": 75.0,
+                "alertActive": True,
+                "alertReason": "LOW_FEATURE_DRIVER_COVERAGE",
+            },
             "overseerAction": "",
             "overseerReason": "",
             "modelWeights": {"trend": 0.4, "momentum": 0.25, "delta": 0.15, "orderBook": 0.15, "volatility": 0.05},
@@ -209,6 +239,10 @@ class TestWebSocketGameloop:
             assert "genAIAnalysis" in state
             assert "stats" in state
             assert "riskState" in state
+            assert "playbookGuard" in state
+            assert "guardTripped" in state["playbookGuard"]
+            assert "explainabilityMonitor" in state
+            assert "alertActive" in state["explainabilityMonitor"]
             assert "overseerAction" in state
             assert "overseerReason" in state
             assert "modelWeights" in state

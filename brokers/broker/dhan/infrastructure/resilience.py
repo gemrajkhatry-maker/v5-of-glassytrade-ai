@@ -33,8 +33,8 @@ from typing import Optional, Dict, Callable, TypeVar, Awaitable
 
 from brokers.broker.dhan.ports import (
     IRateLimiter,
-    ICircuitBreaker,
 )
+from shared.resilience import CircuitBreaker as SharedCircuitBreaker, CircuitBreakerError
 from brokers.broker.logging import get_logger
 from brokers.broker.dhan.domain import (
     DhanNetworkError,
@@ -171,14 +171,9 @@ class TokenBucketRateLimiter(IRateLimiter):
             self._configs[category] = default_config
             self._buckets[category] = (float(default_config.burst), time.monotonic())
 
-        # Lazily create lock — guarded by a threading lock to avoid TOCTOU race
+        # Lazily create lock bound to the running event loop
         if category not in self._locks:
-            if not hasattr(self, '_locks_creation_lock'):
-                import threading
-                self._locks_creation_lock = threading.Lock()
-            with self._locks_creation_lock:
-                if category not in self._locks:  # double-check
-                    self._locks[category] = asyncio.Lock()
+            self._locks[category] = asyncio.Lock()
 
         lock = self._locks[category]
         config = self._configs[category]
@@ -261,30 +256,38 @@ class TokenBucketRateLimiter(IRateLimiter):
         )
 
 
-# =============================================================================
-# Circuit Breaker State + Config  (shared from broker/ports.py)
-# =============================================================================
-
-from brokers.broker.ports import CircuitState, CircuitBreakerConfig, CircuitBreaker as BaseCircuitBreaker  # noqa: E402
+from shared.resilience import CircuitState
 
 
 # =============================================================================
 # Dhan Circuit Breaker (extends unified CircuitBreaker)
 # =============================================================================
 
-class DhanCircuitBreaker(BaseCircuitBreaker):
+class DhanCircuitBreaker(SharedCircuitBreaker):
     """
     Dhan-specific circuit breaker implementation.
-    
-    Extends the unified CircuitBreaker from broker/ports.py to add
-    Dhan-specific error handling and integration.
-    
-    This class is kept for backward compatibility. New code should use
-    CircuitBreaker from broker/ports.py directly.
-    
+
+    .. deprecated::
+        This class is **deprecated** and exists only for backward compatibility.
+        New code should use ``CircuitBreaker`` from ``brokers.broker.ports``
+        directly. The only Dhan-specific behaviour this subclass adds is
+        re-raising ``CircuitBreakerError`` as ``DhanNetworkError`` in
+        ``execute()``, plus a ``force_open()`` helper. Both can be handled at
+        the call-site instead.
+
+    Migration path::
+
+        # Old (deprecated)
+        from brokers.broker.dhan.infrastructure.resilience import DhanCircuitBreaker
+        cb = DhanCircuitBreaker()
+
+        # New (preferred)
+        from brokers.broker.ports import CircuitBreaker
+        cb = CircuitBreaker(failure_threshold=5, recovery_timeout=30.0)
+
     Example:
         >>> circuit_breaker = DhanCircuitBreaker()
-        >>> 
+        >>>
         >>> # Execute operation through circuit breaker
         >>> try:
         ...     result = await circuit_breaker.execute(
@@ -296,18 +299,13 @@ class DhanCircuitBreaker(BaseCircuitBreaker):
     
     def __init__(
         self,
-        config: Optional[CircuitBreakerConfig] = None,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 30.0,
+        success_threshold: int = 3
     ) -> None:
         """
         Initialize the circuit breaker.
-        
-        Args:
-            config: Optional circuit breaker configuration.
         """
-        failure_threshold = config.failure_threshold if config else 5
-        recovery_timeout = config.timeout if config else 30.0
-        success_threshold = config.success_threshold if config else 3
-        
         super().__init__(
             failure_threshold=failure_threshold,
             recovery_timeout=recovery_timeout,
@@ -335,25 +333,6 @@ class DhanCircuitBreaker(BaseCircuitBreaker):
         self,
         operation: Callable[[], Awaitable[T]]
     ) -> T:
-        """
-        Execute an operation through the circuit breaker.
-        
-        If the circuit is closed, executes the operation.
-        If the circuit is open, fails fast without calling the operation.
-        If the circuit is half-open, allows one test request.
-        
-        Args:
-            operation: Async callable to execute.
-        
-        Returns:
-            Result of the operation.
-        
-        Raises:
-            DhanNetworkError: If circuit is open.
-            Exception: Any exception from the operation.
-        """
-        # Use the parent class execute method, wrapping CircuitBreakerError
-        from brokers.broker.ports import CircuitBreakerError
         try:
             return await super().execute(operation)
         except CircuitBreakerError as e:

@@ -13,12 +13,13 @@ logger = logging.getLogger(__name__)
 class GenerativeAIService:
     """Fabio Logic LLM service — entry decisions ONLY.
 
-    The instruction and prompt format are aligned exactly to the training
-    data in ``training_data_fabio.jsonl``.  The model was trained on:
-      - Instruction: "Analyze the trading scenario based on Fabio Valentini's
-        methodology (Orderflow, Auction Market Theory)."
-      - Input:  natural-language market scenario with VAH/VAL/POC/Delta
-      - Output: structured "Market State / Logic / Trigger" block
+    Runtime contract:
+      - Prompt input: natural-language AMT/flow narrative from build_entry_prompt()
+      - Canonical output: single JSON object with direction/rationale/confidence/market_state
+      - Legacy structured "Market State / Logic / Trigger" parsing remains as fallback
+
+    This keeps runtime behavior aligned to one paper-trading contract even if
+    older fine-tuning artifacts still exist in the repository.
     """
 
     # The EXACT instruction used during fine-tuning (from config for consistency)

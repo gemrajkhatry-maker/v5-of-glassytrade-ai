@@ -10,7 +10,6 @@ footprint accumulation, OI tracking, Greeks refresh) from gameloop.py so that:
 from __future__ import annotations
 
 import asyncio
-import copy
 import gc
 import logging
 import math
@@ -18,6 +17,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
+from shared.resilience import PerEntityCircuitBreaker
 from app.config import settings
 from app.application.utils import is_market_open
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
@@ -34,37 +34,14 @@ _DHAN_CONNECT_COOLDOWN: float = 5.0
 _MAX_STREAM_RETRIES = 10
 _GC_INTERVAL_SECS = 1800
 _STALE_THRESHOLD_SECS = 60.0
-_STALE_RECONNECT_SECS = 60.0
+_STALE_RECONNECT_SECS = 300.0  # 5 min — MCX options can be quiet for minutes between ticks
 
 
-class SymbolCircuitBreaker:
-    """Per-symbol circuit breaker — isolates bad symbols from crashing the stream."""
+class SymbolCircuitBreaker(PerEntityCircuitBreaker):
+    """Backward-compat alias for tests — wraps PerEntityCircuitBreaker with old param names."""
 
-    def __init__(self, max_failures: int = 5, cooldown_secs: float = 60):
-        self._failures: dict[str, int] = {}
-        self._open_until: dict[str, float] = {}
-        self._max = max_failures
-        self._cooldown = cooldown_secs
-
-    def record_failure(self, symbol: str) -> None:
-        self._failures[symbol] = self._failures.get(symbol, 0) + 1
-        if self._failures[symbol] >= self._max:
-            self._open_until[symbol] = time.time() + self._cooldown
-            logger.warning("Circuit OPEN for %s (%d failures, cooldown %ds)",
-                           symbol, self._failures[symbol], self._cooldown)
-
-    def record_success(self, symbol: str) -> None:
-        self._failures.pop(symbol, None)
-        self._open_until.pop(symbol, None)
-
-    def is_open(self, symbol: str) -> bool:
-        deadline = self._open_until.get(symbol, 0)
-        if deadline and time.time() < deadline:
-            return True
-        if deadline:
-            self._open_until.pop(symbol, None)
-            self._failures[symbol] = self._max - 1
-        return False
+    def __init__(self, max_failures: int = 5, cooldown_secs: float = 60.0) -> None:
+        super().__init__(failure_threshold=max_failures, recovery_timeout=cooldown_secs)
 
 
 def _new_candle_state() -> dict:
@@ -101,6 +78,15 @@ def _validate_tick(tick: OHLC) -> str | None:
     return None
 
 
+def _depth_to_dto(book: OrderBook | None) -> dict | None:
+    if not book:
+        return None
+    return {
+        "bids": [{"price": float(l.price), "quantity": float(l.quantity)} for l in book.bids[:20]],
+        "asks": [{"price": float(l.price), "quantity": float(l.quantity)} for l in book.asks[:20]],
+    }
+
+
 class TradingEngine:
     """Standalone trading engine — streams market data and runs the full pipeline.
 
@@ -135,18 +121,28 @@ class TradingEngine:
         self._current_depths: dict[str, dict] = {}
         self._fp_accumulators: dict[str, TickFootprintAccumulator] = {}
         self._last_process_times: dict[str, float] = {}
-        self._last_greeks_times: dict[str, float] = {}
         self._prev_oi_values: dict[str, int] = {}
         self._tick_counts: dict[str, int] = {}
         self._last_tick_times: dict[str, float] = {}
 
-        self._circuit_breaker = SymbolCircuitBreaker()
+        self._circuit_breaker = PerEntityCircuitBreaker(
+            failure_threshold=5, 
+            recovery_timeout=_STALE_RECONNECT_SECS
+        )
         self._interval_secs = _interval_to_seconds(settings.STREAM_INTERVAL)
 
         # Tasks
         self._stream_task: asyncio.Task | None = None
         self._depth_task: asyncio.Task | None = None
+        self._watchdog_task: asyncio.Task | None = None
+        self._stale_watchdog_task: asyncio.Task | None = None
         self._running = False
+        self._last_any_tick_time: float = time.time()
+
+        # Polling fallback — set True by stale watchdog when WS gives no data
+        # (e.g. Dhan WS doesn't stream MCX OPTFUT binary frames)
+        self._polling_mode: bool = False
+        self._engine_start_time: float = 0.0
 
     # ------------------------------------------------------------------
     # Public API
@@ -167,14 +163,15 @@ class TradingEngine:
             self._tick_counts[sym] = 0
             self._last_tick_times[sym] = time.time()
 
+        self._engine_start_time = time.time()
+
         # Seed historical data
         await self._seed_history()
-        # Load initial Greeks
-        await self._load_greeks()
 
         # Start streaming tasks
         self._stream_task = asyncio.create_task(self._tick_loop_forever())
-        self._depth_task = asyncio.create_task(self._depth_20_loop())
+        self._watchdog_task = asyncio.create_task(self._sl_watchdog_loop())
+        self._stale_watchdog_task = asyncio.create_task(self._stale_stream_watchdog())
 
         logger.info("Trading engine started for %d symbols: %s",
                      len(self._active_symbols), self._active_symbols)
@@ -183,24 +180,34 @@ class TradingEngine:
         """Graceful shutdown."""
         self._running = False
         notify_task = getattr(self, '_notify_task', None)
-        for task in (self._stream_task, self._depth_task, notify_task):
+        for task in (self._stream_task, self._watchdog_task, self._stale_watchdog_task, notify_task):
             if task and not task.done():
                 task.cancel()
-        tasks = [t for t in (self._stream_task, self._depth_task, notify_task) if t]
+        tasks = [t for t in (self._stream_task, self._watchdog_task, self._stale_watchdog_task, notify_task) if t]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         logger.info("Trading engine stopped.")
 
     def get_latest_state(self, symbol: str) -> dict | None:
-        """Read-only access for WS viewers. Returns a snapshot (deep copy)."""
+        """Read-only access for WS viewers.
+
+        Returns a shallow copy of the state dict with a selective deep copy of
+        only the mutable ``portfolio`` value (which contains Position objects).
+        This avoids the overhead of deep-copying the entire state on every
+        viewer poll while still preventing mutation of shared portfolio data.
+        """
         state = self._latest_states.get(symbol)
         if state is None:
             return None
         import copy
         try:
-            return copy.deepcopy(state)
+            snapshot = dict(state)
+            # Only deep-copy the portfolio (has mutable Position objects)
+            if "portfolio" in snapshot:
+                snapshot["portfolio"] = copy.deepcopy(snapshot["portfolio"])
+            return snapshot
         except Exception:
-            return dict(state)
+            return copy.deepcopy(state)
 
     def get_all_latest_states(self) -> dict[str, dict]:
         """All symbol states for initial WS sync."""
@@ -248,41 +255,69 @@ class TradingEngine:
                 history = await self._market_data.fetch_history(
                     sym, settings.STREAM_INTERVAL, 500,
                 )
+
+                # Fallback for MCX options: broker API returns empty, load closed candles from DB
+                if not history:
+                    history = self._load_candles_from_db(sym, limit=500)
+                    if history:
+                        logger.info("Engine: seeded %d candles for %s from local DB", len(history), sym)
+
                 if history:
                     session = self._session_service.get_or_create_session(sym)
                     if len(session.data) < 10:
                         session.data = history
                         logger.info("Engine: seeded %d candles for %s", len(history), sym)
 
-                    # Run initial process_tick for AMT analysis
-                    if len(history) >= 20:
+                    # Build initial state from last candle (skip full pipeline / LLM during seed)
+                    if len(history) >= 1:
                         try:
                             last_candle = history[-1]
-                            state = await asyncio.to_thread(
-                                self._session_service.process_tick, sym, last_candle, None,
-                            )
                             from app.infrastructure.serialization.schemas import ohlc_to_dto
-                            state["tick"] = ohlc_to_dto(last_candle)
-                            state["ltp"] = last_candle.close
-                            state["_symbol"] = sym
-                            self._latest_states[sym] = state
-                            logger.info("Engine: initial process_tick done for %s", sym)
+                            self._latest_states[sym] = {
+                                "tick": ohlc_to_dto(last_candle),
+                                "ltp": last_candle.close,
+                                "_symbol": sym,
+                                "status": "seeded",
+                            }
+                            logger.info("Engine: initial seed done for %s (skipped LLM)", sym)
                         except Exception:
-                            logger.debug("Engine: initial process_tick failed for %s", sym, exc_info=True)
+                            logger.debug("Engine: initial seed failed for %s", sym, exc_info=True)
             except Exception:
                 logger.warning("Engine: history fetch failed for %s", sym, exc_info=True)
 
-    async def _load_greeks(self) -> None:
-        for sym in self._active_symbols:
-            try:
-                greeks = self._market_data.get_greeks(sym)
-                if greeks:
-                    session = self._session_service.get_or_create_session(sym)
-                    session._greeks = greeks
-                    self._last_greeks_times[sym] = asyncio.get_event_loop().time()
-                    logger.info("Engine: Greeks loaded for %s", sym)
-            except Exception:
-                logger.debug("Engine: Greeks fetch failed for %s", sym, exc_info=True)
+    def _load_candles_from_db(self, symbol: str, limit: int = 500) -> list[OHLC]:
+        """Load closed candles from SQLite.
+
+        Uses a dict keyed by timestamp to deduplicate — handles old DB rows written
+        per-tick before the candle-close-only write strategy was introduced.
+        Rows are ordered ASC by time from query_ticks, so iterating keeps the last
+        (most complete) row for each candle period.
+        """
+        storage = self._session_service._storage
+        if not storage:
+            return []
+        try:
+            rows = storage.query_ticks(symbol, limit=limit * 20)
+            seen: dict[str, OHLC] = {}
+            for row in rows:
+                t = row["time"]
+                if not t:
+                    continue
+                try:
+                    seen[t] = OHLC(
+                        time=t, open=float(row["open"] or 0),
+                        high=float(row["high"] or 0), low=float(row["low"] or 0),
+                        close=float(row["close"] or 0), volume=float(row["volume"] or 0),
+                        delta=float(row["delta"] or 0),
+                    )
+                except Exception:
+                    continue
+            # Explicit sort — ISO 8601 strings sort lexicographically = chronologically,
+            # but guards against mixed timezone formats in older DB rows.
+            return sorted(seen.values(), key=lambda x: x.time)[-limit:]
+        except Exception:
+            logger.debug("Engine: failed to load candles from DB for %s", symbol, exc_info=True)
+            return []
 
     # ------------------------------------------------------------------
     # Main tick loop
@@ -301,8 +336,7 @@ class TradingEngine:
         from app.infrastructure.serialization.schemas import ohlc_to_dto, footprint_to_dto
 
         last_gc_time = time.time()
-        last_stale_check = time.time()
-        last_any_tick_time = time.time()
+        self._last_any_tick_time = time.time()
         dhan_connect_state = [0.0]
 
         try:
@@ -318,18 +352,6 @@ class TradingEngine:
                 if not is_market_open(exchange=settings.DEFAULT_EXCHANGE):
                     continue
 
-                # Stale-data watchdog — if no ticks for too long, force a
-                # reconnect inside _stream_with_reconnect (don't break outer loop).
-                now_stale = time.time()
-                if now_stale - last_stale_check > 15:
-                    last_stale_check = now_stale
-                    if now_stale - last_any_tick_time > _STALE_RECONNECT_SECS:
-                        logger.warning("Engine: STALE — no ticks for %.0fs, reconnecting",
-                                       now_stale - last_any_tick_time)
-                        # Reset timer so the fresh connection isn't immediately killed
-                        last_any_tick_time = time.time()
-                        break
-
                 # Demux
                 pkt_symbol = pkt.get("symbol", self._active_symbols[0] if self._active_symbols else "")
                 if pkt_symbol not in self._candle_states:
@@ -343,7 +365,7 @@ class TradingEngine:
                     continue
 
                 self._last_tick_times[pkt_symbol] = time.time()
-                last_any_tick_time = self._last_tick_times[pkt_symbol]
+                self._last_any_tick_time = self._last_tick_times[pkt_symbol]
 
                 self._tick_counts[pkt_symbol] = self._tick_counts.get(pkt_symbol, 0) + 1
                 if self._tick_counts[pkt_symbol] == 1:
@@ -381,16 +403,27 @@ class TradingEngine:
                 pkt_bids = pkt.get("depth_bids", [])
                 pkt_asks = pkt.get("depth_asks", [])
                 if pkt_bids or pkt_asks:
-                    self._current_depths[pkt_symbol]["book"] = OrderBook(
-                        bids=tuple(
-                            OrderBookLevel(price=float(b.get("price", 0)), quantity=float(b.get("qty", 0)))
-                            for b in pkt_bids
-                        ),
-                        asks=tuple(
-                            OrderBookLevel(price=float(a.get("price", 0)), quantity=float(a.get("qty", 0)))
-                            for a in pkt_asks
-                        ),
+                    # Fabio's Depth 20 Fix: Only overwrite if existing book is empty or shallow.
+                    # This prevents the 100ms-throttled 5-level data from the tick stream
+                    # from nuking the high-resolution 20-level data from the background stream.
+                    current_book = self._current_depths[pkt_symbol].get("book")
+                    is_shallow = (
+                        current_book is None or 
+                        len(current_book.bids) < 10 or 
+                        len(current_book.asks) < 10
                     )
+                    
+                    if is_shallow:
+                        self._current_depths[pkt_symbol]["book"] = OrderBook(
+                            bids=tuple(
+                                OrderBookLevel(price=float(b.get("price", 0)), quantity=float(b.get("qty", 0)))
+                                for b in pkt_bids
+                            ),
+                            asks=tuple(
+                                OrderBookLevel(price=float(a.get("price", 0)), quantity=float(a.get("qty", 0)))
+                                for a in pkt_asks
+                            ),
+                        )
 
                 # Footprint accumulator
                 best_bid = pkt_bids[0].get("price", 0) if pkt_bids else 0.0
@@ -423,18 +456,6 @@ class TradingEngine:
 
                 self._last_process_times[pkt_symbol] = now_time
 
-                # Greeks refresh every 60s
-                last_greeks = self._last_greeks_times.get(pkt_symbol, 0.0)
-                if now_time - last_greeks > 60:
-                    try:
-                        greeks = self._market_data.get_greeks(pkt_symbol)
-                        if greeks:
-                            sess = self._session_service.get_or_create_session(pkt_symbol)
-                            sess._greeks = greeks
-                            self._last_greeks_times[pkt_symbol] = now_time
-                    except Exception:
-                        pass
-
                 # Full process_tick
                 try:
                     state = await asyncio.to_thread(
@@ -446,6 +467,7 @@ class TradingEngine:
                     state["ltp"] = ltp
                     state["oi"] = oi
                     state["_symbol"] = pkt_symbol
+                    state["depth"] = _depth_to_dto(self._current_depths[pkt_symbol]["book"])
 
                     # Overlay footprint
                     session = self._session_service._sessions.get(pkt_symbol)
@@ -499,7 +521,9 @@ class TradingEngine:
             candle_vol = 0
         else:
             candle_vol = vol - cs["prev_cum_vol"]
-            if candle_vol > 5000:
+            # Contextual spike cap: >5% of cumulative likely means session reset
+            vol_cap = max(10000, cs["prev_cum_vol"] * 0.05) if cs["prev_cum_vol"] > 0 else 10000
+            if candle_vol > vol_cap:
                 cs["prev_cum_vol"] = vol
                 candle_vol = 0
             else:
@@ -519,9 +543,12 @@ class TradingEngine:
         else:
             tick_buy = cum_buy - cs["prev_cum_buy"]
             tick_sell = cum_sell - cs["prev_cum_sell"]
-            if tick_buy > 5000:
+            # Contextual cap: >5% of cumulative = likely session reset
+            buy_sell_total = max(cs["prev_cum_buy"], 1) + max(cs["prev_cum_sell"], 1)
+            bs_cap = max(10000, buy_sell_total * 0.05)
+            if tick_buy > bs_cap:
                 tick_buy = 0
-            if tick_sell > 5000:
+            if tick_sell > bs_cap:
                 tick_sell = 0
             cs["prev_cum_buy"] = cum_buy
             cs["prev_cum_sell"] = cum_sell
@@ -590,6 +617,7 @@ class TradingEngine:
             "ltp": ltp,
             "oi": oi,
             "_symbol": symbol,
+            "depth": _depth_to_dto(self._current_depths.get(symbol, {}).get("book")),
         }
         try:
             session = self._session_service._sessions.get(symbol)
@@ -641,48 +669,157 @@ class TradingEngine:
         await self._notify_viewers(force=True)
 
     # ------------------------------------------------------------------
-    # Depth-20 background stream
+    # SL Watchdog — independent of tick stream
     # ------------------------------------------------------------------
 
-    async def _depth_20_loop(self) -> None:
-        if not hasattr(self._market_data, 'stream_depth_20'):
-            return
-        if settings.DEFAULT_EXCHANGE not in ("NSE", "NFO", "BSE"):
-            return
+    async def _sl_watchdog_loop(self) -> None:
+        """Independent SL/TP watchdog running every 1 second.
+
+        Protects positions even when the tick stream is disconnected
+        (e.g., during WebSocket reconnect, network jitter, or exchange gaps).
+        Uses the last known LTP cached in ``_last_tick_times`` and
+        ``_latest_states`` to evaluate SL/TP boundaries.
+        """
+        logger.info("Engine: SL watchdog started")
         while self._running:
             try:
-                logger.info("Engine: depth-20 starting for %d symbols", len(self._active_symbols))
-                async for md in self._market_data.stream_depth_20(self._active_symbols):
-                    if not self._running:
-                        break
-                    sym = getattr(md, 'symbol', self._active_symbols[0] if self._active_symbols else "")
-                    if sym not in self._current_depths:
+                await asyncio.sleep(1.0)
+                for sym in list(self._active_symbols):
+                    session = self._session_service._sessions.get(sym)
+                    if not session:
                         continue
-                    levels = getattr(md, 'levels', [])
-                    side = getattr(md, 'side', '')
-                    if not levels:
+
+                    # Get last known LTP from cached state
+                    cached_state = self._latest_states.get(sym, {})
+                    ltp = cached_state.get("ltp", 0)
+                    if ltp <= 0:
                         continue
-                    book = self._current_depths[sym].get("book")
-                    new_levels = tuple(
-                        OrderBookLevel(price=float(lv.price), quantity=float(lv.quantity))
-                        for lv in levels
-                    )
-                    if side == "bid":
-                        self._current_depths[sym]["book"] = OrderBook(
-                            bids=new_levels,
-                            asks=book.asks if book else (),
-                        )
-                    elif side == "ask":
-                        self._current_depths[sym]["book"] = OrderBook(
-                            bids=book.bids if book else (),
-                            asks=new_levels,
-                        )
-                logger.info("Engine: depth-20 stream ended, reconnecting...")
+
+                    with session._lock:
+                        open_positions = [
+                            p for p in session.portfolio.positions if p.is_open
+                        ]
+                        if not open_positions:
+                            continue
+
+                        for pos in open_positions:
+                            should_close, reason = pos.should_close(ltp)
+                            if should_close:
+                                logger.warning(
+                                    "WATCHDOG: Force-closing %s %s @ %.2f "
+                                    "(SL=%.2f, TP=%.2f, LTP=%.2f) — %s",
+                                    pos.side, sym, pos.entry_price,
+                                    pos.stop_loss, pos.take_profit, ltp, reason,
+                                )
+                                closed = session.portfolio.close_position(
+                                    pos.id, ltp, f"WATCHDOG_{reason}",
+                                )
+                                if closed:
+                                    # Unregister from trade manager
+                                    try:
+                                        self._session_service._record_position_consistency(
+                                            session, sym, context="watchdog_close",
+                                        )
+                                    except Exception:
+                                        pass
+                                    # Persist trade close
+                                    if self._session_service._storage:
+                                        try:
+                                            self._session_service._storage.delete_open_position(pos.id)
+                                            self._session_service._storage.save_trade({
+                                                "position_id": pos.id,
+                                                "symbol": sym,
+                                                "side": pos.side.value if hasattr(pos.side, 'value') else str(pos.side),
+                                                "entry_price": pos.entry_price,
+                                                "exit_price": ltp,
+                                                "size": pos.size,
+                                                "pnl": pos.pnl,
+                                                "source": pos.source.value if hasattr(pos.source, 'value') else str(pos.source),
+                                                "reason": f"WATCHDOG_{reason}",
+                                                "opened_at": pos.entry_time,
+                                                "closed_at": pos.exit_time,
+                                            })
+                                        except Exception:
+                                            logger.debug("Watchdog: persistence failed", exc_info=True)
             except asyncio.CancelledError:
-                raise
+                break
             except Exception:
-                logger.warning("Engine: depth-20 disconnected, retrying in 10s", exc_info=True)
-            await asyncio.sleep(10)
+                logger.error("SL watchdog error", exc_info=True)
+        logger.info("Engine: SL watchdog stopped")
+
+    # ------------------------------------------------------------------
+    # Stale-stream watchdog — independent of tick iteration
+    # ------------------------------------------------------------------
+
+    async def _stale_stream_watchdog(self) -> None:
+        """Detect hung market data streams and force reconnect or switch to polling.
+
+        Runs independently of the tick loop so it fires even when
+        ``async for pkt in stream_full()`` is blocked waiting forever.
+
+        Strategy:
+        - If no tick has EVER arrived within _WS_POLL_FALLBACK_SECS of engine start
+          and market is open → WS feed is dead (e.g. MCX OPTFUT broker limitation).
+          Switch permanently to REST LTP polling.
+        - Otherwise, for stale streams (tick gap > _STALE_RECONNECT_SECS), cancel
+          the stream task so _stream_with_reconnect triggers a WS reconnect.
+        """
+        _WS_POLL_FALLBACK_SECS = 60.0   # Give WS 60s to deliver first tick
+        logger.info("Engine: stale-stream watchdog started")
+        _ever_checked_fallback = False
+
+        while self._running:
+            try:
+                await asyncio.sleep(15)
+                if not is_market_open(exchange=settings.DEFAULT_EXCHANGE):
+                    continue
+
+                gap = time.time() - self._last_any_tick_time
+                uptime = time.time() - self._engine_start_time
+
+                # --- Polling fallback: switch once if WS never delivers data ---
+                if (
+                    not _ever_checked_fallback
+                    and not self._polling_mode
+                    and uptime > _WS_POLL_FALLBACK_SECS
+                    and all(self._tick_counts.get(s, 0) == 0 for s in self._active_symbols)
+                ):
+                    _ever_checked_fallback = True
+                    logger.warning(
+                        "Engine: WS produced ZERO ticks after %.0fs — "
+                        "switching permanently to REST polling fallback (MCX OPTFUT)",
+                        uptime,
+                    )
+                    self._polling_mode = True
+                    self._last_any_tick_time = time.time()
+                    # Cancel dead WS stream task and await its cleanup
+                    if self._stream_task and not self._stream_task.done():
+                        self._stream_task.cancel()
+                        try:
+                            await self._stream_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    # Restart stream task — will immediately enter polling branch
+                    if self._running:
+                        self._stream_task = asyncio.create_task(self._tick_loop_forever())
+                        logger.info("Engine: stream task restarted in REST polling mode")
+                    continue
+
+                # --- Normal stale: reconnect WS (stream produced data before) ---
+                if not self._polling_mode and gap > _STALE_RECONNECT_SECS:
+                    logger.warning(
+                        "Engine: STALE — no ticks for %.0fs, cancelling stream task", gap
+                    )
+                    self._last_any_tick_time = time.time()
+                    if self._stream_task and not self._stream_task.done():
+                        self._stream_task.cancel()
+
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.error("Stale-stream watchdog error", exc_info=True)
+        logger.info("Engine: stale-stream watchdog stopped")
+
 
     # ------------------------------------------------------------------
     # Stream with reconnect
@@ -691,6 +828,28 @@ class TradingEngine:
     async def _stream_with_reconnect(self, connect_state: list[float]):
         consecutive_failures = 0
         while self._running:
+            # -----------------------------------------------------------------
+            # Polling fallback path (MCX OPTFUT — WS never sends binary frames)
+            # -----------------------------------------------------------------
+            if self._polling_mode:
+                logger.info("Engine: using REST polling fallback (polling_mode=True)")
+                try:
+                    async for pkt in self._market_data.stream_poll(
+                        self._active_symbols, poll_interval=3.0
+                    ):
+                        consecutive_failures = 0
+                        yield pkt
+                    # stream_poll only exits if running=False
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning("Engine: polling error, retrying in 5s: %s", e)
+                    await asyncio.sleep(5)
+                continue
+
+            # -----------------------------------------------------------------
+            # Normal WS streaming path
+            # -----------------------------------------------------------------
             now = asyncio.get_event_loop().time()
             since_last = now - connect_state[0]
             if since_last < _DHAN_CONNECT_COOLDOWN:

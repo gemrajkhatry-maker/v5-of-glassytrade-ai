@@ -1,74 +1,81 @@
-"""Simulated market data generator — infrastructure adapter.
-
-Generates synthetic OHLCV data with configurable trends for testing
-and simulation. Does NOT implement MarketDataPort (it's a utility).
-"""
+"""Deterministic synthetic OHLCV generator used by tests."""
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+import math
 import random
-from datetime import datetime, timedelta
 
 from app.domain.trading.models.value_objects import OHLC
 
 
+_REGIME_DRIFT = {
+    "bullish": 0.0040,
+    "bearish": -0.0040,
+    "sideways": 0.0,
+    "volatile": 0.0,
+}
+
+_REGIME_NOISE = {
+    "bullish": 0.0060,
+    "bearish": 0.0060,
+    "sideways": 0.0040,
+    "volatile": 0.0120,
+}
+
+
 def generate_market_data(
     days: int = 50,
-    start_price: float = 150.0,
-    trend: str = "sideways",
+    start_price: float = 100.0,
+    regime: str = "sideways",
 ) -> list[OHLC]:
-    """Generate synthetic OHLCV + delta data.
+    """Return deterministic synthetic candles for test scenarios."""
+    total = max(int(days), 0)
+    if total == 0:
+        return []
 
-    Args:
-        days: Number of candles to generate.
-        start_price: Starting price.
-        trend: One of 'bullish', 'bearish', 'sideways', 'volatile'.
-    """
-    data: list[OHLC] = []
-    current_price = start_price
+    normalized = str(regime or "sideways").strip().lower()
+    drift = _REGIME_DRIFT.get(normalized, 0.0)
+    noise = _REGIME_NOISE.get(normalized, _REGIME_NOISE["sideways"])
+    rng = random.Random(f"{total}:{start_price:.4f}:{normalized}")
 
-    volatility = 0.08 if trend == "volatile" else 0.03
-    trend_bias = 0.0
-    if trend == "bullish":
-        trend_bias = 0.005
-    elif trend == "bearish":
-        trend_bias = -0.005
+    price = max(float(start_price), 1.0)
+    current = datetime(2026, 1, 1, 9, 15, tzinfo=timezone.utc)
+    candles: list[OHLC] = []
 
-    now = datetime.utcnow()
+    for index in range(total):
+        cycle = math.sin(index / 6.0) * (noise * 0.35)
+        shock = rng.uniform(-noise, noise)
+        step = drift + cycle + shock
+        if normalized == "volatile":
+            step += rng.choice((-1.0, 1.0)) * noise * 0.25
 
-    for i in range(days):
-        change_pct = (random.random() - 0.5) * volatility * 2 + trend_bias
-        open_price = current_price
-        close_price = open_price * (1 + change_pct)
+        open_price = price
+        close_price = max(1.0, open_price * (1.0 + step))
+        wick_scale = abs(step) + noise * 0.8 + 0.001
+        high = max(open_price, close_price) * (1.0 + wick_scale * (0.4 + rng.random() * 0.6))
+        low = min(open_price, close_price) * max(0.1, 1.0 - wick_scale * (0.4 + rng.random() * 0.6))
+        volume = max(100.0, 900.0 + abs(step) * 50000.0 + rng.uniform(-150.0, 250.0))
+        taker_buy_share = min(0.95, max(0.05, 0.5 + step * 8.0 + rng.uniform(-0.08, 0.08)))
+        taker_buy_volume = volume * taker_buy_share
+        delta = taker_buy_volume - (volume - taker_buy_volume)
+        vwap = (high + low + close_price) / 3.0
 
-        max_val = max(open_price, close_price)
-        min_val = min(open_price, close_price)
-        high = max_val * (1 + random.random() * 0.02)
-        low = min_val * (1 - random.random() * 0.02)
+        candles.append(
+            OHLC(
+                time=current.isoformat().replace("+00:00", "Z"),
+                open=round(open_price, 6),
+                high=round(max(high, open_price, close_price), 6),
+                low=round(min(low, open_price, close_price), 6),
+                close=round(close_price, 6),
+                volume=round(volume, 6),
+                vwap=round(vwap, 6),
+                taker_buy_volume=round(taker_buy_volume, 6),
+                delta=round(delta, 6),
+            )
+        )
 
-        move_size = abs(close_price - open_price) / open_price
-        base_volume = 1000.0
-        volume = base_volume * (1 + move_size * 50) * (random.random() * 0.5 + 0.5)
+        price = close_price
+        current += timedelta(minutes=5)
 
-        direction = 1 if close_price > open_price else -1
-        delta_bias = direction * 0.3
-        random_delta = random.random() * 2 - 1
-        delta_ratio = max(-0.9, min(0.9, delta_bias + random_delta * 0.5))
-        delta = volume * delta_ratio
-        taker_buy = (volume + delta) / 2
-
-        typical_price = (high + low + close_price) / 3
-        vwap = typical_price + (random.random() - 0.5) * (high - low) * 0.2
-
-        date = now - timedelta(days=days - i)
-        time_str = date.strftime("%Y-%m-%d")
-
-        data.append(OHLC(
-            time=time_str, open=open_price, high=high, low=low,
-            close=close_price, volume=volume, vwap=vwap,
-            taker_buy_volume=taker_buy, delta=delta,
-        ))
-
-        current_price = close_price
-
-    return data
+    return candles

@@ -25,3 +25,7 @@ class PaperBrokerAdapter(BrokerPort):
         scale_in = (signal.metadata or {}).get("scale_in", False)
         scale_fraction = 0.4 if scale_in else 1.0
         return portfolio.open_position(signal, symbol, scale_fraction=scale_fraction)
+
+    def cancel_order(self, order_id: str) -> bool:
+        """Paper broker does not hold individual stop bracket orders natively."""
+        return True

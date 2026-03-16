@@ -19,7 +19,7 @@ from stable_baselines3.common.callbacks import BaseCallback
 
 from app.domain.trading.models.value_objects import OHLC
 from app.domain.fabio_ai.rl.valentini_env import ValentiniAMTEnv
-from app.domain.fabio_ai.rl.data_loader import generate_synthetic, split_data
+from app.domain.fabio_ai.rl.data_loader import split_data
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +139,7 @@ class ValentiniTrainer:
     ) -> TrainingStatus:
         """Run the full training pipeline.
 
-        If ``data`` is None, synthetic data is generated for testing.
+        Requires real market data — no synthetic fallback.
         """
         from sb3_contrib import MaskablePPO
 
@@ -151,9 +151,9 @@ class ValentiniTrainer:
         start_time = time.time()
 
         try:
-            # 1. Prepare data
+            # 1. Prepare data — real market data required
             if data is None:
-                data = generate_synthetic(5000)
+                raise ValueError("Real market data (list[OHLC]) is required for RL training. No synthetic fallback.")
 
             split = split_data(data)
 

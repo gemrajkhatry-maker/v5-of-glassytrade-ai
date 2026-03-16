@@ -14,6 +14,7 @@ import sqlite3
 import threading
 import time
 from typing import Any
+from uuid import uuid4
 
 from app.domain.ports.storage import StoragePort
 
@@ -106,11 +107,23 @@ CREATE TABLE IF NOT EXISTS open_positions (
     extra TEXT
 );
 
+CREATE TABLE IF NOT EXISTS position_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    position_id TEXT,
+    symbol TEXT,
+    event_type TEXT NOT NULL,
+    event_time TEXT,
+    extra TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_ticks_symbol_time ON ticks(symbol, time);
 CREATE INDEX IF NOT EXISTS idx_trades_closed_at ON trades(closed_at);
 CREATE INDEX IF NOT EXISTS idx_llm_created ON llm_decisions(created_at);
 CREATE INDEX IF NOT EXISTS idx_perf_created ON performance_snapshots(created_at);
 CREATE INDEX IF NOT EXISTS idx_session_profiles ON session_profiles(symbol, market, session_date);
+CREATE INDEX IF NOT EXISTS idx_position_events_pos_time ON position_events(position_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_position_events_symbol_time ON position_events(symbol, created_at);
 
 CREATE TABLE IF NOT EXISTS kv_store (
     key TEXT PRIMARY KEY,
@@ -145,6 +158,19 @@ class SQLiteStorageAdapter(StoragePort):
             self._conn.execute("PRAGMA synchronous=NORMAL")
             self._conn.execute("PRAGMA wal_autocheckpoint=500")
             self._conn.executescript(_SCHEMA)
+            # Upgrade to UNIQUE index on (symbol, time): dedup rows first, then swap index.
+            try:
+                self._conn.execute(
+                    "DELETE FROM ticks WHERE id NOT IN ("
+                    "  SELECT MAX(id) FROM ticks GROUP BY symbol, time"
+                    ")"
+                )
+                self._conn.execute("DROP INDEX IF EXISTS idx_ticks_symbol_time")
+                self._conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_ticks_symbol_time ON ticks(symbol, time)"
+                )
+            except Exception:
+                pass
             self._conn.commit()
             logger.info("SQLite database initialized at %s (WAL mode)", self._db_path)
 
@@ -169,7 +195,7 @@ class SQLiteStorageAdapter(StoragePort):
         self._last_flush_time = time.time()
         try:
             self._conn.executemany(
-                "INSERT INTO ticks (symbol, time, open, high, low, close, volume, delta, extra) "
+                "INSERT OR REPLACE INTO ticks (symbol, time, open, high, low, close, volume, delta, extra) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 batch,
             )
@@ -202,7 +228,7 @@ class SQLiteStorageAdapter(StoragePort):
             else:
                 self._schedule_flush()
 
-    def save_trade(self, trade_data: dict[str, Any]) -> None:
+    def save_trade(self, trade_data: dict[str, Any], *, auto_commit: bool = True) -> None:
         with self._lock:
             try:
                 self._conn.execute(
@@ -227,12 +253,13 @@ class SQLiteStorageAdapter(StoragePort):
                                                  "opened_at", "closed_at")}),
                     ),
                 )
-                self._conn.commit()
+                if auto_commit:
+                    self._conn.commit()
             except Exception:
                 self._conn.rollback()
                 raise
 
-    def save_llm_decision(self, decision_data: dict[str, Any]) -> None:
+    def save_llm_decision(self, decision_data: dict[str, Any], *, auto_commit: bool = True) -> None:
         _KNOWN_KEYS = {"symbol", "direction", "confidence", "rationale",
                         "input_prompt", "raw_output", "market_state", "aggression",
                         "price", "vah", "val", "poc", "delta", "volume", "profile_shape"}
@@ -263,10 +290,19 @@ class SQLiteStorageAdapter(StoragePort):
                                     if k not in _KNOWN_KEYS}),
                     ),
                 )
-                self._conn.commit()
+                if auto_commit:
+                    self._conn.commit()
             except Exception:
                 self._conn.rollback()
                 raise
+
+    def flush(self) -> None:
+        """Explicit commit -- called by persistence bus after processing a batch."""
+        with self._lock:
+            try:
+                self._conn.commit()
+            except Exception:
+                logger.debug("flush commit failed", exc_info=True)
 
     def save_performance_snapshot(self, snapshot: dict[str, Any]) -> None:
         with self._lock:
@@ -335,6 +371,7 @@ class SQLiteStorageAdapter(StoragePort):
 
     def query_llm_decisions(
         self, start: str | None = None, end: str | None = None,
+        symbols: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock:
             query = "SELECT * FROM llm_decisions WHERE 1=1"
@@ -345,6 +382,10 @@ class SQLiteStorageAdapter(StoragePort):
             if end:
                 query += " AND created_at <= ?"
                 params.append(end)
+            if symbols:
+                placeholders = ",".join(["?"] * len(symbols))
+                query += f" AND symbol IN ({placeholders})"
+                params.extend(symbols)
             query += " ORDER BY created_at ASC"
             rows = self._conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
@@ -444,6 +485,52 @@ class SQLiteStorageAdapter(StoragePort):
                 (limit,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def save_position_event(self, event: dict[str, Any]) -> None:
+        with self._lock:
+            try:
+                payload = dict(event)
+                payload.setdefault("event_id", str(uuid4()))
+                self._conn.execute(
+                    "INSERT INTO position_events (position_id, symbol, event_type, event_time, extra) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (
+                        payload.get("position_id", ""),
+                        payload.get("symbol", ""),
+                        payload.get("event_type", ""),
+                        payload.get("event_time", ""),
+                        json.dumps({
+                            k: v for k, v in payload.items()
+                            if k not in ("position_id", "symbol", "event_type", "event_time")
+                        }),
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def query_position_events(
+        self, position_id: str | None = None, symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            query = "SELECT * FROM position_events WHERE 1=1"
+            params: list[Any] = []
+            if position_id:
+                query += " AND position_id = ?"
+                params.append(position_id)
+            if symbol:
+                query += " AND symbol = ?"
+                params.append(symbol)
+            query += " ORDER BY created_at ASC"
+            rows = self._conn.execute(query, params).fetchall()
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                d = dict(row)
+                extra = json.loads(d.pop("extra", "{}") or "{}")
+                d.update(extra)
+                result.append(d)
+            return result
 
     # ------------------------------------------------------------------
     # Key-Value store (crash-safe state persistence)

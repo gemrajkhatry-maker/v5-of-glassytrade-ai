@@ -27,6 +27,13 @@ class TestLLMNotReadyError:
         with pytest.raises(LLMNotReadyError, match="still loading"):
             adapter.predict("test", "test")
 
+    def test_extract_json_candidate_returns_balanced_object(self):
+        from app.infrastructure.adapters.mlx_inference_adapter import MLXInferenceAdapter
+
+        text = '{"direction":"LONG","rationale":"test"} trailing text'
+
+        assert MLXInferenceAdapter._extract_json_candidate(text) == '{"direction":"LONG","rationale":"test"}'
+
 
 class TestFlushTicksSingleLock:
     def test_concurrent_flush_no_data_loss(self):

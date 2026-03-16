@@ -11,6 +11,10 @@ import logging
 import json
 import sys
 import os
+
+# Fix OpenMP multiple initialization crash (LightGBM + MLX) on macOS
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import time as _time
 import tracemalloc
 from collections import defaultdict
@@ -180,3 +184,8 @@ app.include_router(trading_router, prefix="/api")
 app.include_router(ai_router, prefix="/api")
 app.include_router(rl_router, prefix="/api")
 app.include_router(gameloop_router, prefix="/api")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
