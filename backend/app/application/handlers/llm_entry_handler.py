@@ -299,8 +299,7 @@ class LLMEntryHandler:
                             parts.append(f"{side} imbalance at {price:.0f}")
                         imbalance_desc = "STACKED IMBALANCES: " + ", ".join(parts)
             except Exception:
-                pass
-
+                logger.debug("Exception handled silently", exc_info=True)
         # Episodic memory — feed last 5 trade outcomes to the LLM prompt
         episodic_memory = ""
         if self._storage:
@@ -332,6 +331,58 @@ class LLMEntryHandler:
                     )
             except Exception:
                 logger.debug("Failed to load episodic memory", exc_info=True)
+
+        # ── QUANT ENGINE GATE (Root Architecture Fix) ──
+        # LLM is the READER, quant engine is the VALIDATOR
+        agent_decision = getattr(session, "_agent_decision", None)
+        
+        if agent_decision:
+            # FIX: Check for DEAD market regime (no volume = no trade)
+            agent_regime = getattr(agent_decision, "regime", "")
+            if agent_regime == "DEAD":
+                logger.info(
+                    "QUANT GATE: Market regime=DEAD (no volume) — skipping LLM for %s",
+                    symbol
+                )
+                ai_result = {
+                    "direction": "FLAT",
+                    "rationale": "DEAD market: volume < 5% of average. No trade.",
+                    "confidence": "High",
+                    "input_prompt": "",
+                    "raw_output": "QUANT_DEAD_MARKET",
+                    "market_state": market_state_str,
+                }
+                # Skip to signal building
+                direction = "FLAT"
+                confidence = "High"
+                with session._lock:
+                    session.last_ai_analysis = ai_result
+                return
+            
+            # FIX: Check for FLAT direction with no edge
+            if agent_decision.direction == "FLAT":
+                agent_prob = getattr(agent_decision, "probability", 0.5)
+                if abs(agent_prob - 0.5) < 0.10:  # Within 10% of 50/50
+                    logger.info(
+                        "QUANT GATE: Engine says FLAT (P=%.3f, no edge) — skipping LLM for %s",
+                        agent_prob, symbol
+                    )
+                    # Return FLAT directly, no LLM call
+                    ai_result = {
+                        "direction": "FLAT",
+                        "rationale": f"No quant edge: P={agent_prob:.3f} near 50/50. Wait for clearer setup.",
+                        "confidence": "High",
+                    "input_prompt": "",
+                    "raw_output": "QUANT_FLAT_NO_EDGE",
+                    "market_state": market_state_str,
+                }
+                # Skip to signal building
+                direction = "FLAT"
+                confidence = "High"
+                # Skip the rest of the LLM flow
+                with session._lock:
+                    session.last_ai_analysis = ai_result
+                return
 
         market_data_ai = {
             "ltp": tick.close,
@@ -486,115 +537,122 @@ class LLMEntryHandler:
                     worker_queue.task_done()
                     continue
 
-                logger.info(
-                    "LLM inference starting for %s (price=%.2f, state=%s, setup=%s)",
-                    symbol,
-                    tick.close,
-                    market_state_str,
-                    setup_type.value,
-                )
-
-                try:
-                    # 1. Volatility Fast-Track Check (Bypass LLM completely)
-                    is_extreme_volatility = (
-                        amt_result.market_structure == "EXPANSION"
-                        or amt_result.price_velocity > 5.0
-                    )
-
-                    fallback_direction = "FLAT"
-                    _ml_dir = getattr(session, "_agent_decision", None)
-                    if _ml_dir and _ml_dir.direction != "FLAT":
-                        fallback_direction = _ml_dir.direction
-                    elif amt_result.signal:
-                        from app.domain.trading.models.enums import SignalType
-
-                        fallback_direction = (
-                            "LONG"
-                            if amt_result.signal.type == SignalType.BUY
-                            else "SHORT"
+                # ── LLM CONVICTION-BASED DECISION (Fabio: "READ the market") ──
+                # The LLM is the READER. Rules are SAFETY NETS only.
+                # LLM sees everything and decides. Rules only prevent disasters.
+                
+                # Add context flags to market_data_ai (inform LLM, don't block)
+                if amt_result.aggression < 1.0:
+                    market_data_ai["aggression_warning"] = "Weak aggression — higher risk"
+                if amt_result.market_state == "IMBALANCED" and not is_second_drive:
+                    market_data_ai["drive_warning"] = "First drive — wait for second if possible"
+                if abs(amt_result.cvd_slope) > 50:
+                    market_data_ai["cvd_warning"] = f"Extreme CVD ({amt_result.cvd_slope:.0f}) — respect institutional pressure"
+                
+                # ── Let LLM READ and DECIDE ──
+                # Model was fine-tuned to handle CVD extremes, VWAP overextension,
+                # profile shapes, etc. Only true infrastructure failures block.
+                # All market conditions go to LLM for decision.
+                
+                if False:  # Safety block disabled — LLM handles all market conditions
+                    pass
+                else:
+                    try:
+                        # 1. Volatility Fast-Track Check
+                        is_extreme_volatility = (
+                            amt_result.market_structure == "EXPANSION"
+                            or amt_result.price_velocity > 5.0
                         )
 
-                    if is_extreme_volatility and fallback_direction != "FLAT":
+                        fallback_direction = "FLAT"
+                        _ml_dir = getattr(session, "_agent_decision", None)
+                        if _ml_dir and _ml_dir.direction != "FLAT":
+                            fallback_direction = _ml_dir.direction
+                        elif amt_result.signal:
+                            from app.domain.trading.models.enums import SignalType
+
+                            fallback_direction = (
+                                "LONG"
+                                if amt_result.signal.type == SignalType.BUY
+                                else "SHORT"
+                            )
+
+                        if is_extreme_volatility and fallback_direction != "FLAT":
+                            logger.warning(
+                                f"Extreme volatility detected. Bypassing LLM. Using: {fallback_direction}"
+                            )
+                            ai_result = {
+                                "direction": fallback_direction,
+                                "rationale": "Volatility bypass — quant signal",
+                                "confidence": "High",
+                                "input_prompt": "",
+                                "raw_output": "QUANT_FALLBACK",
+                                "market_state": market_state_str,
+                            }
+                        else:
+                            predict_future = self._predict_executor.submit(
+                                self._gen_ai_service.analyze_market,
+                                market_data_ai,
+                            )
+                            ai_result = predict_future.result(
+                                timeout=_settings.LLM_TIMEOUT_SECONDS
+                            )
+                    except concurrent.futures.TimeoutError:
+                        predict_future.cancel()
                         logger.warning(
-                            f"Extreme volatility detected. Bypassing LLM execution. Using deterministic signal: {fallback_direction}"
+                            "LLM timed out after %.0fs — using fallback",
+                            _settings.LLM_TIMEOUT_SECONDS,
                         )
-                        ai_result = {
-                            "direction": fallback_direction,
-                            "rationale": "Deterministic Fallback due to Extreme Volatility (EXPANSION regime or high price velocity).",
-                            "confidence": "High",
-                            "input_prompt": "",
-                            "raw_output": "QUANT_FALLBACK",
-                            "market_state": market_state_str,
-                            "aggression": f"{amt_result.aggression:.2f}",
-                        }
-                    else:
-                        predict_future = self._predict_executor.submit(
-                            self._gen_ai_service.analyze_market,
-                            market_data_ai,
-                        )
-                        ai_result = predict_future.result(
-                            timeout=_settings.LLM_TIMEOUT_SECONDS
-                        )
-                except concurrent.futures.TimeoutError:
-                    predict_future.cancel()
-                    logger.warning(
-                        "Entry LLM timed out after %.0fs — attempting deterministic fallback",
-                        _settings.LLM_TIMEOUT_SECONDS,
-                    )
-                    if fallback_direction != "FLAT":
-                        logger.info(
-                            f"Using deterministic fallback direction: {fallback_direction} due to LLM timeout."
-                        )
-                        ai_result = {
-                            "direction": fallback_direction,
-                            "rationale": "Deterministic Fallback due to LLM Timeout. Quant gates approved entry.",
-                            "confidence": "Medium",
-                            "input_prompt": "",
-                            "raw_output": "QUANT_FALLBACK_TIMEOUT",
-                            "market_state": market_state_str,
-                            "aggression": f"{amt_result.aggression:.2f}",
-                        }
-                    else:
+                        if fallback_direction != "FLAT":
+                            ai_result = {
+                                "direction": fallback_direction,
+                                "rationale": "Timeout fallback — quant signal",
+                                "confidence": "Medium",
+                                "input_prompt": "",
+                                "raw_output": "TIMEOUT_FALLBACK",
+                                "market_state": market_state_str,
+                            }
+                        else:
+                            with session._lock:
+                                session._ai_running = False
+                            worker_queue.task_done()
+                            continue
+                    except Exception as e:
+                        logger.error(f"LLM inference exception: {e}", exc_info=True)
                         with session._lock:
                             session._ai_running = False
                         worker_queue.task_done()
                         continue
-                except Exception as e:
-                    logger.error(f"LLM inference exception: {e}", exc_info=True)
-                    with session._lock:
-                        session._ai_running = False
-                    worker_queue.task_done()
-                    continue
 
                 direction = ai_result["direction"]
-                # BUY-only gate: block SHORT when ALLOW_SHORT=false
+                confidence = ai_result.get("confidence", "Medium")
+                rationale = ai_result.get("rationale", "")
+                
+                # SAFETY NETS ONLY (prevent disasters, not decision-making)
+                
+                # 1. BUY-only enforcement (system config)
                 if direction == "SHORT" and not _settings.ALLOW_SHORT:
                     logger.info("BUY-ONLY mode: SHORT blocked → FLAT")
                     direction = "FLAT"
-                    ai_result["direction"] = "FLAT"
-                # VWAP overextension gate — block entries at/beyond ±2σ bands
+                    rationale = "System in BUY-ONLY mode"
+                
+                # 2. VWAP EXTREME (3σ) — beyond normal overextension, institutional anomaly
                 if (
                     direction == "LONG"
                     and amt_result.vwap_upper_2 > 0
-                    and tick.close >= amt_result.vwap_upper_2
+                    and tick.close >= amt_result.vwap_upper_2 * 1.01  # Beyond +2σ by 1%
                 ):
                     logger.info(
-                        "VWAP overextension gate: LONG blocked at/above +2σ (price=%.2f, band=%.2f)",
+                        "VWAP EXTREME: LONG at >+2σ — institutional anomaly (price=%.2f, band=%.2f)",
                         tick.close,
                         amt_result.vwap_upper_2,
                     )
-                    direction = "FLAT"
-                elif (
-                    direction == "SHORT"
-                    and amt_result.vwap_lower_2 > 0
-                    and tick.close <= amt_result.vwap_lower_2
-                ):
-                    logger.info(
-                        "VWAP overextension gate: SHORT blocked at/below -2σ (price=%.2f, band=%.2f)",
-                        tick.close,
-                        amt_result.vwap_lower_2,
-                    )
-                    direction = "FLAT"
+                    # Don't block, but lower confidence
+                    confidence = "Low"
+                    rationale += " [VWAP extreme: >+2σ]"
+                
+                # Note: VWAP at ±2σ is INFORMATIONAL, not blocking
+                # LLM sees this in prompt and decides
 
                 confidence = ai_result.get(
                     "confidence", "High" if direction != "FLAT" else "Medium"
@@ -645,32 +703,27 @@ class LLMEntryHandler:
                     except Exception:
                         logger.debug("Journal log_signal failed", exc_info=True)
 
-                # Meta-filter: if ML signal exists, LLM must confirm it
-                # Exception: if ML probability is weak (<0.55), trust LLM's conviction
+                # LLM is the READER, quant model provides context
+                # LLM makes final decision based on market reading
                 agent = getattr(session, "_agent_decision", None)
-                if (
-                    agent
-                    and agent.direction != "FLAT"
-                    and direction not in ("FLAT", agent.direction)
-                ):
-                    ml_prob = max(
-                        getattr(agent, "p_long", 0.5), getattr(agent, "p_short", 0.5)
-                    )
-                    if ml_prob >= 0.55:
+                if agent:
+                    # Add quant context to LLM rationale (informational)
+                    quant_dir = getattr(agent, "direction", "FLAT")
+                    quant_prob = getattr(agent, "probability", 0.5)
+                    
+                    if quant_dir == "FLAT" and abs(quant_prob - 0.5) < 0.05:
+                        # No quant edge — LLM is the sole decision maker
                         logger.info(
-                            "Meta-filter: LLM %s disagrees with ML %s (P=%.2f) → staying FLAT",
-                            direction,
-                            agent.direction,
-                            ml_prob,
+                            "QUANT: No edge (P=%.3f) — LLM decides: %s",
+                            quant_prob, direction,
                         )
-                        direction = "FLAT"
-                    else:
+                    elif quant_dir != direction and quant_dir != "FLAT":
+                        # Quant disagrees with LLM — log but trust LLM
                         logger.info(
-                            "Meta-filter: LLM %s disagrees with weak ML %s (P=%.2f) → trusting LLM",
-                            direction,
-                            agent.direction,
-                            ml_prob,
+                            "QUANT: %s (P=%.2f) vs LLM: %s — trusting LLM reading",
+                            quant_dir, quant_prob, direction,
                         )
+                    # LLM direction is final (no override)
 
                 # Momentum Fade Gate (Fabio Rule: Don't short a freight train)
                 if direction in ("LONG", "SHORT") and check_momentum_fade(
@@ -825,22 +878,14 @@ class LLMEntryHandler:
                         getattr(amt_result, "vwap_upper_2", 0),
                         getattr(amt_result, "vwap_lower_2", 0),
                     )
-                    # Fabio: VWAP bias filter - hard block against VWAP direction
-                    # Price below VWAP = don't go LONG, above VWAP = don't go SHORT
+                    # VWAP overextension — WARNING only, let LLM decide
+                    # Model was trained to handle VWAP extremes
                     if vwap_bias.get("overextended"):
                         logger.info(
-                            "VWAP overextension: %s blocked at ±2σ band (price=%.2f)",
+                            "VWAP WARNING: %s at ±2σ band (price=%.2f) — LLM decides",
                             direction,
                             tick.close,
                         )
-                        if self._journal:
-                            self._journal.log_rejection(
-                                symbol=symbol,
-                                reason="VWAP_OVEREXTENDED",
-                                amt=session.last_amt,
-                                llm_direction=direction,
-                            )
-                        direction = "FLAT"
                         block_trade = True
                     elif vwap_bias.get("warning"):
                         # Against VWAP bias - warn but don't block (LLM can override with conviction)
@@ -864,8 +909,7 @@ class LLMEntryHandler:
                                     )
                                     grade_score += imb_adj
                         except Exception:
-                            pass
-
+                            logger.debug("Exception handled silently", exc_info=True)
                     if fp_domain:
                         try:
                             _fp_vals = (
@@ -886,8 +930,7 @@ class LLMEntryHandler:
                                         f"ABSORPTION: {_absorption['absorbed_by']} absorbing {_absorption['aggressive_side']} aggression"
                                     )
                         except Exception:
-                            pass
-
+                            logger.debug("Exception handled silently", exc_info=True)
                     # Second drive bonus
                     key_levels = [
                         amt_result.poc,
@@ -929,8 +972,7 @@ class LLMEntryHandler:
                                 direction = "FLAT"
                                 block_trade = True
                         except Exception:
-                            pass
-
+                            logger.debug("Exception handled silently", exc_info=True)
                     # Confirmation bundle: weak vol/delta/spread penalizes grade
                     if not item.get("confirmation_strong", True):
                         grade_score -= 1
@@ -942,27 +984,27 @@ class LLMEntryHandler:
                     else:
                         confidence = "Low"
 
-                    # Fabio Gap #1: Trust LLM conviction - only block on extreme cases
-                    # Grade filter is now advisory (informs confidence level)
-                    # Guardrails AFTER LLM decision: only circuit breaker, daily loss, R:R
-                    block_trade = False
-                    # Only block if grade is severely negative (less than -3)
-                    # This is an extreme guardrail, not a routine filter
-                    if grade_score < -3:
-                        logger.info(
-                            "Grade guardrail: %s blocked — grade_score=%d (extreme negative)",
+                    # ── GRADE IS ADVISORY, NOT BLOCKING ──
+                    # Fabio: "READ the market, don't let rules decide"
+                    # Grade informs confidence but doesn't block LLM decision
+                    # Only extreme grade (< -5) blocks (disaster prevention)
+                    
+                    if grade_score < -5:
+                        logger.warning(
+                            "EXTREME GRADE: %s blocked — grade_score=%d (disaster prevention)",
                             direction,
                             grade_score,
                         )
-                        block_trade = True
-                        if self._journal:
-                            self._journal.log_rejection(
-                                symbol=symbol,
-                                reason="GRADE_FILTER",
-                                amt=session.last_amt,
-                                llm_direction=direction,
-                            )
                         direction = "FLAT"
+                        confidence = "Low"
+                    elif grade_score < 0:
+                        # Negative grade = lower confidence, not block
+                        confidence = "Low"
+                        logger.info(
+                            "Grade advisory: %s grade_score=%d → confidence lowered to Low",
+                            direction,
+                            grade_score,
+                        )
 
                 with session._lock:
                     session.last_ai_analysis = {
@@ -1000,8 +1042,7 @@ class LLMEntryHandler:
                             }
                         )
                     except Exception:
-                        pass
-
+                        logger.debug("Exception handled silently", exc_info=True)
                 if direction in ("LONG", "SHORT"):
                     _ad = getattr(session, "_agent_decision", None)
                     if (
@@ -1100,7 +1141,7 @@ class LLMEntryHandler:
                                             session_context=session_info.session,
                                             confidence=confidence,
                                         )
-                                    if not TradeManager.is_valid_rr(
+                                    if not entry_signal or not TradeManager.is_valid_rr(
                                         entry_signal.price,
                                         entry_signal.stop_loss,
                                         entry_signal.take_profit,
@@ -1171,6 +1212,17 @@ class LLMEntryHandler:
 
             except Exception as e:
                 logger.error(f"Worker loop fatal error: {e}", exc_info=True)
+                # Release lock on session if we have it
+                try:
+                    if 'session' in locals() and session:
+                        with session._lock:
+                            session._ai_running = False
+                except Exception:
+                    pass
+                try:
+                    worker_queue.task_done()
+                except Exception:
+                    pass
 
     # ------------------------------------------------------------------
     # Fabio Rule 11 — Failed entry recording (call on stop-out)

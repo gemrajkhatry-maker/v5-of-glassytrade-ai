@@ -52,6 +52,7 @@ FEATURE_NAMES: tuple[str, ...] = (
     "bid_ask_spread_bps",
     "book_imbalance_l1",
     "book_imbalance_l5",
+    # "book_imbalance_l20",  # L20 depth imbalance — NOT in trained model (diagnostic only)
     "bid_depth_total",
     "ask_depth_total",
     "book_pressure_ratio",
@@ -188,10 +189,15 @@ def extract_features(
         f["bid_depth_total"] = bid_q20
         f["ask_depth_total"] = ask_q20
         f["book_pressure_ratio"] = bid_q20 / ask_q20 if ask_q20 > 0 else 1.0
+        
+        # L20 order book imbalance (depth20 for NSE)
+        total_q20 = bid_q20 + ask_q20
+        f["book_imbalance_l20"] = (bid_q20 - ask_q20) / total_q20 if total_q20 > 0 else 0.0
     else:
         f["bid_ask_spread_bps"] = 0.0
         f["book_imbalance_l1"] = 0.0
         f["book_imbalance_l5"] = 0.0
+        f["book_imbalance_l20"] = 0.0  # L20 depth imbalance
         f["bid_depth_total"] = 0.0
         f["ask_depth_total"] = 0.0
         f["book_pressure_ratio"] = 1.0

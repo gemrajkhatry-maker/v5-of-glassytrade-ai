@@ -403,3 +403,132 @@ def opening_inventory_bias(
         return "SHORT_BIAS"
     else:
         return "NEUTRAL"
+
+
+# ---------------------------------------------------------------------------
+# Session-Aware IB & VWAP Anchors (NSE vs MCX)
+# ---------------------------------------------------------------------------
+
+# MCX sub-sessions for late-day trading
+MCX_SUB_SESSIONS = {
+    "MORNING": (9, 0, 13, 0),      # 09:00 - 13:00 IST
+    "AFTERNOON": (13, 0, 19, 30),   # 13:00 - 19:30 IST  
+    "US_SESSION": (19, 30, 23, 30), # 19:30 - 23:30 IST (US-driven)
+}
+
+MCX_US_OPEN_IST = (19, 30)  # 7:30 PM IST = US market influence
+
+
+def get_ib_window(exchange: str, current_time: datetime | None = None) -> tuple[int, int, int, int]:
+    """Get the Initial Balance window for the current session.
+    
+    Returns (start_hour, start_min, end_hour, end_min) in IST.
+    
+    NSE: 09:15 - 10:15 (60 min, institutional participation)
+    MCX Morning: 09:00 - 10:00 (60 min)
+    MCX US Session: 19:30 - 20:30 (60 min, US influence)
+    """
+    if current_time is None:
+        current_time = datetime.now(_IST)
+    else:
+        current_time = _to_ist(current_time)
+    
+    hour = current_time.hour
+    minute = current_time.minute
+    
+    if exchange.upper() == "NSE":
+        # NSE: Fixed IB window 09:15 - 10:15
+        return (9, 15, 10, 15)
+    
+    elif exchange.upper() == "MCX":
+        # MCX: Dynamic IB based on sub-session
+        if hour < 13 or (hour == 13 and minute == 0):
+            # Morning session: 09:00 - 10:00
+            return (9, 0, 10, 0)
+        elif hour < 19 or (hour == 19 and minute < 30):
+            # Afternoon: use morning IB as reference
+            return (9, 0, 10, 0)
+        else:
+            # US session: new IB from 19:30 - 20:30
+            return (19, 30, 20, 30)
+    
+    return (9, 0, 10, 0)  # Default
+
+
+def get_vwap_anchors(exchange: str, current_time: datetime | None = None, 
+                     commodity: str = "") -> list[tuple[int, int]]:
+    """Get VWAP reset anchors for the session.
+    
+    NSE: Single anchor at 09:15
+    MCX: Full session (09:00) + US session (19:30) for energy commodities
+    """
+    if current_time is None:
+        current_time = datetime.now(_IST)
+    else:
+        current_time = _to_ist(current_time)
+    
+    anchors = []
+    
+    if exchange.upper() == "NSE":
+        anchors.append((9, 15))  # NSE open
+    
+    elif exchange.upper() == "MCX":
+        anchors.append((9, 0))  # Full session VWAP
+        
+        # Add US-session VWAP for energy commodities during US hours
+        commodity_upper = commodity.upper()
+        if commodity_upper in ["CRUDEOIL", "NATURALGAS", "CRUDEOILM"]:
+            hour = current_time.hour
+            if hour >= 19 or (hour == 19 and current_time.minute >= 30):
+                anchors.append(MCX_US_OPEN_IST)
+    
+    return anchors
+
+
+def get_sub_session(exchange: str, current_time: datetime | None = None) -> str:
+    """Get the current sub-session name for MCX.
+    
+    Returns: "MORNING", "AFTERNOON", "US_SESSION", or "NSE" for NSE.
+    """
+    if exchange.upper() == "NSE":
+        return "NSE"
+    
+    if current_time is None:
+        current_time = datetime.now(_IST)
+    else:
+        current_time = _to_ist(current_time)
+    
+    hour = current_time.hour
+    minute = current_time.minute
+    t = hour * 60 + minute
+    
+    for name, (sh, sm, eh, em) in MCX_SUB_SESSIONS.items():
+        start = sh * 60 + sm
+        end = eh * 60 + em
+        if start <= t < end:
+            return name
+    
+    return "UNKNOWN"
+
+
+def is_late_session(exchange: str, current_time: datetime | None = None) -> bool:
+    """Check if we're in the late session (different dynamics).
+    
+    NSE: Last 30 minutes (15:00-15:30)
+    MCX: US session (19:30-23:30) — driven by US futures
+    """
+    if current_time is None:
+        current_time = datetime.now(_IST)
+    else:
+        current_time = _to_ist(current_time)
+    
+    hour = current_time.hour
+    minute = current_time.minute
+    
+    if exchange.upper() == "NSE":
+        return hour >= 15
+    
+    elif exchange.upper() == "MCX":
+        return hour >= 19 or (hour == 19 and minute >= 30)
+    
+    return False

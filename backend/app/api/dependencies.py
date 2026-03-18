@@ -102,7 +102,7 @@ class ServiceGraph:
             _results = _scan_pool.submit(_scan).result(timeout=120)
 
             if _results:
-                # Scanner already validates LTP from chain — no redundant API calls
+                # Scanner found contracts with bullish momentum
                 _final = [r for r in _results if r.ltp > 0]
                 if not _final:
                     _final = _results
@@ -111,7 +111,11 @@ class ServiceGraph:
                     logger.info("Auto-selected #%d: %s (LTP=%.2f, OI=%d, Score=%.1f, Bias=%s)",
                                i, r.symbol, r.ltp, r.oi, r.score, r.bias)
             else:
-                logger.warning("Option scan returned no results — using DEFAULT_SYMBOL=%s", settings.DEFAULT_SYMBOL)
+                # Scanner returned 0 — no bullish momentum
+                # Still use DEFAULT_SYMBOL for data streaming (UI needs data)
+                # But trade signals will be FLAT (no setups)
+                logger.warning("No bullish setups found — using %s for data streaming (no trades)", 
+                              settings.DEFAULT_SYMBOL)
         except (_cf.TimeoutError, Exception):
             logger.warning("Option scanner failed/timed out — using DEFAULT_SYMBOL=%s", settings.DEFAULT_SYMBOL)
         finally:

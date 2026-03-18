@@ -175,13 +175,18 @@ class TradeLifecycleHandler:
             market_state = "IMBALANCED"
         else:
             market_state = "BALANCED"
+        # Ensure Decimal types are converted to float for trade_manager
+        entry_price = float(position.entry_price) if hasattr(position.entry_price, '__float__') else position.entry_price
+        stop_loss = float(signal.stop_loss) if hasattr(signal.stop_loss, '__float__') else signal.stop_loss
+        take_profit = float(signal.take_profit) if hasattr(signal.take_profit, '__float__') else signal.take_profit
+        
         self._trade_manager.register_position(
             position_id=position.id,
             symbol=symbol,
             side="LONG" if signal.type == SignalType.BUY else "SHORT",
-            entry_price=position.entry_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
             allow_trail=allow_trail,
             market_state=market_state,
             enable_scale_in=scale_in,

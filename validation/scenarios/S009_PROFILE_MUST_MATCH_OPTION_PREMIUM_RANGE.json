@@ -1,0 +1,30 @@
+{
+  "scenario_id": "S009",
+  "name": "PROFILE_MUST_MATCH_OPTION_PREMIUM_RANGE",
+  "description": "For CRUDEOIL 9100 CE at ~\u20b9112, all profile levels must be in \u20b980\u2013\u20b9200 range",
+  "fabio_rule": "Profile must be computed on the instrument being traded \u2014 not the underlying futures",
+  "input": {
+    "symbol": "CRUDEOIL_9100_CE",
+    "current_price": 111.9,
+    "instrument_type": "OPTION_PREMIUM",
+    "session_poc": 115.0,
+    "session_vah": 138.0,
+    "session_val": 91.0,
+    "lvns": [
+      107.5,
+      119.0
+    ],
+    "prior_poc": 112.5
+  },
+  "expected": {
+    "profile_valid": true,
+    "price_range_min": 80.0,
+    "price_range_max": 200.0,
+    "validation_checks": {
+      "poc_in_range": true,
+      "vah_in_range": true,
+      "val_in_range": true,
+      "all_lvns_in_range": true
+    }
+  }
+}

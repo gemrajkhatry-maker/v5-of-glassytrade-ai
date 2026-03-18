@@ -1,8 +1,17 @@
-"""Session Risk Manager — Fabio's intraday cushion/compounding system (Gap #4)."""
+"""Session Risk Manager — Fabio's intraday cushion/compounding system (Gap #4).
+
+NOW WITH:
+- 3-Loss Daily Circuit Breaker (FIX: Fabio rule: "stop trading after 3 consecutive stop-outs")
+- Dynamic risk tier adjustment
+- Session trade limits
+"""
 
 from __future__ import annotations
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class RiskTier(str, Enum):
@@ -17,6 +26,9 @@ class RiskTier(str, Enum):
 class SessionRiskManager:
     """Tracks session P&L and adjusts risk per Fabio's cushion methodology.
 
+    FABIO RULE: "If you hit 3 stop-outs, stop trading for the day.
+    The market is not aligned with your reads."
+    
     Pure domain service — no side effects, fully testable.
     """
 
@@ -27,12 +39,17 @@ class SessionRiskManager:
     _base_sl_pct: float = 0.005  # default 0.5%
     _max_sl_pct: float = 0.005  # hard cap
     _max_profit_risk_pct: float = 0.30  # never risk > 30% of session profit
-    _max_trades_per_session: int = (
-        5  # Fabio: cap trades per session to prevent overtrading
-    )
+    _max_trades_per_session: int = 5  # Fabio: cap trades per session
+    
+    # ── FIX: 3-Loss Daily Circuit Breaker ──
+    # Fabio: "If you hit 3 stop-outs, stop trading for the day."
+    max_consecutive_losses: int = 3  # Circuit breaker threshold
+    _halted: bool = False  # True when circuit breaker is triggered
 
     @property
     def risk_tier(self) -> RiskTier:
+        if self._halted:
+            return RiskTier.DEFENSIVE
         if self.consecutive_losses >= 2:
             return RiskTier.DEFENSIVE
         if self.trade_count < 2:
@@ -45,11 +62,36 @@ class SessionRiskManager:
 
     @property
     def can_trade(self) -> bool:
-        """Check if new trade is allowed based on session limits."""
-        # Check max trades cap
+        """Check if new trade is allowed based on session limits.
+        
+        ENFORCES:
+        1. Circuit breaker (3 consecutive losses)
+        2. Max trades per session
+        3. Halted state
+        """
+        if self._halted:
+            return False
+        if self.consecutive_losses >= self.max_consecutive_losses:
+            self._halted = True
+            logger.critical(
+                "CIRCUIT BREAKER: %d consecutive losses — halting for session",
+                self.consecutive_losses,
+            )
+            return False
         if self.trade_count >= self._max_trades_per_session:
             return False
         return True
+
+    @property
+    def halt_reason(self) -> str:
+        """Return reason for halt, or empty string if trading allowed."""
+        if self._halted:
+            return f"3-loss circuit breaker: {self.consecutive_losses} consecutive losses"
+        if self.consecutive_losses >= self.max_consecutive_losses:
+            return f"Circuit breaker: {self.consecutive_losses} consecutive losses"
+        if self.trade_count >= self._max_trades_per_session:
+            return f"Max trades ({self._max_trades_per_session}) reached"
+        return ""
 
     @property
     def stop_loss_pct(self) -> float:
@@ -75,19 +117,10 @@ class SessionRiskManager:
         # Hard cap — never exceed max regardless of tier
         result = min(raw, self._max_sl_pct)
 
-        # Fabio cushion rule: when in profit, never risk more than 30% of session gain.
-        # Implemented as a tighter SL cap (in pct terms) when session_pnl > 0.
-        # absolute max_from_profit is enforced at portfolio level during position sizing.
-        if self.session_pnl > 0 and self._max_profit_risk_pct > 0:
-            # Use a conservative estimate: assume entry size gives ~0.5% of equity as 1R
-            # If session_pnl is large relative to typical risk, tighten SL pct
-            # Real enforcement is at portfolio level, this is a secondary soft cap.
-            pass  # Portfolio-level enforcement handles absolute cap
-
         return result
 
     def record_trade(self, pnl: float) -> None:
-        """Record a completed trade result."""
+        """Record a completed trade result and check circuit breaker."""
         self.session_pnl += pnl
         self.trade_count += 1
         if pnl > 0:
@@ -96,6 +129,15 @@ class SessionRiskManager:
         elif pnl < 0:
             self.consecutive_losses += 1
             self.consecutive_wins = 0
+            
+            # ── Check circuit breaker immediately ──
+            if self.consecutive_losses >= self.max_consecutive_losses:
+                self._halted = True
+                logger.critical(
+                    "CIRCUIT BREAKER ACTIVATED: %d consecutive losses. "
+                    "Session halted per Fabio rule.",
+                    self.consecutive_losses,
+                )
         # pnl == 0 (breakeven) doesn't reset streaks
 
     def to_dict(self) -> dict:
@@ -105,6 +147,7 @@ class SessionRiskManager:
             "trade_count": self.trade_count,
             "consecutive_wins": self.consecutive_wins,
             "consecutive_losses": self.consecutive_losses,
+            "_halted": self._halted,
         }
 
     def load_from_dict(self, data: dict) -> None:
@@ -113,6 +156,7 @@ class SessionRiskManager:
         self.trade_count = data.get("trade_count", 0)
         self.consecutive_wins = data.get("consecutive_wins", 0)
         self.consecutive_losses = data.get("consecutive_losses", 0)
+        self._halted = data.get("_halted", False)
 
     def reset(self) -> None:
         """Reset at session start."""
@@ -120,3 +164,4 @@ class SessionRiskManager:
         self.trade_count = 0
         self.consecutive_wins = 0
         self.consecutive_losses = 0
+        self._halted = False

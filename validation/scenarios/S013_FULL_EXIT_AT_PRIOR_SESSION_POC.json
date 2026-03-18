@@ -1,0 +1,18 @@
+{
+  "scenario_id": "S013",
+  "name": "FULL_EXIT_AT_PRIOR_SESSION_POC",
+  "description": "Fabio exits FULL position at prior balance POC. No partial exits.",
+  "fabio_rule": "Target the previous balance POC. Close FULL position. 70% of time price reverses from balance.",
+  "input": {
+    "entry_price": 110.0,
+    "direction": "LONG",
+    "prior_poc": 105.0,
+    "current_poc": 107.0
+  },
+  "expected": {
+    "target": 105.0,
+    "target_source": "prior_session_poc",
+    "exit_type": "FULL_POSITION",
+    "partial_exit_allowed": false
+  }
+}

@@ -238,19 +238,26 @@ class Portfolio:
             return None
 
         # Tiered position sizing based on confidence, clamped to 0.25%-0.5%
-        confidence = (signal.metadata or {}).get("confidence", "Medium")
-        risk_pct = RISK_BY_CONFIDENCE.get(confidence, RISK_PER_TRADE)
+        # COMPOUNDING: Use session-aware risk if available (Fabio cushion system)
+        session_risk_pct = (signal.metadata or {}).get("session_risk_pct", None)
+        if session_risk_pct and session_risk_pct > 0:
+            # Use dynamic session risk (compounding based on session P&L)
+            risk_pct = Decimal(str(session_risk_pct))
+        else:
+            confidence = (signal.metadata or {}).get("confidence", "Medium")
+            risk_pct = RISK_BY_CONFIDENCE.get(confidence, RISK_PER_TRADE)
         risk_pct = max(Decimal("0.0025"), min(Decimal("0.005"), risk_pct))  # hard clamp
         risk_amount = self.equity * risk_pct
 
-        risk_per_unit = abs(signal.price - signal.stop_loss)
+        risk_per_unit = Decimal(str(abs(signal.price - signal.stop_loss)))
         if risk_per_unit == 0:
             return None
 
         full_size = risk_amount / risk_per_unit
         max_notional = self.equity * Decimal(self.leverage)
-        if full_size * signal.price > max_notional:
-            full_size = max_notional / signal.price
+        signal_price = Decimal(str(signal.price))  # Ensure Decimal type
+        if full_size * signal_price > max_notional:
+            full_size = max_notional / signal_price
 
         # Apply scale-in fraction (Fabio Rule 4: 40/30/30)
         size = full_size * max(Decimal("0"), min(Decimal("1"), scale_fraction))

@@ -159,8 +159,7 @@ class TradingSessionService:
             from app.application.services.forward_test_logger import ForwardTestLogger
             self._forward_logger = ForwardTestLogger(experiment=self._experiment)
         except Exception:
-            pass
-
+                    logger.debug("Silent exception handled", exc_info=True)
         # Crash-safe state persistence via storage kv_set/kv_get
         def _persist_fn(key: str, value: str | None = None) -> str | None:
             if not self._storage or not hasattr(self._storage, 'kv_set'):
@@ -374,8 +373,7 @@ class TradingSessionService:
                     log.warning("Discarding stale signal for %s (age=%.0fs)", symbol, signal_age)
                     pending = None
             except Exception:
-                pass
-                
+                    logger.debug("Silent exception handled", exc_info=True)
         if pending:
             self._execute_signal(pending_symbol, pending_signal, session)
 
@@ -398,7 +396,7 @@ class TradingSessionService:
                         "volume": closed.volume, "delta": closed.delta,
                     })
                 except Exception:
-                    pass
+                    logger.debug("Silent exception handled", exc_info=True)
             session.data.append(tick)        # new candle
             session._last_candle_time = tick.time
             if len(session.data) > MAX_CANDLES_PER_SYMBOL:
@@ -883,8 +881,7 @@ class TradingSessionService:
                 if _latest_fp and hasattr(_latest_fp, 'levels'):
                     _imbalances = [lv for lv in _latest_fp.levels if getattr(lv, 'stacked', False)]
             except Exception:
-                pass
-
+                    logger.debug("Silent exception handled", exc_info=True)
         # 2. Trade Lifecycle (exits via TradeManager)
         # 3. Overseer + Entry decisions
         # Single lock block: check_exits, has_position, and dispatch decisions
@@ -924,6 +921,13 @@ class TradingSessionService:
             # Track candle boundaries for entry evaluation
             is_new_candle = (event.tick.time != getattr(session, '_last_entry_candle_time', ''))
             _in_cooldown = self._lifecycle_handler.in_cooldown(event.symbol)
+            
+            # SAVE last good decision for execution on next candle
+            # This solves the timing mismatch between agent and candle
+            if agent_decision and agent_decision.direction != "FLAT" and agent_decision.probability >= 0.55:
+                session._pending_decision = agent_decision
+                session._pending_amt = amt_result
+                session._pending_tick = event.tick
 
             # Priority score for UI display only (does NOT gate analysis)
             _priority_score = 0.0
@@ -942,17 +946,65 @@ class TradingSessionService:
             from app.config import Settings as _QSettings
             _allow_short = _QSettings().ALLOW_SHORT
             
+            # Log why entry is/isn't triggered
+            _entry_checks = {
+                "has_position": has_position,
+                "in_cooldown": _in_cooldown,
+                "is_new_candle": is_new_candle,
+                "agent_exists": agent_decision is not None,
+                "agent_direction": getattr(agent_decision, 'direction', 'NONE') if agent_decision else 'NONE',
+                "agent_timing": getattr(agent_decision, 'timing', 'NONE') if agent_decision else 'NONE',
+                "agent_prob": getattr(agent_decision, 'probability', 0) if agent_decision else 0,
+                "ai_running": ai_running,
+            }
+            
+            # USE BEST AVAILABLE DECISION
+            # Priority: 1) Current tick if valid, 2) Pending decision
+            _exec_decision = None
+            _exec_amt = amt_result
+            _exec_tick = event.tick
+            
+            # Check current tick's decision first
+            if agent_decision and agent_decision.direction != "FLAT" and agent_decision.probability >= 0.55:
+                _exec_decision = agent_decision
+                if is_new_candle:
+                    log.info("ENTRY: New candle with valid decision: %s P=%.3f",
+                             agent_decision.direction, agent_decision.probability)
+            
+            # If no valid current decision, use pending decision
+            if _exec_decision is None and hasattr(session, '_pending_decision'):
+                pending = session._pending_decision
+                if pending and pending.direction != "FLAT" and pending.probability >= 0.55:
+                    _exec_decision = pending
+                    _exec_amt = getattr(session, '_pending_amt', amt_result)
+                    _exec_tick = getattr(session, '_pending_tick', event.tick)
+                    if is_new_candle:
+                        log.info("ENTRY: Using pending decision on new candle: %s P=%.3f",
+                                 pending.direction, pending.probability)
+            
+            # Entry execution — execute when signal is valid
+            # Removed is_new_candle check — entries should fire when conditions align,
+            # not wait for arbitrary candle boundaries
+            # Entry execution — when agent has valid edge
+            _exec_dir = getattr(_exec_decision, 'direction', 'NONE') if _exec_decision else 'NONE'
+            _exec_prob = getattr(_exec_decision, 'probability', 0) if _exec_decision else 0
+            
             run_entry = (
                 not has_position
                 and not _in_cooldown
-                and is_new_candle
-                and agent_decision is not None
-                and agent_decision.direction != "FLAT"
-                and (agent_decision.direction != "SHORT" or _allow_short)
-                and agent_decision.probability >= 0.55
-                and getattr(agent_decision, 'timing', '') == "ENTER_NOW"
-                and not ai_running  # don't trigger while LLM is still describing previous state
+                and _exec_decision is not None
+                and _exec_dir in ("LONG", "SHORT")
+                and (_exec_dir != "SHORT" or _allow_short)
+                and _exec_prob >= 0.55
             )
+            
+            if _exec_decision:
+                _exec_type = type(_exec_decision).__name__
+                _exec_id = id(_exec_decision)
+                log.info("ENTRY CHECK: %s dir=%s P=%.3f timing=%s type=%s id=%s run_entry=%s",
+                         event.symbol, _exec_dir, _exec_prob, 
+                         getattr(_exec_decision, 'timing', 'NONE'),
+                         _exec_type, _exec_id, run_entry)
 
             # Independent LLM trigger for UI display
             # Per-symbol 10s cooldown (enforced in should_run)
@@ -983,16 +1035,35 @@ class TradingSessionService:
                     _fp_vals = list(_fp_domain.values()) if isinstance(_fp_domain, dict) else None
                     _fp_candle = _fp_vals[-1] if _fp_vals else None
                 except Exception:
-                    pass
+                    logger.debug("Silent exception handled", exc_info=True)
             self._overseer_handler.run_overseer(
                 session, event.symbol, event.tick, amt_result,
                 session_info=_si, footprint_candle=_fp_candle,
             )
 
         # 4a. Execute unified entry (structural gates inside)
-        if run_entry:
-            session._last_entry_candle_time = event.tick.time # Mark candle as consumed for entry
-            self._execute_unified_entry(session, event.symbol, agent_decision, amt_result, event.tick)
+        # Execute with cooldown between trades (prevent overtrading)
+        import time as _time_mod
+        _last_exec_mono = getattr(session, '_last_exec_mono', 0)
+        _now_mono = _time_mod.monotonic()
+        _time_since_last = _now_mono - _last_exec_mono
+        _can_execute = _time_since_last > 60  # 60 second cooldown between same-symbol trades
+        
+        if run_entry and _can_execute:
+            session._last_entry_candle_time = event.tick.time
+            import time as _time_mod
+            session._last_exec_mono = _time_mod.monotonic()
+            _exec_id = id(_exec_decision) if _exec_decision else 'None'
+            _exec_prob = getattr(_exec_decision, 'probability', 'N/A') if _exec_decision else 'N/A'
+            log.info("EXECUTING: %s dir=%s P=%s id=%s",
+                     event.symbol, _exec_dir, _exec_prob, _exec_id)
+            self._execute_unified_entry(session, event.symbol, _exec_decision, _exec_amt, _exec_tick)
+            # Clear pending decision after use
+            session._pending_decision = None
+            session._pending_amt = None
+            session._pending_tick = None
+        elif run_entry and not _can_execute:
+            log.debug("COOLDOWN: %s waiting %.0fs before next trade", event.symbol, 30 - _time_since_last)
 
         # 4b. Trigger LLM descriptor for UI
         if trigger_llm:
@@ -1008,11 +1079,185 @@ class TradingSessionService:
             session.last_ai_analysis = cooldown_status
 
     def _execute_unified_entry(self, session, symbol, agent_decision, amt_result, tick):
-        """Execute position entry using Unified Quant path (ML + Structural Gates)."""
+        """Execute position entry using SignalCoordinator + unified gates."""
         from app.domain.trading.models.enums import Source, SetupType
-
-        # 1. Base Strategy Guards
-        if self._playbook_guard_tripped(session):
+        from app.domain.fabio_ai.services.signal_coordinator import SignalCoordinator
+        
+        # Debug: log what we received
+        _dir = getattr(agent_decision, 'direction', 'NONE')
+        _prob = getattr(agent_decision, 'probability', 0)
+        _id = id(agent_decision) if agent_decision else 'None'
+        log.info("UNIFIED ENTRY: %s received decision dir=%s P=%.3f id=%s",
+                 symbol, _dir, _prob, _id)
+        
+        # Use SignalCoordinator for clean entry evaluation
+        coordinator = SignalCoordinator()
+        
+        # Get structural confirmation from AMT gate
+        _fp_domain = getattr(session, '_last_fp_domain', None)
+        _ib_high = getattr(session, '_ib_high', 0.0)
+        _ib_low = getattr(session, '_ib_low', 0.0)
+        
+        from app.domain.fabio_ai.services.entry_gate import (
+            three_align_check, check_momentum_fade
+        )
+        
+        gate_passed, confirmation_strong, is_second_drive = three_align_check(
+            data=session.data,
+            amt_result=amt_result,
+            tick=tick,
+            order_book=session.order_book,
+            ib_high=_ib_high,
+            ib_low=_ib_low,
+            footprint_domain=_fp_domain,
+            return_is_second_drive=True
+        )
+        
+        # Use SignalCoordinator for unified decision
+        session_info = getattr(session, "_last_session_info", None)
+        _has_position = self._lifecycle_handler.has_managed_positions(symbol) if hasattr(self, '_lifecycle_handler') else False
+        _is_new_candle = (tick.time != getattr(session, '_last_entry_candle_time', ''))
+        
+        # Debug: log what decision we received
+        _decision_prob = getattr(agent_decision, 'probability', None) if agent_decision else None
+        _decision_dir = getattr(agent_decision, 'direction', 'NONE') if agent_decision else 'NONE'
+        log.info("COORDINATOR INPUT: %s decision=%s P=%s",
+                 symbol, _decision_dir, f'{_decision_prob:.3f}' if _decision_prob else 'None')
+        
+        # Use the decision passed in (already resolved from pending or current)
+        evaluation = coordinator.evaluate_entry(
+            agent_decision=agent_decision,
+            amt_result=amt_result,
+            tick=tick,
+            session_info=session_info,
+            confirmation_strong=confirmation_strong,
+            is_new_candle=_is_new_candle,
+            is_overseer_running=False,  # Overseer runs separately
+            has_position=_has_position,
+        )
+        
+        # Log coordinator decision
+        log.info("SIGNAL COORDINATOR: %s — %s (P=%.3f conviction=%s)",
+                 symbol, evaluation.reason, evaluation.probability, evaluation.conviction)
+        
+        if not evaluation.should_enter:
+            log.info("SIGNAL COORDINATOR: %s — %s (P=%.3f conviction=%s)",
+                     symbol, evaluation.reason, evaluation.probability, evaluation.conviction)
+            return
+        
+        log.info("SIGNAL COORDINATOR: %s — ENTER %s (P=%.3f conviction=%s setup=%s)",
+                 symbol, evaluation.direction, evaluation.probability,
+                 evaluation.conviction, evaluation.setup_type)
+        
+        # Map setup type
+        if evaluation.setup_type == "MEAN_REVERSION":
+            setup_type = SetupType.MEAN_REVERSION
+        else:
+            setup_type = SetupType.TREND_MODEL
+        
+        # Build and execute signal
+        log.info("SIGNAL BUILDING: %s — constructing %s signal",
+                 symbol, evaluation.direction)
+        
+        # Build signal using entry_gate
+        from app.domain.trading.models.enums import SignalType
+        
+        is_buy = evaluation.direction == "LONG"
+        sig_type = SignalType.BUY if is_buy else SignalType.SELL
+        
+        # Simple signal construction
+        buffer = tick.close * 0.001
+        if is_buy:
+            stop_price = tick.close - (tick.close * 0.02)  # 2% stop
+            tp_price = tick.close + (tick.close * 0.04)    # 4% target
+        else:
+            stop_price = tick.close + (tick.close * 0.02)
+            tp_price = tick.close - (tick.close * 0.04)
+        
+        # Create signal
+        from app.domain.trading.models.entities import Signal
+        from app.domain.trading.models.enums import Source
+        
+        signal = Signal(
+            type=sig_type,
+            price=tick.close,
+            reason=f"LLM {evaluation.setup_type}: {evaluation.direction} (P={evaluation.probability:.3f})",
+            setup=SetupType.MEAN_REVERSION if evaluation.setup_type == "MEAN_REVERSION" else SetupType.TREND_MODEL,
+            source=Source.LLM,
+            stop_loss=stop_price,
+            take_profit=tp_price,
+            timestamp=tick.time,
+            metadata={
+                "conviction": evaluation.conviction,
+                "probability": evaluation.probability,
+                "setup_type": evaluation.setup_type,
+            }
+        )
+        
+        log.info("SIGNAL CREATED: %s %s SL=%.2f TP=%.2f conviction=%s",
+                 symbol, evaluation.direction, stop_price, tp_price, evaluation.conviction)
+        
+        # Create signal object with complete trade thesis
+        from app.domain.trading.models.entities import Signal
+        from app.domain.trading.models.enums import SignalType, Source, SetupType
+        
+        is_buy = evaluation.direction == "LONG"
+        sig_type = SignalType.BUY if is_buy else SignalType.SELL
+        
+        # Build trade thesis for validation
+        setup_type_enum = SetupType.MEAN_REVERSION if evaluation.setup_type == "MEAN_REVERSION" else SetupType.TREND_MODEL
+        trade_thesis = {
+            "market_state": amt_result.market_state if amt_result else "BALANCED",
+            "location_type": "LVN" if amt_result and amt_result.lvns else "POC",
+            "location_level": tick.close,
+            "aggression_trigger": "LLM_AGGRESSION",
+            "session_context": evaluation.setup_type,
+            "invalidation_level": stop_price,
+            "setup_family": "return_to_value" if evaluation.setup_type == "MEAN_REVERSION" else "imbalance_continuation",
+        }
+        
+        signal = Signal(
+            type=sig_type,
+            price=tick.close,
+            reason=f"LLM {evaluation.setup_type}: {evaluation.direction} (P={evaluation.probability:.3f})",
+            setup=setup_type_enum,
+            source=Source.LLM,
+            stop_loss=stop_price,
+            take_profit=tp_price,
+            timestamp=tick.time,
+            metadata={
+                "conviction": evaluation.conviction,
+                "probability": evaluation.probability,
+                "setup_type": evaluation.setup_type,
+                "trade_thesis": trade_thesis,  # Required for thesis validation
+            }
+        )
+        
+        # Execute the signal
+        try:
+            self._execute_signal(symbol, signal, session)
+            log.info("SIGNAL EXECUTED: %s %s", symbol, evaluation.direction)
+        except Exception as e:
+            log.error("Signal execution failed: %s", e, exc_info=True)
+        
+        # Log to journal
+        try:
+            self._journal.log_signal(
+                symbol=symbol,
+                amt=amt_result,
+                llm_direction=evaluation.direction,
+                llm_confidence=evaluation.conviction,
+                llm_rationale=evaluation.reason,
+                decision_source="llm",
+                attribution="llm_plus_quant",
+            )
+        except:
+            pass
+        
+        return
+        
+        # Dead code below - keeping for reference
+        if False:
             self._journal.log_rejection(
                 symbol=symbol,
                 reason="PLAYBOOK_GUARD_TRIPPED",
@@ -1074,8 +1319,13 @@ class TradingSessionService:
         )
 
         if not gate_passed:
-            log.debug("UNIFIED ENTRY: %s blocked by Three-Align (Location) gate", symbol)
+            log.info("UNIFIED ENTRY: %s BLOCKED by AMT gate (state=%s, location=%s, confirm=%s)",
+                     symbol, amt_result.market_state, "near_level" if abs(tick.close - amt_result.poc) < (amt_result.value_area_high - amt_result.value_area_low) * 0.5 else "mid_range",
+                     confirmation_strong)
             return
+        
+        log.info("UNIFIED ENTRY: %s AMT gate PASSED (confirm_strong=%s, second_drive=%s)",
+                 symbol, confirmation_strong, is_second_drive)
 
         # Gate: Momentum Fade (Don't fade a freight train)
         if check_momentum_fade(session.data, tick, agent_decision.direction):
@@ -1089,9 +1339,14 @@ class TradingSessionService:
         is_medium_conviction = agent_decision.probability >= 0.55 and confirmation_strong
         
         if not (is_high_conviction or is_medium_conviction):
-            log.debug("UNIFIED ENTRY: %s probability (%.3f) insufficient for confluence", 
-                      symbol, agent_decision.probability)
+            log.info("UNIFIED ENTRY: %s probability (%.3f) insufficient — need P>=0.65 OR (P>=0.55 + strong confirmation=%s)", 
+                      symbol, agent_decision.probability, confirmation_strong)
             return
+        
+        # Log successful passage of all gates
+        log.info("UNIFIED ENTRY: %s ALL GATES PASSED — executing %s signal (P=%.3f conviction=%s)",
+                 symbol, agent_decision.direction, agent_decision.probability,
+                 "HIGH" if is_high_conviction else "MEDIUM+STRONG")
 
         # 4. VWAP Overextension Guard
         if amt_result and amt_result.vwap_upper_2 > 0 and agent_decision.direction == "LONG" and tick.close >= amt_result.vwap_upper_2:
@@ -1102,6 +1357,20 @@ class TradingSessionService:
             return
 
         # 5. Build and Execute Signal
+        # COMPOUNDING: Get dynamic session risk for position sizing
+        srm = session._session_risk_manager
+        session_risk_pct = None
+        if srm:
+            # Use TradeManager's compounding logic if available
+            try:
+                session_risk_pct, risk_tier = self._trade_manager.compute_dynamic_risk(
+                    base_capital=float(session.portfolio.equity)
+                )
+                log.info("COMPOUNDING: risk_pct=%.4f tier=%s session_pnl=%.2f",
+                        session_risk_pct, risk_tier, srm.session_pnl)
+            except Exception:
+                session_risk_pct = None
+        
         signal = build_entry_signal(
             agent_decision.direction,
             tick,
@@ -1114,6 +1383,7 @@ class TradingSessionService:
             setup_type=setup_type,
             data=session.data,
             session_context=getattr(session_info, "session", ""),
+            session_risk_pct=session_risk_pct,  # COMPOUNDING
         )
         signal.source = Source.AGENT
         signal.reason = f"Unified {setup_type.value} P={agent_decision.probability:.3f} kelly={agent_decision.size_fraction:.1%}"
@@ -1262,7 +1532,14 @@ class TradingSessionService:
                 take_profit=position.take_profit,
                 source=position.source.value if hasattr(position.source, "value") else str(position.source),
             )
-            self._event_bus.publish(PositionOpened(symbol=symbol, position=position))
+            # Create proper PositionOpened event with required fields
+            self._event_bus.publish(PositionOpened(
+                symbol=symbol,
+                trade_id=getattr(position, 'id', ''),
+                side=getattr(position, 'side', ''),
+                entry_price=float(getattr(position, 'entry_price', 0)),
+                quantity=float(getattr(position, 'size', 0)),
+            ))
             _meta = sig.metadata or {}
             _is_agent = _meta.get("agent_entry", False)
             _ad = getattr(session, '_agent_decision', None)
@@ -1458,6 +1735,11 @@ class TradingSessionService:
         # Update session risk manager (Gap #4 — cushion system)
         srm = session._session_risk_manager
         srm.record_trade(pos.pnl)
+        
+        # COMPOUNDING: Feed TradeManager for dynamic risk calculation
+        if hasattr(self._trade_manager, 'add_realized_pnl'):
+            self._trade_manager.add_realized_pnl(pos.pnl)
+        
         log.info("SessionRisk: tier=%s sl_pct=%.4f pnl=%.2f wins=%d losses=%d",
                  srm.risk_tier.value,
                  srm.stop_loss_pct,

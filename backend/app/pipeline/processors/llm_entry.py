@@ -264,34 +264,106 @@ class LLMEntryProcessor(BaseProcessor):
     def _build_prompt_data(
         self, msg: SignalGateMessage, gate_payload: SignalGatePayload
     ) -> dict:
-        """Build the minimal context dictionary for build_entry_prompt.
-
-        At the LLM entry stage the pipeline carries only gate-level context.
-        Fields not available are set to safe zero-value defaults so that
-        ``_build_core_amt_narrative`` can run without AttributeError.
+        """Build FULL AMT context dictionary for build_entry_prompt.
+        
+        FIX #1: NOW WITH REAL DATA — the LLM can actually read the auction.
+        All AMT context is carried through the pipeline from AMTAnalysisProcessor
+        via SignalGateProcessor.
         """
+        # Use POC as price proxy (best available at gate stage)
+        ltp = gate_payload.poc if gate_payload.poc > 0 else 0.0
+        
+        # Build aggressive prints list for prompt
+        aggressive_prints = []
+        if gate_payload.aggressive_prints:
+            for ap in gate_payload.aggressive_prints:
+                if isinstance(ap, dict):
+                    aggressive_prints.append(ap)
+                else:
+                    aggressive_prints.append({
+                        "side": getattr(ap, "side", ""),
+                        "price": getattr(ap, "price", 0.0),
+                    })
+        
+        # Build bubble retests list
+        bubble_retests = []
+        if gate_payload.bubble_retests:
+            for br in gate_payload.bubble_retests:
+                if isinstance(br, dict):
+                    bubble_retests.append(br)
+                else:
+                    bubble_retests.append({
+                        "side": getattr(br, "side", ""),
+                        "price": getattr(br, "price", 0.0),
+                    })
+        
+        # Build LVN list
+        lvns = list(gate_payload.lvns) if gate_payload.lvns else []
+        
         return {
-            # Price context — not available at gate stage; POC defaults to 0.
-            "ltp": 0.0,
-            "vah": 0.0,
-            "val": 0.0,
-            "poc": 0.0,
-            "delta": 0.0,
-            "volume": 0.0,
-            # Market structure
-            "market_state": "BALANCED",
-            "profile_shape": "D",
-            "cvd": 0.0,
-            "cvd_divergence": "",
-            "is_second_drive": False,
-            "market_structure": "",
-            "aggressive_prints": [],
-            "bubble_retests": [],
-            "lvn_play": None,
-            # Gate context
+            # ── Price context (REAL DATA) ──
+            "ltp": ltp,
+            "vah": gate_payload.vah,
+            "val": gate_payload.val,
+            "poc": gate_payload.poc,
+            "delta": gate_payload.delta_score,
+            "volume": 0.0,  # not carried in pipeline yet
+            
+            # ── Market structure (REAL DATA) ──
+            "market_state": gate_payload.market_state,
+            "profile_shape": gate_payload.profile_shape,
+            "cvd": gate_payload.cvd_slope,
+            "cvd_slope": gate_payload.cvd_slope,
+            "cvd_divergence": gate_payload.cvd_divergence,
+            "is_second_drive": gate_payload.is_second_drive,
+            "market_structure": gate_payload.market_state,
+            "aggressive_prints": aggressive_prints,
+            "bubble_retests": bubble_retests,
+            "lvn_play": gate_payload.lvn_play,
+            
+            # ── Developing VA (REAL DATA) ──
+            "dev_poc": gate_payload.dev_poc,
+            "dev_vah": gate_payload.dev_vah,
+            "dev_val": gate_payload.dev_val,
+            
+            # ── Impulse leg profile (REAL DATA) ──
+            "leg_poc": gate_payload.leg_poc,
+            "leg_vah": gate_payload.leg_vah,
+            "leg_val": gate_payload.leg_val,
+            
+            # ── VWAP (REAL DATA) ──
+            "session_vwap": gate_payload.session_vwap,
+            "vwap_upper_2": gate_payload.vwap_upper_2,
+            "vwap_lower_2": gate_payload.vwap_lower_2,
+            
+            # ── LVN levels (REAL DATA) ──
+            "lvns": lvns,
+            "hvns": list(gate_payload.hvns) if gate_payload.hvns else [],
+            
+            # ── Session context (REAL DATA) ──
+            "session_name": gate_payload.session_name,
+            "favor_strategy": gate_payload.favor_strategy,
+            "opening_bias": gate_payload.opening_bias,
+            "ib_high": gate_payload.ib_high,
+            "ib_low": gate_payload.ib_low,
+            
+            # ── Aggression (REAL DATA) ──
+            "aggression": gate_payload.aggression,
+            
+            # ── Prior session (not available at gate stage) ──
+            "prior_poc": 0.0,
+            "prior_vah": 0.0,
+            "prior_val": 0.0,
+            "gap_type": "",
+            
+            # ── Gate context ──
             "setup_grade": gate_payload.setup_grade,
             "confidence": gate_payload.confidence,
             "gate_reason": gate_payload.reason,
+            
+            # ── CVD hard block info ──
+            "cvd_hard_block": gate_payload.cvd_hard_block,
+            "cvd_hard_block_reason": gate_payload.cvd_hard_block_reason,
         }
 
     async def _emit_decision(

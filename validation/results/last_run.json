@@ -1,0 +1,127 @@
+{
+  "timestamp": "2026-03-17T19:47:18.311112",
+  "passed": 15,
+  "total": 15,
+  "results": [
+    {
+      "id": "S001",
+      "name": "BALANCED_NO_BREAK_NO_AGGRESSION",
+      "expected": "FLAT (gate blocked)",
+      "actual": "FLAT",
+      "passed": true,
+      "notes": "Balanced state, no aggression \u2192 gate=False"
+    },
+    {
+      "id": "S002",
+      "name": "OOB_NO_LVN_NO_TRADE",
+      "expected": "FLAT (no LVN for entry)",
+      "actual": "FLAT",
+      "passed": true,
+      "notes": "OOB but no LVN \u2192 gate=False"
+    },
+    {
+      "id": "S003",
+      "name": "OOB_AT_LVN_NO_AGGRESSION",
+      "expected": "FLAT (no aggression)",
+      "actual": "FLAT",
+      "passed": true,
+      "notes": "At LVN but no aggression \u2192 gate=False, confirm=False"
+    },
+    {
+      "id": "S004",
+      "name": "ALL_THREE_ALIGN_LONG",
+      "expected": "LONG (all three align)",
+      "actual": "LONG",
+      "passed": true,
+      "notes": "BALANCED + LVN + Aggression \u2192 gate=True, confirm=True"
+    },
+    {
+      "id": "S005",
+      "name": "BALANCED_FAILED_BREAKOUT_SHORT",
+      "expected": "SHORT (mean reversion)",
+      "actual": "SHORT",
+      "passed": true,
+      "notes": "BALANCED + failed breakout \u2192 gate=True"
+    },
+    {
+      "id": "S006",
+      "name": "KELLY_CONSERVATIVE_WHEN_UNPROVEN",
+      "expected": "Kelly \u2264 0.0025 (0.25%)",
+      "actual": "Kelly = 0.0025 (0.25%)",
+      "passed": true,
+      "notes": "No proven track record \u2192 conservative Kelly"
+    },
+    {
+      "id": "S007",
+      "name": "CVD_EXTREME_BLOCK",
+      "expected": "FLAT (CVD extreme block)",
+      "actual": "FLAT",
+      "passed": true,
+      "notes": "CVD=-200.0 \u2192 blocked=True"
+    },
+    {
+      "id": "S008",
+      "name": "P_SHAPE_NO_LONG",
+      "expected": "P-shape warning against LONG",
+      "actual": "FOUND",
+      "passed": true,
+      "notes": "P-shape present=True, warning=True"
+    },
+    {
+      "id": "S009",
+      "name": "B_SHAPE_NO_SHORT",
+      "expected": "b-shape warning against SHORT",
+      "actual": "FOUND",
+      "passed": true,
+      "notes": "b-shape present=True, warning=True"
+    },
+    {
+      "id": "S010",
+      "name": "VWAP_OVEREXTENSION_WARNING",
+      "expected": "VWAP overextension warning",
+      "actual": "WARNING",
+      "passed": true,
+      "notes": "Price at +2\u03c3 should show VWAP warning"
+    },
+    {
+      "id": "S011",
+      "name": "CIRCUIT_BREAKER_3_LOSSES",
+      "expected": "HALTED",
+      "actual": "HALTED",
+      "passed": true,
+      "notes": "3 losses \u2192 can_trade=False"
+    },
+    {
+      "id": "S012",
+      "name": "SECOND_DRIVE_REQUIRED",
+      "expected": "FLAT (first drive blocked)",
+      "actual": "FLAT",
+      "passed": true,
+      "notes": "IMBALANCED + first \u2192 gate=False, second_drive=False"
+    },
+    {
+      "id": "S013",
+      "name": "PRIOR_VA_MISSING_GRACEFUL",
+      "expected": "'No historical data' message",
+      "actual": "FOUND",
+      "passed": true,
+      "notes": "Prior VA missing \u2192 graceful message"
+    },
+    {
+      "id": "S014",
+      "name": "LOW_RR_REJECTED",
+      "expected": "R:R filter enforced (MIN_RR_RATIO = 1.0)",
+      "actual": "ENFORCED",
+      "passed": true,
+      "notes": "R:R check present=True, rejection present=True"
+    },
+    {
+      "id": "S015",
+      "name": "OPENING_SESSION_BLOCKED",
+      "expected": "FLAT (no entry)",
+      "actual": "FLAT",
+      "passed": true,
+      "notes": "session=NSE_OPENING, allow_entry=False"
+    }
+  ]
+}

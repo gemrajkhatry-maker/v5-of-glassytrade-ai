@@ -58,7 +58,7 @@ class CandlePayload:
 
 @dataclass(frozen=True)
 class AMTResultPayload:
-    """Volume profile + market state analysis."""
+    """Volume profile + market state analysis — ENRICHED for downstream processors."""
     market_state: str          # "BALANCED" | "IMBALANCED"
     leg_state: str
     poc: float
@@ -72,14 +72,97 @@ class AMTResultPayload:
     balance_pct: float = 50.0
     near_level: bool = False
     confirmation_score: int = 0  # 0-3 out of 3
+    
+    # NEW: Developing VA (short lookback — adapts fast after large moves)
+    dev_poc: float = 0.0
+    dev_vah: float = 0.0
+    dev_val: float = 0.0
+    
+    # NEW: Impulse leg profile (Fabio: profile the leg that broke structure)
+    leg_poc: float = 0.0
+    leg_vah: float = 0.0
+    leg_val: float = 0.0
+    leg_lvns: tuple[float, ...] = ()
+    
+    # NEW: Session VWAP (Fabio: VWAP for trailing stops)
+    session_vwap: float = 0.0
+    vwap_upper_2: float = 0.0
+    vwap_lower_2: float = 0.0
+    
+    # NEW: LVN/HVN levels from session profile
+    lvns: tuple[float, ...] = ()
+    hvns: tuple[float, ...] = ()
+    
+    # NEW: LVN Play detection (Fabio's highest-conviction setup)
+    lvn_play: dict | None = None
+    
+    # NEW: Aggressive print clusters (institutional level markers)
+    aggressive_prints: tuple[dict, ...] = ()
+    
+    # NEW: Bubble retests (Fabio: high volume area being re-tested)
+    bubble_retests: tuple[dict, ...] = ()
 
 @dataclass(frozen=True)
 class SignalGatePayload:
-    """Result of the Three-Align gate check."""
+    """Result of the Three-Align gate check — NOW WITH FULL AMT CONTEXT for LLM.
+    
+    This payload carries ALL the data the LLM needs to "read the auction"
+    per Fabio's methodology. Before this fix, the LLM received zeros.
+    """
     passed: bool
     reason: str                # why gate passed or blocked
     setup_grade: str = ""      # "A" | "B" | "C"
     confidence: float = 0.0
+    
+    # ── Full AMT Context (carried from AMTAnalysisProcessor) ──
+    market_state: str = "BALANCED"
+    profile_shape: str = "D"
+    poc: float = 0.0
+    vah: float = 0.0
+    val: float = 0.0
+    cvd_slope: float = 0.0
+    cvd_divergence: str = ""   # "BEARISH_DIV" | "BULLISH_DIV" | ""
+    delta_score: float = 0.0
+    aggression: str = "NEUTRAL"
+    
+    # Developing VA
+    dev_poc: float = 0.0
+    dev_vah: float = 0.0
+    dev_val: float = 0.0
+    
+    # Impulse leg
+    leg_poc: float = 0.0
+    leg_vah: float = 0.0
+    leg_val: float = 0.0
+    
+    # VWAP
+    session_vwap: float = 0.0
+    vwap_upper_2: float = 0.0
+    vwap_lower_2: float = 0.0
+    
+    # Structural levels
+    lvns: tuple[float, ...] = ()
+    hvns: tuple[float, ...] = ()
+    is_second_drive: bool = False
+    
+    # LVN Play (highest conviction setup)
+    lvn_play: dict | None = None
+    
+    # Aggressive prints
+    aggressive_prints: tuple[dict, ...] = ()
+    bubble_retests: tuple[dict, ...] = ()
+    
+    # Session context (added by gate processor)
+    session_name: str = ""
+    favor_strategy: str = ""
+    opening_bias: str = ""
+    ib_high: float = 0.0
+    ib_low: float = 0.0
+    session_phase: str = ""
+    
+    # CVD hard gate result
+    cvd_hard_block: bool = False
+    cvd_hard_block_reason: str = ""
 
 @dataclass(frozen=True)
 class LLMDecisionPayload:

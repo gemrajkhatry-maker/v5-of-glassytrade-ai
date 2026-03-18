@@ -1,0 +1,25 @@
+{
+  "scenario_id": "S005",
+  "name": "OOB_ALL_GATES_PASS_BUT_PRIOR_POC_NULL",
+  "description": "All 3 Fabio gates pass but prior_poc=None \u2192 can't set target \u2192 FLAT",
+  "fabio_rule": "Target must be prior balance POC. If unknown, no trade.",
+  "input": {
+    "symbol": "CRUDEOIL_9100_CE",
+    "price": 110.5,
+    "session_state": "OUT_OF_BALANCE",
+    "delta_score": 0.79,
+    "ib_break_occurred": true,
+    "ib_break_failed": false,
+    "price_at_lvn": true,
+    "prior_poc": null,
+    "session_window_active": true
+  },
+  "expected": {
+    "signal": "FLAT",
+    "reason": "prior_poc_unavailable",
+    "gates_failed": [
+      "target_unknown"
+    ],
+    "kelly": 0.0
+  }
+}

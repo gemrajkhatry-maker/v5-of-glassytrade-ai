@@ -23,19 +23,25 @@ ENTRY_RESPONSE_KEYS: tuple[str, ...] = (
 
 @lru_cache(maxsize=2)
 def entry_response_schema_instruction(*, allow_short: bool) -> str:
-    """Return the canonical entry-response schema instruction."""
+    """Return the canonical entry-response schema instruction.
+    
+    FABIO-ALIGNED: Forces clean JSON output for reliable parsing.
+    """
     direction_choices = (
         '"LONG" | "SHORT" | "FLAT"' if allow_short else '"LONG" | "FLAT"'
     )
     return (
-        "\n\nRespond in this structured format for the UI:\n"
-        "Market State: <Balance or Imbalance>\n"
-        "Logic: <professional justification referencing market state + location + aggression>\n"
-        f"Trigger: <{direction_choices}> (High | Medium | Low confidence)"
+        '\n\nRespond with VALID JSON only (no markdown, no extra text):\n'
+        '{\n'
+        '  "direction": ' + direction_choices + ',\n'
+        '  "confidence": "High" | "Medium" | "Low",\n'
+        '  "rationale": "Brief justification referencing market state + location + aggression"\n'
+        '}\n\n'
+        'CRITICAL: Output ONLY the JSON object. No other text before or after.'
     )
 
 
 ENTRY_JSON_RUNTIME_REMINDER = (
-    "Return exactly three lines: Market State, Logic, and Trigger. "
-    "Do not add markdown, JSON braces, or prose outside this structure."
+    "Return ONLY a valid JSON object with direction, confidence, and rationale keys. "
+    "No markdown, no extra text, no prose outside the JSON."
 )

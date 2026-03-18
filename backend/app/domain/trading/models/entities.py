@@ -109,14 +109,27 @@ class Position:
     def is_open(self) -> bool:
         return self.status == PositionStatus.OPEN
 
-    def update_pnl(self, current_price: Decimal) -> Decimal:
+    def update_pnl(self, current_price) -> Decimal:
         """Recalculate unrealised PnL from *current_price*."""
+        from decimal import Decimal as D
+        
+        # Ensure both prices are Decimal for calculation
+        if not isinstance(current_price, D):
+            current_price = D(str(round(float(current_price), 6)))
+        entry = self.entry_price
+        if not isinstance(entry, D):
+            entry = D(str(round(float(entry), 6)))
+        
         diff = (
-            current_price - self.entry_price
+            current_price - entry
             if self.side == Side.LONG
-            else self.entry_price - current_price
+            else entry - current_price
         )
-        self.pnl = diff * self.size
+        # Ensure size is Decimal for multiplication
+        size = self.size
+        if not isinstance(size, D):
+            size = D(str(float(size)))
+        self.pnl = diff * size
         return self.pnl
 
     def move_stop_to_breakeven(self) -> None:

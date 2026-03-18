@@ -1,0 +1,37 @@
+{
+  "scenario_id": "S011",
+  "name": "NO_RAPID_FIRE_IN_BALANCED_STATE",
+  "description": "In BALANCED + no IB break, zero directional signals allowed across 20 candles.",
+  "fabio_rule": "In balance 70% of time market stays stuck. Only FLAT is valid.",
+  "input": {
+    "session_state": "BALANCED",
+    "ib_break_occurred": false,
+    "candles_evaluated": 20,
+    "delta_scores": [
+      0.0,
+      0.0,
+      0.02,
+      -0.01,
+      0.0,
+      0.0,
+      0.0,
+      0.03,
+      0.0,
+      0.0,
+      0.01,
+      0.0,
+      -0.02,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.01,
+      -0.01,
+      0.0
+    ]
+  },
+  "expected": {
+    "max_directional_signals_allowed": 0,
+    "all_signals_must_be": "FLAT"
+  }
+}

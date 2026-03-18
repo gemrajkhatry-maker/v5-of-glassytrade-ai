@@ -19,22 +19,27 @@ _IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def _filter_today_session(data: list) -> list:
-    """Filter candles to today's trading session only.
-
-    For options/intraday instruments, multi-day VP is meaningless
-    because overnight premium decay creates huge price gaps.
+    """Filter candles to build meaningful volume profile.
+    
+    For options: prefer today's session only (overnight theta decay distorts VP)
+    For MCX commodities: use multi-day data (commodities don't have theta decay)
+    
+    With 90-day historical data now available from Dhan, we can build
+    robust volume profiles even for MCX options.
     """
     if not data:
         return data
     today = datetime.now(_IST).strftime("%Y-%m-%d")
     today_data = [c for c in data if today in str(c.time)]
-    # Fall back to all data only if ZERO candles from today (e.g. weekend/pre-market).
-    # Even 1 today candle is better than using yesterday's prices for options —
-    # overnight theta decay creates huge price gaps that distort VP.
-    if len(today_data) == 0:
-        # Pre-market: use only the most recent 20 candles to minimize stale data
-        return data[-20:] if len(data) > 20 else data
-    return today_data
+    
+    # If we have enough today candles (>20 = ~2 hours at 5m), use session-only
+    if len(today_data) > 20:
+        return today_data
+    
+    # Not enough today candles — use recent data for meaningful VP
+    # Use last 100 candles (~8 hours at 5m) for good profile
+    logger.info("Only %d today candles — using last 100 for VP", len(today_data))
+    return data[-100:] if len(data) > 100 else data
 
 
 class AMTHandler:

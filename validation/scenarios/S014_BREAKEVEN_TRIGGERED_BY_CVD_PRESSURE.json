@@ -1,0 +1,21 @@
+{
+  "scenario_id": "S014",
+  "name": "BREAKEVEN_TRIGGERED_BY_CVD_PRESSURE",
+  "description": "Move SL to break-even when CVD shows strong pressure BEFORE price level confirmation.",
+  "fabio_rule": "CVD pushing up \u2192 move stop to break-even early. This is the leading indicator advantage.",
+  "input": {
+    "open_trade_direction": "LONG",
+    "entry_price": 110.0,
+    "current_price": 112.5,
+    "cvd_slope": 85.0,
+    "cvd_direction": "BULLISH",
+    "cvd_sustained_candles": 4,
+    "price_confirmation_level_broken": false
+  },
+  "expected": {
+    "action": "MOVE_STOP_TO_BREAKEVEN",
+    "new_stop": 110.0,
+    "triggered_by": "CVD_PRESSURE_NOT_PRICE",
+    "breakeven_applied_early": true
+  }
+}

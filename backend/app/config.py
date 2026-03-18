@@ -65,7 +65,7 @@ class Settings(SharedSettings):
     SCANNER_UNDERLYINGS: Any = Field(default=["CRUDEOIL", "NATURALGAS"])
     SCANNER_OPTION_TYPE: str = Field(default="")
     SCANNER_EXPIRY_INDEX: int = Field(default=0)
-    SCANNER_TOP_N: int = Field(default=10)
+    SCANNER_TOP_N: int = Field(default=3)  # Top 3 contracts only (scalping-optimized)
     STRIKES_AROUND_ATM: int = Field(default=2)
 
     # AMT thresholds

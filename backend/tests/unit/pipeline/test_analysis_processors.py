@@ -38,7 +38,9 @@ from app.pipeline.processors.gate import SignalGateProcessor
 # ---------------------------------------------------------------------------
 
 IST = timezone(timedelta(hours=5, minutes=30))
-_BASE_TS = datetime(2026, 3, 14, 9, 15, 0, tzinfo=IST)
+# Use 10:00 IST = NSE_PRIMARY session (allows all models)
+# Previously used 09:15 which is NSE_OPENING (no entry allowed per Fabio rule)
+_BASE_TS = datetime(2026, 3, 14, 10, 0, 0, tzinfo=IST)
 
 _SYMBOL = "NIFTY"
 
@@ -59,7 +61,10 @@ def _fake_amt_result(
     profile_shape: str = "D",
     balance_ratio: float = 0.5,
 ) -> SimpleNamespace:
-    """Build a minimal AMTResult-like namespace for use in mocks."""
+    """Build a minimal AMTResult-like namespace for use in mocks.
+    
+    Includes all fields required by the enriched AMTResultPayload.
+    """
     return SimpleNamespace(
         market_state=market_state,
         poc=poc,
@@ -71,7 +76,22 @@ def _fake_amt_result(
         aggression=aggression,
         market_structure=market_structure,
         balance_ratio=balance_ratio,
+        # Enriched fields
         session_vwap=0.0,
+        vwap_upper_2=0.0,
+        vwap_lower_2=0.0,
+        dev_poc=0.0,
+        dev_vah=0.0,
+        dev_val=0.0,
+        leg_poc=0.0,
+        leg_vah=0.0,
+        leg_val=0.0,
+        leg_lvns=(),
+        lvns=(),
+        hvns=(),
+        lvn_play=None,
+        aggressive_prints=(),
+        bubble_retests=[],
     )
 
 
@@ -113,7 +133,7 @@ def _make_amt_result_msg(
     val: float = 95.0,
     ts: datetime | None = None,
 ) -> Message:
-    """Factory for AMTResultMessage."""
+    """Factory for AMTResultMessage with enriched fields."""
     ts = ts or _BASE_TS
     payload = AMTResultPayload(
         market_state=market_state,
@@ -129,6 +149,22 @@ def _make_amt_result_msg(
         balance_pct=50.0,
         near_level=False,
         confirmation_score=0,
+        # Enriched fields
+        dev_poc=0.0,
+        dev_vah=0.0,
+        dev_val=0.0,
+        leg_poc=0.0,
+        leg_vah=0.0,
+        leg_val=0.0,
+        leg_lvns=(),
+        session_vwap=0.0,
+        vwap_upper_2=0.0,
+        vwap_lower_2=0.0,
+        lvns=(),
+        hvns=(),
+        lvn_play=None,
+        aggressive_prints=(),
+        bubble_retests=(),
     )
     return Message(
         payload=payload,
@@ -498,12 +534,14 @@ async def test_gate_processor_confidence_levels():
 
     # Strong pass
     results_a = await _run_gate_processor([base_msg], (True, True, False))
-    assert results_a[0].payload.confidence == pytest.approx(1.0)
+    # New grading: 0.4 (confirmation) + 0.2 (CVD neutral) + 0.15 (no div) + 0.1 (D-shape) = 0.85
+    assert results_a[0].payload.confidence == pytest.approx(0.85)
     assert results_a[0].payload.setup_grade == "A"
 
     # Weak pass
     results_b = await _run_gate_processor([base_msg], (True, False, False))
-    assert results_b[0].payload.confidence == pytest.approx(0.5)
+    # New grading: 0.15 (weak confirm) + 0.2 (CVD neutral) + 0.15 (no div) + 0.1 (D-shape) = 0.6
+    assert results_b[0].payload.confidence == pytest.approx(0.6)
     assert results_b[0].payload.setup_grade == "B"
 
     # Fail

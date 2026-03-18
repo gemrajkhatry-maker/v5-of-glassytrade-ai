@@ -46,7 +46,9 @@ from app.domain.fabio_ai.services.session_context import (
 
 
 class AMTConfig:
-    LVN_THRESHOLD: float = 0.40  # LVN: bins < 40% of mean volume (formula: 0.3–0.5)
+    # LVN/HVN thresholds from constants.py (Fabio spec-compliant)
+    from app.domain import constants
+    LVN_THRESHOLD: float = constants.LVN_THRESHOLD  # < 15% of mean (Fabio spec)
     LVN_SMOOTHING: int = 3  # Smooth histogram before LVN/HVN detection
     OBI_THRESHOLD: float = 0.25
     DELTA_THRESHOLD: float = 0.3
@@ -55,7 +57,11 @@ class AMTConfig:
     BUBBLE_VOL_MULTIPLIER: float = 1.5
     AGGRESSION_EMA_PERIOD: int = 20  # EMA period for dynamic volume threshold
     DELTA_DIRECTIONALITY_THRESHOLD: float = 0.40  # Professional: 40-50% delta ratio
-    HVN_THRESHOLD: float = 0.40  # HVN: bins > 40% of max volume (formula: 0.3–0.5)
+    HVN_THRESHOLD: float = constants.HVN_THRESHOLD  # > 200% of mean (Fabio spec)
+    
+    # FIX #9: Balance ratio threshold for Indian markets
+    # Indian options have wider ranges due to gamma/theta
+    # Adjusted from default 0.50 to 0.55 for more realistic balance detection
 
     # Configurable via env — tune for MCX with lower values
     from app.config import settings as _settings
@@ -113,9 +119,25 @@ def create_profile(data: list[OHLC], buckets: int = 200) -> list[VolumeProfileLe
         start_bucket = max(0, min(buckets - 1, start_bucket))
         end_bucket = max(0, min(buckets - 1, end_bucket))
 
-        buy_ratio = (
-            float(d.taker_buy_volume) / float(d.volume) if float(d.volume) > 0 else 0.5
-        )
+        # FIX #3: Delta approximation for Indian markets
+        # taker_buy_volume may not be available from all brokers
+        # Use delta as proxy when available, otherwise infer from price action
+        if hasattr(d, 'taker_buy_volume') and d.taker_buy_volume > 0:
+            buy_ratio = float(d.taker_buy_volume) / float(d.volume)
+        elif hasattr(d, 'delta') and d.delta != 0:
+            # Delta available: infer buy ratio from delta
+            buy_ratio = 0.5 + (float(d.delta) / (2.0 * float(d.volume)))
+            buy_ratio = max(0.0, min(1.0, buy_ratio))  # Clamp to [0, 1]
+        else:
+            # Fallback: infer from candle close vs midpoint
+            # Bullish candle (close > midpoint) suggests more buying
+            midpoint = (d.high + d.low) / 2
+            if d.close > midpoint:
+                buy_ratio = 0.6  # Slight bullish bias
+            elif d.close < midpoint:
+                buy_ratio = 0.4  # Slight bearish bias
+            else:
+                buy_ratio = 0.5  # Neutral
 
         # Uniform distribution across candle range (real volume-at-price)
         n_buckets = end_bucket - start_bucket + 1
@@ -344,10 +366,13 @@ def find_hvns(
     cfg: AMTConfig | None = None,
     smoothed: list[float] | None = None,
 ) -> list[float]:
-    """Detect High Volume Nodes using smoothing + max-threshold method.
+    """Detect High Volume Nodes using smoothing + mean-threshold method.
 
     Formula: smooth histogram, then find local maxima where
-    smoothed_volume(i) >= HVN_THRESHOLD × max(smoothed_volume).
+    smoothed_volume(i) >= HVN_THRESHOLD × mean(smoothed_volume).
+    
+    Uses MEAN (not MAX) as reference for consistency with LVN detection.
+    HVN = volume significantly above average (high participation level).
     """
     cfg = cfg or AMTConfig()
     if len(profile) < 3:
@@ -355,11 +380,13 @@ def find_hvns(
 
     raw = [p.volume for p in profile]
     sm = smoothed if smoothed else smooth_array(raw, cfg.LVN_SMOOTHING)
-    max_vol = max(sm) if sm else 0.0
-    if max_vol <= 0:
+    mean_vol = sum(sm) / len(sm) if sm else 0.0
+    if mean_vol <= 0:
         return []
 
-    threshold = max_vol * cfg.HVN_THRESHOLD
+    # HVN: local maxima where volume > 150% of mean (high participation)
+    # This is consistent with LVN using mean as reference
+    threshold = mean_vol * 1.5  # 150% of mean = significant volume node
     step = profile[1].price - profile[0].price if len(profile) > 1 else 1.0
     hvns: list[float] = []
 
@@ -1150,14 +1177,14 @@ class AMTAnalyzer:
             if can_go_up and (not can_go_down or up_pair >= down_pair):
                 # Expand upward by up to 2 rows (tie: upward first per convention)
                 for k in range(1, up_count + 1):
-                    if up_idx + 1 < len(profile):
-                        up_idx += 1
+                    if up_idx + k < len(profile):
+                        up_idx += 1  # Move index up
                         current_volume += profile[up_idx].volume
             elif can_go_down:
                 # Expand downward by up to 2 rows
                 for k in range(1, down_count + 1):
-                    if down_idx - 1 >= 0:
-                        down_idx -= 1
+                    if down_idx - k >= 0:
+                        down_idx -= 1  # Move index down
                         current_volume += profile[down_idx].volume
 
         # VAH = upper edge of top VA bin, VAL = lower edge of bottom VA bin

@@ -178,20 +178,6 @@ class DhanMarketDataAdapter(MarketDataPort):
     async def fetch_history(
         self, symbol: str, interval: str = "5m", limit: int = 500
     ) -> list[OHLC]:
-        # Dhan's CHARTS_INTRADAY endpoint rejects MCX option contracts (OPTFUT)
-        # with HTTP 400 [DH-906]. Skip the seed and rely on live streaming to
-        # build candles — this prevents the circuit breaker from opening on startup.
-        sym_upper = symbol.upper()
-        if ("CALL" in sym_upper or "PUT" in sym_upper) and any(
-            sym_upper.startswith(u) for u in self._MCX_UNDERLYINGS
-        ):
-            logger.info(
-                "fetch_history: skipping MCX option %s "
-                "(CHARTS_INTRADAY unsupported for OPTFUT — using live feed only)",
-                symbol,
-            )
-            return []
-
         try:
             await self._ensure_initialized()
             broker = self.get_broker()
@@ -199,7 +185,8 @@ class DhanMarketDataAdapter(MarketDataPort):
             instrument = self._make_instrument(symbol)
 
             is_intraday = interval in ("1m", "5m", "15m", "25m", "1h", "60", "1", "5", "15", "25")
-            days_back = 5 if is_intraday else 365
+            # FIX: Use 90 days for intraday (Dhan allows 90 days in one go)
+            days_back = 90 if is_intraday else 365
 
             end = datetime.now(IST)
             start = end - timedelta(days=days_back)

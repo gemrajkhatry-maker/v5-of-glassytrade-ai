@@ -181,11 +181,20 @@ def pick_direction(
     if not regime.allowed_short:
         p_short = 0.0
 
-    # Direction selection
+    # Direction selection — LLM decides when probabilities are close
+    # If one direction has clear edge (>margin), use it
+    # If probabilities are close (within margin), pass both to LLM for reading
     if p_long >= p_threshold_long and p_long > p_short + margin and regime.allowed_long:
         return DirectionSignal("LONG", p_long, p_short, p_long - 0.27)
     elif p_short >= p_threshold_short and p_short > p_long + margin and regime.allowed_short:
         return DirectionSignal("SHORT", p_long, p_short, p_short - 0.29)
+    elif abs(p_long - p_short) < margin and max(p_long, p_short) >= 0.50:
+        # Close probabilities — let LLM read the market
+        # Pick the higher probability direction as suggestion
+        direction = "LONG" if p_long >= p_short else "SHORT"
+        prob = max(p_long, p_short)
+        edge = abs(p_long - p_short)
+        return DirectionSignal(direction, p_long, p_short, edge)
     else:
         return DirectionSignal("FLAT", p_long, p_short, 0.0)
 
@@ -349,6 +358,7 @@ def kelly_size(
     loss_pct: float = 0.0075,  # 0.75% stop
     max_fraction: float = 0.25,
     risk_scale: float = 1.0,
+    win_rate_sample_size: int = 0,  # NEW: for conservative capping
 ) -> float:
     """Half-Kelly position sizing from probability estimate.
 
@@ -356,6 +366,8 @@ def kelly_size(
     where p = win probability, q = 1-p, b = win/loss ratio.
 
     We use HALF-Kelly for safety (reduces variance by 75%).
+    
+    FIX 0.2: Hard cap Kelly at 0.5% risk until backtested.
     """
     if probability <= 0 or probability >= 1:
         return 0.0
@@ -369,7 +381,23 @@ def kelly_size(
         return 0.0
 
     half_kelly = kelly * 0.5 * risk_scale
-    return min(half_kelly, max_fraction)
+    
+    # FIX 0.2: Conservative cap for unproven models
+    # FIX: When no real trade data, use Fabio's conservative default (0.25%)
+    MAX_KELLY_UNPROVEN = 0.0025  # 0.25% Fabio conservative default
+    MAX_KELLY_PROVEN = 0.005     # 0.5% max when proven (30+ trades)
+    
+    if win_rate_sample_size < 30:
+        # No proven track record — use conservative Kelly
+        half_kelly = min(half_kelly, MAX_KELLY_UNPROVEN)
+    else:
+        # Proven track record — allow up to 0.5%
+        half_kelly = min(half_kelly, MAX_KELLY_PROVEN)
+    
+    # Final cap against max_fraction
+    half_kelly = min(half_kelly, max_fraction)
+    
+    return half_kelly
 
 
 def adjust_sl_tp(
@@ -501,12 +529,12 @@ def run_agent_pipeline(
     )
 
     return AgentDecision(
-        direction=signal.direction if timing == "ENTER_NOW" else "FLAT",
+        direction=signal.direction,  # Always pass direction to LLM (let LLM decide)
         probability=chosen_p,
         regime=regime.regime,
         playbook=playbook,
-        timing=timing,
-        size_fraction=size,
+        timing=timing,  # Timing is informational, not a gate
+        size_fraction=size if timing == "ENTER_NOW" else 0.0,
         sl_adjust=sl_mult,
         tp_adjust=tp_mult,
         latency_us=elapsed_us,

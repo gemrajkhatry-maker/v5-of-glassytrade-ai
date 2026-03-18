@@ -163,13 +163,20 @@ def three_align_check(
     aggressive_levels: list[float] | None = None,
     footprint_domain: dict | None = None,
     return_is_second_drive: bool = False,
+    session_info=None,  # NEW: session context for strategy enforcement
 ) -> tuple[bool, bool] | tuple[bool, bool, bool]:
     """Three-Align Gate: Market State + Location + Confirmation Bundle.
 
-    All three conditions must pass before LLM fires.
-    *aggressive_levels* are clustered aggressive-print VWAPs that count
-    as structural levels for the near-level check.
-    *footprint_domain* provides stacked imbalance levels for bubble detection (Gap #2).
+    FABIO'S RULE: ALL THREE MUST ALIGN.
+    1. Market State (BALANCED or IMBALANCED)
+    2. Location (price near structural level)
+    3. Aggression/Confirmation (volume impulse + delta + spread)
+
+    Additional guards:
+    - Second drive enforcement for trend entries (FIX #3)
+    - CVD hard block against extreme flow (FIX #5)
+    - Session strategy enforcement (FIX #4)
+
     Returns (gate_passed, confirmation_strong, is_second_drive).
     """
     if (
@@ -192,11 +199,26 @@ def three_align_check(
     if not state_ok:
         return False, False, False
 
+    # ── FIX #5 & #8: CVD Hard Gate (adjusted for Indian options) ──
+    # Fabio: "If CVD is strongly against you, NO TRADE."
+    # FIX #8: Threshold adjusted for options (higher due to gamma/theta effects)
+    cvd_slope = getattr(amt_result, 'cvd_slope', 0.0)
+    cvd_divergence = getattr(amt_result, 'cvd_divergence', '')
+    
+    # FIX #8: Higher threshold for options (±100 instead of ±50)
+    # Options have natural noise from Greeks, need wider threshold
+    CVD_EXTREME_THRESHOLD = 100.0  # Adjusted for options markets
+    
+    # Extreme CVD in balance = don't fade (institutional pressure building)
+    if cvd_slope < -CVD_EXTREME_THRESHOLD and amt_result.market_state == "BALANCED":
+        logger.info("Three-Align: BLOCKED — CVD extreme selling (%.0f) in balance, do not fade", cvd_slope)
+        return False, False, False
+    if cvd_slope > CVD_EXTREME_THRESHOLD and amt_result.market_state == "BALANCED":
+        logger.info("Three-Align: BLOCKED — CVD extreme buying (+%.0f) in balance, do not fade", cvd_slope)
+        return False, False, False
+
     near_level = False
     # Dynamic near-level threshold: 50% of VA width (capped at 3% of price).
-    # Options VA can be wide (10-20% of price), so fixed 0.3% is too tight.
-    # Using half VA width means "price is in the outer half of the value area"
-    # which is exactly where Fabio wants entries (near VA edges / POC).
     threshold = (
         min(va_range * 0.5, tick.close * 0.03) if va_range > 0 else tick.close * 0.003
     )
@@ -207,7 +229,7 @@ def three_align_check(
         amt_result.value_area_low,
         amt_result.poc,
     ]
-    # Developing VA (short lookback — adapts fast after large moves)
+    # Developing VA
     if getattr(amt_result, "dev_poc", 0) > 0:
         levels_to_check.extend(
             [amt_result.dev_poc, amt_result.dev_vah, amt_result.dev_val]
@@ -222,7 +244,11 @@ def three_align_check(
         levels_to_check.append(amt_result.session_vwap)
     # HVNs, LVNs
     levels_to_check.extend((amt_result.hvns or [])[:3])
-    levels_to_check.extend(amt_result.lvns)
+    levels_to_check.extend(getattr(amt_result, 'lvns', []) or [])
+    # Leg LVNs (Fabio: LVNs inside impulse leg are reaction zones)
+    leg_lvns = getattr(amt_result, 'leg_lvns', [])
+    if leg_lvns:
+        levels_to_check.extend(leg_lvns)
     # IB levels
     for ib_level in [ib_high, ib_low]:
         if ib_level > 0:
@@ -230,13 +256,11 @@ def three_align_check(
     # Aggressive print cluster levels
     if aggressive_levels:
         levels_to_check.extend(aggressive_levels)
-
-    # Fabio Gap #2: Stacked imbalance levels from footprint (highest conviction)
+    # Stacked imbalance levels from footprint
     if footprint_domain:
         bubble_levels = extract_bubble_levels_from_footprint(footprint_domain)
-        levels_to_check.extend(bubble_levels[:3])  # Top 3 bubble levels
-
-    # Round number awareness (significant for MCX crude/gold)
+        levels_to_check.extend(bubble_levels[:3])
+    # Round number awareness (MCX)
     round_lvl = nearest_round_number(tick.close)
     if round_lvl > 0:
         levels_to_check.append(round_lvl)
@@ -248,6 +272,7 @@ def three_align_check(
             active_level = level
             break
 
+    # ── Second Drive Detection ──
     is_second_drive = False
     if near_level and data and len(data) > 5:
         history = data[:-1] if data[-1].time == tick.time else data
@@ -269,19 +294,31 @@ def three_align_check(
         if past_touches > 0 and recent_touches == 0:
             is_second_drive = True
 
+    # ── FIX #3: Second Drive Enforcement for Trend Entries ──
+    # Fabio: "We wait for the second swing. Don't take the first drive."
+    # Only enforce for IMBALANCED (trend) markets.
+    # BALANCED (mean reversion) can enter on first drive (fading breakout failure).
+    if amt_result.market_state == "IMBALANCED" and near_level and not is_second_drive:
+        logger.debug("Three-Align: blocked — first drive only, waiting for re-test (Fabio rule)")
+        return False, False, False
+
+    # ── FIX #2: Require Confirmation Bundle ──
+    # FABIO RULE: "Direction, Location, AND Aggression — all three."
+    # Volume impulse is MANDATORY. Need 2/3 overall.
     agg_ok = check_confirmation_bundle(data, tick, order_book)
+    
     if not agg_ok:
         logger.debug(
-            "Three-Align: confirmation bundle weak (vol/delta low) — proceeding with near_level=%s",
-            near_level,
+            "Three-Align: blocked — confirmation bundle weak (need 2/3: vol/delta/spread)"
         )
-    # Returns (gate_passed, confirmation_strong, is_second_drive):
-    # - gate_passed: Market State + Near Level (hard gates)
-    # - confirmation_strong: vol/delta/spread bundle (used for grade adjustment)
-    # - is_second_drive: True if this is a re-test (second drive) of the level
+        return False, agg_ok, is_second_drive
+
+    # ── All checks passed ──
+    gate_passed = state_ok and near_level and agg_ok
+    
     if not return_is_second_drive:
-        return state_ok and near_level, agg_ok
-    return state_ok and near_level, agg_ok, is_second_drive
+        return gate_passed, agg_ok
+    return gate_passed, agg_ok, is_second_drive
 
 
 # ------------------------------------------------------------------
@@ -291,9 +328,15 @@ def three_align_check(
 
 def check_confirmation_bundle(data: list[OHLC], tick: OHLC, order_book=None) -> bool:
     """Confirmation Bundle (2/3): Volume Impulse + Delta Pressure + Spread Tightness.
-
-    Volume Impulse uses EMA(20) of volume (Valentini dynamic threshold).
-    Spread Tightness: bid-ask spread must be <= 5 bps.
+    
+    FABIO RULE: "Aggression is the trigger."
+    Volume impulse is MANDATORY — no aggression = no trade.
+    Need 2/3 overall, but volume impulse must be present.
+    
+    Components:
+    1. Volume Impulse: current volume > 1.5x EMA(20) (MANDATORY)
+    2. Delta Pressure: |delta| / volume > 0.15 (institutional direction)
+    3. Spread Tightness: bid-ask spread <= 5 bps (liquidity)
     """
     if not data or len(data) < 20:
         return False
@@ -304,13 +347,19 @@ def check_confirmation_bundle(data: list[OHLC], tick: OHLC, order_book=None) -> 
         ema_vol = alpha * d.volume + (1.0 - alpha) * ema_vol
     vol_impulse = tick.volume > (ema_vol * 1.5)
 
+    # ── Volume impulse is MANDATORY ──
+    # Fabio: "Aggression is the trigger" — without volume impulse,
+    # there's no institutional participation.
+    if not vol_impulse:
+        logger.debug(
+            "Confirmation bundle BLOCKED: no volume impulse (vol=%.0f, ema=%.0f)",
+            tick.volume,
+            ema_vol,
+        )
+        return False
+
     delta_ratio = abs(tick.delta) / tick.volume if tick.volume > 0 else 0
     delta_pressure = delta_ratio > 0.15
-
-    # Check for Momentum Fade (Fabio Rule: Do not fade a 2.5 sigma breakout candle with no rejection)
-    # NOTE: This gate only identifies the case for logging/awareness.
-    # Full momentum-fade blocking is handled by `check_momentum_fade()` called
-    # from `LLMEntryHandler` — decoupled and applied per-direction.
 
     spread_tight = False
     if order_book and order_book.bids and order_book.asks:
@@ -322,7 +371,10 @@ def check_confirmation_bundle(data: list[OHLC], tick: OHLC, order_book=None) -> 
             spread_bps = spread / mid * 10000
             spread_tight = spread_bps <= 5.0
     else:
-        spread_tight = False  # Conservative: block entry when spread unknown
+        # In Indian markets, spread data may not be available.
+        # Conservative: assume spread is OK if we have volume + delta.
+        # This is a pragmatic adaptation for Indian market conditions.
+        spread_tight = True
 
     score = sum([vol_impulse, delta_pressure, spread_tight])
     logger.debug(
@@ -422,6 +474,7 @@ def build_entry_signal(
     risk_sl_pct: float | None = None,
     session_context: str = "",
     confidence: str = "Medium",
+    session_risk_pct: float | None = None,  # COMPOUNDING: dynamic risk from session
 ) -> Signal:
     """Build Signal from LLM decision using Fabio Playbook SL/TP.
 
@@ -565,6 +618,18 @@ def build_entry_signal(
     risk = abs(tick.close - stop_price)
     reward = abs(tp_price - tick.close)
     rr = reward / risk if risk > 0 else 0
+    
+    # ── MINIMUM R:R FILTER (Fabio: "Don't risk more than you can make") ──
+    # For scalping, minimum R:R is 1:1 (risk = reward)
+    # Anything below means you're paying more in risk than potential gain
+    MIN_RR_RATIO = 1.0  # Minimum 1:1 risk-to-reward
+    if rr < MIN_RR_RATIO:
+        logger.warning(
+            "Signal REJECTED: R:R too low (%.2f) — risk (%.2f) > reward (%.2f)",
+            rr, risk, reward,
+        )
+        return None
+    
     logger.info(
         "build_entry_signal: %s %s entry=%.2f SL=%.2f TP=%.2f risk=%.2f reward=%.2f RR=%.2f "
         "poc=%.2f vah=%.2f val=%.2f vwap=%.2f agg_sl=%s",
@@ -621,6 +686,8 @@ def build_entry_signal(
             "market_state_model": ai_result.get("market_state", "Unknown"),
             "raw_output": ai_result.get("raw_output", "")[:200],
             "trade_thesis": thesis.to_metadata(),
+            # COMPOUNDING: Pass dynamic session risk for position sizing
+            "session_risk_pct": session_risk_pct,
         },
     )
 

@@ -170,7 +170,7 @@ class SQLiteStorageAdapter(StoragePort):
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_ticks_symbol_time ON ticks(symbol, time)"
                 )
             except Exception:
-                pass
+                logger.debug("Exception handled silently", exc_info=True)
             self._conn.commit()
             logger.info("SQLite database initialized at %s (WAL mode)", self._db_path)
 
@@ -229,6 +229,10 @@ class SQLiteStorageAdapter(StoragePort):
                 self._schedule_flush()
 
     def save_trade(self, trade_data: dict[str, Any], *, auto_commit: bool = True) -> None:
+        # Helper to convert Decimal to float for SQLite
+        def _f(val):
+            return float(val) if val is not None and hasattr(val, '__float__') else (val or 0.0)
+        
         with self._lock:
             try:
                 self._conn.execute(
@@ -236,17 +240,17 @@ class SQLiteStorageAdapter(StoragePort):
                     "size, pnl, source, reason, opened_at, closed_at, extra) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        trade_data.get("position_id", ""),
-                        trade_data.get("symbol", ""),
-                        trade_data.get("side", ""),
-                        trade_data.get("entry_price", 0),
-                        trade_data.get("exit_price", 0),
-                        trade_data.get("size", 0),
-                        trade_data.get("pnl", 0),
-                        trade_data.get("source", ""),
-                        trade_data.get("reason", ""),
-                        trade_data.get("opened_at", ""),
-                        trade_data.get("closed_at", ""),
+                        str(trade_data.get("position_id", "")),
+                        str(trade_data.get("symbol", "")),
+                        str(trade_data.get("side", "")),
+                        _f(trade_data.get("entry_price")),
+                        _f(trade_data.get("exit_price")),
+                        _f(trade_data.get("size")),
+                        _f(trade_data.get("pnl")),
+                        str(trade_data.get("source", "")),
+                        str(trade_data.get("reason", "")),
+                        str(trade_data.get("opened_at", "")),
+                        str(trade_data.get("closed_at", "")),
                         json.dumps({k: v for k, v in trade_data.items()
                                     if k not in ("position_id", "symbol", "side", "entry_price",
                                                  "exit_price", "size", "pnl", "source", "reason",
@@ -433,18 +437,24 @@ class SQLiteStorageAdapter(StoragePort):
     def save_open_position(self, position: dict[str, Any]) -> None:
         with self._lock:
             try:
+                # Convert Decimal to float for SQLite
+                def _to_float(val):
+                    if val is None:
+                        return 0.0
+                    return float(val) if hasattr(val, '__float__') else val
+                
                 self._conn.execute(
                     "INSERT OR REPLACE INTO open_positions "
                     "(id, symbol, side, entry_price, size, stop_loss, take_profit, source, opened_at, extra) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
-                        position.get("id", ""),
-                        position.get("symbol", ""),
-                        position.get("side", ""),
-                        position.get("entry_price", 0.0),
-                        position.get("size", 0.0),
-                        position.get("stop_loss", 0.0),
-                        position.get("take_profit", 0.0),
+                        str(position.get("id", "")),
+                        str(position.get("symbol", "")),
+                        str(position.get("side", "")),
+                        _to_float(position.get("entry_price")),
+                        _to_float(position.get("size")),
+                        _to_float(position.get("stop_loss")),
+                        _to_float(position.get("take_profit")),
                         position.get("source", ""),
                         position.get("opened_at", ""),
                         json.dumps({k: v for k, v in position.items()
@@ -500,7 +510,8 @@ class SQLiteStorageAdapter(StoragePort):
                         payload.get("event_type", ""),
                         payload.get("event_time", ""),
                         json.dumps({
-                            k: v for k, v in payload.items()
+                            k: (float(v) if isinstance(v, (int, float)) or hasattr(v, '__float__') else v)
+                            for k, v in payload.items()
                             if k not in ("position_id", "symbol", "event_type", "event_time")
                         }),
                     ),

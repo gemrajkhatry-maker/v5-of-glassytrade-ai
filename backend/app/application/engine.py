@@ -640,7 +640,7 @@ class TradingEngine:
                         "rationale": ad.rationale,
                     }
         except Exception:
-            pass
+            logger.debug("Exception handled silently", exc_info=True)
         # Merge into existing latest state (don't overwrite full process_tick fields)
         prev = self._latest_states.get(symbol, {})
         prev.update(msg)
@@ -721,7 +721,7 @@ class TradingEngine:
                                             session, sym, context="watchdog_close",
                                         )
                                     except Exception:
-                                        pass
+                                        logger.debug("Exception handled silently", exc_info=True)
                                     # Persist trade close
                                     if self._session_service._storage:
                                         try:

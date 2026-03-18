@@ -14,6 +14,7 @@ sleep 1
 echo "Starting backend on :9090..."
 cd "$BACKEND_DIR"
 KMP_DUPLICATE_LIB_OK=TRUE \
+PYTHONPATH="$PROJECT_DIR:$BACKEND_DIR" \
 nohup "$BACKEND_DIR/venv/bin/python" -u -m uvicorn app.main:app \
   --host 0.0.0.0 --port 9090 \
   > "$BACKEND_DIR/backend.log" 2>&1 &

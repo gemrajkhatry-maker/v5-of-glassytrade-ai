@@ -1,0 +1,18 @@
+{
+  "scenario_id": "S006",
+  "name": "KELLY_NEVER_EXCEEDS_0_5_PCT",
+  "description": "Regardless of edge calculation, kelly must be capped at 0.005. With no sample data \u2192 use 0.0025.",
+  "fabio_rule": "Risk 0.25 to 0.5% of account per trade \u2014 Fabio Valentini exact words",
+  "input": {
+    "calculated_kelly_raw": 0.25,
+    "calculated_edge": 0.85,
+    "win_rate_sample_size": 0,
+    "account_size": 1000000
+  },
+  "expected": {
+    "kelly_output": 0.0025,
+    "max_risk_inr": 2500,
+    "kelly_was_capped": true,
+    "rule": "When win_rate_sample_size < 30, use 0.0025 (0.25%). Never exceed 0.005 (0.5%)."
+  }
+}

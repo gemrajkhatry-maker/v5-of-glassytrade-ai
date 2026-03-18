@@ -14,12 +14,14 @@ downstream monitors can observe gate statistics.
 
 Configuration (ProcessorConfig.settings):
     min_candles: int — minimum candles before gate opens (default 6, Fabio rule)
+    market: str — "NSE" | "MCX" | "GLOBAL" (default "NSE")
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from app.domain.fabio_ai.services.entry_gate import three_align_check  # noqa: E402
@@ -38,13 +40,12 @@ logger = logging.getLogger(__name__)
 class SignalGateProcessor(BaseProcessor):
     """Applies the Three-Align gate to each AMTResultMessage.
 
-    The gate checks:
-      1. Market State — BALANCED or IMBALANCED with a valid VA range
-      2. Price Location — price is near a structural level (VA edge / POC / LVN)
-      3. Confirmation Bundle — volume impulse + delta pressure + spread (2/3)
-
-    Gate logic is delegated to ``entry_gate.three_align_check`` unchanged.
-    The processor only bridges payload types.
+    NOW WITH:
+    - Full AMT context carried to LLM (Fix #1)
+    - 3/3 confirmation enforcement (Fix #2)
+    - Second drive detection (Fix #3)
+    - Session strategy enforcement (Fix #4)
+    - CVD hard block (Fix #5)
     """
 
     name = "signal_gate"
@@ -53,6 +54,7 @@ class SignalGateProcessor(BaseProcessor):
         """Load settings."""
         await super().setup(config)
         self._min_candles: int = int(config.settings.get("min_candles", 6))
+        self._market: str = str(config.settings.get("market", "NSE"))
 
     # ------------------------------------------------------------------
     # Main loop
@@ -84,16 +86,12 @@ class SignalGateProcessor(BaseProcessor):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _build_domain_amt_result(self, p: AMTResultPayload) -> Any:
+    def _build_domain_amt_result(self, p: AMTResultPayload) -> SimpleNamespace:
         """Reconstruct a minimal AMTResult-compatible object from the payload.
-
-        We do NOT import the concrete AMTResult dataclass at this layer to
-        keep the processor decoupled from the domain.  Instead we build a
-        SimpleNamespace that satisfies the attribute-access pattern used by
-        ``three_align_check``.
+        
+        NOW WITH FULL CONTEXT — passes developing VA, leg profile, VWAP,
+        LVNs, HVNs, aggressive prints, and LVN play to the gate.
         """
-        from types import SimpleNamespace
-
         return SimpleNamespace(
             market_state=p.market_state,
             poc=p.poc,
@@ -103,34 +101,34 @@ class SignalGateProcessor(BaseProcessor):
             cvd_divergence=p.cvd_divergence,
             profile_shape=p.profile_shape,
             aggression=p.delta_score,
-            # Fields used by three_align_check for extended level checks;
-            # unavailable at this pipeline stage — default to 0 / empty.
-            session_vwap=0.0,
-            vwap_upper_2=0.0,
-            vwap_lower_2=0.0,
-            dev_poc=0.0,
-            dev_vah=0.0,
-            dev_val=0.0,
-            leg_poc=0.0,
-            leg_vah=0.0,
-            leg_val=0.0,
-            hvns=(),
-            lvns=(),
-            aggressive_prints=(),
-            lvn_play=None,
+            # Developing VA (NEW)
+            session_vwap=p.session_vwap,
+            vwap_upper_2=p.vwap_upper_2,
+            vwap_lower_2=p.vwap_lower_2,
+            dev_poc=p.dev_poc,
+            dev_vah=p.dev_vah,
+            dev_val=p.dev_val,
+            # Impulse leg (NEW)
+            leg_poc=p.leg_poc,
+            leg_vah=p.leg_vah,
+            leg_val=p.leg_val,
+            # Structural levels (NEW)
+            hvns=p.hvns,
+            lvns=p.lvns,
+            # Aggressive prints (NEW)
+            aggressive_prints=[
+                SimpleNamespace(price=ap.get("price", 0), volume=ap.get("volume", 0), side=ap.get("side", ""))
+                for ap in p.aggressive_prints
+            ] if p.aggressive_prints else (),
+            # LVN Play (NEW)
+            lvn_play=p.lvn_play,
         )
 
-    def _build_synthetic_tick(self, p: AMTResultPayload) -> Any:
+    def _build_synthetic_tick(self, p: AMTResultPayload) -> SimpleNamespace:
         """Create a minimal tick-like object representing current price.
-
-        three_align_check uses tick.close for near-level checks.
-        We approximate current price as the POC (best available proxy when
-        no live tick is carried in the pipeline message).
+        
+        Uses POC as price reference — the fair-value anchor for proximity checks.
         """
-        from types import SimpleNamespace
-
-        # Use POC as the price reference — it is the fair-value anchor
-        # that the gate needs for near-level proximity checks.
         price = p.poc if p.poc > 0 else 1.0
         return SimpleNamespace(
             time="",
@@ -139,25 +137,194 @@ class SignalGateProcessor(BaseProcessor):
             low=price,
             close=price,
             volume=0.0,
-            vwap=0.0,
+            vwap=p.session_vwap if p.session_vwap > 0 else 0.0,
             taker_buy_volume=0.0,
-            delta=0.0,
+            delta=p.delta_score,
         )
+
+    def _get_session_context(self, timestamp: datetime) -> dict:
+        """Get session context for the current time.
+        
+        Returns session info needed for session-strategy enforcement.
+        """
+        try:
+            from app.domain.fabio_ai.services.session_context import get_session_info
+            session_info = get_session_info(
+                timestamp=str(timestamp),
+                market=self._market,
+            )
+            return {
+                "session_name": session_info.session,
+                "favor_strategy": session_info.favor_strategy,
+                "allow_entry": session_info.allow_entry,
+                "allow_trend": session_info.allow_trend,
+                "allow_reversion": session_info.allow_reversion,
+                "force_exit": session_info.force_exit,
+                "opening_bias": getattr(session_info, 'opening_relation', 'IN_BALANCE'),
+            }
+        except Exception:
+            logger.debug("[%s] Could not get session context, using defaults", self.name)
+            return {
+                "session_name": "UNKNOWN",
+                "favor_strategy": "NEUTRAL",
+                "allow_entry": True,
+                "allow_trend": True,
+                "allow_reversion": True,
+                "force_exit": False,
+                "opening_bias": "IN_BALANCE",
+            }
+
+    def _check_cvd_hard_block(self, p: AMTResultPayload, direction_hint: str = "") -> tuple[bool, str]:
+        """Fabio Rule: If CVD is strongly against you, NO TRADE.
+        
+        Returns (is_blocked, reason).
+        """
+        cvd = p.cvd_slope
+        
+        # Extreme selling in balance = don't fade (potential breakdown)
+        if cvd < -50.0 and p.market_state == "BALANCED":
+            return True, f"CVD extreme selling ({cvd:.0f}) in balance — do not fade"
+        
+        # Extreme buying in balance = don't fade (potential breakout)
+        if cvd > 50.0 and p.market_state == "BALANCED":
+            return True, f"CVD extreme buying (+{cvd:.0f}) in balance — do not fade"
+        
+        # CVD divergence against trade direction
+        if p.cvd_divergence:
+            if cvd > 0 and direction_hint == "SHORT":
+                return True, "CVD bullish divergence against SHORT direction"
+            if cvd < 0 and direction_hint == "LONG":
+                return True, "CVD bearish divergence against LONG direction"
+        
+        return False, ""
+
+    def _derive_cvd_divergence_str(self, p: AMTResultPayload) -> str:
+        """Convert cvd_divergence bool + cvd_slope direction into string."""
+        if not p.cvd_divergence:
+            return ""
+        if p.cvd_slope < 0:
+            return "BEARISH_DIV"
+        if p.cvd_slope > 0:
+            return "BULLISH_DIV"
+        return "DIVERGENCE"
+
+    def _grade_setup(
+        self, gate_passed: bool, confirmation_strong: bool, p: AMTResultPayload
+    ) -> tuple[str, float]:
+        """Assign setup grade (A/B/C) and confidence based on confirmation quality.
+        
+        A-grade: Strong confirmation + aligned CVD + LVN play present
+        B-grade: Gate passed but confirmation weak or minor headwinds
+        """
+        if not gate_passed:
+            return "", 0.0
+
+        score = 0.0
+
+        # Confirmation quality
+        if confirmation_strong:
+            score += 0.4
+        else:
+            score += 0.15
+
+        # CVD alignment
+        if abs(p.cvd_slope) < 20.0:
+            score += 0.2  # No extreme CVD = good
+        elif abs(p.cvd_slope) < 50.0:
+            score += 0.1  # Moderate CVD = okay
+
+        # No divergence
+        if not p.cvd_divergence:
+            score += 0.15
+
+        # Profile shape aligned
+        if p.profile_shape in ("D", "B"):
+            score += 0.1  # Balanced/bimodal = clean
+        elif p.profile_shape in ("P", "b"):
+            score += 0.05  # Skewed = watch out
+
+        # LVN play bonus
+        if p.lvn_play is not None:
+            score += 0.15
+
+        # Aggression present
+        if p.aggression == "AGGRESSIVE":
+            score += 0.1
+
+        # Map to grade
+        if score >= 0.8:
+            return "A", min(score, 1.0)
+        elif score >= 0.5:
+            return "B", score
+        else:
+            return "C", score
 
     async def _handle_amt_result(
         self, msg: AMTResultMessage, out: Channel
     ) -> None:
-        """Evaluate the gate and emit a SignalGateMessage."""
+        """Evaluate the gate and emit a SignalGateMessage WITH FULL AMT CONTEXT."""
         p: AMTResultPayload = msg.payload
 
+        # Get session context
+        session_ctx = self._get_session_context(msg.timestamp)
+
+        # ── FIX #4: Session strategy enforcement ──
+        # Block entries outside allowed session phases
+        if not session_ctx["allow_entry"]:
+            reason = f"Gate BLOCKED: session '{session_ctx['session_name']}' does not allow entry"
+            logger.debug("[%s] %s: %s", self.name, msg.symbol, reason)
+            await self._emit_gate(
+                out=out,
+                msg=msg,
+                passed=False,
+                reason=reason,
+                setup_grade="",
+                confidence=0.0,
+                amt_payload=p,
+                session_ctx=session_ctx,
+                cvd_block=(False, ""),
+                is_second_drive=False,
+            )
+            return
+
+        if session_ctx.get("force_exit", False):
+            reason = f"Gate BLOCKED: session '{session_ctx['session_name']}' forces exit only"
+            await self._emit_gate(
+                out=out,
+                msg=msg,
+                passed=False,
+                reason=reason,
+                setup_grade="",
+                confidence=0.0,
+                amt_payload=p,
+                session_ctx=session_ctx,
+                cvd_block=(False, ""),
+                is_second_drive=False,
+            )
+            return
+
+        # ── FIX #5: CVD hard block check ──
+        cvd_blocked, cvd_reason = self._check_cvd_hard_block(p)
+        if cvd_blocked:
+            reason = f"Gate BLOCKED: {cvd_reason}"
+            logger.info("[%s] %s: CVD hard block — %s", self.name, msg.symbol, cvd_reason)
+            await self._emit_gate(
+                out=out,
+                msg=msg,
+                passed=False,
+                reason=reason,
+                setup_grade="",
+                confidence=0.0,
+                amt_payload=p,
+                session_ctx=session_ctx,
+                cvd_block=(True, cvd_reason),
+                is_second_drive=False,
+            )
+            return
+
+        # ── Three-Align Gate Execution ──
         amt_domain = self._build_domain_amt_result(p)
         tick = self._build_synthetic_tick(p)
-
-        # Provide a minimal candle list that satisfies min_candles_gate.
-        # The gate only counts elements in the list; OHLC values are not used
-        # for the structural checks when we pass amt_domain directly.
-        # We create dummy entries matching the minimum required count so the
-        # gate can make a decision based on market-structure data.
         dummy_candles = [tick] * self._min_candles
 
         try:
@@ -172,6 +339,10 @@ class SignalGateProcessor(BaseProcessor):
                 footprint_domain=None,
                 return_is_second_drive=True,
             )
+            # Returns (gate_passed, confirmation_strong, is_second_drive)
+            gate_passed = bool(gate_result[0])
+            confirmation_strong = bool(gate_result[1])
+            is_second_drive = bool(gate_result[2]) if len(gate_result) > 2 else False
         except Exception:
             logger.error(
                 "[%s] three_align_check failed for %s",
@@ -181,20 +352,26 @@ class SignalGateProcessor(BaseProcessor):
             )
             gate_passed = False
             confirmation_strong = False
-        else:
-            # Returns (gate_passed, confirmation_strong, is_second_drive) when
-            # return_is_second_drive=True.
-            gate_passed = bool(gate_result[0])
-            confirmation_strong = bool(gate_result[1])
+            is_second_drive = False
 
-        # Derive a human-readable reason for observability.
+        # ── FIX #4: Session-specific model enforcement ──
         if gate_passed:
-            reason = (
-                "Three-Align PASSED"
-                + (" (confirmation strong)" if confirmation_strong else "")
-            )
+            is_trend = p.market_state == "IMBALANCED"
+            is_reversion = p.market_state == "BALANCED"
+
+            if is_trend and not session_ctx.get("allow_trend", True):
+                gate_passed = False
+                reason = f"Gate BLOCKED: session '{session_ctx['session_name']}' forbids trend entries"
+            elif is_reversion and not session_ctx.get("allow_reversion", True):
+                gate_passed = False
+                reason = f"Gate BLOCKED: session '{session_ctx['session_name']}' forbids reversion entries"
+            else:
+                reason = "Three-Align PASSED"
+                if confirmation_strong:
+                    reason += " (confirmation strong)"
+                if is_second_drive:
+                    reason += " (second drive)"
         else:
-            # Distinguish the most common failure modes for monitoring.
             if p.poc <= 0 or p.vah <= 0 or p.val <= 0:
                 reason = "Gate BLOCKED: invalid profile (no VP data)"
             elif p.market_state not in ("BALANCED", "IMBALANCED"):
@@ -202,31 +379,98 @@ class SignalGateProcessor(BaseProcessor):
             else:
                 reason = "Gate BLOCKED: price not near structural level"
 
-        # Assign a setup grade based on confirmation quality.
-        if gate_passed and confirmation_strong:
-            setup_grade = "A"
-        elif gate_passed:
-            setup_grade = "B"
-        else:
-            setup_grade = ""
+        # Grade and confidence
+        setup_grade, confidence = self._grade_setup(gate_passed, confirmation_strong, p)
 
-        # Confidence is a simple heuristic: confirmation_score / 3.
-        # The pipeline message carries confirmation_score=0 by default (set by
-        # AMTAnalysisProcessor); a real value requires order-book data that is
-        # not yet in the payload.  We use 1.0 when gate passes with strong
-        # confirmation, 0.5 when weakly passing, 0.0 otherwise.
-        if gate_passed and confirmation_strong:
-            confidence = 1.0
-        elif gate_passed:
-            confidence = 0.5
-        else:
-            confidence = 0.0
+        # Build CVD divergence string
+        cvd_div_str = self._derive_cvd_divergence_str(p)
 
-        gate_payload = SignalGatePayload(
+        await self._emit_gate(
+            out=out,
+            msg=msg,
             passed=gate_passed,
             reason=reason,
             setup_grade=setup_grade,
             confidence=confidence,
+            amt_payload=p,
+            session_ctx=session_ctx,
+            cvd_block=(cvd_blocked, cvd_reason),
+            is_second_drive=is_second_drive,
+            cvd_div_str=cvd_div_str,
+        )
+
+    async def _emit_gate(
+        self,
+        out: Channel,
+        msg: AMTResultMessage,
+        passed: bool,
+        reason: str,
+        setup_grade: str,
+        confidence: float,
+        amt_payload: AMTResultPayload,
+        session_ctx: dict,
+        cvd_block: tuple[bool, str],
+        is_second_drive: bool,
+        cvd_div_str: str = "",
+    ) -> None:
+        """Construct and send a fully-enriched SignalGateMessage to the outbox."""
+        p = amt_payload
+
+        gate_payload = SignalGatePayload(
+            passed=passed,
+            reason=reason,
+            setup_grade=setup_grade,
+            confidence=confidence,
+            
+            # ── AMT Context (FIX #1) ──
+            market_state=p.market_state,
+            profile_shape=p.profile_shape,
+            poc=p.poc,
+            vah=p.vah,
+            val=p.val,
+            cvd_slope=p.cvd_slope,
+            cvd_divergence=cvd_div_str,
+            delta_score=p.delta_score,
+            aggression=p.aggression,
+            
+            # Developing VA
+            dev_poc=p.dev_poc,
+            dev_vah=p.dev_vah,
+            dev_val=p.dev_val,
+            
+            # Impulse leg
+            leg_poc=p.leg_poc,
+            leg_vah=p.leg_vah,
+            leg_val=p.leg_val,
+            
+            # VWAP
+            session_vwap=p.session_vwap,
+            vwap_upper_2=p.vwap_upper_2,
+            vwap_lower_2=p.vwap_lower_2,
+            
+            # Structural levels
+            lvns=p.lvns,
+            hvns=p.hvns,
+            is_second_drive=is_second_drive,
+            
+            # LVN Play
+            lvn_play=p.lvn_play,
+            
+            # Aggressive prints
+            aggressive_prints=p.aggressive_prints,
+            bubble_retests=p.bubble_retests,
+            
+            # Session context
+            session_name=session_ctx.get("session_name", ""),
+            favor_strategy=session_ctx.get("favor_strategy", ""),
+            opening_bias=session_ctx.get("opening_bias", ""),
+            ib_high=0.0,
+            ib_low=0.0,
+            session_phase=session_ctx.get("session_name", ""),
+            
+            # CVD hard block
+            cvd_hard_block=cvd_block[0],
+            cvd_hard_block_reason=cvd_block[1],
         )
 
         gate_msg = Message(

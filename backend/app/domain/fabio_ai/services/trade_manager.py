@@ -204,6 +204,9 @@ class TradeManager:
         self._load_daily_losses()
         self._daily_loss_reset_time: float = self._next_ist_midnight()
         self._session_realized_pnl: float = 0.0  # Tracks PnL for the current session
+        
+        # Ensure clean startup — clear any stale positions
+        self._positions.clear()
 
     # ------------------------------------------------------------------
     # Daily loss tracking
@@ -474,8 +477,13 @@ class TradeManager:
           - Step 2 (confirmation): price moves 30% of SL distance in favor
           - Step 3 (breakout): price moves 60% toward TP
         """
-        risk = abs(entry_price - stop_loss)
-        tp_dist = abs(take_profit - entry_price)
+        # Ensure compatible types for calculation
+        entry_dec = float(entry_price) if hasattr(entry_price, '__float__') else entry_price
+        stop_dec = float(stop_loss) if hasattr(stop_loss, '__float__') else stop_loss
+        tp_dec = float(take_profit) if hasattr(take_profit, '__float__') else take_profit
+        
+        risk = abs(entry_dec - stop_dec)
+        tp_dist = abs(tp_dec - entry_dec)
 
         # Scale-in levels
         if enable_scale_in and side == "LONG":
@@ -492,13 +500,13 @@ class TradeManager:
             position_id=position_id,
             symbol=symbol,
             side=side,
-            entry_price=entry_price,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
+            entry_price=float(entry_dec),
+            stop_loss=float(stop_dec),
+            take_profit=float(tp_dec),
             allow_trail=allow_trail,
             market_state=market_state,
-            peak_price=entry_price,
-            initial_stop=stop_loss,
+            peak_price=float(entry_dec),
+            initial_stop=float(stop_dec),
             entry_time=entry_time if entry_time is not None else time.time(),
             scale_step=1 if enable_scale_in else 3,  # 3 = fully deployed
             scale_confirm_price=confirm_price,
@@ -508,9 +516,12 @@ class TradeManager:
         )
         with self._lock:
             self._positions[position_id] = mp
+            pos_count = len(self._positions)
+        
         logger.info(
             f"TradeManager: registered {side} {position_id} "
-            f"entry={entry_price:.2f} SL={stop_loss:.2f} TP={take_profit:.2f}"
+            f"entry={float(entry_price):.2f} SL={float(stop_loss):.2f} TP={float(take_profit):.2f} "
+            f"total_positions={pos_count}"
             f"{' [scale-in enabled]' if enable_scale_in else ''}"
         )
 
@@ -885,12 +896,17 @@ class TradeManager:
                 return None
 
             now = current_time if current_time is not None else time.time()
+            # Convert Decimal to float for calculations
+            entry = float(mp.entry_price) if hasattr(mp.entry_price, '__float__') else mp.entry_price
+            sl = float(mp.stop_loss) if hasattr(mp.stop_loss, '__float__') else mp.stop_loss
+            tp = float(mp.take_profit) if hasattr(mp.take_profit, '__float__') else mp.take_profit
+            
             unrealised = (
-                (current_price - mp.entry_price)
+                (current_price - entry)
                 if mp.is_long
-                else (mp.entry_price - current_price)
+                else (entry - current_price)
             )
-            unrealised_pct = unrealised / mp.entry_price if mp.entry_price else 0.0
+            unrealised_pct = unrealised / entry if entry else 0.0
 
             # Distance to SL / TP as percentage of entry price
             distance_to_sl = (

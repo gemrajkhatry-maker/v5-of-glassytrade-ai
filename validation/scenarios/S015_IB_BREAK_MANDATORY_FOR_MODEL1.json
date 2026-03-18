@@ -1,0 +1,21 @@
+{
+  "scenario_id": "S015",
+  "name": "IB_BREAK_MANDATORY_FOR_MODEL1",
+  "description": "Even if delta high and OOB, without confirmed IB break Model 1 must not fire.",
+  "fabio_rule": "IB break confirms directional day. Without it, OOB not confirmed.",
+  "input": {
+    "session_state": "OUT_OF_BALANCE",
+    "delta_score": 0.88,
+    "price_at_lvn": true,
+    "prior_poc": 105.0,
+    "ib_break_occurred": false,
+    "ib_break_confirmed": false
+  },
+  "expected": {
+    "signal": "FLAT",
+    "gates_failed": [
+      "ib_break_not_confirmed"
+    ],
+    "kelly": 0.0
+  }
+}

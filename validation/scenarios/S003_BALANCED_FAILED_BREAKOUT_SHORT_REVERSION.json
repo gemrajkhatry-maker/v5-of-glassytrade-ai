@@ -1,0 +1,55 @@
+{
+  "scenario_id": "S003",
+  "name": "BALANCED_FAILED_BREAKOUT_SHORT_REVERSION",
+  "description": "Fabio Rule: BALANCED + IB break UP fails + aggression = SHORT to POC",
+  "fabio_rule": "Model 2 Mean Reversion: balanced, first breakout up, fail confirmed, reclaim leg, LVN, sell aggression \u2192 SHORT",
+  "input": {
+    "symbol": "NATURALGAS_290_PE",
+    "price": 22.5,
+    "session_state": "BALANCED",
+    "leg_state": "BALANCED",
+    "pct_in_va": 82.0,
+    "vah": 24.0,
+    "poc": 20.0,
+    "val": 18.0,
+    "prior_poc": 20.5,
+    "delta_score": -0.74,
+    "ofi": -0.58,
+    "cvd_slope": -22.0,
+    "ib_high": 24.5,
+    "ib_low": 19.0,
+    "ib_break_occurred": true,
+    "ib_break_failed": true,
+    "ib_break_direction": "UP",
+    "failed_breakout_extreme": 25.2,
+    "price_back_inside_va": true,
+    "reclaim_leg_identified": true,
+    "reclaim_leg_lvn": 22.4,
+    "price_at_lvn": true,
+    "lvns": [
+      22.4,
+      19.5
+    ],
+    "session_window_active": true,
+    "aggression_print_price": 22.5,
+    "tick_size": 0.05
+  },
+  "expected": {
+    "signal": "SHORT",
+    "model_active": "MEAN_REVERSION_MODEL_2",
+    "gates_passed": [
+      "market_state_balanced",
+      "ib_break_occurred",
+      "breakout_failed",
+      "reclaim_leg",
+      "location_at_lvn",
+      "sell_aggression"
+    ],
+    "gates_failed": [],
+    "kelly": 0.0025,
+    "entry_price": 22.5,
+    "stop_loss": 25.3,
+    "target": 20.0,
+    "rr_minimum": 2.0
+  }
+}
