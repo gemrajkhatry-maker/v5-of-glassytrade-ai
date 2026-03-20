@@ -16,19 +16,22 @@ from app.domain.fabio_ai.services import mlx_compute as mc
 # Value Objects
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class CVDState:
     """Snapshot of the CVD tracker at a point in time."""
-    value: float               # Current cumulative delta
-    slope: float               # Linear-regression slope over window
-    has_divergence: bool       # Price vs CVD divergence detected?
-    divergence_type: str       # "BULLISH_DIV" | "BEARISH_DIV" | "NONE"
-    z_score: float = 0.0      # Z-score of divergence strength
+
+    value: float  # Current cumulative delta
+    slope: float  # Linear-regression slope over window
+    has_divergence: bool  # Price vs CVD divergence detected?
+    divergence_type: str  # "BULLISH_DIV" | "BEARISH_DIV" | "NONE"
+    z_score: float = 0.0  # Z-score of divergence strength
 
 
 # ---------------------------------------------------------------------------
 # CVD Tracker
 # ---------------------------------------------------------------------------
+
 
 class CVDTracker:
     """Stateful tracker for Cumulative Volume Delta.
@@ -40,10 +43,10 @@ class CVDTracker:
     # Maximum history length to prevent unbounded memory growth
     _MAX_HISTORY = 500
 
-    def __init__(self, slope_window: int = 14, divergence_window: int = 20) -> None:
+    def __init__(self, slope_window: int = 20, divergence_window: int = 20) -> None:
         self._cvd: float = 0.0
-        self._history: list[float] = []           # CVD values
-        self._price_history: list[float] = []     # Close prices
+        self._history: list[float] = []  # CVD values
+        self._price_history: list[float] = []  # Close prices
         self._slope_window = slope_window
         self._divergence_window = divergence_window
         self._last_time: str = ""
@@ -99,7 +102,7 @@ class CVDTracker:
 
     def _compute_slope(self) -> float:
         """Linear-regression slope of recent CVD values (MLX-accelerated)."""
-        window = self._history[-self._slope_window:]
+        window = self._history[-self._slope_window :]
         if len(window) < 3:
             return 0.0
         return mc.linreg_slope(window)

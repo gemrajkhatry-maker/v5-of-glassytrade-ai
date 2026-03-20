@@ -462,7 +462,7 @@ class RegimeDetector:
             reversal = any(c.low < break_level for c in post_break)
         else:  # SHORT
             entry_price = post_break[0].close
-            exit_price = post_break[-1].exit_price
+            exit_price = post_break[-1].close
             continuation = exit_price < entry_price
             reversal = any(c.high > break_level for c in post_break)
 

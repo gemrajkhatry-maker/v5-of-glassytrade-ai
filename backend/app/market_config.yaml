@@ -9,6 +9,11 @@ markets:
       - FINNIFTY
     default_symbol: "NIFTY 27 FEB 25500 CALL"
     scanner_underlying: "NIFTY"
+    # Per-symbol big trade thresholds (FR-10-08)
+    # NIFTY options: higher volume, lower threshold
+    big_trade_multiplier: 3.0
+    big_trade_cluster_count: 3
+    big_trade_cluster_ticks: 2
     llm_instruction: >
       You are READING the auction using Fabio Valentini's AMT methodology for the NSE Index market.
       You are NOT predicting — you are interpreting market structure, order flow, and institutional behavior.
@@ -31,6 +36,18 @@ markets:
       - COPPER
     default_symbol: "CRUDEOIL 19 MAR 6000 CALL"
     scanner_underlying: "CRUDEOIL"
+    # Per-symbol big trade thresholds (FR-10-08)
+    # MCX commodities: thinner books, higher threshold
+    big_trade_multiplier: 5.0
+    big_trade_cluster_count: 3
+    big_trade_cluster_ticks: 2
+    # EIA release window (FR-01-07)
+    # NATURALGAS: Thursday 10:30 AM ET = 21:00 IST
+    # CRUDEOIL: Wednesday 10:30 AM ET = 21:00 IST
+    eia_symbols:
+      - NATURALGAS
+      - CRUDEOIL
+    eia_suppression_minutes: 15
     llm_instruction: >
       You are READING the auction using Fabio Valentini's AMT methodology for the MCX Commodity market.
       You are NOT predicting — you are interpreting market structure, direct exchange volume, and institutional behavior.

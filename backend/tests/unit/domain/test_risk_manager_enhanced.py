@@ -54,10 +54,10 @@ class TestCircuitBreakers:
         assert "drawdown" in self.rm.halt_reason
 
     def test_no_halt_under_drawdown_limit(self):
-        # 3% loss (below 5% threshold) — should NOT halt
-        self.portfolio.balance -= 30_000
+        # 1% loss (below 2% threshold per FR-10-04) — should NOT halt
+        self.portfolio.balance -= 10_000
         self.portfolio.equity = self.portfolio.balance
-        self.rm.record_trade_result(-30_000, self.portfolio)
+        self.rm.record_trade_result(-10_000, self.portfolio)
         assert not self.rm.is_halted
 
 

@@ -1,1546 +1,596 @@
+# Restructured Documentation
+
+This document has been reordered for better logical flow: Architecture -> Features -> Design -> APIs -> Data -> Implementation -> Testing -> Deployment -> Runbook -> Build Instructions.
+
+---
+
 Here is the complete next set of documents in the SDLC chain — **TDD, API Contract, Test Plan, Deployment Architecture, Operations Runbook, and Data Dictionary**. [scribd](https://www.scribd.com/document/923519913/Fabio-Playbook)
 
 ***
 
-# Document Set 2 — Technical Design, API, Testing, Deployment & Operations
+
+
+# GlassyTrade AI — Redesigned Architecture & Flows
 
 ***
 
-# Document 1 — Technical Design Document (TDD)
-
-***
-
-## TDD-01 — Module Breakdown & Responsibilities
+## System Context Diagram
 
 ```
-src/
-│
-├── core/
-│   ├── tick_processor.py         # Normalize raw WebSocket ticks
-│   ├── candle_builder.py         # Build OHLCV candles from tick stream
-│   ├── session_manager.py        # Session boundary detection, state init/reset
-│   └── symbol_state.py           # SymbolState dataclass — all state per symbol
-│
-├── profile/
-│   └── volume_profile_engine.py  # Session + Leg profile build, POC, VAH/VAL
-│
-├── orderflow/
-│   ├── cvd_engine.py             # CVD, slope, divergence
-│   ├── footprint_engine.py       # Per-candle per-level bid/ask + imbalance
-│   ├── bubble_detector.py        # Volume bubble (2σ threshold)
-│   ├── absorption_detector.py    # Absorption candle detection
-│   ├── big_trade_detector.py     # Institutional big trade cluster
-│   ├── ofi_calculator.py         # Order Flow Imbalance (10-candle rolling)
-│   ├── vwap_engine.py            # VWAP + σ bands
-│   └── ib_detector.py            # Initial Balance + IB break
-│
-├── strategy/
-│   ├── market_state_engine.py    # BALANCED/IMBALANCED/PROBING/NO_TRADE
-│   ├── aggression_scorer.py      # Multi-signal scoring (max 4.5 score)
-│   ├── trade_constructor.py      # Entry, SL, target, R:R, cushion
-│   ├── profile_selector.py       # Which profile is active — SESSION/LEG
-│   ├── session_risk_manager.py   # Daily loss, drawdown, consecutive loss gates
-│   ├── position_sizer.py         # Fixed fractional lot sizing
-│   ├── partition_exit_manager.py # P1/P2/P3 + BE + counter-aggression exits
-│   └── pyramid_manager.py        # Pyramid add conditions + sizing
-│
-├── data/
-│   ├── tick_processor.py         # Tick normalization and validation
-│   ├── candle_builder.py         # Candle construction from ticks
-│   ├── atr_calculator.py         # ATR metrics for strategy/risk logic
-│   └── persistence.py            # Persistence primitives
-│
-├── output/
-│   └── __init__.py               # Output package placeholder
-│
-├── config/
-│   ├── instruments.py            # Per-symbol config (tick size, lot size, etc.)
-│   └── engine_config.py          # Global thresholds (LVN %, ATR mult, etc.)
-│
-└── tests/                        # Unit + integration coverage
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              EXTERNAL SYSTEMS                                   │
+│                                                                                 │
+│   DhanHQ WS Feed          DhanHQ REST API         EIA Economic Calendar        │
+│   (tick stream)            (option chain,           (suppression windows)       │
+│   wss://api-feed.dhan.co   L2 DOM, LTP, OI)        ir.eia.gov                  │
+│         │                        │                        │                    │
+└─────────┼────────────────────────┼────────────────────────┼────────────────────┘
+          │                        │                        │
+          ▼                        ▼                        ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         GLASSTRADE AI ENGINE                                    │
+│                         (single Python process, asyncio + uvloop)               │
+└─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ***
 
-## TDD-02 — Data Structures (All Key Types)
+## Layer Architecture (7 Layers)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  LAYER 7 — PRESENTATION                                                         │
+│  React Frontend (Port 5190)                                                     │
+│  Scanner Table │ Volume Profile │ Footprint │ AI Commander │ Risk Dashboard     │
+└────────────────────────────────┬────────────────────────────────────────────────┘
+                                 │ WebSocket (ws://localhost:8000/ws/signals)
+┌────────────────────────────────▼────────────────────────────────────────────────┐
+│  LAYER 6 — API GATEWAY                                                          │
+│  FastAPI + uvicorn                                                              │
+│  REST: /api/signal /api/profile /api/risk /api/trade /api/config               │
+│  WS:   /ws/signals  (broadcast hub — reads from WSPublisher queue)             │
+└────────────────────────────────┬────────────────────────────────────────────────┘
+                                 │ in-process asyncio.Queue
+┌────────────────────────────────▼────────────────────────────────────────────────┐
+│  LAYER 5 — OUTPUT & ALERTS                                                      │
+│  SignalFormatter → OutputSchema (Pydantic) → WSPublisher                       │
+│  AlertManager → pre-alerts, drive alerts, risk kill events                     │
+│  NotificationClient → Telegram push (mobile)                                   │
+└────────────────────────────────┬────────────────────────────────────────────────┘
+                                 │ OutputSchema
+┌────────────────────────────────▼────────────────────────────────────────────────┐
+│  LAYER 4 — STRATEGY ENGINE (per-symbol coroutine)                               │
+│  ┌──────────────────────────────────────────────────────────────────────────┐   │
+│  │  12-GATE PIPELINE (runs every tick)                                      │   │
+│  │  G0:Time │ G1:Quality │ G2:Risk │ G3:Dead │ G4:Probing │ G5:Profile    │   │
+│  │  G6:Zone │ G7:Drive   │ G8:Aggr │ G9:Cush │ G10:RR    │ G11:Size      │   │
+│  │  G12:EIA │                                                               │   │
+│  │                                                                          │   │
+│  │  MarketState → AnomalyDetector → ProfileSelector → DriveTracker        │   │
+│  │  → AggressionScorer → TradeConstructor → RiskManager                   │   │
+│  │  → PartitionExitMgr → PyramidMgr → RationaleGenerator                  │   │
+│  └──────────────────────────────────────────────────────────────────────────┘   │
+│                                                                                 │
+│  UNDERLYING PROFILE ROUTER (shared across all option symbols)                  │
+│  UnderlyingProfileRouter → VolumeProfileEngine (delta + plain)                 │
+│  NPOCTracker │ CompositeProfile (weekly bias)                                  │
+└────────────────────────────────┬────────────────────────────────────────────────┘
+                                 │ Tick objects
+┌────────────────────────────────▼────────────────────────────────────────────────┐
+│  LAYER 3 — ORDER FLOW ENGINE (feeds Layer 4 every tick)                         │
+│  CVDEngine │ FootprintEngine │ BubbleDetector │ AbsorptionDetector              │
+│  BigTradeDetector │ OFICalculator │ VWAPEngine │ IBDetector │ L2Monitor         │
+└────────────────────────────────┬────────────────────────────────────────────────┘
+                                 │ normalized Tick
+┌────────────────────────────────▼────────────────────────────────────────────────┐
+│  LAYER 2 — SCANNER & SUBSCRIPTION MANAGER                                       │
+│  OptionScanner → ExchangeMode (NSE|MCX) → OptionChainFetcher                  │
+│  ContractFilter → ContractRanker → SubscriptionManager                         │
+│  RebalanceLoop (5min) → dynamic add/remove subscriptions                       │
+└────────────────────────────────┬────────────────────────────────────────────────┘
+                                 │ raw WS messages
+┌────────────────────────────────▼────────────────────────────────────────────────┐
+│  LAYER 1 — DATA INGESTION                                                       │
+│  DhanWSClient (tick stream) │ DhanRESTClient (chain, L2, OI)                  │
+│  TickProcessor │ CandleBuilder │ SessionManager                                │
+│  EconomicCalendar (EIA suppression)                                             │
+└────────────────────────────────┬────────────────────────────────────────────────┘
+                                 │ persist / recover
+┌────────────────────────────────▼────────────────────────────────────────────────┐
+│  LAYER 0 — PERSISTENCE                                                          │
+│  DuckDB: ticks, session_profiles, signals, trades, session_risk, open_trades   │
+│  Pickle+lzma: SymbolState crash snapshots                                       │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+***
+
+## Master Data Flow
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│                          STARTUP SEQUENCE                                            │
+│                                                                                      │
+│  1. Load .env config                                                                 │
+│  2. DuckDB init + schema create                                                      │
+│  3. Load prev session profiles per underlying → SymbolState.prev_session_va         │
+│  4. EIA calendar load → suppression windows                                          │
+│  5. DhanHQ REST: fetch option chains for all underlyings (mode = NSE|MCX)           │
+│  6. ContractFilter + rank → select top N contracts                                  │
+│  7. DhanHQ WS: connect + subscribe selected security IDs                            │
+│  8. Init SymbolState per contract, start per-symbol pipeline coroutines             │
+│  9. Start L2 DOM poller (500ms)                                                     │
+│  10. Start rebalance loop (5min)                                                    │
+│  11. FastAPI server ready                                                           │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────┐
+│                      PER-TICK PIPELINE FLOW (runs every tick, per symbol)           │
+│                                                                                      │
+│  DhanHQ WS tick arrives                                                             │
+│         │                                                                            │
+│         ▼                                                                            │
+│  TickProcessor.normalize()                                                          │
+│  → Tick {price, ask_vol, bid_vol, volume, trade_size, delta, timestamp}             │
+│         │                                                                            │
+│         ├──────────────────────────────────────────────────────────┐               │
+│         │                                                           │               │
+│         ▼                                                           ▼               │
+│  SymbolState tick_buffer.append(tick)              UnderlyingProfileRouter          │
+│  CandleBuilder.update(tick)                        .update(tick, underlying,        │
+│                  │                                  underlying_price)               │
+│                  │ on candle close:                       │                         │
+│                  ▼                                        ▼                         │
+│         candle_buffer.append(candle)         VolumeProfileEngine                   │
+│         recalc: ATR, AvgVol                  .session_profile[bucket] += vol       │
+│         OFICalculator.update()               .leg_profile[bucket] += vol           │
+│         VWAPEngine.update()                  .delta_profile[bucket] updated        │
+│         IBDetector.check_ib_break()                                                │
+│                  │                                                                  │
+│                  ▼                                                                  │
+│         FootprintEngine.finalize_candle()                                          │
+│         BubbleDetector.update(footprint_history)                                   │
+│                  │                                                                  │
+│         ◄────────┘                                                                  │
+│         │                                                                           │
+│         ▼                                                                           │
+│  ═══════════════════════════════════════════════════                               │
+│                    12-GATE PIPELINE                                                 │
+│  ═══════════════════════════════════════════════════                               │
+│                                                                                     │
+│  GATE 0: SessionManager.is_in_warmup() OR is_in_dead_zone()                        │
+│          → BLOCKED: return OutputSchema(action="TIME_BLOCKED")                     │
+│          ↓ PASS                                                                     │
+│                                                                                     │
+│  GATE 1: state.data_quality == "STALE" (gap > 30s since last tick)                │
+│          → STALE: return OutputSchema(action="DATA_STALE")                         │
+│          ↓ PASS                                                                     │
+│                                                                                     │
+│  GATE 2: SessionRiskManager.can_trade()                                            │
+│          daily_loss ≥ 2% OR consecutive_losses ≥ 3 OR drawdown ≥ 3%              │
+│          → SESSION_STOPPED: return OutputSchema(action="SESSION_STOPPED")          │
+│          ↓ PASS                                                                     │
+│                                                                                     │
+│  GATE 3: EconomicCalendar.is_suppression_window(timestamp)                        │
+│          → SUPPRESSED: return OutputSchema(action="EIA_WINDOW")                    │
+│          ↓ PASS                                                                     │
+│                                                                                     │
+│  GATE 4: MarketStateEngine.detect()                                               │
+│          → NO_TRADE (POC ±2 ticks): return FLAT                                   │
+│          → PROBING (unconfirmed break): return WAIT                               │
+│          → BALANCED or IMBALANCED: continue                                        │
+│          ↓ PASS (BALANCED or IMBALANCED)                                           │
+│                                                                                     │
+│  [PARALLEL COMPUTE — all run simultaneously on candle close]                       │
+│  ├── AnomalyDetector.detect(price, session_va, prev_va)                           │
+│  ├── NPOCTracker.check_and_fill(price) + get_active_npocs()                       │
+│  ├── CompositeProfile.apply_weekly_bias_filter(direction, price)                   │
+│  └── L2Monitor.detect_liquidity_wall(price)                                       │
+│          ↓                                                                          │
+│                                                                                     │
+│  GATE 5: ProfileSelector.select_active_profile(market_state)                     │
+│          → NONE / WAIT / BUILDING_LEG: return FLAT                                │
+│          → SESSION or LEG or COMBINED: key_level identified                        │
+│          ↓ PASS (key_level exists)                                                 │
+│                                                                                     │
+│  GATE 6: abs(current_price - key_level) ≤ 3 ticks?                               │
+│          → NO: AlertManager.set_price_alert(key_level)                             │
+│                return OutputSchema(action="ALERT_SET")                             │
+│          ↓ YES                                                                      │
+│                                                                                     │
+│  GATE 7: DriveTracker.classify_drive(current_price, key_level)                   │
+│          → drive == 1: record touch, return FLAT (first drive — no entry)         │
+│          → drive == 2 + first rejected: ENTRY ZONE VALID                          │
+│          → drive ≥ 3: level exhausted, return FLAT                                │
+│          ↓ PASS (drive == 2, rejected)                                             │
+│                                                                                     │
+│  [AGGRESSION COMPUTE]                                                              │
+│  FootprintEngine.detect_imbalance(direction)         → score += 1.0              │
+│  CVDEngine.get_slope() + detect_divergence()          → score += 1.0              │
+│  BigTradeDetector.detect_cluster(key_level)           → score += 1.0              │
+│  AbsorptionDetector.detect(candle, atr, avg_vol)      → score += 0.5             │
+│  OFICalculator.calc_ofi()                             → score += 0.5             │
+│  BubbleDetector.bubble_confirms_entry()               → score += 0.5             │
+│  DeltaZoneDetector.detect_high_delta_zones()          → score += 0.5             │
+│  AnomalyDetector.double_anomaly_bonus()               → score += 0.5             │
+│  CompositeProfile.weekly_bias_aligned()               → score += 0.5             │
+│          ↓                                                                          │
+│                                                                                     │
+│  GATE 8: aggression_score ≥ 2.0?                                                  │
+│          → NO: return OutputSchema(action="WAIT", score=x)                        │
+│          ↓ YES                                                                      │
+│                                                                                     │
+│  GATE 9: calculate_cushion(entry, stop) ≤ 10 ticks?                              │
+│          → NO (INVALID): return FLAT                                               │
+│          ↓ YES                                                                      │
+│                                                                                     │
+│  GATE 10: risk_reward ≥ 1.5?                                                      │
+│           → NO: return FLAT (bad setup geometry)                                   │
+│           ↓ YES                                                                     │
+│                                                                                     │
+│  GATE 11: PositionSizer.calculate() — risk budget available?                      │
+│           → BLOCKED: return SessionRisk block                                      │
+│           ↓ YES                                                                     │
+│                                                                                     │
+│  GATE 12: OI pressure check — is_high_oi_wall(strike) ?                          │
+│           → HIGH OI: reduce confidence (not block)                                 │
+│           ↓ PASS                                                                    │
+│                                                                                     │
+│  ═══ ALL GATES PASSED → TRADE SIGNAL ═══                                          │
+│                                                                                     │
+│  TradeConstructor.build() → TradeSetup                                            │
+│  RationaleGenerator.generate() → string                                           │
+│  SignalFormatter.format() → OutputSchema                                           │
+│         │                                                                           │
+│         ├── DuckDB.save_signal()                                                   │
+│         ├── WSPublisher.broadcast_signal()  → Frontend                             │
+│         └── AlertManager.notify_drive_alert() → Telegram                          │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+***
+
+## Open Trade Management Flow (Separate Loop)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  OPEN TRADE MANAGEMENT LOOP (runs every tick when open_entries is not empty)       │
+│                                                                                     │
+│  [EVERY TICK]                                                                       │
+│         │                                                                           │
+│         ▼                                                                           │
+│  CounterAggressionDetector.check()                                                 │
+│         │                                                                           │
+│         ├── 2+ counter signals? ──► EXIT ALL IMMEDIATELY                           │
+│         │                          PartitionExitManager.exit_all()                 │
+│         │                          DuckDB.save_trade() × all lots                  │
+│         │                          WSPublisher.broadcast_trade_update("EXIT_ALL")  │
+│         │                          SessionRiskManager.register_trade_result(pnl)   │
+│         │                                                                           │
+│         └── counter < 2: continue                                                  │
+│                  │                                                                  │
+│                  ▼                                                                  │
+│  BreakevenManager.check_trigger(current_price, entry, target, direction)           │
+│         │                                                                           │
+│         ├── 35% to target reached? ──► MOVE SL TO BREAKEVEN                       │
+│         │                              update all OpenEntry.stop_loss = entry      │
+│         │                              WSPublisher.broadcast("MOVE_TO_BREAKEVEN")  │
+│         │                                                                           │
+│         └── not yet: continue                                                      │
+│                  │                                                                  │
+│                  ▼                                                                  │
+│  PartitionExitManager.check()                                                      │
+│         │                                                                           │
+│         ├── P1 trigger (33% R, weak CVD)? ──► exit 30% lots                       │
+│         ├── P2 trigger (target reached)?   ──► EXIT FULL POSITION BY DEFAULT (Trail only if strong trend + tight spread)             │
+│         │         └── strong CVD? → trail P3   weak CVD? → exit P3                │
+│         └── not yet: continue                                                      │
+│                  │                                                                  │
+│                  ▼                                                                  │
+│  PyramidManager.check()  (only if first entry in profit)                           │
+│         │                                                                           │
+│         ├── new LVN exists between current price and target?                       │
+│         ├── price AT pyramid level (±3 ticks)?                                     │
+│         ├── aggression_score ≥ 3.0 (higher bar)?                                  │
+│         └── YES ALL: PYRAMID ADD                                                   │
+│                    lot size = 50% of first entry (add 1) or 25% (add 2)           │
+│                    ALL stops → SL of new entry                                     │
+│                    DuckDB.save_open_trade_state()  ← crash recovery               │
+│                    WSPublisher.broadcast("PYRAMID_ADD")                            │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+***
+
+## Rebalance Flow (Every 5 Minutes)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  SCANNER REBALANCE LOOP (asyncio task, runs every 300s)                            │
+│                                                                                     │
+│  For each underlying in ExchangeMode:                                              │
+│    1. Rate-limit wait (3s per chain call)                                          │
+│    2. DhanHQ REST: fetch_option_chain(underlying, expiry)                          │
+│    3. get_underlying_ltp()                                                          │
+│    4. find_atm_strike(ltp)                                                          │
+│    5. select_strikes_to_scan(atm ± N)                                              │
+│    6. passes_filter() for each strike × CE/PE                                      │
+│    7. rank_contracts() by tradability score                                         │
+│                                                                                     │
+│  Diff against current subscriptions:                                               │
+│    NEW contracts (ATM moved) ──► subscribe_contracts() + init SymbolState         │
+│    STALE contracts (now far OTM) ──► unsubscribe_contracts()                      │
+│                                      cleanup SymbolState + queues                  │
+│                                      do NOT kill if trade is open on that contract │
+│                                                                                     │
+│  Check expiry roll:                                                                 │
+│    days_to_expiry < 3? ──► switch all contracts to next expiry                    │
+│    re-subscribe with new security IDs                                              │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+***
+
+## Session Boundary Flow (Daily Reset)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│  SESSION BOUNDARY HANDLER (fires at session open time per exchange)                │
+│                                                                                     │
+│  SessionManager detects new session:                                               │
+│                                                                                     │
+│  FOR EACH UNDERLYING:                                                              │
+│    1. Save completed session profile to DuckDB                                     │
+│       session_profiles: {date, underlying, poc, vah, val, profile_json}           │
+│    2. Add session POC to NPOCTracker                                               │
+│    3. Update CompositeProfile (add session to rolling 5-session window)            │
+│    4. state.prev_session_va = state.session_va                                     │
+│    5. Reset VolumeProfileEngine (session_profile = {})                             │
+│    6. Reset CVDEngine (cvd = 0)                                                    │
+│    7. Reset DriveTracker (all drives = {})                                         │
+│    8. Reset AlertManager (all alerts cleared)                                      │
+│    9. Reset SessionRiskManager (daily_pnl = 0, consecutive = 0)                   │
+│    10. Reset IBDetector                                                             │
+│    11. Reload prev session profiles for new prev reference                         │
+│                                                                                     │
+│  Re-run initial_scan() for new session contracts                                   │
+│  (option chain refreshes daily — new strikes, new security IDs possible)           │
+│                                                                                     │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+***
+
+## Component Interaction Map
+
+```
+                    ┌─────────────────┐
+                    │  OptionScanner  │ ← ExchangeMode (NSE|MCX)
+                    └────────┬────────┘
+                             │ selected contracts
+                    ┌────────▼────────┐
+                    │SubscriptionMgr  │ ← 5-min rebalance
+                    └────────┬────────┘
+                             │ security_id → asyncio.Queue
+          ┌──────────────────┼──────────────────────────────┐
+          ▼                  ▼                              ▼
+   SymbolState[A]     SymbolState[B]              SymbolState[N]
+          │                  │                              │
+          ▼                  ▼                              ▼
+   pipeline_coro     pipeline_coro               pipeline_coro
+          │
+          ├── tick_buffer / candle_buffer
+          ├── CVDEngine (session-scoped)
+          ├── FootprintEngine (candle-scoped)
+          ├── BubbleDetector (21-bar window)
+          ├── DriveTracker (session-scoped)
+          ├── AlertManager (session-scoped)
+          ├── SessionRiskManager (session-scoped)
+          └── open_entries (trade-scoped)
+          │
+          └──► UnderlyingProfileRouter [SHARED]
+                    │
+                    ├── VolumeProfileEngine[NATURALGAS]  ← session + leg + delta
+                    ├── VolumeProfileEngine[NIFTY]
+                    ├── VolumeProfileEngine[BANKNIFTY]
+                    ├── NPOCTracker[NATURALGAS]
+                    ├── NPOCTracker[NIFTY]
+                    └── CompositeProfile[all underlyings] ← weekly bias
+```
+
+***
+
+## State Object per Symbol (Revised)
 
 ```python
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional, List, Dict
-from collections import deque
-
-@dataclass
-class Tick:
-    price:       float
-    ask_vol:     int
-    bid_vol:     int
-    volume:      int
-    trade_size:  int
-    delta:       int
-    timestamp:   datetime
-
-@dataclass
-class Candle:
-    start_ts:   datetime
-    end_ts:     datetime
-    open:       float
-    high:       float
-    low:        float
-    close:      float
-    volume:     int
-    ask_vol:    int
-    bid_vol:    int
-    delta:      int
-    tick_count: int
-
-@dataclass
-class ValueArea:
-    POC:          float
-    VAH:          float
-    VAL:          float
-    total_volume: int
-    va_volume:    int
-
-@dataclass
-class LVN:
-    price:         float
-    volume:        int
-    quality_score: float
-    sigma_below_mean: float
-
-@dataclass
-class DriveRecord:
-    level:        float
-    timestamp:    datetime
-    was_rejected: bool
-    rejection_type: Optional[str]  # WICK | CLOSE | None
-
-@dataclass
-class AggressionResult:
-    score:     float
-    confirmed: bool   # score >= 2.0
-    signals:   List[str]
-    breakdown: Dict[str, float]  # {"footprint": 1.0, "cvd": 1.0, ...}
-
-@dataclass
-class TradeSetup:
-    direction:       str      # LONG | SHORT
-    confidence:      str      # High | Medium | Low
-    entry_zone:      float
-    stop_loss:       float
-    sl_ticks:        int
-    cushion_quality: str
-    target:          float
-    risk_reward:     float
-    invalidation:    float
-    break_even_at:   float
-    lots:            int
-    risk_amount:     float
-    risk_pct:        float
-    drive_number:    int
-    aggression:      AggressionResult
-
-@dataclass
-class OpenEntry:
-    entry_id:    str
-    price:       float
-    lots:        int
-    stop_loss:   float
-    add_number:  int    # 1 = first, 2 = pyramid 1, 3 = pyramid 2
-    timestamp:   datetime
-    pnl:         float = 0.0
-
 @dataclass
 class SymbolState:
-    symbol:              str
-    # Profiles
-    session_profile:     Dict[float, int] = field(default_factory=dict)
-    session_va:          Optional[ValueArea] = None
-    prev_session_va:     Optional[ValueArea] = None
-    leg_profile:         Dict[float, int] = field(default_factory=dict)
-    leg_anchor:          Optional[dict] = None
-    # Buffers
-    tick_buffer:         deque = field(default_factory=lambda: deque(maxlen=10000))
-    candle_buffer:       deque = field(default_factory=lambda: deque(maxlen=200))
-    cvd_series:          List[dict] = field(default_factory=list)
-    # State
-    drive_tracker:       Optional[object] = None
-    risk_manager:        Optional[object] = None
-    open_entries:        List[OpenEntry] = field(default_factory=list)
-    # Indicators
-    atr:                 float = 0.0
-    avg_vol:             float = 0.0
-    avg_trade_size:      float = 0.0
-    vwap_state:          dict = field(default_factory=dict)
-    ib:                  dict = field(default_factory=dict)
-    ofi:                 float = 0.0
+    # Identity
+    symbol:         str          # "NATURALGAS_280_PE"
+    security_id:    str          # DhanHQ security ID
+    underlying:     str          # "NATURALGAS"
+    strike:         float        # 280.0
+    option_type:    str          # "CE" or "PE"
+    expiry:         str          # "2026-03-27"
+    segment:        str          # "MCX_COMM"
+
+    # Tick/Candle buffers
+    tick_buffer:    deque        # maxlen=10000
+    candle_buffer:  deque        # maxlen=200
+
+    # Order flow (option-level — per-contract)
+    cvd_engine:     CVDEngine
+    footprint_engine: FootprintEngine
+    bubble_detector: BubbleDetector
+    big_trade_detector: BigTradeDetector
+    ib:             dict         # IB high/low for this contract
+
+    # Strategy state
+    drive_tracker:  DriveTracker
+    alert_manager:  AlertManager
+
+    # Risk & trade
+    risk_manager:   SessionRiskManager
+    open_entries:   list[OpenEntry]
+    pyramid_count:  int
+
+    # Cached indicators (refreshed on candle close)
+    atr:            float
+    avg_vol:        float
+    avg_trade_size: float
+    ofi:            float
+    vwap_state:     dict
+
     # Session
-    session_start_ts:    Optional[datetime] = None
-    is_session_active:   bool = False
-    data_quality:        str = "LIVE"
-    last_tick_ts:        Optional[datetime] = None
-    last_signal:         Optional[dict] = None
+    session_start_ts: datetime
+    data_quality:   str          # LIVE | STALE | RECONNECTING
+    last_tick_ts:   datetime
+    last_signal:    dict
+
+    # NOTE: profiles live in UnderlyingProfileRouter[underlying]
+    # NOT in SymbolState — one profile per underlying, shared across all its strikes
 ```
 
 ***
 
-## TDD-03 — Concurrency Model
+## Persistence Flow
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  DUCKDB WRITE EVENTS                                                         │
+│                                                                              │
+│  Every tick:          ticks table (append)                                   │
+│  Every candle close:  (no write — in-memory only)                           │
+│  Every signal:        signals table (append)                                 │
+│  Every entry/exit:    trades table + open_trades (upsert)                   │
+│  Every risk event:    session_risk table (upsert)                            │
+│  Session close:       session_profiles table (insert)                        │
+│                                                                              │
+│  CRASH RECOVERY WRITES (every trade state change):                           │
+│  pickle.dump(SymbolState) → data/snapshots/{symbol}_state.pkl.xz             │
+│                                                                              │
+│  STARTUP READS:                                                              │
+│  session_profiles WHERE date = yesterday → prev_session_va                  │
+│  open_trades WHERE not closed → recover mid-session trades                  │
+│  session_profiles last 5 rows per underlying → composite profile            │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+***
+
+## Frontend Data Flow
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  REACT FRONTEND                                                               │
+│                                                                              │
+│  useWebSocket hook                                                           │
+│  └── onmessage(msg) → route by msg.type                                     │
+│        │                                                                     │
+│        ├── "SIGNAL"       → signalStore.updateSignal(symbol, data)          │
+│        ├── "TRADE_UPDATE" → signalStore.updateTrade(trade_id, action)       │
+│        ├── "RISK_EVENT"   → riskStore.handleEvent(event)                    │
+│        ├── "STATE_CHANGE" → signalStore.updateState(symbol, from, to)       │
+│        ├── "DRIVE_ALERT"  → alertStore.addAlert(symbol, drive, level)       │
+│        ├── "DATA_QUALITY" → signalStore.setQuality(symbol, quality)         │
+│        └── "HEARTBEAT"    → connectionStore.updateHeartbeat(ts)             │
+│                                                                              │
+│  Scanner Table (zustand signalStore)                                         │
+│  └── re-renders only changed rows (zustand shallow selector)                │
+│                                                                              │
+│  VolumeProfile Component                                                     │
+│  └── Canvas 2D — redraws only on profile REST fetch (every 30s)             │
+│  └── NOT re-rendering on every tick — profile is batch-updated              │
+│                                                                              │
+│  Footprint Component                                                         │
+│  └── Canvas 2D — redraws on every candle close signal                       │
+│                                                                              │
+│  AICommander Panel                                                           │
+│  └── Shows last signal JSON — updates on SIGNAL message only                │
+│                                                                              │
+│  RiskDashboard                                                               │
+│  └── Shows daily_pnl, consecutive_losses, kill_switch_status                │
+│  └── Red banner auto-appears on SESSION_STOPPED event                       │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+***
+
+## Revised `main.py` (Single Entry Point — Everything Starts Here)
 
 ```python
-# One async task per symbol — all run in single event loop
-# No threading — avoids GIL and race conditions on shared state
+import asyncio, uvloop
+from config.instruments import ExchangeMode
+from data.dhan_ws_client import DhanWSClient
+from data.dhan_rest_client import DhanRESTClient
+from data.duckdb_store import DuckDBStore
+from scanner.option_scanner import OptionScanner
+from strategy.underlying_profile_router import UnderlyingProfileRouter
+from strategy.pipeline import StrategyEngine
+from output.ws_publisher import WSPublisher
+from api.main import create_api_app
+import uvicorn, structlog
 
-import asyncio
-
-async def symbol_pipeline(symbol: str, state: SymbolState, queue: asyncio.Queue):
-    """
-    Each symbol runs its own independent pipeline coroutine.
-    Ticks are pushed to the queue by the WebSocket client.
-    """
-    while True:
-        tick = await queue.get()
-        await process_tick_pipeline(tick, state)
-        queue.task_done()
+log = structlog.get_logger()
 
 async def main():
-    states = {sym: SymbolState(sym) for sym in ACTIVE_SYMBOLS}
-    queues = {sym: asyncio.Queue() for sym in ACTIVE_SYMBOLS}
-
-    # WS client pushes to all queues
-    ws_task = asyncio.create_task(dhan_ws_client(queues))
-
-    # L2 DOM poller — 500ms per symbol
-    l2_tasks = [asyncio.create_task(l2_poller(sym, states[sym]))
-                for sym in ACTIVE_SYMBOLS]
-
-    # Symbol pipelines
-    pipelines = [asyncio.create_task(symbol_pipeline(sym, states[sym], queues[sym]))
-                 for sym in ACTIVE_SYMBOLS]
-
-    await asyncio.gather(ws_task, *l2_tasks, *pipelines)
-```
-
-***
-
-## TDD-04 — Profile Incremental Update (O(1) per tick)
-
-```python
-class VolumeProfileEngine:
-    """
-    Incremental bucket update — avoids full rebuild every tick.
-    Session profile and leg profile maintained independently.
-    """
-    def __init__(self, bucket_size: float):
-        self.bucket_size = bucket_size
-        self.session:  Dict[float, int] = {}
-        self.leg:      Dict[float, int] = {}
-        self._leg_active = False
-
-    def update(self, tick: Tick):
-        bucket = round(tick.price / self.bucket_size) * self.bucket_size
-
-        # Always update session profile
-        self.session[bucket] = self.session.get(bucket, 0) + tick.volume
-
-        # Update leg profile only when leg is active
-        if self._leg_active:
-            self.leg[bucket] = self.leg.get(bucket, 0) + tick.volume
-
-    def start_leg(self):
-        self.leg = {}
-        self._leg_active = True
-
-    def stop_leg(self):
-        self._leg_active = False
-
-    def reset_session(self):
-        self.session = {}
-        self.leg = {}
-        self._leg_active = False
-
-    def get_poc(self, profile: str = "session") -> float:
-        p = self.session if profile == "session" else self.leg
-        return max(p, key=p.get) if p else 0.0
-
-    def get_value_area(self, profile: str = "session") -> ValueArea:
-        p = self.session if profile == "session" else self.leg
-        poc = self.get_poc(profile)
-        return expand_value_area(p, poc)
-```
-
-***
-
-## TDD-05 — WebSocket Client with Reconnect
-
-```python
-import asyncio, json, websockets
-from datetime import datetime
-
-class DhanWSClient:
-    def __init__(self, access_token: str, queues: Dict[str, asyncio.Queue]):
-        self.token   = access_token
-        self.queues  = queues
-        self.uri     = "wss://api-feed.dhan.co"
-        self.reconnect_delay = 2   # seconds, doubles on each failure (max 30)
-
-    async def connect(self):
-        while True:
-            try:
-                async with websockets.connect(
-                    self.uri,
-                    extra_headers={"access-token": self.token},
-                    ping_interval=20,
-                    ping_timeout=10
-                ) as ws:
-                    await self.subscribe(ws)
-                    self.reconnect_delay = 2  # Reset on success
-                    async for message in ws:
-                        await self.handle_message(message)
-            except Exception as e:
-                # Mark all symbols as RECONNECTING
-                for sym in self.queues:
-                    pass  # update state.data_quality = "RECONNECTING"
-                await asyncio.sleep(min(self.reconnect_delay, 30))
-                self.reconnect_delay = min(self.reconnect_delay * 2, 30)
-
-    async def handle_message(self, raw: str):
-        data = json.loads(raw)
-        tick = Tick(
-            price      = data["LTP"],
-            ask_vol    = data.get("buy_qty",  0),
-            bid_vol    = data.get("sell_qty", 0),
-            volume     = data.get("buy_qty", 0) + data.get("sell_qty", 0),
-            trade_size = data.get("trade_size", 1),
-            delta      = data.get("buy_qty", 0) - data.get("sell_qty", 0),
-            timestamp  = datetime.fromisoformat(data["timestamp"])
-        )
-        symbol = data["symbol"]
-        if symbol in self.queues:
-            await self.queues[symbol].put(tick)
-
-    async def subscribe(self, ws):
-        payload = {
-            "RequestCode": 15,
-            "InstrumentCount": len(self.queues),
-            "InstrumentList": [
-                {"ExchangeSegment": "NSE_FO", "SecurityId": sid}
-                for sid in ACTIVE_SECURITY_IDS
-            ]
-        }
-        await ws.send(json.dumps(payload))
-```
-
-***
-
-# Document 2 — API Contract
-
-***
-
-## API-01 — Internal REST API (FastAPI)
-
-### GET /api/symbols
-```json
-Response:
-{
-  "symbols": [
-    {
-      "symbol":       "NATURALGAS",
-      "strike":       280,
-      "option_type":  "PE",
-      "is_active":    true,
-      "session_state": "BALANCED",
-      "last_signal_ts": "2026-03-17T19:45:00+05:30"
-    }
-  ]
-}
-```
-
-### GET /api/signal/{symbol}
-```json
-Response: Full OutputSchema JSON (as defined in BRD FR-11)
-```
-
-### GET /api/profile/{symbol}
-```json
-Response:
-{
-  "symbol":       "NATURALGAS",
-  "profile_type": "SESSION",
-  "poc":          9.25,
-  "vah":          11.78,
-  "val":          8.91,
-  "lvns":         [8.20, 7.90],
-  "hvns":         [9.10, 9.40],
-  "profile_data": {"8.91": 1200, "9.00": 3400, ...}
-}
-```
-
-### GET /api/risk/session
-```json
-Response:
-{
-  "daily_pnl":           -2500.00,
-  "daily_pnl_pct":       -0.83,
-  "consecutive_losses":  2,
-  "trades_today":        5,
-  "session_active":      true,
-  "kill_switch_active":  false,
-  "risk_remaining_pct":  1.17
-}
-```
-
-### POST /api/trade/entry (manual override)
-```json
-Request:
-{
-  "symbol":    "NATURALGAS",
-  "direction": "LONG",
-  "lots":      4,
-  "override_reason": "Manual entry confirmation"
-}
-Response:
-{
-  "trade_id": "uuid",
-  "accepted": true,
-  "risk_amount": 1250.00
-}
-```
-
-### POST /api/trade/exit (manual override)
-```json
-Request:
-{
-  "trade_id":   "uuid",
-  "lots":       4,
-  "exit_reason": "Manual counter-aggression"
-}
-```
-
-### GET /api/config/{symbol}
-```json
-Response: Full instrument config from INSTRUMENTS registry
-```
-
-### PUT /api/config/{symbol}
-```json
-Request: Partial instrument config update
-{
-  "big_trade_threshold": 75,
-  "risk_per_trade_pct":  0.003
-}
-```
-
-***
-
-## API-02 — WebSocket Push API (Frontend)
-
-**Endpoint:** `ws://localhost:8000/ws/signals`
-
-**Message types pushed to frontend:**
-
-```json
-// Type 1: New signal
-{
-  "type":    "SIGNAL",
-  "data":    { /* full OutputSchema */ }
-}
-
-// Type 2: Trade management update (partition, pyramid, BE)
-{
-  "type":    "TRADE_UPDATE",
-  "trade_id": "uuid",
-  "action":   "EXIT_P1 | EXIT_P2 | EXIT_P3 | PYRAMID_ADD | MOVE_TO_BREAKEVEN | TRAIL_SL | EXIT_ALL",
-  "lots":     2,
-  "price":    9.10,
-  "reason":   "Seed recovery — weak momentum"
-}
-
-// Type 3: Session risk event
-{
-  "type":   "RISK_EVENT",
-  "event":  "DAILY_LOSS_LIMIT | DRAWDOWN_LIMIT | CONSECUTIVE_LOSSES | SESSION_KILLED",
-  "value":  -2.0,
-  "reason": "2% daily loss limit reached"
-}
-
-// Type 4: Market state change
-{
-  "type":      "STATE_CHANGE",
-  "symbol":    "NATURALGAS",
-  "from":      "BALANCED",
-  "to":        "IMBALANCED",
-  "direction": "DOWN",
-  "timestamp": "2026-03-17T19:45:00+05:30"
-}
-
-// Type 5: Drive alert
-{
-  "type":      "DRIVE_ALERT",
-  "symbol":    "NATURALGAS",
-  "drive":     1,
-  "level":     8.91,
-  "action":    "FIRST_DRIVE_RECORDED — set alert for return"
-}
-
-// Type 6: Data quality alert
-{
-  "type":    "DATA_QUALITY",
-  "symbol":  "NATURALGAS",
-  "quality": "STALE",
-  "gap_seconds": 45
-}
-
-// Type 7: Heartbeat (every 5s)
-{
-  "type": "HEARTBEAT",
-  "ts":   "2026-03-17T19:45:05+05:30",
-  "symbols_active": 3
-}
-```
-
-***
-
-## API-03 — DhanHQ Integration Contracts
-
-### WebSocket Subscription Payload
-```json
-{
-  "RequestCode": 15,
-  "InstrumentCount": 1,
-  "InstrumentList": [
-    {
-      "ExchangeSegment": "MCX_COMM",
-      "SecurityId": "428199"
-    }
-  ]
-}
-```
-
-### Expected Tick Payload (inbound)
-```json
-{
-  "type":        "ticker",
-  "symbol":      "NATURALGAS",
-  "LTP":         9.35,
-  "buy_qty":     125,
-  "sell_qty":    75,
-  "trade_size":  200,
-  "timestamp":   "2026-03-17T19:45:00.123456+05:30",
-  "exchange":    "MCX"
-}
-```
-
-### L2 DOM Poll (REST)
-```
-GET https://api.dhan.co/marketfeed/ohlc
-Headers: access-token: {token}
-Body: {"NSE_FO": ["428199"]}
-
-Response field mapping:
-  depth.buy[0..4]  → bid levels (price, quantity, orders)
-  depth.sell[0..4] → ask levels (price, quantity, orders)
-```
-
-***
-
-# Document 3 — Test Plan
-
-***
-
-## TP-01 — Unit Tests
-
-### Profile Engine Tests
-```python
-def test_poc_calculation():
-    profile = {9.0: 1000, 9.1: 5000, 9.2: 2000}
-    assert calc_poc(profile) == 9.1
-
-def test_value_area_70_pct():
-    # Ensure VA expands until exactly 70% accumulated
-    profile = build_synthetic_profile()
-    poc     = calc_poc(profile)
-    va      = calc_value_area(profile, poc)
-    total   = sum(profile.values())
-    assert va.va_volume / total >= 0.70
-    assert va.VAH > va.POC > va.VAL
-
-def test_lvn_threshold():
-    profile = {9.0: 100, 9.1: 5, 9.2: 110, 9.3: 8}
-    nodes   = detect_nodes(profile)
-    # Mean = 55.75, threshold = 55.75 × 0.15 = 8.36
-    # 9.1 (5) and 9.3 (8) should be LVNs
-    assert 9.1 in nodes["LVNs"]
-    assert 9.3 in nodes["LVNs"]
-    assert 9.0 not in nodes["LVNs"]
-
-def test_lvn_score_midpoint_bonus():
-    # LVN at leg midpoint should score higher
-    score_mid = score_lvn(10.0, 5, 9.0, 11.0, {10.0: 5, 9.5: 100, 10.5: 100})
-    score_far = score_lvn(9.1, 5, 9.0, 11.0, {9.1: 5, 9.5: 100, 10.5: 100})
-    assert score_mid > score_far
-```
-
-### CVD Tests
-```python
-def test_cvd_accumulation():
-    ticks = [
-        Tick(price=9.0, ask_vol=100, bid_vol=50, ...),
-        Tick(price=9.1, ask_vol=80,  bid_vol=120, ...),
-    ]
-    cvd = calc_cvd(ticks, ticks[0].timestamp)
-    assert cvd[0]["cvd"] == 50   # 100-50
-    assert cvd [scribd](https://www.scribd.com/document/923519913/Fabio-Playbook)["cvd"] == -10  # 50 + (80-120)
-
-def test_cvd_bull_divergence():
-    # Prices go lower but CVD higher = bullish divergence
-    prices = [{"close": 9.0}, {"close": 8.9}, {"close": 8.8}]
-    cvd    = [{"cvd": -100}, {"cvd": -80}, {"cvd": -60}]
-    result = detect_cvd_divergence(prices, cvd, lookback=3)
-    assert result["bull"] == True
-    assert result["bear"] == False
-```
-
-### Aggression Scorer Tests
-```python
-def test_minimum_score_gate():
-    # Score of 1.5 must NOT generate trade signal
-    result = mock_aggression_score(1.5)
-    assert result["confirmed"] == False
-
-def test_pyramid_requires_3():
-    # Score of 2.5 is enough for entry but NOT pyramid
-    assert 2.5 >= CONFIG["min_aggression_score"]        # passes entry
-    assert 2.5 < 3.0                                     # fails pyramid
-
-def test_score_breakdown():
-    # Verify each signal contributes correct weight
-    score = calculate_aggression_score_isolated(
-        footprint=True, cvd=True, big_trade=False,
-        absorption=False, ofi=False
-    )
-    assert score == 2.0
-```
-
-### Drive Tracker Tests
-```python
-def test_first_drive_no_entry():
-    tracker = DriveTracker(tick_size=0.10)
-    result  = classify_drive(9.40, 9.40, tracker, candles, "SHORT", atr, cvd, fp)
-    assert result["entry_valid"] == False
-    assert result["drive_number"] == 1
-
-def test_second_drive_with_rejection_valid():
-    tracker = DriveTracker(tick_size=0.10)
-    # Simulate first drive + rejection
-    tracker.record_touch(9.40, ts1, was_rejected=True)
-    result = classify_drive(9.40, 9.40, tracker, candles, "SHORT", atr, cvd, fp)
-    assert result["drive_number"] == 2
-    assert result["entry_valid"] == True
-
-def test_second_drive_without_rejection_invalid():
-    tracker = DriveTracker(tick_size=0.10)
-    tracker.record_touch(9.40, ts1, was_rejected=False)  # no rejection
-    result  = classify_drive(9.40, 9.40, tracker, candles, "SHORT", atr, cvd, fp)
-    assert result["entry_valid"] == False
-```
-
-### Risk Manager Tests
-```python
-def test_daily_loss_kill_switch():
-    rm = SessionRiskManager(account_equity=500000)
-    rm.register_trade_result(-5000)   # -1%
-    rm.register_trade_result(-5000)   # -2% → should kill
-    can, reason = rm.can_trade()
-    assert can == False
-    assert "DAILY LOSS" in reason
-
-def test_consecutive_loss_pause():
-    rm = SessionRiskManager(account_equity=500000)
-    for _ in range(3):
-        rm.register_trade_result(-500)
-    can, reason = rm.can_trade()
-    assert can == False
-    assert "consecutive" in reason.lower()
-
-def test_win_resets_consecutive():
-    rm = SessionRiskManager(account_equity=500000)
-    rm.register_trade_result(-500)
-    rm.register_trade_result(-500)
-    rm.register_trade_result(+2000)  # win resets counter
-    assert rm.consecutive_losses == 0
-```
-
-### Partition Exit Tests
-```python
-def test_p1_skipped_on_strong_momentum():
-    # Strong CVD slope → P1 should NOT fire
-    result = partition_exit_manager(
-        direction="LONG", entry_price=8.91, current_price=9.02,
-        target_price=9.25, total_lots=6,
-        cvd_series=strong_cvd_series,   # slope > 2.0
-        ...
-    )
-    actions = [a["action"] for a in result]
-    assert "EXIT_P1" not in actions
-
-def test_p2_always_fires_at_target():
-    result = partition_exit_manager(
-        direction="LONG", entry_price=8.91, current_price=9.25,
-        target_price=9.25, total_lots=6, ...
-    )
-    actions = [a["action"] for a in result]
-    assert "EXIT_P2" in actions
-
-def test_counter_aggression_exits_all():
-    result = partition_exit_manager(
-        direction="LONG", ...,
-        counter_aggression_score=2  # mock 2+ counter signals
-    )
-    assert result[0]["action"] == "EXIT_ALL"
-```
-
-***
-
-## TP-02 — Integration Tests
-
-```python
-# Full pipeline test — tick to signal
-def test_full_pipeline_balanced_long():
-    """
-    Simulate: market is BALANCED, price at VAL,
-    second drive confirmed, aggression ≥ 2.0
-    Expected: LONG signal with full output schema
-    """
-    state   = build_mock_state("BALANCED", price_at="VAL")
-    ticks   = build_mock_ticks(at_val=True, buy_pressure=True)
-    result  = run_strategy_full(ticks, candles, ...)
-    assert result["direction"] == "LONG"
-    assert result["confidence"] in ("Medium", "High")
-    assert result["drive_number"] == 2
-    assert result["aggression_score"] >= 2.0
-    assert result["stop_loss"] < result["entry_zone"]
-    assert result["target"] > result["entry_zone"]
-
-def test_no_trade_at_poc():
-    state  = build_mock_state("BALANCED", price_at="POC")
-    result = run_strategy_full(...)
-    assert result["direction"] == "FLAT"
-    assert "POC dead zone" in result["rationale"]
-
-def test_session_kill_switch_blocks_signal():
-    rm = SessionRiskManager(500000)
-    rm.register_trade_result(-10000)   # exceed 2% daily loss
-    result = run_strategy_full(..., risk_manager=rm)
-    assert result["action"] == "SESSION_STOPPED"
-
-def test_first_drive_suppresses_entry():
-    state   = build_mock_state("BALANCED", price_at="VAH")
-    tracker = DriveTracker(tick_size=0.10)  # no prior drives
-    result  = run_strategy_full(..., drive_tracker=tracker)
-    assert result["direction"] == "FLAT"
-    assert result["drive_number"] == 1
-
-def test_pyramid_add_at_new_lvn():
-    # First entry at 8.91 in profit, price at 9.02 LVN
-    entries = [OpenEntry(price=8.91, lots=4, ...)]
-    result  = manage_pyramid(
-        direction="LONG", entries=entries, current_price=9.02,
-        first_pnl=0.11,  # in profit
-        aggression_score=3.0, ...
-    )
-    assert result["action"] == "PYRAMID_ADD"
-    assert result["add_lots"] == 2   # 50% of 4
-```
-
-***
-
-## TP-03 — Performance Tests
-
-```python
-# Signal latency must be < 500ms end-to-end
-def test_signal_latency():
-    import time
-    t_start = time.time()
-    run_strategy_full(ticks=live_tick_batch, ...)
-    latency_ms = (time.time() - t_start) * 1000
-    assert latency_ms < 500, f"Latency {latency_ms:.1f}ms exceeds 500ms"
-
-# Profile update O(1) per tick
-def test_profile_update_constant_time():
-    import time
-    engine = VolumeProfileEngine(bucket_size=0.10)
-    # Pre-populate with 100k ticks
-    for _ in range(100000):
-        engine.update(mock_tick())
-    # Time a single update — should be constant regardless of profile size
-    t0 = time.time()
-    engine.update(mock_tick())
-    t1 = time.time()
-    assert (t1 - t0) * 1000 < 1.0, "Profile update > 1ms — not O(1)"
-
-# 10 concurrent symbols no degradation
-def test_concurrent_symbols():
-    import asyncio
-    async def run():
-        tasks = [symbol_pipeline(sym, ...) for sym in 10_symbols]
-        await asyncio.gather(*tasks)
-    asyncio.run(asyncio.wait_for(run(), timeout=1.0))  # 10 symbols in < 1s
-```
-
-***
-
-## TP-04 — Strategy Backtesting Validation Tests
-
-```python
-# Run strategy on 30 days of historical tick data
-# Validate statistical edge exists
-
-def test_backtest_win_rate():
-    results = backtest_strategy(
-        tick_data  = load_ticks("2026-01-01", "2026-02-28"),
-        instrument = "NATURALGAS"
-    )
-    assert results["win_rate"] >= 0.45, "Win rate below 45% — no edge"
-    assert results["avg_rr"]   >= 1.5,  "Average R:R below 1.5"
-
-def test_backtest_second_drive_vs_first():
-    results_d1 = backtest_strategy(drive_filter=1, ...)
-    results_d2 = backtest_strategy(drive_filter=2, ...)
-    assert results_d2["win_rate"] > results_d1["win_rate"], "Second drive not better than first"
-
-def test_backtest_no_middle_trades():
-    results = backtest_strategy(allow_poc_trades=True, ...)
-    results_no_mid = backtest_strategy(allow_poc_trades=False, ...)
-    assert results_no_mid["win_rate"] > results["win_rate"]
-```
-
-***
-
-# Document 4 — Deployment Architecture
-
-***
-
-## DEPLOY-01 — Environment Stack
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                  LOCAL MACHINE (Primary)                  │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │               Docker Compose Stack               │   │
-│  │                                                  │   │
-│  │  ┌─────────────┐   ┌──────────────────────────┐ │   │
-│  │  │  FastAPI     │   │   GlassyTrade Engine     │ │   │
-│  │  │  (Port 8000) │   │   (Python async)         │ │   │
-│  │  │  REST + WS   │   │   All strategy modules   │ │   │
-│  │  └──────┬───────┘   └──────────┬───────────────┘ │   │
-│  │         │                      │                  │   │
-│  │  ┌──────▼──────────────────────▼──────────────┐  │   │
-│  │  │              DuckDB                        │  │   │
-│  │  │  (local file: glasstrade.db)               │  │   │
-│  │  │  Ticks, Profiles, Signals, Trades, Risk   │  │   │
-│  │  └────────────────────────────────────────────┘  │   │
-│  │                                                  │   │
-│  │  ┌────────────────────────────────────────────┐  │   │
-│  │  │     React Frontend (Port 5190)             │  │   │
-│  │  │     GlassyTrade AI UI                      │  │   │
-│  │  └────────────────────────────────────────────┘  │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                          │
-│  External Connections:                                   │
-│  ├── DhanHQ WebSocket wss://api-feed.dhan.co            │
-│  ├── DhanHQ REST    https://api.dhan.co                 │
-│  └── EIA Calendar  https://ir.eia.gov/ngs/ngs.html      │
-└──────────────────────────────────────────────────────────┘
-```
-
-***
-
-## DEPLOY-02 — docker-compose.yml
-
-```yaml
-version: "3.9"
-
-services:
-  engine:
-    build: ./engine
-    container_name: glasstrade_engine
-    environment:
-      - DHAN_ACCESS_TOKEN=${DHAN_ACCESS_TOKEN}
-      - DHAN_CLIENT_ID=${DHAN_CLIENT_ID}
-      - DB_PATH=/data/glasstrade.db
-      - LOG_LEVEL=INFO
-    volumes:
-      - ./data:/data
-      - ./logs:/logs
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  frontend:
-    build: ./frontend
-    container_name: glasstrade_ui
-    ports:
-      - "5190:5190"
-    depends_on:
-      - engine
-    restart: unless-stopped
-
-  api:
-    build: ./api
-    container_name: glasstrade_api
-    ports:
-      - "8000:8000"
-    environment:
-      - DB_PATH=/data/glasstrade.db
-    volumes:
-      - ./data:/data
-    depends_on:
-      - engine
-    restart: unless-stopped
-```
-
-***
-
-## DEPLOY-03 — Environment Variables (.env)
-
-```bash
-# DhanHQ
-DHAN_ACCESS_TOKEN=your_token_here
-DHAN_CLIENT_ID=your_client_id
-
-# Engine
-ACCOUNT_EQUITY=500000          # Starting equity in INR
-ACTIVE_SYMBOLS=NATURALGAS,NIFTY,BANKNIFTY
-MAX_CONCURRENT_SYMBOLS=10
-LOG_LEVEL=INFO
-
-# Risk Overrides (optional — defaults in engine_config.py)
-RISK_PER_TRADE_PCT=0.005
-MAX_DAILY_LOSS_PCT=0.02
-MAX_CONSECUTIVE_LOSSES=3
-
-# DB
-DB_PATH=./data/glasstrade.db
-TICK_RETENTION_DAYS=1          # Purge ticks older than N days
-
-# EIA Calendar
-EIA_SUPPRESS_MINUTES_BEFORE=15
-EIA_SUPPRESS_MINUTES_AFTER=15
-```
-
-***
-
-## DEPLOY-04 — Startup & Shutdown Sequence
-
-```python
-# main.py startup sequence
-async def startup():
-    # 1. Load instrument configs
-    load_instrument_registry()
-
-    # 2. Init DuckDB — create tables if not exist
+    uvloop.install()
+
+    # ── Config ────────────────────────────────────────────────────────────────
+    from dotenv import load_dotenv; load_dotenv()
+    import os
+    MODE       = ExchangeMode[os.getenv("EXCHANGE_MODE", "MCX")]
+    EQUITY     = float(os.getenv("ACCOUNT_EQUITY", 500000))
+    DB_PATH    = os.getenv("DB_PATH", "./data/db/glasstrade.db")
+
+    # ── Layer 0: Persistence ─────────────────────────────────────────────────
     db = DuckDBStore(DB_PATH)
     db.initialize_schema()
 
-    # 3. Load previous session profiles for each symbol
-    for sym in ACTIVE_SYMBOLS:
-        prev_va = db.load_prev_session_profile(sym)
-        states[sym].prev_session_va = prev_va
+    # ── Layer 1: Data clients ─────────────────────────────────────────────────
+    rest = DhanRESTClient(os.getenv("DHAN_ACCESS_TOKEN"))
+    ws   = DhanWSClient(os.getenv("DHAN_ACCESS_TOKEN"))
 
-    # 4. Init session state per symbol
-    for sym in ACTIVE_SYMBOLS:
-        states[sym].session_start_ts = get_session_open(sym)
-        states[sym].risk_manager = SessionRiskManager(ACCOUNT_EQUITY)
-        states[sym].drive_tracker = DriveTracker(INSTRUMENTS[sym]["tick_size"])
+    # ── Layer 5: Output ───────────────────────────────────────────────────────
+    publisher = WSPublisher()
 
-    # 5. Start WebSocket client
-    ws = DhanWSClient(DHAN_ACCESS_TOKEN, queues)
-    asyncio.create_task(ws.connect())
+    # ── Layer 4: Strategy engine + shared underlying profiles ─────────────────
+    profile_router = UnderlyingProfileRouter(MODE)
+    engine         = StrategyEngine(db, profile_router, publisher, EQUITY)
 
-    # 6. Start L2 pollers
-    for sym in ACTIVE_SYMBOLS:
-        asyncio.create_task(l2_poller(sym, states[sym]))
+    # ── Layer 2: Scanner ──────────────────────────────────────────────────────
+    scanner = OptionScanner(MODE, rest, ws, engine, db)
+    ws.on_tick = scanner.route_tick        # wire tick router
 
-    # 7. Start signal pipelines
-    for sym in ACTIVE_SYMBOLS:
-        asyncio.create_task(symbol_pipeline(sym, states[sym], queues[sym]))
+    # ── Start all async tasks ─────────────────────────────────────────────────
+    await asyncio.gather(
+        ws.connect(),                      # L1: WebSocket
+        scanner.initial_scan(),            # L2: First option chain scan
+        scanner.rebalance_loop(),          # L2: 5-min rebalance
+        rest.l2_poll_loop(engine),         # L1: L2 DOM 500ms
+        run_api(publisher),                # L6: FastAPI server
+    )
 
-    # 8. Start FastAPI server
-    # (handled by uvicorn)
+async def run_api(publisher: WSPublisher):
+    app = create_api_app(publisher)
+    config = uvicorn.Config(app, host="0.0.0.0", port=8000, loop="none")
+    server = uvicorn.Server(config)
+    await server.serve()
 
-async def shutdown():
-    # Save all completed session profiles to DuckDB
-    for sym in ACTIVE_SYMBOLS:
-        if states[sym].session_va:
-            db.save_session_profile(sym, states[sym].session_va)
-
-    # Flush all pending signals
-    await signal_queue.join()
-
-    # Log final session risk summary
-    for sym in ACTIVE_SYMBOLS:
-        db.save_session_risk(sym, states[sym].risk_manager.session_summary())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
+
+Continuing from the architecture redesign — here is the complete implementation of every remaining module in build order.
 
 ***
 
-# Document 5 — Operations Runbook
 
-***
-
-## OPS-01 — Daily Pre-Market Checklist
-
-```
-□ 1. Verify DHAN token not expired (tokens expire daily — renew by 08:45 IST)
-□ 2. Confirm previous session profiles loaded: GET /api/profile/{symbol}
-     → prev_session_va must not be null
-□ 3. Confirm risk manager reset: GET /api/risk/session
-     → daily_pnl = 0, consecutive_losses = 0
-□ 4. Check EIA release calendar — if release today, suppress window confirmed?
-□ 5. Confirm WebSocket connected: GET /api/health
-     → ws_status: "CONNECTED"
-□ 6. Verify data quality: all symbols showing data_quality = "LIVE"
-□ 7. Set account equity for the session: PUT /api/config/equity
-□ 8. Confirm DuckDB size < 5GB (purge old ticks if needed)
-```
-
-***
-
-## OPS-02 — During Session Monitoring
-
-```
-Every 30 minutes:
-□ Check /api/risk/session — daily_pnl within limits?
-□ Check WebSocket heartbeat last received < 10s ago?
-□ Any symbol showing data_quality = "STALE"?
-
-On STALE alert:
-□ Check DhanHQ status page
-□ Engine will auto-reconnect — wait 60s before manual restart
-□ If reconnected: profiles rebuild from tick buffer — no action needed
-□ If down > 5 min: do not trade until LIVE quality restored
-
-On SESSION_KILLED event:
-□ All signals suppressed automatically
-□ Do not manually override — session is over
-□ Review trade log for session: GET /api/trades/today
-```
-
-***
-
-## OPS-03 — EOD Close Procedure
-
-```
-After market close (15:30 NSE / 23:30 MCX):
-□ 1. Session profiles auto-saved to DuckDB — verify:
-     SELECT * FROM session_profiles WHERE date = today
-□ 2. Export session trade log: GET /api/trades/export?date=today
-□ 3. Review consecutive losses — if ≥ 2, review strategy fit next day
-□ 4. Purge today's tick data if size > 2GB:
-     DELETE FROM ticks WHERE timestamp < (session_close - 1hr)
-□ 5. Renew DhanHQ access token for next day
-□ 6. Review any OPEN_ITEMS from BRD — are gaps resolved?
-```
-
-***
-
-## OPS-04 — Error Handling Reference
-
-| Error | Cause | Auto Recovery | Manual Action |
-|---|---|---|---|
-| `WS_DISCONNECTED` | Network drop | Auto-reconnect with backoff | If 5+ min: restart engine container |
-| `DATA_STALE` | No ticks > 30s | Alert fired | Check DhanHQ status |
-| `PROFILE_EMPTY` | Session just started | Auto resolves after warm-up | Wait for warm-up window |
-| `PREV_SESSION_NULL` | First day run or DB issue | Engine runs without reference | Manually seed prev_session_va |
-| `DB_LOCKED` | Concurrent write | Auto retry 3x | Restart DuckDB connection |
-| `TOKEN_EXPIRED` | DhanHQ token stale | None — signals suppressed | Renew token via DhanHQ portal |
-| `RISK_SESSION_KILLED` | Daily loss / drawdown | Intentional — no recovery | Session over; restart tomorrow |
-| `CUSHION_INVALID` | Setup has > 10 tick stop | Signal suppressed | Review tick size config |
-
-***
-
-# Document 6 — Data Dictionary
-
-All fields used across the system, precisely defined:
-
-| Field | Type | Unit | Source | Description |
-|---|---|---|---|---|
-| `price` | float | INR | Tick | Last traded price, rounded to tick_size |
-| `ask_vol` | int | lots | Tick (`buy_qty`) | Volume executed at ask = aggressive buyer |
-| `bid_vol` | int | lots | Tick (`sell_qty`) | Volume executed at bid = aggressive seller |
-| `trade_size` | int | lots | Tick | Size of single trade print |
-| `delta` | int | lots | Derived | `ask_vol - bid_vol` per tick |
-| `POC` | float | INR | Profile | Price level with highest cumulative volume |
-| `VAH` | float | INR | Profile | Upper boundary of 70% value area |
-| `VAL` | float | INR | Profile | Lower boundary of 70% value area |
-| `LVN` | float | INR | Profile | Price level with volume < 15% of mean row vol |
-| `HVN` | float | INR | Profile | Price level with volume > 200% of mean row vol |
-| `cvd` | int | lots | Derived | Cumulative sum of delta from session open |
-| `cvd_slope` | float | lots/candle | Derived | Rate of change of CVD over 20 candles |
-| `footprint_score` | float | ratio | Derived | % of cells with ≥3:1 imbalance in candle |
-| `absorption` | bool | — | Derived | `range < ATR×0.3` AND `volume > avg×2.0` |
-| `bubble_sigma` | float | σ | Derived | Standard deviations above mean for volume bubble |
-| `ofi` | float | ratio | Derived | `(ask_vol - bid_vol) / total_vol` rolling 10 bars |
-| `atr` | float | INR | Derived | Average True Range, 14-period |
-| `avg_vol` | float | lots | Derived | Simple moving average of volume, 20-period |
-| `ib_high` | float | INR | Candle | High of first 2 session candles |
-| `ib_low` | float | INR | Candle | Low of first 2 session candles |
-| `drive_number` | int | count | DriveTracker | How many times price has touched this level |
-| `aggression_score` | float | points | Derived | Sum of all confirmed signal weights |
-| `cushion_ticks` | int | ticks | Derived | `abs(entry - stop_loss) / tick_size` |
-| `risk_pct` | float | % | Derived | `lots × risk_per_lot / account_equity` |
-| `risk_reward` | float | ratio | Derived | `abs(target - entry) / abs(entry - stop)` |
-| `pnl` | float | INR | Trade | `(exit - entry) × lots × point_value` |
-| `daily_pnl_pct` | float | % | Risk | `daily_pnl / session_start_equity` |
-| `session_state` | enum | — | Engine | `BALANCED | IMBALANCED | PROBING | NO_TRADE` |
-| `active_profile` | enum | — | Engine | `SESSION | LEG | COMBINED | NONE` |
-| `confidence` | enum | — | Engine | `High (≥3.0) | Medium (≥2.0) | Low (<2.0)` |
-| `data_quality` | enum | — | Monitor | `LIVE | STALE | RECONNECTING` |
-
-
-Here is the **complete audit of everything critical that is pending** — items that, if skipped, will break the strategy or leave the system incomplete. [youtube](https://www.youtube.com/watch?v=Jpd96fLqr5M)
-
-***
-
-## CRITICAL (System Breaks Without These)
-
-***
-
-### ❌ 1 — Delta Volume Profile (Wrong Profile Type Used Throughout)
-
-**This is the single biggest gap.** Every profile in the current design uses plain `total volume` per price level. Fabio explicitly uses **Delta-colored volume profiles** — where each row shows `buy_delta` vs `sell_delta`, not just total volume. [reddit](https://www.reddit.com/r/OrderFlow_Trading/comments/1qdgy0c/question_about_the_type_of_volume_profile_fabio/)
-
-```
-WHAT WE BUILT (WRONG):
-  Price  │ Total Volume Bar
-  9.10   │ ████████████████  ← only total volume shown
-
-WHAT FABIO ACTUALLY USES (CORRECT):
-  Price  │ Buy Delta (green)│ Sell Delta (red)
-  9.10   │ ██████████ +650  │ ████ -180   ← net buyers dominating
-  9.05   │ ███ +120         │ ███████ -580 ← net sellers dominating ← HIGH SELL DELTA ZONE
-  9.00   │ ████████ +430    │ ██ -90      ← buyers defending level
-```
-
-**Why it matters:** High sell delta zones (strong negative delta) in the left side of a leg profile = trapped sellers = LONG entry zones. High buy delta zones = LONG defended levels. The POC in a delta profile can be **different from the POC in a volume profile**. [youtube](https://www.youtube.com/watch?v=QPTkRoD9GE4)
-
-```python
-# REQUIRED ADDITION: Delta Profile Build
-def build_delta_profile(ticks, start_ts, end_ts):
-    bucket_size = CONFIG["profile_bucket_size"]
-    delta_profile = {}     # {price: {"buy_delta": int, "sell_delta": int, "net_delta": int}}
-
-    for tick in ticks:
-        if not (start_ts <= tick.timestamp <= end_ts):
-            continue
-        bucket = round(tick.price / bucket_size) * bucket_size
-        if bucket not in delta_profile:
-            delta_profile[bucket] = {"buy_delta": 0, "sell_delta": 0, "net_delta": 0}
-        delta_profile[bucket]["buy_delta"]  += tick.ask_vol
-        delta_profile[bucket]["sell_delta"] += tick.bid_vol
-        delta_profile[bucket]["net_delta"]  += tick.delta
-
-    return delta_profile
-
-# HIGH SELL DELTA ZONE = trapped sellers = LONG entry
-def detect_high_delta_zones(delta_profile, direction):
-    """
-    For LONG setups: find levels with very high SELL delta (net_delta very negative)
-                     = sellers trapped here = buyers will appear on retest
-    For SHORT setups: find levels with very high BUY delta (net_delta very positive)
-                      = buyers trapped here = sellers will appear on retest
-    """
-    net_deltas = [abs(v["net_delta"]) for v in delta_profile.values()]
-    mean_abs   = sum(net_deltas) / len(net_deltas)
-    threshold  = mean_abs * 2.5   # 250% of mean = significant delta concentration
-
-    zones = []
-    for price, data in delta_profile.items():
-        if direction == "LONG"  and data["net_delta"] < -(threshold):
-            zones.append({"price": price, "type": "HIGH_SELL_DELTA", "delta": data["net_delta"]})
-        if direction == "SHORT" and data["net_delta"] > +(threshold):
-            zones.append({"price": price, "type": "HIGH_BUY_DELTA",  "delta": data["net_delta"]})
-
-    return sorted(zones, key=lambda x: abs(x["delta"]), reverse=True)
-```
-
-**Impact on aggression scoring:** High delta zone at entry level adds +0.5 to aggression score — must add `FR-06-NEW: Delta zone confluence` to the aggression engine.
-
-***
-
-### ❌ 2 — Naked POC (NPOC) — Previous Unfilled POCs
-
-Fabio specifically watches for **Naked POCs** — previous session POCs that have not yet been revisited by price. These are the **strongest magnet levels** in the entire framework because price is statistically obligated to revisit them. [youtube](https://www.youtube.com/watch?v=Jpd96fLqr5M)
-
-```python
-class NPOCTracker:
-    """
-    Tracks all previous session POCs.
-    A POC is "naked" until price trades through it.
-    Once touched, it is removed from the naked list.
-    """
-    def __init__(self):
-        self.naked_pocs = []   # [{date, price, direction_of_unfill}]
-
-    def add_session_poc(self, date, poc_price):
-        self.naked_pocs.append({
-            "date":    date,
-            "price":   poc_price,
-            "touched": False
-        })
-
-    def check_and_fill(self, current_price, tick_size):
-        zone = tick_size * 2
-        for npoc in self.naked_pocs:
-            if not npoc["touched"] and abs(current_price - npoc["price"]) <= zone:
-                npoc["touched"] = True  # NPOC filled — remove from magnet list
-
-    def get_active_npocs(self, current_price, lookback_days=5):
-        """Return nearest unfilled NPOCs above and below current price."""
-        active = [n for n in self.naked_pocs[-lookback_days:] if not n["touched"]]
-        above  = [n for n in active if n["price"] > current_price]
-        below  = [n for n in active if n["price"] < current_price]
-        return {
-            "nearest_above": min(above, key=lambda x: x["price"]) if above else None,
-            "nearest_below": max(below, key=lambda x: x["price"]) if below else None
-        }
-```
-
-**How NPOCs change the strategy:**
-- Nearest NPOC above price → **additional pull target** for LONG trades — can extend P3 toward NPOC instead of stopping at POC
-- Price approaching NPOC from below → **area where reversal is possible** — reduce confidence if entering LONG into an NPOC above
-
-***
-
-### ❌ 3 — Anomaly Zone Detection (Fabio's Core Term)
-
-Fabio labels price trading **below VAL or above VAH as an "anomaly"**. This is not just "imbalanced" — it has a specific meaning: [youtube](https://www.youtube.com/watch?v=Jpd96fLqr5M)
-
-> "An anomaly is a price area where value has not yet been established. The market MUST return to fill this anomaly or establish a new value area there."
-
-```python
-def detect_anomaly_zone(current_price, session_va, prev_session_va):
-    """
-    Anomaly = price outside the COMPOSITE value area
-    (both current session AND previous session value areas).
-    Stronger signal than simple imbalance.
-    """
-    # Single session anomaly
-    single_anomaly = current_price > session_va["VAH"] or current_price < session_va["VAL"]
-
-    # Double anomaly = outside BOTH current and previous session VA
-    if prev_session_va:
-        composite_vah = max(session_va["VAH"], prev_session_va["VAH"])
-        composite_val = min(session_va["VAL"], prev_session_va["VAL"])
-        double_anomaly = current_price > composite_vah or current_price < composite_val
-    else:
-        double_anomaly = False
-
-    return {
-        "is_anomaly":       single_anomaly,
-        "is_double_anomaly": double_anomaly,
-        "anomaly_type":     "ABOVE" if current_price > session_va["VAH"] else "BELOW" if current_price < session_va["VAL"] else None,
-        "composite_vah":    composite_vah if prev_session_va else session_va["VAH"],
-        "composite_val":    composite_val if prev_session_va else session_va["VAL"],
-        # Double anomaly = strongest mean reversion setup
-        "trade_bias":       "STRONG_MEAN_REVERSION" if double_anomaly else "TREND_FOLLOW" if single_anomaly else "NEUTRAL"
-    }
-```
-
-***
-
-### ❌ 4 — Composite / Multi-Session Volume Profile
-
-Fabio overlays a **Composite Profile** — multiple sessions merged — to find the larger-timeframe value area. This gives the **weekly or multi-day value context** that the single session profile alone cannot provide. [reddit](https://www.reddit.com/r/OrderFlow_Trading/comments/1qdgy0c/question_about_the_type_of_volume_profile_fabio/)
-
-```python
-def build_composite_profile(session_profiles_list):
-    """
-    Merge last N session profiles into one composite.
-    Reveals multi-day acceptance zones (strong HVNs) and voids (strong LVNs).
-    Used to set WEEKLY bias before any intraday trade.
-    """
-    composite = {}
-    for session in session_profiles_list:   # last 5 sessions for weekly
-        for price, vol in session.items():
-            composite[price] = composite.get(price, 0) + vol
-
-    poc  = calc_poc(composite)
-    va   = calc_value_area(composite, poc)
-    nodes = detect_nodes(composite)
-
-    return {
-        "composite_profile": composite,
-        "weekly_poc":        poc,
-        "weekly_vah":        va["VAH"],
-        "weekly_val":        va["VAL"],
-        "weekly_lvns":       nodes["LVNs"],
-        "weekly_hvns":       nodes["HVNs"]
-    }
-
-# Weekly bias filter — must be added to GATE 0
-def apply_weekly_bias_filter(direction, current_price, composite):
-    """
-    If weekly POC is above current price → weekly bias is LONG
-    If weekly POC is below current price → weekly bias is SHORT
-    Only take trades aligned with weekly bias for highest conviction.
-    """
-    weekly_poc = composite["weekly_poc"]
-    weekly_bias = "LONG" if weekly_poc > current_price else "SHORT"
-
-    if direction != weekly_bias:
-        return {"aligned": False, "confidence_reduction": 0.5,
-                "reason": f"Trade against weekly bias (bias={weekly_bias})"}
-    return {"aligned": True, "confidence_boost": 0.5}
-```
-
-***
-
-### ❌ 5 — Open Interest (OI) Logic
-
-Your current AI Commander outputs **"No OI pressure"** but the entire OI detection layer was never designed. Fabio himself does NOT use OI — but your system references it, so it either needs a definition or needs to be removed cleanly. [localhost](http://localhost:5190/)
-
-```python
-def check_oi_pressure(symbol, strike, option_type, dhan_rest_client):
-    """
-    OI pressure = large OI concentration at current strike vs surrounding strikes.
-    High OI = max pain wall / institutional positioning = potential resistance.
-    """
-    oi_data = dhan_rest_client.get_option_chain(symbol)
-
-    current_strike_oi = oi_data[strike][option_type]["oi"]
-    surrounding_oi    = [
-        oi_data.get(strike + i, {}).get(option_type, {}).get("oi", 0)
-        for i in [-200, -100, +100, +200]
-    ]
-    avg_surrounding   = sum(surrounding_oi) / len(surrounding_oi) if surrounding_oi else 1
-
-    oi_ratio = current_strike_oi / avg_surrounding if avg_surrounding > 0 else 1.0
-
-    if oi_ratio >= 3.0:
-        return {"pressure": "HIGH",   "oi_ratio": oi_ratio, "signal": "RESISTANCE"}
-    elif oi_ratio >= 1.5:
-        return {"pressure": "MEDIUM", "oi_ratio": oi_ratio, "signal": "CAUTION"}
-    else:
-        return {"pressure": "LOW",    "oi_ratio": oi_ratio, "signal": "CLEAR"}
-```
-
-***
-
-### ❌ 6 — Pre-Alert System (How Alerts Are Triggered)
-
-Drive 1 fires a `SET_ALERT_FOR_RETURN` action throughout the entire design but **no alert mechanism was ever built**. [scribd](https://www.scribd.com/document/923519913/Fabio-Playbook)
-
-```python
-class AlertManager:
-    def __init__(self, ws_publisher):
-        self.active_alerts  = {}  # {alert_id: alert_dict}
-        self.ws             = ws_publisher
-
-    def set_price_alert(self, symbol, price, direction,
-                        level_type, tick_size):
-        """Set alert to fire when price returns within 3 ticks of level."""
-        alert_id = f"{symbol}_{price}_{level_type}"
-        self.active_alerts[alert_id] = {
-            "symbol":     symbol,
-            "price":      price,
-            "direction":  direction,
-            "level_type": level_type,  # VAH | VAL | LVN | PYRAMID
-            "zone_upper": price + tick_size * 3,
-            "zone_lower": price - tick_size * 3,
-            "fired":      False,
-            "created_at": datetime.now()
-        }
-
-    def check_alerts(self, current_price, symbol):
-        """Called every tick — fire any alerts within zone."""
-        fired = []
-        for aid, alert in self.active_alerts.items():
-            if alert["symbol"] != symbol or alert["fired"]:
-                continue
-            if alert["zone_lower"] <= current_price <= alert["zone_upper"]:
-                alert["fired"] = True
-                # Push to frontend immediately
-                self.ws.push({
-                    "type":        "PRICE_ALERT",
-                    "alert_id":    aid,
-                    "symbol":      symbol,
-                    "level_type":  alert["level_type"],
-                    "level_price": alert["price"],
-                    "current_price": current_price,
-                    "message":     f"Price approaching {alert['level_type']} at {alert['price']} — watch for second drive aggression"
-                })
-                fired.append(aid)
-        return fired
-
-    def clear_session_alerts(self, symbol):
-        """Clear all alerts at session close — they belong to current session only."""
-        self.active_alerts = {
-            k: v for k, v in self.active_alerts.items()
-            if v["symbol"] != symbol
-        }
-```
-
-***
-
-### ❌ 7 — Backtesting Framework (Referenced but Never Built)
-
-Tests reference `backtest_strategy()` and `load_ticks()` but neither exists anywhere in the design.
-
-```python
-class BacktestEngine:
-    """
-    Replay historical tick data through the exact same strategy pipeline.
-    Produces trade-by-trade PnL log and statistical summary.
-    """
-    def __init__(self, instrument_config, engine_config):
-        self.cfg    = instrument_config
-        self.ecfg   = engine_config
-        self.trades = []
-
-    def run(self, tick_data: list, start_date: str, end_date: str):
-        """
-        Replay ticks chronologically.
-        Reset all state at each session boundary exactly as live engine does.
-        """
-        state        = SymbolState(self.cfg["symbol"])
-        session_open = None
-
-        for tick in tick_data:
-            # Detect session boundary
-            if self.is_new_session(tick.timestamp, session_open, self.cfg):
-                # Save completed session profile
-                if state.session_va:
-                    state.prev_session_va = state.session_va
-                # Reset session state
-                state = self.reset_session_state(state, tick.timestamp)
-                session_open = tick.timestamp
-
-            # Run exact same pipeline as live
-            result = run_strategy_full(
-                ticks          = list(state.tick_buffer),
-                candles        = list(state.candle_buffer),
-                session_start_ts = session_open,
-                prev_session_va  = state.prev_session_va,
-                leg_data         = state.leg_anchor,
-                account_equity   = self.ecfg["account_equity"],
-                drive_tracker    = state.drive_tracker,
-                risk_manager     = state.risk_manager,
-                point_value      = self.cfg["point_value"]
-            )
-
-            # Record any trade signals
-            if result.get("action") == "TRADE":
-                self.record_backtest_trade(result, tick)
-
-        return self.compute_summary()
-
-    def compute_summary(self):
-        if not self.trades:
-            return {"error": "No trades generated"}
-
-        pnls    = [t["pnl"] for t in self.trades]
-        wins    = [p for p in pnls if p > 0]
-        losses  = [p for p in pnls if p < 0]
-
-        return {
-            "total_trades":     len(self.trades),
-            "win_rate":         len(wins) / len(self.trades),
-            "avg_rr":           abs(sum(wins)/len(wins)) / abs(sum(losses)/len(losses)) if losses else 999,
-            "total_pnl":        round(sum(pnls), 2),
-            "max_drawdown":     self.calc_max_drawdown(pnls),
-            "profit_factor":    abs(sum(wins)) / abs(sum(losses)) if losses else 999,
-            "avg_win":          round(sum(wins)/len(wins), 2) if wins else 0,
-            "avg_loss":         round(sum(losses)/len(losses), 2) if losses else 0,
-            "second_drive_win_rate": self.calc_drive_win_rate(drive=2),
-            "trades":           self.trades
-        }
-```
-
-***
-
-### ❌ 8 — Mid-Trade State Recovery (Engine Restart During Open Trade)
-
-Never addressed. If the engine restarts with an open trade, the entire position, partition state, and pyramid entries are lost.
-
-```python
-def save_open_trade_state(state: SymbolState, db: DuckDBStore):
-    """Called every time an entry is made or updated."""
-    db.upsert_open_trade({
-        "symbol":        state.symbol,
-        "entries":       [e.__dict__ for e in state.open_entries],
-        "pyramid_count": state.pyramid_count,
-        "direction":     state.last_signal.get("direction"),
-        "target":        state.last_signal.get("target"),
-        "snapshot_ts":   datetime.now().isoformat()
-    })
-
-def recover_open_trade(symbol: str, db: DuckDBStore) -> list:
-    """Called at startup — restore any open trades from last session."""
-    raw = db.load_open_trade(symbol)
-    if not raw:
-        return []
-    return [OpenEntry(**e) for e in raw["entries"]]
-```
-
-***
-
-## HIGH PRIORITY (Significantly Degrades Edge Without These)
-
-| # | What | Why Missing Hurts |
-|---|---|---|
-| **9** | **Footprint candle resolution spec** | Should be 1min footprint — never explicitly stated. Using wrong resolution changes all imbalance readings |
-| **10** | **MCX evening session handling** | MCX NATURALGAS trades until 23:30 IST. Second session after 17:00 has different liquidity — never handled |
-| **11** | **Options-specific profile** | System profiles option premiums (8.91 etc.), not the underlying. Theta decay corrupts profile structure — must profile underlying and use for signals, options only for sizing |
-| **12** | **Weekly bias gate (Composite Profile)** | All trades currently use only intraday session context — no higher timeframe filter. Counter-trend intraday signals on strong trend days get falsely triggered |
-| **13** | **Delta zones in aggression scorer** | +0.5 weight for high sell/buy delta zone confluence missing from FR-06. Score calculations are currently incomplete |
-| **14** | **NPOC as secondary target** | P3 trailing has no upper target defined — NPOC is the logical P3 target, currently missing |
-| **15** | **Alert clear on drive 3+** | When level becomes drive 3+, existing alerts for that level must be cancelled. AlertManager has `clear_session_alerts()` but not per-level cancel |
-
-***
-
-## Complete Pending Items Master List
-
-```
-CRITICAL (breaks system):
-├── ❌ Delta Volume Profile — wrong profile type used throughout
-├── ❌ Naked POC (NPOC) tracker + target usage
-├── ❌ Anomaly zone detection (Fabio's specific term)
-├── ❌ Composite / Multi-session profile (weekly bias)
-├── ❌ OI pressure calculation (referenced in output, never designed)
-├── ❌ Pre-alert system (AlertManager) — Drive 1 alerts never implemented
-├── ❌ Backtesting framework — BacktestEngine + load_ticks()
-└── ❌ Mid-trade state recovery on engine restart
-
-HIGH PRIORITY (degrades edge):
-├── ⚠️  Footprint candle resolution explicitly set to 1min
-├── ⚠️  MCX evening session boundary + separate session profile
-├── ⚠️  Options vs underlying profiling separation
-├── ⚠️  Weekly bias gate from composite profile → GATE 0 addition
-├── ⚠️  Delta zone confluence → FR-06-NEW aggression weight +0.5
-├── ⚠️  NPOC as P3 trailing target
-└── ⚠️  Per-level alert cancellation when drive 3+ detected
-
-OPEN ITEMS FROM BRD (still unresolved):
-├── OI-01: DhanHQ WS exact field names — need live test
-├── OI-02: MCX big trade threshold calibration — need 1-week data
-├── OI-03: MCX evening session — design decision needed
-├── OI-04: Multi-symbol threading model — async confirmed, validate
-├── OI-05: DhanHQ L2 rate limits — check API docs
-├── OI-06: EIA calendar API source — pick reliable source
-├── OI-07: Options vs underlying profile — design decision
-└── OI-08: Frontend push mechanism — WebSocket confirmed
-```
-
-
-This is a fundamental redesign of the **entry point of the entire system** — instead of hardcoding symbols, the system discovers and selects option contracts dynamically. Here is the complete redesign of the scanning layer. [dhanhq](https://dhanhq.co/docs/v2/option-chain/)
-
-***
 
 # GlassyTrade AI — Option Scanner Layer
 
@@ -2148,585 +1198,1029 @@ Here is the complete redesigned architecture incorporating every layer from all 
 
 ***
 
-# GlassyTrade AI — Redesigned Architecture & Flows
+
+
+# Document 1 — Technical Design Document (TDD)
 
 ***
 
-## System Context Diagram
+## TDD-01 — Module Breakdown & Responsibilities
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              EXTERNAL SYSTEMS                                   │
-│                                                                                 │
-│   DhanHQ WS Feed          DhanHQ REST API         EIA Economic Calendar        │
-│   (tick stream)            (option chain,           (suppression windows)       │
-│   wss://api-feed.dhan.co   L2 DOM, LTP, OI)        ir.eia.gov                  │
-│         │                        │                        │                    │
-└─────────┼────────────────────────┼────────────────────────┼────────────────────┘
-          │                        │                        │
-          ▼                        ▼                        ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                         GLASSTRADE AI ENGINE                                    │
-│                         (single Python process, asyncio + uvloop)               │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-***
-
-## Layer Architecture (7 Layers)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│  LAYER 7 — PRESENTATION                                                         │
-│  React Frontend (Port 5190)                                                     │
-│  Scanner Table │ Volume Profile │ Footprint │ AI Commander │ Risk Dashboard     │
-└────────────────────────────────┬────────────────────────────────────────────────┘
-                                 │ WebSocket (ws://localhost:8000/ws/signals)
-┌────────────────────────────────▼────────────────────────────────────────────────┐
-│  LAYER 6 — API GATEWAY                                                          │
-│  FastAPI + uvicorn                                                              │
-│  REST: /api/signal /api/profile /api/risk /api/trade /api/config               │
-│  WS:   /ws/signals  (broadcast hub — reads from WSPublisher queue)             │
-└────────────────────────────────┬────────────────────────────────────────────────┘
-                                 │ in-process asyncio.Queue
-┌────────────────────────────────▼────────────────────────────────────────────────┐
-│  LAYER 5 — OUTPUT & ALERTS                                                      │
-│  SignalFormatter → OutputSchema (Pydantic) → WSPublisher                       │
-│  AlertManager → pre-alerts, drive alerts, risk kill events                     │
-│  NotificationClient → Telegram push (mobile)                                   │
-└────────────────────────────────┬────────────────────────────────────────────────┘
-                                 │ OutputSchema
-┌────────────────────────────────▼────────────────────────────────────────────────┐
-│  LAYER 4 — STRATEGY ENGINE (per-symbol coroutine)                               │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │  12-GATE PIPELINE (runs every tick)                                      │   │
-│  │  G0:Time │ G1:Quality │ G2:Risk │ G3:Dead │ G4:Probing │ G5:Profile    │   │
-│  │  G6:Zone │ G7:Drive   │ G8:Aggr │ G9:Cush │ G10:RR    │ G11:Size      │   │
-│  │  G12:EIA │                                                               │   │
-│  │                                                                          │   │
-│  │  MarketState → AnomalyDetector → ProfileSelector → DriveTracker        │   │
-│  │  → AggressionScorer → TradeConstructor → RiskManager                   │   │
-│  │  → PartitionExitMgr → PyramidMgr → RationaleGenerator                  │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                 │
-│  UNDERLYING PROFILE ROUTER (shared across all option symbols)                  │
-│  UnderlyingProfileRouter → VolumeProfileEngine (delta + plain)                 │
-│  NPOCTracker │ CompositeProfile (weekly bias)                                  │
-└────────────────────────────────┬────────────────────────────────────────────────┘
-                                 │ Tick objects
-┌────────────────────────────────▼────────────────────────────────────────────────┐
-│  LAYER 3 — ORDER FLOW ENGINE (feeds Layer 4 every tick)                         │
-│  CVDEngine │ FootprintEngine │ BubbleDetector │ AbsorptionDetector              │
-│  BigTradeDetector │ OFICalculator │ VWAPEngine │ IBDetector │ L2Monitor         │
-└────────────────────────────────┬────────────────────────────────────────────────┘
-                                 │ normalized Tick
-┌────────────────────────────────▼────────────────────────────────────────────────┐
-│  LAYER 2 — SCANNER & SUBSCRIPTION MANAGER                                       │
-│  OptionScanner → ExchangeMode (NSE|MCX) → OptionChainFetcher                  │
-│  ContractFilter → ContractRanker → SubscriptionManager                         │
-│  RebalanceLoop (5min) → dynamic add/remove subscriptions                       │
-└────────────────────────────────┬────────────────────────────────────────────────┘
-                                 │ raw WS messages
-┌────────────────────────────────▼────────────────────────────────────────────────┐
-│  LAYER 1 — DATA INGESTION                                                       │
-│  DhanWSClient (tick stream) │ DhanRESTClient (chain, L2, OI)                  │
-│  TickProcessor │ CandleBuilder │ SessionManager                                │
-│  EconomicCalendar (EIA suppression)                                             │
-└────────────────────────────────┬────────────────────────────────────────────────┘
-                                 │ persist / recover
-┌────────────────────────────────▼────────────────────────────────────────────────┐
-│  LAYER 0 — PERSISTENCE                                                          │
-│  DuckDB: ticks, session_profiles, signals, trades, session_risk, open_trades   │
-│  Pickle+lzma: SymbolState crash snapshots                                       │
-└─────────────────────────────────────────────────────────────────────────────────┘
+src/
+│
+├── core/
+│   ├── tick_processor.py         # Normalize raw WebSocket ticks
+│   ├── candle_builder.py         # Build OHLCV candles from tick stream
+│   ├── session_manager.py        # Session boundary detection, state init/reset
+│   └── symbol_state.py           # SymbolState dataclass — all state per symbol
+│
+├── profile/
+│   └── volume_profile_engine.py  # Session + Leg profile build, POC, VAH/VAL
+│
+├── orderflow/
+│   ├── cvd_engine.py             # CVD, slope, divergence
+│   ├── footprint_engine.py       # Per-candle per-level bid/ask + imbalance
+│   ├── bubble_detector.py        # Volume bubble (2σ threshold)
+│   ├── absorption_detector.py    # Absorption candle detection
+│   ├── big_trade_detector.py     # Institutional big trade cluster
+│   ├── ofi_calculator.py         # Order Flow Imbalance (10-candle rolling)
+│   ├── vwap_engine.py            # VWAP + σ bands
+│   └── ib_detector.py            # Initial Balance + IB break
+│
+├── strategy/
+│   ├── market_state_engine.py    # BALANCED/IMBALANCED (requires 2+ closes beyond VA)/PROBING/NO_TRADE
+│   ├── aggression_scorer.py      # Multi-signal scoring (max 4.5 score)
+│   ├── trade_constructor.py      # Entry, SL, target, R:R, cushion
+│   ├── profile_selector.py       # Which profile is active — SESSION/LEG
+│   ├── session_risk_manager.py   # Daily loss, drawdown, consecutive loss gates
+│   ├── position_sizer.py         # Fixed fractional lot sizing
+│   ├── partition_exit_manager.py # Exit full position at target (POC) + BE + counter-aggression exits (Trail ONLY on strong trend)
+│   └── pyramid_manager.py        # Pyramid add conditions + sizing
+│
+├── data/
+│   ├── tick_processor.py         # Tick normalization and validation
+│   ├── candle_builder.py         # Candle construction from ticks
+│   ├── atr_calculator.py         # ATR metrics for strategy/risk logic
+│   └── persistence.py            # Persistence primitives
+│
+├── output/
+│   └── __init__.py               # Output package placeholder
+│
+├── config/
+│   ├── instruments.py            # Per-symbol config (tick size, lot size, etc.)
+│   └── engine_config.py          # Global thresholds (LVN %, ATR mult, etc.)
+│
+└── tests/                        # Unit + integration coverage
 ```
 
 ***
 
-## Master Data Flow
-
-```
-┌──────────────────────────────────────────────────────────────────────────────────────┐
-│                          STARTUP SEQUENCE                                            │
-│                                                                                      │
-│  1. Load .env config                                                                 │
-│  2. DuckDB init + schema create                                                      │
-│  3. Load prev session profiles per underlying → SymbolState.prev_session_va         │
-│  4. EIA calendar load → suppression windows                                          │
-│  5. DhanHQ REST: fetch option chains for all underlyings (mode = NSE|MCX)           │
-│  6. ContractFilter + rank → select top N contracts                                  │
-│  7. DhanHQ WS: connect + subscribe selected security IDs                            │
-│  8. Init SymbolState per contract, start per-symbol pipeline coroutines             │
-│  9. Start L2 DOM poller (500ms)                                                     │
-│  10. Start rebalance loop (5min)                                                    │
-│  11. FastAPI server ready                                                           │
-└──────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-```
-┌──────────────────────────────────────────────────────────────────────────────────────┐
-│                      PER-TICK PIPELINE FLOW (runs every tick, per symbol)           │
-│                                                                                      │
-│  DhanHQ WS tick arrives                                                             │
-│         │                                                                            │
-│         ▼                                                                            │
-│  TickProcessor.normalize()                                                          │
-│  → Tick {price, ask_vol, bid_vol, volume, trade_size, delta, timestamp}             │
-│         │                                                                            │
-│         ├──────────────────────────────────────────────────────────┐               │
-│         │                                                           │               │
-│         ▼                                                           ▼               │
-│  SymbolState tick_buffer.append(tick)              UnderlyingProfileRouter          │
-│  CandleBuilder.update(tick)                        .update(tick, underlying,        │
-│                  │                                  underlying_price)               │
-│                  │ on candle close:                       │                         │
-│                  ▼                                        ▼                         │
-│         candle_buffer.append(candle)         VolumeProfileEngine                   │
-│         recalc: ATR, AvgVol                  .session_profile[bucket] += vol       │
-│         OFICalculator.update()               .leg_profile[bucket] += vol           │
-│         VWAPEngine.update()                  .delta_profile[bucket] updated        │
-│         IBDetector.check_ib_break()                                                │
-│                  │                                                                  │
-│                  ▼                                                                  │
-│         FootprintEngine.finalize_candle()                                          │
-│         BubbleDetector.update(footprint_history)                                   │
-│                  │                                                                  │
-│         ◄────────┘                                                                  │
-│         │                                                                           │
-│         ▼                                                                           │
-│  ═══════════════════════════════════════════════════                               │
-│                    12-GATE PIPELINE                                                 │
-│  ═══════════════════════════════════════════════════                               │
-│                                                                                     │
-│  GATE 0: SessionManager.is_in_warmup() OR is_in_dead_zone()                        │
-│          → BLOCKED: return OutputSchema(action="TIME_BLOCKED")                     │
-│          ↓ PASS                                                                     │
-│                                                                                     │
-│  GATE 1: state.data_quality == "STALE" (gap > 30s since last tick)                │
-│          → STALE: return OutputSchema(action="DATA_STALE")                         │
-│          ↓ PASS                                                                     │
-│                                                                                     │
-│  GATE 2: SessionRiskManager.can_trade()                                            │
-│          daily_loss ≥ 2% OR consecutive_losses ≥ 3 OR drawdown ≥ 3%              │
-│          → SESSION_STOPPED: return OutputSchema(action="SESSION_STOPPED")          │
-│          ↓ PASS                                                                     │
-│                                                                                     │
-│  GATE 3: EconomicCalendar.is_suppression_window(timestamp)                        │
-│          → SUPPRESSED: return OutputSchema(action="EIA_WINDOW")                    │
-│          ↓ PASS                                                                     │
-│                                                                                     │
-│  GATE 4: MarketStateEngine.detect()                                               │
-│          → NO_TRADE (POC ±2 ticks): return FLAT                                   │
-│          → PROBING (unconfirmed break): return WAIT                               │
-│          → BALANCED or IMBALANCED: continue                                        │
-│          ↓ PASS (BALANCED or IMBALANCED)                                           │
-│                                                                                     │
-│  [PARALLEL COMPUTE — all run simultaneously on candle close]                       │
-│  ├── AnomalyDetector.detect(price, session_va, prev_va)                           │
-│  ├── NPOCTracker.check_and_fill(price) + get_active_npocs()                       │
-│  ├── CompositeProfile.apply_weekly_bias_filter(direction, price)                   │
-│  └── L2Monitor.detect_liquidity_wall(price)                                       │
-│          ↓                                                                          │
-│                                                                                     │
-│  GATE 5: ProfileSelector.select_active_profile(market_state)                     │
-│          → NONE / WAIT / BUILDING_LEG: return FLAT                                │
-│          → SESSION or LEG or COMBINED: key_level identified                        │
-│          ↓ PASS (key_level exists)                                                 │
-│                                                                                     │
-│  GATE 6: abs(current_price - key_level) ≤ 3 ticks?                               │
-│          → NO: AlertManager.set_price_alert(key_level)                             │
-│                return OutputSchema(action="ALERT_SET")                             │
-│          ↓ YES                                                                      │
-│                                                                                     │
-│  GATE 7: DriveTracker.classify_drive(current_price, key_level)                   │
-│          → drive == 1: record touch, return FLAT (first drive — no entry)         │
-│          → drive == 2 + first rejected: ENTRY ZONE VALID                          │
-│          → drive ≥ 3: level exhausted, return FLAT                                │
-│          ↓ PASS (drive == 2, rejected)                                             │
-│                                                                                     │
-│  [AGGRESSION COMPUTE]                                                              │
-│  FootprintEngine.detect_imbalance(direction)         → score += 1.0              │
-│  CVDEngine.get_slope() + detect_divergence()          → score += 1.0              │
-│  BigTradeDetector.detect_cluster(key_level)           → score += 1.0              │
-│  AbsorptionDetector.detect(candle, atr, avg_vol)      → score += 0.5             │
-│  OFICalculator.calc_ofi()                             → score += 0.5             │
-│  BubbleDetector.bubble_confirms_entry()               → score += 0.5             │
-│  DeltaZoneDetector.detect_high_delta_zones()          → score += 0.5             │
-│  AnomalyDetector.double_anomaly_bonus()               → score += 0.5             │
-│  CompositeProfile.weekly_bias_aligned()               → score += 0.5             │
-│          ↓                                                                          │
-│                                                                                     │
-│  GATE 8: aggression_score ≥ 2.0?                                                  │
-│          → NO: return OutputSchema(action="WAIT", score=x)                        │
-│          ↓ YES                                                                      │
-│                                                                                     │
-│  GATE 9: calculate_cushion(entry, stop) ≤ 10 ticks?                              │
-│          → NO (INVALID): return FLAT                                               │
-│          ↓ YES                                                                      │
-│                                                                                     │
-│  GATE 10: risk_reward ≥ 1.5?                                                      │
-│           → NO: return FLAT (bad setup geometry)                                   │
-│           ↓ YES                                                                     │
-│                                                                                     │
-│  GATE 11: PositionSizer.calculate() — risk budget available?                      │
-│           → BLOCKED: return SessionRisk block                                      │
-│           ↓ YES                                                                     │
-│                                                                                     │
-│  GATE 12: OI pressure check — is_high_oi_wall(strike) ?                          │
-│           → HIGH OI: reduce confidence (not block)                                 │
-│           ↓ PASS                                                                    │
-│                                                                                     │
-│  ═══ ALL GATES PASSED → TRADE SIGNAL ═══                                          │
-│                                                                                     │
-│  TradeConstructor.build() → TradeSetup                                            │
-│  RationaleGenerator.generate() → string                                           │
-│  SignalFormatter.format() → OutputSchema                                           │
-│         │                                                                           │
-│         ├── DuckDB.save_signal()                                                   │
-│         ├── WSPublisher.broadcast_signal()  → Frontend                             │
-│         └── AlertManager.notify_drive_alert() → Telegram                          │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-***
-
-## Open Trade Management Flow (Separate Loop)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│  OPEN TRADE MANAGEMENT LOOP (runs every tick when open_entries is not empty)       │
-│                                                                                     │
-│  [EVERY TICK]                                                                       │
-│         │                                                                           │
-│         ▼                                                                           │
-│  CounterAggressionDetector.check()                                                 │
-│         │                                                                           │
-│         ├── 2+ counter signals? ──► EXIT ALL IMMEDIATELY                           │
-│         │                          PartitionExitManager.exit_all()                 │
-│         │                          DuckDB.save_trade() × all lots                  │
-│         │                          WSPublisher.broadcast_trade_update("EXIT_ALL")  │
-│         │                          SessionRiskManager.register_trade_result(pnl)   │
-│         │                                                                           │
-│         └── counter < 2: continue                                                  │
-│                  │                                                                  │
-│                  ▼                                                                  │
-│  BreakevenManager.check_trigger(current_price, entry, target, direction)           │
-│         │                                                                           │
-│         ├── 35% to target reached? ──► MOVE SL TO BREAKEVEN                       │
-│         │                              update all OpenEntry.stop_loss = entry      │
-│         │                              WSPublisher.broadcast("MOVE_TO_BREAKEVEN")  │
-│         │                                                                           │
-│         └── not yet: continue                                                      │
-│                  │                                                                  │
-│                  ▼                                                                  │
-│  PartitionExitManager.check()                                                      │
-│         │                                                                           │
-│         ├── P1 trigger (33% R, weak CVD)? ──► exit 30% lots                       │
-│         ├── P2 trigger (target reached)?   ──► exit 50% lots (ALWAYS)             │
-│         │         └── strong CVD? → trail P3   weak CVD? → exit P3                │
-│         └── not yet: continue                                                      │
-│                  │                                                                  │
-│                  ▼                                                                  │
-│  PyramidManager.check()  (only if first entry in profit)                           │
-│         │                                                                           │
-│         ├── new LVN exists between current price and target?                       │
-│         ├── price AT pyramid level (±3 ticks)?                                     │
-│         ├── aggression_score ≥ 3.0 (higher bar)?                                  │
-│         └── YES ALL: PYRAMID ADD                                                   │
-│                    lot size = 50% of first entry (add 1) or 25% (add 2)           │
-│                    ALL stops → SL of new entry                                     │
-│                    DuckDB.save_open_trade_state()  ← crash recovery               │
-│                    WSPublisher.broadcast("PYRAMID_ADD")                            │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-***
-
-## Rebalance Flow (Every 5 Minutes)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│  SCANNER REBALANCE LOOP (asyncio task, runs every 300s)                            │
-│                                                                                     │
-│  For each underlying in ExchangeMode:                                              │
-│    1. Rate-limit wait (3s per chain call)                                          │
-│    2. DhanHQ REST: fetch_option_chain(underlying, expiry)                          │
-│    3. get_underlying_ltp()                                                          │
-│    4. find_atm_strike(ltp)                                                          │
-│    5. select_strikes_to_scan(atm ± N)                                              │
-│    6. passes_filter() for each strike × CE/PE                                      │
-│    7. rank_contracts() by tradability score                                         │
-│                                                                                     │
-│  Diff against current subscriptions:                                               │
-│    NEW contracts (ATM moved) ──► subscribe_contracts() + init SymbolState         │
-│    STALE contracts (now far OTM) ──► unsubscribe_contracts()                      │
-│                                      cleanup SymbolState + queues                  │
-│                                      do NOT kill if trade is open on that contract │
-│                                                                                     │
-│  Check expiry roll:                                                                 │
-│    days_to_expiry < 3? ──► switch all contracts to next expiry                    │
-│    re-subscribe with new security IDs                                              │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-***
-
-## Session Boundary Flow (Daily Reset)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│  SESSION BOUNDARY HANDLER (fires at session open time per exchange)                │
-│                                                                                     │
-│  SessionManager detects new session:                                               │
-│                                                                                     │
-│  FOR EACH UNDERLYING:                                                              │
-│    1. Save completed session profile to DuckDB                                     │
-│       session_profiles: {date, underlying, poc, vah, val, profile_json}           │
-│    2. Add session POC to NPOCTracker                                               │
-│    3. Update CompositeProfile (add session to rolling 5-session window)            │
-│    4. state.prev_session_va = state.session_va                                     │
-│    5. Reset VolumeProfileEngine (session_profile = {})                             │
-│    6. Reset CVDEngine (cvd = 0)                                                    │
-│    7. Reset DriveTracker (all drives = {})                                         │
-│    8. Reset AlertManager (all alerts cleared)                                      │
-│    9. Reset SessionRiskManager (daily_pnl = 0, consecutive = 0)                   │
-│    10. Reset IBDetector                                                             │
-│    11. Reload prev session profiles for new prev reference                         │
-│                                                                                     │
-│  Re-run initial_scan() for new session contracts                                   │
-│  (option chain refreshes daily — new strikes, new security IDs possible)           │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-***
-
-## Component Interaction Map
-
-```
-                    ┌─────────────────┐
-                    │  OptionScanner  │ ← ExchangeMode (NSE|MCX)
-                    └────────┬────────┘
-                             │ selected contracts
-                    ┌────────▼────────┐
-                    │SubscriptionMgr  │ ← 5-min rebalance
-                    └────────┬────────┘
-                             │ security_id → asyncio.Queue
-          ┌──────────────────┼──────────────────────────────┐
-          ▼                  ▼                              ▼
-   SymbolState[A]     SymbolState[B]              SymbolState[N]
-          │                  │                              │
-          ▼                  ▼                              ▼
-   pipeline_coro     pipeline_coro               pipeline_coro
-          │
-          ├── tick_buffer / candle_buffer
-          ├── CVDEngine (session-scoped)
-          ├── FootprintEngine (candle-scoped)
-          ├── BubbleDetector (21-bar window)
-          ├── DriveTracker (session-scoped)
-          ├── AlertManager (session-scoped)
-          ├── SessionRiskManager (session-scoped)
-          └── open_entries (trade-scoped)
-          │
-          └──► UnderlyingProfileRouter [SHARED]
-                    │
-                    ├── VolumeProfileEngine[NATURALGAS]  ← session + leg + delta
-                    ├── VolumeProfileEngine[NIFTY]
-                    ├── VolumeProfileEngine[BANKNIFTY]
-                    ├── NPOCTracker[NATURALGAS]
-                    ├── NPOCTracker[NIFTY]
-                    └── CompositeProfile[all underlyings] ← weekly bias
-```
-
-***
-
-## State Object per Symbol (Revised)
+## TDD-02 — Data Structures (All Key Types)
 
 ```python
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Optional, List, Dict
+from collections import deque
+
+@dataclass
+class Tick:
+    price:       float
+    ask_vol:     int
+    bid_vol:     int
+    volume:      int
+    trade_size:  int
+    delta:       int
+    timestamp:   datetime
+
+@dataclass
+class Candle:
+    start_ts:   datetime
+    end_ts:     datetime
+    open:       float
+    high:       float
+    low:        float
+    close:      float
+    volume:     int
+    ask_vol:    int
+    bid_vol:    int
+    delta:      int
+    tick_count: int
+
+@dataclass
+class ValueArea:
+    POC:          float
+    VAH:          float
+    VAL:          float
+    total_volume: int
+    va_volume:    int
+
+@dataclass
+class LVN:
+    price:         float
+    volume:        int
+    quality_score: float
+    sigma_below_mean: float
+
+@dataclass
+class DriveRecord:
+    level:        float
+    timestamp:    datetime
+    was_rejected: bool
+    rejection_type: Optional[str]  # WICK | CLOSE | None
+
+@dataclass
+class AggressionResult:
+    score:     float
+    confirmed: bool   # score >= 2.0
+    signals:   List[str]
+    breakdown: Dict[str, float]  # {"footprint": 1.0, "cvd": 1.0, ...}
+
+@dataclass
+class TradeSetup:
+    direction:       str      # LONG | SHORT
+    confidence:      str      # High | Medium | Low
+    entry_zone:      float
+    stop_loss:       float
+    sl_ticks:        int
+    cushion_quality: str
+    target:          float
+    risk_reward:     float
+    invalidation:    float
+    break_even_at:   float
+    lots:            int
+    risk_amount:     float
+    risk_pct:        float
+    drive_number:    int
+    aggression:      AggressionResult
+
+@dataclass
+class OpenEntry:
+    entry_id:    str
+    price:       float
+    lots:        int
+    stop_loss:   float
+    add_number:  int    # 1 = first, 2 = pyramid 1, 3 = pyramid 2
+    timestamp:   datetime
+    pnl:         float = 0.0
+
 @dataclass
 class SymbolState:
-    # Identity
-    symbol:         str          # "NATURALGAS_280_PE"
-    security_id:    str          # DhanHQ security ID
-    underlying:     str          # "NATURALGAS"
-    strike:         float        # 280.0
-    option_type:    str          # "CE" or "PE"
-    expiry:         str          # "2026-03-27"
-    segment:        str          # "MCX_COMM"
-
-    # Tick/Candle buffers
-    tick_buffer:    deque        # maxlen=10000
-    candle_buffer:  deque        # maxlen=200
-
-    # Order flow (option-level — per-contract)
-    cvd_engine:     CVDEngine
-    footprint_engine: FootprintEngine
-    bubble_detector: BubbleDetector
-    big_trade_detector: BigTradeDetector
-    ib:             dict         # IB high/low for this contract
-
-    # Strategy state
-    drive_tracker:  DriveTracker
-    alert_manager:  AlertManager
-
-    # Risk & trade
-    risk_manager:   SessionRiskManager
-    open_entries:   list[OpenEntry]
-    pyramid_count:  int
-
-    # Cached indicators (refreshed on candle close)
-    atr:            float
-    avg_vol:        float
-    avg_trade_size: float
-    ofi:            float
-    vwap_state:     dict
-
+    symbol:              str
+    # Profiles
+    session_profile:     Dict[float, int] = field(default_factory=dict)
+    session_va:          Optional[ValueArea] = None
+    prev_session_va:     Optional[ValueArea] = None
+    leg_profile:         Dict[float, int] = field(default_factory=dict)
+    leg_anchor:          Optional[dict] = None
+    # Buffers
+    tick_buffer:         deque = field(default_factory=lambda: deque(maxlen=10000))
+    candle_buffer:       deque = field(default_factory=lambda: deque(maxlen=200))
+    cvd_series:          List[dict] = field(default_factory=list)
+    # State
+    drive_tracker:       Optional[object] = None
+    risk_manager:        Optional[object] = None
+    open_entries:        List[OpenEntry] = field(default_factory=list)
+    # Indicators
+    atr:                 float = 0.0
+    avg_vol:             float = 0.0
+    avg_trade_size:      float = 0.0
+    vwap_state:          dict = field(default_factory=dict)
+    ib:                  dict = field(default_factory=dict)
+    ofi:                 float = 0.0
     # Session
-    session_start_ts: datetime
-    data_quality:   str          # LIVE | STALE | RECONNECTING
-    last_tick_ts:   datetime
-    last_signal:    dict
-
-    # NOTE: profiles live in UnderlyingProfileRouter[underlying]
-    # NOT in SymbolState — one profile per underlying, shared across all its strikes
+    session_start_ts:    Optional[datetime] = None
+    is_session_active:   bool = False
+    data_quality:        str = "LIVE"
+    last_tick_ts:        Optional[datetime] = None
+    last_signal:         Optional[dict] = None
 ```
 
 ***
 
-## Persistence Flow
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  DUCKDB WRITE EVENTS                                                         │
-│                                                                              │
-│  Every tick:          ticks table (append)                                   │
-│  Every candle close:  (no write — in-memory only)                           │
-│  Every signal:        signals table (append)                                 │
-│  Every entry/exit:    trades table + open_trades (upsert)                   │
-│  Every risk event:    session_risk table (upsert)                            │
-│  Session close:       session_profiles table (insert)                        │
-│                                                                              │
-│  CRASH RECOVERY WRITES (every trade state change):                           │
-│  pickle.dump(SymbolState) → data/snapshots/{symbol}_state.pkl.xz             │
-│                                                                              │
-│  STARTUP READS:                                                              │
-│  session_profiles WHERE date = yesterday → prev_session_va                  │
-│  open_trades WHERE not closed → recover mid-session trades                  │
-│  session_profiles last 5 rows per underlying → composite profile            │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-***
-
-## Frontend Data Flow
-
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  REACT FRONTEND                                                               │
-│                                                                              │
-│  useWebSocket hook                                                           │
-│  └── onmessage(msg) → route by msg.type                                     │
-│        │                                                                     │
-│        ├── "SIGNAL"       → signalStore.updateSignal(symbol, data)          │
-│        ├── "TRADE_UPDATE" → signalStore.updateTrade(trade_id, action)       │
-│        ├── "RISK_EVENT"   → riskStore.handleEvent(event)                    │
-│        ├── "STATE_CHANGE" → signalStore.updateState(symbol, from, to)       │
-│        ├── "DRIVE_ALERT"  → alertStore.addAlert(symbol, drive, level)       │
-│        ├── "DATA_QUALITY" → signalStore.setQuality(symbol, quality)         │
-│        └── "HEARTBEAT"    → connectionStore.updateHeartbeat(ts)             │
-│                                                                              │
-│  Scanner Table (zustand signalStore)                                         │
-│  └── re-renders only changed rows (zustand shallow selector)                │
-│                                                                              │
-│  VolumeProfile Component                                                     │
-│  └── Canvas 2D — redraws only on profile REST fetch (every 30s)             │
-│  └── NOT re-rendering on every tick — profile is batch-updated              │
-│                                                                              │
-│  Footprint Component                                                         │
-│  └── Canvas 2D — redraws on every candle close signal                       │
-│                                                                              │
-│  AICommander Panel                                                           │
-│  └── Shows last signal JSON — updates on SIGNAL message only                │
-│                                                                              │
-│  RiskDashboard                                                               │
-│  └── Shows daily_pnl, consecutive_losses, kill_switch_status                │
-│  └── Red banner auto-appears on SESSION_STOPPED event                       │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
-
-***
-
-## Revised `main.py` (Single Entry Point — Everything Starts Here)
+## TDD-03 — Concurrency Model
 
 ```python
-import asyncio, uvloop
-from config.instruments import ExchangeMode
-from data.dhan_ws_client import DhanWSClient
-from data.dhan_rest_client import DhanRESTClient
-from data.duckdb_store import DuckDBStore
-from scanner.option_scanner import OptionScanner
-from strategy.underlying_profile_router import UnderlyingProfileRouter
-from strategy.pipeline import StrategyEngine
-from output.ws_publisher import WSPublisher
-from api.main import create_api_app
-import uvicorn, structlog
+# One async task per symbol — all run in single event loop
+# No threading — avoids GIL and race conditions on shared state
 
-log = structlog.get_logger()
+import asyncio
+
+async def symbol_pipeline(symbol: str, state: SymbolState, queue: asyncio.Queue):
+    """
+    Each symbol runs its own independent pipeline coroutine.
+    Ticks are pushed to the queue by the WebSocket client.
+    """
+    while True:
+        tick = await queue.get()
+        await process_tick_pipeline(tick, state)
+        queue.task_done()
 
 async def main():
-    uvloop.install()
+    states = {sym: SymbolState(sym) for sym in ACTIVE_SYMBOLS}
+    queues = {sym: asyncio.Queue() for sym in ACTIVE_SYMBOLS}
 
-    # ── Config ────────────────────────────────────────────────────────────────
-    from dotenv import load_dotenv; load_dotenv()
-    import os
-    MODE       = ExchangeMode[os.getenv("EXCHANGE_MODE", "MCX")]
-    EQUITY     = float(os.getenv("ACCOUNT_EQUITY", 500000))
-    DB_PATH    = os.getenv("DB_PATH", "./data/db/glasstrade.db")
+    # WS client pushes to all queues
+    ws_task = asyncio.create_task(dhan_ws_client(queues))
 
-    # ── Layer 0: Persistence ─────────────────────────────────────────────────
-    db = DuckDBStore(DB_PATH)
-    db.initialize_schema()
+    # L2 DOM poller — 500ms per symbol
+    l2_tasks = [asyncio.create_task(l2_poller(sym, states[sym]))
+                for sym in ACTIVE_SYMBOLS]
 
-    # ── Layer 1: Data clients ─────────────────────────────────────────────────
-    rest = DhanRESTClient(os.getenv("DHAN_ACCESS_TOKEN"))
-    ws   = DhanWSClient(os.getenv("DHAN_ACCESS_TOKEN"))
+    # Symbol pipelines
+    pipelines = [asyncio.create_task(symbol_pipeline(sym, states[sym], queues[sym]))
+                 for sym in ACTIVE_SYMBOLS]
 
-    # ── Layer 5: Output ───────────────────────────────────────────────────────
-    publisher = WSPublisher()
-
-    # ── Layer 4: Strategy engine + shared underlying profiles ─────────────────
-    profile_router = UnderlyingProfileRouter(MODE)
-    engine         = StrategyEngine(db, profile_router, publisher, EQUITY)
-
-    # ── Layer 2: Scanner ──────────────────────────────────────────────────────
-    scanner = OptionScanner(MODE, rest, ws, engine, db)
-    ws.on_tick = scanner.route_tick        # wire tick router
-
-    # ── Start all async tasks ─────────────────────────────────────────────────
-    await asyncio.gather(
-        ws.connect(),                      # L1: WebSocket
-        scanner.initial_scan(),            # L2: First option chain scan
-        scanner.rebalance_loop(),          # L2: 5-min rebalance
-        rest.l2_poll_loop(engine),         # L1: L2 DOM 500ms
-        run_api(publisher),                # L6: FastAPI server
-    )
-
-async def run_api(publisher: WSPublisher):
-    app = create_api_app(publisher)
-    config = uvicorn.Config(app, host="0.0.0.0", port=8000, loop="none")
-    server = uvicorn.Server(config)
-    await server.serve()
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    await asyncio.gather(ws_task, *l2_tasks, *pipelines)
 ```
 
-Continuing from the architecture redesign — here is the complete implementation of every remaining module in build order.
+***
+
+## TDD-04 — Profile Incremental Update (O(1) per tick)
+
+```python
+class VolumeProfileEngine:
+    """
+    Incremental bucket update — avoids full rebuild every tick.
+    Session profile and leg profile maintained independently.
+    """
+    def __init__(self, bucket_size: float):
+        self.bucket_size = bucket_size
+        self.session:  Dict[float, int] = {}
+        self.leg:      Dict[float, int] = {}
+        self._leg_active = False
+
+    def update(self, tick: Tick):
+        bucket = round(tick.price / self.bucket_size) * self.bucket_size
+
+        # Always update session profile
+        self.session[bucket] = self.session.get(bucket, 0) + tick.volume
+
+        # Update leg profile only when leg is active
+        if self._leg_active:
+            self.leg[bucket] = self.leg.get(bucket, 0) + tick.volume
+
+    def start_leg(self):
+        self.leg = {}
+        self._leg_active = True
+
+    def stop_leg(self):
+        self._leg_active = False
+
+    def reset_session(self):
+        self.session = {}
+        self.leg = {}
+        self._leg_active = False
+
+    def get_poc(self, profile: str = "session") -> float:
+        p = self.session if profile == "session" else self.leg
+        return max(p, key=p.get) if p else 0.0
+
+    def get_value_area(self, profile: str = "session") -> ValueArea:
+        p = self.session if profile == "session" else self.leg
+        poc = self.get_poc(profile)
+        return expand_value_area(p, poc)
+```
 
 ***
+
+## TDD-05 — WebSocket Client with Reconnect
+
+```python
+import asyncio, json, websockets
+from datetime import datetime
+
+class DhanWSClient:
+    def __init__(self, access_token: str, queues: Dict[str, asyncio.Queue]):
+        self.token   = access_token
+        self.queues  = queues
+        self.uri     = "wss://api-feed.dhan.co"
+        self.reconnect_delay = 2   # seconds, doubles on each failure (max 30)
+
+    async def connect(self):
+        while True:
+            try:
+                async with websockets.connect(
+                    self.uri,
+                    extra_headers={"access-token": self.token},
+                    ping_interval=20,
+                    ping_timeout=10
+                ) as ws:
+                    await self.subscribe(ws)
+                    self.reconnect_delay = 2  # Reset on success
+                    async for message in ws:
+                        await self.handle_message(message)
+            except Exception as e:
+                # Mark all symbols as RECONNECTING
+                for sym in self.queues:
+                    pass  # update state.data_quality = "RECONNECTING"
+                await asyncio.sleep(min(self.reconnect_delay, 30))
+                self.reconnect_delay = min(self.reconnect_delay * 2, 30)
+
+    async def handle_message(self, raw: str):
+        data = json.loads(raw)
+        tick = Tick(
+            price      = data["LTP"],
+            ask_vol    = data.get("buy_qty",  0),
+            bid_vol    = data.get("sell_qty", 0),
+            volume     = data.get("buy_qty", 0) + data.get("sell_qty", 0),
+            trade_size = data.get("trade_size", 1),
+            delta      = data.get("buy_qty", 0) - data.get("sell_qty", 0),
+            timestamp  = datetime.fromisoformat(data["timestamp"])
+        )
+        symbol = data["symbol"]
+        if symbol in self.queues:
+            await self.queues[symbol].put(tick)
+
+    async def subscribe(self, ws):
+        payload = {
+            "RequestCode": 15,
+            "InstrumentCount": len(self.queues),
+            "InstrumentList": [
+                {"ExchangeSegment": "NSE_FO", "SecurityId": sid}
+                for sid in ACTIVE_SECURITY_IDS
+            ]
+        }
+        await ws.send(json.dumps(payload))
+```
+
+***
+
+
+
+# Document 2 — API Contract
+
+***
+
+## API-01 — Internal REST API (FastAPI)
+
+### GET /api/symbols
+```json
+Response:
+{
+  "symbols": [
+    {
+      "symbol":       "NATURALGAS",
+      "strike":       280,
+      "option_type":  "PE",
+      "is_active":    true,
+      "session_state": "BALANCED",
+      "last_signal_ts": "2026-03-17T19:45:00+05:30"
+    }
+  ]
+}
+```
+
+### GET /api/signal/{symbol}
+```json
+Response: Full OutputSchema JSON (as defined in BRD FR-11)
+```
+
+### GET /api/profile/{symbol}
+```json
+Response:
+{
+  "symbol":       "NATURALGAS",
+  "profile_type": "SESSION",
+  "poc":          9.25,
+  "vah":          11.78,
+  "val":          8.91,
+  "lvns":         [8.20, 7.90],
+  "hvns":         [9.10, 9.40],
+  "profile_data": {"8.91": 1200, "9.00": 3400, ...}
+}
+```
+
+### GET /api/risk/session
+```json
+Response:
+{
+  "daily_pnl":           -2500.00,
+  "daily_pnl_pct":       -0.83,
+  "consecutive_losses":  2,
+  "trades_today":        5,
+  "session_active":      true,
+  "kill_switch_active":  false,
+  "risk_remaining_pct":  1.17
+}
+```
+
+### POST /api/trade/entry (manual override)
+```json
+Request:
+{
+  "symbol":    "NATURALGAS",
+  "direction": "LONG",
+  "lots":      4,
+  "override_reason": "Manual entry confirmation"
+}
+Response:
+{
+  "trade_id": "uuid",
+  "accepted": true,
+  "risk_amount": 1250.00
+}
+```
+
+### POST /api/trade/exit (manual override)
+```json
+Request:
+{
+  "trade_id":   "uuid",
+  "lots":       4,
+  "exit_reason": "Manual counter-aggression"
+}
+```
+
+### GET /api/config/{symbol}
+```json
+Response: Full instrument config from INSTRUMENTS registry
+```
+
+### PUT /api/config/{symbol}
+```json
+Request: Partial instrument config update
+{
+  "big_trade_threshold": 75,
+  "risk_per_trade_pct":  0.003
+}
+```
+
+***
+
+## API-02 — WebSocket Push API (Frontend)
+
+**Endpoint:** `ws://localhost:8000/ws/signals`
+
+**Message types pushed to frontend:**
+
+```json
+// Type 1: New signal
+{
+  "type":    "SIGNAL",
+  "data":    { /* full OutputSchema */ }
+}
+
+// Type 2: Trade management update (partition, pyramid, BE)
+{
+  "type":    "TRADE_UPDATE",
+  "trade_id": "uuid",
+  "action":   "EXIT_P1 | EXIT_P2 | EXIT_P3 | PYRAMID_ADD | MOVE_TO_BREAKEVEN | TRAIL_SL | EXIT_ALL",
+  "lots":     2,
+  "price":    9.10,
+  "reason":   "Seed recovery — weak momentum"
+}
+
+// Type 3: Session risk event
+{
+  "type":   "RISK_EVENT",
+  "event":  "DAILY_LOSS_LIMIT | DRAWDOWN_LIMIT | CONSECUTIVE_LOSSES | SESSION_KILLED",
+  "value":  -2.0,
+  "reason": "2% daily loss limit reached"
+}
+
+// Type 4: Market state change
+{
+  "type":      "STATE_CHANGE",
+  "symbol":    "NATURALGAS",
+  "from":      "BALANCED",
+  "to":        "IMBALANCED",
+  "direction": "DOWN",
+  "timestamp": "2026-03-17T19:45:00+05:30"
+}
+
+// Type 5: Drive alert
+{
+  "type":      "DRIVE_ALERT",
+  "symbol":    "NATURALGAS",
+  "drive":     1,
+  "level":     8.91,
+  "action":    "FIRST_DRIVE_RECORDED — set alert for return"
+}
+
+// Type 6: Data quality alert
+{
+  "type":    "DATA_QUALITY",
+  "symbol":  "NATURALGAS",
+  "quality": "STALE",
+  "gap_seconds": 45
+}
+
+// Type 7: Heartbeat (every 5s)
+{
+  "type": "HEARTBEAT",
+  "ts":   "2026-03-17T19:45:05+05:30",
+  "symbols_active": 3
+}
+```
+
+***
+
+## API-03 — DhanHQ Integration Contracts
+
+### WebSocket Subscription Payload
+```json
+{
+  "RequestCode": 15,
+  "InstrumentCount": 1,
+  "InstrumentList": [
+    {
+      "ExchangeSegment": "MCX_COMM",
+      "SecurityId": "428199"
+    }
+  ]
+}
+```
+
+### Expected Tick Payload (inbound)
+```json
+{
+  "type":        "ticker",
+  "symbol":      "NATURALGAS",
+  "LTP":         9.35,
+  "buy_qty":     125,
+  "sell_qty":    75,
+  "trade_size":  200,
+  "timestamp":   "2026-03-17T19:45:00.123456+05:30",
+  "exchange":    "MCX"
+}
+```
+
+### L2 DOM Poll (REST)
+```
+GET https://api.dhan.co/marketfeed/ohlc
+Headers: access-token: {token}
+Body: {"NSE_FO": ["428199"]}
+
+Response field mapping:
+  depth.buy[0..4]  → bid levels (price, quantity, orders)
+  depth.sell[0..4] → ask levels (price, quantity, orders)
+```
+
+***
+
+
+
+# Document 6 — Data Dictionary
+
+All fields used across the system, precisely defined:
+
+| Field | Type | Unit | Source | Description |
+|---|---|---|---|---|
+| `price` | float | INR | Tick | Last traded price, rounded to tick_size |
+| `ask_vol` | int | lots | Tick (`buy_qty`) | Volume executed at ask = aggressive buyer |
+| `bid_vol` | int | lots | Tick (`sell_qty`) | Volume executed at bid = aggressive seller |
+| `trade_size` | int | lots | Tick | Size of single trade print |
+| `delta` | int | lots | Derived | `ask_vol - bid_vol` per tick |
+| `POC` | float | INR | Profile | Price level with highest cumulative volume |
+| `VAH` | float | INR | Profile | Upper boundary of 70% value area |
+| `VAL` | float | INR | Profile | Lower boundary of 70% value area |
+| `LVN` | float | INR | Profile | Price level with volume < 15% of mean row vol |
+| `HVN` | float | INR | Profile | Price level with volume > 200% of mean row vol |
+| `cvd` | int | lots | Derived | Cumulative sum of delta from session open |
+| `cvd_slope` | float | lots/candle | Derived | Rate of change of CVD over 20 candles |
+| `footprint_score` | float | ratio | Derived | % of cells with ≥3:1 imbalance in candle |
+| `absorption` | bool | — | Derived | `range < ATR×0.3` AND `volume > avg×2.0` |
+| `bubble_sigma` | float | σ | Derived | Standard deviations above mean for volume bubble |
+| `ofi` | float | ratio | Derived | `(ask_vol - bid_vol) / total_vol` rolling 10 bars |
+| `atr` | float | INR | Derived | Average True Range, 14-period |
+| `avg_vol` | float | lots | Derived | Simple moving average of volume, 20-period |
+| `ib_high` | float | INR | Candle | High of first 2 session candles |
+| `ib_low` | float | INR | Candle | Low of first 2 session candles |
+| `drive_number` | int | count | DriveTracker | How many times price has touched this level |
+| `aggression_score` | float | points | Derived | Sum of all confirmed signal weights |
+| `cushion_ticks` | int | ticks | Derived | `abs(entry - stop_loss) / tick_size` |
+| `risk_pct` | float | % | Derived | `lots × risk_per_lot / account_equity` |
+| `risk_reward` | float | ratio | Derived | `abs(target - entry) / abs(entry - stop)` |
+| `pnl` | float | INR | Trade | `(exit - entry) × lots × point_value` |
+| `daily_pnl_pct` | float | % | Risk | `daily_pnl / session_start_equity` |
+| `session_state` | enum | — | Engine | `BALANCED | IMBALANCED | PROBING | NO_TRADE` |
+| `active_profile` | enum | — | Engine | `SESSION | LEG | COMBINED | NONE` |
+| `confidence` | enum | — | Engine | `High (≥3.0) | Medium (≥2.0) | Low (<2.0)` |
+| `data_quality` | enum | — | Monitor | `LIVE | STALE | RECONNECTING` |
+
+
+Here is the **complete audit of everything critical that is pending** — items that, if skipped, will break the strategy or leave the system incomplete. [youtube](https://www.youtube.com/watch?v=Jpd96fLqr5M)
+
+***
+
+## CRITICAL (System Breaks Without These)
+
+***
+
+### ❌ 1 — Delta Volume Profile (Wrong Profile Type Used Throughout)
+
+**This is the single biggest gap.** Every profile in the current design uses plain `total volume` per price level. Fabio explicitly uses **Delta-colored volume profiles** — where each row shows `buy_delta` vs `sell_delta`, not just total volume. [reddit](https://www.reddit.com/r/OrderFlow_Trading/comments/1qdgy0c/question_about_the_type_of_volume_profile_fabio/)
+
+```
+WHAT WE BUILT (WRONG):
+  Price  │ Total Volume Bar
+  9.10   │ ████████████████  ← only total volume shown
+
+WHAT FABIO ACTUALLY USES (CORRECT):
+  Price  │ Buy Delta (green)│ Sell Delta (red)
+  9.10   │ ██████████ +650  │ ████ -180   ← net buyers dominating
+  9.05   │ ███ +120         │ ███████ -580 ← net sellers dominating ← HIGH SELL DELTA ZONE
+  9.00   │ ████████ +430    │ ██ -90      ← buyers defending level
+```
+
+**Why it matters:** High sell delta zones (strong negative delta) in the left side of a leg profile = trapped sellers = LONG entry zones. High buy delta zones = LONG defended levels. The POC in a delta profile can be **different from the POC in a volume profile**. [youtube](https://www.youtube.com/watch?v=QPTkRoD9GE4)
+
+```python
+# REQUIRED ADDITION: Delta Profile Build
+def build_delta_profile(ticks, start_ts, end_ts):
+    bucket_size = CONFIG["profile_bucket_size"]
+    delta_profile = {}     # {price: {"buy_delta": int, "sell_delta": int, "net_delta": int}}
+
+    for tick in ticks:
+        if not (start_ts <= tick.timestamp <= end_ts):
+            continue
+        bucket = round(tick.price / bucket_size) * bucket_size
+        if bucket not in delta_profile:
+            delta_profile[bucket] = {"buy_delta": 0, "sell_delta": 0, "net_delta": 0}
+        delta_profile[bucket]["buy_delta"]  += tick.ask_vol
+        delta_profile[bucket]["sell_delta"] += tick.bid_vol
+        delta_profile[bucket]["net_delta"]  += tick.delta
+
+    return delta_profile
+
+# HIGH SELL DELTA ZONE = trapped sellers = LONG entry
+def detect_high_delta_zones(delta_profile, direction):
+    """
+    For LONG setups: find levels with very high SELL delta (net_delta very negative)
+                     = sellers trapped here = buyers will appear on retest
+    For SHORT setups: find levels with very high BUY delta (net_delta very positive)
+                      = buyers trapped here = sellers will appear on retest
+    """
+    net_deltas = [abs(v["net_delta"]) for v in delta_profile.values()]
+    mean_abs   = sum(net_deltas) / len(net_deltas)
+    threshold  = mean_abs * 2.5   # 250% of mean = significant delta concentration
+
+    zones = []
+    for price, data in delta_profile.items():
+        if direction == "LONG"  and data["net_delta"] < -(threshold):
+            zones.append({"price": price, "type": "HIGH_SELL_DELTA", "delta": data["net_delta"]})
+        if direction == "SHORT" and data["net_delta"] > +(threshold):
+            zones.append({"price": price, "type": "HIGH_BUY_DELTA",  "delta": data["net_delta"]})
+
+    return sorted(zones, key=lambda x: abs(x["delta"]), reverse=True)
+```
+
+**Impact on aggression scoring:** High delta zone, tight spread, and volume impulse at entry level add +1.0 to aggression score (proxy bundle) — must add `FR-06-NEW: Delta zone confluence` to the aggression engine.
+
+***
+
+### ❌ 2 — Naked POC (NPOC) — Previous Unfilled POCs
+
+Fabio specifically watches for **Naked POCs** — previous session POCs that have not yet been revisited by price. These are the **strongest magnet levels** in the entire framework because price is statistically obligated to revisit them. [youtube](https://www.youtube.com/watch?v=Jpd96fLqr5M)
+
+```python
+class NPOCTracker:
+    """
+    Tracks all previous session POCs.
+    A POC is "naked" until price trades through it.
+    Once touched, it is removed from the naked list.
+    """
+    def __init__(self):
+        self.naked_pocs = []   # [{date, price, direction_of_unfill}]
+
+    def add_session_poc(self, date, poc_price):
+        self.naked_pocs.append({
+            "date":    date,
+            "price":   poc_price,
+            "touched": False
+        })
+
+    def check_and_fill(self, current_price, tick_size):
+        zone = tick_size * 2
+        for npoc in self.naked_pocs:
+            if not npoc["touched"] and abs(current_price - npoc["price"]) <= zone:
+                npoc["touched"] = True  # NPOC filled — remove from magnet list
+
+    def get_active_npocs(self, current_price, lookback_days=5):
+        """Return nearest unfilled NPOCs above and below current price."""
+        active = [n for n in self.naked_pocs[-lookback_days:] if not n["touched"]]
+        above  = [n for n in active if n["price"] > current_price]
+        below  = [n for n in active if n["price"] < current_price]
+        return {
+            "nearest_above": min(above, key=lambda x: x["price"]) if above else None,
+            "nearest_below": max(below, key=lambda x: x["price"]) if below else None
+        }
+```
+
+**How NPOCs change the strategy:**
+- Nearest NPOC above price → **additional pull target** for LONG trades — can extend P3 toward NPOC instead of stopping at POC
+- Price approaching NPOC from below → **area where reversal is possible** — reduce confidence if entering LONG into an NPOC above
+
+***
+
+### ❌ 3 — Anomaly Zone Detection (Fabio's Core Term)
+
+Fabio labels price trading **below VAL or above VAH as an "anomaly"**. This is not just "imbalanced" — it has a specific meaning: [youtube](https://www.youtube.com/watch?v=Jpd96fLqr5M)
+
+> "An anomaly is a price area where value has not yet been established. The market MUST return to fill this anomaly or establish a new value area there."
+
+```python
+def detect_anomaly_zone(current_price, session_va, prev_session_va):
+    """
+    Anomaly = price outside the COMPOSITE value area
+    (both current session AND previous session value areas).
+    Stronger signal than simple imbalance.
+    """
+    # Single session anomaly
+    single_anomaly = current_price > session_va["VAH"] or current_price < session_va["VAL"]
+
+    # Double anomaly = outside BOTH current and previous session VA
+    if prev_session_va:
+        composite_vah = max(session_va["VAH"], prev_session_va["VAH"])
+        composite_val = min(session_va["VAL"], prev_session_va["VAL"])
+        double_anomaly = current_price > composite_vah or current_price < composite_val
+    else:
+        double_anomaly = False
+
+    return {
+        "is_anomaly":       single_anomaly,
+        "is_double_anomaly": double_anomaly,
+        "anomaly_type":     "ABOVE" if current_price > session_va["VAH"] else "BELOW" if current_price < session_va["VAL"] else None,
+        "composite_vah":    composite_vah if prev_session_va else session_va["VAH"],
+        "composite_val":    composite_val if prev_session_va else session_va["VAL"],
+        # Double anomaly = strongest mean reversion setup
+        "trade_bias":       "STRONG_MEAN_REVERSION" if double_anomaly else "TREND_FOLLOW" if single_anomaly else "NEUTRAL"
+    }
+```
+
+***
+
+### ❌ 4 — Composite / Multi-Session Volume Profile
+
+Fabio overlays a **Composite Profile** — multiple sessions merged — to find the larger-timeframe value area. This gives the **weekly or multi-day value context** that the single session profile alone cannot provide. [reddit](https://www.reddit.com/r/OrderFlow_Trading/comments/1qdgy0c/question_about_the_type_of_volume_profile_fabio/)
+
+```python
+def build_composite_profile(session_profiles_list):
+    """
+    Merge last N session profiles into one composite.
+    Reveals multi-day acceptance zones (strong HVNs) and voids (strong LVNs).
+    Used to set WEEKLY bias before any intraday trade.
+    """
+    composite = {}
+    for session in session_profiles_list:   # last 5 sessions for weekly
+        for price, vol in session.items():
+            composite[price] = composite.get(price, 0) + vol
+
+    poc  = calc_poc(composite)
+    va   = calc_value_area(composite, poc)
+    nodes = detect_nodes(composite)
+
+    return {
+        "composite_profile": composite,
+        "weekly_poc":        poc,
+        "weekly_vah":        va["VAH"],
+        "weekly_val":        va["VAL"],
+        "weekly_lvns":       nodes["LVNs"],
+        "weekly_hvns":       nodes["HVNs"]
+    }
+
+# Weekly bias filter — must be added to GATE 0
+def apply_weekly_bias_filter(direction, current_price, composite):
+    """
+    If weekly POC is above current price → weekly bias is LONG
+    If weekly POC is below current price → weekly bias is SHORT
+    Only take trades aligned with weekly bias for highest conviction.
+    """
+    weekly_poc = composite["weekly_poc"]
+    weekly_bias = "LONG" if weekly_poc > current_price else "SHORT"
+
+    if direction != weekly_bias:
+        return {"aligned": False, "confidence_reduction": 0.5,
+                "reason": f"Trade against weekly bias (bias={weekly_bias})"}
+    return {"aligned": True, "confidence_boost": 0.5}
+```
+
+***
+
+### ❌ 5 — Open Interest (OI) Logic
+
+Your current AI Commander outputs **"No OI pressure"** but the entire OI detection layer was never designed. Fabio himself does NOT use OI — but your system references it, so it either needs a definition or needs to be removed cleanly. [localhost](http://localhost:5190/)
+
+```python
+def check_oi_pressure(symbol, strike, option_type, dhan_rest_client):
+    """
+    OI pressure = large OI concentration at current strike vs surrounding strikes.
+    High OI = max pain wall / institutional positioning = potential resistance.
+    """
+    oi_data = dhan_rest_client.get_option_chain(symbol)
+
+    current_strike_oi = oi_data[strike][option_type]["oi"]
+    surrounding_oi    = [
+        oi_data.get(strike + i, {}).get(option_type, {}).get("oi", 0)
+        for i in [-200, -100, +100, +200]
+    ]
+    avg_surrounding   = sum(surrounding_oi) / len(surrounding_oi) if surrounding_oi else 1
+
+    oi_ratio = current_strike_oi / avg_surrounding if avg_surrounding > 0 else 1.0
+
+    if oi_ratio >= 3.0:
+        return {"pressure": "HIGH",   "oi_ratio": oi_ratio, "signal": "RESISTANCE"}
+    elif oi_ratio >= 1.5:
+        return {"pressure": "MEDIUM", "oi_ratio": oi_ratio, "signal": "CAUTION"}
+    else:
+        return {"pressure": "LOW",    "oi_ratio": oi_ratio, "signal": "CLEAR"}
+```
+
+***
+
+### ❌ 6 — Pre-Alert System (How Alerts Are Triggered)
+
+Drive 1 fires a `SET_ALERT_FOR_RETURN` action throughout the entire design but **no alert mechanism was ever built**. [scribd](https://www.scribd.com/document/923519913/Fabio-Playbook)
+
+```python
+class AlertManager:
+    def __init__(self, ws_publisher):
+        self.active_alerts  = {}  # {alert_id: alert_dict}
+        self.ws             = ws_publisher
+
+    def set_price_alert(self, symbol, price, direction,
+                        level_type, tick_size):
+        """Set alert to fire when price returns within 3 ticks of level."""
+        alert_id = f"{symbol}_{price}_{level_type}"
+        self.active_alerts[alert_id] = {
+            "symbol":     symbol,
+            "price":      price,
+            "direction":  direction,
+            "level_type": level_type,  # VAH | VAL | LVN | PYRAMID
+            "zone_upper": price + tick_size * 3,
+            "zone_lower": price - tick_size * 3,
+            "fired":      False,
+            "created_at": datetime.now()
+        }
+
+    def check_alerts(self, current_price, symbol):
+        """Called every tick — fire any alerts within zone."""
+        fired = []
+        for aid, alert in self.active_alerts.items():
+            if alert["symbol"] != symbol or alert["fired"]:
+                continue
+            if alert["zone_lower"] <= current_price <= alert["zone_upper"]:
+                alert["fired"] = True
+                # Push to frontend immediately
+                self.ws.push({
+                    "type":        "PRICE_ALERT",
+                    "alert_id":    aid,
+                    "symbol":      symbol,
+                    "level_type":  alert["level_type"],
+                    "level_price": alert["price"],
+                    "current_price": current_price,
+                    "message":     f"Price approaching {alert['level_type']} at {alert['price']} — watch for second drive aggression"
+                })
+                fired.append(aid)
+        return fired
+
+    def clear_session_alerts(self, symbol):
+        """Clear all alerts at session close — they belong to current session only."""
+        self.active_alerts = {
+            k: v for k, v in self.active_alerts.items()
+            if v["symbol"] != symbol
+        }
+```
+
+***
+
+### ❌ 7 — Backtesting Framework (Referenced but Never Built)
+
+Tests reference `backtest_strategy()` and `load_ticks()` but neither exists anywhere in the design.
+
+```python
+class BacktestEngine:
+    """
+    Replay historical tick data through the exact same strategy pipeline.
+    Produces trade-by-trade PnL log and statistical summary.
+    """
+    def __init__(self, instrument_config, engine_config):
+        self.cfg    = instrument_config
+        self.ecfg   = engine_config
+        self.trades = []
+
+    def run(self, tick_data: list, start_date: str, end_date: str):
+        """
+        Replay ticks chronologically.
+        Reset all state at each session boundary exactly as live engine does.
+        """
+        state        = SymbolState(self.cfg["symbol"])
+        session_open = None
+
+        for tick in tick_data:
+            # Detect session boundary
+            if self.is_new_session(tick.timestamp, session_open, self.cfg):
+                # Save completed session profile
+                if state.session_va:
+                    state.prev_session_va = state.session_va
+                # Reset session state
+                state = self.reset_session_state(state, tick.timestamp)
+                session_open = tick.timestamp
+
+            # Run exact same pipeline as live
+            result = run_strategy_full(
+                ticks          = list(state.tick_buffer),
+                candles        = list(state.candle_buffer),
+                session_start_ts = session_open,
+                prev_session_va  = state.prev_session_va,
+                leg_data         = state.leg_anchor,
+                account_equity   = self.ecfg["account_equity"],
+                drive_tracker    = state.drive_tracker,
+                risk_manager     = state.risk_manager,
+                point_value      = self.cfg["point_value"]
+            )
+
+            # Record any trade signals
+            if result.get("action") == "TRADE":
+                self.record_backtest_trade(result, tick)
+
+        return self.compute_summary()
+
+    def compute_summary(self):
+        if not self.trades:
+            return {"error": "No trades generated"}
+
+        pnls    = [t["pnl"] for t in self.trades]
+        wins    = [p for p in pnls if p > 0]
+        losses  = [p for p in pnls if p < 0]
+
+        return {
+            "total_trades":     len(self.trades),
+            "win_rate":         len(wins) / len(self.trades),
+            "avg_rr":           abs(sum(wins)/len(wins)) / abs(sum(losses)/len(losses)) if losses else 999,
+            "total_pnl":        round(sum(pnls), 2),
+            "max_drawdown":     self.calc_max_drawdown(pnls),
+            "profit_factor":    abs(sum(wins)) / abs(sum(losses)) if losses else 999,
+            "avg_win":          round(sum(wins)/len(wins), 2) if wins else 0,
+            "avg_loss":         round(sum(losses)/len(losses), 2) if losses else 0,
+            "second_drive_win_rate": self.calc_drive_win_rate(drive=2),
+            "trades":           self.trades
+        }
+```
+
+***
+
+### ❌ 8 — Mid-Trade State Recovery (Engine Restart During Open Trade)
+
+Never addressed. If the engine restarts with an open trade, the entire position, partition state, and pyramid entries are lost.
+
+```python
+def save_open_trade_state(state: SymbolState, db: DuckDBStore):
+    """Called every time an entry is made or updated."""
+    db.upsert_open_trade({
+        "symbol":        state.symbol,
+        "entries":       [e.__dict__ for e in state.open_entries],
+        "pyramid_count": state.pyramid_count,
+        "direction":     state.last_signal.get("direction"),
+        "target":        state.last_signal.get("target"),
+        "snapshot_ts":   datetime.now().isoformat()
+    })
+
+def recover_open_trade(symbol: str, db: DuckDBStore) -> list:
+    """Called at startup — restore any open trades from last session."""
+    raw = db.load_open_trade(symbol)
+    if not raw:
+        return []
+    return [OpenEntry(**e) for e in raw["entries"]]
+```
+
+***
+
+## HIGH PRIORITY (Significantly Degrades Edge Without These)
+
+| # | What | Why Missing Hurts |
+|---|---|---|
+| **9** | **Footprint candle resolution spec** | Should be 1min footprint — never explicitly stated. Using wrong resolution changes all imbalance readings |
+| **10** | **MCX evening session handling** | MCX NATURALGAS trades until 23:30 IST. Second session after 17:00 has different liquidity — never handled |
+| **11** | **Options-specific profile** | System profiles option premiums (8.91 etc.), not the underlying. Theta decay corrupts profile structure — must profile underlying and use for signals, options only for sizing |
+| **12** | **Weekly bias gate (Composite Profile)** | All trades currently use only intraday session context — no higher timeframe filter. Counter-trend intraday signals on strong trend days get falsely triggered |
+| **13** | **Delta zones in aggression scorer** | +0.5 weight for high sell/buy delta zone confluence missing from FR-06. Score calculations are currently incomplete |
+| **14** | **NPOC as secondary target** | P3 trailing is rare (only on strong trend days) — NPOC is the logical P3 target when trailing is active, currently missing |
+| **15** | **Alert clear on drive 3+** | When level becomes drive 3+, existing alerts for that level must be cancelled. AlertManager has `clear_session_alerts()` but not per-level cancel |
+
+***
+
+## Complete Pending Items Master List
+
+```
+CRITICAL (breaks system):
+├── ❌ Delta Volume Profile — wrong profile type used throughout
+├── ❌ Naked POC (NPOC) tracker + target usage
+├── ❌ Anomaly zone detection (Fabio's specific term)
+├── ❌ Composite / Multi-session profile (weekly bias)
+├── ❌ OI pressure calculation (referenced in output, never designed)
+├── ❌ Pre-alert system (AlertManager) — Drive 1 alerts never implemented
+├── ❌ Backtesting framework — BacktestEngine + load_ticks()
+└── ❌ Mid-trade state recovery on engine restart
+
+HIGH PRIORITY (degrades edge):
+├── ⚠️  Footprint candle resolution explicitly set to 1min
+├── ⚠️  MCX evening session boundary + separate session profile
+├── ⚠️  Options vs underlying profiling separation
+├── ⚠️  Weekly bias gate from composite profile → GATE 0 addition
+├── ⚠️  Proxy Bundle (tight spread + vol impulse + rising OI/delta zone) → FR-06-NEW aggression weight +1.0
+├── ⚠️  NPOC as P3 trailing target
+└── ⚠️  Per-level alert cancellation when drive 3+ detected
+
+OPEN ITEMS FROM BRD (still unresolved):
+├── OI-01: DhanHQ WS exact field names — need live test
+├── OI-02: MCX big trade threshold calibration — need 1-week data
+├── OI-03: MCX evening session — design decision needed
+├── OI-04: Multi-symbol threading model — async confirmed, validate
+├── OI-05: DhanHQ L2 rate limits — check API docs
+├── OI-06: EIA calendar API source — pick reliable source
+├── OI-07: Options vs underlying profile — design decision
+└── OI-08: Frontend push mechanism — WebSocket confirmed
+```
+
+
+This is a fundamental redesign of the **entry point of the entire system** — instead of hardcoding symbols, the system discovers and selects option contracts dynamically. Here is the complete redesign of the scanning layer. [dhanhq](https://dhanhq.co/docs/v2/option-chain/)
+
+***
+
+
 
 # GlassyTrade AI — Complete Implementation (Continued)
 
@@ -2964,11 +2458,11 @@ class EngineConfig:
     pyramid_risk_ceiling_mult: float = 1.5    # max 1.5× base risk
 
     # Risk
-    risk_per_trade_pct:        float = 0.005
+    risk_per_trade_pct:        float = 0.0025
     max_daily_loss_pct:        float = 0.020
     max_consecutive_losses:    int   = 3
     max_drawdown_pct:          float = 0.030
-    max_risk_per_trade_pct:    float = 0.010  # hard ceiling
+    max_risk_per_trade_pct:    float = 0.005  # hard ceiling
 
     # Delta profile
     delta_zone_sigma_mult:     float = 2.5    # high delta = abs(net) > mean × 2.5
@@ -4135,6 +3629,540 @@ VITE_WS_URL=ws://localhost:8000/ws/signals
 
 
 
+
+
+# Document 3 — Test Plan
+
+***
+
+## TP-01 — Unit Tests
+
+### Profile Engine Tests
+```python
+def test_poc_calculation():
+    profile = {9.0: 1000, 9.1: 5000, 9.2: 2000}
+    assert calc_poc(profile) == 9.1
+
+def test_value_area_70_pct():
+    # Ensure VA expands until exactly 70% accumulated
+    profile = build_synthetic_profile()
+    poc     = calc_poc(profile)
+    va      = calc_value_area(profile, poc)
+    total   = sum(profile.values())
+    assert va.va_volume / total >= 0.70
+    assert va.VAH > va.POC > va.VAL
+
+def test_lvn_threshold():
+    profile = {9.0: 100, 9.1: 5, 9.2: 110, 9.3: 8}
+    nodes   = detect_nodes(profile)
+    # Mean = 55.75, threshold = 55.75 × 0.15 = 8.36
+    # 9.1 (5) and 9.3 (8) should be LVNs
+    assert 9.1 in nodes["LVNs"]
+    assert 9.3 in nodes["LVNs"]
+    assert 9.0 not in nodes["LVNs"]
+
+def test_lvn_score_midpoint_bonus():
+    # LVN at leg midpoint should score higher
+    score_mid = score_lvn(10.0, 5, 9.0, 11.0, {10.0: 5, 9.5: 100, 10.5: 100})
+    score_far = score_lvn(9.1, 5, 9.0, 11.0, {9.1: 5, 9.5: 100, 10.5: 100})
+    assert score_mid > score_far
+```
+
+### CVD Tests
+```python
+def test_cvd_accumulation():
+    ticks = [
+        Tick(price=9.0, ask_vol=100, bid_vol=50, ...),
+        Tick(price=9.1, ask_vol=80,  bid_vol=120, ...),
+    ]
+    cvd = calc_cvd(ticks, ticks[0].timestamp)
+    assert cvd[0]["cvd"] == 50   # 100-50
+    assert cvd [scribd](https://www.scribd.com/document/923519913/Fabio-Playbook)["cvd"] == -10  # 50 + (80-120)
+
+def test_cvd_bull_divergence():
+    # Prices go lower but CVD higher = bullish divergence
+    prices = [{"close": 9.0}, {"close": 8.9}, {"close": 8.8}]
+    cvd    = [{"cvd": -100}, {"cvd": -80}, {"cvd": -60}]
+    result = detect_cvd_divergence(prices, cvd, lookback=3)
+    assert result["bull"] == True
+    assert result["bear"] == False
+```
+
+### Aggression Scorer Tests
+```python
+def test_minimum_score_gate():
+    # Score of 1.5 must NOT generate trade signal
+    result = mock_aggression_score(1.5)
+    assert result["confirmed"] == False
+
+def test_pyramid_requires_3():
+    # Score of 2.5 is enough for entry but NOT pyramid
+    assert 2.5 >= CONFIG["min_aggression_score"]        # passes entry
+    assert 2.5 < 3.0                                     # fails pyramid
+
+def test_score_breakdown():
+    # Verify each signal contributes correct weight
+    score = calculate_aggression_score_isolated(
+        footprint=True, cvd=True, big_trade=False,
+        absorption=False, ofi=False
+    )
+    assert score == 2.0
+```
+
+### Drive Tracker Tests
+```python
+def test_first_drive_no_entry():
+    tracker = DriveTracker(tick_size=0.10)
+    result  = classify_drive(9.40, 9.40, tracker, candles, "SHORT", atr, cvd, fp)
+    assert result["entry_valid"] == False
+    assert result["drive_number"] == 1
+
+def test_second_drive_with_rejection_valid():
+    tracker = DriveTracker(tick_size=0.10)
+    # Simulate first drive + rejection
+    tracker.record_touch(9.40, ts1, was_rejected=True)
+    result = classify_drive(9.40, 9.40, tracker, candles, "SHORT", atr, cvd, fp)
+    assert result["drive_number"] == 2
+    assert result["entry_valid"] == True
+
+def test_second_drive_without_rejection_invalid():
+    tracker = DriveTracker(tick_size=0.10)
+    tracker.record_touch(9.40, ts1, was_rejected=False)  # no rejection
+    result  = classify_drive(9.40, 9.40, tracker, candles, "SHORT", atr, cvd, fp)
+    assert result["entry_valid"] == False
+```
+
+### Risk Manager Tests
+```python
+def test_daily_loss_kill_switch():
+    rm = SessionRiskManager(account_equity=500000)
+    rm.register_trade_result(-5000)   # -1%
+    rm.register_trade_result(-5000)   # -2% → should kill
+    can, reason = rm.can_trade()
+    assert can == False
+    assert "DAILY LOSS" in reason
+
+def test_consecutive_loss_pause():
+    rm = SessionRiskManager(account_equity=500000)
+    for _ in range(3):
+        rm.register_trade_result(-500)
+    can, reason = rm.can_trade()
+    assert can == False
+    assert "consecutive" in reason.lower()
+
+def test_win_resets_consecutive():
+    rm = SessionRiskManager(account_equity=500000)
+    rm.register_trade_result(-500)
+    rm.register_trade_result(-500)
+    rm.register_trade_result(+2000)  # win resets counter
+    assert rm.consecutive_losses == 0
+```
+
+### Partition Exit Tests
+```python
+def test_p1_skipped_on_strong_momentum():
+    # Strong CVD slope → P1 should NOT fire
+    result = partition_exit_manager(
+        direction="LONG", entry_price=8.91, current_price=9.02,
+        target_price=9.25, total_lots=6,
+        cvd_series=strong_cvd_series,   # slope > 2.0
+        ...
+    )
+    actions = [a["action"] for a in result]
+    assert "EXIT_P1" not in actions
+
+def test_p2_always_fires_at_target():
+    result = partition_exit_manager(
+        direction="LONG", entry_price=8.91, current_price=9.25,
+        target_price=9.25, total_lots=6, ...
+    )
+    actions = [a["action"] for a in result]
+    assert "EXIT_P2" in actions
+
+def test_counter_aggression_exits_all():
+    result = partition_exit_manager(
+        direction="LONG", ...,
+        counter_aggression_score=2  # mock 2+ counter signals
+    )
+    assert result[0]["action"] == "EXIT_ALL"
+```
+
+***
+
+## TP-02 — Integration Tests
+
+```python
+# Full pipeline test — tick to signal
+def test_full_pipeline_balanced_long():
+    """
+    Simulate: market is BALANCED, price at VAL,
+    second drive confirmed, aggression ≥ 2.0
+    Expected: LONG signal with full output schema
+    """
+    state   = build_mock_state("BALANCED", price_at="VAL")
+    ticks   = build_mock_ticks(at_val=True, buy_pressure=True)
+    result  = run_strategy_full(ticks, candles, ...)
+    assert result["direction"] == "LONG"
+    assert result["confidence"] in ("Medium", "High")
+    assert result["drive_number"] == 2
+    assert result["aggression_score"] >= 2.0
+    assert result["stop_loss"] < result["entry_zone"]
+    assert result["target"] > result["entry_zone"]
+
+def test_no_trade_at_poc():
+    state  = build_mock_state("BALANCED", price_at="POC")
+    result = run_strategy_full(...)
+    assert result["direction"] == "FLAT"
+    assert "POC dead zone" in result["rationale"]
+
+def test_session_kill_switch_blocks_signal():
+    rm = SessionRiskManager(500000)
+    rm.register_trade_result(-10000)   # exceed 2% daily loss
+    result = run_strategy_full(..., risk_manager=rm)
+    assert result["action"] == "SESSION_STOPPED"
+
+def test_first_drive_suppresses_entry():
+    state   = build_mock_state("BALANCED", price_at="VAH")
+    tracker = DriveTracker(tick_size=0.10)  # no prior drives
+    result  = run_strategy_full(..., drive_tracker=tracker)
+    assert result["direction"] == "FLAT"
+    assert result["drive_number"] == 1
+
+def test_pyramid_add_at_new_lvn():
+    # First entry at 8.91 in profit, price at 9.02 LVN
+    entries = [OpenEntry(price=8.91, lots=4, ...)]
+    result  = manage_pyramid(
+        direction="LONG", entries=entries, current_price=9.02,
+        first_pnl=0.11,  # in profit
+        aggression_score=3.0, ...
+    )
+    assert result["action"] == "PYRAMID_ADD"
+    assert result["add_lots"] == 2   # 50% of 4
+```
+
+***
+
+## TP-03 — Performance Tests
+
+```python
+# Signal latency must be < 500ms end-to-end
+def test_signal_latency():
+    import time
+    t_start = time.time()
+    run_strategy_full(ticks=live_tick_batch, ...)
+    latency_ms = (time.time() - t_start) * 1000
+    assert latency_ms < 500, f"Latency {latency_ms:.1f}ms exceeds 500ms"
+
+# Profile update O(1) per tick
+def test_profile_update_constant_time():
+    import time
+    engine = VolumeProfileEngine(bucket_size=0.10)
+    # Pre-populate with 100k ticks
+    for _ in range(100000):
+        engine.update(mock_tick())
+    # Time a single update — should be constant regardless of profile size
+    t0 = time.time()
+    engine.update(mock_tick())
+    t1 = time.time()
+    assert (t1 - t0) * 1000 < 1.0, "Profile update > 1ms — not O(1)"
+
+# 10 concurrent symbols no degradation
+def test_concurrent_symbols():
+    import asyncio
+    async def run():
+        tasks = [symbol_pipeline(sym, ...) for sym in 10_symbols]
+        await asyncio.gather(*tasks)
+    asyncio.run(asyncio.wait_for(run(), timeout=1.0))  # 10 symbols in < 1s
+```
+
+***
+
+## TP-04 — Strategy Backtesting Validation Tests
+
+```python
+# Run strategy on 30 days of historical tick data
+# Validate statistical edge exists
+
+def test_backtest_win_rate():
+    results = backtest_strategy(
+        tick_data  = load_ticks("2026-01-01", "2026-02-28"),
+        instrument = "NATURALGAS"
+    )
+    assert results["win_rate"] >= 0.45, "Win rate below 45% — no edge"
+    assert results["avg_rr"]   >= 1.5,  "Average R:R below 1.5"
+
+def test_backtest_second_drive_vs_first():
+    results_d1 = backtest_strategy(drive_filter=1, ...)
+    results_d2 = backtest_strategy(drive_filter=2, ...)
+    assert results_d2["win_rate"] > results_d1["win_rate"], "Second drive not better than first"
+
+def test_backtest_no_middle_trades():
+    results = backtest_strategy(allow_poc_trades=True, ...)
+    results_no_mid = backtest_strategy(allow_poc_trades=False, ...)
+    assert results_no_mid["win_rate"] > results["win_rate"]
+```
+
+***
+
+
+
+# Document Set 2 — Technical Design, API, Testing, Deployment & Operations
+
+***
+
+
+
+# Document 4 — Deployment Architecture
+
+***
+
+## DEPLOY-01 — Environment Stack
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                  LOCAL MACHINE (Primary)                  │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │               Docker Compose Stack               │   │
+│  │                                                  │   │
+│  │  ┌─────────────┐   ┌──────────────────────────┐ │   │
+│  │  │  FastAPI     │   │   GlassyTrade Engine     │ │   │
+│  │  │  (Port 8000) │   │   (Python async)         │ │   │
+│  │  │  REST + WS   │   │   All strategy modules   │ │   │
+│  │  └──────┬───────┘   └──────────┬───────────────┘ │   │
+│  │         │                      │                  │   │
+│  │  ┌──────▼──────────────────────▼──────────────┐  │   │
+│  │  │              DuckDB                        │  │   │
+│  │  │  (local file: glasstrade.db)               │  │   │
+│  │  │  Ticks, Profiles, Signals, Trades, Risk   │  │   │
+│  │  └────────────────────────────────────────────┘  │   │
+│  │                                                  │   │
+│  │  ┌────────────────────────────────────────────┐  │   │
+│  │  │     React Frontend (Port 5190)             │  │   │
+│  │  │     GlassyTrade AI UI                      │  │   │
+│  │  └────────────────────────────────────────────┘  │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                          │
+│  External Connections:                                   │
+│  ├── DhanHQ WebSocket wss://api-feed.dhan.co            │
+│  ├── DhanHQ REST    https://api.dhan.co                 │
+│  └── EIA Calendar  https://ir.eia.gov/ngs/ngs.html      │
+└──────────────────────────────────────────────────────────┘
+```
+
+***
+
+## DEPLOY-02 — docker-compose.yml
+
+```yaml
+version: "3.9"
+
+services:
+  engine:
+    build: ./engine
+    container_name: glasstrade_engine
+    environment:
+      - DHAN_ACCESS_TOKEN=${DHAN_ACCESS_TOKEN}
+      - DHAN_CLIENT_ID=${DHAN_CLIENT_ID}
+      - DB_PATH=/data/glasstrade.db
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data:/data
+      - ./logs:/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    container_name: glasstrade_ui
+    ports:
+      - "5190:5190"
+    depends_on:
+      - engine
+    restart: unless-stopped
+
+  api:
+    build: ./api
+    container_name: glasstrade_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_PATH=/data/glasstrade.db
+    volumes:
+      - ./data:/data
+    depends_on:
+      - engine
+    restart: unless-stopped
+```
+
+***
+
+## DEPLOY-03 — Environment Variables (.env)
+
+```bash
+# DhanHQ
+DHAN_ACCESS_TOKEN=your_token_here
+DHAN_CLIENT_ID=your_client_id
+
+# Engine
+ACCOUNT_EQUITY=500000          # Starting equity in INR
+ACTIVE_SYMBOLS=NATURALGAS,NIFTY,BANKNIFTY
+MAX_CONCURRENT_SYMBOLS=10
+LOG_LEVEL=INFO
+
+# Risk Overrides (optional — defaults in engine_config.py)
+RISK_PER_TRADE_PCT=0.005
+MAX_DAILY_LOSS_PCT=0.02
+MAX_CONSECUTIVE_LOSSES=3
+
+# DB
+DB_PATH=./data/glasstrade.db
+TICK_RETENTION_DAYS=1          # Purge ticks older than N days
+
+# EIA Calendar
+EIA_SUPPRESS_MINUTES_BEFORE=15
+EIA_SUPPRESS_MINUTES_AFTER=15
+```
+
+***
+
+## DEPLOY-04 — Startup & Shutdown Sequence
+
+```python
+# main.py startup sequence
+async def startup():
+    # 1. Load instrument configs
+    load_instrument_registry()
+
+    # 2. Init DuckDB — create tables if not exist
+    db = DuckDBStore(DB_PATH)
+    db.initialize_schema()
+
+    # 3. Load previous session profiles for each symbol
+    for sym in ACTIVE_SYMBOLS:
+        prev_va = db.load_prev_session_profile(sym)
+        states[sym].prev_session_va = prev_va
+
+    # 4. Init session state per symbol
+    for sym in ACTIVE_SYMBOLS:
+        states[sym].session_start_ts = get_session_open(sym)
+        states[sym].risk_manager = SessionRiskManager(ACCOUNT_EQUITY)
+        states[sym].drive_tracker = DriveTracker(INSTRUMENTS[sym]["tick_size"])
+
+    # 5. Start WebSocket client
+    ws = DhanWSClient(DHAN_ACCESS_TOKEN, queues)
+    asyncio.create_task(ws.connect())
+
+    # 6. Start L2 pollers
+    for sym in ACTIVE_SYMBOLS:
+        asyncio.create_task(l2_poller(sym, states[sym]))
+
+    # 7. Start signal pipelines
+    for sym in ACTIVE_SYMBOLS:
+        asyncio.create_task(symbol_pipeline(sym, states[sym], queues[sym]))
+
+    # 8. Start FastAPI server
+    # (handled by uvicorn)
+
+async def shutdown():
+    # Save all completed session profiles to DuckDB
+    for sym in ACTIVE_SYMBOLS:
+        if states[sym].session_va:
+            db.save_session_profile(sym, states[sym].session_va)
+
+    # Flush all pending signals
+    await signal_queue.join()
+
+    # Log final session risk summary
+    for sym in ACTIVE_SYMBOLS:
+        db.save_session_risk(sym, states[sym].risk_manager.session_summary())
+```
+
+***
+
+
+
+# Document 5 — Operations Runbook
+
+***
+
+## OPS-01 — Daily Pre-Market Checklist
+
+```
+□ 1. Verify DHAN token not expired (tokens expire daily — renew by 08:45 IST)
+□ 2. Confirm previous session profiles loaded: GET /api/profile/{symbol}
+     → prev_session_va must not be null
+□ 3. Confirm risk manager reset: GET /api/risk/session
+     → daily_pnl = 0, consecutive_losses = 0
+□ 4. Check EIA release calendar — if release today, suppress window confirmed?
+□ 5. Confirm WebSocket connected: GET /api/health
+     → ws_status: "CONNECTED"
+□ 6. Verify data quality: all symbols showing data_quality = "LIVE"
+□ 7. Set account equity for the session: PUT /api/config/equity
+□ 8. Confirm DuckDB size < 5GB (purge old ticks if needed)
+```
+
+***
+
+## OPS-02 — During Session Monitoring
+
+```
+Every 30 minutes:
+□ Check /api/risk/session — daily_pnl within limits?
+□ Check WebSocket heartbeat last received < 10s ago?
+□ Any symbol showing data_quality = "STALE"?
+
+On STALE alert:
+□ Check DhanHQ status page
+□ Engine will auto-reconnect — wait 60s before manual restart
+□ If reconnected: profiles rebuild from tick buffer — no action needed
+□ If down > 5 min: do not trade until LIVE quality restored
+
+On SESSION_KILLED event:
+□ All signals suppressed automatically
+□ Do not manually override — session is over
+□ Review trade log for session: GET /api/trades/today
+```
+
+***
+
+## OPS-03 — EOD Close Procedure
+
+```
+After market close (15:30 NSE / 23:30 MCX):
+□ 1. Session profiles auto-saved to DuckDB — verify:
+     SELECT * FROM session_profiles WHERE date = today
+□ 2. Export session trade log: GET /api/trades/export?date=today
+□ 3. Review consecutive losses — if ≥ 2, review strategy fit next day
+□ 4. Purge today's tick data if size > 2GB:
+     DELETE FROM ticks WHERE timestamp < (session_close - 1hr)
+□ 5. Renew DhanHQ access token for next day
+□ 6. Review any OPEN_ITEMS from BRD — are gaps resolved?
+```
+
+***
+
+## OPS-04 — Error Handling Reference
+
+| Error | Cause | Auto Recovery | Manual Action |
+|---|---|---|---|
+| `WS_DISCONNECTED` | Network drop | Auto-reconnect with backoff | If 5+ min: restart engine container |
+| `DATA_STALE` | No ticks > 30s | Alert fired | Check DhanHQ status |
+| `PROFILE_EMPTY` | Session just started | Auto resolves after warm-up | Wait for warm-up window |
+| `PREV_SESSION_NULL` | First day run or DB issue | Engine runs without reference | Manually seed prev_session_va |
+| `DB_LOCKED` | Concurrent write | Auto retry 3x | Restart DuckDB connection |
+| `TOKEN_EXPIRED` | DhanHQ token stale | None — signals suppressed | Renew token via DhanHQ portal |
+| `RISK_SESSION_KILLED` | Daily loss / drawdown | Intentional — no recovery | Session over; restart tomorrow |
+| `CUSHION_INVALID` | Setup has > 10 tick stop | Signal suppressed | Review tick size config |
+
+***
+
+
+
 # GlassyTrade AI — Coding Agent Build Instructions
 
 Every instruction is atomic, testable, and unambiguous. No interpretation required.
@@ -4307,11 +4335,11 @@ No magic numbers anywhere else in the codebase — always import from `CFG`.
 | `p3_trail_factor` | 0.40 |
 | `pyramid_max_adds` | 2 |
 | `pyramid_risk_ceiling_mult` | 1.5 |
-| `risk_per_trade_pct` | 0.005 |
+| `risk_per_trade_pct` | 0.0025 |
 | `max_daily_loss_pct` | 0.020 |
 | `max_consecutive_losses` | 3 |
 | `max_drawdown_pct` | 0.030 |
-| `max_risk_per_trade_pct` | 0.010 |
+| `max_risk_per_trade_pct` | 0.005 |
 | `delta_zone_sigma_mult` | 2.5 |
 | `composite_session_window` | 5 |
 | `dead_zone_start` | "12:00" |
@@ -4485,6 +4513,9 @@ assert candle.tick_count == 3
 ***
 
 ### INSTRUCTION 006 — `core/session_manager.py`
+
+> **[QUANT UPDATE]** CRITICAL: Implement a 15-minute warmup filter at session open. Ignore all structural break signals during this window to avoid pre-market whipsaws and trap manipulation.
+
 
 **TASK:**
 Create `SessionManager` class that takes an `InstrumentConfig` in `__init__`.
@@ -4783,6 +4814,9 @@ assert result["confirmed"] == True  # most cells have ask:bid >= 3:1
 
 ### INSTRUCTION 012 — `orderflow/absorption_detector.py`
 
+> **[QUANT UPDATE]** CRITICAL: Must require immediate subsequent price displacement (e.g. range expansion in next 1-2 candles) to validate absorption, otherwise it is exhaustion/fake.
+
+
 **TASK:**
 Create function `detect_absorption(candle: Candle, atr: float, avg_vol: float) -> dict`
 Returns `{detected: bool, absorption_type: str, direction_implication: str}`
@@ -4817,6 +4851,9 @@ assert result2["detected"] == False
 ***
 
 ### INSTRUCTION 013 — `orderflow/bubble_detector.py`
+
+> **[QUANT UPDATE]** CRITICAL: Filter out API tick conflation (retail sweeps) by requiring `trade_size` or tick count to spike alongside volume, ensuring it's true institutional aggression.
+
 
 **TASK:**
 Create `BubbleDetector` class:
@@ -4908,6 +4945,9 @@ assert state == "PROBING"
 
 **TASK:**
 Create `DriveTracker` class:
+
+> **[QUANT UPDATE]** CRITICAL: Enforce a Time/Price decay rule between touches. A 1-tick pullback in the same candle is NOT a new drive. Price must rotate away significantly and return.
+
 - `__init__(self, tick_size: float)`
 - `record_touch(level: float, ts: float, was_rejected: bool, rejection_type: Optional[str])`
 - `classify_drive(current_price: float, key_level: float, direction: str, candles: list, atr: float, cvd_engine, tick_size: float) -> DriveResult`
@@ -4960,6 +5000,9 @@ assert result3.entry_valid == False
 ***
 
 ### INSTRUCTION 016 — `strategy/aggression_scorer.py`
+
+> **[QUANT UPDATE]** CRITICAL: Normalize the spread (current_spread / 10-period_EMA_spread) before scoring to account for MCX volatility regime changes. Requires Proxy Bundle (Spread + Vol + OI).
+
 
 **TASK:**
 Create `AggressionScorer` with one static method:
@@ -5070,6 +5113,9 @@ assert "DAILY" in reason3
 
 ### INSTRUCTION 018 — `risk/position_sizer.py`
 
+> **[QUANT UPDATE]** CRITICAL: Recalculate R:R at live L2 Ask price before market execution. If `(target - ask) < (ask - SL) * 1.5`, abort the execution due to slippage.
+
+
 **TASK:**
 Create `PositionSizer` with static method:
 `calculate(equity, entry, stop, point_value, lot_size, cushion_quality, risk_manager, cfg) -> tuple[int, float, float]`
@@ -5077,7 +5123,7 @@ Create `PositionSizer` with static method:
 Returns `(lots, risk_amount_inr, risk_pct)`.
 
 **Sizing formula — EXACT:**
-1. `risk_amount = equity × cfg.risk_per_trade_pct` (0.5% of equity)
+1. `risk_amount = equity × cfg.risk_per_trade_pct` (0.25% of equity (per playbook))
 2. If `cushion_quality == "WIDE"`: `risk_amount = risk_amount × 0.50` (50% size reduction)
 3. `risk_per_lot = abs(entry - stop) × point_value`
 4. `lots = floor(risk_amount / risk_per_lot)`
@@ -5188,6 +5234,9 @@ Create `PyramidResult` dataclass: `add: bool`, `level: Optional[float]`, `lots: 
 ***
 
 ### INSTRUCTION 021 — `data/duckdb_store.py`
+
+> **[QUANT UPDATE]** CRITICAL: Do not write live ticks synchronously. Implement an async in-memory deque / batch flusher to prevent OLAP disk I/O locking.
+
 
 **TASK:**
 Implement `DuckDBStore` class with exactly these tables and methods as specified in the architecture document. No extra tables, no extra columns.
@@ -5482,3 +5531,5 @@ Run this exact checklist before marking system complete:
 ❌ Any threshold value not sourced from CFG
 ❌ Auto-trading execution (order placement) — signal generation only
 ```
+
+

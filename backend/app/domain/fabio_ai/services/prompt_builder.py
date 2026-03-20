@@ -169,6 +169,11 @@ def _build_core_amt_narrative(data: Dict[str, Any]) -> str:
         lvn_str = ", ".join(f"{l:.0f}" for l in lvns[:3])
         parts.append(f"LVNs: {lvn_str}. These are reaction zones on pullback.")
     
+    # Stacked imbalances (from footprint)
+    stacked_imbalances = data.get("stacked_imbalances", "")
+    if stacked_imbalances:
+        parts.append(f"Stacked imbalances: {stacked_imbalances}.")
+    
     # Developing VA
     dev_poc = data.get("dev_poc", 0)
     dev_vah = data.get("dev_vah", 0)
@@ -244,6 +249,11 @@ def _build_core_amt_narrative(data: Dict[str, Any]) -> str:
         for ap in aggressive_prints[-2:]:
             if isinstance(ap, dict):
                 parts.append(f"Big order: {ap.get('side', '?')} at {ap.get('price', 0):.0f}.")
+    
+    # Volume bubbles (institutional volume spikes)
+    volume_bubbles = data.get("volume_bubbles", "")
+    if volume_bubbles:
+        parts.append(f"Volume bubbles: {volume_bubbles}")
     
     # Bubble retests
     bubble_retests = data.get("bubble_retests", [])

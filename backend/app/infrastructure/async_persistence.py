@@ -65,6 +65,13 @@ class AsyncPersistenceBus:
 
     def save_session_profile(self, profile_data: dict[str, Any]) -> None:
         self._enqueue("save_session_profile", (profile_data,), {})
+    def save_npoc(self, underlying: str, session_date: str, poc_price: float) -> None:
+        self._enqueue("save_npoc", (underlying, session_date, poc_price), {})
+
+    def mark_npoc_filled(self, underlying: str, session_date: str, filled_at: str) -> None:
+        self._enqueue("mark_npoc_filled", (underlying, session_date, filled_at), {})
+
+
 
     # ------------------------------------------------------------------
     # Passthrough read API (synchronous — reads must be consistent)
@@ -90,6 +97,10 @@ class AsyncPersistenceBus:
 
     def query_position_events(self, *args, **kwargs):
         return self._storage.query_position_events(*args, **kwargs)
+    def get_active_npocs(self, underlying: str):
+        return self._storage.get_active_npocs(underlying)
+
+
 
     # Forward kv_set/kv_get if available
     def kv_set(self, key: str, value: str) -> None:

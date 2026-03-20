@@ -39,7 +39,6 @@ class SessionRiskManager:
     _base_sl_pct: float = 0.005  # default 0.5%
     _max_sl_pct: float = 0.005  # hard cap
     _max_profit_risk_pct: float = 0.30  # never risk > 30% of session profit
-    _max_trades_per_session: int = 5  # Fabio: cap trades per session
     
     # ── FIX: 3-Loss Daily Circuit Breaker ──
     # Fabio: "If you hit 3 stop-outs, stop trading for the day."
@@ -66,8 +65,7 @@ class SessionRiskManager:
         
         ENFORCES:
         1. Circuit breaker (3 consecutive losses)
-        2. Max trades per session
-        3. Halted state
+        2. Halted state
         """
         if self._halted:
             return False
@@ -78,8 +76,6 @@ class SessionRiskManager:
                 self.consecutive_losses,
             )
             return False
-        if self.trade_count >= self._max_trades_per_session:
-            return False
         return True
 
     @property
@@ -89,8 +85,6 @@ class SessionRiskManager:
             return f"3-loss circuit breaker: {self.consecutive_losses} consecutive losses"
         if self.consecutive_losses >= self.max_consecutive_losses:
             return f"Circuit breaker: {self.consecutive_losses} consecutive losses"
-        if self.trade_count >= self._max_trades_per_session:
-            return f"Max trades ({self._max_trades_per_session}) reached"
         return ""
 
     @property

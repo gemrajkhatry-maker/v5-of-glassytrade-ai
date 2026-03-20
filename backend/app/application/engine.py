@@ -165,6 +165,10 @@ class TradingEngine:
 
         self._engine_start_time = time.time()
 
+        # ── Mid-Trade Recovery (Gap #8) ──
+        # Recover open positions from DB on startup to survive crashes
+        await self._recover_open_positions()
+
         # Seed historical data
         await self._seed_history()
 
@@ -284,6 +288,75 @@ class TradingEngine:
                             logger.debug("Engine: initial seed failed for %s", sym, exc_info=True)
             except Exception:
                 logger.warning("Engine: history fetch failed for %s", sym, exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Mid-Trade Recovery (Gap #8)
+    # ------------------------------------------------------------------
+
+    async def _recover_open_positions(self) -> None:
+        """Recover open positions from DB on startup to survive crashes.
+
+        Loads all open positions from the open_positions table and restores
+        them to the TradeManager so the engine can resume managing them
+        without losing position context.
+        """
+        storage = self._session_service._storage
+        if not storage:
+            logger.info("Engine: no storage available — skipping position recovery")
+            return
+
+        try:
+            open_positions = storage.load_open_positions()
+            if not open_positions:
+                logger.info("Engine: no open positions to recover")
+                return
+
+            recovered = 0
+            for pos_data in open_positions:
+                symbol = pos_data.get("symbol", "")
+                if not symbol:
+                    continue
+
+                # Add symbol to active list if not already there
+                if symbol not in self._active_symbols:
+                    self._active_symbols.append(symbol)
+                    self._candle_states[symbol] = _new_candle_state()
+                    self._current_depths[symbol] = {"book": None}
+                    self._fp_accumulators[symbol] = TickFootprintAccumulator()
+                    self._last_process_times[symbol] = 0.0
+                    self._tick_counts[symbol] = 0
+                    self._last_tick_times[symbol] = time.time()
+
+                # Restore position to the session's portfolio
+                try:
+                    session = self._session_service.get_or_create_session(symbol)
+                    position = session.portfolio.recover_position(pos_data)
+                    if position:
+                        logger.info(
+                            "Engine: recovered position %s for %s (side=%s, entry=%.2f, SL=%.2f, TP=%.2f)",
+                            pos_data.get("id", "?"),
+                            symbol,
+                            pos_data.get("side", "?"),
+                            pos_data.get("entry_price", 0),
+                            pos_data.get("stop_loss", 0),
+                            pos_data.get("take_profit", 0),
+                        )
+                        recovered += 1
+                except Exception as e:
+                    logger.error(
+                        "Engine: failed to recover position %s for %s: %s",
+                        pos_data.get("id", "?"),
+                        symbol,
+                        e,
+                    )
+
+            if recovered > 0:
+                logger.info("Engine: recovered %d open positions from DB", recovered)
+            else:
+                logger.info("Engine: no positions were recovered")
+
+        except Exception as e:
+            logger.error("Engine: position recovery failed: %s", e, exc_info=True)
 
     def _load_candles_from_db(self, symbol: str, limit: int = 500) -> list[OHLC]:
         """Load closed candles from SQLite.

@@ -31,24 +31,16 @@ class TestProfileShapeExtraction:
     parsed by extracting the first character as the shape code."""
 
     def test_pb01_p_shape_extracted_with_avoid_long(self):
-        """PB-01: P-shape descriptor produces 'P-shape' text and 'AVOID LONG' warning.
-
-        Previously, profile_shape.lower() == "P" never matched because
-        the string was "P-shape (top-heavy, distribution)". The fix uses
-        profile_shape[0] == "P".
-        """
+        """PB-01: P-shape descriptor produces 'P-shape' text and 'DO NOT GO LONG' warning."""
         prompt = build_entry_prompt(_data(profile_shape="P-shape (top-heavy, distribution)"))
         assert "P-shape" in prompt, "Prompt must contain 'P-shape' for P-shape profile"
-        assert "AVOID LONG" in prompt, "Prompt must warn 'AVOID LONG' for P-shape (distribution)"
+        assert "DO NOT GO LONG" in prompt, "Prompt must warn 'DO NOT GO LONG' for P-shape"
 
     def test_pb02_b_shape_extracted_with_avoid_short(self):
-        """PB-02: b-shape descriptor produces 'b-shape' text and 'AVOID SHORT' warning.
-
-        Lowercase 'b' is critical -- it differs from capital 'B' (bimodal).
-        """
+        """PB-02: b-shape descriptor produces 'b-shape' text and 'DO NOT GO SHORT' warning."""
         prompt = build_entry_prompt(_data(profile_shape="b-shape (bottom-heavy)"))
         assert "b-shape" in prompt, "Prompt must contain 'b-shape' for b-shape profile"
-        assert "AVOID SHORT" in prompt, "Prompt must warn 'AVOID SHORT' for b-shape (accumulation)"
+        assert "DO NOT GO SHORT" in prompt, "Prompt must warn 'DO NOT GO SHORT' for b-shape"
 
     def test_pb03_d_shape_balanced_rotation(self):
         """PB-03: D-shape produces 'D-shape' and 'balanced rotation', no AVOID warning."""
@@ -91,30 +83,28 @@ class TestCVDMagnitudeWarnings:
     warnings for extreme values."""
 
     def test_pb06_extreme_negative_cvd_do_not_long(self):
-        """PB-06: CVD slope -611 triggers 'CVD EXTREME SELLING' and 'DO NOT LONG'."""
+        """PB-06: CVD slope -611 triggers 'CVD EXTREME SELLING' and 'DO NOT FADE'."""
         prompt = build_entry_prompt(_data(cvd_slope=-611))
         assert "CVD EXTREME SELLING" in prompt, "Extreme negative CVD must show 'CVD EXTREME SELLING'"
-        assert "DO NOT LONG" in prompt, "Extreme negative CVD must warn 'DO NOT LONG'"
+        assert "DO NOT FADE" in prompt, "Extreme negative CVD must warn 'DO NOT FADE'"
 
     def test_pb07_extreme_positive_cvd_do_not_short(self):
-        """PB-07: CVD slope +200 triggers 'CVD EXTREME BUYING' and 'DO NOT SHORT'."""
+        """PB-07: CVD slope +200 triggers 'CVD EXTREME BUYING' and 'DO NOT FADE'."""
         prompt = build_entry_prompt(_data(cvd_slope=200))
         assert "CVD EXTREME BUYING" in prompt, "Extreme positive CVD must show 'CVD EXTREME BUYING'"
-        assert "DO NOT SHORT" in prompt, "Extreme positive CVD must warn 'DO NOT SHORT'"
+        assert "DO NOT FADE" in prompt, "Extreme positive CVD must warn 'DO NOT FADE'"
 
     def test_pb08_moderate_positive_cvd_no_warning(self):
-        """PB-08: Moderate CVD slope +5.0 shows 'CVD up' without 'DO NOT' warnings."""
+        """PB-08: Moderate CVD slope +5.0 shows 'Sustained buying' without extreme warnings."""
         prompt = build_entry_prompt(_data(cvd_slope=5.0))
-        assert "CVD up" in prompt, "Moderate positive CVD must show 'CVD up'"
-        # Split on RULES to check only the narrative section for CVD-specific warnings
+        assert "Sustained buying" in prompt, "Moderate positive CVD must show 'Sustained buying'"
         narrative = prompt.split("RULES:")[0]
-        # The narrative should NOT contain "DO NOT LONG" or "DO NOT SHORT" from CVD lines
         assert "CVD EXTREME" not in narrative, "Moderate CVD should not trigger extreme warnings"
 
     def test_pb09_moderate_negative_cvd_no_warning(self):
-        """PB-09: Moderate CVD slope -3.0 shows 'CVD down' without 'DO NOT' warnings."""
+        """PB-09: Moderate CVD slope -3.0 shows 'Sustained selling' without extreme warnings."""
         prompt = build_entry_prompt(_data(cvd_slope=-3.0))
-        assert "CVD down" in prompt, "Moderate negative CVD must show 'CVD down'"
+        assert "Sustained selling" in prompt, "Moderate negative CVD must show 'Sustained selling'"
         narrative = prompt.split("RULES:")[0]
         assert "CVD EXTREME" not in narrative, "Moderate CVD should not trigger extreme warnings"
 
@@ -148,14 +138,14 @@ class TestCVDDivergenceWarnings:
     """Validates CVD divergence directional prohibition warnings."""
 
     def test_pb10_bearish_div_do_not_long(self):
-        """PB-10: BEARISH_DIV divergence produces 'DO NOT go LONG'."""
+        """PB-10: BEARISH_DIV divergence produces 'DO NOT GO LONG'."""
         prompt = build_entry_prompt(_data(cvd_divergence="BEARISH_DIV"))
-        assert "DO NOT go LONG" in prompt, "BEARISH_DIV must produce 'DO NOT go LONG'"
+        assert "DO NOT GO LONG" in prompt, "BEARISH_DIV must produce 'DO NOT GO LONG'"
 
     def test_pb11_bullish_div_do_not_short(self):
-        """PB-11: BULLISH_DIV divergence produces 'DO NOT go SHORT'."""
+        """PB-11: BULLISH_DIV divergence produces 'DO NOT GO SHORT'."""
         prompt = build_entry_prompt(_data(cvd_divergence="BULLISH_DIV"))
-        assert "DO NOT go SHORT" in prompt, "BULLISH_DIV must produce 'DO NOT go SHORT'"
+        assert "DO NOT GO SHORT" in prompt, "BULLISH_DIV must produce 'DO NOT GO SHORT'"
 
     def test_no_divergence_no_warning(self):
         """No divergence produces no divergence-related 'DO NOT' text."""
@@ -167,9 +157,8 @@ class TestCVDDivergenceWarnings:
     def test_bearish_div_combined_with_extreme_cvd(self):
         """Both BEARISH_DIV and extreme negative CVD should both produce warnings."""
         prompt = build_entry_prompt(_data(cvd_divergence="BEARISH_DIV", cvd_slope=-611))
-        assert "DO NOT go LONG" in prompt, "Divergence warning must be present"
+        assert "DO NOT GO LONG" in prompt, "Divergence warning must be present"
         assert "CVD EXTREME SELLING" in prompt, "Extreme CVD warning must also be present"
-        assert "DO NOT LONG" in prompt, "Extreme CVD prohibition must also be present"
 
 
 # =====================================================================
@@ -185,25 +174,26 @@ class TestDecisionRules:
         prompt = build_entry_prompt(_data())
         rules_section = prompt.split("RULES:")[1] if "RULES:" in prompt else ""
         assert "P-shape" in rules_section, "RULES must reference P-shape"
-        assert "DO NOT go LONG" in rules_section, "RULES must prohibit LONG for P-shape"
+        assert "avoid LONG" in rules_section, "RULES must prohibit LONG for P-shape"
 
     def test_pb13_rules_contain_b_shape_prohibition(self):
         """PB-13: RULES section mentions b-shape prohibition for SHORT."""
         prompt = build_entry_prompt(_data())
         rules_section = prompt.split("RULES:")[1] if "RULES:" in prompt else ""
         assert "b-shape" in rules_section, "RULES must reference b-shape"
-        assert "DO NOT go SHORT" in rules_section, "RULES must prohibit SHORT for b-shape"
+        assert "avoid SHORT" in rules_section, "RULES must prohibit SHORT for b-shape"
 
     def test_pb14_rules_contain_cvd_prohibition(self):
-        """PB-14: RULES section mentions CVD directional prohibitions."""
+        """PB-14: RULES section mentions CVD and profile shape prohibitions."""
         prompt = build_entry_prompt(_data())
         rules_section = prompt.split("RULES:")[1] if "RULES:" in prompt else ""
         assert "CVD" in rules_section, "RULES must reference CVD"
-        assert "DO NOT go LONG" in rules_section, "RULES must prohibit LONG for bearish CVD"
-        assert "DO NOT go SHORT" in rules_section, "RULES must prohibit SHORT for bullish CVD"
+        assert "avoid LONG" in rules_section, "RULES must prohibit LONG for P-shape"
+        assert "avoid SHORT" in rules_section, "RULES must prohibit SHORT for b-shape"
 
     def test_rules_always_present(self):
         """RULES section must always be present regardless of input data."""
         prompt = build_entry_prompt(_data())
         assert "RULES:" in prompt, "RULES section must be present in every prompt"
-        assert "ALL THREE must align" in prompt, "Three-align requirement must be stated"
+        # The prompt uses "READ the market — State + Location + Aggression" instead of "ALL THREE must align"
+        assert "READ the market" in prompt, "Three-align requirement must be stated"

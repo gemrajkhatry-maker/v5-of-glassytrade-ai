@@ -111,62 +111,88 @@ class OptionScannerService:
                 for opt_type, option_map in [("CE", chain.calls), ("PE", chain.puts)]:
                     for strike in strikes:
                         opt = option_map.get(float(strike))
-                    if opt is None:
-                        continue
-                    
-                    ltp = float(opt.ltp or 0)
-                    if ltp <= 0:
-                        continue
-                    
-                    oi = int(opt.oi or 0)
-                    vol = int(opt.volume or 0)
-                    
-                    # Hard filters
-                    min_oi = self._MIN_OI.get(u.upper(), 5000)
-                    if oi < min_oi:
-                        continue
-                    
-                    bid = float(opt.bid or 0)
-                    ask = float(opt.ask or 0)
-                    if bid > 0 and ask > 0 and ltp > 0:
-                        spread_pct = (ask - bid) / ltp * 100
-                        if spread_pct > 2.5:
+                        if opt is None:
                             continue
-                    
-                    # Simple scoring: ATM proximity + OI + Volume
-                    atm_dist = abs(strike - atm) / interval if interval > 0 else 0
-                    delta_val = abs(float(opt.delta or 0.5))
-                    
-                    score = 0
-                    # ATM proximity (40 pts)
-                    score += max(0, 40 - (atm_dist * 15))
-                    # OI (30 pts)
-                    score += min(30, (oi / min_oi) * 10)
-                    # Volume (20 pts)  
-                    score += min(20, (vol / 1000) * 5)
-                    # Delta sweet spot (10 pts)
-                    if 0.40 <= delta_val <= 0.60:
-                        score += 10
-                    
-                    results.append(ScanResult(
-                        symbol=opt.symbol,
-                        underlying=u,
-                        strike=int(strike),
-                        option_type=opt_type,
-                        expiry=chain.expiry.date().isoformat(),
-                        ltp=ltp, oi=oi, volume=vol,
-                        spread=ask - bid if bid > 0 and ask > 0 else 0,
-                        score=score, bias=bias, bias_reason=bias_reason,
-                        delta=delta_val,
-                        iv=float(opt.iv or 0) if hasattr(opt, 'iv') else 0,
-                    ))
+                        
+                        ltp = float(opt.ltp or 0)
+                        if ltp <= 0:
+                            continue
+                        
+                        oi = int(opt.oi or 0)
+                        vol = int(opt.volume or 0)
+                        
+                        # Hard filters
+                        min_oi = self._MIN_OI.get(u.upper(), 5000)
+                        if oi < min_oi:
+                            continue
+                        
+                        bid = float(opt.bid or 0)
+                        ask = float(opt.ask or 0)
+                        if bid > 0 and ask > 0 and ltp > 0:
+                            spread_pct = (ask - bid) / ltp * 100
+                            if spread_pct > 2.5:
+                                continue
+                        
+                        # Advanced scoring: Spread penalty + Momentum Booster
+                        atm_dist = abs(strike - atm) / interval if interval > 0 else 0
+                        delta_val = abs(float(opt.delta or 0.5))
+                        
+                        score = 0
+                        # ATM proximity (40 pts max)
+                        score += max(0, 40 - (atm_dist * 15))
+                        # OI liquidity scaling (30 pts max)
+                        score += min(30, (oi / min_oi) * 10)
+                        # Volume momentum scaling (20 pts max)
+                        score += min(20, (vol / 1000) * 5)
+                        
+                        # Quant Improvement 1: Delta sweet spot +10 pts
+                        if 0.40 <= delta_val <= 0.60:
+                            score += 10
+                            
+                        # Quant Improvement 2: Dynamic Spread Penalty (-20 pts max)
+                        if ltp > 0:
+                            spread_pct = (ask - bid) / ltp * 100
+                            if spread_pct > 0.5:
+                                penalty = min(20, (spread_pct - 0.5) * 10)
+                                score -= penalty
+                                
+                        # Quant Improvement 3: Momentum Bias Booster (+25 pts)
+                        if bias == "BULLISH" and opt_type == "CE":
+                            score += 25
+                        elif bias == "BEARISH" and opt_type == "PE":
+                            score += 25
+                        
+                        results.append(ScanResult(
+                            symbol=opt.symbol,
+                            underlying=u,
+                            strike=int(strike),
+                            option_type=opt_type,
+                            expiry=chain.expiry.date().isoformat(),
+                            ltp=ltp, oi=oi, volume=vol,
+                            spread=ask - bid if bid > 0 and ask > 0 else 0,
+                            score=score, bias=bias, bias_reason=bias_reason,
+                            delta=delta_val,
+                            iv=float(opt.iv or 0) if hasattr(opt, 'iv') else 0,
+                        ))
 
             except Exception as e:
                 logger.error("scan_top_n failed for %s: %s", u, e)
         
-        # Sort by score, return top N
-        results.sort(key=lambda r: -r.score)
-        final = results[:n]
+        # Group by underlying and take top N per underlying first
+        from collections import defaultdict
+        grouped = defaultdict(list)
+        for r in results:
+            grouped[r.underlying].append(r)
+            
+        diverse_results = []
+        for u_name, u_results in grouped.items():
+            u_results.sort(key=lambda r: -r.score)
+            # Take top 2 from each index to ensure diversity (e.g. 2 Nifty, 2 BankNifty, 2 FinNifty)
+            diverse_results.extend(u_results[:top_per_underlying])
+            
+        # Sort the combined diverse list and take the final N (5-6)
+        diverse_results.sort(key=lambda r: -r.score)
+        final = diverse_results[:n]
         
         # If no contracts found (no momentum), return ATM contracts for monitoring
         if not final:

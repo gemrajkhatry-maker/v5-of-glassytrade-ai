@@ -204,7 +204,7 @@ class TradeManager:
         self._load_daily_losses()
         self._daily_loss_reset_time: float = self._next_ist_midnight()
         self._session_realized_pnl: float = 0.0  # Tracks PnL for the current session
-        
+
         # Ensure clean startup — clear any stale positions
         self._positions.clear()
 
@@ -417,10 +417,14 @@ class TradeManager:
             phase_stop = TIME_STOP_TABLE.get(key, 0.0)
             if phase_stop == 0.0:
                 # Fallback: 1800 balanced, 7200 imbalanced
-                phase_stop = 7200.0 if MarketStateCodec.is_imbalanced(market_state) else 1800.0
+                phase_stop = (
+                    7200.0 if MarketStateCodec.is_imbalanced(market_state) else 1800.0
+                )
         else:
             # No session info: use static fallback
-            phase_stop = 7200.0 if MarketStateCodec.is_imbalanced(market_state) else 1800.0
+            phase_stop = (
+                7200.0 if MarketStateCodec.is_imbalanced(market_state) else 1800.0
+            )
 
         # Near close: cap at time_to_close - 300s (5 min buffer before close)
         if time_to_close > 0:
@@ -438,19 +442,24 @@ class TradeManager:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def is_valid_rr(entry: float, sl: float, tp: float, min_rr: float = 1.95) -> bool:
+    def is_valid_rr(
+        entry: float, sl: float, tp: float, min_rr: float | None = None
+    ) -> bool:
         """Check that risk:reward ratio is at least 1:min_rr.
 
         Returns True if the trade offers sufficient reward relative to risk.
-        Threshold slightly below 2.0 to avoid floating-point edge rejections.
+        Default threshold from plan FR-07-08: 1.5
         """
+        from app.domain.constants import MIN_RR_RATIO
+
+        threshold = min_rr if min_rr is not None else MIN_RR_RATIO
         if entry <= 0:
             return False
         risk = abs(entry - sl)
         reward = abs(tp - entry)
         if risk <= 0 or reward <= 0:
             return False
-        return (reward / risk) >= min_rr
+        return (reward / risk) >= threshold
 
     # ------------------------------------------------------------------
     # Registration
@@ -478,10 +487,14 @@ class TradeManager:
           - Step 3 (breakout): price moves 60% toward TP
         """
         # Ensure compatible types for calculation
-        entry_dec = float(entry_price) if hasattr(entry_price, '__float__') else entry_price
-        stop_dec = float(stop_loss) if hasattr(stop_loss, '__float__') else stop_loss
-        tp_dec = float(take_profit) if hasattr(take_profit, '__float__') else take_profit
-        
+        entry_dec = (
+            float(entry_price) if hasattr(entry_price, "__float__") else entry_price
+        )
+        stop_dec = float(stop_loss) if hasattr(stop_loss, "__float__") else stop_loss
+        tp_dec = (
+            float(take_profit) if hasattr(take_profit, "__float__") else take_profit
+        )
+
         risk = abs(entry_dec - stop_dec)
         tp_dist = abs(tp_dec - entry_dec)
 
@@ -517,7 +530,7 @@ class TradeManager:
         with self._lock:
             self._positions[position_id] = mp
             pos_count = len(self._positions)
-        
+
         logger.info(
             f"TradeManager: registered {side} {position_id} "
             f"entry={float(entry_price):.2f} SL={float(stop_loss):.2f} TP={float(take_profit):.2f} "
@@ -594,8 +607,10 @@ class TradeManager:
             # OR when CVD strongly confirms the current trade direction (CVD slope > 0.5 or < -0.5).
             if not mp.breakeven_set:
                 risk = abs(mp.entry_price - mp.initial_stop)
-                hit_1r = self.config.breakeven_at_1r and (risk > 0 and unrealised >= risk)
-                
+                hit_1r = self.config.breakeven_at_1r and (
+                    risk > 0 and unrealised >= risk
+                )
+
                 # CVD Breakeven: require at least a small amount of profit to move to BE based on CVD
                 hit_cvd = False
                 if self.config.cvd_breakeven and unrealised > 0:
@@ -897,14 +912,24 @@ class TradeManager:
 
             now = current_time if current_time is not None else time.time()
             # Convert Decimal to float for calculations
-            entry = float(mp.entry_price) if hasattr(mp.entry_price, '__float__') else mp.entry_price
-            sl = float(mp.stop_loss) if hasattr(mp.stop_loss, '__float__') else mp.stop_loss
-            tp = float(mp.take_profit) if hasattr(mp.take_profit, '__float__') else mp.take_profit
-            
+            entry = (
+                float(mp.entry_price)
+                if hasattr(mp.entry_price, "__float__")
+                else mp.entry_price
+            )
+            sl = (
+                float(mp.stop_loss)
+                if hasattr(mp.stop_loss, "__float__")
+                else mp.stop_loss
+            )
+            tp = (
+                float(mp.take_profit)
+                if hasattr(mp.take_profit, "__float__")
+                else mp.take_profit
+            )
+
             unrealised = (
-                (current_price - entry)
-                if mp.is_long
-                else (entry - current_price)
+                (current_price - entry) if mp.is_long else (entry - current_price)
             )
             unrealised_pct = unrealised / entry if entry else 0.0
 

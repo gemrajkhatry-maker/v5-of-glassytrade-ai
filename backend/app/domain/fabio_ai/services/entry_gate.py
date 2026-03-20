@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 def min_candles_gate(data: list, min_candles: int = 6) -> bool:
     """Block entry if insufficient candles have formed since session start.
-    
+
     Fabio rule: Don't trade first 15-30 minutes.
     Default 6 candles × 5min = 30 minutes.
     Returns True if enough candles exist, False to BLOCK.
@@ -40,7 +40,7 @@ def min_candles_gate(data: list, min_candles: int = 6) -> bool:
 
 def full_body_close_gate(tick: OHLC, break_level: float, direction: str) -> bool:
     """Fabio rule: Require full body candle close above breakout level.
-    
+
     Returns True if confirmed, False to BLOCK.
     """
     body = abs(tick.close - tick.open)
@@ -57,10 +57,10 @@ def full_body_close_gate(tick: OHLC, break_level: float, direction: str) -> bool
 
 def nearest_round_number(price: float) -> float:
     """Find nearest round number for MCX instruments.
-    
+
     Uses magnitude-based rounding:
     - Price < 1000: round to 100
-    - Price 1000-10000: round to 500  
+    - Price 1000-10000: round to 500
     - Price > 10000: round to 1000
     """
     if price < 1000:
@@ -202,19 +202,25 @@ def three_align_check(
     # ── FIX #5 & #8: CVD Hard Gate (adjusted for Indian options) ──
     # Fabio: "If CVD is strongly against you, NO TRADE."
     # FIX #8: Threshold adjusted for options (higher due to gamma/theta effects)
-    cvd_slope = getattr(amt_result, 'cvd_slope', 0.0)
-    cvd_divergence = getattr(amt_result, 'cvd_divergence', '')
-    
+    cvd_slope = getattr(amt_result, "cvd_slope", 0.0)
+    cvd_divergence = getattr(amt_result, "cvd_divergence", "")
+
     # FIX #8: Higher threshold for options (±100 instead of ±50)
     # Options have natural noise from Greeks, need wider threshold
     CVD_EXTREME_THRESHOLD = 100.0  # Adjusted for options markets
-    
+
     # Extreme CVD in balance = don't fade (institutional pressure building)
     if cvd_slope < -CVD_EXTREME_THRESHOLD and amt_result.market_state == "BALANCED":
-        logger.info("Three-Align: BLOCKED — CVD extreme selling (%.0f) in balance, do not fade", cvd_slope)
+        logger.info(
+            "Three-Align: BLOCKED — CVD extreme selling (%.0f) in balance, do not fade",
+            cvd_slope,
+        )
         return False, False, False
     if cvd_slope > CVD_EXTREME_THRESHOLD and amt_result.market_state == "BALANCED":
-        logger.info("Three-Align: BLOCKED — CVD extreme buying (+%.0f) in balance, do not fade", cvd_slope)
+        logger.info(
+            "Three-Align: BLOCKED — CVD extreme buying (+%.0f) in balance, do not fade",
+            cvd_slope,
+        )
         return False, False, False
 
     near_level = False
@@ -244,9 +250,9 @@ def three_align_check(
         levels_to_check.append(amt_result.session_vwap)
     # HVNs, LVNs
     levels_to_check.extend((amt_result.hvns or [])[:3])
-    levels_to_check.extend(getattr(amt_result, 'lvns', []) or [])
+    levels_to_check.extend(getattr(amt_result, "lvns", []) or [])
     # Leg LVNs (Fabio: LVNs inside impulse leg are reaction zones)
-    leg_lvns = getattr(amt_result, 'leg_lvns', [])
+    leg_lvns = getattr(amt_result, "leg_lvns", [])
     if leg_lvns:
         levels_to_check.extend(leg_lvns)
     # IB levels
@@ -299,14 +305,16 @@ def three_align_check(
     # Only enforce for IMBALANCED (trend) markets.
     # BALANCED (mean reversion) can enter on first drive (fading breakout failure).
     if amt_result.market_state == "IMBALANCED" and near_level and not is_second_drive:
-        logger.debug("Three-Align: blocked — first drive only, waiting for re-test (Fabio rule)")
+        logger.debug(
+            "Three-Align: blocked — first drive only, waiting for re-test (Fabio rule)"
+        )
         return False, False, False
 
     # ── FIX #2: Require Confirmation Bundle ──
     # FABIO RULE: "Direction, Location, AND Aggression — all three."
     # Volume impulse is MANDATORY. Need 2/3 overall.
     agg_ok = check_confirmation_bundle(data, tick, order_book)
-    
+
     if not agg_ok:
         logger.debug(
             "Three-Align: blocked — confirmation bundle weak (need 2/3: vol/delta/spread)"
@@ -315,7 +323,7 @@ def three_align_check(
 
     # ── All checks passed ──
     gate_passed = state_ok and near_level and agg_ok
-    
+
     if not return_is_second_drive:
         return gate_passed, agg_ok
     return gate_passed, agg_ok, is_second_drive
@@ -328,11 +336,11 @@ def three_align_check(
 
 def check_confirmation_bundle(data: list[OHLC], tick: OHLC, order_book=None) -> bool:
     """Confirmation Bundle (2/3): Volume Impulse + Delta Pressure + Spread Tightness.
-    
+
     FABIO RULE: "Aggression is the trigger."
     Volume impulse is MANDATORY — no aggression = no trade.
     Need 2/3 overall, but volume impulse must be present.
-    
+
     Components:
     1. Volume Impulse: current volume > 1.5x EMA(20) (MANDATORY)
     2. Delta Pressure: |delta| / volume > 0.15 (institutional direction)
@@ -618,18 +626,21 @@ def build_entry_signal(
     risk = abs(tick.close - stop_price)
     reward = abs(tp_price - tick.close)
     rr = reward / risk if risk > 0 else 0
-    
+
     # ── MINIMUM R:R FILTER (Fabio: "Don't risk more than you can make") ──
-    # For scalping, minimum R:R is 1:1 (risk = reward)
-    # Anything below means you're paying more in risk than potential gain
-    MIN_RR_RATIO = 1.0  # Minimum 1:1 risk-to-reward
+    # Plan FR-07-08: R:R must be minimum 1:1.5 to generate signal
+    from app.domain.constants import MIN_RR_RATIO
+
     if rr < MIN_RR_RATIO:
         logger.warning(
-            "Signal REJECTED: R:R too low (%.2f) — risk (%.2f) > reward (%.2f)",
-            rr, risk, reward,
+            "Signal REJECTED: R:R too low (%.2f < %.2f) — risk (%.2f) > reward (%.2f)",
+            rr,
+            MIN_RR_RATIO,
+            risk,
+            reward,
         )
         return None
-    
+
     logger.info(
         "build_entry_signal: %s %s entry=%.2f SL=%.2f TP=%.2f risk=%.2f reward=%.2f RR=%.2f "
         "poc=%.2f vah=%.2f val=%.2f vwap=%.2f agg_sl=%s",
@@ -887,3 +898,105 @@ def check_imbalance_alignment(direction: str, imbalances: list) -> int:
     if opposing > aligned:
         return -2
     return 0
+
+
+# ------------------------------------------------------------------
+# Gate Pipeline Integration (Phase 6)
+# ------------------------------------------------------------------
+
+
+def run_gate_pipeline(
+    data: list[OHLC],
+    amt_result: AMTResult,
+    tick: OHLC,
+    market_state: str = "BALANCED",
+    drive_number: int = 0,
+    drive_entry_valid: bool = False,
+    aggression_score: float = 0.0,
+    is_risk_halted: bool = False,
+    halt_reason: str = "",
+    tick_age_seconds: float = 1.0,
+    symbol: str = "",
+) -> tuple[bool, str, str]:
+    """Run the 12-gate pipeline for additional validation.
+
+    Call this AFTER three_align_check passes. Returns (passed, reason, detail).
+    """
+    from app.domain.fabio_ai.services.gate_pipeline import GatePipeline, GateContext
+    from app.domain.fabio_ai.services.eia_calendar import EIACalendar
+    from app.domain.trading.models.enums import MarketState as MS
+
+    # Map string to enum
+    state_map = {
+        "NO_TRADE": MS.NO_TRADE,
+        "BALANCED": MS.BALANCED,
+        "BALANCE": MS.BALANCED,
+        "IMBALANCED": MS.IMBALANCED,
+        "IMBALANCE": MS.IMBALANCED,
+        "PROBING": MS.PROBING,
+    }
+    ms = state_map.get(market_state.upper(), MS.BALANCED)
+
+    # Compute distance to nearest level
+    price = float(tick.close)
+    levels = [amt_result.value_area_high, amt_result.value_area_low]
+    if amt_result.lvns:
+        levels.extend(amt_result.lvns)
+    nearest = min(levels, key=lambda lv: abs(price - lv)) if levels else 0
+    tick_size = abs(price) * 0.0005 if price != 0 else 0.05
+    dist_ticks = abs(price - nearest) / tick_size if tick_size > 0 else 999
+
+    # R:R
+    risk = (
+        abs(price - amt_result.value_area_low)
+        if price > amt_result.poc
+        else abs(amt_result.value_area_high - price)
+    )
+    reward = abs(amt_result.poc - price)
+    rr = reward / risk if risk > 0 else 0
+
+    # EIA window check (FR-01-07)
+    eia_calendar = EIACalendar(suppression_minutes=15)
+    eia_suppressed = eia_calendar.is_suppressed(symbol) if symbol else False
+
+    ctx = GateContext(
+        symbol=symbol,
+        candle_count=len(data),
+        tick_age_seconds=tick_age_seconds,
+        market_state=ms,
+        poc=amt_result.poc,
+        vah=amt_result.value_area_high,
+        val=amt_result.value_area_low,
+        price=price,
+        tick_size=tick_size,
+        nearest_level=nearest,
+        distance_to_level_ticks=dist_ticks,
+        drive_number=drive_number,
+        drive_entry_valid=drive_entry_valid,
+        aggression_score=aggression_score,
+        is_risk_halted=is_risk_halted,
+        halt_reason=halt_reason,
+        eia_window_active=eia_suppressed,
+        setup_type=amt_result.setup or "NONE",
+        r_r_ratio=rr,
+        cushion_ticks=dist_ticks,
+    )
+
+    result = GatePipeline().evaluate(ctx)
+    return result.passed, result.reason.value, result.detail
+
+
+def calculate_position_size(
+    equity: float,
+    entry_price: float,
+    stop_loss: float,
+    point_value: float = 10.0,
+) -> tuple[int, float, bool]:
+    """Calculate position size using PositionSizer (FR-10-01).
+
+    Returns (lots, risk_amount, valid).
+    """
+    from app.domain.fabio_ai.services.position_sizer import PositionSizer
+
+    ps = PositionSizer.calculate(equity, entry_price, stop_loss, point_value)
+    return ps.lots, ps.risk_amount, ps.valid

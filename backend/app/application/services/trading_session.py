@@ -1041,7 +1041,7 @@ class TradingSessionService:
                 session_info=_si, footprint_candle=_fp_candle,
             )
 
-        # 4a. Execute unified entry (structural gates inside)
+        # 4a. Execute entry using proper AMT pipeline (Fabio methodology)
         # Execute with cooldown between trades (prevent overtrading)
         import time as _time_mod
         _last_exec_mono = getattr(session, '_last_exec_mono', 0)
@@ -1050,23 +1050,70 @@ class TradingSessionService:
         _can_execute = _time_since_last > 60  # 60 second cooldown between same-symbol trades
         
         if run_entry and _can_execute:
-            session._last_entry_candle_time = event.tick.time
-            import time as _time_mod
-            session._last_exec_mono = _time_mod.monotonic()
-            _exec_id = id(_exec_decision) if _exec_decision else 'None'
-            _exec_prob = getattr(_exec_decision, 'probability', 'N/A') if _exec_decision else 'N/A'
-            log.info("EXECUTING: %s dir=%s P=%s id=%s",
-                     event.symbol, _exec_dir, _exec_prob, _exec_id)
-            self._execute_unified_entry(session, event.symbol, _exec_decision, _exec_amt, _exec_tick)
-            # Clear pending decision after use
-            session._pending_decision = None
-            session._pending_amt = None
-            session._pending_tick = None
+            # PHASE 1 FIX: Enforce session risk check before every entry
+            srm = session._session_risk_manager
+            if srm and not srm.can_trade:
+                log.info("ENTRY BLOCKED: %s — session risk: %s", event.symbol, srm.halt_reason)
+                run_entry = False
+            
+            if run_entry:
+                # Use proper AMT pipeline: run_gate_pipeline() + build_entry_signal()
+                from app.domain.fabio_ai.services.entry_gate import run_gate_pipeline, build_entry_signal
+                
+                # Run 12-gate pipeline
+                gate_passed, gate_reason, gate_detail = run_gate_pipeline(
+                    data=list(event.data),
+                    amt_result=amt_result,
+                    tick=event.tick,
+                    market_state=amt_result.market_state,
+                    drive_number=getattr(amt_result, 'drive_number', 0),
+                    drive_entry_valid=getattr(amt_result, 'drive_entry_valid', False),
+                    aggression_score=amt_result.aggression,
+                    is_risk_halted=False,
+                    halt_reason="",
+                    tick_age_seconds=1.0,
+                    symbol=event.symbol,
+                )
+                
+                if gate_passed:
+                    # Build signal using proper AMT methodology
+                    from app.domain.fabio_ai.services.entry_gate import build_entry_signal
+                    
+                    signal = build_entry_signal(
+                        direction=_exec_dir,
+                        tick=event.tick,
+                        amt_result=amt_result,
+                        ai_result={
+                            "rationale": f"AMT pipeline: {amt_result.market_state} {amt_result.aggression:.1f} aggression",
+                            "confidence": "High" if _exec_prob >= 0.65 else "Medium",
+                            "market_state": amt_result.market_state,
+                        },
+                        setup_type=amt_result.setup or "MEAN_REVERSION",
+                        data=list(event.data),
+                        session_context=getattr(session._last_session_info, "session", ""),
+                        confidence="High" if _exec_prob >= 0.65 else "Medium",
+                    )
+                    
+                    if signal:
+                        session._last_entry_candle_time = event.tick.time
+                        session._last_exec_mono = _time_mod.monotonic()
+                        log.info("EXECUTING: %s dir=%s P=%.3f via AMT pipeline",
+                                 event.symbol, _exec_dir, _exec_prob)
+                        self._execute_signal(event.symbol, signal, session)
+                        # Clear pending decision after use
+                        session._pending_decision = None
+                        session._pending_amt = None
+                        session._pending_tick = None
+                    else:
+                        log.info("ENTRY BLOCKED: %s — signal construction failed", event.symbol)
+                else:
+                    log.info("ENTRY BLOCKED: %s — gate %d (%s): %s",
+                             event.symbol, gate_passed, gate_reason, gate_detail)
         elif run_entry and not _can_execute:
-            log.debug("COOLDOWN: %s waiting %.0fs before next trade", event.symbol, 30 - _time_since_last)
+            log.debug("COOLDOWN: %s waiting %.0fs before next trade", event.symbol, 60 - _time_since_last)
 
-        # 4b. Trigger LLM descriptor for UI
-        if trigger_llm:
+        # 4b. Trigger LLM descriptor for UI (reduced frequency - only on new candles)
+        if trigger_llm and is_new_candle:
             self._llm_handler.run_entry(session, event.symbol, event.tick, amt_result)
 
         # Cooldown status message
@@ -1078,29 +1125,32 @@ class TradingSessionService:
             cooldown_status["rationale"] = base_rationale + " [Cooldown — waiting before next entry]"
             session.last_ai_analysis = cooldown_status
 
-    def _execute_unified_entry(self, session, symbol, agent_decision, amt_result, tick):
-        """Execute position entry using SignalCoordinator + unified gates."""
+    def _evaluate_candidate(self, session, symbol, agent_decision, amt_result, tick):
+        """Evaluate entry candidate using proper AMT methodology.
+        
+        This method does NOT execute trades — it only evaluates and logs.
+        All actual entries must go through the proper AMT pipeline:
+        run_gate_pipeline() + build_entry_signal()
+        """
         from app.domain.trading.models.enums import Source, SetupType
-        from app.domain.fabio_ai.services.signal_coordinator import SignalCoordinator
+        from app.domain.fabio_ai.services.entry_gate import (
+            three_align_check, 
+            check_momentum_fade,
+            run_gate_pipeline,
+            build_entry_signal,
+        )
         
         # Debug: log what we received
         _dir = getattr(agent_decision, 'direction', 'NONE')
         _prob = getattr(agent_decision, 'probability', 0)
         _id = id(agent_decision) if agent_decision else 'None'
-        log.info("UNIFIED ENTRY: %s received decision dir=%s P=%.3f id=%s",
+        log.info("CANDIDATE EVAL: %s received decision dir=%s P=%.3f id=%s",
                  symbol, _dir, _prob, _id)
-        
-        # Use SignalCoordinator for clean entry evaluation
-        coordinator = SignalCoordinator()
         
         # Get structural confirmation from AMT gate
         _fp_domain = getattr(session, '_last_fp_domain', None)
         _ib_high = getattr(session, '_ib_high', 0.0)
         _ib_low = getattr(session, '_ib_low', 0.0)
-        
-        from app.domain.fabio_ai.services.entry_gate import (
-            three_align_check, check_momentum_fade
-        )
         
         gate_passed, confirmation_strong, is_second_drive = three_align_check(
             data=session.data,
@@ -1113,298 +1163,47 @@ class TradingSessionService:
             return_is_second_drive=True
         )
         
-        # Use SignalCoordinator for unified decision
-        session_info = getattr(session, "_last_session_info", None)
-        _has_position = self._lifecycle_handler.has_managed_positions(symbol) if hasattr(self, '_lifecycle_handler') else False
-        _is_new_candle = (tick.time != getattr(session, '_last_entry_candle_time', ''))
-        
-        # Debug: log what decision we received
-        _decision_prob = getattr(agent_decision, 'probability', None) if agent_decision else None
-        _decision_dir = getattr(agent_decision, 'direction', 'NONE') if agent_decision else 'NONE'
-        log.info("COORDINATOR INPUT: %s decision=%s P=%s",
-                 symbol, _decision_dir, f'{_decision_prob:.3f}' if _decision_prob else 'None')
-        
-        # Use the decision passed in (already resolved from pending or current)
-        evaluation = coordinator.evaluate_entry(
-            agent_decision=agent_decision,
-            amt_result=amt_result,
-            tick=tick,
-            session_info=session_info,
-            confirmation_strong=confirmation_strong,
-            is_new_candle=_is_new_candle,
-            is_overseer_running=False,  # Overseer runs separately
-            has_position=_has_position,
-        )
-        
-        # Log coordinator decision
-        log.info("SIGNAL COORDINATOR: %s — %s (P=%.3f conviction=%s)",
-                 symbol, evaluation.reason, evaluation.probability, evaluation.conviction)
-        
-        if not evaluation.should_enter:
-            log.info("SIGNAL COORDINATOR: %s — %s (P=%.3f conviction=%s)",
-                     symbol, evaluation.reason, evaluation.probability, evaluation.conviction)
-            return
-        
-        log.info("SIGNAL COORDINATOR: %s — ENTER %s (P=%.3f conviction=%s setup=%s)",
-                 symbol, evaluation.direction, evaluation.probability,
-                 evaluation.conviction, evaluation.setup_type)
-        
-        # Map setup type
-        if evaluation.setup_type == "MEAN_REVERSION":
-            setup_type = SetupType.MEAN_REVERSION
-        else:
-            setup_type = SetupType.TREND_MODEL
-        
-        # Build and execute signal
-        log.info("SIGNAL BUILDING: %s — constructing %s signal",
-                 symbol, evaluation.direction)
-        
-        # Build signal using entry_gate
-        from app.domain.trading.models.enums import SignalType
-        
-        is_buy = evaluation.direction == "LONG"
-        sig_type = SignalType.BUY if is_buy else SignalType.SELL
-        
-        # Simple signal construction
-        buffer = tick.close * 0.001
-        if is_buy:
-            stop_price = tick.close - (tick.close * 0.02)  # 2% stop
-            tp_price = tick.close + (tick.close * 0.04)    # 4% target
-        else:
-            stop_price = tick.close + (tick.close * 0.02)
-            tp_price = tick.close - (tick.close * 0.04)
-        
-        # Create signal
-        from app.domain.trading.models.entities import Signal
-        from app.domain.trading.models.enums import Source
-        
-        signal = Signal(
-            type=sig_type,
-            price=tick.close,
-            reason=f"LLM {evaluation.setup_type}: {evaluation.direction} (P={evaluation.probability:.3f})",
-            setup=SetupType.MEAN_REVERSION if evaluation.setup_type == "MEAN_REVERSION" else SetupType.TREND_MODEL,
-            source=Source.LLM,
-            stop_loss=stop_price,
-            take_profit=tp_price,
-            timestamp=tick.time,
-            metadata={
-                "conviction": evaluation.conviction,
-                "probability": evaluation.probability,
-                "setup_type": evaluation.setup_type,
-            }
-        )
-        
-        log.info("SIGNAL CREATED: %s %s SL=%.2f TP=%.2f conviction=%s",
-                 symbol, evaluation.direction, stop_price, tp_price, evaluation.conviction)
-        
-        # Create signal object with complete trade thesis
-        from app.domain.trading.models.entities import Signal
-        from app.domain.trading.models.enums import SignalType, Source, SetupType
-        
-        is_buy = evaluation.direction == "LONG"
-        sig_type = SignalType.BUY if is_buy else SignalType.SELL
-        
-        # Build trade thesis for validation
-        setup_type_enum = SetupType.MEAN_REVERSION if evaluation.setup_type == "MEAN_REVERSION" else SetupType.TREND_MODEL
-        trade_thesis = {
-            "market_state": amt_result.market_state if amt_result else "BALANCED",
-            "location_type": "LVN" if amt_result and amt_result.lvns else "POC",
-            "location_level": tick.close,
-            "aggression_trigger": "LLM_AGGRESSION",
-            "session_context": evaluation.setup_type,
-            "invalidation_level": stop_price,
-            "setup_family": "return_to_value" if evaluation.setup_type == "MEAN_REVERSION" else "imbalance_continuation",
-        }
-        
-        signal = Signal(
-            type=sig_type,
-            price=tick.close,
-            reason=f"LLM {evaluation.setup_type}: {evaluation.direction} (P={evaluation.probability:.3f})",
-            setup=setup_type_enum,
-            source=Source.LLM,
-            stop_loss=stop_price,
-            take_profit=tp_price,
-            timestamp=tick.time,
-            metadata={
-                "conviction": evaluation.conviction,
-                "probability": evaluation.probability,
-                "setup_type": evaluation.setup_type,
-                "trade_thesis": trade_thesis,  # Required for thesis validation
-            }
-        )
-        
-        # Execute the signal
-        try:
-            self._execute_signal(symbol, signal, session)
-            log.info("SIGNAL EXECUTED: %s %s", symbol, evaluation.direction)
-        except Exception as e:
-            log.error("Signal execution failed: %s", e, exc_info=True)
-        
-        # Log to journal
-        try:
-            self._journal.log_signal(
-                symbol=symbol,
-                amt=amt_result,
-                llm_direction=evaluation.direction,
-                llm_confidence=evaluation.conviction,
-                llm_rationale=evaluation.reason,
-                decision_source="llm",
-                attribution="llm_plus_quant",
-            )
-        except:
-            pass
-        
-        return
-        
-        # Dead code below - keeping for reference
-        if False:
-            self._journal.log_rejection(
-                symbol=symbol,
-                reason="PLAYBOOK_GUARD_TRIPPED",
-                amt=session.last_amt,
-                agent_direction=agent_decision.direction,
-                agent_regime=agent_decision.regime,
-                agent_feature_drivers=getattr(agent_decision, "feature_drivers", ()),
-                decision_source="unified",
-                attribution="quant",
-            )
-            return
-
-        session_info = getattr(session, "_last_session_info", None)
-        if not getattr(session_info, "allow_entry", False):
-            self._record_playbook_guard_rejection(session, "PLAYBOOK_SESSION_BLOCK")
-            self._journal.log_rejection(
-                symbol=symbol,
-                reason="PLAYBOOK_SESSION_BLOCK",
-                amt=session.last_amt,
-                agent_direction=agent_decision.direction,
-                agent_regime=agent_decision.regime,
-                agent_feature_drivers=getattr(agent_decision, "feature_drivers", ()),
-                decision_source="unified",
-                attribution="quant",
-            )
-            return
-
-        market_state = str(getattr(amt_result, "market_state", ""))
-        if MarketStateCodec.is_imbalanced(market_state) and getattr(session_info, "allow_trend", False):
-            setup_type = SetupType.TREND_MODEL
-        elif MarketStateCodec.is_balanced(market_state) and getattr(session_info, "allow_reversion", False):
-            setup_type = SetupType.MEAN_REVERSION
-        else:
-            self._record_playbook_guard_rejection(session, "PLAYBOOK_STATE_SESSION_MISMATCH")
-            self._journal.log_rejection(
-                symbol=symbol,
-                reason="PLAYBOOK_STATE_SESSION_MISMATCH",
-                amt=session.last_amt,
-                agent_direction=agent_decision.direction,
-                agent_regime=agent_decision.regime,
-                agent_feature_drivers=getattr(agent_decision, "feature_drivers", ()),
-                decision_source="unified",
-                attribution="quant",
-            )
-            return
-
-        # 2. Structural Layer — Fabio Location & Confluence
-        # Gate: Three-Align (Market State + Price Location)
-        _fp_domain = getattr(session, '_last_fp_domain', None)
-        gate_passed, confirmation_strong, is_second_drive = three_align_check(
-            data=session.data,
-            amt_result=amt_result,
-            tick=tick,
-            order_book=session.order_book,
-            ib_high=getattr(session, '_ib_high', 0.0),
-            ib_low=getattr(session, '_ib_low', 0.0),
-            footprint_domain=_fp_domain,
-            return_is_second_drive=True
-        )
-
+        # Log AMT gate result
         if not gate_passed:
-            log.info("UNIFIED ENTRY: %s BLOCKED by AMT gate (state=%s, location=%s, confirm=%s)",
-                     symbol, amt_result.market_state, "near_level" if abs(tick.close - amt_result.poc) < (amt_result.value_area_high - amt_result.value_area_low) * 0.5 else "mid_range",
-                     confirmation_strong)
+            log.info("CANDIDATE EVAL: %s BLOCKED by AMT gate (state=%s, confirm=%s)",
+                     symbol, amt_result.market_state, confirmation_strong)
             return
         
-        log.info("UNIFIED ENTRY: %s AMT gate PASSED (confirm_strong=%s, second_drive=%s)",
+        log.info("CANDIDATE EVAL: %s AMT gate PASSED (confirm_strong=%s, second_drive=%s)",
                  symbol, confirmation_strong, is_second_drive)
-
+        
         # Gate: Momentum Fade (Don't fade a freight train)
         if check_momentum_fade(session.data, tick, agent_decision.direction):
-            log.warning("UNIFIED ENTRY: %s blocked by Momentum Fade gate", symbol)
-            return
-
-        # 3. Decision Refinement
-        # High confidence (0.65+) triggers immediately.
-        # Medium confidence (0.55+) requires strong structural confirmation.
-        is_high_conviction = agent_decision.probability >= 0.65
-        is_medium_conviction = agent_decision.probability >= 0.55 and confirmation_strong
-        
-        if not (is_high_conviction or is_medium_conviction):
-            log.info("UNIFIED ENTRY: %s probability (%.3f) insufficient — need P>=0.65 OR (P>=0.55 + strong confirmation=%s)", 
-                      symbol, agent_decision.probability, confirmation_strong)
+            log.warning("CANDIDATE EVAL: %s blocked by Momentum Fade gate", symbol)
             return
         
-        # Log successful passage of all gates
-        log.info("UNIFIED ENTRY: %s ALL GATES PASSED — executing %s signal (P=%.3f conviction=%s)",
-                 symbol, agent_decision.direction, agent_decision.probability,
-                 "HIGH" if is_high_conviction else "MEDIUM+STRONG")
-
-        # 4. VWAP Overextension Guard
+        # Gate: VWAP Overextension Guard
         if amt_result and amt_result.vwap_upper_2 > 0 and agent_decision.direction == "LONG" and tick.close >= amt_result.vwap_upper_2:
-            log.info("UNIFIED ENTRY: LONG blocked at +2σ VWAP (price=%.2f, band=%.2f)", tick.close, amt_result.vwap_upper_2)
+            log.info("CANDIDATE EVAL: LONG blocked at +2σ VWAP (price=%.2f, band=%.2f)", tick.close, amt_result.vwap_upper_2)
             return
         if amt_result and amt_result.vwap_lower_2 > 0 and agent_decision.direction == "SHORT" and tick.close <= amt_result.vwap_lower_2:
-            log.info("UNIFIED ENTRY: SHORT blocked at -2σ VWAP (price=%.2f, band=%.2f)", tick.close, amt_result.vwap_lower_2)
+            log.info("CANDIDATE EVAL: SHORT blocked at -2σ VWAP (price=%.2f, band=%.2f)", tick.close, amt_result.vwap_lower_2)
             return
-
-        # 5. Build and Execute Signal
-        # COMPOUNDING: Get dynamic session risk for position sizing
+        
+        # Gate: Drive 2 requirement (Fabio: "Don't take the first drive")
+        if not is_second_drive:
+            log.info("CANDIDATE EVAL: %s blocked — first drive only, waiting for re-test", symbol)
+            return
+        
+        # Gate: Session risk check
         srm = session._session_risk_manager
-        session_risk_pct = None
-        if srm:
-            # Use TradeManager's compounding logic if available
-            try:
-                session_risk_pct, risk_tier = self._trade_manager.compute_dynamic_risk(
-                    base_capital=float(session.portfolio.equity)
-                )
-                log.info("COMPOUNDING: risk_pct=%.4f tier=%s session_pnl=%.2f",
-                        session_risk_pct, risk_tier, srm.session_pnl)
-            except Exception:
-                session_risk_pct = None
+        if srm and not srm.can_trade:
+            log.info("CANDIDATE EVAL: %s blocked — session risk: %s", symbol, srm.halt_reason)
+            return
         
-        signal = build_entry_signal(
-            agent_decision.direction,
-            tick,
-            amt_result,
-            {
-                "rationale": f"Unified P={agent_decision.probability:.3f} confluence={'Strong' if confirmation_strong else 'Normal'}",
-                "confidence": "High" if is_high_conviction else "Medium",
-                "market_state": market_state,
-            },
-            setup_type=setup_type,
-            data=session.data,
-            session_context=getattr(session_info, "session", ""),
-            session_risk_pct=session_risk_pct,  # COMPOUNDING
-        )
-        signal.source = Source.AGENT
-        signal.reason = f"Unified {setup_type.value} P={agent_decision.probability:.3f} kelly={agent_decision.size_fraction:.1%}"
-        signal.metadata = {
-            **(signal.metadata or {}),
-            "agent": "unified",
-            "agent_entry": True,
-            "probability": agent_decision.probability,
-            "size_fraction": agent_decision.size_fraction,
-            "playbook": (signal.metadata or {}).get("trade_thesis", {}).get("setup_family", ""),
-            "structural_confluence": confirmation_strong,
-            "is_second_drive": is_second_drive,
-        }
-
-        # Mark candle as consumed so we don't re-fire until the next candle
-        session._last_quant_candle_time = tick.time # Maintain legacy flag just in case
+        # Log candidate evaluation result
+        log.info("CANDIDATE EVAL: %s — candidate valid (P=%.3f, dir=%s, second_drive=%s)",
+                 symbol, agent_decision.probability, agent_decision.direction, is_second_drive)
         
-        log.info("UNIFIED ENTRY: %s %s playbook=%s P=%.3f confluence=%s",
-                 agent_decision.direction, symbol, setup_type.value, agent_decision.probability,
-                 "STRONG" if confirmation_strong else "NORMAL")
-        self._execute_signal(symbol, signal, session)
+        # NOTE: This method does NOT execute trades.
+        # All actual entries must go through the proper AMT pipeline:
+        # run_gate_pipeline() + build_entry_signal()
+        # This ensures Fabio's methodology is followed strictly.
 
     def _on_signal_generated(self, event: SignalGenerated) -> None:
         """Event bus handler — may be called from any thread.

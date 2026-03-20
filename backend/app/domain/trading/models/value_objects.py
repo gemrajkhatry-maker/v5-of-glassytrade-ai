@@ -163,6 +163,10 @@ class AMTResult:
     cushion_tier: str = "Conservative"
     session_pnl: float = 0.0
     bubble_retests: list[AggressivePrint] = field(default_factory=list)
+    # NPOC (Naked POC) — secondary targets for P3 trailing
+    npoc_above: float = 0.0  # Nearest unfilled NPOC above current price
+    npoc_below: float = 0.0  # Nearest unfilled NPOC below current price
+
 
 # ---------------------------------------------------------------------------
 # Strategy Stats

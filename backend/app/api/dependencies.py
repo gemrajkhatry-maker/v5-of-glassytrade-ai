@@ -23,6 +23,10 @@ from app.domain.ports.llm_inference import LLMInferencePort
 from app.domain.ports.probability_inference import ProbabilityInferencePort
 from app.domain.ports.storage import StoragePort
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+from app.domain.fabio_ai.services.composite_profile import CompositeProfile
+from app.domain.fabio_ai.services.alert_manager import AlertManager
+from app.domain.fabio_ai.services.npoc_tracker import NPOCTracker
+from app.infrastructure.adapters.delta_profile_adapter import DeltaProfileAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +61,21 @@ class ServiceGraph:
         logger.info("Probability engine ready=%s (model_dir=%s)",
                      self.probability_engine.is_ready(), _model_dir)
 
+
+        # Composite Profile (Gap #4) — weekly bias from merged session profiles
+        self.composite_profile = CompositeProfile(window=settings.COMPOSITE_SESSION_WINDOW)
+        self._composite_cache: dict = {}
+
+        # Alert Manager (Gap #6) — pre-alerts for Drive 1 returns
+        self.alert_manager = AlertManager(
+            proximity_ticks=settings.ALERT_PROXIMITY_TICKS,
+        )
+
+        # Delta Profile (Gap #1) — delta-colored volume profiles for entry zones
+        from app.domain.constants import DELTA_BUCKET_SIZE_DEFAULT
+        self.delta_profile = DeltaProfileAdapter(
+            bucket_size=DELTA_BUCKET_SIZE_DEFAULT,
+        )
         self.trading_session = TradingSessionService(
             event_bus=self.event_bus,
             broker=self.broker,
@@ -64,6 +83,13 @@ class ServiceGraph:
             storage=self.storage,
             probability_engine=self.probability_engine,
         )
+        # NPOC Tracker — naked POC tracking for secondary targets
+        self.npoc_tracker = NPOCTracker(storage_port=self.storage)
+
+        # OI Analyzer (Gap #5 — OI Pressure)
+        from app.domain.fabio_ai.services.oi_analyzer import OIAnalyzer
+        self.oi_analyzer = OIAnalyzer(market_data=self.market_data)
+
 
         # Pre-warm broker: load instrument cache (date-stamped, refreshed once/day).
         # ensure_initialized_sync() is thread-safe and idempotent — no race with
@@ -93,6 +119,7 @@ class ServiceGraph:
                 return _scanner.scan_top_n(
                     n=settings.SCANNER_TOP_N,
                     underlyings=settings.SCANNER_UNDERLYINGS,
+                    top_per_underlying=settings.SCANNER_TOP_PER_UNDERLYING,
                     preferred_option_type=settings.SCANNER_OPTION_TYPE or None,
                     exchange=settings.DEFAULT_EXCHANGE,
                     expiry_index=settings.SCANNER_EXPIRY_INDEX,

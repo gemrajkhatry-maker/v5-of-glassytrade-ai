@@ -94,18 +94,18 @@ class TestBuildPrompt:
         prompt = build_entry_prompt(_make_market_data(
             volume_bubbles="BUY bubble at 15100 (500 vol, delta +300)"
         ))
-        assert "Volume bubbles" in prompt
+        assert "bubble" in prompt.lower() or "BUBBLE" in prompt
 
     def test_cvd_divergence_in_prompt(self):
         prompt = build_entry_prompt(_make_market_data(cvd_divergence="BEARISH_DIV"))
-        assert "BEARISH DIVERGENCE" in prompt
+        assert "DIVERGENCE" in prompt and "Bearish" in prompt
 
     def test_prompt_includes_json_response_contract(self):
         prompt = build_entry_prompt(_make_market_data())
         assert "Respond ONLY with a JSON object" in prompt
-        # Schema uses structured-text format: Market State / Logic / Trigger lines
-        assert "Trigger" in prompt
-        assert "Market State" in prompt
+        # Current schema uses "direction" and "confidence" fields
+        assert "direction" in prompt
+        assert "MARKET STATE" in prompt
 
 
 

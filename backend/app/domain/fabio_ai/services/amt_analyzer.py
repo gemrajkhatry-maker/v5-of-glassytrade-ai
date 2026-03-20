@@ -38,6 +38,12 @@ from app.domain.fabio_ai.services.session_context import (
     get_session_info,
     opening_inventory_bias,
 )
+from app.domain.fabio_ai.services.market_state_engine import (
+    detect_market_state,
+    log_state_transition,
+)
+from app.domain.fabio_ai.services.drive_tracker import DriveTracker
+from app.domain.fabio_ai.services.aggression_scorer import AggressionScorer
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +54,7 @@ from app.domain.fabio_ai.services.session_context import (
 class AMTConfig:
     # LVN/HVN thresholds from constants.py (Fabio spec-compliant)
     from app.domain import constants
+
     LVN_THRESHOLD: float = constants.LVN_THRESHOLD  # < 15% of mean (Fabio spec)
     LVN_SMOOTHING: int = 3  # Smooth histogram before LVN/HVN detection
     OBI_THRESHOLD: float = 0.25
@@ -58,17 +65,29 @@ class AMTConfig:
     AGGRESSION_EMA_PERIOD: int = 20  # EMA period for dynamic volume threshold
     DELTA_DIRECTIONALITY_THRESHOLD: float = 0.40  # Professional: 40-50% delta ratio
     HVN_THRESHOLD: float = constants.HVN_THRESHOLD  # > 200% of mean (Fabio spec)
-    
+
     # FIX #9: Balance ratio threshold for Indian markets
     # Indian options have wider ranges due to gamma/theta
     # Adjusted from default 0.50 to 0.55 for more realistic balance detection
 
     # Configurable via env — tune for MCX with lower values
-    from app.config import settings as _settings
+    # Default values from Fabio spec (overridable via env)
+    AGGRESSION_SIGMA_THRESHOLD: float = 2.5
+    DISPLACEMENT_MULTIPLIER: float = 1.5
+    BALANCE_RATIO_THRESHOLD: float = 0.55
 
-    AGGRESSION_SIGMA_THRESHOLD: float = _settings.AGGRESSION_SIGMA
-    DISPLACEMENT_MULTIPLIER: float = _settings.DISPLACEMENT_MULTIPLIER
-    BALANCE_RATIO_THRESHOLD: float = _settings.BALANCE_RATIO_THRESHOLD
+    @classmethod
+    def from_settings(cls) -> AMTConfig:
+        """Create config from environment settings."""
+        from app.config import settings as _settings
+        instance = cls()
+        try:
+            instance.AGGRESSION_SIGMA_THRESHOLD = float(_settings.AGGRESSION_SIGMA)
+            instance.DISPLACEMENT_MULTIPLIER = float(_settings.DISPLACEMENT_MULTIPLIER)
+            instance.BALANCE_RATIO_THRESHOLD = float(_settings.BALANCE_RATIO_THRESHOLD)
+        except (TypeError, ValueError):
+            pass  # Use defaults
+        return instance
 
 
 # ---------------------------------------------------------------------------
@@ -122,9 +141,9 @@ def create_profile(data: list[OHLC], buckets: int = 200) -> list[VolumeProfileLe
         # FIX #3: Delta approximation for Indian markets
         # taker_buy_volume may not be available from all brokers
         # Use delta as proxy when available, otherwise infer from price action
-        if hasattr(d, 'taker_buy_volume') and d.taker_buy_volume > 0:
+        if hasattr(d, "taker_buy_volume") and d.taker_buy_volume > 0:
             buy_ratio = float(d.taker_buy_volume) / float(d.volume)
-        elif hasattr(d, 'delta') and d.delta != 0:
+        elif hasattr(d, "delta") and d.delta != 0:
             # Delta available: infer buy ratio from delta
             buy_ratio = 0.5 + (float(d.delta) / (2.0 * float(d.volume)))
             buy_ratio = max(0.0, min(1.0, buy_ratio))  # Clamp to [0, 1]
@@ -224,11 +243,7 @@ class IncrementalVolumeProfile:
         start_bucket = max(0, min(self._buckets - 1, start_bucket))
         end_bucket = max(0, min(self._buckets - 1, end_bucket))
 
-        buy_ratio = (
-            float(candle.taker_buy_volume) / c_vol
-            if c_vol > 0
-            else 0.5
-        )
+        buy_ratio = float(candle.taker_buy_volume) / c_vol if c_vol > 0 else 0.5
         n_buckets = end_bucket - start_bucket + 1
         vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
 
@@ -249,11 +264,7 @@ class IncrementalVolumeProfile:
         start_bucket = max(0, min(self._buckets - 1, start_bucket))
         end_bucket = max(0, min(self._buckets - 1, end_bucket))
 
-        buy_ratio = (
-            float(candle.taker_buy_volume) / c_vol
-            if c_vol > 0
-            else 0.5
-        )
+        buy_ratio = float(candle.taker_buy_volume) / c_vol if c_vol > 0 else 0.5
         n_buckets = end_bucket - start_bucket + 1
         vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
 
@@ -370,7 +381,7 @@ def find_hvns(
 
     Formula: smooth histogram, then find local maxima where
     smoothed_volume(i) >= HVN_THRESHOLD × mean(smoothed_volume).
-    
+
     Uses MEAN (not MAX) as reference for consistency with LVN detection.
     HVN = volume significantly above average (high participation level).
     """
@@ -384,14 +395,14 @@ def find_hvns(
     if mean_vol <= 0:
         return []
 
-    # HVN: local maxima where volume > 150% of mean (high participation)
-    # This is consistent with LVN using mean as reference
-    threshold = mean_vol * 1.5  # 150% of mean = significant volume node
+    # HVN: local maxima where volume > HVN_THRESHOLD × mean (per Fabio spec)
+    threshold = mean_vol * cfg.HVN_THRESHOLD  # 200% of mean = high volume node
     step = profile[1].price - profile[0].price if len(profile) > 1 else 1.0
     hvns: list[float] = []
 
     for i in range(1, len(sm) - 1):
-        if sm[i] > sm[i - 1] and sm[i] > sm[i + 1] and sm[i] >= threshold:
+        # Use >= on right side to handle smoothing plateaus
+        if sm[i] > sm[i - 1] and sm[i] >= sm[i + 1] and sm[i] >= threshold:
             if not hvns or abs(profile[i].price - hvns[-1]) > step * 2:
                 hvns.append(profile[i].price)
     return hvns
@@ -490,7 +501,7 @@ def find_aggressive_prints(
 class InitialBalanceTracker:
     """Tracks Initial Balance (IB) — high/low of the first N minutes of session."""
 
-    def __init__(self, ib_minutes: int = 30) -> None:
+    def __init__(self, ib_minutes: int = 10) -> None:
         self._ib_minutes = ib_minutes
         self._ib_high: float = 0.0
         self._ib_low: float = float("inf")
@@ -918,6 +929,21 @@ class AMTAnalyzer:
         self._ar_engine = AcceptanceRejectionEngine()
         # Previous CVD slope for delta-flip detection in LVN play
         self._prev_cvd_slope: float = 0.0
+        # Previous market state for transition logging (FR-04-07)
+        self._previous_state: MarketState | None = None
+        # New modules (Phases 3-5)
+        self._drive_tracker = DriveTracker()
+        from app.domain.fabio_ai.services.orderflow_detectors import (
+            BigTradeDetector,
+            BubbleDetector,
+            OFICalculator,
+            AbsorptionDetector,
+        )
+
+        self._big_trade_detector = BigTradeDetector()
+        self._bubble_detector = BubbleDetector()
+        self._ofi_calculator = OFICalculator()
+        self._absorption_detector = AbsorptionDetector()
 
     def detect_displacement_leg(self, data: list[OHLC]) -> dict:
         """Detect displacement and return leg profile data.
@@ -976,11 +1002,15 @@ class AMTAnalyzer:
         # POC — VWAP tie-break (matches session logic)
         max_vol = max(p.volume for p in leg_profile)
         poc_candidates = [i for i, p in enumerate(leg_profile) if p.volume == max_vol]
-        
+
         # Local Leg VWAP for tie-break
         leg_vol = sum(c.volume for c in leg_candles)
-        leg_vwap = sum(c.close * c.volume for c in leg_candles) / leg_vol if leg_vol > 0 else leg_candles[-1].close
-        
+        leg_vwap = (
+            sum(c.close * c.volume for c in leg_candles) / leg_vol
+            if leg_vol > 0
+            else leg_candles[-1].close
+        )
+
         poc_idx = min(
             poc_candidates, key=lambda i: abs(leg_profile[i].price - leg_vwap)
         )
@@ -1063,7 +1093,7 @@ class AMTAnalyzer:
         avg_range = sum(d.high - d.low for d in prev_data) / len(prev_data)
         leg_range = max(c.high for c in recent) - min(c.low for c in recent)
 
-        if leg_range < avg_range * AMTConfig.DISPLACEMENT_MULTIPLIER * N:
+        if leg_range < avg_range * AMTConfig.DISPLACEMENT_MULTIPLIER:
             return False
 
         # Efficiency check: closes near extremes for at least 2/3 of candles
@@ -1111,6 +1141,8 @@ class AMTAnalyzer:
         developing_profile: IncrementalVolumeProfile | None = None,
         cushion_tier: str = "Conservative",
         session_pnl: float = 0.0,
+        npoc_tracker: "NPOCTracker | None" = None,
+        underlying: str = "NIFTY",
     ) -> AMTResult:
         """Run the full AMT analysis pipeline."""
         empty = AMTResult(
@@ -1224,9 +1256,8 @@ class AMTAnalyzer:
         # Acceptance/Rejection engine
         ar_state = self._ar_engine.update(current, vah, val, baseline_vol)
 
-        # 2. Market State (Fabio: Displacement + Acceptance + ATR compression)
-        market_state = MarketState.BALANCED
-
+        # 2. Market State (4-state model: NO_TRADE / BALANCED / IMBALANCED / PROBING)
+        # Uses standalone detect_market_state() per FR-04
         leg_data = self.detect_displacement_leg(recent_data)
         has_displacement = leg_data["has_displacement"]
         has_acceptance = self.detect_acceptance(recent_data, vah, val)
@@ -1235,37 +1266,51 @@ class AMTAnalyzer:
         if ar_state["acceptance_above"] or ar_state["acceptance_below"]:
             has_acceptance = True
 
-        # Balance ratio: fraction of recent candles inside VA (computed early for market state)
+        # Balance ratio: fraction of recent candles inside VA
         balance_window = min(len(recent_data), 20)
         inside_count = sum(
             1 for d in recent_data[-balance_window:] if val <= d.close <= vah
         )
         balance_ratio = inside_count / balance_window if balance_window > 0 else 0.0
-        ratio_imbalanced = (
-            balance_ratio < AMTConfig.BALANCE_RATIO_THRESHOLD
-            if balance_window >= 5
-            else False
+
+        # Compute tick_size from data (minimum price increment)
+        prices = sorted(set(float(d.close) for d in recent_data[-50:]))
+        tick_size = min(
+            (
+                prices[i + 1] - prices[i]
+                for i in range(len(prices) - 1)
+                if prices[i + 1] > prices[i]
+            ),
+            default=0.05,
         )
 
-        # Require EITHER (displacement + acceptance) OR low balance ratio + acceptance
-        # OR persistent price outside VA (slow drift / sustained breakout)
-        # Safety override: zero candles in VA = definitive imbalance
-        if balance_ratio == 0.0 and balance_window >= 5:
-            market_state = MarketState.IMBALANCED
-        elif (has_displacement and has_acceptance) or (
-            ratio_imbalanced and has_acceptance
-        ):
-            market_state = MarketState.IMBALANCED
+        # Detect market state using 4-state model
+        state_result = detect_market_state(
+            price=float(current.close),
+            poc=poc,
+            vah=vah,
+            val=val,
+            tick_size=tick_size,
+            has_displacement=has_displacement,
+            has_acceptance=has_acceptance,
+            balance_ratio=balance_ratio,
+        )
+        market_state = state_result.state
+        zone = state_result.zone
 
-        # Persistent outside-VA check: if price is clearly outside VA without
-        # needing the strict displacement pattern (handles slow drifts)
-        if market_state == MarketState.BALANCED and len(recent_data) >= 5:
-            price_outside = current.close > vah or current.close < val
-            if price_outside and has_acceptance:
-                # Price is outside VA with 3+ closes confirming = IMBALANCED
-                market_state = MarketState.IMBALANCED
+        # Log state transitions for audit trail (FR-04-07)
+        log_state_transition(self._previous_state, market_state, state_result)
+        self._previous_state = market_state
 
-        # 3. Aggression
+        # 3. Order Flow Detectors + Aggression Scoring (FR-03/06)
+        # Compute average volume for detectors
+        avg_candle_vol = (
+            sum(float(d.volume) for d in recent_data) / len(recent_data)
+            if recent_data
+            else 0.0
+        )
+
+        # OBI from order book (kept for backward compat)
         obi = 0.0
         toxicity = 0.0
         if order_book:
@@ -1274,37 +1319,71 @@ class AMTAnalyzer:
             total = bids_q + asks_q
             if total > 0:
                 obi = (bids_q - asks_q) / total
-
-            # Toxicity: Order Book Depletion / Extreme Top-of-Book Skew
             if len(order_book.bids) >= 3 and len(order_book.asks) >= 3:
                 top_bids_q = sum(b.quantity for b in order_book.bids[:3])
                 top_asks_q = sum(a.quantity for a in order_book.asks[:3])
                 top_total = top_bids_q + top_asks_q
                 if top_total > 0:
                     top_obi = (top_bids_q - top_asks_q) / top_total
-                    if abs(top_obi) > 0.7:  # Highly toxic / one-sided top of book
+                    if abs(top_obi) > 0.7:
                         toxicity = top_obi
 
         norm_delta = current.delta / current.volume if current.volume > 0 else 0
-        is_toxic = abs(toxicity) > 0.7
-        obi_agg = abs(obi) > self.config.OBI_THRESHOLD
-        delta_agg = abs(norm_delta) > self.config.DELTA_THRESHOLD
 
-        candle_range = max(current.high - current.low, current.close * 0.0001)
-        body_size = abs(current.close - current.open)
-        price_flat = (body_size / candle_range) < 0.3
+        # FR-06-01: Footprint imbalance confirmed (≥40% cells at ≥3:1)
+        # Proxy: aggressive prints detected = footprint imbalance present
+        footprint_confirmed = len(agg_prints) >= 2
 
-        bullish_abs = norm_delta > self.config.ABSORPTION_THRESHOLD and price_flat
-        bearish_abs = norm_delta < -self.config.ABSORPTION_THRESHOLD and price_flat
-        is_absorption = bullish_abs or bearish_abs
-        has_aggression = obi_agg or delta_agg or is_absorption or is_toxic
+        # FR-06-02: CVD slope/divergence confirms
+        cvd_confirmed = False
+        cvd_state = self._cvd_tracker.state()
+        if market_state == MarketState.IMBALANCED and cvd_state.slope > 0:
+            cvd_confirmed = True  # Buying pressure confirms uptrend
+        elif market_state == MarketState.IMBALANCED and cvd_state.slope < 0:
+            cvd_confirmed = True  # Selling pressure confirms downtrend
+        elif cvd_state.has_divergence:
+            cvd_confirmed = True  # Divergence is a signal
 
-        aggression_score = 0.0
-        if has_aggression:
-            direction = 1 if (obi > 0 or norm_delta > 0 or toxicity > 0) else -1
-            base_agg = max(abs(obi), abs(norm_delta), 0.5 if is_absorption else 0)
-            boost = 0.5 if is_toxic else 0.0
-            aggression_score = direction * min(base_agg + boost, 2.0)  # Cap at 2.0
+        # FR-06-03: Big trade cluster
+        big_trade = self._big_trade_detector.detect(current, avg_candle_vol)
+        big_trade_confirmed = big_trade is not None
+
+        # FR-06-04: Absorption
+        atr = (
+            max(d.high for d in recent_data[-14:])
+            - min(d.low for d in recent_data[-14:])
+        ) / max(len(recent_data[-14:]), 1)
+        absorption = self._absorption_detector.detect(current, atr, avg_candle_vol)
+        absorption_detected = absorption.detected
+
+        # FR-06-05: OFI aligned
+        ofi_result = self._ofi_calculator.update(current)
+        ofi_aligned = (ofi_result.ofi > 0.10) or (ofi_result.ofi < -0.10)
+
+        # FR-06-06: Confluence (LVN near session VAH/VAL/POC)
+        confluence_bonus = False
+        for lvn in lvns:
+            for level in [vah, val, poc]:
+                if level > 0 and abs(lvn - level) < tick_size * 3:
+                    confluence_bonus = True
+                    break
+
+        # FR-06-07: Volume bubble near entry
+        bubble = self._bubble_detector.detect(current)
+        volume_bubble_near = bubble.detected
+
+        # Aggression scorer (FR-06 additive, max 4.5)
+        agg_result = AggressionScorer.score(
+            footprint_confirmed=footprint_confirmed,
+            cvd_confirmed=cvd_confirmed,
+            big_trade_confirmed=big_trade_confirmed,
+            absorption_detected=absorption_detected,
+            ofi_aligned=ofi_aligned,
+            confluence_bonus=confluence_bonus,
+            volume_bubble_near=volume_bubble_near,
+        )
+        aggression_score = agg_result.score
+        has_aggression = agg_result.confirmed
 
         # 4. Signal Generation
         signal = self._generate_signal(
@@ -1474,11 +1553,11 @@ class AMTAnalyzer:
             session_high = max(d.high for d in data)
             session_low = min(d.low for d in data)
             ib_range = ib_high - ib_low
-            
+
             if ib_range > 0:
                 dist_above = max(0.0, session_high - ib_high)
                 dist_below = max(0.0, ib_low - session_low)
-                
+
                 if dist_above == 0 and dist_below == 0:
                     day_type = "NORMAL"
                 elif dist_above > 0 and dist_below > 0:
@@ -1487,6 +1566,27 @@ class AMTAnalyzer:
                     day_type = "TREND"
                 else:
                     day_type = "NORMAL_VARIATION"
+
+
+        # NPOC (Naked POC) — check fills and get nearest targets
+        npoc_above = 0.0
+        npoc_below = 0.0
+        if npoc_tracker is not None:
+            # Check and fill NPOCs within 2 ticks of current price
+            npoc_tracker.check_and_fill(
+                underlying=underlying,
+                current_price=float(current.close),
+                tick_size=tick_size,
+            )
+            # Get nearest active NPOCs for secondary target calculation
+            npoc_result = npoc_tracker.get_active_npocs(
+                underlying=underlying,
+                current_price=float(current.close),
+            )
+            if npoc_result.nearest_above:
+                npoc_above = npoc_result.nearest_above.price
+            if npoc_result.nearest_below:
+                npoc_below = npoc_result.nearest_below.price
 
         return AMTResult(
             market_state=market_state.value,
@@ -1566,6 +1666,8 @@ class AMTAnalyzer:
             cushion_tier=cushion_tier,
             session_pnl=session_pnl,
             bubble_retests=bubble_retests,
+            npoc_above=npoc_above,
+            npoc_below=npoc_below,
         )
 
     def _generate_signal(
@@ -1582,6 +1684,12 @@ class AMTAnalyzer:
     ) -> Signal | None:
         """Generate a trade signal from current market microstructure."""
         now_iso = current.time  # use tick timestamp, not wall clock
+
+        # GATE 3/4: NO_TRADE and PROBING states never generate signals
+        if market_state == MarketState.NO_TRADE:
+            return None
+        if market_state == MarketState.PROBING:
+            return None
 
         # A. Trend Continuation (Imbalanced + Pullback + LVN + Aggression)
         if market_state == MarketState.IMBALANCED and has_aggression:

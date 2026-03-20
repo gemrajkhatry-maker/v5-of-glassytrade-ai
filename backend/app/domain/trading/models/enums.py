@@ -10,7 +10,14 @@ class MarketStateCodec:
 
     Handles legacy formats like "MarketState.BALANCED", mixed-case, and
     the "BALANCE"/"IMBALANCE" variants from MarketStructureState.
+    Supports the 4-state model: NO_TRADE, BALANCED, IMBALANCED, PROBING.
     """
+
+    @staticmethod
+    def is_no_trade(value: object) -> bool:
+        """Return True if *value* represents a no-trade dead zone."""
+        s = str(value).upper()
+        return s in ("NO_TRADE", "NOTRADE", "MARKETSTATE.NO_TRADE")
 
     @staticmethod
     def is_balanced(value: object) -> bool:
@@ -25,9 +32,28 @@ class MarketStateCodec:
         return s in ("IMBALANCED", "IMBALANCE", "MARKETSTATE.IMBALANCED")
 
     @staticmethod
+    def is_probing(value: object) -> bool:
+        """Return True if *value* represents an unconfirmed break."""
+        s = str(value).upper()
+        return s in ("PROBING", "MARKETSTATE.PROBING")
+
+    @staticmethod
+    def is_tradeable(value: object) -> bool:
+        """Return True if the state allows trading."""
+        s = str(value).upper()
+        return s in ("BALANCED", "BALANCE", "IMBALANCED", "IMBALANCE")
+
+    @staticmethod
     def encode(value: object) -> float:
-        """Return 1.0 for imbalanced, 0.0 for balanced (ML feature encoding)."""
-        return 1.0 if MarketStateCodec.is_imbalanced(value) else 0.0
+        """Return numeric encoding: IMBALANCED=1.0, BALANCED=0.0, PROBING=0.5, NO_TRADE=-1.0."""
+        s = str(value).upper()
+        if "IMBALANCED" in s or "IMBALANCE" in s:
+            return 1.0
+        if "PROBING" in s:
+            return 0.5
+        if "NO_TRADE" in s or "NOTRADE" in s:
+            return -1.0
+        return 0.0
 
 
 class ProfileShapeCodec:
@@ -86,18 +112,21 @@ class ProfileShapeCodec:
 
 class Side(str, Enum):
     """Trade direction."""
+
     LONG = "LONG"
     SHORT = "SHORT"
 
 
 class SignalType(str, Enum):
     """Signal direction."""
+
     BUY = "BUY"
     SELL = "SELL"
 
 
 class Source(str, Enum):
     """Origin of a trade or signal."""
+
     AMT = "AMT"
     PREDICTION = "PREDICTION"
     RL = "RL"
@@ -106,13 +135,23 @@ class Source(str, Enum):
 
 
 class MarketState(str, Enum):
-    """Auction Market Theory market state."""
+    """Auction Market Theory market state (4-state model per FR-04).
+
+    NO_TRADE: Price within ±2 ticks of POC — dead zone, no edge.
+    BALANCED: Price inside VAH-VAL range — rotational, mean-reverting.
+    IMBALANCED: Price outside VA + displacement + acceptance — trending.
+    PROBING: Price outside VA without displacement — unconfirmed break.
+    """
+
+    NO_TRADE = "NO_TRADE"
     BALANCED = "BALANCED"
     IMBALANCED = "IMBALANCED"
+    PROBING = "PROBING"
 
 
 class MarketStructureState(str, Enum):
     """5-state market structure classification."""
+
     BALANCE = "BALANCE"
     IMBALANCE = "IMBALANCE"
     TRANSITION = "TRANSITION"
@@ -122,6 +161,7 @@ class MarketStructureState(str, Enum):
 
 class SetupType(str, Enum):
     """Trade setup classification."""
+
     TREND_MODEL = "TREND_MODEL"
     MEAN_REVERSION = "MEAN_REVERSION"
     PREDICTION_ENTRY = "PREDICTION_ENTRY"
@@ -130,12 +170,14 @@ class SetupType(str, Enum):
 
 class PositionStatus(str, Enum):
     """Lifecycle status of a position."""
+
     OPEN = "OPEN"
     CLOSED = "CLOSED"
 
 
 class Sentiment(str, Enum):
     """AI model sentiment assessment."""
+
     BULLISH = "BULLISH"
     BEARISH = "BEARISH"
     NEUTRAL = "NEUTRAL"
@@ -143,6 +185,7 @@ class Sentiment(str, Enum):
 
 class TrendDirection(str, Enum):
     """Long-term trend direction."""
+
     UP = "UP"
     DOWN = "DOWN"
     SIDEWAYS = "SIDEWAYS"
@@ -150,6 +193,7 @@ class TrendDirection(str, Enum):
 
 class MessageRole(str, Enum):
     """Chat message role."""
+
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"

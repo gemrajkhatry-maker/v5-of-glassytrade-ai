@@ -125,6 +125,18 @@ CREATE INDEX IF NOT EXISTS idx_session_profiles ON session_profiles(symbol, mark
 CREATE INDEX IF NOT EXISTS idx_position_events_pos_time ON position_events(position_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_position_events_symbol_time ON position_events(symbol, created_at);
 
+
+CREATE TABLE IF NOT EXISTS npoc_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    underlying TEXT NOT NULL,
+    session_date TEXT NOT NULL,
+    poc_price REAL NOT NULL,
+    is_filled INTEGER DEFAULT 0,
+    filled_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_npoc_underlying_date ON npoc_records(underlying, session_date);
+
 CREATE TABLE IF NOT EXISTS kv_store (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -561,6 +573,49 @@ class SQLiteStorageAdapter(StoragePort):
                 self._conn.rollback()
                 raise
 
+
+    # ------------------------------------------------------------------
+    # NPOC (Naked POC) persistence
+    # ------------------------------------------------------------------
+
+    def save_npoc(self, underlying: str, session_date: str, poc_price: float) -> None:
+        """Persist a new naked POC record for tracking."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT INTO npoc_records (underlying, session_date, poc_price) "
+                    "VALUES (?, ?, ?)",
+                    (underlying, session_date, poc_price),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def mark_npoc_filled(self, underlying: str, session_date: str, filled_at: str) -> None:
+        """Mark an NPOC as filled when price revisits the level."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "UPDATE npoc_records SET is_filled = 1, filled_at = ? "
+                    "WHERE underlying = ? AND session_date = ? AND is_filled = 0",
+                    (filled_at, underlying, session_date),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def get_active_npocs(self, underlying: str) -> list[dict[str, Any]]:
+        """Retrieve all unfilled NPOC records for an underlying."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM npoc_records WHERE underlying = ? AND is_filled = 0 "
+                "ORDER BY session_date DESC",
+                (underlying,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
     def kv_get(self, key: str) -> str | None:
         """Retrieve a value by key, or None if not found."""
         with self._lock:
@@ -568,3 +623,26 @@ class SQLiteStorageAdapter(StoragePort):
                 "SELECT value FROM kv_store WHERE key = ?", (key,),
             ).fetchone()
             return row[0] if row else None
+
+    # ------------------------------------------------------------------
+    # Composite profile queries (Gap #4)
+    # ------------------------------------------------------------------
+
+    def load_composite_profiles(
+        self, symbol: str, market: str = "NSE", limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Load last N session profiles for composite profile calculation."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM session_profiles WHERE symbol = ? AND market = ? "
+                "ORDER BY session_date DESC LIMIT ?",
+                (symbol, market, limit),
+            ).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                extra = json.loads(d.pop("extra", "{}") or "{}")
+                d.update(extra)
+                result.append(d)
+            return result
+

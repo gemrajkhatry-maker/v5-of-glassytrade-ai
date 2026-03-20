@@ -28,8 +28,8 @@ class DailyRiskState:
 
     trade_date: date = field(default_factory=lambda: datetime.now(_IST).date())
     starting_equity: float = 0.0
-    peak_equity: float = 0.0          # High-water mark for the day
-    current_equity: float = 0.0       # Updated after every trade result
+    peak_equity: float = 0.0  # High-water mark for the day
+    current_equity: float = 0.0  # Updated after every trade result
     realized_pnl: float = 0.0
     consecutive_losses: int = 0
     total_trades: int = 0
@@ -51,11 +51,9 @@ class DailyRiskState:
 class RiskManager:
     """Validates trade signals against portfolio risk constraints."""
 
-    # Circuit-breaker thresholds
-    # 5% drawdown from peak — 2% was too tight for options (normal candle swings hit it)
-    MAX_DAILY_DRAWDOWN_PCT: float = 0.05  # 5% from day's peak equity
-    # 5 consecutive losses is a clear signal — 10 was too permissive for scalping
-    MAX_CONSECUTIVE_LOSSES: int = 5
+    # Circuit-breaker thresholds (per Fabio AMT spec FR-10)
+    MAX_DAILY_DRAWDOWN_PCT: float = 0.02  # 2% from day's peak equity (FR-10-04)
+    MAX_CONSECUTIVE_LOSSES: int = 3  # 3 consecutive losses = pause (FR-10-03)
     MAX_CONCURRENT_POSITIONS: int = 5
     MAX_PORTFOLIO_NOTIONAL_PCT: Decimal = Decimal("0.60")  # 60% of equity total
     MAX_PER_SYMBOL_NOTIONAL_PCT: Decimal = Decimal("0.20")  # 20% of equity per symbol
@@ -68,7 +66,7 @@ class RiskManager:
 
         # Drift detection — rolling win rate vs historical baseline
         self._recent_outcomes: list[bool] = []  # True=win, False=loss (last 50 trades)
-        self._baseline_win_rate: float = 0.45   # Expected baseline from backtest
+        self._baseline_win_rate: float = 0.45  # Expected baseline from backtest
         self._drift_alert: bool = False
         self._drift_message: str = ""
 
@@ -134,29 +132,39 @@ class RiskManager:
 
         # Max concurrent positions
         if len(open_positions) >= self.MAX_CONCURRENT_POSITIONS:
-            logger.warning("Trade rejected: max concurrent positions (%d)", self.MAX_CONCURRENT_POSITIONS)
+            logger.warning(
+                "Trade rejected: max concurrent positions (%d)",
+                self.MAX_CONCURRENT_POSITIONS,
+            )
             return False
 
         # Portfolio notional cap (60% of equity)
         total_notional = sum(p.size * p.entry_price for p in open_positions)
         max_notional = portfolio.equity * self.MAX_PORTFOLIO_NOTIONAL_PCT
         if total_notional >= max_notional:
-            logger.warning("Trade rejected: portfolio notional cap (%.0f >= %.0f)", total_notional, max_notional)
+            logger.warning(
+                "Trade rejected: portfolio notional cap (%.0f >= %.0f)",
+                total_notional,
+                max_notional,
+            )
             return False
 
         # Per-symbol notional cap (20% of equity) — prevents one symbol eating the whole book
         # Uses signal.symbol if available, else falls back to position symbol
-        sig_symbol = getattr(signal, 'symbol', None)
+        sig_symbol = getattr(signal, "symbol", None)
         if sig_symbol and portfolio.equity > 0:
             symbol_notional = sum(
-                p.size * p.entry_price for p in open_positions
-                if getattr(p, 'symbol', None) == sig_symbol
+                p.size * p.entry_price
+                for p in open_positions
+                if getattr(p, "symbol", None) == sig_symbol
             )
             max_sym_notional = portfolio.equity * self.MAX_PER_SYMBOL_NOTIONAL_PCT
             if symbol_notional >= max_sym_notional:
                 logger.warning(
                     "Trade rejected: per-symbol notional cap for %s (%.0f >= %.0f)",
-                    sig_symbol, symbol_notional, max_sym_notional
+                    sig_symbol,
+                    symbol_notional,
+                    max_sym_notional,
                 )
                 return False
 
@@ -176,7 +184,9 @@ class RiskManager:
         # If the first trade is a loss, reconstruct pre-loss equity so the
         # drawdown denominator correctly reflects where we started the day.
         if self._daily.peak_equity <= 0:
-            pre_trade_equity = portfolio.equity + abs(pnl) if pnl < 0 else portfolio.equity
+            pre_trade_equity = (
+                portfolio.equity + abs(pnl) if pnl < 0 else portfolio.equity
+            )
             self._daily.peak_equity = pre_trade_equity
             self._daily.starting_equity = pre_trade_equity
 
@@ -192,13 +202,19 @@ class RiskManager:
 
         # Check circuit breakers
         if self._daily.consecutive_losses >= self.MAX_CONSECUTIVE_LOSSES:
-            self._halt(f"Circuit breaker: {self._daily.consecutive_losses} consecutive losses")
+            self._halt(
+                f"Circuit breaker: {self._daily.consecutive_losses} consecutive losses"
+            )
 
         # Percentage-based drawdown from day's peak equity
         if self._daily.peak_equity > 0:
-            drawdown_pct = (self._daily.peak_equity - portfolio.equity) / self._daily.peak_equity
+            drawdown_pct = (
+                self._daily.peak_equity - portfolio.equity
+            ) / self._daily.peak_equity
             if drawdown_pct >= self.MAX_DAILY_DRAWDOWN_PCT:
-                self._halt(f"Circuit breaker: daily drawdown {drawdown_pct:.1%} from peak exceeds {self.MAX_DAILY_DRAWDOWN_PCT:.0%} limit")
+                self._halt(
+                    f"Circuit breaker: daily drawdown {drawdown_pct:.1%} from peak exceeds {self.MAX_DAILY_DRAWDOWN_PCT:.0%} limit"
+                )
 
         # Drift detection — rolling win rate vs baseline
         self._recent_outcomes.append(pnl > 0)
@@ -209,7 +225,9 @@ class RiskManager:
             # math imported at top of module — no per-call import overhead
             n = len(self._recent_outcomes)
             rolling_wr = sum(self._recent_outcomes) / n
-            sigma = math.sqrt(self._baseline_win_rate * (1 - self._baseline_win_rate) / n)
+            sigma = math.sqrt(
+                self._baseline_win_rate * (1 - self._baseline_win_rate) / n
+            )
             threshold = self._baseline_win_rate - 2 * sigma
             if rolling_wr < threshold:
                 self._drift_alert = True

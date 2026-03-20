@@ -18,13 +18,15 @@ if market_config_path.exists():
 
 class AMTThresholds(BaseModel):
     """AMT threshold configuration with validation."""
+
     aggression_sigma: float = Field(default=2.5, ge=0.5, le=5.0)
     displacement_multiplier: float = Field(default=1.5, ge=0.5, le=3.0)
-    balance_ratio_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
+    balance_ratio_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
 
 
 class LLMConfig(BaseModel):
     """LLM inference configuration with validation."""
+
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     entry_temperature: float = Field(default=0.4, ge=0.0, le=2.0)
     overseer_temperature: float = Field(default=0.3, ge=0.0, le=2.0)
@@ -34,6 +36,7 @@ class LLMConfig(BaseModel):
 
 class ScannerConfig(BaseModel):
     """Scanner configuration with validation."""
+
     mode: str = Field(default="nse_options")
     top_n: int = Field(default=10, ge=1, le=50)
     strikes_around_atm: int = Field(default=2, ge=1, le=10)
@@ -45,7 +48,7 @@ class Settings(SharedSettings):
     Main application settings.
     Inherits shared settings (Dhans, Environment) from the shared layer.
     """
-    
+
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
@@ -65,13 +68,14 @@ class Settings(SharedSettings):
     SCANNER_UNDERLYINGS: Any = Field(default=["CRUDEOIL", "NATURALGAS"])
     SCANNER_OPTION_TYPE: str = Field(default="")
     SCANNER_EXPIRY_INDEX: int = Field(default=0)
-    SCANNER_TOP_N: int = Field(default=3)  # Top 3 contracts only (scalping-optimized)
+    SCANNER_TOP_N: int = Field(default=3)  # Total limit
+    SCANNER_TOP_PER_UNDERLYING: int = Field(default=2)  # Per underlying limit
     STRIKES_AROUND_ATM: int = Field(default=2)
 
     # AMT thresholds
     AGGRESSION_SIGMA: float = Field(default=2.5)
     DISPLACEMENT_MULTIPLIER: float = Field(default=1.5)
-    BALANCE_RATIO_THRESHOLD: float = Field(default=0.70)
+    BALANCE_RATIO_THRESHOLD: float = Field(default=0.55)
 
     # Risk & Execution
     SLIPPAGE_PCT: float = Field(default=0.0005)
@@ -86,7 +90,7 @@ class Settings(SharedSettings):
     EXPLAINABILITY_ALERT_MIN_TRADES: int = Field(default=3)
     EXPLAINABILITY_MIN_DRIVER_COVERAGE_PCT: float = Field(default=90.0)
     EXPLAINABILITY_MIN_AGGRESSION_DRIVER_PCT: float = Field(default=75.0)
-    
+
     # Fabio Gap #13: Place SL 1-2 ticks INSIDE the aggressive print cluster
     SL_INSIDE_CLUSTER: bool = Field(default=True)
 
@@ -96,10 +100,22 @@ class Settings(SharedSettings):
 
     # LLM Backend Selection
     LLM_BACKEND: str = Field(default="mlx")
-    MLX_MODEL_PATH: str = Field(default=str(Path(__file__).resolve().parent.parent / "models" / "glassytrade-qwen-mlx-fused"))
+    MLX_MODEL_PATH: str = Field(
+        default=str(
+            Path(__file__).resolve().parent.parent
+            / "models"
+            / "glassytrade-qwen-mlx-fused"
+        )
+    )
     MLX_ADAPTER_PATH: str = Field(default="")
-    REASONING_MODEL_PATH: str = Field(default=str(Path(__file__).resolve().parent.parent / "models" / "reasoning-model"))
-    REASONING_MODEL_ID: str = Field(default="Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled")
+    REASONING_MODEL_PATH: str = Field(
+        default=str(
+            Path(__file__).resolve().parent.parent / "models" / "reasoning-model"
+        )
+    )
+    REASONING_MODEL_ID: str = Field(
+        default="Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled"
+    )
     REASONING_ADAPTER_PATH: str = Field(default="")
 
     # LLM Inference Settings
@@ -116,7 +132,9 @@ class Settings(SharedSettings):
     TELEGRAM_BOT_TOKEN: str = Field(default="")
     TELEGRAM_CHAT_ID: str = Field(default="")
 
-    @field_validator("CORS_ORIGINS", "DHAN_SYMBOLS", "SCANNER_UNDERLYINGS", mode="before")
+    @field_validator(
+        "CORS_ORIGINS", "DHAN_SYMBOLS", "SCANNER_UNDERLYINGS", mode="before"
+    )
     @classmethod
     def assemble_list_from_str(cls, v: Any) -> List[str]:
         if isinstance(v, str) and not v.startswith("["):
@@ -125,6 +143,12 @@ class Settings(SharedSettings):
             return v
         return v
 
+
+    # Composite Profile (Gap #4)
+    COMPOSITE_SESSION_WINDOW: int = Field(default=5, ge=1, le=10)
+
+    # Pre-Alert System (Gap #6)
+    ALERT_PROXIMITY_TICKS: int = Field(default=3, ge=1, le=10)
     def validate_all(self) -> List[str]:
         errors: List[str] = []
         if not self.DHAN_CLIENT_ID:

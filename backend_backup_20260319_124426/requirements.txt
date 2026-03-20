@@ -1,0 +1,21 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+pydantic>=2.10.0
+httpx>=0.28.0
+websockets>=14.0
+python-dotenv>=1.0.0
+pytest>=8.3.0
+pytest-asyncio>=0.25.0
+# AI / ML
+torch
+transformers
+peft
+accelerate
+numpy>=1.24.0
+# Apple Silicon ML (MLX)
+mlx>=0.8.0
+mlx-lm>=0.8.0
+# Probability engine
+lightgbm>=4.0.0
+# Config
+pyyaml>=6.0

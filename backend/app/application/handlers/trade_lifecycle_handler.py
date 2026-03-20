@@ -6,6 +6,10 @@ import logging
 from typing import TYPE_CHECKING, Callable
 
 from app.domain.fabio_ai.services.trade_manager import TradeManager, ExitReason
+from app.domain.fabio_ai.services.partition_exit_manager import (
+    PartitionExitManager,
+    PartitionState,
+)
 from app.domain.trading.models.enums import SignalType, Source
 
 if TYPE_CHECKING:
@@ -16,17 +20,22 @@ logger = logging.getLogger(__name__)
 
 
 class TradeLifecycleHandler:
-    """Handles position exits via TradeManager (SL/TP/Trail/Time)."""
+    """Handles position exits via TradeManager (SL/TP/Trail/Time) + Partition Exits (P1/P2/P3)."""
 
     def __init__(
         self,
         on_stop_out: Callable[[float, str], None] | None = None,
-        on_partial_exit: Callable[[str, str, float, float, float, float, float, str], None] | None = None,
+        on_partial_exit: Callable[
+            [str, str, float, float, float, float, float, str], None
+        ]
+        | None = None,
         persist_fn=None,
     ) -> None:
         self._trade_manager = TradeManager(persist_fn=persist_fn)
+        self._partition_manager = PartitionExitManager()
+        self._partition_states: dict[str, PartitionState] = {}
         self._on_stop_out = on_stop_out
-        self._on_partial_exit = on_partial_exit  # (pos_id, side, entry_price, exit_price, partial_pct, size_closed, realized_pnl, reason)
+        self._on_partial_exit = on_partial_exit
 
     @property
     def trade_manager(self) -> TradeManager:
@@ -34,10 +43,15 @@ class TradeLifecycleHandler:
         return self._trade_manager
 
     def check_exits(
-        self, portfolio: Portfolio, current_price: float,
-        cvd_divergence: str = "", time_to_close: float = 0.0,
-        cvd_slope: float = 0.0, order_book=None,
-        amt_result=None, imbalances=None,
+        self,
+        portfolio: Portfolio,
+        current_price: float,
+        cvd_divergence: str = "",
+        time_to_close: float = 0.0,
+        cvd_slope: float = 0.0,
+        order_book=None,
+        amt_result=None,
+        imbalances=None,
     ) -> bool:
         """Check all open positions for exit conditions and scale-in triggers.
 
@@ -58,15 +72,26 @@ class TradeLifecycleHandler:
                 continue
 
             # Spread blowout check (Gap #15): exit if bid-ask > 3% of premium
-            if order_book and hasattr(order_book, 'bids') and order_book.bids and order_book.asks:
+            if (
+                order_book
+                and hasattr(order_book, "bids")
+                and order_book.bids
+                and order_book.asks
+            ):
                 blowout = self._trade_manager.check_spread_blowout(
-                    pos.id, order_book.bids[0].price, order_book.asks[0].price,
+                    pos.id,
+                    order_book.bids[0].price,
+                    order_book.asks[0].price,
                     premium=current_price,
                 )
                 if blowout:
                     portfolio.close_position(pos.id, blowout.exit_price, blowout.reason)
                     self._trade_manager.unregister_position(pos.id)
-                    logger.info("Position %s closed: SPREAD BLOWOUT at %.2f", pos.id, blowout.exit_price)
+                    logger.info(
+                        "Position %s closed: SPREAD BLOWOUT at %.2f",
+                        pos.id,
+                        blowout.exit_price,
+                    )
                     return True
 
             # Scale-in check (Fabio Rule 4: 40/30/30)
@@ -83,9 +108,13 @@ class TradeLifecycleHandler:
                     pos.id, cvd_divergence, current_price
                 )
                 if cvd_exit:
-                    portfolio.close_position(pos.id, cvd_exit.exit_price, cvd_exit.reason)
+                    portfolio.close_position(
+                        pos.id, cvd_exit.exit_price, cvd_exit.reason
+                    )
                     self._trade_manager.unregister_position(pos.id)
-                    logger.info(f"Position {pos.id} closed: CVD kill signal at {cvd_exit.exit_price:.2f}")
+                    logger.info(
+                        f"Position {pos.id} closed: CVD kill signal at {cvd_exit.exit_price:.2f}"
+                    )
                     return True
 
             # CVD-based breakeven: move SL to entry when CVD confirms direction
@@ -93,27 +122,94 @@ class TradeLifecycleHandler:
                 self._trade_manager.apply_cvd_breakeven(pos.id, cvd_slope)
 
             # VWAP trail (Gap #9): trail SL to VWAP bands at 1.5R profit
-            if amt_result and getattr(amt_result, 'session_vwap', 0) > 0:
+            if amt_result and getattr(amt_result, "session_vwap", 0) > 0:
                 self._trade_manager.apply_vwap_trail(
-                    pos.id, current_price,
+                    pos.id,
+                    current_price,
                     amt_result.session_vwap,
-                    getattr(amt_result, 'vwap_upper_1', 0),
-                    getattr(amt_result, 'vwap_lower_1', 0),
-                    getattr(amt_result, 'vwap_upper_2', 0),
-                    getattr(amt_result, 'vwap_lower_2', 0),
+                    getattr(amt_result, "vwap_upper_1", 0),
+                    getattr(amt_result, "vwap_lower_1", 0),
+                    getattr(amt_result, "vwap_upper_2", 0),
+                    getattr(amt_result, "vwap_lower_2", 0),
                 )
 
             # Imbalance tighten (Gap #2): tighten SL when stacked imbalances oppose position
             if imbalances:
-                self._trade_manager.check_imbalance_tighten(pos.id, imbalances, current_price)
+                self._trade_manager.check_imbalance_tighten(
+                    pos.id,
+                    imbalances,
+                    current_price,
+                )
+
+            # Partition Exit Manager (FR-08): P1/P2/P3 + BE + counter-aggression
+            p_state = self._partition_states.get(pos.id)
+            if p_state is not None:
+                entry = float(pos.entry_price)
+                sl = float(getattr(pos, "initial_stop", getattr(pos, "stop_loss", 0)))
+                tp = float(getattr(pos, "take_profit", 0))
+                is_long = (
+                    pos.side.value == "LONG"
+                    if hasattr(pos.side, "value")
+                    else str(pos.side) == "LONG"
+                )
+                if sl > 0 and tp > 0 and entry > 0:
+                    partition_signals = self._partition_manager.check_exits(
+                        entry_price=entry,
+                        initial_stop=sl,
+                        take_profit=tp,
+                        current_price=current_price,
+                        is_long=is_long,
+                        cvd_slope=cvd_slope,
+                        state=p_state,
+                    )
+                    for psig in partition_signals:
+                        if psig.exit_type in ("COUNTER_AGGRESSION", "TRAIL"):
+                            # Full exit
+                            portfolio.close_position(pos.id, psig.price, psig.exit_type)
+                            self._trade_manager.unregister_position(pos.id)
+                            self._partition_states.pop(pos.id, None)
+                            logger.info(
+                                "Position %s closed: %s at %.2f",
+                                pos.id,
+                                psig.exit_type,
+                                psig.price,
+                            )
+                            return True
+                        elif psig.exit_type in (
+                            "PARTITION_1",
+                            "PARTITION_2",
+                            "PARTITION_3",
+                        ):
+                            # Partial exit
+                            size_before = pos.size
+                            realized_pnl = portfolio.partial_close_position(
+                                pos.id,
+                                psig.size_pct,
+                                psig.price,
+                                psig.exit_type,
+                            )
+                            logger.info(
+                                "Position %s partial: %s %.0f%% at %.2f realized=%.2f",
+                                pos.id,
+                                psig.exit_type,
+                                psig.size_pct * 100,
+                                psig.price,
+                                realized_pnl,
+                            )
 
             exit_sig = self._trade_manager.check_position(
-                pos.id, current_price, time_to_close=time_to_close,
+                pos.id,
+                current_price,
+                time_to_close=time_to_close,
             )
             if exit_sig:
-                logger.info("Exit trigger: pos=%s reason=%s price=%.2f tick=%d",
-                            pos.id, exit_sig.reason, exit_sig.exit_price,
-                            tick_count)
+                logger.info(
+                    "Exit trigger: pos=%s reason=%s price=%.2f tick=%d",
+                    pos.id,
+                    exit_sig.reason,
+                    exit_sig.exit_price,
+                    tick_count,
+                )
                 if exit_sig.reason == ExitReason.PARTIAL_TAKE_PROFIT:
                     # Runner mode: close 75% at target, keep 25% trailing
                     # Standard partial: close 50%
@@ -133,16 +229,28 @@ class TradeLifecycleHandler:
                     )
                     # Notify journal/forward logger
                     if self._on_partial_exit:
-                        side = pos.side.value if hasattr(pos.side, 'value') else str(pos.side)
+                        side = (
+                            pos.side.value
+                            if hasattr(pos.side, "value")
+                            else str(pos.side)
+                        )
                         self._on_partial_exit(
-                            pos.id, side, pos.entry_price, exit_sig.exit_price,
-                            partial_pct, size_before * partial_pct, pos.size, realized_pnl,
+                            pos.id,
+                            side,
+                            pos.entry_price,
+                            exit_sig.exit_price,
+                            partial_pct,
+                            size_before * partial_pct,
+                            pos.size,
+                            realized_pnl,
                         )
                     # Do NOT unregister — position is still open with remaining size
                     return False
                 else:
                     # Full close
-                    portfolio.close_position(pos.id, exit_sig.exit_price, exit_sig.reason)
+                    portfolio.close_position(
+                        pos.id, exit_sig.exit_price, exit_sig.reason
+                    )
                     self._trade_manager.unregister_position(pos.id)
                     # Track daily losses on stop loss exits
                     if exit_sig.reason == ExitReason.STOP_LOSS:
@@ -158,7 +266,9 @@ class TradeLifecycleHandler:
                     return True
         return False
 
-    def register_position(self, symbol: str, position: Position, signal: Signal) -> None:
+    def register_position(
+        self, symbol: str, position: Position, signal: Signal
+    ) -> None:
         """Register a new position with TradeManager for exit monitoring.
 
         All signal sources (LLM, AGENT, AMT, etc.) must be registered so the
@@ -176,10 +286,22 @@ class TradeLifecycleHandler:
         else:
             market_state = "BALANCED"
         # Ensure Decimal types are converted to float for trade_manager
-        entry_price = float(position.entry_price) if hasattr(position.entry_price, '__float__') else position.entry_price
-        stop_loss = float(signal.stop_loss) if hasattr(signal.stop_loss, '__float__') else signal.stop_loss
-        take_profit = float(signal.take_profit) if hasattr(signal.take_profit, '__float__') else signal.take_profit
-        
+        entry_price = (
+            float(position.entry_price)
+            if hasattr(position.entry_price, "__float__")
+            else position.entry_price
+        )
+        stop_loss = (
+            float(signal.stop_loss)
+            if hasattr(signal.stop_loss, "__float__")
+            else signal.stop_loss
+        )
+        take_profit = (
+            float(signal.take_profit)
+            if hasattr(signal.take_profit, "__float__")
+            else signal.take_profit
+        )
+
         self._trade_manager.register_position(
             position_id=position.id,
             symbol=symbol,
@@ -193,6 +315,8 @@ class TradeLifecycleHandler:
             session_phase=session_phase,
             is_expiry=is_expiry,
         )
+        # Initialize partition exit state for this position
+        self._partition_states[position.id] = PartitionState()
 
     def has_managed_positions(self, symbol: str) -> bool:
         return self._trade_manager.has_managed_positions(symbol)
@@ -200,20 +324,26 @@ class TradeLifecycleHandler:
     def get_position_consistency(self, portfolio: Portfolio, symbol: str | None = None):
         """Return a comparison of portfolio-open positions vs lifecycle-managed positions."""
         open_ids = {
-            p.id for p in portfolio.positions
+            p.id
+            for p in portfolio.positions
             if getattr(p, "status", None) == "OPEN" or getattr(p, "is_open", False)
         }
         return self._trade_manager.get_position_consistency(open_ids, symbol=symbol)
 
-    def reconcile_portfolio(self, portfolio: Portfolio, symbol: str | None = None) -> tuple[str, ...]:
+    def reconcile_portfolio(
+        self, portfolio: Portfolio, symbol: str | None = None
+    ) -> tuple[str, ...]:
         """Reconcile managed lifecycle state with the portfolio's open positions."""
         open_ids = {
-            p.id for p in portfolio.positions
+            p.id
+            for p in portfolio.positions
             if getattr(p, "status", None) == "OPEN" or getattr(p, "is_open", False)
         }
         return self._trade_manager.sync_with_open_position_ids(open_ids, symbol=symbol)
 
-    def ensure_position_consistency(self, portfolio: Portfolio, symbol: str | None = None):
+    def ensure_position_consistency(
+        self, portfolio: Portfolio, symbol: str | None = None
+    ):
         """Reconcile stale manager state and return the resulting consistency view."""
         stale_ids = self.reconcile_portfolio(portfolio, symbol=symbol)
         consistency = self.get_position_consistency(portfolio, symbol=symbol)

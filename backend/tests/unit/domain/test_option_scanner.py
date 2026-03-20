@@ -160,20 +160,18 @@ class TestOptionScannerService:
         return puts
 
     def test_scanner_returns_result(self):
-        """Mock broker returning a chain with ATM calls should give a ScanResult."""
+        """Mock broker returning a chain with ATM calls should give ScanResults."""
         calls = self._full_calls()
         chain = _make_chain(atm=23400.0, expiry_iso="2026-03-20", calls=calls)
         broker = MagicMock()
         broker.get_option_chain.return_value = chain
 
         scanner = self._make_scanner(broker)
-        result = scanner.scan(underlying="NIFTY", preferred_option_type="CE")
+        results = scanner.scan_top_n(underlyings=["NIFTY"], n=3)
 
-        assert result is not None
-        assert result.underlying == "NIFTY"
-        assert result.option_type == "CE"
-        assert "NIFTY" in result.symbol
-        assert "CALL" in result.symbol
+        assert len(results) > 0
+        assert results[0].underlying == "NIFTY"
+        assert "NIFTY" in results[0].symbol
 
     def test_scanner_returns_put(self):
         """preferred_option_type='PE' should scan puts chain."""
@@ -183,69 +181,47 @@ class TestOptionScannerService:
         broker.get_option_chain.return_value = chain
 
         scanner = self._make_scanner(broker)
-        result = scanner.scan(underlying="NIFTY", preferred_option_type="PE")
+        results = scanner.scan_top_n(underlyings=["NIFTY"], n=3)
 
-        assert result is not None
-        assert result.option_type == "PE"
-        assert "PUT" in result.symbol
+        assert len(results) > 0
+        # Should include PE contracts
+        pe_results = [r for r in results if r.option_type == "PE"]
+        assert len(pe_results) > 0
 
     def test_scanner_none_on_empty_chain(self):
-        """Broker returning None should cause scan() to return None."""
+        """Broker returning None should cause scan_top_n to return empty list."""
         broker = MagicMock()
         broker.get_option_chain.return_value = None
 
         scanner = self._make_scanner(broker)
-        result = scanner.scan(underlying="NIFTY")
+        results = scanner.scan_top_n(underlyings=["NIFTY"], n=3)
 
-        assert result is None
+        assert len(results) == 0
 
     def test_scanner_none_on_exception(self):
-        """Broker raising an exception should be caught and scan() returns None."""
+        """Broker raising an exception should be caught and scan_top_n returns empty."""
         broker = MagicMock()
         broker.get_option_chain.side_effect = RuntimeError("Network error")
 
         scanner = self._make_scanner(broker)
-        result = scanner.scan(underlying="NIFTY")
+        results = scanner.scan_top_n(underlyings=["NIFTY"], n=3)
 
-        assert result is None
+        assert len(results) == 0
 
-    def test_scan_best_picks_highest_score(self):
-        """scan_best should return the contract with the highest score."""
-        # NIFTY: high OI + high volume = higher score
-        nifty_calls = {}
-        for i in range(-2, 3):
-            s = 23400.0 + i * 50
-            nifty_calls[s] = _make_option(ltp=100.0, oi=5_000_000, volume=500_000,
-                                           strike=s, symbol=f"NIFTY 20 MAR {int(s)} CALL")
-        nifty_chain = _make_chain(atm=23400.0, calls=nifty_calls)
-
-        bnf_calls = {}
-        for i in range(-2, 3):
-            s = 51500.0 + i * 100
-            bnf_calls[s] = _make_option(ltp=200.0, oi=1_000_000, volume=10_000,
-                                         strike=s, symbol=f"BANKNIFTY 20 MAR {int(s)} CALL")
-        bnf_chain = _make_chain(atm=51500.0, calls=bnf_calls)
-
+    def test_scan_top_n_picks_highest_score(self):
+        """scan_top_n should return contracts sorted by score."""
+        calls = self._full_calls()
+        chain = _make_chain(atm=23400.0, expiry_iso="2026-03-20", calls=calls)
         broker = MagicMock()
+        broker.get_option_chain.return_value = chain
 
-        def get_chain(underlying, exchange, expiry_index=0):
-            if underlying == "NIFTY":
-                return nifty_chain
-            if underlying == "BANKNIFTY":
-                return bnf_chain
-            return None
+        scanner = self._make_scanner(broker)
+        results = scanner.scan_top_n(underlyings=["NIFTY"], n=3)
 
-        broker.get_option_chain.side_effect = get_chain
-
-        from unittest.mock import patch
-        import app.config as app_config
-        with patch.object(app_config.settings, "SCANNER_MODE", "nse_options"):
-            scanner = self._make_scanner(broker)
-            result = scanner.scan_best(underlyings=["NIFTY", "BANKNIFTY"], preferred_option_type="CE")
-
-        assert result is not None
-        # NIFTY has higher volume (500K vs 10K) → higher score
-        assert result.underlying == "NIFTY"
+        assert len(results) > 0
+        # Results should be sorted by score descending
+        for i in range(len(results) - 1):
+            assert results[i].score >= results[i + 1].score
 
     def test_scanner_passes_exchange_string(self):
         """Scanner should pass exchange as string to broker.get_option_chain."""
@@ -253,7 +229,7 @@ class TestOptionScannerService:
         broker.get_option_chain.return_value = None
 
         scanner = self._make_scanner(broker)
-        scanner.scan(underlying="NIFTY", exchange="MCX")
+        scanner.scan_top_n(underlyings=["NIFTY"], n=1, exchange="MCX")
 
         _, kwargs = broker.get_option_chain.call_args
         assert kwargs["exchange"] == "MCX"
