@@ -120,7 +120,9 @@ class LLMWorker:
                 self._queue.task_done()
 
             except Exception as e:
-                logger.error("LLM worker error for %s: %s", self._symbol, e, exc_info=True)
+                logger.error(
+                    "LLM worker error for %s: %s", self._symbol, e, exc_info=True
+                )
                 try:
                     self._queue.task_done()
                 except Exception:
@@ -197,7 +199,12 @@ class LLMWorker:
             )
             gate_result = self._gate_chain.evaluate(gate_context)
             if not gate_result.passed:
-                logger.info("Gate chain blocked %s for %s: %s", direction, symbol, gate_result.detail)
+                logger.info(
+                    "Gate chain blocked %s for %s: %s",
+                    direction,
+                    symbol,
+                    gate_result.detail,
+                )
                 direction = "FLAT"
                 confidence = "Low"
 
@@ -216,11 +223,22 @@ class LLMWorker:
                 "raw_output": ai_result.get("raw_output", ""),
                 "market_state": ai_result.get("market_state", "Unknown"),
                 "aggression": ai_result.get("aggression", "0.00"),
+                "quant_probability": ai_result.get("quant_probability", 0.0),
+                "quant_direction": ai_result.get("quant_direction", ""),
             }
             session._ai_running = False
 
         # Persist LLM decision
-        self._persist_decision(symbol, direction, confidence, ai_result, amt_result, tick, setup_type, session_info)
+        self._persist_decision(
+            symbol,
+            direction,
+            confidence,
+            ai_result,
+            amt_result,
+            tick,
+            setup_type,
+            session_info,
+        )
 
         # Publish event
         self._event_bus.publish(
@@ -232,7 +250,12 @@ class LLMWorker:
             )
         )
 
-        logger.info("LLM result for %s: direction=%s confidence=%s", symbol, direction, confidence)
+        logger.info(
+            "LLM result for %s: direction=%s confidence=%s",
+            symbol,
+            direction,
+            confidence,
+        )
 
     def _get_fallback_direction(self, session, amt_result) -> str:
         """Get fallback direction from agent decision or AMT signal."""
@@ -245,20 +268,42 @@ class LLMWorker:
 
     def _get_cvd_threshold(self) -> float:
         """Get market-specific CVD threshold."""
-        from app.domain.constants import CVD_BLOCK_THRESHOLD_NSE, CVD_BLOCK_THRESHOLD_MCX
+        from app.domain.constants import (
+            CVD_BLOCK_THRESHOLD_NSE,
+            CVD_BLOCK_THRESHOLD_MCX,
+        )
+
         if settings.SCANNER_MODE in ("nse", "nse_options"):
             return CVD_BLOCK_THRESHOLD_NSE
         return CVD_BLOCK_THRESHOLD_MCX
 
-    def _persist_decision(self, symbol, direction, confidence, ai_result, amt_result, tick, setup_type, session_info) -> None:
+    def _persist_decision(
+        self,
+        symbol,
+        direction,
+        confidence,
+        ai_result,
+        amt_result,
+        tick,
+        setup_type,
+        session_info,
+    ) -> None:
         """Persist LLM decision to storage."""
         # Journal logging
         if self._journal:
             try:
-                agent = getattr(ai_result.get("session"), "_agent_decision", None) if hasattr(ai_result, "session") else None
+                agent = (
+                    getattr(ai_result.get("session"), "_agent_decision", None)
+                    if hasattr(ai_result, "session")
+                    else None
+                )
                 self._journal.log_signal(
                     symbol=symbol,
-                    amt={"poc": amt_result.poc, "vah": amt_result.value_area_high, "val": amt_result.value_area_low},
+                    amt={
+                        "poc": amt_result.poc,
+                        "vah": amt_result.value_area_high,
+                        "val": amt_result.value_area_low,
+                    },
                     llm_direction=direction,
                     llm_confidence=confidence,
                     llm_rationale=ai_result.get("rationale", ""),

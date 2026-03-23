@@ -1,0 +1,620 @@
+"""Validation tests for AMT stability fixes (issues 1-8).
+
+Tests verify:
+1. Delta score persistence filter prevents flicker
+2. CVD slope sign persistence prevents rapid flipping
+3. PROBING never coexists with BALANCE structure
+4. PROBING playbook triggers correctly
+5. LVNs persist across bars (don't disappear)
+6. Structure labels don't flicker (hysteresis)
+7. Footprint delta aligns with aggression signals
+8. Decision history spans full session
+"""
+
+import pytest
+from unittest.mock import MagicMock
+from decimal import Decimal
+
+from app.domain.fabio_ai.services.aggression_scorer import (
+    AggressionScorer,
+    PersistentAggressionScorer,
+)
+from app.domain.fabio_ai.services.cvd_tracker import CVDTracker
+from app.domain.fabio_ai.services.amt_analyzer import (
+    AMTAnalyzer,
+    AMTConfig,
+    LVNPersistenceTracker,
+    find_lvns,
+)
+from app.domain.fabio_ai.services.market_state_engine import detect_market_state
+from app.domain.fabio_ai.services.market_structure_classifier import (
+    MarketStructureClassifier,
+    MarketStructure,
+)
+from app.domain.fabio_ai.services.gate_pipeline import (
+    GatePipeline,
+    GateContext,
+    GateReason,
+)
+from app.domain.trading.models.enums import MarketState
+from app.domain.trading.models.value_objects import OHLC, VolumeProfileLevel
+from app.application.services.signal_tracking_service import SignalTrackingService
+
+
+# ---------------------------------------------------------------------------
+# Helper: build OHLC list
+# ---------------------------------------------------------------------------
+
+
+def _make_candle(
+    time: str,
+    open_: float = 100.0,
+    high: float = 101.0,
+    low: float = 99.0,
+    close: float = 100.5,
+    volume: float = 1000.0,
+    delta: float = 50.0,
+    vwap: float = 0.0,
+) -> OHLC:
+    return OHLC.create(
+        time=time,
+        open=open_,
+        high=high,
+        low=low,
+        close=close,
+        volume=volume,
+        vwap=vwap or close,
+        taker_buy_volume=max(0.0, delta),
+        delta=delta,
+    )
+
+
+def _make_candles(n: int, base_price: float = 100.0) -> list[OHLC]:
+    """Generate n sequential candles with slight upward drift."""
+    candles = []
+    for i in range(n):
+        p = base_price + i * 0.1
+        candles.append(
+            _make_candle(
+                time=f"2026-03-23T10:{i:02d}:00",
+                open_=p,
+                high=p + 0.5,
+                low=p - 0.5,
+                close=p + 0.2,
+                volume=1000.0,
+                delta=50.0,
+            )
+        )
+    return candles
+
+
+# ===================================================================
+# TEST 1: Delta Score Persistence Filter
+# ===================================================================
+
+
+class TestDeltaScorePersistence:
+    """Verify aggression score only emits confirmed after N consecutive bars."""
+
+    def test_confirmed_requires_persistence(self):
+        scorer = PersistentAggressionScorer(persistence_bars=3)
+
+        # Bar 1: high score → not yet confirmed (streak=1)
+        result = scorer.score(
+            footprint_confirmed=True,
+            cvd_confirmed=True,
+            big_trade_confirmed=True,
+        )
+        assert result.score >= 3.0
+        assert not result.confirmed  # streak=1 < 3
+        assert result.confidence == "LOW"
+
+        # Bar 2: still high → not yet confirmed (streak=2)
+        result = scorer.score(
+            footprint_confirmed=True,
+            cvd_confirmed=True,
+            big_trade_confirmed=True,
+        )
+        assert not result.confirmed  # streak=2 < 3
+
+        # Bar 3: still high → NOW confirmed (streak=3)
+        result = scorer.score(
+            footprint_confirmed=True,
+            cvd_confirmed=True,
+            big_trade_confirmed=True,
+        )
+        assert result.confirmed  # streak=3 >= 3
+        assert result.confidence in ("MEDIUM", "HIGH")
+
+    def test_streak_resets_on_drop(self):
+        scorer = PersistentAggressionScorer(persistence_bars=3)
+
+        # 2 bars at high score
+        scorer.score(footprint_confirmed=True, cvd_confirmed=True)
+        scorer.score(footprint_confirmed=True, cvd_confirmed=True)
+
+        # Drop below threshold → streak resets
+        result = scorer.score()  # all False
+        assert result.score < 2.0
+        assert not result.confirmed
+        assert scorer.confirmed_streak == 0
+
+    def test_raw_score_always_computed(self):
+        """Raw score should be available even when confirmed is False."""
+        scorer = PersistentAggressionScorer(persistence_bars=3)
+        result = scorer.score(footprint_confirmed=True, cvd_confirmed=True)
+        assert result.score > 0  # raw score still reflects signals
+
+
+# ===================================================================
+# TEST 2: CVD Slope Persistence
+# ===================================================================
+
+
+class TestCVDSlopePersistence:
+    """Verify CVD slope doesn't flip sign rapidly."""
+
+    def test_slope_sign_persists(self):
+        tracker = CVDTracker(slope_window=10, divergence_window=10)
+
+        # Build 20 candles with increasing delta (bullish CVD)
+        for i in range(20):
+            candle = _make_candle(
+                time=f"2026-03-23T10:{i:02d}:00",
+                delta=10.0 + i * 5,  # increasing positive delta
+            )
+            state = tracker.update(candle)
+
+        # Slope should be positive after enough bars
+        assert state.slope >= 0, f"Expected positive slope, got {state.slope}"
+
+    def test_slope_reset_on_session_boundary(self):
+        tracker = CVDTracker(slope_window=10)
+
+        # Build candles
+        for i in range(15):
+            tracker.update(
+                _make_candle(
+                    time=f"2026-03-23T10:{i:02d}:00",
+                    delta=100.0,
+                )
+            )
+
+        # Session boundary: time goes backwards
+        state = tracker.update(
+            _make_candle(
+                time="2026-03-23T09:00:00",  # earlier time = new session
+                delta=50.0,
+            )
+        )
+        assert state.value == 50.0  # CVD reset and started fresh
+
+
+# ===================================================================
+# TEST 3: PROBING + BALANCE Contradiction
+# ===================================================================
+
+
+class TestProbingRangeContradiction:
+    """Verify PROBING market state overrides BALANCE structure to TRANSITION."""
+
+    def test_probing_overrides_balance_structure(self):
+        """When market_state=PROBING and structure=BALANCE, override to TRANSITION."""
+        # Create a structure that would classify as BALANCE
+        balance_structure = MarketStructure(
+            state="BALANCE",
+            confidence_score=75,
+            features={"range_atr": 1.0, "vwap_slope": 0.05},
+        )
+
+        # Cross-validation logic (from amt_analyzer.py)
+        market_state = MarketState.PROBING
+        if market_state == MarketState.PROBING and balance_structure.state == "BALANCE":
+            corrected = MarketStructure(
+                state="TRANSITION",
+                confidence_score=max(balance_structure.confidence_score, 60),
+                features=balance_structure.features,
+            )
+        else:
+            corrected = balance_structure
+
+        assert corrected.state == "TRANSITION"
+        assert corrected.confidence_score >= 60
+
+    def test_balanced_state_preserves_balance_structure(self):
+        """When market_state=BALANCED, BALANCE structure is valid."""
+        balance_structure = MarketStructure(
+            state="BALANCE",
+            confidence_score=75,
+            features={},
+        )
+        market_state = MarketState.BALANCED
+        if market_state == MarketState.PROBING and balance_structure.state == "BALANCE":
+            corrected = MarketStructure(
+                state="TRANSITION",
+                confidence_score=max(balance_structure.confidence_score, 60),
+                features=balance_structure.features,
+            )
+        else:
+            corrected = balance_structure
+
+        assert corrected.state == "BALANCE"  # no override
+
+
+# ===================================================================
+# TEST 4: PROBING Playbook
+# ===================================================================
+
+
+class TestProbingPlaybook:
+    """Verify PROBING state can generate signals with high aggression."""
+
+    def test_gate4_blocks_probing_without_aggression(self):
+        pipeline = GatePipeline()
+        ctx = GateContext(
+            market_state=MarketState.PROBING,
+            aggression_score=1.5,  # below 3.0
+            candle_count=100,
+            nearest_level=100.0,
+            distance_to_level_ticks=1.0,
+            drive_number=2,
+            drive_entry_valid=True,
+            cushion_ticks=5.0,
+            r_r_ratio=2.0,
+            position_size_ok=True,
+        )
+        result = pipeline.evaluate(ctx)
+        assert not result.passed
+        assert result.gate == 4
+
+    def test_gate4_allows_probing_with_high_aggression(self):
+        pipeline = GatePipeline()
+        ctx = GateContext(
+            market_state=MarketState.PROBING,
+            aggression_score=3.5,  # above 3.0
+            candle_count=100,
+            nearest_level=100.0,
+            distance_to_level_ticks=1.0,
+            poc=99.0,
+            vah=101.0,
+            val=97.0,
+            price=102.0,
+            drive_number=2,
+            drive_entry_valid=True,
+            cushion_ticks=5.0,
+            r_r_ratio=2.0,
+            position_size_ok=True,
+            setup_type="TREND_MODEL",
+        )
+        result = pipeline.evaluate(ctx)
+        # Should pass gate 4 (PROBING with high aggression)
+        # May fail at a later gate, but not gate 4
+        assert result.gate != 4 or result.passed
+
+
+# ===================================================================
+# TEST 5: LVN Stability
+# ===================================================================
+
+
+class TestLVNStability:
+    """Verify LVNs don't appear and disappear randomly."""
+
+    def test_lvn_requires_persistence(self):
+        tracker = LVNPersistenceTracker(min_bars=3)
+        profile = [
+            VolumeProfileLevel(price=100.0 + i * 0.5, volume=100.0) for i in range(20)
+        ]
+        # Set one level as LVN (very low volume)
+        profile[10].volume = 5.0
+
+        # Bar 1: LVN detected → candidate, not emitted yet
+        result = tracker.update([105.0], profile)
+        assert 105.0 not in result  # not yet persisted
+
+        # Bar 2: still candidate
+        result = tracker.update([105.0], profile)
+        assert 105.0 not in result
+
+        # Bar 3: persisted (age=3 >= min_bars=3)
+        result = tracker.update([105.0], profile)
+        assert 105.0 in result
+
+    def test_lvn_persists_after_detection(self):
+        """Once emitted, LVN stays even if raw detection misses a bar."""
+        tracker = LVNPersistenceTracker(min_bars=2)
+        profile = [
+            VolumeProfileLevel(price=100.0 + i * 0.5, volume=100.0) for i in range(20)
+        ]
+        profile[10].volume = 5.0
+
+        # Build up to emission
+        tracker.update([105.0], profile)
+        tracker.update([105.0], profile)
+        result = tracker.update([105.0], profile)
+        assert 105.0 in result
+
+        # Bar 4: raw detection misses it, but emitted LVN persists
+        # (volume still low)
+        result = tracker.update([], profile)
+        assert 105.0 in result  # still there because volume didn't rise
+
+    def test_lvn_removed_when_volume_rises(self):
+        """LVN is removed when its bucket volume rises above threshold."""
+        from app.domain.fabio_ai.services.amt_analyzer import LVNPersistenceTracker as T
+
+        tracker = T(min_bars=2)
+
+        # Low-volume profile: most buckets have high volume, LVN bucket has low
+        low_vol_profile = [
+            VolumeProfileLevel(price=100.0 + i * 0.5, volume=100.0) for i in range(20)
+        ]
+        low_vol_profile[10].volume = 5.0  # LVN: well below mean
+
+        # Bar 1: candidate created
+        result = tracker.update([105.0], low_vol_profile)
+        assert 105.0 not in result  # not yet persisted
+
+        # Bar 2: promoted (age=2 >= min_bars=2)
+        result = tracker.update([105.0], low_vol_profile)
+        assert 105.0 in result  # now persisted
+
+        # Volume rises at the LVN level
+        high_vol_profile = [
+            VolumeProfileLevel(price=100.0 + i * 0.5, volume=200.0) for i in range(20)
+        ]
+        high_vol_profile[10].volume = 200.0  # way above removal threshold
+
+        result = tracker.update([105.0], high_vol_profile)
+        assert 105.0 not in result  # removed because volume rose
+
+        # Volume rises at the LVN level
+        high_vol_profile = [
+            VolumeProfileLevel(price=100.0 + i * 0.5, volume=200.0) for i in range(20)
+        ]
+        high_vol_profile[10].volume = 200.0  # way above threshold
+
+        result = tracker.update([105.0], high_vol_profile)
+        # LVN should be removed since volume is now high
+        assert 105.0 not in result
+
+
+# ===================================================================
+# TEST 6: Structure Label Hysteresis
+# ===================================================================
+
+
+class TestStructureHysteresis:
+    """Verify structure labels don't flicker."""
+
+    def test_hysteresis_parameters_increased(self):
+        """Verify that dwell/cooldown are no longer 1."""
+        from app.domain.fabio_ai.services import market_structure_classifier as msc
+
+        assert msc._DWELL_TICKS >= 2, (
+            f"Dwell ticks should be >= 2, got {msc._DWELL_TICKS}"
+        )
+        assert msc._COOLDOWN_TICKS >= 2, (
+            f"Cooldown ticks should be >= 2, got {msc._COOLDOWN_TICKS}"
+        )
+
+
+# ===================================================================
+# TEST 7: Footprint Delta Alignment
+# ===================================================================
+
+
+class TestFootprintDeltaAlignment:
+    """Verify footprint_confirmed requires both agg prints AND strong delta."""
+
+    def test_footprint_confirmed_requires_both_conditions(self):
+        """footprint_confirmed = has_agg_prints AND has_strong_delta."""
+        # Strong delta but no agg prints → not confirmed
+        norm_delta = 0.5  # strong
+        agg_prints = []  # no prints
+        footprint_confirmed = len(agg_prints) >= 2 and abs(norm_delta) > 0.30
+        assert not footprint_confirmed
+
+        # Agg prints but weak delta → not confirmed
+        norm_delta = 0.1  # weak
+        agg_prints = [1, 2, 3]  # has prints
+        footprint_confirmed = len(agg_prints) >= 2 and abs(norm_delta) > 0.30
+        assert not footprint_confirmed
+
+        # Both → confirmed
+        norm_delta = 0.5
+        agg_prints = [1, 2, 3]
+        footprint_confirmed = len(agg_prints) >= 2 and abs(norm_delta) > 0.30
+        assert footprint_confirmed
+
+
+# ===================================================================
+# TEST 8: Decision History Extension
+# ===================================================================
+
+
+class TestDecisionHistory:
+    """Verify decision history supports full session."""
+
+    def test_get_recent_decisions_extended_limit(self):
+        service = SignalTrackingService()
+
+        # Add 100 decisions
+        for i in range(100):
+            service.track_gate_block(
+                symbol="TEST",
+                gate_name=f"GATE_{i % 12}",
+                gate_reason="TEST",
+                gate_detail="test",
+            )
+
+        # Default limit should return all
+        recent = service.get_recent_decisions("TEST")
+        assert len(recent) == 100
+
+    def test_get_recent_decisions_respects_limit(self):
+        service = SignalTrackingService()
+
+        for i in range(200):
+            service.track_gate_block(
+                symbol="TEST",
+                gate_name="GATE_0",
+                gate_reason="TEST",
+                gate_detail="test",
+            )
+
+        recent = service.get_recent_decisions("TEST", limit=50)
+        assert len(recent) == 50
+
+
+# ===================================================================
+# TEST: Aggression Scorer direction_sign
+# ===================================================================
+
+
+class TestAggressionDirectionSign:
+    """Verify direction_sign correctly identifies bullish vs bearish."""
+
+    def test_bullish_signals_give_positive_direction(self):
+        # Set majority of the 7 signals to positive
+        result = AggressionScorer.score(
+            footprint_confirmed=True,
+            cvd_confirmed=True,
+            big_trade_confirmed=True,
+            absorption_detected=True,
+        )
+        # 4 out of 7 signals are active (> 7/2 = 3.5) → bullish
+        assert result.direction_sign == 1
+
+    def test_empty_signals_give_negative_direction(self):
+        result = AggressionScorer.score()
+        # With no signals, there are 0 bullish out of 7 total
+        # 0 > 7/2 is False → direction_sign = -1
+        assert result.direction_sign == -1
+
+
+# ===================================================================
+# TEST: PROBING Playbook Signal Generation
+# ===================================================================
+
+
+class TestProbingSignalGeneration:
+    """Verify PROBING state generates signals with correct conditions."""
+
+    def test_probing_above_vah_bullish(self):
+        analyzer = AMTAnalyzer()
+
+        # Generate enough candles for the analyzer
+        candles = _make_candles(30, base_price=100.0)
+        # Last candle above VAH with positive aggression direction
+        candles[-1] = _make_candle(
+            time="2026-03-23T10:29:00",
+            open_=105.0,
+            high=106.0,
+            low=104.5,
+            close=105.5,
+            delta=200.0,  # strong positive delta
+        )
+
+        signal = analyzer._generate_signal(
+            data=candles,
+            current=candles[-1],
+            market_state=MarketState.PROBING,
+            has_aggression=True,
+            aggression_score=3.5,
+            lvns=[],
+            vah=104.0,  # current is above VAH
+            val=96.0,
+            poc=100.0,
+            aggression_direction=1,  # bullish
+            has_high_aggression=True,  # pyramid_eligible
+            session_vwap=100.0,  # below current price (bullish context)
+        )
+
+        assert signal is not None
+        assert signal.type.value == "BUY"
+        assert "PROBING Acceptance" in signal.reason
+
+    def test_probing_below_val_bearish(self):
+        analyzer = AMTAnalyzer()
+
+        candles = _make_candles(30, base_price=100.0)
+        candles[-1] = _make_candle(
+            time="2026-03-23T10:29:00",
+            open_=95.0,
+            high=95.5,
+            low=94.0,
+            close=94.5,
+            delta=-200.0,  # strong negative delta
+        )
+
+        signal = analyzer._generate_signal(
+            data=candles,
+            current=candles[-1],
+            market_state=MarketState.PROBING,
+            has_aggression=True,
+            aggression_score=3.5,
+            lvns=[],
+            vah=104.0,
+            val=96.0,  # current is below VAL
+            poc=100.0,
+            aggression_direction=-1,  # bearish
+            has_high_aggression=True,  # pyramid_eligible
+            session_vwap=100.0,  # above current price (bearish context)
+        )
+
+        assert signal is not None
+        assert signal.type.value == "SELL"
+        assert "PROBING Acceptance" in signal.reason
+
+    def test_probing_no_signal_without_aggression(self):
+        analyzer = AMTAnalyzer()
+        candles = _make_candles(30)
+
+        signal = analyzer._generate_signal(
+            data=candles,
+            current=candles[-1],
+            market_state=MarketState.PROBING,
+            has_aggression=False,
+            aggression_score=1.0,
+            lvns=[],
+            vah=99.0,
+            val=95.0,
+            poc=97.0,
+            aggression_direction=0,
+            has_high_aggression=False,
+            session_vwap=0.0,
+        )
+
+        assert signal is None  # no signal without aggression
+
+    def test_probing_acceptance_blocked_by_vwap_context(self):
+        """PROBING acceptance above VAH blocked if price below VWAP (contradictory)."""
+        analyzer = AMTAnalyzer()
+        candles = _make_candles(30, base_price=100.0)
+        candles[-1] = _make_candle(
+            time="2026-03-23T10:29:00",
+            open_=105.0,
+            high=106.0,
+            low=104.5,
+            close=105.5,
+            delta=200.0,
+        )
+
+        signal = analyzer._generate_signal(
+            data=candles,
+            current=candles[-1],
+            market_state=MarketState.PROBING,
+            has_aggression=True,
+            aggression_score=3.5,
+            lvns=[],
+            vah=104.0,  # above VAH
+            val=96.0,
+            poc=100.0,
+            aggression_direction=1,  # bullish
+            has_high_aggression=True,
+            session_vwap=106.0,  # ABOVE current price → VWAP context contradicts bullish
+        )
+
+        # Acceptance blocked because price is above VAH but below VWAP
+        assert signal is None

@@ -13,13 +13,7 @@ from typing import Any, overload
 from app.domain.trading.models.enums import (
     Side, SignalType, Source, SetupType, PositionStatus,
 )
-
-
-def _to_decimal(value: float | int | str | Decimal) -> Decimal:
-    """Convert various numeric types to Decimal for precise financial calculations."""
-    if isinstance(value, Decimal):
-        return value
-    return Decimal(str(value))
+from shared.conversion import to_decimal
 
 
 # ---------------------------------------------------------------------------
@@ -64,10 +58,10 @@ class Signal:
         """Factory method that accepts float or Decimal for monetary values."""
         return cls(
             type=type,
-            price=_to_decimal(price),
+            price=to_decimal(price),
             reason=reason,
-            stop_loss=_to_decimal(stop_loss),
-            take_profit=_to_decimal(take_profit),
+            stop_loss=to_decimal(stop_loss),
+            take_profit=to_decimal(take_profit),
             timestamp=timestamp,
             setup=setup,
             source=source,
@@ -111,24 +105,16 @@ class Position:
 
     def update_pnl(self, current_price) -> Decimal:
         """Recalculate unrealised PnL from *current_price*."""
-        from decimal import Decimal as D
-        
-        # Ensure both prices are Decimal for calculation
-        if not isinstance(current_price, D):
-            current_price = D(str(round(float(current_price), 6)))
-        entry = self.entry_price
-        if not isinstance(entry, D):
-            entry = D(str(round(float(entry), 6)))
+        # Use shared conversion utility for consistent precision
+        current = to_decimal(current_price)
+        entry = to_decimal(self.entry_price)
+        size = to_decimal(self.size)
         
         diff = (
-            current_price - entry
+            current - entry
             if self.side == Side.LONG
-            else entry - current_price
+            else entry - current
         )
-        # Ensure size is Decimal for multiplication
-        size = self.size
-        if not isinstance(size, D):
-            size = D(str(float(size)))
         self.pnl = diff * size
         return self.pnl
 

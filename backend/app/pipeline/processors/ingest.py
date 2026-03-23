@@ -39,38 +39,83 @@ class DhanWsIngestor(BaseProcessor):
 
     async def process(self, inbox: dict[str, Channel], outbox: dict[str, Channel]) -> None:
         from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter
+        from app.config import settings
         adapter = DhanMarketDataAdapter()
         out = outbox["raw_ticks"]
 
-        while True:
+        _latest_depth = {}  # symbol -> {"bid": [], "ask": []}
+
+        async def _depth_worker():
             try:
-                async for pkt in adapter.stream_full(self._symbols):
-                    msg = Message(
-                        payload=RawTickPayload(
-                            ltp=float(pkt.get("ltp", 0)),
-                            volume=int(pkt.get("volume", 0)),
-                            ltq=int(pkt.get("ltq", 0)),
-                            oi=int(pkt.get("oi", 0)),
-                            total_buy_qty=int(pkt.get("total_buy_qty", 0)),
-                            total_sell_qty=int(pkt.get("total_sell_qty", 0)),
-                            depth_bids=tuple(
-                                (b["price"], b["qty"]) for b in pkt.get("depth_bids", [])
-                            ),
-                            depth_asks=tuple(
-                                (a["price"], a["qty"]) for a in pkt.get("depth_asks", [])
-                            ),
-                            source="ws",
-                        ),
-                        symbol=pkt.get("symbol", self._symbols[0] if self._symbols else ""),
-                        timestamp=datetime.now(IST),
-                        source_processor=self.name,
-                    )
-                    await out.send(msg)
+                logger.info("[%s] Depth WS connection starting (Depth 20)...", self.name)
+                async for depth in adapter.stream_depth_20(self._symbols):
+                    sym = getattr(depth, "symbol", "")
+                    if not sym:
+                        continue
+                    side = getattr(depth, "side", "bid").lower()
+                    if sym not in _latest_depth:
+                        _latest_depth[sym] = {"bid": [], "ask": []}
+                    
+                    levels = getattr(depth, "levels", [])
+                    _latest_depth[sym][side] = [
+                        (lvl.price, lvl.quantity) for lvl in levels
+                    ]
             except asyncio.CancelledError:
-                raise
+                pass
             except Exception as e:
-                logger.warning("[%s] WS error, reconnecting in 5s: %s", self.name, e)
-                await asyncio.sleep(5)
+                logger.warning("[%s] Depth stream error: %s", self.name, e)
+
+        depth_task = None
+        if settings.DEFAULT_EXCHANGE == "NSE":
+            logger.info("[%s] Dual-Stream enabled: Starting Full + Depth 20 streams", self.name)
+            depth_task = asyncio.create_task(_depth_worker())
+        else:
+            logger.info("[%s] Single-Stream mode: Depth 20 disabled for %s", self.name, settings.DEFAULT_EXCHANGE)
+
+        try:
+            while True:
+                try:
+                    async for pkt in adapter.stream_full(self._symbols):
+                        sym = pkt.get("symbol", self._symbols[0] if self._symbols else "")
+                        
+                        # Use cached 20-level depth if available, otherwise fallback to pkt 5-level depth
+                        cached = _latest_depth.get(sym, {})
+                        
+                        if "bid" in cached and len(cached["bid"]) > 0:
+                            depth_bids = tuple(cached["bid"])
+                        else:
+                            depth_bids = tuple((b["price"], b["qty"]) for b in pkt.get("depth_bids", []))
+                            
+                        if "ask" in cached and len(cached["ask"]) > 0:
+                            depth_asks = tuple(cached["ask"])
+                        else:
+                            depth_asks = tuple((a["price"], a["qty"]) for a in pkt.get("depth_asks", []))
+
+                        msg = Message(
+                            payload=RawTickPayload(
+                                ltp=float(pkt.get("ltp", 0)),
+                                volume=int(pkt.get("volume", 0)),
+                                ltq=int(pkt.get("ltq", 0)),
+                                oi=int(pkt.get("oi", 0)),
+                                total_buy_qty=int(pkt.get("total_buy_qty", 0)),
+                                total_sell_qty=int(pkt.get("total_sell_qty", 0)),
+                                depth_bids=depth_bids,
+                                depth_asks=depth_asks,
+                                source="ws",
+                            ),
+                            symbol=sym,
+                            timestamp=datetime.now(IST),
+                            source_processor=self.name,
+                        )
+                        await out.send(msg)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning("[%s] Main WS error, reconnecting in 5s: %s", self.name, e)
+                    await asyncio.sleep(5)
+        finally:
+            if depth_task:
+                depth_task.cancel()
 
 
 class RestPollIngestor(BaseProcessor):

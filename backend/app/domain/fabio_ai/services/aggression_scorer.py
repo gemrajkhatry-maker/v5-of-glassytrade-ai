@@ -30,6 +30,7 @@ from app.domain.constants import (
     AGGRESSION_BUBBLE,
     MIN_AGGRESSION_SCORE,
     PYRAMID_AGGRESSION_SCORE,
+    AGGRESSION_PERSISTENCE_BARS,
 )
 
 logger = logging.getLogger(__name__)
@@ -149,3 +150,93 @@ class AggressionScorer:
             f"Aggression {result.score:.1f}/4.5 ({result.confidence}) "
             f"signals=[{', '.join(active)}]"
         )
+
+
+class PersistentAggressionScorer:
+    """Stateful aggression scorer with persistence filter to prevent signal flicker.
+
+    Wraps AggressionScorer.score() and only emits confirmed/pyramid flags
+    after the score has remained above the threshold for N consecutive bars.
+
+    Usage:
+        scorer = PersistentAggressionScorer()
+        result = scorer.score(footprint_confirmed=True, cvd_confirmed=True, ...)
+        # result.confirmed is True only if score >= 2.0 for 3 consecutive bars
+    """
+
+    def __init__(self, persistence_bars: int = AGGRESSION_PERSISTENCE_BARS) -> None:
+        self._persistence_bars = persistence_bars
+        self._confirmed_streak: int = 0
+        self._pyramid_streak: int = 0
+        self._raw_score_history: list[float] = []
+
+    def reset(self) -> None:
+        """Reset persistence state (call at session boundary)."""
+        self._confirmed_streak = 0
+        self._pyramid_streak = 0
+        self._raw_score_history.clear()
+
+    def score(
+        self,
+        footprint_confirmed: bool = False,
+        cvd_confirmed: bool = False,
+        big_trade_confirmed: bool = False,
+        absorption_detected: bool = False,
+        ofi_aligned: bool = False,
+        confluence_bonus: bool = False,
+        volume_bubble_near: bool = False,
+    ) -> AggressionResult:
+        """Compute aggression score with persistence filter.
+
+        Raw score is computed each bar. Confirmed/pyramid flags require
+        the raw score to be above threshold for N consecutive bars.
+        """
+        raw_result = AggressionScorer.score(
+            footprint_confirmed=footprint_confirmed,
+            cvd_confirmed=cvd_confirmed,
+            big_trade_confirmed=big_trade_confirmed,
+            absorption_detected=absorption_detected,
+            ofi_aligned=ofi_aligned,
+            confluence_bonus=confluence_bonus,
+            volume_bubble_near=volume_bubble_near,
+        )
+
+        self._raw_score_history.append(raw_result.score)
+
+        # Update persistence streaks
+        if raw_result.score >= MIN_AGGRESSION_SCORE:
+            self._confirmed_streak += 1
+        else:
+            self._confirmed_streak = 0
+
+        if raw_result.score >= PYRAMID_AGGRESSION_SCORE:
+            self._pyramid_streak += 1
+        else:
+            self._pyramid_streak = 0
+
+        # Apply persistence filter
+        confirmed = self._confirmed_streak >= self._persistence_bars
+        pyramid_eligible = self._pyramid_streak >= self._persistence_bars
+
+        if confirmed and pyramid_eligible:
+            confidence = "HIGH"
+        elif confirmed:
+            confidence = "MEDIUM"
+        else:
+            confidence = "LOW"
+
+        return AggressionResult(
+            score=raw_result.score,
+            confirmed=confirmed,
+            pyramid_eligible=pyramid_eligible,
+            confidence=confidence,
+            breakdown=raw_result.breakdown,
+        )
+
+    @property
+    def confirmed_streak(self) -> int:
+        return self._confirmed_streak
+
+    @property
+    def raw_history(self) -> list[float]:
+        return list(self._raw_score_history)

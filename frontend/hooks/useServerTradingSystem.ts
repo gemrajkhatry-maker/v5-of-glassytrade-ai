@@ -341,6 +341,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.stats !== undefined) merged.stats = { ...existing.stats, ...state.stats };
                     if (state.ltp !== undefined) merged.ltp = state.ltp;
                     if (state.oi !== undefined) merged.oi = state.oi;
+                    if (state.rangeBars !== undefined) merged.rangeBars = state.rangeBars;
 
                     // History tracking: Listen for both standard generative AI and the new reasoning worker
                     const newAi = state.genAIAnalysis;
@@ -439,6 +440,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         orderBook: state.depth ?? inst.orderBook,
                         depth20Active: state.depth20Active ?? inst.depth20Active,
                         stats: newStats,
+                        rangeBars: state.rangeBars ?? inst.rangeBars,
                         lastUpdate: Date.now(),
                     },
                 };

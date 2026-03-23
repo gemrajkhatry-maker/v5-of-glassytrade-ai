@@ -56,6 +56,24 @@ AGGRESSION_BUBBLE = 0.5  # FR-06-07: volume bubble near entry
 MIN_AGGRESSION_SCORE = 2.0  # FR-06-08: minimum for trade signal
 PYRAMID_AGGRESSION_SCORE = 3.0  # FR-06-09: minimum for pyramid add
 
+# Aggression persistence filter — prevent signal flicker
+AGGRESSION_PERSISTENCE_BARS = 3  # Score must be >= threshold for N consecutive bars
+CVD_SLOPE_PERSISTENCE_BARS = 3  # Slope sign must persist for N consecutive bars
+CVD_SLOPE_EXTENDED_WINDOW = 40  # Extended lookback for session-leg slope
+
+# LVN stability
+LVN_MIN_PERSISTENCE_BARS = 3  # LVN must survive N bars before emitted
+LVN_REMOVAL_THRESHOLD = 0.30  # LVN removed only if volume rises above 30% of mean
+
+# Structure label hysteresis
+STRUCTURE_DWELL_TICKS = 3  # New state must persist N consecutive ticks
+STRUCTURE_COOLDOWN_TICKS = 3  # Hold after state change before allowing another
+STRUCTURE_CONFIDENCE_GATE = 60  # Minimum confidence to accept new state
+STRUCTURE_BYPASS_CONFIDENCE = 70  # Skip TRANSITION buffer if confidence exceeds this
+
+# Decision history
+DECISION_HISTORY_LIMIT = 1000  # Max decisions to return from API
+
 # ============================================================================
 # Trade Setup (FR-07)
 # ============================================================================

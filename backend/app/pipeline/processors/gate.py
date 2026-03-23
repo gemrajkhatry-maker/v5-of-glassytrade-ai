@@ -16,6 +16,7 @@ Configuration (ProcessorConfig.settings):
     min_candles: int — minimum candles before gate opens (default 6, Fabio rule)
     market: str — "NSE" | "MCX" | "GLOBAL" (default "NSE")
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -88,7 +89,7 @@ class SignalGateProcessor(BaseProcessor):
 
     def _build_domain_amt_result(self, p: AMTResultPayload) -> SimpleNamespace:
         """Reconstruct a minimal AMTResult-compatible object from the payload.
-        
+
         NOW WITH FULL CONTEXT — passes developing VA, leg profile, VWAP,
         LVNs, HVNs, aggressive prints, and LVN play to the gate.
         """
@@ -117,16 +118,22 @@ class SignalGateProcessor(BaseProcessor):
             lvns=p.lvns,
             # Aggressive prints (NEW)
             aggressive_prints=[
-                SimpleNamespace(price=ap.get("price", 0), volume=ap.get("volume", 0), side=ap.get("side", ""))
+                SimpleNamespace(
+                    price=ap.get("price", 0),
+                    volume=ap.get("volume", 0),
+                    side=ap.get("side", ""),
+                )
                 for ap in p.aggressive_prints
-            ] if p.aggressive_prints else (),
+            ]
+            if p.aggressive_prints
+            else (),
             # LVN Play (NEW)
             lvn_play=p.lvn_play,
         )
 
     def _build_synthetic_tick(self, p: AMTResultPayload) -> SimpleNamespace:
         """Create a minimal tick-like object representing current price.
-        
+
         Uses POC as price reference — the fair-value anchor for proximity checks.
         """
         price = p.poc if p.poc > 0 else 1.0
@@ -144,11 +151,12 @@ class SignalGateProcessor(BaseProcessor):
 
     def _get_session_context(self, timestamp: datetime) -> dict:
         """Get session context for the current time.
-        
+
         Returns session info needed for session-strategy enforcement.
         """
         try:
             from app.domain.fabio_ai.services.session_context import get_session_info
+
             session_info = get_session_info(
                 timestamp=str(timestamp),
                 market=self._market,
@@ -160,10 +168,12 @@ class SignalGateProcessor(BaseProcessor):
                 "allow_trend": session_info.allow_trend,
                 "allow_reversion": session_info.allow_reversion,
                 "force_exit": session_info.force_exit,
-                "opening_bias": getattr(session_info, 'opening_relation', 'IN_BALANCE'),
+                "opening_bias": getattr(session_info, "opening_relation", "IN_BALANCE"),
             }
         except Exception:
-            logger.debug("[%s] Could not get session context, using defaults", self.name)
+            logger.debug(
+                "[%s] Could not get session context, using defaults", self.name
+            )
             return {
                 "session_name": "UNKNOWN",
                 "favor_strategy": "NEUTRAL",
@@ -174,45 +184,41 @@ class SignalGateProcessor(BaseProcessor):
                 "opening_bias": "IN_BALANCE",
             }
 
-    def _check_cvd_hard_block(self, p: AMTResultPayload, direction_hint: str = "") -> tuple[bool, str]:
+    def _check_cvd_hard_block(
+        self, p: AMTResultPayload, direction_hint: str = ""
+    ) -> tuple[bool, str]:
         """Fabio Rule: If CVD is strongly against you, NO TRADE.
-        
+
         Returns (is_blocked, reason).
         """
         cvd = p.cvd_slope
-        
+
         # Extreme selling in balance = don't fade (potential breakdown)
         if cvd < -50.0 and p.market_state == "BALANCED":
             return True, f"CVD extreme selling ({cvd:.0f}) in balance — do not fade"
-        
+
         # Extreme buying in balance = don't fade (potential breakout)
         if cvd > 50.0 and p.market_state == "BALANCED":
             return True, f"CVD extreme buying (+{cvd:.0f}) in balance — do not fade"
-        
+
         # CVD divergence against trade direction
         if p.cvd_divergence:
             if cvd > 0 and direction_hint == "SHORT":
                 return True, "CVD bullish divergence against SHORT direction"
             if cvd < 0 and direction_hint == "LONG":
                 return True, "CVD bearish divergence against LONG direction"
-        
+
         return False, ""
 
     def _derive_cvd_divergence_str(self, p: AMTResultPayload) -> str:
-        """Convert cvd_divergence bool + cvd_slope direction into string."""
-        if not p.cvd_divergence:
-            return ""
-        if p.cvd_slope < 0:
-            return "BEARISH_DIV"
-        if p.cvd_slope > 0:
-            return "BULLISH_DIV"
-        return "DIVERGENCE"
+        """Return CVD divergence type string from payload (preserves original direction)."""
+        return p.cvd_divergence or ""
 
     def _grade_setup(
         self, gate_passed: bool, confirmation_strong: bool, p: AMTResultPayload
     ) -> tuple[str, float]:
         """Assign setup grade (A/B/C) and confidence based on confirmation quality.
-        
+
         A-grade: Strong confirmation + aligned CVD + LVN play present
         B-grade: Gate passed but confirmation weak or minor headwinds
         """
@@ -259,9 +265,7 @@ class SignalGateProcessor(BaseProcessor):
         else:
             return "C", score
 
-    async def _handle_amt_result(
-        self, msg: AMTResultMessage, out: Channel
-    ) -> None:
+    async def _handle_amt_result(self, msg: AMTResultMessage, out: Channel) -> None:
         """Evaluate the gate and emit a SignalGateMessage WITH FULL AMT CONTEXT."""
         p: AMTResultPayload = msg.payload
 
@@ -307,7 +311,9 @@ class SignalGateProcessor(BaseProcessor):
         cvd_blocked, cvd_reason = self._check_cvd_hard_block(p)
         if cvd_blocked:
             reason = f"Gate BLOCKED: {cvd_reason}"
-            logger.info("[%s] %s: CVD hard block — %s", self.name, msg.symbol, cvd_reason)
+            logger.info(
+                "[%s] %s: CVD hard block — %s", self.name, msg.symbol, cvd_reason
+            )
             await self._emit_gate(
                 out=out,
                 msg=msg,
@@ -421,7 +427,6 @@ class SignalGateProcessor(BaseProcessor):
             reason=reason,
             setup_grade=setup_grade,
             confidence=confidence,
-            
             # ── AMT Context (FIX #1) ──
             market_state=p.market_state,
             profile_shape=p.profile_shape,
@@ -432,34 +437,27 @@ class SignalGateProcessor(BaseProcessor):
             cvd_divergence=cvd_div_str,
             delta_score=p.delta_score,
             aggression=p.aggression,
-            
             # Developing VA
             dev_poc=p.dev_poc,
             dev_vah=p.dev_vah,
             dev_val=p.dev_val,
-            
             # Impulse leg
             leg_poc=p.leg_poc,
             leg_vah=p.leg_vah,
             leg_val=p.leg_val,
-            
             # VWAP
             session_vwap=p.session_vwap,
             vwap_upper_2=p.vwap_upper_2,
             vwap_lower_2=p.vwap_lower_2,
-            
             # Structural levels
             lvns=p.lvns,
             hvns=p.hvns,
             is_second_drive=is_second_drive,
-            
             # LVN Play
             lvn_play=p.lvn_play,
-            
             # Aggressive prints
             aggressive_prints=p.aggressive_prints,
             bubble_retests=p.bubble_retests,
-            
             # Session context
             session_name=session_ctx.get("session_name", ""),
             favor_strategy=session_ctx.get("favor_strategy", ""),
@@ -467,7 +465,6 @@ class SignalGateProcessor(BaseProcessor):
             ib_high=0.0,
             ib_low=0.0,
             session_phase=session_ctx.get("session_name", ""),
-            
             # CVD hard block
             cvd_hard_block=cvd_block[0],
             cvd_hard_block_reason=cvd_block[1],
@@ -483,3 +480,39 @@ class SignalGateProcessor(BaseProcessor):
         )
 
         await self._safe_send(out, gate_msg)
+
+        # Persist gate decision to DB for decision history
+        try:
+            from app.api.dependencies import get_service_graph
+
+            sg = get_service_graph()
+            if hasattr(sg, "signal_tracker") and sg.signal_tracker:
+                if passed:
+                    sg.signal_tracker.track_signal_generated(
+                        symbol=msg.symbol,
+                        direction="LONG" if p.delta_score > 0 else "SHORT",
+                        confidence=str(setup_grade),
+                        aggression_score=p.delta_score,
+                        drive_number=0,
+                        market_state=p.market_state,
+                        price=0.0,
+                        poc=p.poc,
+                        vah=p.vah,
+                        val=p.val,
+                        cvd_slope=p.cvd_slope,
+                    )
+                else:
+                    sg.signal_tracker.track_gate_block(
+                        symbol=msg.symbol,
+                        gate_name="THREE_ALIGN",
+                        gate_reason="ALERT" if "price" in reason.lower() else "FLAT",
+                        gate_detail=reason,
+                        market_state=p.market_state,
+                        poc=p.poc,
+                        vah=p.vah,
+                        val=p.val,
+                        cvd_slope=p.cvd_slope,
+                        aggression_score=p.delta_score,
+                    )
+        except Exception:
+            pass  # Non-critical — tracking failure should not break pipeline

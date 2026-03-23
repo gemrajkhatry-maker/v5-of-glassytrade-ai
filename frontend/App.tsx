@@ -7,7 +7,7 @@ import MarketSidebar from './components/MarketSidebar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { DEFAULT_CONFIG } from './constants';
 import { ChartConfig, ChatMessage, MessageRole, ChartMode } from './types';
-import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, Grid, BookOpen, Eye } from 'lucide-react';
+import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, Grid, BookOpen, Eye, TrendingUp } from 'lucide-react';
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
 import JournalPage from './components/JournalPage';
 
@@ -189,8 +189,8 @@ function App() {
                         {/* Instance 2: Footprint */}
                         <ChartScene
                             key={`footprint-${activeInstrument.symbol}`}
-                            data={activeInstrument.data} // Used for initial mount/history
-                            tickBus={tickBus}            // Realtime data feed
+                            data={activeInstrument.data}
+                            tickBus={tickBus}
                             symbol={activeInstrument.symbol}
                             predictions={activeInstrument.predictions}
                             config={effectiveConfig}
@@ -202,6 +202,24 @@ function App() {
                             isHidden={chartMode !== 'FOOTPRINT'}
                             footprintData={activeFootprint.data}
                             cumulativeDeltas={activeFootprint.cumulativeDeltas}
+                        />
+                        {/* Instance 3: Range Bars */}
+                        <ChartScene
+                            key={`range-${activeInstrument.symbol}`}
+                            data={activeInstrument.data}
+                            tickBus={tickBus}
+                            symbol={activeInstrument.symbol}
+                            predictions={activeInstrument.predictions}
+                            config={effectiveConfig}
+                            activeSignal={activeInstrument.amtAnalysis?.signal}
+                            positions={activeInstrument.portfolio.positions}
+                            closedTrades={activeInstrument.portfolio.closedTrades}
+                            amtAnalysis={activeInstrument.amtAnalysis}
+                            mode="RANGE"
+                            isHidden={chartMode !== 'RANGE'}
+                            footprintData={null}
+                            cumulativeDeltas={[]}
+                            rangeBarData={activeInstrument.rangeBars ?? null}
                         />
                     </ErrorBoundary>
                 </div>
@@ -235,6 +253,14 @@ function App() {
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <Grid size={14} /> Footprint
+                                    </span>
+                                </button>
+                                <button
+                                    onClick={() => setChartMode('RANGE')}
+                                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${chartMode === 'RANGE' ? 'bg-violet-500/20 text-violet-200 shadow-sm' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                >
+                                    <span className="flex items-center gap-1.5">
+                                        <TrendingUp size={14} /> Range
                                     </span>
                                 </button>
                             </div>

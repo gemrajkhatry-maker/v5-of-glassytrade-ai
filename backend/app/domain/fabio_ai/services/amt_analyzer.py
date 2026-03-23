@@ -25,6 +25,7 @@ from app.domain.trading.models.value_objects import (
 )
 from app.domain.fabio_ai.models.observation import AMTObservation
 from app.domain.trading.models.entities import Signal
+from app.domain.constants import LVN_MIN_PERSISTENCE_BARS, LVN_REMOVAL_THRESHOLD
 from app.domain.fabio_ai.services.cvd_tracker import CVDTracker
 from app.domain.fabio_ai.services.profile_classifier import (
     classify_shape,
@@ -43,7 +44,10 @@ from app.domain.fabio_ai.services.market_state_engine import (
     log_state_transition,
 )
 from app.domain.fabio_ai.services.drive_tracker import DriveTracker
-from app.domain.fabio_ai.services.aggression_scorer import AggressionScorer
+from app.domain.fabio_ai.services.aggression_scorer import (
+    AggressionScorer,
+    PersistentAggressionScorer,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +84,7 @@ class AMTConfig:
     def from_settings(cls) -> AMTConfig:
         """Create config from environment settings."""
         from app.config import settings as _settings
+
         instance = cls()
         try:
             instance.AGGRESSION_SIGMA_THRESHOLD = float(_settings.AGGRESSION_SIGMA)
@@ -370,6 +375,97 @@ def find_lvns(
             if not lvns or abs(profile[i].price - lvns[-1]) > step * 2:
                 lvns.append(profile[i].price)
     return lvns
+
+
+class LVNPersistenceTracker:
+    """Tracks LVN persistence across bars to prevent appearing/disappearing.
+
+    An LVN must be detected for N consecutive bars before it is emitted.
+    Once emitted, it persists until the volume at that level rises above
+    the removal threshold (LVN_REMOVAL_THRESHOLD × mean volume).
+
+    This prevents the "LVN appears for 1 bar then disappears" problem.
+    """
+
+    def __init__(self, min_bars: int = LVN_MIN_PERSISTENCE_BARS) -> None:
+        self._min_bars = min_bars
+        # price -> (birth_bar_index, emitted)
+        self._candidates: dict[float, tuple[int, bool]] = {}
+        self._bar_index: int = 0
+        self._emitted_lvns: dict[float, int] = {}  # price -> bar when emitted
+
+    def reset(self) -> None:
+        """Reset at session boundary."""
+        self._candidates.clear()
+        self._emitted_lvns.clear()
+        self._bar_index = 0
+
+    def update(
+        self,
+        raw_lvns: list[float],
+        profile: list[VolumeProfileLevel],
+    ) -> list[float]:
+        """Process new raw LVNs and return stable (persisted) LVNs.
+
+        Args:
+            raw_lvns: LVN prices detected this bar from find_lvns().
+            profile: Current volume profile (for removal threshold check).
+
+        Returns:
+            List of stable LVN prices.
+        """
+        self._bar_index += 1
+        tick_size = profile[1].price - profile[0].price if len(profile) > 1 else 1.0
+        snap = tick_size * 2  # snapping distance
+
+        # 1. Update candidates: add new, refresh existing
+        raw_set = set(raw_lvns)
+        matched_raw: set[float] = set()
+
+        for price in list(self._candidates.keys()):
+            # Check if this candidate has a matching raw LVN
+            found_match = False
+            for rlvn in raw_lvns:
+                if abs(rlvn - price) < snap:
+                    found_match = True
+                    matched_raw.add(rlvn)
+                    break
+            if not found_match and price not in self._emitted_lvns:
+                # Candidate disappeared before being emitted — remove
+                del self._candidates[price]
+
+        # Add new candidates
+        for rlvn in raw_lvns:
+            if rlvn not in matched_raw:
+                # Check if close to an existing candidate
+                is_new = all(abs(rlvn - p) >= snap for p in self._candidates)
+                if is_new:
+                    self._candidates[rlvn] = (self._bar_index, False)
+
+        # 2. Promote candidates that have persisted long enough
+        # Age = _bar_index - birth + 1 (inclusive counting: bar 1 through bar 3 = age 3)
+        for price, (birth, emitted) in list(self._candidates.items()):
+            age = self._bar_index - birth + 1
+            if not emitted and age >= self._min_bars:
+                self._candidates[price] = (birth, True)
+                self._emitted_lvns[price] = self._bar_index
+
+        # 3. Check removal of emitted LVNs: remove if volume rose above threshold
+        if profile:
+            mean_vol = sum(p.volume for p in profile) / len(profile)
+            removal_threshold = mean_vol * LVN_REMOVAL_THRESHOLD
+            for price in list(self._emitted_lvns):
+                # Find the nearest profile bucket
+                nearest_idx = min(
+                    range(len(profile)),
+                    key=lambda i: abs(profile[i].price - price),
+                )
+                if profile[nearest_idx].volume > removal_threshold:
+                    del self._emitted_lvns[price]
+                    self._candidates.pop(price, None)
+
+        # 4. Return all emitted LVNs sorted by price
+        return sorted(self._emitted_lvns.keys())
 
 
 def find_hvns(
@@ -944,6 +1040,10 @@ class AMTAnalyzer:
         self._bubble_detector = BubbleDetector()
         self._ofi_calculator = OFICalculator()
         self._absorption_detector = AbsorptionDetector()
+        # Persistent aggression scorer (prevents delta score flicker)
+        self._persistent_agg_scorer = PersistentAggressionScorer()
+        # LVN persistence tracker (prevents LVN appearing/disappearing)
+        self._lvn_tracker = LVNPersistenceTracker()
 
     def detect_displacement_leg(self, data: list[OHLC]) -> dict:
         """Detect displacement and return leg profile data.
@@ -1229,7 +1329,9 @@ class AMTAnalyzer:
         # is valid market information (low volatility). Synthetic expansion was
         # creating false "near level" triggers in the Three-Align Gate.
 
-        lvns = find_lvns(profile, self.config)
+        # LVN detection with persistence filter — prevents appearing/disappearing
+        raw_lvns = find_lvns(profile, self.config)
+        lvns = self._lvn_tracker.update(raw_lvns, profile)
         hvns = find_hvns(profile, self.config)
         # LVN/HVN detection complete
         # Incremental aggressive prints — only compute last candle if data grew by 1
@@ -1331,8 +1433,13 @@ class AMTAnalyzer:
         norm_delta = current.delta / current.volume if current.volume > 0 else 0
 
         # FR-06-01: Footprint imbalance confirmed (≥40% cells at ≥3:1)
-        # Proxy: aggressive prints detected = footprint imbalance present
-        footprint_confirmed = len(agg_prints) >= 2
+        # Two conditions must agree:
+        #   1. Aggressive volume prints detected (institutional activity)
+        #   2. Current candle has strong directional delta (|norm_delta| > 0.3)
+        # This aligns the aggression signal with the tick-level footprint delta
+        has_agg_prints = len(agg_prints) >= 2
+        has_strong_delta = abs(norm_delta) > 0.30
+        footprint_confirmed = has_agg_prints and has_strong_delta
 
         # FR-06-02: CVD slope/divergence confirms
         cvd_confirmed = False
@@ -1372,8 +1479,8 @@ class AMTAnalyzer:
         bubble = self._bubble_detector.detect(current)
         volume_bubble_near = bubble.detected
 
-        # Aggression scorer (FR-06 additive, max 4.5)
-        agg_result = AggressionScorer.score(
+        # Aggression scorer (FR-06 additive, max 4.5) — with persistence filter
+        agg_result = self._persistent_agg_scorer.score(
             footprint_confirmed=footprint_confirmed,
             cvd_confirmed=cvd_confirmed,
             big_trade_confirmed=big_trade_confirmed,
@@ -1384,19 +1491,6 @@ class AMTAnalyzer:
         )
         aggression_score = agg_result.score
         has_aggression = agg_result.confirmed
-
-        # 4. Signal Generation
-        signal = self._generate_signal(
-            data,
-            current,
-            market_state,
-            has_aggression,
-            aggression_score,
-            lvns,
-            vah,
-            val,
-            poc,
-        )
 
         # Compute profile shape once and attach to result
         shape = classify_shape(profile)
@@ -1431,6 +1525,8 @@ class AMTAnalyzer:
             self._vwap_cum_sq_vol = 0.0
             self._ib_tracker.reset()
             self._ar_engine.reset()
+            self._persistent_agg_scorer.reset()
+            self._lvn_tracker.reset()
         self._vwap_last_time = current.time
 
         self._vwap_cum_vol += float(current.volume)
@@ -1472,6 +1568,16 @@ class AMTAnalyzer:
             self._poc_tracker._poc_history,
             self._vwap_history,
         )
+
+        # Cross-validation: PROBING market state is logically incompatible with
+        # BALANCE structure. PROBING = testing outside value, BALANCE = rotation
+        # inside value. If both fire, override structure to TRANSITION.
+        if market_state == MarketState.PROBING and structure.state == "BALANCE":
+            structure = type(structure)(
+                state="TRANSITION",
+                confidence_score=max(structure.confidence_score, 60),
+                features=structure.features,
+            )
 
         # Initial Balance tracking
         ib_high, ib_low, ib_complete = self._ib_tracker.update(current)
@@ -1567,7 +1673,6 @@ class AMTAnalyzer:
                 else:
                     day_type = "NORMAL_VARIATION"
 
-
         # NPOC (Naked POC) — check fills and get nearest targets
         npoc_above = 0.0
         npoc_below = 0.0
@@ -1587,6 +1692,22 @@ class AMTAnalyzer:
                 npoc_above = npoc_result.nearest_above.price
             if npoc_result.nearest_below:
                 npoc_below = npoc_result.nearest_below.price
+
+        # 4. Signal Generation — AFTER VWAP, CVD, structure, cross-validation
+        signal = self._generate_signal(
+            data,
+            current,
+            market_state,
+            has_aggression,
+            aggression_score,
+            lvns,
+            vah,
+            val,
+            poc,
+            agg_result.direction_sign,
+            agg_result.pyramid_eligible,
+            session_vwap,
+        )
 
         return AMTResult(
             market_state=market_state.value,
@@ -1681,15 +1802,88 @@ class AMTAnalyzer:
         vah: float,
         val: float,
         poc: float,
+        aggression_direction: int = 0,
+        has_high_aggression: bool = False,
+        session_vwap: float = 0.0,
     ) -> Signal | None:
         """Generate a trade signal from current market microstructure."""
         now_iso = current.time  # use tick timestamp, not wall clock
 
-        # GATE 3/4: NO_TRADE and PROBING states never generate signals
+        # GATE 3: NO_TRADE state never generates signals
         if market_state == MarketState.NO_TRADE:
             return None
-        if market_state == MarketState.PROBING:
-            return None
+
+        # C. PROBING Playbook — unconfirmed break with high aggression
+        # PROBING = price outside VA without displacement. Two scenarios:
+        #   A. Acceptance: aggression confirms the break → continuation
+        #   B. Rejection: opposing aggression → fade back into value
+        # Requires pyramid_eligible (score ≥ 3.0 for 3 consecutive bars)
+        # per requirement: "DeltaScore ≥ 3 for N consecutive bars"
+        if market_state == MarketState.PROBING and has_high_aggression:
+            above_vah = float(current.close) > vah
+            below_val = float(current.close) < val
+            above_vwap = (
+                float(current.close) > session_vwap if session_vwap > 0 else True
+            )
+            below_vwap = (
+                float(current.close) < session_vwap if session_vwap > 0 else True
+            )
+
+            if above_vah:
+                # Scenario A: Acceptance above VAH — bullish continuation
+                # VWAP context: price above VWAP confirms bullish institutional positioning
+                if aggression_direction > 0 and above_vwap:
+                    return Signal(
+                        type=SignalType.BUY,
+                        price=current.close,
+                        reason="PROBING Acceptance: aggression confirms break above VAH (above VWAP)",
+                        setup=SetupType.TREND_MODEL,
+                        source=Source.AMT,
+                        stop_loss=val,
+                        take_profit=vah + (vah - val),
+                        timestamp=now_iso,
+                    )
+                # Scenario B: Rejection above VAH — fade short
+                # VWAP context: opposing aggression above VWAP = institutional absorption
+                if aggression_direction < 0:
+                    return Signal(
+                        type=SignalType.SELL,
+                        price=current.close,
+                        reason="PROBING Rejection: opposing aggression at VAH (fade into value)",
+                        setup=SetupType.MEAN_REVERSION,
+                        source=Source.AMT,
+                        stop_loss=vah + (vah - val) * 0.25,
+                        take_profit=poc,
+                        timestamp=now_iso,
+                    )
+
+            elif below_val:
+                # Scenario A: Acceptance below VAL — bearish continuation
+                # VWAP context: price below VWAP confirms bearish institutional positioning
+                if aggression_direction < 0 and below_vwap:
+                    return Signal(
+                        type=SignalType.SELL,
+                        price=current.close,
+                        reason="PROBING Acceptance: aggression confirms break below VAL (below VWAP)",
+                        setup=SetupType.TREND_MODEL,
+                        source=Source.AMT,
+                        stop_loss=vah,
+                        take_profit=val - (vah - val),
+                        timestamp=now_iso,
+                    )
+                # Scenario B: Rejection below VAL — fade long
+                # VWAP context: opposing aggression below VWAP = institutional absorption
+                if aggression_direction > 0:
+                    return Signal(
+                        type=SignalType.BUY,
+                        price=current.close,
+                        reason="PROBING Rejection: opposing aggression at VAL (fade into value)",
+                        setup=SetupType.MEAN_REVERSION,
+                        source=Source.AMT,
+                        stop_loss=val - (vah - val) * 0.25,
+                        take_profit=poc,
+                        timestamp=now_iso,
+                    )
 
         # A. Trend Continuation (Imbalanced + Pullback + LVN + Aggression)
         if market_state == MarketState.IMBALANCED and has_aggression:

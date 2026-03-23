@@ -65,13 +65,14 @@ class AsyncPersistenceBus:
 
     def save_session_profile(self, profile_data: dict[str, Any]) -> None:
         self._enqueue("save_session_profile", (profile_data,), {})
+
     def save_npoc(self, underlying: str, session_date: str, poc_price: float) -> None:
         self._enqueue("save_npoc", (underlying, session_date, poc_price), {})
 
-    def mark_npoc_filled(self, underlying: str, session_date: str, filled_at: str) -> None:
+    def mark_npoc_filled(
+        self, underlying: str, session_date: str, filled_at: str
+    ) -> None:
         self._enqueue("mark_npoc_filled", (underlying, session_date, filled_at), {})
-
-
 
     # ------------------------------------------------------------------
     # Passthrough read API (synchronous — reads must be consistent)
@@ -86,6 +87,9 @@ class AsyncPersistenceBus:
     def query_llm_decisions(self, *args, **kwargs):
         return self._storage.query_llm_decisions(*args, **kwargs)
 
+    def query_signal_decisions(self, *args, **kwargs):
+        return self._storage.query_signal_decisions(*args, **kwargs)
+
     def load_open_positions(self):
         return self._storage.load_open_positions()
 
@@ -97,10 +101,9 @@ class AsyncPersistenceBus:
 
     def query_position_events(self, *args, **kwargs):
         return self._storage.query_position_events(*args, **kwargs)
+
     def get_active_npocs(self, underlying: str):
         return self._storage.get_active_npocs(underlying)
-
-
 
     # Forward kv_set/kv_get if available
     def kv_set(self, key: str, value: str) -> None:
@@ -120,7 +123,9 @@ class AsyncPersistenceBus:
             return
         self._running = True
         self._thread = threading.Thread(
-            target=self._worker, name="PersistenceBus", daemon=True,
+            target=self._worker,
+            name="PersistenceBus",
+            daemon=True,
         )
         self._thread.start()
         logger.info("AsyncPersistenceBus started")
@@ -137,10 +142,16 @@ class AsyncPersistenceBus:
         remaining: list[tuple[str, tuple, dict]] = []
         self._drain_critical(remaining)
         if remaining:
-            logger.info("AsyncPersistenceBus: flushing %d critical writes after worker stop", len(remaining))
+            logger.info(
+                "AsyncPersistenceBus: flushing %d critical writes after worker stop",
+                len(remaining),
+            )
             self._execute_batch(remaining)
         if self._dropped > 0:
-            logger.warning("AsyncPersistenceBus: dropped %d writes due to full queue", self._dropped)
+            logger.warning(
+                "AsyncPersistenceBus: dropped %d writes due to full queue",
+                self._dropped,
+            )
         logger.info(
             "AsyncPersistenceBus stopped (pending=%d, critical_pending=%d)",
             self._queue.qsize(),
@@ -160,12 +171,14 @@ class AsyncPersistenceBus:
     # ------------------------------------------------------------------
 
     # Methods whose drops are critical (trade/position data loss)
-    _CRITICAL_METHODS = frozenset({
-        "save_trade",
-        "save_open_position",
-        "delete_open_position",
-        "save_position_event",
-    })
+    _CRITICAL_METHODS = frozenset(
+        {
+            "save_trade",
+            "save_open_position",
+            "delete_open_position",
+            "save_position_event",
+        }
+    )
 
     def _enqueue_critical(self, method: str, args: tuple, kwargs: dict) -> None:
         """Route to the priority critical queue; fall back to the main queue."""
@@ -209,7 +222,9 @@ class AsyncPersistenceBus:
                 if method:
                     method(*args, **kwargs)
             except Exception:
-                logger.error("AsyncPersistenceBus: %s failed", method_name, exc_info=True)
+                logger.error(
+                    "AsyncPersistenceBus: %s failed", method_name, exc_info=True
+                )
 
     def _worker(self) -> None:
         """Drain writes from both queues and flush to storage.
@@ -218,7 +233,9 @@ class AsyncPersistenceBus:
         writes are never starved by high-frequency tick volume.
         """
         batch: list[tuple[str, tuple, dict]] = []
-        while self._running or not self._critical_queue.empty() or not self._queue.empty():
+        while (
+            self._running or not self._critical_queue.empty() or not self._queue.empty()
+        ):
             try:
                 # 1. Always drain the critical queue first (non-blocking)
                 self._drain_critical(batch)

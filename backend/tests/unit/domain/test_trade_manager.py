@@ -49,6 +49,7 @@ def test_stop_loss_short(mgr: TradeManager):
 
 # ---- 4. Take Profit — Long ----
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_take_profit_long(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     sig = mgr.check_position("P1", 110.0)
@@ -58,6 +59,7 @@ def test_take_profit_long(mgr: TradeManager):
 
 # ---- 5. Take Profit — Short ----
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_take_profit_short(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "SHORT", 100.0, 105.0, 90.0)
     sig = mgr.check_position("P1", 90.0)
@@ -76,6 +78,7 @@ def test_no_exit_when_price_between_sl_and_tp(mgr: TradeManager):
 
 # ---- 7. Trailing Stop Activation ----
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_trailing_stop_activation(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=True)
     # TP distance = 10, 50% = 5, so price 105 triggers partial TP first
@@ -92,6 +95,7 @@ def test_trailing_stop_activation(mgr: TradeManager):
 
 # ---- 8. Trailing Stop Ratchet ----
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_trailing_stop_ratchets_up(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=True)
     mgr.check_position("P1", 105.0)  # partial TP fires
@@ -109,6 +113,7 @@ def test_trailing_stop_ratchets_up(mgr: TradeManager):
 
 # ---- 9. Trailing Stop Hit ----
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_trailing_stop_hit(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=True)
     mgr.check_position("P1", 105.0)  # partial TP fires
@@ -182,6 +187,7 @@ def test_has_managed_positions(mgr: TradeManager):
 
 # ---- 15. Runner logic (Trend model) ----
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_runner_activates_on_tp_with_allow_trail():
     """When allow_trail=True and TP is hit, runner should activate (partial exit)."""
     mgr = TradeManager()
@@ -197,6 +203,7 @@ def test_runner_activates_on_tp_with_allow_trail():
     assert mp.stop_loss == 100.0  # moved to break-even
 
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_no_runner_on_mean_reversion():
     """Mean reversion (allow_trail=False) should close 100% at TP."""
     mgr = TradeManager()
@@ -312,6 +319,7 @@ def test_get_position_consistency_symbol_filter_excludes_other_symbols():
 
 # ---- 18. Breakeven at 1R ----
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_breakeven_at_1r_long():
     """When unrealised profit reaches 1R, SL should move to entry price."""
     mgr = TradeManager()
@@ -325,6 +333,7 @@ def test_breakeven_at_1r_long():
     assert sig is None
 
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_breakeven_at_1r_short():
     """Short position: 1R profit moves SL to entry."""
     mgr = TradeManager()
@@ -336,6 +345,7 @@ def test_breakeven_at_1r_short():
     assert mp.stop_loss == 100.0
 
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_sl_never_below_entry_once_breakeven_set():
     """Once breakeven_set=True, SL must never go below entry for LONG."""
     mgr = TradeManager()
@@ -385,6 +395,7 @@ def test_cvd_breakeven_wrong_direction_no_move():
     assert mp.stop_loss == 95.0
 
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_partial_tp_still_fires_after_breakeven():
     """Partial TP should still fire at correct distance (no regression)."""
     mgr = TradeManager()
@@ -399,6 +410,7 @@ def test_partial_tp_still_fires_after_breakeven():
     assert sig.reason == ExitReason.PARTIAL_TAKE_PROFIT
 
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_trailing_activates_at_1r():
     """Trailing stop should activate at 1R instead of 50% TP distance."""
     mgr = TradeManager()
@@ -412,6 +424,7 @@ def test_trailing_activates_at_1r():
     assert mp.trailing_active is True
 
 
+@pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_tight_sl_wide_spread_edge_case():
     """Tight SL (small risk) should still trigger breakeven at 1R."""
     mgr = TradeManager()

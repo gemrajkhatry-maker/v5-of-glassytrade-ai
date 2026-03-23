@@ -16,6 +16,12 @@ from dataclasses import dataclass, field
 
 from app.domain.trading.models.value_objects import OHLC
 from app.domain.fabio_ai.services import mlx_compute as mc
+from app.domain.constants import (
+    STRUCTURE_DWELL_TICKS,
+    STRUCTURE_COOLDOWN_TICKS,
+    STRUCTURE_CONFIDENCE_GATE,
+    STRUCTURE_BYPASS_CONFIDENCE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,12 +29,14 @@ logger = logging.getLogger(__name__)
 # Output dataclass
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class MarketStructure:
     """Result of market structure classification."""
-    state: str          # "BALANCE" | "IMBALANCE" | "TRANSITION" | "EXPANSION" | "CHOP"
+
+    state: str  # "BALANCE" | "IMBALANCE" | "TRANSITION" | "EXPANSION" | "CHOP"
     confidence_score: int  # 0-100
-    features: dict      # raw feature values for debugging
+    features: dict  # raw feature values for debugging
 
 
 # ---------------------------------------------------------------------------
@@ -37,16 +45,23 @@ class MarketStructure:
 
 _STATES = ("BALANCE", "IMBALANCE", "TRANSITION", "EXPANSION", "CHOP")
 
-# Hysteresis parameters
-_DWELL_TICKS = 1        # new state must persist this many consecutive ticks
-_CONFIDENCE_GATE = 60   # minimum confidence to accept a new state
-_COOLDOWN_TICKS = 1     # hold after a state change before allowing another (reduced for scalp reactivity)
-_BYPASS_CONFIDENCE = 65  # skip TRANSITION buffer if confidence exceeds this (lowered to reduce lag)
+# Hysteresis parameters (from constants — prevents BALANCE/CHOP flicker)
+_DWELL_TICKS = (
+    STRUCTURE_DWELL_TICKS  # new state must persist this many consecutive ticks
+)
+_CONFIDENCE_GATE = STRUCTURE_CONFIDENCE_GATE  # minimum confidence to accept a new state
+_COOLDOWN_TICKS = (
+    STRUCTURE_COOLDOWN_TICKS  # hold after a state change before allowing another
+)
+_BYPASS_CONFIDENCE = (
+    STRUCTURE_BYPASS_CONFIDENCE  # skip TRANSITION buffer if confidence exceeds this
+)
 
 
 # ---------------------------------------------------------------------------
 # Pure-Python math helpers
 # ---------------------------------------------------------------------------
+
 
 def _linreg_slope(ys: list[float]) -> float:
     """Ordinary least-squares slope for evenly-spaced y values (MLX-accelerated)."""
@@ -73,6 +88,7 @@ def _atr(candles: list[OHLC], period: int = 14) -> float:
 # ---------------------------------------------------------------------------
 # Feature computation
 # ---------------------------------------------------------------------------
+
 
 def _range_atr_ratio(candles: list[OHLC], period: int = 14) -> float:
     """Range of last *period* candles divided by ATR(period)."""
@@ -130,6 +146,7 @@ def _poc_migration(poc_history: list[float], atr: float, period: int = 20) -> fl
 # Scoring helpers (each feature contributes 0-20 to confidence)
 # ---------------------------------------------------------------------------
 
+
 def _score_balance(ra: float, vs: float, ol: float, va: float, pm: float) -> int:
     """Score how well features fit BALANCE."""
     s = 0
@@ -145,7 +162,13 @@ def _score_imbalance(ra: float, vs: float, ol: float, va: float, pm: float) -> i
     """Score how well features fit IMBALANCE."""
     s = 0
     s += 20 if ra > 2.0 else max(0, int((ra - 1.2) / 0.8 * 20)) if ra > 1.2 else 0
-    s += 20 if abs(vs) > 0.3 else max(0, int((abs(vs) - 0.1) / 0.2 * 20)) if abs(vs) > 0.1 else 0
+    s += (
+        20
+        if abs(vs) > 0.3
+        else max(0, int((abs(vs) - 0.1) / 0.2 * 20))
+        if abs(vs) > 0.1
+        else 0
+    )
     s += 20 if ol < 40 else max(0, 20 - int((ol - 40) / 30 * 20)) if ol < 70 else 0
     s += 20 if va > 1.3 else max(0, int((va - 1.1) / 0.2 * 20)) if va > 1.1 else 0
     s += 20 if pm > 0.15 else max(0, int((pm - 0.05) / 0.1 * 20)) if pm > 0.05 else 0
@@ -193,7 +216,13 @@ def _score_expansion(ra: float, vs: float, ol: float, va: float, pm: float) -> i
     """Score how well features fit EXPANSION (extreme trending)."""
     s = 0
     s += 20 if ra > 2.5 else max(0, int((ra - 1.5) / 1.0 * 20)) if ra > 1.5 else 0
-    s += 20 if abs(vs) > 0.4 else max(0, int((abs(vs) - 0.2) / 0.2 * 20)) if abs(vs) > 0.2 else 0
+    s += (
+        20
+        if abs(vs) > 0.4
+        else max(0, int((abs(vs) - 0.2) / 0.2 * 20))
+        if abs(vs) > 0.2
+        else 0
+    )
     s += 20 if ol < 30 else max(0, 20 - int((ol - 30) / 40 * 20)) if ol < 70 else 0
     s += 20 if va > 1.5 else max(0, int((va - 1.2) / 0.3 * 20)) if va > 1.2 else 0
     s += 20 if pm > 0.25 else max(0, int((pm - 0.1) / 0.15 * 20)) if pm > 0.1 else 0
@@ -227,6 +256,7 @@ _SCORERS = {
 # ---------------------------------------------------------------------------
 # Classifier
 # ---------------------------------------------------------------------------
+
 
 class MarketStructureClassifier:
     """Classifies market structure with hysteresis to prevent noisy flipping.
@@ -298,13 +328,18 @@ class MarketStructureClassifier:
 
         logger.debug(
             "MSC scores: %s | raw_best=%s conf=%d | current=%s cooldown=%d",
-            scores, raw_best, raw_confidence,
-            self._current_state, self._cooldown_remaining,
+            scores,
+            raw_best,
+            raw_confidence,
+            self._current_state,
+            self._cooldown_remaining,
         )
 
         # --- Apply hysteresis ------------------------------------------------
         new_state, new_conf = self._apply_hysteresis(
-            raw_best, raw_confidence, scores,
+            raw_best,
+            raw_confidence,
+            scores,
         )
 
         return MarketStructure(
@@ -364,7 +399,9 @@ class MarketStructureClassifier:
             self._cooldown_remaining = _COOLDOWN_TICKS
             logger.info(
                 "MSC state change: %s -> %s (confidence=%d)",
-                prev, candidate, candidate_conf,
+                prev,
+                candidate,
+                candidate_conf,
             )
             return candidate, candidate_conf
 

@@ -104,7 +104,6 @@ class GateContext:
     weekly_bias: str = "NEUTRAL"
     weekly_bias_aligned: bool = True
     weekly_bias_strength: float = 0.0
-    
 
     # Setup
     setup_type: str = "NONE"
@@ -162,9 +161,17 @@ class GatePipeline:
                 3, GateReason.FLAT, f"Price at POC dead zone (state=NO_TRADE)"
             )
 
-        # GATE 4: PROBING state
+        # GATE 4: PROBING state — allow with aggression confirmation
+        # PROBING can trade when: aggression >= 3.0 AND at a key level
+        # This supports the PROBING + BALANCED playbook (acceptance/rejection)
         if ctx.market_state == MarketState.PROBING:
-            return self._fail(4, GateReason.FLAT, f"Unconfirmed break (state=PROBING)")
+            if ctx.aggression_score < 3.0:
+                return self._fail(
+                    4,
+                    GateReason.FLAT,
+                    f"PROBING without high aggression ({ctx.aggression_score:.1f} < 3.0)",
+                )
+            # PROBING + HIGH aggression → allow through (playbook handles direction)
 
         # GATE 5: Profile + key level
         if ctx.nearest_level <= 0:

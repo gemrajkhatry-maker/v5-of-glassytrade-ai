@@ -17,8 +17,16 @@ from app.domain.trading.models.value_objects import OHLC
 def _candle(close=100, volume=500, delta=100, high=None, low=None, time="t"):
     h = high or close * 1.01
     l = low or close * 0.99
-    return OHLC(time=time, open=close, high=h, low=l, close=close,
-                volume=volume, vwap=0, delta=delta)
+    return OHLC(
+        time=time,
+        open=close,
+        high=h,
+        low=l,
+        close=close,
+        volume=volume,
+        vwap=0,
+        delta=delta,
+    )
 
 
 class TestBigTradeDetector:
@@ -124,16 +132,20 @@ class TestOFICalculator:
 
 
 class TestAbsorptionDetector:
-    """FR-03-09/10: Absorption candle detection."""
+    """FR-03-09/10: Absorption candle detection with displacement validation."""
 
     def test_detects_absorption(self):
-        """Small range + high volume → absorption detected."""
+        """Small range + high volume + displacement → absorption detected."""
         detector = AbsorptionDetector()
-        # range=0.28, ATR=1.0 → 0.28 < 0.30 ✓
-        # volume=500, avg=200 → 2.5 > 2.0 ✓
-        candle = _candle(close=100, high=100.14, low=99.86, volume=500, delta=100)
-        result = detector.detect(candle, atr=1.0, avg_vol=200)
-        assert result.detected is True
+        # First candle: absorption signature (range=0.28 < ATR*0.30, vol=500 > avg*2.0)
+        candle1 = _candle(close=100, high=100.14, low=99.86, volume=500, delta=100)
+        result1 = detector.detect(candle1, atr=1.0, avg_vol=200)
+        assert result1.detected is False  # pending displacement
+
+        # Second candle: displacement (close beyond absorption high)
+        candle2 = _candle(close=100.2, high=100.3, low=100.0, volume=300, delta=50)
+        result2 = detector.detect(candle2, atr=1.0, avg_vol=200)
+        assert result2.detected is True
 
     def test_no_absorption_wide_range(self):
         """Wide range → no absorption."""
@@ -150,15 +162,19 @@ class TestAbsorptionDetector:
         assert result.detected is False
 
     def test_classifies_sell_absorbed(self):
-        """Positive delta → SELL_ABSORBED (bullish)."""
+        """Positive delta + displacement → SELL_ABSORBED (bullish)."""
         detector = AbsorptionDetector()
-        candle = _candle(close=100, high=100.14, low=99.86, volume=500, delta=100)
-        result = detector.detect(candle, atr=1.0, avg_vol=200)
+        candle1 = _candle(close=100, high=100.14, low=99.86, volume=500, delta=100)
+        detector.detect(candle1, atr=1.0, avg_vol=200)
+        candle2 = _candle(close=100.2, high=100.3, low=100.0, volume=300, delta=50)
+        result = detector.detect(candle2, atr=1.0, avg_vol=200)
         assert result.side == "SELL_ABSORBED"
 
     def test_classifies_buy_absorbed(self):
-        """Negative delta → BUY_ABSORBED (bearish)."""
+        """Negative delta + displacement → BUY_ABSORBED (bearish)."""
         detector = AbsorptionDetector()
-        candle = _candle(close=100, high=100.14, low=99.86, volume=500, delta=-100)
-        result = detector.detect(candle, atr=1.0, avg_vol=200)
+        candle1 = _candle(close=100, high=100.14, low=99.86, volume=500, delta=-100)
+        detector.detect(candle1, atr=1.0, avg_vol=200)
+        candle2 = _candle(close=99.8, high=100.0, low=99.7, volume=300, delta=-50)
+        result = detector.detect(candle2, atr=1.0, avg_vol=200)
         assert result.side == "BUY_ABSORBED"

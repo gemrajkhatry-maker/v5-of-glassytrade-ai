@@ -2,6 +2,10 @@
 
 Tracks running CVD across candles, computes its linear-regression slope,
 and detects price-vs-CVD divergence (absorption signals).
+
+Enhanced with:
+- Extended slope window (40 candles) for session-leg scale
+- Sign persistence filter to prevent rapid slope flipping
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ from dataclasses import dataclass, field
 
 from app.domain.trading.models.value_objects import OHLC
 from app.domain.fabio_ai.services import mlx_compute as mc
+from app.domain.constants import CVD_SLOPE_EXTENDED_WINDOW, CVD_SLOPE_PERSISTENCE_BARS
 
 
 # ---------------------------------------------------------------------------
@@ -43,13 +48,18 @@ class CVDTracker:
     # Maximum history length to prevent unbounded memory growth
     _MAX_HISTORY = 500
 
-    def __init__(self, slope_window: int = 20, divergence_window: int = 20) -> None:
+    def __init__(
+        self, slope_window: int = CVD_SLOPE_EXTENDED_WINDOW, divergence_window: int = 20
+    ) -> None:
         self._cvd: float = 0.0
         self._history: list[float] = []  # CVD values
         self._price_history: list[float] = []  # Close prices
         self._slope_window = slope_window
         self._divergence_window = divergence_window
         self._last_time: str = ""
+        # Slope sign persistence filter
+        self._slope_sign_history: list[int] = []  # +1, -1, or 0 per bar
+        self._last_emitted_slope: float = 0.0
 
     # -- public API ----------------------------------------------------------
 
@@ -58,6 +68,8 @@ class CVDTracker:
         self._history.clear()
         self._price_history.clear()
         self._last_time = ""
+        self._slope_sign_history.clear()
+        self._last_emitted_slope = 0.0
 
     def update(self, candle: OHLC) -> CVDState:
         """Consume one candle and return the updated state.
@@ -101,11 +113,39 @@ class CVDTracker:
     # -- internals -----------------------------------------------------------
 
     def _compute_slope(self) -> float:
-        """Linear-regression slope of recent CVD values (MLX-accelerated)."""
+        """Linear-regression slope of recent CVD values with sign persistence filter.
+
+        The raw slope is computed over the extended window (40 candles).
+        The emitted slope only changes sign after the new sign persists for
+        CVD_SLOPE_PERSISTENCE_BARS consecutive bars. This prevents rapid
+        flipping like +33k → +5k → -3k → -7k.
+        """
         window = self._history[-self._slope_window :]
         if len(window) < 3:
             return 0.0
-        return mc.linreg_slope(window)
+
+        raw_slope = mc.linreg_slope(window)
+
+        # Track sign: +1 for positive, -1 for negative, 0 for near-zero
+        if raw_slope > 0.01:
+            current_sign = 1
+        elif raw_slope < -0.01:
+            current_sign = -1
+        else:
+            current_sign = 0
+
+        self._slope_sign_history.append(current_sign)
+
+        # Check if current sign has persisted for N bars
+        if len(self._slope_sign_history) >= CVD_SLOPE_PERSISTENCE_BARS:
+            recent_signs = self._slope_sign_history[-CVD_SLOPE_PERSISTENCE_BARS:]
+            if all(s == current_sign for s in recent_signs):
+                # Sign is stable — emit raw slope
+                self._last_emitted_slope = raw_slope
+                return raw_slope
+
+        # Sign not stable yet — return last stable slope (or 0)
+        return self._last_emitted_slope
 
     def _detect_divergence(self) -> tuple[str, float]:
         """Detect price-vs-CVD divergence (MLX-accelerated)."""

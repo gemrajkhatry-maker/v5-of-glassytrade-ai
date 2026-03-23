@@ -7,12 +7,6 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 
-# Mock the shared module before importing SessionContextFactory
-import sys
-sys.modules['shared'] = MagicMock()
-sys.modules['shared.config'] = MagicMock()
-sys.modules['shared.config'].SharedSettings = MagicMock
-
 from app.domain.fabio_ai.services.session_context_factory import SessionContextFactory
 
 

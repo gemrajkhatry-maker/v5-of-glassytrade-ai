@@ -48,6 +48,7 @@ class ServiceGraph:
         self._raw_storage = SQLiteStorageAdapter()
         # Wrap with async persistence bus — all writes go to background thread
         from app.infrastructure.async_persistence import AsyncPersistenceBus
+
         self._persistence_bus = AsyncPersistenceBus(self._raw_storage)
         self._persistence_bus.start()
         self.storage = self._persistence_bus  # TradingSessionService uses async writes
@@ -58,12 +59,16 @@ class ServiceGraph:
         self.probability_engine: ProbabilityInferencePort = LGBMProbabilityAdapter(
             model_dir=_model_dir,
         )
-        logger.info("Probability engine ready=%s (model_dir=%s)",
-                     self.probability_engine.is_ready(), _model_dir)
-
+        logger.info(
+            "Probability engine ready=%s (model_dir=%s)",
+            self.probability_engine.is_ready(),
+            _model_dir,
+        )
 
         # Composite Profile (Gap #4) — weekly bias from merged session profiles
-        self.composite_profile = CompositeProfile(window=settings.COMPOSITE_SESSION_WINDOW)
+        self.composite_profile = CompositeProfile(
+            window=settings.COMPOSITE_SESSION_WINDOW
+        )
         self._composite_cache: dict = {}
 
         # Alert Manager (Gap #6) — pre-alerts for Drive 1 returns
@@ -73,6 +78,7 @@ class ServiceGraph:
 
         # Delta Profile (Gap #1) — delta-colored volume profiles for entry zones
         from app.domain.constants import DELTA_BUCKET_SIZE_DEFAULT
+
         self.delta_profile = DeltaProfileAdapter(
             bucket_size=DELTA_BUCKET_SIZE_DEFAULT,
         )
@@ -88,8 +94,15 @@ class ServiceGraph:
 
         # OI Analyzer (Gap #5 — OI Pressure)
         from app.domain.fabio_ai.services.oi_analyzer import OIAnalyzer
+
         self.oi_analyzer = OIAnalyzer(market_data=self.market_data)
 
+        # Signal Tracking Service — persists all gate decisions to DB
+        from app.application.services.signal_tracking_service import (
+            SignalTrackingService,
+        )
+
+        self.signal_tracker = SignalTrackingService(storage=self._raw_storage)
 
         # Pre-warm broker: load instrument cache (date-stamped, refreshed once/day).
         # ensure_initialized_sync() is thread-safe and idempotent — no race with
@@ -103,7 +116,9 @@ class ServiceGraph:
             _fut.result(timeout=300)
             logger.info("Broker pre-warm complete (instrument cache ready)")
         except (_cf.TimeoutError, Exception):
-            logger.warning("Broker pre-warm failed/timed out (non-critical — market may be closed)")
+            logger.warning(
+                "Broker pre-warm failed/timed out (non-critical — market may be closed)"
+            )
         finally:
             _init_pool.shutdown(wait=False)
 
@@ -135,16 +150,28 @@ class ServiceGraph:
                     _final = _results
                 self.active_symbols = [r.symbol for r in _final]
                 for i, r in enumerate(_final, 1):
-                    logger.info("Auto-selected #%d: %s (LTP=%.2f, OI=%d, Score=%.1f, Bias=%s)",
-                               i, r.symbol, r.ltp, r.oi, r.score, r.bias)
+                    logger.info(
+                        "Auto-selected #%d: %s (LTP=%.2f, OI=%d, Score=%.1f, Bias=%s)",
+                        i,
+                        r.symbol,
+                        r.ltp,
+                        r.oi,
+                        r.score,
+                        r.bias,
+                    )
             else:
                 # Scanner returned 0 — no bullish momentum
                 # Still use DEFAULT_SYMBOL for data streaming (UI needs data)
                 # But trade signals will be FLAT (no setups)
-                logger.warning("No bullish setups found — using %s for data streaming (no trades)", 
-                              settings.DEFAULT_SYMBOL)
+                logger.warning(
+                    "No bullish setups found — using %s for data streaming (no trades)",
+                    settings.DEFAULT_SYMBOL,
+                )
         except (_cf.TimeoutError, Exception):
-            logger.warning("Option scanner failed/timed out — using DEFAULT_SYMBOL=%s", settings.DEFAULT_SYMBOL)
+            logger.warning(
+                "Option scanner failed/timed out — using DEFAULT_SYMBOL=%s",
+                settings.DEFAULT_SYMBOL,
+            )
         finally:
             _scan_pool.shutdown(wait=False)
 
@@ -156,6 +183,7 @@ def get_service_graph() -> ServiceGraph:
 
 
 # FastAPI dependency helpers
+
 
 def get_market_data() -> MarketDataPort:
     return get_service_graph().market_data

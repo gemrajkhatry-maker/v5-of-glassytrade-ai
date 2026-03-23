@@ -32,37 +32,38 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SignalDecision:
     """A single signal generation decision point."""
+
     decision_id: str
     symbol: str
     timestamp: str
     decision_type: str  # "GENERATED" | "BLOCKED" | "WAITING" | "COOLDOWN"
-    
+
     # Gate information (if blocked)
     gate_name: str = ""
     gate_reason: str = ""
     gate_detail: str = ""
-    
+
     # Signal information (if generated)
     direction: str = ""  # "LONG" | "SHORT" | "FLAT"
     confidence: str = ""  # "High" | "Medium" | "Low"
     aggression_score: float = 0.0
     drive_number: int = 0
     market_state: str = ""
-    
+
     # Context
     price: float = 0.0
     poc: float = 0.0
     vah: float = 0.0
     val: float = 0.0
     cvd_slope: float = 0.0
-    
+
     # LLM/Agent info
     agent_direction: str = ""
     agent_probability: float = 0.0
     agent_regime: str = ""
     llm_direction: str = ""
     llm_confidence: str = ""
-    
+
     # Timing
     time_since_last_signal: float = 0.0
     candle_number: int = 0
@@ -127,7 +128,12 @@ class SignalTrackingService:
         self._record(symbol, decision)
         logger.info(
             "SIGNAL GENERATED: %s %s confidence=%s aggression=%.1f drive=%d state=%s",
-            symbol, direction, confidence, aggression_score, drive_number, market_state,
+            symbol,
+            direction,
+            confidence,
+            aggression_score,
+            drive_number,
+            market_state,
         )
         return decision
 
@@ -171,7 +177,10 @@ class SignalTrackingService:
         self._record(symbol, decision)
         logger.debug(
             "GATE BLOCK: %s — %s (%s): %s",
-            symbol, gate_name, gate_reason, gate_detail,
+            symbol,
+            gate_name,
+            gate_reason,
+            gate_detail,
         )
         return decision
 
@@ -248,19 +257,21 @@ class SignalTrackingService:
             stats["cooldown"] += 1
 
         # Persist to storage
-        if self._storage and hasattr(self._storage, 'save_position_event'):
+        if self._storage and hasattr(self._storage, "save_position_event"):
             try:
-                self._storage.save_position_event({
-                    "position_id": decision.decision_id,
-                    "symbol": symbol,
-                    "event_type": f"SIGNAL_{decision.decision_type}",
-                    "event_time": decision.timestamp,
-                    "decision_id": decision.decision_id,
-                    "gate_name": decision.gate_name,
-                    "gate_reason": decision.gate_reason,
-                    "direction": decision.direction,
-                    "confidence": decision.confidence,
-                })
+                self._storage.save_position_event(
+                    {
+                        "position_id": decision.decision_id,
+                        "symbol": symbol,
+                        "event_type": f"SIGNAL_{decision.decision_type}",
+                        "event_time": decision.timestamp,
+                        "decision_id": decision.decision_id,
+                        "gate_name": decision.gate_name,
+                        "gate_reason": decision.gate_reason,
+                        "direction": decision.direction,
+                        "confidence": decision.confidence,
+                    }
+                )
             except Exception:
                 pass
 
@@ -288,9 +299,13 @@ class SignalTrackingService:
                     total["gate_blocks"][gate] = 0
                 total["gate_blocks"][gate] += count
 
-        total_decisions = total["generated"] + total["blocked"] + total["waiting"] + total["cooldown"]
+        total_decisions = (
+            total["generated"] + total["blocked"] + total["waiting"] + total["cooldown"]
+        )
         if total_decisions > 0:
-            total["generation_rate"] = round(total["generated"] / total_decisions * 100, 1)
+            total["generation_rate"] = round(
+                total["generated"] / total_decisions * 100, 1
+            )
             total["block_rate"] = round(total["blocked"] / total_decisions * 100, 1)
         else:
             total["generation_rate"] = 0.0
@@ -298,8 +313,8 @@ class SignalTrackingService:
 
         return total
 
-    def get_recent_decisions(self, symbol: str, limit: int = 50) -> list[dict]:
-        """Get recent decisions for a symbol."""
+    def get_recent_decisions(self, symbol: str, limit: int = 1000) -> list[dict]:
+        """Get recent decisions for a symbol (extended to full session history)."""
         decisions = self._decisions.get(symbol, [])
         recent = decisions[-limit:] if len(decisions) > limit else decisions
         return [

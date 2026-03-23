@@ -8,15 +8,26 @@ from app.domain.fabio_ai.services.market_structure_classifier import (
 )
 
 
-def _make_candle(open: float, high: float, low: float, close: float,
-                 volume: float, vwap: float = 0.0) -> OHLC:
-    return OHLC(time="t", open=open, high=high, low=low, close=close,
-                volume=volume, vwap=vwap, delta=0.0, taker_buy_volume=0.0)
+def _make_candle(
+    open: float, high: float, low: float, close: float, volume: float, vwap: float = 0.0
+) -> OHLC:
+    return OHLC(
+        time="t",
+        open=open,
+        high=high,
+        low=low,
+        close=close,
+        volume=volume,
+        vwap=vwap,
+        delta=0.0,
+        taker_buy_volume=0.0,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Balance detection
 # ---------------------------------------------------------------------------
+
 
 class TestBalanceDetection:
     def setup_method(self):
@@ -24,13 +35,17 @@ class TestBalanceDetection:
 
     def test_balance_state(self):
         # Tight range, stable POC/VWAP, uniform volume
-        candles = [_make_candle(100, 100.5, 99.5, 100.1, 1000, 100.0) for _ in range(30)]
+        candles = [
+            _make_candle(100, 100.5, 99.5, 100.1, 1000, 100.0) for _ in range(30)
+        ]
         result = self.classifier.classify(candles, [100.0] * 30, [100.0] * 30)
         assert isinstance(result, MarketStructure)
         assert result.state == "BALANCE"
 
     def test_balance_has_required_fields(self):
-        candles = [_make_candle(100, 100.5, 99.5, 100.1, 1000, 100.0) for _ in range(30)]
+        candles = [
+            _make_candle(100, 100.5, 99.5, 100.1, 1000, 100.0) for _ in range(30)
+        ]
         result = self.classifier.classify(candles, [100.0] * 30, [100.0] * 30)
         assert hasattr(result, "state")
         assert hasattr(result, "confidence_score")
@@ -40,6 +55,7 @@ class TestBalanceDetection:
 # ---------------------------------------------------------------------------
 # Imbalance detection
 # ---------------------------------------------------------------------------
+
 
 class TestImbalanceDetection:
     def setup_method(self):
@@ -52,8 +68,16 @@ class TestImbalanceDetection:
             o = 100 + i * 2
             # Range expands as move progresses (simulates real trending)
             spread = 1.0 + i * 0.3
-            candles.append(_make_candle(o, o + spread, o - 0.2, o + spread - 0.1,
-                                        1000 + i * 100, o + spread / 2))
+            candles.append(
+                _make_candle(
+                    o,
+                    o + spread,
+                    o - 0.2,
+                    o + spread - 0.1,
+                    1000 + i * 100,
+                    o + spread / 2,
+                )
+            )
         poc_history = [100 + i * 2 for i in range(30)]
         vwap_history = [101 + i * 2 for i in range(30)]
         # Classify multiple times to get past hysteresis
@@ -65,6 +89,7 @@ class TestImbalanceDetection:
 # ---------------------------------------------------------------------------
 # Chop detection
 # ---------------------------------------------------------------------------
+
 
 class TestChopDetection:
     def setup_method(self):
@@ -91,6 +116,7 @@ class TestChopDetection:
 # Expansion detection
 # ---------------------------------------------------------------------------
 
+
 class TestExpansionDetection:
     def setup_method(self):
         self.classifier = MarketStructureClassifier()
@@ -101,8 +127,16 @@ class TestExpansionDetection:
         for i in range(30):
             o = 100 + i * 5
             spread = 3 + i * 0.5  # Expanding range
-            candles.append(_make_candle(o, o + spread, o - 0.1, o + spread - 0.1,
-                                        500 + i * 200, o + spread / 2))
+            candles.append(
+                _make_candle(
+                    o,
+                    o + spread,
+                    o - 0.1,
+                    o + spread - 0.1,
+                    500 + i * 200,
+                    o + spread / 2,
+                )
+            )
         poc_history = [100 + i * 5 for i in range(30)]
         vwap_history = [102 + i * 5 for i in range(30)]
         for _ in range(8):
@@ -114,34 +148,45 @@ class TestExpansionDetection:
 # Hysteresis
 # ---------------------------------------------------------------------------
 
+
 class TestHysteresis:
     def setup_method(self):
         self.classifier = MarketStructureClassifier()
 
     def test_immediate_flip_on_strong_breakout(self):
         # Establish BALANCE
-        balance = [_make_candle(100, 100.5, 99.5, 100.1, 1000, 100.0) for _ in range(30)]
+        balance = [
+            _make_candle(100, 100.5, 99.5, 100.1, 1000, 100.0) for _ in range(30)
+        ]
         for _ in range(8):
             r = self.classifier.classify(balance, [100.0] * 30, [100.0] * 30)
         assert r.state == "BALANCE"
 
-        # Switch to strong expansion data — because hysteresis parameters are low,
-        # it should quickly flip away from BALANCE, likely to EXPANSION or IMBALANCE.
+        # Switch to strong expansion data — with increased hysteresis (dwell=3, cooldown=3),
+        # the state needs multiple bars to transition out of BALANCE.
+        # Feed enough expansion bars to overcome dwell + cooldown.
         exp = []
         for i in range(30):
             o = 100 + i * 5
             s = 3 + i * 0.5
-            exp.append(_make_candle(o, o + s, o - 0.1, o + s - 0.1, 500 + i * 200, o + s / 2))
+            exp.append(
+                _make_candle(o, o + s, o - 0.1, o + s - 0.1, 500 + i * 200, o + s / 2)
+            )
         poc_exp = [100 + i * 5 for i in range(30)]
         vwap_exp = [102 + i * 5 for i in range(30)]
 
-        first = self.classifier.classify(exp, poc_exp, vwap_exp)
-        assert first.state != "BALANCE", "Low hysteresis should allow state to exit BALANCE quickly"
+        # Classify multiple times to get past hysteresis dwell + cooldown
+        for _ in range(6):
+            first = self.classifier.classify(exp, poc_exp, vwap_exp)
+        assert first.state != "BALANCE", (
+            "After hysteresis period, state should exit BALANCE on strong breakout"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Insufficient data
 # ---------------------------------------------------------------------------
+
 
 class TestInsufficientData:
     def setup_method(self):
@@ -156,6 +201,7 @@ class TestInsufficientData:
 # ---------------------------------------------------------------------------
 # Confidence scoring
 # ---------------------------------------------------------------------------
+
 
 class TestConfidenceScoring:
     def setup_method(self):

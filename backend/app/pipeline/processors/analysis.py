@@ -9,6 +9,7 @@ logic. All analysis is delegated to AMTHandler (which wraps AMTAnalyzer).
 Configuration (ProcessorConfig.settings):
     lookback: int — maximum closed candles kept per symbol (default 50)
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -168,29 +169,32 @@ class AMTAnalysisProcessor(BaseProcessor):
             amt_result, _amt_dto, _fp_dto = handler.analyze(ohlc_list)
         except Exception:
             logger.error(
-                "[%s] AMTHandler.analyze failed for %s", self.name, symbol, exc_info=True
+                "[%s] AMTHandler.analyze failed for %s",
+                self.name,
+                symbol,
+                exc_info=True,
             )
             return
 
         # ── Map AMTResult domain object → ENRICHED pipeline payload ──
         # All new fields carry context for the LLM to "read the auction"
         # per Fabio's methodology.
-        
+
         # Convert aggressive prints to dicts for pipeline transport
         aggressive_prints = tuple(
             {"price": float(ap.price), "volume": float(ap.volume), "side": str(ap.side)}
             for ap in (amt_result.aggressive_prints or [])
         )
-        
+
         # Convert bubble retests to dicts
         bubble_retests = tuple(
             {"price": float(br.price), "volume": float(br.volume), "side": str(br.side)}
-            for br in (getattr(amt_result, 'bubble_retests', None) or [])
+            for br in (getattr(amt_result, "bubble_retests", None) or [])
         )
-        
+
         # LVN play dict
-        lvn_play = getattr(amt_result, 'lvn_play', None)
-        
+        lvn_play = getattr(amt_result, "lvn_play", None)
+
         # Determine aggression string
         agg_score = float(amt_result.aggression)
         if agg_score >= 2.5:
@@ -199,7 +203,7 @@ class AMTAnalysisProcessor(BaseProcessor):
             aggression_str = "MODERATE"
         else:
             aggression_str = "NEUTRAL"
-        
+
         amt_payload = AMTResultPayload(
             market_state=amt_result.market_state,
             leg_state=amt_result.market_structure,
@@ -207,40 +211,35 @@ class AMTAnalysisProcessor(BaseProcessor):
             vah=float(amt_result.value_area_high),
             val=float(amt_result.value_area_low),
             cvd_slope=float(amt_result.cvd_slope),
-            cvd_divergence=bool(amt_result.cvd_divergence),
+            cvd_divergence=str(amt_result.cvd_divergence or ""),
             profile_shape=str(amt_result.profile_shape or "D"),
             delta_score=agg_score,
             aggression=aggression_str,
             balance_pct=float(amt_result.balance_ratio * 100),
             near_level=False,  # Computed by SignalGateProcessor
             confirmation_score=0,  # Computed by SignalGateProcessor
-            
             # ── NEW: Developing VA ──
-            dev_poc=float(getattr(amt_result, 'dev_poc', 0.0)),
-            dev_vah=float(getattr(amt_result, 'dev_vah', 0.0)),
-            dev_val=float(getattr(amt_result, 'dev_val', 0.0)),
-            
+            dev_poc=float(getattr(amt_result, "dev_poc", 0.0)),
+            dev_vah=float(getattr(amt_result, "dev_vah", 0.0)),
+            dev_val=float(getattr(amt_result, "dev_val", 0.0)),
             # ── NEW: Impulse leg profile ──
-            leg_poc=float(getattr(amt_result, 'leg_poc', 0.0)),
-            leg_vah=float(getattr(amt_result, 'leg_vah', 0.0)),
-            leg_val=float(getattr(amt_result, 'leg_val', 0.0)),
-            leg_lvns=tuple(float(lvn) for lvn in getattr(amt_result, 'leg_lvns', []) or []),
-            
+            leg_poc=float(getattr(amt_result, "leg_poc", 0.0)),
+            leg_vah=float(getattr(amt_result, "leg_vah", 0.0)),
+            leg_val=float(getattr(amt_result, "leg_val", 0.0)),
+            leg_lvns=tuple(
+                float(lvn) for lvn in getattr(amt_result, "leg_lvns", []) or []
+            ),
             # ── NEW: Session VWAP ──
-            session_vwap=float(getattr(amt_result, 'session_vwap', 0.0)),
-            vwap_upper_2=float(getattr(amt_result, 'vwap_upper_2', 0.0)),
-            vwap_lower_2=float(getattr(amt_result, 'vwap_lower_2', 0.0)),
-            
+            session_vwap=float(getattr(amt_result, "session_vwap", 0.0)),
+            vwap_upper_2=float(getattr(amt_result, "vwap_upper_2", 0.0)),
+            vwap_lower_2=float(getattr(amt_result, "vwap_lower_2", 0.0)),
             # ── NEW: LVN/HVN levels ──
             lvns=tuple(float(lvn) for lvn in (amt_result.lvns or [])),
             hvns=tuple(float(hvn) for hvn in (amt_result.hvns or [])),
-            
             # ── NEW: LVN Play ──
             lvn_play=lvn_play,
-            
             # ── NEW: Aggressive prints ──
             aggressive_prints=aggressive_prints,
-            
             # ── NEW: Bubble retests ──
             bubble_retests=bubble_retests,
         )

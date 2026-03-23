@@ -48,15 +48,33 @@ class CommandRequest(BaseModel):
 
 # Chart command keywords → config updates
 _SYMBOL_KEYWORDS = {
-    "nifty": "NIFTY", "banknifty": "BANKNIFTY", "finnifty": "FINNIFTY",
-    "crude": "CRUDEOIL", "crudeoil": "CRUDEOIL", "natural gas": "NATURALGAS",
-    "gold": "GOLD", "silver": "SILVER",
+    "nifty": "NIFTY",
+    "banknifty": "BANKNIFTY",
+    "finnifty": "FINNIFTY",
+    "crude": "CRUDEOIL",
+    "crudeoil": "CRUDEOIL",
+    "natural gas": "NATURALGAS",
+    "gold": "GOLD",
+    "silver": "SILVER",
 }
-_INTERVAL_KEYWORDS = {"15m": "15m", "1m": "1m", "5m": "5m", "1h": "1h", "4h": "4h", "1d": "1d"}
+_INTERVAL_KEYWORDS = {
+    "15m": "15m",
+    "1m": "1m",
+    "5m": "5m",
+    "1h": "1h",
+    "4h": "4h",
+    "1d": "1d",
+}
 _COLOR_KEYWORDS = {
-    "red": "#ef4444", "green": "#10b981", "blue": "#3b82f6",
-    "purple": "#8b5cf6", "cyan": "#06b6d4", "amber": "#f59e0b",
-    "neon": "#39ff14", "pink": "#ec4899", "white": "#ffffff",
+    "red": "#ef4444",
+    "green": "#10b981",
+    "blue": "#3b82f6",
+    "purple": "#8b5cf6",
+    "cyan": "#06b6d4",
+    "amber": "#f59e0b",
+    "neon": "#39ff14",
+    "pink": "#ec4899",
+    "white": "#ffffff",
 }
 
 
@@ -115,7 +133,9 @@ async def process_command(req: CommandRequest):
         messages.append("Switch to footprint mode using the tab at top-left")
 
     if not messages:
-        messages.append(f"I understood: \"{req.prompt}\". Try commands like 'show nifty', 'set interval 5m', or 'bull color cyan'.")
+        messages.append(
+            f"I understood: \"{req.prompt}\". Try commands like 'show nifty', 'set interval 5m', or 'bull color cyan'."
+        )
 
     return {
         "message": " | ".join(messages),
@@ -128,43 +148,72 @@ async def process_command(req: CommandRequest):
 async def get_decision_history(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
+    limit: int = Query(1000),
     storage: SQLiteStorageAdapter = Depends(get_storage),
 ):
-    """Returns persisted LLM decision history from SQLite, filtered by active symbols."""
+    """Returns persisted decision history from SQLite — LLM decisions + signal decisions."""
     from app.api.dependencies import get_active_symbols
+
     active_symbols = get_active_symbols()
-    rows = storage.query_llm_decisions(start=start, end=end, symbols=active_symbols)
-    return {"decisions": rows}
+    # Cap limit to prevent massive responses
+    safe_limit = min(limit, 200)
+    llm_rows = storage.query_llm_decisions(
+        start=start, end=end, symbols=active_symbols if active_symbols else None
+    )
+    # Cap LLM rows too
+    if len(llm_rows) > safe_limit:
+        llm_rows = llm_rows[-safe_limit:]
+    signal_rows = storage.query_signal_decisions(
+        symbol=active_symbols[0] if active_symbols else None,
+        limit=safe_limit,
+    )
+    return {"decisions": llm_rows, "signal_decisions": signal_rows}
 
 
 @router.get("/journal")
-async def get_journal(date: Optional[str] = Query(None), run_id: Optional[str] = Query(None, alias="runId")):
+async def get_journal(
+    date: Optional[str] = Query(None),
+    run_id: Optional[str] = Query(None, alias="runId"),
+):
     """Returns journal entries for a given date (YYYY-MM-DD)."""
     from app.application.services.trade_journal import TradeJournal
+
     journal = TradeJournal()
     return {"entries": journal.read_entries(date, run_id=run_id)}
 
 
 @router.get("/journal/trades")
-async def get_journal_trades(date: Optional[str] = Query(None), run_id: Optional[str] = Query(None, alias="runId")):
+async def get_journal_trades(
+    date: Optional[str] = Query(None),
+    run_id: Optional[str] = Query(None, alias="runId"),
+):
     """Returns completed trades (entry+exit pairs) for a given date."""
     from app.application.services.trade_journal import TradeJournal
+
     journal = TradeJournal()
     return {"trades": journal.get_completed_trades(date, run_id=run_id)}
 
 
 @router.get("/journal/summary")
-async def get_journal_summary(date: Optional[str] = Query(None), run_id: Optional[str] = Query(None, alias="runId")):
+async def get_journal_summary(
+    date: Optional[str] = Query(None),
+    run_id: Optional[str] = Query(None, alias="runId"),
+):
     """Returns trade summary for a given date."""
     from app.application.services.trade_journal import TradeJournal
+
     journal = TradeJournal()
     return journal.summary(date, run_id=run_id)
 
 
 @router.get("/journal/report")
-async def get_journal_report(date: Optional[str] = Query(None), run_id: Optional[str] = Query(None, alias="runId")):
+async def get_journal_report(
+    date: Optional[str] = Query(None),
+    run_id: Optional[str] = Query(None, alias="runId"),
+):
     """Returns attribution and symbol-level report for a given date/run."""
     from app.application.services.trade_journal import TradeJournal
+
     journal = TradeJournal()
     return journal.report(date, run_id=run_id)
 
@@ -177,6 +226,7 @@ async def get_journal_compare(
 ):
     """Compare one or more runs across an inclusive date range."""
     from app.application.services.trade_journal import TradeJournal
+
     journal = TradeJournal()
     parsed_run_ids = [item.strip() for item in run_ids.split(",")] if run_ids else None
     return journal.compare_runs(start_date=start, end_date=end, run_ids=parsed_run_ids)
@@ -192,12 +242,18 @@ async def get_journal_promotion(
     min_profit_factor: float = Query(1.1, alias="minProfitFactor"),
     max_drawdown: float = Query(10.0, alias="maxDrawdown"),
     min_trading_days: int = Query(3, alias="minTradingDays"),
-    max_symbol_concentration_pct: float = Query(70.0, alias="maxSymbolConcentrationPct"),
+    max_symbol_concentration_pct: float = Query(
+        70.0, alias="maxSymbolConcentrationPct"
+    ),
     require_multi_session: bool = Query(True, alias="requireMultiSession"),
     min_thesis_completion_rate: float = Query(95.0, alias="minThesisCompletionRate"),
     min_playbook_purity_rate: float = Query(95.0, alias="minPlaybookPurityRate"),
-    max_playbook_session_misuse_rate: float = Query(0.0, alias="maxPlaybookSessionMisuseRate"),
-    min_feature_driver_coverage_rate: float = Query(90.0, alias="minFeatureDriverCoverageRate"),
+    max_playbook_session_misuse_rate: float = Query(
+        0.0, alias="maxPlaybookSessionMisuseRate"
+    ),
+    min_feature_driver_coverage_rate: float = Query(
+        90.0, alias="minFeatureDriverCoverageRate"
+    ),
     min_aggression_driver_rate: float = Query(75.0, alias="minAggressionDriverRate"),
 ):
     """Assess whether one or more paper-trading runs are ready for promotion."""

@@ -1,52 +1,28 @@
-"""Application configuration loaded from environment variables."""
+"""Application configuration loaded from environment variables.
+
+This module now delegates to the consolidated configuration module
+for a single source of truth. Backward compatibility is maintained
+by exposing the same Settings class interface.
+"""
 
 import os
 from pathlib import Path
 from typing import Any, List
-import yaml
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
 from shared.config import SharedSettings
 
-# Load market config
-market_config_path = Path(__file__).resolve().parent / "market_config.yaml"
-market_config = {}
-if market_config_path.exists():
-    with open(market_config_path, "r") as f:
-        market_config = yaml.safe_load(f).get("markets", {})
-
-
-class AMTThresholds(BaseModel):
-    """AMT threshold configuration with validation."""
-
-    aggression_sigma: float = Field(default=2.5, ge=0.5, le=5.0)
-    displacement_multiplier: float = Field(default=1.5, ge=0.5, le=3.0)
-    balance_ratio_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
-
-
-class LLMConfig(BaseModel):
-    """LLM inference configuration with validation."""
-
-    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
-    entry_temperature: float = Field(default=0.4, ge=0.0, le=2.0)
-    overseer_temperature: float = Field(default=0.3, ge=0.0, le=2.0)
-    max_new_tokens: int = Field(default=120, ge=50, le=2048)
-    timeout_seconds: float = Field(default=15.0, ge=5.0, le=120.0)
-
-
-class ScannerConfig(BaseModel):
-    """Scanner configuration with validation."""
-
-    mode: str = Field(default="nse_options")
-    top_n: int = Field(default=10, ge=1, le=50)
-    strikes_around_atm: int = Field(default=2, ge=1, le=10)
-    expiry_index: int = Field(default=0, ge=0, le=4)
+# Import consolidated configuration
+from config.consolidated import get_config, ConsolidatedConfig
 
 
 class Settings(SharedSettings):
     """
     Main application settings.
     Inherits shared settings (Dhans, Environment) from the shared layer.
+    
+    This class now delegates to the consolidated configuration module
+    for a single source of truth. Backward compatibility is maintained.
     """
 
     CORS_ORIGINS: List[str] = [

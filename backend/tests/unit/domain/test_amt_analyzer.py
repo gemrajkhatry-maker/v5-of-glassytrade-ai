@@ -6,24 +6,40 @@ import math
 import pytest
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
 from app.domain.fabio_ai.services.amt_analyzer import (
-    smooth_array, create_profile, find_lvns, find_hvns,
-    find_aggressive_prints, AMTAnalyzer, AMTConfig,
+    smooth_array,
+    create_profile,
+    find_lvns,
+    find_hvns,
+    find_aggressive_prints,
+    AMTAnalyzer,
+    AMTConfig,
     AcceptanceRejectionEngine,
 )
 from app.domain.trading.models.value_objects import VolumeProfileLevel
 from app.infrastructure.adapters.data_generator import generate_market_data
 
 
-def _make_candle(close: float, volume: float = 1000, delta: float = 0,
-                 high: float | None = None, low: float | None = None,
-                 open_: float | None = None) -> OHLC:
+def _make_candle(
+    close: float,
+    volume: float = 1000,
+    delta: float = 0,
+    high: float | None = None,
+    low: float | None = None,
+    open_: float | None = None,
+) -> OHLC:
     o = open_ or close
     h = high or max(close, o) * 1.001
     l = low or min(close, o) * 0.999
     return OHLC(
-        time="2026-01-01T00:00:00Z", open=o, high=h, low=l,
-        close=close, volume=volume, vwap=(h + l + close) / 3,
-        taker_buy_volume=(volume + delta) / 2, delta=delta,
+        time="2026-01-01T00:00:00Z",
+        open=o,
+        high=h,
+        low=l,
+        close=close,
+        volume=volume,
+        vwap=(h + l + close) / 3,
+        taker_buy_volume=(volume + delta) / 2,
+        delta=delta,
     )
 
 
@@ -61,7 +77,7 @@ class TestCreateProfile:
         # Single candle 100-110
         data = [_make_candle(105, open_=105, high=110, low=100, volume=1000)]
         profile = create_profile(data, buckets=20)
-        
+
         # Volume should only be in buckets whose centers are between ~100 and ~110
         volume_outside_range = 0
         volume_inside_range = 0
@@ -70,7 +86,7 @@ class TestCreateProfile:
                 volume_inside_range += p.volume
             else:
                 volume_outside_range += p.volume
-                
+
         assert volume_outside_range == 0
         assert volume_inside_range > 0
 
@@ -215,11 +231,11 @@ class TestAMTAnalyzer:
         data = generate_market_data(50, 100, "sideways")
         result = analyzer.analyze(data)
         # All new fields should exist
-        assert hasattr(result, 'vwap_upper_1')
-        assert hasattr(result, 'vwap_lower_1')
-        assert hasattr(result, 'vwap_upper_2')
-        assert hasattr(result, 'vwap_lower_2')
-        assert hasattr(result, 'balance_ratio')
+        assert hasattr(result, "vwap_upper_1")
+        assert hasattr(result, "vwap_lower_1")
+        assert hasattr(result, "vwap_upper_2")
+        assert hasattr(result, "vwap_lower_2")
+        assert hasattr(result, "balance_ratio")
 
 
 class TestConfirmationBundle:
@@ -228,6 +244,7 @@ class TestConfirmationBundle:
     def test_spread_tightness_passes_tight_spread(self):
         """Tight bid-ask spread (≤5 bps) should pass spread check."""
         from app.domain.fabio_ai.services.entry_gate import check_confirmation_bundle
+
         data = [_make_candle(100, volume=200, delta=80) for _ in range(30)]
         tick = _make_candle(100, volume=500, delta=200)
         ob = OrderBook(
@@ -241,6 +258,7 @@ class TestConfirmationBundle:
     def test_spread_tightness_no_orderbook_blocks_when_others_weak(self):
         """No order book sets spread_tight = False. If others weak, it blocks."""
         from app.domain.fabio_ai.services.entry_gate import check_confirmation_bundle
+
         data = [_make_candle(100, volume=200, delta=80) for _ in range(30)]
         # Normal volume, low delta = 0/2 for others
         tick = _make_candle(100, volume=200, delta=10)
@@ -253,6 +271,7 @@ class TestEntryGateAuditFixes:
 
     def test_min_candles_gate(self):
         from app.domain.fabio_ai.services.entry_gate import min_candles_gate
+
         data = [_make_candle(100) for _ in range(5)]
         assert min_candles_gate(data, 6) is False
         data.append(_make_candle(100))
@@ -260,23 +279,25 @@ class TestEntryGateAuditFixes:
 
     def test_full_body_close_gate(self):
         from app.domain.fabio_ai.services.entry_gate import full_body_close_gate
+
         # Wick-heavy candle (doji)
         doji = _make_candle(100, open_=100, high=105, low=95)
         assert full_body_close_gate(doji, 99, "LONG") is False
-        
+
         # Bullish full body close above level
         bull = _make_candle(100, open_=98, high=101, low=98)
         assert full_body_close_gate(bull, 99, "LONG") is True
-        
+
         # Bullish full body but closes below level
         assert full_body_close_gate(bull, 102, "LONG") is False
-        
+
         # Bearish full body close below level
         bear = _make_candle(98, open_=100, high=100, low=97)
         assert full_body_close_gate(bear, 99, "SHORT") is True
 
     def test_nearest_round_number(self):
         from app.domain.fabio_ai.services.entry_gate import nearest_round_number
+
         assert nearest_round_number(6130) == 6000
         assert nearest_round_number(6350) == 6500  # 6350/500 = 12.7 -> 13*500 = 6500
         assert nearest_round_number(98) == 100
@@ -288,18 +309,29 @@ class TestEntryGateAuditFixes:
 # Group 1: Full AMTAnalyzer.analyze() Integration Tests
 # ---------------------------------------------------------------------------
 
-def _make_candle_timed(close: float, time_str: str, volume: float = 1000,
-                       delta: float = 0, high: float | None = None,
-                       low: float | None = None) -> OHLC:
+
+def _make_candle_timed(
+    close: float,
+    time_str: str,
+    volume: float = 1000,
+    delta: float = 0,
+    high: float | None = None,
+    low: float | None = None,
+) -> OHLC:
     """Helper that creates a candle with a specific timestamp."""
     o = close
     h = high or close * 1.002
     l = low or close * 0.998
     return OHLC(
-        time=time_str, open=o, high=h, low=l,
-        close=close, volume=volume,
+        time=time_str,
+        open=o,
+        high=h,
+        low=l,
+        close=close,
+        volume=volume,
         vwap=(h + l + close) / 3,
-        taker_buy_volume=(volume + delta) / 2, delta=delta,
+        taker_buy_volume=(volume + delta) / 2,
+        delta=delta,
     )
 
 
@@ -372,8 +404,13 @@ class TestAnalyzeIntegration:
 
         # Market structure should be one of the valid states
         valid_structures = {
-            "BALANCE", "BALANCED", "TRENDING_UP", "TRENDING_DOWN",
-            "BREAKOUT_UP", "BREAKOUT_DOWN",
+            "BALANCE",
+            "BALANCED",
+            "TRENDING_UP",
+            "TRENDING_DOWN",
+            "BREAKOUT_UP",
+            "BREAKOUT_DOWN",
+            "TRANSITION",
         }
         assert result.market_structure in valid_structures
 
@@ -397,6 +434,7 @@ class TestAnalyzeIntegration:
 # Group 3: Incremental Profile Update Tests
 # ---------------------------------------------------------------------------
 
+
 class TestIncrementalProfile:
     """Tests for incremental profile updates matching full rebuilds."""
 
@@ -417,10 +455,12 @@ class TestIncrementalProfile:
         # POC/VAH/VAL should be very close (same profile construction)
         assert inc_result.poc == pytest.approx(fresh_result.poc, rel=0.01)
         assert inc_result.value_area_high == pytest.approx(
-            fresh_result.value_area_high, rel=0.01,
+            fresh_result.value_area_high,
+            rel=0.01,
         )
         assert inc_result.value_area_low == pytest.approx(
-            fresh_result.value_area_low, rel=0.01,
+            fresh_result.value_area_low,
+            rel=0.01,
         )
 
     def test_incremental_rebuilds_on_range_expansion(self):
@@ -429,19 +469,28 @@ class TestIncrementalProfile:
         data = []
         for i in range(20):
             price = 100 + (i % 10)
-            data.append(_make_candle_timed(
-                price, f"2026-01-01T00:{i:02d}:00Z",
-                volume=1000, delta=50,
-                high=price + 0.5, low=price - 0.5,
-            ))
+            data.append(
+                _make_candle_timed(
+                    price,
+                    f"2026-01-01T00:{i:02d}:00Z",
+                    volume=1000,
+                    delta=50,
+                    high=price + 0.5,
+                    low=price - 0.5,
+                )
+            )
 
         analyzer = AMTAnalyzer()
         analyzer.analyze(data)
 
         # Add candle at 120, well outside previous range
         outlier = _make_candle_timed(
-            120, f"2026-01-01T00:20:00Z",
-            volume=2000, delta=100, high=121, low=119,
+            120,
+            f"2026-01-01T00:20:00Z",
+            volume=2000,
+            delta=100,
+            high=121,
+            low=119,
         )
         data_expanded = data + [outlier]
         result = analyzer.analyze(data_expanded)
@@ -470,29 +519,31 @@ class TestIncrementalProfile:
         base_price = 100
         data = []
         for i in range(300):
-            vol = 10000 if i < 50 else 100 # High volume at the start
-            data.append(_make_candle(base_price + i*0.1, volume=vol)) 
-        
+            vol = 10000 if i < 50 else 100  # High volume at the start
+            data.append(_make_candle(base_price + i * 0.1, volume=vol))
+
         result = analyzer.analyze(data)
         # If we use all 300, the POC should be near the start (high volume zone)
         # Base price 100 to 105.
-        assert result.poc < 110 
-        
+        assert result.poc < 110
+
     def test_leg_poc_uses_local_vwap_tiebreak(self):
         """Leg POC should tie-break using local leg VWAP, not session VWAP."""
         analyzer = AMTAnalyzer()
         # Session VWAP is high (near 200)
         analyzer._vwap_cum_vol = 1000
-        analyzer._vwap_cum_quote_vol = 200000 
-        
+        analyzer._vwap_cum_quote_vol = 200000
+
         # Trend leg at low prices (10-20)
         # Create two equal peaks in the leg: one at 12, one at 18
         leg_data = []
         for i in range(10):
             p = 10 + i
             vol = 1000 if (p == 12 or p == 18) else 100
-            leg_data.append(_make_candle(p, volume=vol, open_=p, high=p+0.5, low=p-0.5))
-            
+            leg_data.append(
+                _make_candle(p, volume=vol, open_=p, high=p + 0.5, low=p - 0.5)
+            )
+
         # The leg VWAP will be around 15.
         # 12 is closer to 15 than 18 is.
         # But 18 is closer to SESSION VWAP (200).
@@ -500,36 +551,51 @@ class TestIncrementalProfile:
         result = analyzer.detect_displacement_leg(leg_data)
         assert result["poc"] == pytest.approx(12, abs=1.0)
 
+
 # ---------------------------------------------------------------------------
 # Group 4: Phase 3 Audit Implementations
 # ---------------------------------------------------------------------------
+
 
 class TestDayTypeClassification:
     def test_normal_day_type(self):
         analyzer = AMTAnalyzer()
         # Create an IB (60 mins = 12 5-min candles)
         data = []
-        for i in range(12):  
-            data.append(_make_candle_timed(105 + i%2, f"2026-01-01T09:{i*5:02d}:00Z", high=110, low=100))
+        for i in range(12):
+            data.append(
+                _make_candle_timed(
+                    105 + i % 2, f"2026-01-01T09:{i * 5:02d}:00Z", high=110, low=100
+                )
+            )
             analyzer.analyze(data)
         # Add inside candles
         for i in range(12, 20):
-            data.append(_make_candle_timed(105, f"2026-01-01T10:{(i-12)*5:02d}:00Z", high=108, low=102))
+            data.append(
+                _make_candle_timed(
+                    105, f"2026-01-01T10:{(i - 12) * 5:02d}:00Z", high=108, low=102
+                )
+            )
             result = analyzer.analyze(data)
-        
+
         assert result.day_type == "NORMAL"
 
     def test_trend_day_type(self):
         analyzer = AMTAnalyzer()
         data = []
-        for i in range(12):  
-            data.append(_make_candle_timed(105 + i%2, f"2026-01-01T09:{i*5:02d}:00Z", high=110, low=100))
+        for i in range(12):
+            data.append(
+                _make_candle_timed(
+                    105 + i % 2, f"2026-01-01T09:{i * 5:02d}:00Z", high=110, low=100
+                )
+            )
             analyzer.analyze(data)
         # Add massive extension up (IB range is 10, dist > 10 = 120+)
         data.append(_make_candle_timed(125, "2026-01-01T10:00:00Z", high=125, low=115))
         result = analyzer.analyze(data)
-        
+
         assert result.day_type == "TREND"
+
 
 class TestLiquiditySweepDetection:
     def test_liquidity_sweep_high(self):
@@ -542,7 +608,15 @@ class TestLiquiditySweepDetection:
         # Pierce VAH (> 110), close below it (< 110)
         # Strong upper wick (115 - max(109, 108) = 6) > body (109 - 108 = 1)
         # Vol = 2000 > baseline * 1.5 = 1500
-        candle = OHLC(time="2026-01-01T10:00:00Z", open=108.0, high=115.0, low=107.0, close=109.0, volume=2000, delta=0)
-        
+        candle = OHLC(
+            time="2026-01-01T10:00:00Z",
+            open=108.0,
+            high=115.0,
+            low=107.0,
+            close=109.0,
+            volume=2000,
+            delta=0,
+        )
+
         result = engine.update(candle, vah, val, baseline_vol)
         assert result.get("liquidity_sweep") == "SWEEP_HIGH"

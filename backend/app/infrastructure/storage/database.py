@@ -17,6 +17,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.domain.ports.storage import StoragePort
+from shared.conversion import to_float
 
 logger = logging.getLogger(__name__)
 
@@ -230,8 +231,14 @@ class SQLiteStorageAdapter(StoragePort):
             tick_data.get("close", 0),
             tick_data.get("volume", 0),
             tick_data.get("delta", 0),
-            json.dumps({k: v for k, v in tick_data.items()
-                        if k not in ("time", "open", "high", "low", "close", "volume", "delta")}),
+            json.dumps(
+                {
+                    k: v
+                    for k, v in tick_data.items()
+                    if k
+                    not in ("time", "open", "high", "low", "close", "volume", "delta")
+                }
+            ),
         )
         with self._lock:
             self._tick_buffer.append(row)
@@ -240,11 +247,9 @@ class SQLiteStorageAdapter(StoragePort):
             else:
                 self._schedule_flush()
 
-    def save_trade(self, trade_data: dict[str, Any], *, auto_commit: bool = True) -> None:
-        # Helper to convert Decimal to float for SQLite
-        def _f(val):
-            return float(val) if val is not None and hasattr(val, '__float__') else (val or 0.0)
-        
+    def save_trade(
+        self, trade_data: dict[str, Any], *, auto_commit: bool = True
+    ) -> None:
         with self._lock:
             try:
                 self._conn.execute(
@@ -255,18 +260,34 @@ class SQLiteStorageAdapter(StoragePort):
                         str(trade_data.get("position_id", "")),
                         str(trade_data.get("symbol", "")),
                         str(trade_data.get("side", "")),
-                        _f(trade_data.get("entry_price")),
-                        _f(trade_data.get("exit_price")),
-                        _f(trade_data.get("size")),
-                        _f(trade_data.get("pnl")),
+                        to_float(trade_data.get("entry_price")),
+                        to_float(trade_data.get("exit_price")),
+                        to_float(trade_data.get("size")),
+                        to_float(trade_data.get("pnl")),
                         str(trade_data.get("source", "")),
                         str(trade_data.get("reason", "")),
                         str(trade_data.get("opened_at", "")),
                         str(trade_data.get("closed_at", "")),
-                        json.dumps({k: v for k, v in trade_data.items()
-                                    if k not in ("position_id", "symbol", "side", "entry_price",
-                                                 "exit_price", "size", "pnl", "source", "reason",
-                                                 "opened_at", "closed_at")}),
+                        json.dumps(
+                            {
+                                k: v
+                                for k, v in trade_data.items()
+                                if k
+                                not in (
+                                    "position_id",
+                                    "symbol",
+                                    "side",
+                                    "entry_price",
+                                    "exit_price",
+                                    "size",
+                                    "pnl",
+                                    "source",
+                                    "reason",
+                                    "opened_at",
+                                    "closed_at",
+                                )
+                            }
+                        ),
                     ),
                 )
                 if auto_commit:
@@ -275,10 +296,26 @@ class SQLiteStorageAdapter(StoragePort):
                 self._conn.rollback()
                 raise
 
-    def save_llm_decision(self, decision_data: dict[str, Any], *, auto_commit: bool = True) -> None:
-        _KNOWN_KEYS = {"symbol", "direction", "confidence", "rationale",
-                        "input_prompt", "raw_output", "market_state", "aggression",
-                        "price", "vah", "val", "poc", "delta", "volume", "profile_shape"}
+    def save_llm_decision(
+        self, decision_data: dict[str, Any], *, auto_commit: bool = True
+    ) -> None:
+        _KNOWN_KEYS = {
+            "symbol",
+            "direction",
+            "confidence",
+            "rationale",
+            "input_prompt",
+            "raw_output",
+            "market_state",
+            "aggression",
+            "price",
+            "vah",
+            "val",
+            "poc",
+            "delta",
+            "volume",
+            "profile_shape",
+        }
         with self._lock:
             try:
                 self._conn.execute(
@@ -302,8 +339,13 @@ class SQLiteStorageAdapter(StoragePort):
                         decision_data.get("delta", 0),
                         decision_data.get("volume", 0),
                         decision_data.get("profile_shape", ""),
-                        json.dumps({k: v for k, v in decision_data.items()
-                                    if k not in _KNOWN_KEYS}),
+                        json.dumps(
+                            {
+                                k: v
+                                for k, v in decision_data.items()
+                                if k not in _KNOWN_KEYS
+                            }
+                        ),
                     ),
                 )
                 if auto_commit:
@@ -335,9 +377,22 @@ class SQLiteStorageAdapter(StoragePort):
                         snapshot.get("open_positions", 0),
                         snapshot.get("total_trades", 0),
                         snapshot.get("win_rate", 0),
-                        json.dumps({k: v for k, v in snapshot.items()
-                                    if k not in ("symbol", "equity", "balance", "open_pnl",
-                                                 "open_positions", "total_trades", "win_rate")}),
+                        json.dumps(
+                            {
+                                k: v
+                                for k, v in snapshot.items()
+                                if k
+                                not in (
+                                    "symbol",
+                                    "equity",
+                                    "balance",
+                                    "open_pnl",
+                                    "open_positions",
+                                    "total_trades",
+                                    "win_rate",
+                                )
+                            }
+                        ),
                     ),
                 )
                 self._conn.commit()
@@ -350,7 +405,10 @@ class SQLiteStorageAdapter(StoragePort):
     # ------------------------------------------------------------------
 
     def query_ticks(
-        self, symbol: str, start: str | None = None, end: str | None = None,
+        self,
+        symbol: str,
+        start: str | None = None,
+        end: str | None = None,
         limit: int = 1000,
     ) -> list[dict[str, Any]]:
         # Flush pending ticks so queries see latest data
@@ -370,7 +428,9 @@ class SQLiteStorageAdapter(StoragePort):
             return [dict(r) for r in rows]
 
     def query_trades(
-        self, start: str | None = None, end: str | None = None,
+        self,
+        start: str | None = None,
+        end: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock:
             query = "SELECT * FROM trades WHERE 1=1"
@@ -386,8 +446,11 @@ class SQLiteStorageAdapter(StoragePort):
             return [dict(r) for r in rows]
 
     def query_llm_decisions(
-        self, start: str | None = None, end: str | None = None,
+        self,
+        start: str | None = None,
+        end: str | None = None,
         symbols: list[str] | None = None,
+        limit: int = 200,
     ) -> list[dict[str, Any]]:
         with self._lock:
             query = "SELECT * FROM llm_decisions WHERE 1=1"
@@ -402,7 +465,8 @@ class SQLiteStorageAdapter(StoragePort):
                 placeholders = ",".join(["?"] * len(symbols))
                 query += f" AND symbol IN ({placeholders})"
                 params.extend(symbols)
-            query += " ORDER BY created_at ASC"
+            query += f" ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
             rows = self._conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 
@@ -421,9 +485,23 @@ class SQLiteStorageAdapter(StoragePort):
                         profile_data.get("val", 0),
                         profile_data.get("profile_shape", ""),
                         profile_data.get("total_volume", 0),
-                        json.dumps({k: v for k, v in profile_data.items()
-                                    if k not in ("symbol", "market", "session_date", "poc",
-                                                 "vah", "val", "profile_shape", "total_volume")}),
+                        json.dumps(
+                            {
+                                k: v
+                                for k, v in profile_data.items()
+                                if k
+                                not in (
+                                    "symbol",
+                                    "market",
+                                    "session_date",
+                                    "poc",
+                                    "vah",
+                                    "val",
+                                    "profile_shape",
+                                    "total_volume",
+                                )
+                            }
+                        ),
                     ),
                 )
                 self._conn.commit()
@@ -432,7 +510,9 @@ class SQLiteStorageAdapter(StoragePort):
                 raise
 
     def get_previous_session_profile(
-        self, symbol: str, market: str = "NSE",
+        self,
+        symbol: str,
+        market: str = "NSE",
     ) -> dict[str, Any] | None:
         with self._lock:
             row = self._conn.execute(
@@ -449,12 +529,6 @@ class SQLiteStorageAdapter(StoragePort):
     def save_open_position(self, position: dict[str, Any]) -> None:
         with self._lock:
             try:
-                # Convert Decimal to float for SQLite
-                def _to_float(val):
-                    if val is None:
-                        return 0.0
-                    return float(val) if hasattr(val, '__float__') else val
-                
                 self._conn.execute(
                     "INSERT OR REPLACE INTO open_positions "
                     "(id, symbol, side, entry_price, size, stop_loss, take_profit, source, opened_at, extra) "
@@ -463,15 +537,30 @@ class SQLiteStorageAdapter(StoragePort):
                         str(position.get("id", "")),
                         str(position.get("symbol", "")),
                         str(position.get("side", "")),
-                        _to_float(position.get("entry_price")),
-                        _to_float(position.get("size")),
-                        _to_float(position.get("stop_loss")),
-                        _to_float(position.get("take_profit")),
+                        to_float(position.get("entry_price")),
+                        to_float(position.get("size")),
+                        to_float(position.get("stop_loss")),
+                        to_float(position.get("take_profit")),
                         position.get("source", ""),
                         position.get("opened_at", ""),
-                        json.dumps({k: v for k, v in position.items()
-                                    if k not in ("id", "symbol", "side", "entry_price", "size",
-                                                 "stop_loss", "take_profit", "source", "opened_at")}),
+                        json.dumps(
+                            {
+                                k: v
+                                for k, v in position.items()
+                                if k
+                                not in (
+                                    "id",
+                                    "symbol",
+                                    "side",
+                                    "entry_price",
+                                    "size",
+                                    "stop_loss",
+                                    "take_profit",
+                                    "source",
+                                    "opened_at",
+                                )
+                            }
+                        ),
                     ),
                 )
                 self._conn.commit()
@@ -482,7 +571,9 @@ class SQLiteStorageAdapter(StoragePort):
     def delete_open_position(self, position_id: str) -> None:
         with self._lock:
             try:
-                self._conn.execute("DELETE FROM open_positions WHERE id = ?", (position_id,))
+                self._conn.execute(
+                    "DELETE FROM open_positions WHERE id = ?", (position_id,)
+                )
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()
@@ -521,11 +612,22 @@ class SQLiteStorageAdapter(StoragePort):
                         payload.get("symbol", ""),
                         payload.get("event_type", ""),
                         payload.get("event_time", ""),
-                        json.dumps({
-                            k: (float(v) if isinstance(v, (int, float)) or hasattr(v, '__float__') else v)
-                            for k, v in payload.items()
-                            if k not in ("position_id", "symbol", "event_type", "event_time")
-                        }),
+                        json.dumps(
+                            {
+                                k: to_float(v)
+                                if isinstance(v, (int, float))
+                                or hasattr(v, "__float__")
+                                else v
+                                for k, v in payload.items()
+                                if k
+                                not in (
+                                    "position_id",
+                                    "symbol",
+                                    "event_type",
+                                    "event_time",
+                                )
+                            }
+                        ),
                     ),
                 )
                 self._conn.commit()
@@ -534,7 +636,9 @@ class SQLiteStorageAdapter(StoragePort):
                 raise
 
     def query_position_events(
-        self, position_id: str | None = None, symbol: str | None = None,
+        self,
+        position_id: str | None = None,
+        symbol: str | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock:
             query = "SELECT * FROM position_events WHERE 1=1"
@@ -546,6 +650,32 @@ class SQLiteStorageAdapter(StoragePort):
                 query += " AND symbol = ?"
                 params.append(symbol)
             query += " ORDER BY created_at ASC"
+            rows = self._conn.execute(query, params).fetchall()
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                d = dict(row)
+                extra = json.loads(d.pop("extra", "{}") or "{}")
+                d.update(extra)
+                result.append(d)
+            return result
+
+    def query_signal_decisions(
+        self,
+        symbol: str | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Query signal tracking decisions (GENERATED/BLOCKED/WAITING/COOLDOWN).
+
+        These are stored as position_events with event_type starting with 'SIGNAL_'.
+        """
+        with self._lock:
+            query = "SELECT * FROM position_events WHERE event_type LIKE 'SIGNAL_%'"
+            params: list[Any] = []
+            if symbol:
+                query += " AND symbol = ?"
+                params.append(symbol)
+            query += " ORDER BY created_at DESC LIMIT ?"
+            params.append(limit)
             rows = self._conn.execute(query, params).fetchall()
             result: list[dict[str, Any]] = []
             for row in rows:
@@ -573,7 +703,6 @@ class SQLiteStorageAdapter(StoragePort):
                 self._conn.rollback()
                 raise
 
-
     # ------------------------------------------------------------------
     # NPOC (Naked POC) persistence
     # ------------------------------------------------------------------
@@ -592,7 +721,9 @@ class SQLiteStorageAdapter(StoragePort):
                 self._conn.rollback()
                 raise
 
-    def mark_npoc_filled(self, underlying: str, session_date: str, filled_at: str) -> None:
+    def mark_npoc_filled(
+        self, underlying: str, session_date: str, filled_at: str
+    ) -> None:
         """Mark an NPOC as filled when price revisits the level."""
         with self._lock:
             try:
@@ -620,7 +751,8 @@ class SQLiteStorageAdapter(StoragePort):
         """Retrieve a value by key, or None if not found."""
         with self._lock:
             row = self._conn.execute(
-                "SELECT value FROM kv_store WHERE key = ?", (key,),
+                "SELECT value FROM kv_store WHERE key = ?",
+                (key,),
             ).fetchone()
             return row[0] if row else None
 
@@ -629,7 +761,10 @@ class SQLiteStorageAdapter(StoragePort):
     # ------------------------------------------------------------------
 
     def load_composite_profiles(
-        self, symbol: str, market: str = "NSE", limit: int = 5,
+        self,
+        symbol: str,
+        market: str = "NSE",
+        limit: int = 5,
     ) -> list[dict[str, Any]]:
         """Load last N session profiles for composite profile calculation."""
         with self._lock:
@@ -645,4 +780,3 @@ class SQLiteStorageAdapter(StoragePort):
                 d.update(extra)
                 result.append(d)
             return result
-

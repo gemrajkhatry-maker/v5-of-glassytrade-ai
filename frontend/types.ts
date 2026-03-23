@@ -45,6 +45,8 @@ export interface GenAIAnalysis {
   rawOutput?: string;
   marketState?: string;
   aggression?: string;
+  quantProbability?: number;
+  quantDirection?: string;
 }
 
 export interface AgentDecision {
@@ -117,8 +119,8 @@ export interface InstrumentState {
   portfolio: Portfolio;
   modelWeights: ModelWeights;
   generation: number;
-  aiAnalysis: AIAnalysis | null; // This refers to the numeric prediction model
-  genAIAnalysis: GenAIAnalysis | null; // This refers to the Fabio Logic LLM
+  aiAnalysis: AIAnalysis | null;
+  genAIAnalysis: GenAIAnalysis | null;
   amtAnalysis: AMTAnalysis | null;
   riskState: RiskState | null;
   agentDecision: AgentDecision | null;
@@ -131,10 +133,59 @@ export interface InstrumentState {
   stale?: boolean;
   ltp?: number;
   oi?: number;
+  rangeBars?: RangeBarData;
   lastUpdate: number;
 }
 
-export type ChartMode = 'STANDARD' | 'FOOTPRINT';
+export type ChartMode = 'STANDARD' | 'FOOTPRINT' | 'RANGE';
+
+// Range Bar types (price-movement-based bars)
+export interface RangeBar {
+  time: number;  // synthetic timestamp for chart rendering
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  buyVolume: number;
+  sellVolume: number;
+  delta: number;
+  tickCount: number;
+}
+
+export interface RangeBarVPLevel {
+  price: number;
+  volume: number;
+  buyVolume: number;
+  sellVolume: number;
+}
+
+export interface RangeBarVP {
+  poc: number;
+  vah: number;
+  val: number;
+  levels: RangeBarVPLevel[];
+}
+
+export interface TripleAPattern {
+  detected: boolean;
+  phase: string;
+  direction: string;
+  absorptionBarIndex: number;
+  aggressionBarIndex: number;
+  pocAtDetection: number;
+  vahAtDetection: number;
+  valAtDetection: number;
+}
+
+export interface RangeBarData {
+  bars: RangeBar[];
+  volumeProfile: RangeBarVP;
+  vwap: number;
+  cumulativeDelta: number;
+  tripleA: TripleAPattern;
+  rangeSize: number;
+}
 
 export interface AppState {
   config: ChartConfig; // Global visual config
