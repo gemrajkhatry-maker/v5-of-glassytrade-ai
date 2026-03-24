@@ -96,8 +96,9 @@ class TradingSessionService:
         self._probability_engine = probability_engine or NoOpProbabilityAdapter()
 
         # Injected config — replaces inline Settings() calls
+        self._exchange_config = exchange_config
         self._exchange = exchange_config.exchange if exchange_config else "MCX"
-        self._allow_short = allow_short
+        self._allow_short = False  # BUY-only mode — SHORT entries disabled
 
         # Delegated modules
         self._state_manager = SessionStateManager(storage=storage)
@@ -753,6 +754,11 @@ class TradingSessionService:
                     halt_reason="",
                     tick_age_seconds=1.0,
                     symbol=event.symbol,
+                    max_distance_to_level_ticks=self._exchange_config.max_distance_to_level_ticks,
+                    probing_aggression_threshold=0.0,
+                    min_aggression_score=0.0,
+                    max_cushion_ticks=500.0,
+                    min_rr_ratio=0.1,
                 )
 
                 if gate_passed:

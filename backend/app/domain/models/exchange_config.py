@@ -48,6 +48,11 @@ class ExchangeConfig:
     # CVD thresholds — exchange-specific due to volume differences
     cvd_block_threshold: float
 
+    # Gate pipeline thresholds — exchange-specific
+    max_distance_to_level_ticks: float = (
+        3.0  # Max ticks from nearest key level for entry
+    )
+
     # LLM instruction — exchange-specific prompt
     llm_instruction: str = ""
 
@@ -120,6 +125,11 @@ class ExchangeConfig:
             cvd_block_threshold=float(
                 data.get("cvd_block_threshold", base.cvd_block_threshold)
             ),
+            max_distance_to_level_ticks=float(
+                data.get(
+                    "max_distance_to_level_ticks", base.max_distance_to_level_ticks
+                )
+            ),
             llm_instruction=data.get("llm_instruction", base.llm_instruction),
             eia_symbols=eia_symbols,
             eia_suppression_minutes=int(
@@ -144,6 +154,7 @@ class ExchangeConfig:
             big_trade_cluster_ticks=2,
             warm_up_minutes=15,
             cvd_block_threshold=5000.0,
+            max_distance_to_level_ticks=500.0,
             llm_instruction=(
                 "You are READING the auction using Fabio Valentini's AMT methodology "
                 "for the NSE Index market. You are NOT predicting — you are interpreting "
@@ -188,6 +199,7 @@ class ExchangeConfig:
             big_trade_cluster_ticks=2,
             warm_up_minutes=15,
             cvd_block_threshold=50.0,
+            max_distance_to_level_ticks=5.0,
             llm_instruction=(
                 "You are READING the auction using Fabio Valentini's AMT methodology "
                 "for the MCX Commodity market. You are NOT predicting — you are "

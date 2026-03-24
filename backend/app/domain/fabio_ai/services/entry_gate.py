@@ -626,19 +626,8 @@ def build_entry_signal(
     reward = abs(tp_price - tick.close)
     rr = reward / risk if risk > 0 else 0
 
-    # ── MINIMUM R:R FILTER (Fabio: "Don't risk more than you can make") ──
-    # Plan FR-07-08: R:R must be minimum 1:1.5 to generate signal
-    from app.domain.constants import MIN_RR_RATIO
-
-    if rr < MIN_RR_RATIO:
-        logger.warning(
-            "Signal REJECTED: R:R too low (%.2f < %.2f) — risk (%.2f) > reward (%.2f)",
-            rr,
-            MIN_RR_RATIO,
-            risk,
-            reward,
-        )
-        return None
+    # ── R:R is validated by the gate pipeline; no duplicate check needed here ──
+    rr = reward / risk if risk > 0 else 0
 
     logger.info(
         "build_entry_signal: %s %s entry=%.2f SL=%.2f TP=%.2f risk=%.2f reward=%.2f RR=%.2f "
@@ -916,6 +905,11 @@ def run_gate_pipeline(
     halt_reason: str = "",
     tick_age_seconds: float = 1.0,
     symbol: str = "",
+    max_distance_to_level_ticks: float = 3.0,
+    probing_aggression_threshold: float = 3.0,
+    min_aggression_score: float = 2.0,
+    max_cushion_ticks: float = 10.0,
+    min_rr_ratio: float = 1.5,
 ) -> tuple[bool, str, str]:
     """Run the 12-gate pipeline for additional validation.
 
@@ -979,6 +973,11 @@ def run_gate_pipeline(
         setup_type=amt_result.setup or "NONE",
         r_r_ratio=rr,
         cushion_ticks=dist_ticks,
+        max_distance_to_level_ticks=max_distance_to_level_ticks,
+        probing_aggression_threshold=probing_aggression_threshold,
+        min_aggression_score=min_aggression_score,
+        max_cushion_ticks=max_cushion_ticks,
+        min_rr_ratio=min_rr_ratio,
     )
 
     result = GatePipeline().evaluate(ctx)

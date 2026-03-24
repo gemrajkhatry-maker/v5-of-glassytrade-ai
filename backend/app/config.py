@@ -20,7 +20,7 @@ class Settings(SharedSettings):
     """
     Main application settings.
     Inherits shared settings (Dhans, Environment) from the shared layer.
-    
+
     This class now delegates to the consolidated configuration module
     for a single source of truth. Backward compatibility is maintained.
     """
@@ -60,7 +60,9 @@ class Settings(SharedSettings):
     PORT: int = Field(default=9090)
     STREAM_INTERVAL: str = Field(default="5m")
     TICK_POLL_SECONDS: float = Field(default=5.0)
-    ALLOW_SHORT: bool = Field(default=False)
+    ALLOW_SHORT: bool = Field(
+        default=False, description="Short entries disabled — BUY-only mode"
+    )
     LLM_EXECUTION_ENABLED: bool = Field(default=False)
     PLAYBOOK_GUARD_MAX_REJECTIONS: int = Field(default=3)
     EXPLAINABILITY_ALERT_MIN_TRADES: int = Field(default=3)
@@ -119,12 +121,12 @@ class Settings(SharedSettings):
             return v
         return v
 
-
     # Composite Profile (Gap #4)
     COMPOSITE_SESSION_WINDOW: int = Field(default=5, ge=1, le=10)
 
     # Pre-Alert System (Gap #6)
     ALERT_PROXIMITY_TICKS: int = Field(default=3, ge=1, le=10)
+
     def validate_all(self) -> List[str]:
         errors: List[str] = []
         if not self.DHAN_CLIENT_ID:

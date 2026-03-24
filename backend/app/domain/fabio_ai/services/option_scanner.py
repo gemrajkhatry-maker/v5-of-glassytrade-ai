@@ -73,8 +73,15 @@ class OptionScannerService:
         exchange: str | None = None,
         expiry_index: int = 0,
         strikes_around_atm: int = 2,
+        bullish_only: bool = True,  # Only select bullish option contracts
     ) -> list[ScanResult]:
-        """Select top N contracts based on momentum and liquidity."""
+        """Select top N contracts based on momentum and liquidity.
+
+        Args:
+            bullish_only: When True, only selects contracts aligned with a bullish thesis:
+                - CE: ATM or ITM (strike <= ATM) — direct bullish bet
+                - PE: ATM or ITM (strike >= ATM) — high-delta put, bullish if underlying rallies
+        """
 
         # Exchange mapping per underlying
         _NSE_UNDERLYINGS = {"NIFTY", "BANKNIFTY", "FINNIFTY"}
@@ -123,6 +130,13 @@ class OptionScannerService:
                 # Process both CE and PE
                 for opt_type, option_map in [("CE", chain.calls), ("PE", chain.puts)]:
                     for strike in strikes:
+                        # Bullish-only filter: skip OTM strikes
+                        if bullish_only:
+                            if opt_type == "CE" and strike > atm:
+                                continue  # OTM call — not bullish
+                            if opt_type == "PE" and strike < atm:
+                                continue  # OTM put — bearish hedge, skip
+
                         opt = option_map.get(float(strike))
                         if opt is None:
                             continue
@@ -169,11 +183,11 @@ class OptionScannerService:
                                 penalty = min(20, (spread_pct - 0.5) * 10)
                                 score -= penalty
 
-                        # Quant Improvement 3: Momentum Bias Booster (+25 pts)
-                        if bias == "BULLISH" and opt_type == "CE":
-                            score += 25
-                        elif bias == "BEARISH" and opt_type == "PE":
-                            score += 25
+                        # Quant Improvement 3: Bullish Momentum Bias (+25 pts)
+                        if opt_type == "CE":
+                            score += 25  # Always boost CE (bullish bet)
+                        elif opt_type == "PE" and strike >= atm:
+                            score += 15  # Boost ITM PE (high delta, bullish hedge)
 
                         results.append(
                             ScanResult(

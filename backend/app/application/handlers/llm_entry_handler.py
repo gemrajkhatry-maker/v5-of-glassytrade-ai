@@ -12,6 +12,7 @@ import concurrent.futures
 import logging
 import threading
 import time
+from dataclasses import replace as _replace
 from datetime import datetime, timedelta, timezone
 import queue
 from typing import TYPE_CHECKING, Callable, Optional
@@ -76,7 +77,7 @@ class LLMEntryHandler:
         self._trade_manager = trade_manager
         self._journal = journal
         self._exchange = exchange
-        self._allow_short = allow_short
+        self._allow_short = False  # BUY-only mode — SHORT entries disabled
         self._llm_timeout = llm_timeout
         self._regime_detectors: dict[str, RegimeDetector] = {}
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -368,7 +369,7 @@ class LLMEntryHandler:
                     symbol,
                 )
                 # Override timing to SKIP — dead market cannot have entries
-                agent_decision.timing = "SKIP"
+                agent_decision = _replace(agent_decision, timing="SKIP")
                 ai_result = {
                     "direction": "FLAT",
                     "rationale": "DEAD market: volume < 5% of average. No trade.",
@@ -392,7 +393,7 @@ class LLMEntryHandler:
                         symbol,
                     )
                     # Override timing to SKIP — FLAT with no edge cannot have ENTER_NOW
-                    agent_decision.timing = "SKIP"
+                    agent_decision = _replace(agent_decision, timing="SKIP")
                     ai_result = {
                         "direction": "FLAT",
                         "rationale": f"No quant edge: P={agent_prob:.3f} near 50/50. Wait for clearer setup.",

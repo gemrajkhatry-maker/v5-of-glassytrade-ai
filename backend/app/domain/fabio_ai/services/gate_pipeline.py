@@ -109,6 +109,9 @@ class GateContext:
     probing_aggression_threshold: float = (
         3.0  # Gate 4: min aggression for PROBING state
     )
+    min_aggression_score: float = 2.0  # Gate 8: minimum aggression for any entry
+    max_cushion_ticks: float = 10.0  # Gate 9: max cushion (ticks from price to level)
+    min_rr_ratio: float = 1.5  # Gate 10: minimum risk-reward ratio
     weekly_bias_strength: float = 0.0
 
     # Setup
@@ -201,26 +204,26 @@ class GatePipeline:
         if ctx.drive_number == 2 and not ctx.drive_entry_valid:
             return self._fail(7, GateReason.FLAT, "D2: D1 not rejected, no edge")
 
-        # GATE 8: Aggression ≥ 2.0
-        if ctx.aggression_score < MIN_AGGRESSION_SCORE:
+        # GATE 8: Aggression ≥ threshold
+        if ctx.aggression_score < ctx.min_aggression_score:
             return self._fail(
                 8,
                 GateReason.WAIT,
-                f"Aggression {ctx.aggression_score:.1f} < {MIN_AGGRESSION_SCORE}",
+                f"Aggression {ctx.aggression_score:.1f} < {ctx.min_aggression_score:.1f}",
             )
 
-        # GATE 9: Cushion ≤ 10 ticks
-        if ctx.cushion_ticks > MAX_CUSHION_TICKS:
+        # GATE 9: Cushion ≤ threshold
+        if ctx.cushion_ticks > ctx.max_cushion_ticks:
             return self._fail(
                 9,
                 GateReason.INVALID,
                 f"Cushion {ctx.cushion_ticks:.1f} > {MAX_CUSHION_TICKS} ticks",
             )
 
-        # GATE 10: R:R ≥ 1.5
-        if ctx.r_r_ratio < MIN_RR_RATIO:
+        # GATE 10: R:R ≥ threshold
+        if ctx.r_r_ratio < ctx.min_rr_ratio:
             return self._fail(
-                10, GateReason.SKIP, f"R:R {ctx.r_r_ratio:.2f} < {MIN_RR_RATIO}"
+                10, GateReason.SKIP, f"R:R {ctx.r_r_ratio:.2f} < {ctx.min_rr_ratio:.1f}"
             )
 
         # GATE 11: Position sizing
