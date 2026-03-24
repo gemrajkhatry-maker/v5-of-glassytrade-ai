@@ -3,17 +3,23 @@
 Eliminates the duplicated pattern of market mapping + session info retrieval
 that appears in 3+ locations throughout the codebase.
 
+This factory accepts ExchangeConfig and SymbolRegistry via constructor
+injection instead of importing app.config directly (DIP compliance).
+
 Usage:
-    session_info = SessionContextFactory.from_tick(tick, market="MCX")
+    factory = SessionContextFactory(exchange_config, symbol_registry)
+    session_info = factory.from_tick(tick)
+    exchange = factory.get_exchange_for_symbol("CRUDEOIL 19 MAR 6000 CALL")
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
-from app.config import Settings
 from app.domain.fabio_ai.services.session_context import get_session_info
+from app.domain.models.exchange_config import ExchangeConfig
+from app.domain.services.symbol_registry import SymbolRegistry
 
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC
@@ -24,11 +30,17 @@ logger = logging.getLogger(__name__)
 class SessionContextFactory:
     """Factory for creating session context from tick data.
 
-    Handles the common pattern:
-        _market = Settings().DEFAULT_EXCHANGE
-        if _market in ("NFO", "BSE"): _market = "NSE"
-        session_info = get_session_info(timestamp=tick.time, market=_market)
+    DIP-compliant: receives config and registry via constructor.
+    No infrastructure imports.
     """
+
+    def __init__(
+        self,
+        exchange_config: ExchangeConfig,
+        symbol_registry: Optional[SymbolRegistry] = None,
+    ) -> None:
+        self._config = exchange_config
+        self._registry = symbol_registry or SymbolRegistry()
 
     @staticmethod
     def _normalize_market(market: str) -> str:
@@ -40,8 +52,8 @@ class SessionContextFactory:
             return "NSE"
         return market
 
-    @staticmethod
     def from_tick(
+        self,
         tick: OHLC,
         market: str | None = None,
         open_price: float = 0.0,
@@ -52,7 +64,7 @@ class SessionContextFactory:
 
         Args:
             tick: Current OHLC tick.
-            market: Market identifier (defaults to Settings.DEFAULT_EXCHANGE).
+            market: Market identifier (defaults to injected config).
             open_price: Session open price (defaults to tick.open).
             prior_vah: Prior session VAH for gap analysis.
             prior_val: Prior session VAL for gap analysis.
@@ -60,10 +72,8 @@ class SessionContextFactory:
         Returns:
             SessionInfo object with session phase, opening relation, etc.
         """
-        if market is None:
-            market = Settings().DEFAULT_EXCHANGE
-
-        normalized_market = SessionContextFactory._normalize_market(market)
+        effective_market: str = market if market is not None else self._config.exchange
+        normalized_market = self._normalize_market(effective_market)
         effective_open = open_price if open_price > 0 else float(tick.open)
 
         return get_session_info(
@@ -74,38 +84,10 @@ class SessionContextFactory:
             prior_val=prior_val,
         )
 
-    @staticmethod
-    def from_settings(tick: OHLC, **kwargs):
-        """Create session context using default exchange from settings.
+    def from_settings(self, tick: OHLC, **kwargs):
+        """Create session context using the injected exchange config."""
+        return self.from_tick(tick, market=self._config.exchange, **kwargs)
 
-        Convenience method that uses Settings().DEFAULT_EXCHANGE.
-        """
-        return SessionContextFactory.from_tick(
-            tick,
-            market=Settings().DEFAULT_EXCHANGE,
-            **kwargs,
-        )
-
-    @staticmethod
-    def get_exchange_for_symbol(symbol: str) -> str:
-        """Determine exchange from symbol name.
-
-        Args:
-            symbol: Trading symbol (e.g., "CRUDEOIL 17 MAR 6100 CALL").
-
-        Returns:
-            Exchange identifier ("NSE", "MCX", etc.).
-        """
-        _MCX_UNDERLYINGS = {"CRUDEOIL", "GOLD", "SILVER", "NATURALGAS", "COPPER"}
-        _NSE_UNDERLYINGS = {"NIFTY", "BANKNIFTY", "FINNIFTY"}
-
-        clean = symbol.replace("NSE:", "").replace("MCX:", "").strip()
-        underlying = clean.split("-")[0].split(" ")[0].upper()
-
-        if underlying in _MCX_UNDERLYINGS:
-            return "MCX"
-        if underlying in _NSE_UNDERLYINGS:
-            return "NSE"
-
-        # Fallback to settings default
-        return Settings().DEFAULT_EXCHANGE
+    def get_exchange_for_symbol(self, symbol: str) -> str:
+        """Determine exchange from symbol name using injected registry."""
+        return self._registry.exchange_for(symbol)

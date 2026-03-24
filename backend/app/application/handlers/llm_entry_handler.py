@@ -66,12 +66,18 @@ class LLMEntryHandler:
         storage: StoragePort | None = None,
         trade_manager: TradeManager | None = None,
         journal=None,
+        exchange: str = "MCX",
+        allow_short: bool = False,
+        llm_timeout: float = 15.0,
     ) -> None:
         self._gen_ai_service = gen_ai_service
         self._event_bus = event_bus
         self._storage = storage
         self._trade_manager = trade_manager
         self._journal = journal
+        self._exchange = exchange
+        self._allow_short = allow_short
+        self._llm_timeout = llm_timeout
         self._regime_detectors: dict[str, RegimeDetector] = {}
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._predict_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -168,9 +174,7 @@ class LLMEntryHandler:
         prior_vah = prior.get("vah", 0) if prior else 0
         prior_val = prior.get("val", 0) if prior else 0
         open_price = session.data[0].open if session.data else 0
-        from app.config import Settings
-
-        _market = Settings().DEFAULT_EXCHANGE
+        _market = self._exchange
         if _market in ("NFO", "BSE"):
             _market = "NSE"
         session_info = get_session_info(
@@ -502,7 +506,6 @@ class LLMEntryHandler:
 
     def _llm_worker_loop(self, queue_symbol: str) -> None:
         """Dedicated background thread that processes LLM requests sequentially for a specific symbol."""
-        from app.config import settings as _settings
 
         with self._workers_lock:
             worker_queue = self._llm_queues.get(queue_symbol)
@@ -599,14 +602,12 @@ class LLMEntryHandler:
                             self._gen_ai_service.analyze_market,
                             market_data_ai,
                         )
-                        ai_result = predict_future.result(
-                            timeout=_settings.LLM_TIMEOUT_SECONDS
-                        )
+                        ai_result = predict_future.result(timeout=self._llm_timeout)
                 except concurrent.futures.TimeoutError:
                     predict_future.cancel()
                     logger.warning(
                         "LLM timed out after %.0fs — using fallback",
-                        _settings.LLM_TIMEOUT_SECONDS,
+                        self._llm_timeout,
                     )
                     if fallback_direction != "FLAT":
                         ai_result = {
@@ -634,7 +635,7 @@ class LLMEntryHandler:
                 rationale = ai_result.get("rationale", "")
 
                 # SAFETY NETS ONLY
-                if direction == "SHORT" and not _settings.ALLOW_SHORT:
+                if direction == "SHORT" and not self._allow_short:
                     logger.info("BUY-ONLY mode: SHORT blocked → FLAT")
                     direction = "FLAT"
                     rationale = "System in BUY-ONLY mode"

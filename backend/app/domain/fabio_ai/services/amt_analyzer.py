@@ -81,15 +81,22 @@ class AMTConfig:
     BALANCE_RATIO_THRESHOLD: float = 0.55
 
     @classmethod
-    def from_settings(cls) -> AMTConfig:
-        """Create config from environment settings."""
-        from app.config import settings as _settings
+    def from_exchange_config(cls, exchange_config) -> AMTConfig:
+        """Create config from an ExchangeConfig value object.
 
+        DIP-compliant: no infrastructure imports.
+        """
         instance = cls()
         try:
-            instance.AGGRESSION_SIGMA_THRESHOLD = float(_settings.AGGRESSION_SIGMA)
-            instance.DISPLACEMENT_MULTIPLIER = float(_settings.DISPLACEMENT_MULTIPLIER)
-            instance.BALANCE_RATIO_THRESHOLD = float(_settings.BALANCE_RATIO_THRESHOLD)
+            instance.AGGRESSION_SIGMA_THRESHOLD = float(
+                exchange_config.aggression_sigma
+            )
+            instance.DISPLACEMENT_MULTIPLIER = float(
+                exchange_config.displacement_multiplier
+            )
+            instance.BALANCE_RATIO_THRESHOLD = float(
+                exchange_config.balance_ratio_threshold
+            )
         except (TypeError, ValueError):
             pass  # Use defaults
         return instance

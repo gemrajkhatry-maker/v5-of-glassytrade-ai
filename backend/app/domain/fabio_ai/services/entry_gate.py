@@ -483,6 +483,7 @@ def build_entry_signal(
     session_context: str = "",
     confidence: str = "Medium",
     session_risk_pct: float | None = None,  # COMPOUNDING: dynamic risk from session
+    inside_cluster: bool = True,  # Place SL 1-2 ticks inside aggressive print cluster
 ) -> Signal:
     """Build Signal from LLM decision using Fabio Playbook SL/TP.
 
@@ -504,14 +505,12 @@ def build_entry_signal(
         else (tick.vwap if tick.vwap > 0 else 0)
     )
 
-    from app.config import settings
-
     agg_sl = sl_from_aggressive_print(
         amt_result,
         tick,
         is_buy,
         buffer,
-        inside_cluster=settings.SL_INSIDE_CLUSTER,
+        inside_cluster=inside_cluster,
     )
 
     # VA width as proxy for reasonable SL distance

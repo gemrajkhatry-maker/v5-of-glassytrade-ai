@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app.config import settings
 from app.domain.trading.models.enums import Side, Source, PositionStatus
 from app.domain.trading.models.entities import Position, Signal
 from app.domain.trading.models.value_objects import OHLC, StrategyStats
@@ -34,7 +33,9 @@ MAX_PARTICIPATION_PCT: Decimal = Decimal("0.02")  # Never be > 2% of avg daily v
 # Total per-lot round-trip ≈ ₹40-60 for NFO options.
 COMMISSION_PER_LOT: Decimal = Decimal("50.0")  # ₹50 round-trip per lot (conservative)
 DEFAULT_LOT_SIZE: int = 1  # Overridden per-instrument at runtime
-SLIPPAGE_PCT: Decimal = Decimal(str(settings.SLIPPAGE_PCT))  # Configurable per fill (entry + exit)
+SLIPPAGE_PCT: Decimal = Decimal(
+    "0.0005"
+)  # Default 0.05%; overridden via PortfolioConfig at runtime
 
 # Tiered risk by confidence level (Fabio Valentini position sizing)
 RISK_BY_CONFIDENCE: dict[str, Decimal] = {
@@ -136,7 +137,10 @@ class Portfolio:
 
     @staticmethod
     def _apply_slippage(
-        price: float | Decimal, side: Side, is_entry: bool, slippage_pct: Decimal = SLIPPAGE_PCT
+        price: float | Decimal,
+        side: Side,
+        is_entry: bool,
+        slippage_pct: Decimal = SLIPPAGE_PCT,
     ) -> Decimal:
         """Apply slippage to a fill price.
 

@@ -385,7 +385,7 @@ def _build_core_amt_narrative(data: Dict[str, Any]) -> str:
 # =====================================================================
 
 
-def build_entry_prompt(data: Dict[str, Any]) -> str:
+def build_entry_prompt(data: Dict[str, Any], allow_short: bool = False) -> str:
     """Build entry prompt using the core AMT narrative."""
     narrative = _build_core_amt_narrative(data)
 
@@ -400,14 +400,12 @@ def build_entry_prompt(data: Dict[str, Any]) -> str:
     if opt_parts:
         final_prompt += " " + " ".join(opt_parts)
 
-    from app.config import settings
-
     # Legacy tests expect "Respond ONLY with a JSON object" explicitly if they match that exact string
     # We add it here to ensure compatibility while keeping the schema instruction
     return (
         final_prompt
         + "\n\nRespond ONLY with a JSON object in the following format:\n"
-        + entry_response_schema_instruction(allow_short=settings.ALLOW_SHORT)
+        + entry_response_schema_instruction(allow_short=allow_short)
     )
 
 

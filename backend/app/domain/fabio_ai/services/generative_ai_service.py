@@ -3,11 +3,24 @@ import logging
 from collections import OrderedDict
 from typing import Dict, Any
 
-from app.config import settings
 from app.domain.ports.llm_inference import LLMInferencePort
-from app.domain.fabio_ai.services.prompt_builder import build_entry_prompt, parse_entry_response
+from app.domain.fabio_ai.services.prompt_builder import (
+    build_entry_prompt,
+    parse_entry_response,
+)
 
 logger = logging.getLogger(__name__)
+
+# Default instruction — used when no exchange-specific instruction is injected
+_DEFAULT_INSTRUCTION = (
+    "You are READING the auction using Fabio Valentini's AMT methodology. "
+    "You are NOT predicting — you are interpreting market structure, order flow, "
+    "and institutional behavior. Consider ALL context provided: session phase, "
+    "gate warnings, market state, volume bubbles, stacked imbalances, CVD slope, "
+    "profile shape, VWAP bias, and episodic memory. If the story is clear and "
+    "elements align, state your CONVICTION and direction. If you don't see a "
+    "clear setup or if gate warnings are significant, STAY FLAT."
+)
 
 
 class GenerativeAIService:
@@ -22,13 +35,11 @@ class GenerativeAIService:
     older fine-tuning artifacts still exist in the repository.
     """
 
-    # The EXACT instruction used during fine-tuning (from config for consistency)
-    INSTRUCTION = settings.LLM_INSTRUCTION
-
     _CACHE_SIZE = 8
 
-    def __init__(self, llm_adapter: LLMInferencePort):
+    def __init__(self, llm_adapter: LLMInferencePort, instruction: str = ""):
         self.llm_adapter = llm_adapter
+        self._instruction = instruction or _DEFAULT_INSTRUCTION
         self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
 
     # ------------------------------------------------------------------
@@ -58,7 +69,7 @@ class GenerativeAIService:
             return self._cache[cache_key]
 
         try:
-            raw_response = self.llm_adapter.predict(self.INSTRUCTION, prompt_input)
+            raw_response = self.llm_adapter.predict(self._instruction, prompt_input)
             parsed = parse_entry_response(raw_response)
             parsed["input_prompt"] = prompt_input
             parsed["market_state"] = market_data.get("market_state", "Unknown")

@@ -19,7 +19,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-from app.config import Settings
+from app.config import settings
 from app.domain.trading.models.value_objects import OHLC, OrderBook
 from app.domain.trading.models.aggregates import Portfolio
 from app.domain.trading.models.enums import MarketStateCodec, Source
@@ -87,11 +87,17 @@ class TradingSessionService:
         storage: StoragePort | None = None,
         amt_handler: AMTHandler | None = None,
         probability_engine: ProbabilityInferencePort | None = None,
+        exchange_config=None,  # ExchangeConfig — injected from ServiceGraph
+        allow_short: bool = False,
     ) -> None:
         self._event_bus = event_bus
         self._broker = broker
         self._storage = storage
         self._probability_engine = probability_engine or NoOpProbabilityAdapter()
+
+        # Injected config — replaces inline Settings() calls
+        self._exchange = exchange_config.exchange if exchange_config else "MCX"
+        self._allow_short = allow_short
 
         # Delegated modules
         self._state_manager = SessionStateManager(storage=storage)
@@ -123,6 +129,9 @@ class TradingSessionService:
             storage=storage,
             trade_manager=self._lifecycle_handler.trade_manager,
             journal=self._event_logger._journal,
+            exchange=self._exchange,
+            allow_short=self._allow_short,
+            llm_timeout=float(getattr(settings, "LLM_TIMEOUT_SECONDS", 15)),
         )
         self._rl_handler = RLHandler()
 
@@ -343,9 +352,8 @@ class TradingSessionService:
             from app.domain.fabio_ai.services.session_context import (
                 get_session_info as _get_si,
             )
-            from app.config import Settings
 
-            _market = Settings().DEFAULT_EXCHANGE
+            _market = self._exchange
             if _market in ("NFO", "BSE"):
                 _market = "NSE"
             session_phase = _get_si(timestamp=event.tick.time, market=_market)
@@ -384,9 +392,8 @@ class TradingSessionService:
                 ):
                     try:
                         from datetime import datetime, timezone, timedelta
-                        from app.config import Settings
 
-                        _market = Settings().DEFAULT_EXCHANGE
+                        _market = self._exchange
                         ist = timezone(timedelta(hours=5, minutes=30))
                         session_date = datetime.now(ist).strftime("%Y-%m-%d")
                         from app.domain.fabio_ai.services.entry_gate import (
@@ -616,9 +623,7 @@ class TradingSessionService:
             session._llm_priority_score = _priority_score
 
             # UNIFIED ENTRY PATH
-            from app.config import Settings as _QSettings
-
-            _allow_short = _QSettings().ALLOW_SHORT
+            _allow_short = self._allow_short
 
             # USE BEST AVAILABLE DECISION
             _exec_decision = None
@@ -690,9 +695,7 @@ class TradingSessionService:
             )
 
         if run_overseer:
-            from app.config import Settings as _Settings
-
-            _mkt = _Settings().DEFAULT_EXCHANGE
+            _mkt = self._exchange
             if _mkt in ("NFO", "BSE"):
                 _mkt = "NSE"
             _si = _get_si(timestamp=event.tick.time, market=_mkt)
@@ -1109,12 +1112,11 @@ class TradingSessionService:
         from app.domain.fabio_ai.services.session_context import (
             get_session_info as _get_si,
         )
-        from app.config import Settings
         from datetime import datetime, timezone, timedelta
 
         ist = timezone(timedelta(hours=5, minutes=30))
         now_ist = datetime.now(ist).strftime("%H:%M:%S")
-        _market = Settings().DEFAULT_EXCHANGE
+        _market = self._exchange
         if _market in ("NFO", "BSE"):
             _market = "NSE"
         si = _get_si(timestamp=now_ist, market=_market)
@@ -1277,7 +1279,7 @@ class TradingSessionService:
             "expectedPlaybook": expected,
             "candidatePlaybook": candidate,
             "guardTripped": self._state_manager._playbook_guard_tripped(session),
-            "maxRejections": Settings().PLAYBOOK_GUARD_MAX_REJECTIONS,
+            "maxRejections": settings.PLAYBOOK_GUARD_MAX_REJECTIONS,
             "totalRejections": self._state_manager._playbook_guard_total(session),
             "sessionCompatible": session_compatible,
             "agentAligned": (candidate == expected)
@@ -1307,7 +1309,7 @@ class TradingSessionService:
         aggression = getattr(session, "_aggression_explained_entries", 0)
         coverage_rate = round((explained / total * 100.0), 1) if total else 0.0
         aggression_rate = round((aggression / total * 100.0), 1) if total else 0.0
-        min_trades = Settings().EXPLAINABILITY_ALERT_MIN_TRADES
+        min_trades = settings.EXPLAINABILITY_ALERT_MIN_TRADES
         alert = getattr(session, "_last_explainability_alert", "")
         return {
             "entries": total,
@@ -1316,8 +1318,8 @@ class TradingSessionService:
             "coverageRate": coverage_rate,
             "aggressionDriverRate": aggression_rate,
             "minTrades": min_trades,
-            "minCoverageRate": Settings().EXPLAINABILITY_MIN_DRIVER_COVERAGE_PCT,
-            "minAggressionRate": Settings().EXPLAINABILITY_MIN_AGGRESSION_DRIVER_PCT,
+            "minCoverageRate": settings.EXPLAINABILITY_MIN_DRIVER_COVERAGE_PCT,
+            "minAggressionRate": settings.EXPLAINABILITY_MIN_AGGRESSION_DRIVER_PCT,
             "alertActive": bool(alert) and total >= min_trades,
             "alertReason": alert,
         }

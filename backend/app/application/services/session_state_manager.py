@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
-from app.config import Settings
+from app.config import settings
 
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, OrderBook
@@ -30,11 +30,20 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SessionState:
     """Mutable per-symbol state."""
+
     symbol: str = ""
     data: list[OHLC] = field(default_factory=list)
     order_book: OrderBook | None = None
-    portfolio: Portfolio = field(default_factory=lambda: __import__('app.domain.trading.models.aggregates', fromlist=['Portfolio']).Portfolio.create_default())
-    learning: LearningEngine = field(default_factory=lambda: __import__('app.domain.fabio_ai.services.learning_engine', fromlist=['LearningEngine']).LearningEngine())
+    portfolio: Portfolio = field(
+        default_factory=lambda: __import__(
+            "app.domain.trading.models.aggregates", fromlist=["Portfolio"]
+        ).Portfolio.create_default()
+    )
+    learning: LearningEngine = field(
+        default_factory=lambda: __import__(
+            "app.domain.fabio_ai.services.learning_engine", fromlist=["LearningEngine"]
+        ).LearningEngine()
+    )
 
     # Cached latest results for query access
     last_amt: dict | None = None
@@ -79,7 +88,7 @@ class SessionState:
 
 class SessionStateManager:
     """Manages per-symbol session state.
-    
+
     This module encapsulates all session state management logic, providing
     a single source of truth for session state across the codebase.
     """
@@ -96,10 +105,10 @@ class SessionStateManager:
 
     def get_or_create_session(self, symbol: str) -> SessionState:
         """Get or create a session for the symbol.
-        
+
         Args:
             symbol: Trading symbol
-        
+
         Returns:
             SessionState for the symbol
         """
@@ -118,23 +127,29 @@ class SessionStateManager:
                     # Load prior session profile for gap analysis
                     if self._storage:
                         try:
-                            _market = Settings().DEFAULT_EXCHANGE
-                            prior = self._storage.get_previous_session_profile(symbol, _market)
+                            _market = settings.DEFAULT_EXCHANGE
+                            prior = self._storage.get_previous_session_profile(
+                                symbol, _market
+                            )
                             if prior:
                                 new_session._prior_profile = prior
                                 # Extract prior session print levels for cross-session
                                 # structural level persistence (Gap #10)
                                 new_session._prior_print_levels = [
-                                    p["price"]
-                                    for p in prior.get("print_levels", [])
+                                    p["price"] for p in prior.get("print_levels", [])
                                 ]
                                 logger.info(
                                     "Loaded prior session profile for %s: POC=%.1f VAH=%.1f VAL=%.1f print_levels=%d",
-                                    symbol, prior.get("poc", 0), prior.get("vah", 0), prior.get("val", 0),
+                                    symbol,
+                                    prior.get("poc", 0),
+                                    prior.get("vah", 0),
+                                    prior.get("val", 0),
                                     len(new_session._prior_print_levels),
                                 )
                         except Exception:
-                            logger.debug("Failed to load prior session profile", exc_info=True)
+                            logger.debug(
+                                "Failed to load prior session profile", exc_info=True
+                            )
 
                     self._sessions[symbol] = new_session
         return self._sessions[symbol]
@@ -147,10 +162,12 @@ class SessionStateManager:
         self._last_eviction_check = now
         to_evict = []
         for symbol, session in self._sessions.items():
-            last_tick = getattr(session, '_last_tick_time', 0)
-            has_positions = any(
-                p.status == "OPEN" for p in session.portfolio.positions
-            ) if hasattr(session, 'portfolio') else False
+            last_tick = getattr(session, "_last_tick_time", 0)
+            has_positions = (
+                any(p.status == "OPEN" for p in session.portfolio.positions)
+                if hasattr(session, "portfolio")
+                else False
+            )
             if not has_positions and (now - last_tick) > self._session_idle_timeout:
                 to_evict.append(symbol)
         for symbol in to_evict:
@@ -160,17 +177,21 @@ class SessionStateManager:
     @staticmethod
     def _session_day_from_timestamp(timestamp: str) -> str:
         """Get session day from timestamp.
-        
+
         Args:
             timestamp: ISO timestamp string
-        
+
         Returns:
             Session day string (YYYY-MM-DD)
         """
         ist = timezone(timedelta(hours=5, minutes=30))
         try:
             stripped = str(timestamp).strip()
-            if stripped.replace(".", "", 1).lstrip("-").isdigit() and "T" not in stripped and len(stripped) >= 9:
+            if (
+                stripped.replace(".", "", 1).lstrip("-").isdigit()
+                and "T" not in stripped
+                and len(stripped) >= 9
+            ):
                 dt = datetime.fromtimestamp(float(stripped), tz=timezone.utc)
             else:
                 dt = datetime.fromisoformat(stripped.replace("Z", "+00:00"))
@@ -183,21 +204,23 @@ class SessionStateManager:
     @staticmethod
     def _record_playbook_guard_rejection(session: SessionState, reason: str) -> None:
         """Record a playbook guard rejection.
-        
+
         Args:
             session: Session state
             reason: Rejection reason
         """
-        session._playbook_guard_rejections[reason] = session._playbook_guard_rejections.get(reason, 0) + 1
+        session._playbook_guard_rejections[reason] = (
+            session._playbook_guard_rejections.get(reason, 0) + 1
+        )
         session._last_playbook_guard_reason = reason
 
     @staticmethod
     def _playbook_guard_total(session: SessionState) -> int:
         """Get total playbook guard rejections.
-        
+
         Args:
             session: Session state
-        
+
         Returns:
             Total rejection count
         """
@@ -206,18 +229,21 @@ class SessionStateManager:
     @staticmethod
     def _playbook_guard_tripped(session: SessionState) -> bool:
         """Check if playbook guard is tripped.
-        
+
         Args:
             session: Session state
-        
+
         Returns:
             True if guard is tripped
         """
-        return SessionStateManager._playbook_guard_total(session) >= Settings().PLAYBOOK_GUARD_MAX_REJECTIONS
+        return (
+            SessionStateManager._playbook_guard_total(session)
+            >= settings.PLAYBOOK_GUARD_MAX_REJECTIONS
+        )
 
     def _reset_playbook_guard_state(self, session: SessionState, symbol: str) -> None:
         """Reset playbook guard state.
-        
+
         Args:
             session: Session state
             symbol: Trading symbol
@@ -228,7 +254,7 @@ class SessionStateManager:
     @staticmethod
     def _reset_explainability_state(session: SessionState) -> None:
         """Reset explainability state.
-        
+
         Args:
             session: Session state
         """
@@ -238,12 +264,14 @@ class SessionStateManager:
         session._last_explainability_alert = ""
 
     @staticmethod
-    def _has_aggression_feature_driver(feature_drivers: tuple[str, ...] | list[str] | None) -> bool:
+    def _has_aggression_feature_driver(
+        feature_drivers: tuple[str, ...] | list[str] | None,
+    ) -> bool:
         """Check if feature drivers include aggression.
-        
+
         Args:
             feature_drivers: Feature driver list
-        
+
         Returns:
             True if aggression feature driver is present
         """
@@ -254,9 +282,11 @@ class SessionStateManager:
             for driver in feature_drivers
         )
 
-    def _record_explainability_entry(self, session: SessionState, feature_drivers: tuple[str, ...] | list[str] | None) -> None:
+    def _record_explainability_entry(
+        self, session: SessionState, feature_drivers: tuple[str, ...] | list[str] | None
+    ) -> None:
         """Record an explainability entry.
-        
+
         Args:
             session: Session state
             feature_drivers: Feature driver list
@@ -267,24 +297,38 @@ class SessionStateManager:
         if self._has_aggression_feature_driver(feature_drivers):
             session._aggression_explained_entries += 1
 
-        min_trades = Settings().EXPLAINABILITY_ALERT_MIN_TRADES
+        min_trades = settings.EXPLAINABILITY_ALERT_MIN_TRADES
         if session._explainability_entries < min_trades:
             session._last_explainability_alert = ""
             return
 
-        coverage = (session._explained_entries / session._explainability_entries * 100.0) if session._explainability_entries else 0.0
-        aggression = (session._aggression_explained_entries / session._explainability_entries * 100.0) if session._explainability_entries else 0.0
-        if coverage < Settings().EXPLAINABILITY_MIN_DRIVER_COVERAGE_PCT:
+        coverage = (
+            (session._explained_entries / session._explainability_entries * 100.0)
+            if session._explainability_entries
+            else 0.0
+        )
+        aggression = (
+            (
+                session._aggression_explained_entries
+                / session._explainability_entries
+                * 100.0
+            )
+            if session._explainability_entries
+            else 0.0
+        )
+        if coverage < settings.EXPLAINABILITY_MIN_DRIVER_COVERAGE_PCT:
             session._last_explainability_alert = "LOW_FEATURE_DRIVER_COVERAGE"
             return
-        if aggression < Settings().EXPLAINABILITY_MIN_AGGRESSION_DRIVER_PCT:
+        if aggression < settings.EXPLAINABILITY_MIN_AGGRESSION_DRIVER_PCT:
             session._last_explainability_alert = "LOW_AGGRESSION_DRIVER_RATE"
             return
         session._last_explainability_alert = ""
 
-    def _maybe_reset_symbol_state(self, session: SessionState, symbol: str, tick_time: str) -> None:
+    def _maybe_reset_symbol_state(
+        self, session: SessionState, symbol: str, tick_time: str
+    ) -> None:
         """Reset symbol state on new session day.
-        
+
         Args:
             session: Session state
             symbol: Trading symbol
@@ -295,20 +339,25 @@ class SessionStateManager:
             session._playbook_guard_day = day_key
         if not session._explainability_day:
             session._explainability_day = day_key
-        if session._playbook_guard_day == day_key and session._explainability_day == day_key:
+        if (
+            session._playbook_guard_day == day_key
+            and session._explainability_day == day_key
+        ):
             return
         session._playbook_guard_day = day_key
         session._explainability_day = day_key
         self._reset_playbook_guard_state(session, symbol)
         self._reset_explainability_state(session)
-        logger.info("Reset runtime QA state for %s on new session day %s", symbol, day_key)
+        logger.info(
+            "Reset runtime QA state for %s on new session day %s", symbol, day_key
+        )
 
     def reset_playbook_guard(self, symbol: str | None = None) -> dict:
         """Clear playbook-guard rejections for one symbol or all active sessions.
-        
+
         Args:
             symbol: Trading symbol (optional, resets all if None)
-        
+
         Returns:
             Reset result dictionary
         """
@@ -319,7 +368,11 @@ class SessionStateManager:
             if session is None:
                 continue
             self._reset_playbook_guard_state(session, target)
-            session._playbook_guard_day = datetime.now(timezone(timedelta(hours=5, minutes=30))).date().isoformat()
+            session._playbook_guard_day = (
+                datetime.now(timezone(timedelta(hours=5, minutes=30)))
+                .date()
+                .isoformat()
+            )
             self._reset_explainability_state(session)
             session._explainability_day = session._playbook_guard_day
             reset_symbols.append(target)
@@ -330,7 +383,7 @@ class SessionStateManager:
 
     def get_all_sessions(self) -> dict[str, SessionState]:
         """Get all active sessions.
-        
+
         Returns:
             Dictionary of symbol to SessionState
         """
@@ -338,7 +391,7 @@ class SessionStateManager:
 
     def get_session_count(self) -> int:
         """Get count of active sessions.
-        
+
         Returns:
             Number of active sessions
         """

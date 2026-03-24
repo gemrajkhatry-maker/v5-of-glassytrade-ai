@@ -81,7 +81,9 @@ async def lifespan(app: FastAPI):
     log.info("Waiting for LLM model to be ready (up to 120s)...")
     ready = llm.wait_until_ready(timeout=120.0)
     if not ready:
-        log.error("LLM model failed to load within timeout! Backend will start but LLM calls will fail.")
+        log.error(
+            "LLM model failed to load within timeout! Backend will start but LLM calls will fail."
+        )
     else:
         # Validate with a test inference
         log.info("Running LLM validation inference...")
@@ -93,6 +95,7 @@ async def lifespan(app: FastAPI):
 
     # Start the standalone trading engine (trades independently of frontend)
     from app.application.engine import TradingEngine
+
     engine = TradingEngine(graph)
     graph.engine = engine
     try:
@@ -116,7 +119,7 @@ async def lifespan(app: FastAPI):
     # Flush pending database ticks
     try:
         storage = graph.storage
-        if hasattr(storage, '_flush_ticks'):
+        if hasattr(storage, "_flush_ticks"):
             try:
                 storage._flush_ticks()
             except Exception:
@@ -127,9 +130,9 @@ async def lifespan(app: FastAPI):
     # Shutdown handler thread pools via cleanup()
     try:
         ts = graph.trading_session
-        for attr in ('_llm_handler', '_overseer_handler'):
+        for attr in ("_llm_handler", "_overseer_handler"):
             handler = getattr(ts, attr, None)
-            if handler and hasattr(handler, 'cleanup'):
+            if handler and hasattr(handler, "cleanup"):
                 handler.cleanup()
         log.info("Thread pools shut down.")
     except Exception:
@@ -156,8 +159,8 @@ app.add_middleware(
 # Simple in-memory rate limiter (100 req/min per client IP)
 # ---------------------------------------------------------------------------
 _request_counts: dict[str, list[float]] = defaultdict(list)
-_RATE_LIMIT = 100   # max requests per window
-_RATE_WINDOW = 60   # window in seconds
+_RATE_LIMIT = 100  # max requests per window
+_RATE_WINDOW = 60  # window in seconds
 
 
 @app.middleware("http")
@@ -171,6 +174,7 @@ async def rate_limit_middleware(request, call_next):
     ]
     if len(_request_counts[client_ip]) >= _RATE_LIMIT:
         from starlette.responses import JSONResponse
+
         return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
     _request_counts[client_ip].append(now)
     return await call_next(request)
@@ -188,4 +192,5 @@ app.include_router(gameloop_router, prefix="/api")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+
+    uvicorn.run(app, host="0.0.0.0", port=9090)

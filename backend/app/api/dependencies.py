@@ -2,6 +2,12 @@
 
 Creates and wires the full service graph once at application startup.
 FastAPI dependencies pull from the singleton graph.
+
+Architecture:
+  - ExchangeConfig: Immutable value object with all NSE/MCX-specific settings
+  - SymbolRegistry: Single source of truth for exchange↔symbol mapping
+  - ExchangeStrategy: Port encapsulating exchange-specific behavior
+  - SessionContextFactory: DIP-compliant factory for session context
 """
 
 from __future__ import annotations
@@ -22,10 +28,14 @@ from app.domain.ports.market_data import MarketDataPort
 from app.domain.ports.llm_inference import LLMInferencePort
 from app.domain.ports.probability_inference import ProbabilityInferencePort
 from app.domain.ports.storage import StoragePort
+from app.domain.ports.exchange_strategy import ExchangeStrategy
+from app.domain.models.exchange_config import ExchangeConfig
+from app.domain.services.symbol_registry import SymbolRegistry
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 from app.domain.fabio_ai.services.composite_profile import CompositeProfile
 from app.domain.fabio_ai.services.alert_manager import AlertManager
 from app.domain.fabio_ai.services.npoc_tracker import NPOCTracker
+from app.domain.fabio_ai.services.session_context_factory import SessionContextFactory
 from app.infrastructure.adapters.delta_profile_adapter import DeltaProfileAdapter
 
 logger = logging.getLogger(__name__)
@@ -36,6 +46,50 @@ class ServiceGraph:
 
     def __init__(self) -> None:
         self.event_bus = InMemoryEventBus()
+
+        # ------------------------------------------------------------------
+        # Exchange abstraction layer (OOP / SOLID / DDD)
+        # ------------------------------------------------------------------
+        # Load exchange configs — YAML overrides merged with defaults
+        from config.consolidated import get_exchange_config
+
+        self.exchange_config: ExchangeConfig = get_exchange_config(
+            settings.DEFAULT_EXCHANGE
+        )
+        self.symbol_registry = SymbolRegistry.from_exchange_configs(
+            {self.exchange_config.exchange: self.exchange_config}
+        )
+
+        # Strategy pattern — concrete strategy selected at startup
+        if self.exchange_config.is_mcx():
+            from app.infrastructure.strategies.mcx_strategy import MCXExchangeStrategy
+
+            self.exchange_strategy: ExchangeStrategy = MCXExchangeStrategy(
+                self.exchange_config
+            )
+        else:
+            from app.infrastructure.strategies.nse_strategy import NSEExchangeStrategy
+
+            self.exchange_strategy: ExchangeStrategy = NSEExchangeStrategy(
+                self.exchange_config
+            )
+
+        # DIP-compliant session context factory
+        self.session_factory = SessionContextFactory(
+            exchange_config=self.exchange_config,
+            symbol_registry=self.symbol_registry,
+        )
+
+        logger.info(
+            "Exchange layer ready: exchange=%s, strategy=%s, underlyings=%s",
+            self.exchange_config.exchange,
+            type(self.exchange_strategy).__name__,
+            sorted(self.exchange_config.underlyings),
+        )
+
+        # ------------------------------------------------------------------
+        # Core adapters
+        # ------------------------------------------------------------------
         self.market_data: MarketDataPort = DhanMarketDataAdapter(
             symbols=settings.DHAN_SYMBOLS,
             exchange=settings.DEFAULT_EXCHANGE,
@@ -44,7 +98,10 @@ class ServiceGraph:
         )
         self.broker = PaperBrokerAdapter()
         self.llm_inference: LLMInferencePort = MLXInferenceAdapter()
-        self.gen_ai_service = GenerativeAIService(llm_adapter=self.llm_inference)
+        self.gen_ai_service = GenerativeAIService(
+            llm_adapter=self.llm_inference,
+            instruction=self.exchange_config.llm_instruction,
+        )
         self._raw_storage = SQLiteStorageAdapter()
         # Wrap with async persistence bus — all writes go to background thread
         from app.infrastructure.async_persistence import AsyncPersistenceBus
@@ -88,6 +145,8 @@ class ServiceGraph:
             gen_ai_service=self.gen_ai_service,
             storage=self.storage,
             probability_engine=self.probability_engine,
+            exchange_config=self.exchange_config,
+            allow_short=settings.ALLOW_SHORT,
         )
         # NPOC Tracker — naked POC tracking for secondary targets
         self.npoc_tracker = NPOCTracker(storage_port=self.storage)
@@ -208,3 +267,26 @@ def get_active_symbol() -> str:
 
 def get_active_symbols() -> list[str]:
     return get_service_graph().active_symbols
+
+
+# Exchange abstraction helpers
+
+
+def get_exchange_config() -> ExchangeConfig:
+    """Get the active exchange configuration."""
+    return get_service_graph().exchange_config
+
+
+def get_exchange_strategy() -> ExchangeStrategy:
+    """Get the active exchange strategy (NSE or MCX)."""
+    return get_service_graph().exchange_strategy
+
+
+def get_symbol_registry() -> SymbolRegistry:
+    """Get the symbol registry for exchange detection."""
+    return get_service_graph().symbol_registry
+
+
+def get_session_factory() -> SessionContextFactory:
+    """Get the DIP-compliant session context factory."""
+    return get_service_graph().session_factory

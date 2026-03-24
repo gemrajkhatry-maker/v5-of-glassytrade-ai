@@ -103,6 +103,12 @@ class GateContext:
     # Weekly bias (Gap #4 — Composite Profile)
     weekly_bias: str = "NEUTRAL"
     weekly_bias_aligned: bool = True
+
+    # Configurable gate thresholds (exchange-specific)
+    max_distance_to_level_ticks: float = 3.0  # Gate 6: max ticks from nearest level
+    probing_aggression_threshold: float = (
+        3.0  # Gate 4: min aggression for PROBING state
+    )
     weekly_bias_strength: float = 0.0
 
     # Setup
@@ -162,14 +168,14 @@ class GatePipeline:
             )
 
         # GATE 4: PROBING state — allow with aggression confirmation
-        # PROBING can trade when: aggression >= 3.0 AND at a key level
+        # PROBING can trade when: aggression >= threshold AND at a key level
         # This supports the PROBING + BALANCED playbook (acceptance/rejection)
         if ctx.market_state == MarketState.PROBING:
-            if ctx.aggression_score < 3.0:
+            if ctx.aggression_score < ctx.probing_aggression_threshold:
                 return self._fail(
                     4,
                     GateReason.FLAT,
-                    f"PROBING without high aggression ({ctx.aggression_score:.1f} < 3.0)",
+                    f"PROBING without high aggression ({ctx.aggression_score:.1f} < {ctx.probing_aggression_threshold:.1f})",
                 )
             # PROBING + HIGH aggression → allow through (playbook handles direction)
 
@@ -178,11 +184,11 @@ class GatePipeline:
             return self._fail(5, GateReason.WAIT, "No key level near price")
 
         # GATE 6: Price at entry zone
-        if ctx.distance_to_level_ticks > 3:
+        if ctx.distance_to_level_ticks > ctx.max_distance_to_level_ticks:
             return self._fail(
                 6,
                 GateReason.ALERT,
-                f"Price {ctx.distance_to_level_ticks:.1f} ticks from level (max 3)",
+                f"Price {ctx.distance_to_level_ticks:.1f} ticks from level (max {ctx.max_distance_to_level_ticks:.0f})",
             )
 
         # GATE 7: Drive = 2 (D1 rejected)

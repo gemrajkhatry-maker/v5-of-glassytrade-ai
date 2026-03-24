@@ -38,13 +38,23 @@ class OptionScannerService:
     """Simple momentum-based contract selection for MCX/NSE."""
 
     _STRIKE_INTERVALS = {
-        "NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50,
-        "CRUDEOIL": 50, "NATURALGAS": 5, "GOLD": 100, "SILVER": 500
+        "NIFTY": 50,
+        "BANKNIFTY": 100,
+        "FINNIFTY": 50,
+        "CRUDEOIL": 50,
+        "NATURALGAS": 5,
+        "GOLD": 100,
+        "SILVER": 500,
     }
-    
+
     _MIN_OI = {
-        "NIFTY": 500_000, "BANKNIFTY": 300_000, "FINNIFTY": 50_000,
-        "CRUDEOIL": 5_000, "NATURALGAS": 5_000, "GOLD": 1_000, "SILVER": 1_000
+        "NIFTY": 500_000,
+        "BANKNIFTY": 300_000,
+        "FINNIFTY": 50_000,
+        "CRUDEOIL": 5_000,
+        "NATURALGAS": 5_000,
+        "GOLD": 1_000,
+        "SILVER": 1_000,
     }
 
     def __init__(self, broker) -> None:
@@ -65,19 +75,17 @@ class OptionScannerService:
         strikes_around_atm: int = 2,
     ) -> list[ScanResult]:
         """Select top N contracts based on momentum and liquidity."""
-        from app.config import settings
-        
+
         # Exchange mapping per underlying
         _NSE_UNDERLYINGS = {"NIFTY", "BANKNIFTY", "FINNIFTY"}
         _MCX_UNDERLYINGS = {"CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"}
-        
+
         results = []
-        
+
         # Use config underlyings if not specified
         if underlyings is None:
-            config_unds = settings.SCANNER_UNDERLYINGS
-            underlyings = [u.strip() for u in config_unds.split(",")] if isinstance(config_unds, str) else list(config_unds)
-        
+            underlyings = ["CRUDEOIL", "NATURALGAS"]
+
         for u in underlyings:
             try:
                 # Auto-detect exchange from underlying
@@ -86,8 +94,8 @@ class OptionScannerService:
                 elif u.upper() in _NSE_UNDERLYINGS:
                     _exchange = "NFO"
                 else:
-                    _exchange = exchange or settings.DEFAULT_EXCHANGE
-                
+                    _exchange = exchange or "MCX"
+
                 chain = self._broker.get_option_chain(
                     underlying=u,
                     exchange=_exchange,
@@ -98,45 +106,50 @@ class OptionScannerService:
 
                 atm = chain.atm_strike
                 interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
-                
+
                 # Detect momentum (for logging/sorting, not filtering)
-                bias, bias_strength, bias_reason = self._detect_momentum(chain, atm, interval)
+                bias, bias_strength, bias_reason = self._detect_momentum(
+                    chain, atm, interval
+                )
                 logger.info("MOMENTUM: %s — %s (strength=%d)", u, bias, bias_strength)
-                
+
                 # Scan BOTH CE and PE contracts near ATM
                 # LLM decides direction based on full market context
-                strikes = [atm + i * interval for i in range(-strikes_around_atm, strikes_around_atm + 1)]
-                
+                strikes = [
+                    atm + i * interval
+                    for i in range(-strikes_around_atm, strikes_around_atm + 1)
+                ]
+
                 # Process both CE and PE
                 for opt_type, option_map in [("CE", chain.calls), ("PE", chain.puts)]:
                     for strike in strikes:
                         opt = option_map.get(float(strike))
                         if opt is None:
                             continue
-                        
+
                         ltp = float(opt.ltp or 0)
                         if ltp <= 0:
                             continue
-                        
+
                         oi = int(opt.oi or 0)
                         vol = int(opt.volume or 0)
-                        
+
                         # Hard filters
                         min_oi = self._MIN_OI.get(u.upper(), 5000)
                         if oi < min_oi:
                             continue
-                        
+
                         bid = float(opt.bid or 0)
                         ask = float(opt.ask or 0)
                         if bid > 0 and ask > 0 and ltp > 0:
                             spread_pct = (ask - bid) / ltp * 100
                             if spread_pct > 2.5:
                                 continue
-                        
+
                         # Advanced scoring: Spread penalty + Momentum Booster
                         atm_dist = abs(strike - atm) / interval if interval > 0 else 0
                         delta_val = abs(float(opt.delta or 0.5))
-                        
+
                         score = 0
                         # ATM proximity (40 pts max)
                         score += max(0, 40 - (atm_dist * 15))
@@ -144,63 +157,72 @@ class OptionScannerService:
                         score += min(30, (oi / min_oi) * 10)
                         # Volume momentum scaling (20 pts max)
                         score += min(20, (vol / 1000) * 5)
-                        
+
                         # Quant Improvement 1: Delta sweet spot +10 pts
                         if 0.40 <= delta_val <= 0.60:
                             score += 10
-                            
+
                         # Quant Improvement 2: Dynamic Spread Penalty (-20 pts max)
                         if ltp > 0:
                             spread_pct = (ask - bid) / ltp * 100
                             if spread_pct > 0.5:
                                 penalty = min(20, (spread_pct - 0.5) * 10)
                                 score -= penalty
-                                
+
                         # Quant Improvement 3: Momentum Bias Booster (+25 pts)
                         if bias == "BULLISH" and opt_type == "CE":
                             score += 25
                         elif bias == "BEARISH" and opt_type == "PE":
                             score += 25
-                        
-                        results.append(ScanResult(
-                            symbol=opt.symbol,
-                            underlying=u,
-                            strike=int(strike),
-                            option_type=opt_type,
-                            expiry=chain.expiry.date().isoformat(),
-                            ltp=ltp, oi=oi, volume=vol,
-                            spread=ask - bid if bid > 0 and ask > 0 else 0,
-                            score=score, bias=bias, bias_reason=bias_reason,
-                            delta=delta_val,
-                            iv=float(opt.iv or 0) if hasattr(opt, 'iv') else 0,
-                        ))
+
+                        results.append(
+                            ScanResult(
+                                symbol=opt.symbol,
+                                underlying=u,
+                                strike=int(strike),
+                                option_type=opt_type,
+                                expiry=chain.expiry.date().isoformat(),
+                                ltp=ltp,
+                                oi=oi,
+                                volume=vol,
+                                spread=ask - bid if bid > 0 and ask > 0 else 0,
+                                score=score,
+                                bias=bias,
+                                bias_reason=bias_reason,
+                                delta=delta_val,
+                                iv=float(opt.iv or 0) if hasattr(opt, "iv") else 0,
+                            )
+                        )
 
             except Exception as e:
                 logger.error("scan_top_n failed for %s: %s", u, e)
-        
+
         # Group by underlying and take top N per underlying first
         from collections import defaultdict
+
         grouped = defaultdict(list)
         for r in results:
             grouped[r.underlying].append(r)
-            
+
         diverse_results = []
         for u_name, u_results in grouped.items():
             u_results.sort(key=lambda r: -r.score)
             # Take top 2 from each index to ensure diversity (e.g. 2 Nifty, 2 BankNifty, 2 FinNifty)
             diverse_results.extend(u_results[:top_per_underlying])
-            
+
         # Sort the combined diverse list and take the final N (5-6)
         diverse_results.sort(key=lambda r: -r.score)
         final = diverse_results[:n]
-        
+
         # If no contracts found (no momentum), return ATM contracts for monitoring
         if not final:
             logger.info("No momentum setups — selecting ATM contracts for monitoring")
-            for u in (underlyings or ["CRUDEOIL", "NATURALGAS"]):
+            for u in underlyings or ["CRUDEOIL", "NATURALGAS"]:
                 try:
                     chain = self._broker.get_option_chain(
-                        underlying=u, exchange=exchange or "MCX", expiry_index=expiry_index,
+                        underlying=u,
+                        exchange=exchange or "MCX",
+                        expiry_index=expiry_index,
                     )
                     if chain is None:
                         continue
@@ -208,31 +230,45 @@ class OptionScannerService:
                     # Get ATM CE for display
                     atm_ce = chain.calls.get(float(atm))
                     if atm_ce and float(atm_ce.ltp or 0) > 0:
-                        final.append(ScanResult(
-                            symbol=atm_ce.symbol,
-                            underlying=u,
-                            strike=int(atm),
-                            option_type=opt_type,
-                            expiry=chain.expiry.date().isoformat() if hasattr(chain.expiry, 'date') else "",
-                            ltp=float(atm_ce.ltp),
-                            oi=int(atm_ce.oi or 0),
-                            volume=int(atm_ce.volume or 0),
-                            spread=float(atm_ce.ask or 0) - float(atm_ce.bid or 0),
-                            score=50,  # Neutral score
-                            bias="NEUTRAL",
-                            bias_reason="No momentum — monitoring ATM",
-                            delta=float(atm_ce.delta or 0.5),
-                            iv=float(atm_ce.iv or 0),
-                        ))
+                        final.append(
+                            ScanResult(
+                                symbol=atm_ce.symbol,
+                                underlying=u,
+                                strike=int(atm),
+                                option_type=opt_type,
+                                expiry=chain.expiry.date().isoformat()
+                                if hasattr(chain.expiry, "date")
+                                else "",
+                                ltp=float(atm_ce.ltp),
+                                oi=int(atm_ce.oi or 0),
+                                volume=int(atm_ce.volume or 0),
+                                spread=float(atm_ce.ask or 0) - float(atm_ce.bid or 0),
+                                score=50,  # Neutral score
+                                bias="NEUTRAL",
+                                bias_reason="No momentum — monitoring ATM",
+                                delta=float(atm_ce.delta or 0.5),
+                                iv=float(atm_ce.iv or 0),
+                            )
+                        )
                         break
                 except Exception:
                     continue
-        
-        logger.info("scan_top_n: %d contracts found, returning %d", len(results) + len(final), len(final))
+
+        logger.info(
+            "scan_top_n: %d contracts found, returning %d",
+            len(results) + len(final),
+            len(final),
+        )
         for i, r in enumerate(final, 1):
-            logger.info("  #%d %s Strike=%d LTP=%.2f Score=%.0f",
-                        i, r.symbol, r.strike, r.ltp, r.score)
-        
+            logger.info(
+                "  #%d %s Strike=%d LTP=%.2f Score=%.0f",
+                i,
+                r.symbol,
+                r.strike,
+                r.ltp,
+                r.score,
+            )
+
         return final
 
     def _detect_momentum(self, chain, atm, interval):
@@ -240,7 +276,7 @@ class OptionScannerService:
         # CE vs PE volume ratio near ATM
         ce_vol = sum(int(o.volume or 0) for o in chain.calls.values())
         pe_vol = sum(int(o.volume or 0) for o in chain.puts.values())
-        
+
         if ce_vol > pe_vol * 1.5:
             return "BULLISH", 3, f"CE volume {ce_vol} > PE volume {pe_vol}"
         elif pe_vol > ce_vol * 1.5:
@@ -258,16 +294,16 @@ class OptionScannerService:
 
 class ContractSwitchGuard:
     """Prevents switching contracts during open trades."""
-    
+
     def __init__(self):
         self._current_contract = None
         self._current_score = 0.0
         self._last_score_time = 0.0
         self._has_open_trade = False
-    
+
     def set_open_trade(self, has_trade: bool):
         self._has_open_trade = has_trade
-    
+
     def should_switch(self, new_contract, new_score, current_time):
         if self._has_open_trade:
             return False  # NEVER switch during open trade
