@@ -1,142 +1,147 @@
-"""Domain constants — single source of truth for all thresholds (per Fabio AMT spec)."""
+"""Domain constants — loaded from config/base.yaml globals section.
+
+All constants are defined in YAML (config/base.yaml → globals:).
+This module loads them at import time so existing imports continue to work.
+
+To change any constant: edit config/base.yaml, not this file.
+"""
+
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def _load_globals() -> dict:
+    """Load globals section from config/base.yaml."""
+    try:
+        import yaml
+
+        config_dir = os.path.join(os.path.dirname(__file__), "..", "..", "config")
+        base_path = os.path.join(config_dir, "base.yaml")
+        if os.path.isfile(base_path):
+            with open(base_path) as f:
+                data = yaml.safe_load(f) or {}
+            return data.get("globals", {})
+    except Exception as e:
+        logger.debug("Could not load globals from base.yaml: %s", e)
+    return {}
+
+
+_G = _load_globals()
 
 # ============================================================================
 # Volume Profile (FR-02)
 # ============================================================================
-LVN_THRESHOLD = 0.15  # FR-02-08: < 15% of mean volume
-HVN_THRESHOLD = 2.00  # FR-02-09: > 200% of mean volume
-VALUE_AREA_PCT = 0.70  # FR-02-03: 70% value area
-LVN_SMOOTHING = 3  # Smoothing window for LVN/HVN detection
+LVN_THRESHOLD = _G.get("lvn_threshold", 0.15)
+HVN_THRESHOLD = _G.get("hvn_threshold", 2.00)
+VALUE_AREA_PCT = _G.get("value_area_pct", 0.70)
+LVN_SMOOTHING = _G.get("lvn_smoothing", 3)
+LVN_MIN_PERSISTENCE_BARS = _G.get("lvn_min_persistence_bars", 3)
+LVN_REMOVAL_THRESHOLD = _G.get("lvn_removal_threshold", 0.30)
+DELTA_BUCKET_SIZE_DEFAULT = _G.get("delta_bucket_size_default", 0.05)
+DELTA_PROFILE_BUCKETS = _G.get("delta_profile_buckets", 200)
 
 # ============================================================================
-# Order Flow Metrics (FR-03) — Single source of truth for CVD thresholds
+# Order Flow Metrics (FR-03)
 # ============================================================================
-CVD_SLOPE_WINDOW = 20  # FR-03-02: rolling 20-candle window
-CVD_STRONG_SLOPE = 2.0  # FR-08-04: CVD slope for P3 trail
-CVD_SLOPE_HARD_BLOCK = 50.0  # Hard gate: block entries when |slope| >= this
-CVD_SLOPE_WARNING = 30.0  # Warning level: log + reduce confidence
-CVD_SLOPE_EXTREME = 100.0  # Extreme: block ALL entries regardless of other factors
+CVD_SLOPE_WINDOW = _G.get("cvd_slope_window", 20)
+CVD_STRONG_SLOPE = _G.get("cvd_strong_slope", 2.0)
+CVD_SLOPE_HARD_BLOCK = _G.get("cvd_slope_hard_block", 50.0)
+CVD_SLOPE_WARNING = _G.get("cvd_slope_warning", 30.0)
+CVD_SLOPE_EXTREME = _G.get("cvd_slope_extreme", 100.0)
+CVD_SLOPE_PERSISTENCE_BARS = _G.get("cvd_slope_persistence_bars", 3)
+CVD_SLOPE_EXTENDED_WINDOW = _G.get("cvd_slope_extended_window", 40)
+CVD_BLOCK_THRESHOLD_NSE = _G.get("cvd_block_threshold_nse", 5000)
+CVD_BLOCK_THRESHOLD_MCX = _G.get("cvd_block_threshold_mcx", 50)
 
-FOOTPRINT_IMBALANCE_RATIO = 3.0  # FR-03-06: 300% (3:1 ratio)
-FOOTPRINT_IMBALANCE_PCT = 0.40  # FR-03-06: ≥ 40% cells confirmed
-
-ABSORPTION_RANGE_ATR = 0.30  # FR-03-09: (high-low) < ATR × 0.30
-ABSORPTION_VOL_MULT = 2.0  # FR-03-09: volume > avg × 2.0
-
-BIG_TRADE_MULTIPLIER = 5.0  # FR-03-11: trade_size ≥ avg × 5.0
-BIG_TRADE_CLUSTER_COUNT = 3  # FR-03-11: min 3 prints
-BIG_TRADE_CLUSTER_TICKS = 2  # FR-03-11: within 2 ticks
-
-VOLUME_BUBBLE_SIGMA = 2.0  # FR-03-07: mean + 2σ across 21 bars
-
-OFI_WINDOW = 10  # FR-03-12: 10-candle rolling average
+FOOTPRINT_IMBALANCE_RATIO = _G.get("footprint_imbalance_ratio", 3.0)
+FOOTPRINT_IMBALANCE_PCT = _G.get("footprint_imbalance_pct", 0.40)
+ABSORPTION_RANGE_ATR = _G.get("absorption_range_atr", 0.30)
+ABSORPTION_VOL_MULT = _G.get("absorption_vol_mult", 2.0)
+BIG_TRADE_MULTIPLIER = _G.get("big_trade_multiplier", 5.0)
+BIG_TRADE_CLUSTER_COUNT = _G.get("big_trade_cluster_count", 3)
+BIG_TRADE_CLUSTER_TICKS = _G.get("big_trade_cluster_ticks", 2)
+VOLUME_BUBBLE_SIGMA = _G.get("volume_bubble_sigma", 2.0)
+OFI_WINDOW = _G.get("ofi_window", 10)
+DELTA_ZONE_SIGMA_MULT = _G.get("delta_zone_sigma_mult", 2.5)
 
 # ============================================================================
 # Market State (FR-04)
 # ============================================================================
-POC_NO_TRADE_TICKS = 2  # FR-04-01: ±2 ticks of POC = NO_TRADE
-BALANCE_RATIO_THRESHOLD = 0.55  # FR-04-02: fraction of candles inside VA
-
-# ============================================================================
-# Drive Detection (FR-05)
-# ============================================================================
-DRIVE_REJECTION_WICK_RATIO = 0.5  # Wick must be > 50% of candle range
+POC_NO_TRADE_TICKS = _G.get("poc_no_trade_ticks", 2)
+BALANCE_RATIO_THRESHOLD = _G.get("balance_ratio_threshold", 0.55)
+DRIVE_REJECTION_WICK_RATIO = _G.get("drive_rejection_wick_ratio", 0.5)
+DISPLACEMENT_MULTIPLIER = _G.get("displacement_multiplier", 1.5)
 
 # ============================================================================
 # Aggression Scoring (FR-06)
 # ============================================================================
-AGGRESSION_FOOTPRINT = 1.0  # FR-06-01: footprint confirmed
-AGGRESSION_CVD = 1.0  # FR-06-02: CVD confirms
-AGGRESSION_BIG_TRADE = 1.0  # FR-06-03: big trade cluster
-AGGRESSION_ABSORPTION = 0.5  # FR-06-04: absorption detected
-AGGRESSION_OFI = 0.5  # FR-06-05: OFI aligned
-AGGRESSION_CONFLUENCE = 0.5  # FR-06-06: combined profile confluence
-AGGRESSION_BUBBLE = 0.5  # FR-06-07: volume bubble near entry
+AGGRESSION_FOOTPRINT = _G.get("aggression_footprint", 1.0)
+AGGRESSION_CVD = _G.get("aggression_cvd", 1.0)
+AGGRESSION_BIG_TRADE = _G.get("aggression_big_trade", 1.0)
+AGGRESSION_ABSORPTION = _G.get("aggression_absorption", 0.5)
+AGGRESSION_OFI = _G.get("aggression_ofi", 0.5)
+AGGRESSION_CONFLUENCE = _G.get("aggression_confluence", 0.5)
+AGGRESSION_BUBBLE = _G.get("aggression_bubble", 0.5)
+MIN_AGGRESSION_SCORE = _G.get("min_aggression_score", 2.0)
+PYRAMID_AGGRESSION_SCORE = _G.get("pyramid_aggression_score", 3.0)
+AGGRESSION_PERSISTENCE_BARS = _G.get("aggression_persistence_bars", 3)
+AGGRESSIVE_PRINT_SIGMA = _G.get("aggressive_print_sigma", 2.5)
 
-MIN_AGGRESSION_SCORE = 2.0  # FR-06-08: minimum for trade signal
-PYRAMID_AGGRESSION_SCORE = 3.0  # FR-06-09: minimum for pyramid add
-
-# Aggression persistence filter — prevent signal flicker
-AGGRESSION_PERSISTENCE_BARS = 3  # Score must be >= threshold for N consecutive bars
-CVD_SLOPE_PERSISTENCE_BARS = 3  # Slope sign must persist for N consecutive bars
-CVD_SLOPE_EXTENDED_WINDOW = 40  # Extended lookback for session-leg slope
-
-# LVN stability
-LVN_MIN_PERSISTENCE_BARS = 3  # LVN must survive N bars before emitted
-LVN_REMOVAL_THRESHOLD = 0.30  # LVN removed only if volume rises above 30% of mean
-
-# Structure label hysteresis
-STRUCTURE_DWELL_TICKS = 3  # New state must persist N consecutive ticks
-STRUCTURE_COOLDOWN_TICKS = 3  # Hold after state change before allowing another
-STRUCTURE_CONFIDENCE_GATE = 60  # Minimum confidence to accept new state
-STRUCTURE_BYPASS_CONFIDENCE = 70  # Skip TRANSITION buffer if confidence exceeds this
-
-# Decision history
-DECISION_HISTORY_LIMIT = 1000  # Max decisions to return from API
+# ============================================================================
+# Structure
+# ============================================================================
+STRUCTURE_DWELL_TICKS = _G.get("structure_dwell_ticks", 3)
+STRUCTURE_COOLDOWN_TICKS = _G.get("structure_cooldown_ticks", 3)
+STRUCTURE_CONFIDENCE_GATE = _G.get("structure_confidence_gate", 60)
+STRUCTURE_BYPASS_CONFIDENCE = _G.get("structure_bypass_confidence", 70)
 
 # ============================================================================
 # Trade Setup (FR-07)
 # ============================================================================
-MIN_RR_RATIO = 1.5  # FR-07-08: minimum 1:1.5 R:R
-MAX_CUSHION_TICKS = 10  # FR-07-05: > 10 ticks = invalid
-DISPLACEMENT_MULTIPLIER = 1.5  # FR-04-04: displacement = range ≥ ATR × 1.5
+MIN_RR_RATIO = _G.get("min_rr_ratio", 1.5)
+MAX_CUSHION_TICKS = _G.get("max_cushion_ticks", 10)
+SIGNAL_TTL_SECONDS = _G.get("signal_ttl_seconds", 600)
+VWAP_EXTREME_MULTIPLIER = _G.get("vwap_extreme_multiplier", 1.01)
+DECISION_HISTORY_LIMIT = _G.get("decision_history_limit", 1000)
 
 # ============================================================================
 # Risk Management (FR-10)
 # ============================================================================
-RISK_PER_TRADE_PCT = 0.005  # FR-10-01: 0.5% per trade
-MAX_DAILY_LOSS_PCT = 0.020  # FR-10-02: 2% daily limit
-MAX_CONSECUTIVE_LOSSES = 3  # FR-10-03: 3 consecutive = pause
-MAX_DRAWDOWN_PCT = 0.030  # FR-10-04: 3% from peak
-ABSOLUTE_CEILING_PCT = 0.010  # FR-10-05: 1% absolute max per trade
+RISK_PER_TRADE_PCT = _G.get("risk_per_trade_pct", 0.005)
+MAX_DAILY_LOSS_PCT = _G.get("max_daily_loss_pct", 0.020)
+MAX_CONSECUTIVE_LOSSES = _G.get("max_consecutive_losses", 3)
+MAX_DRAWDOWN_PCT = _G.get("max_drawdown_pct", 0.030)
+ABSOLUTE_CEILING_PCT = _G.get("absolute_ceiling_pct", 0.010)
 
 # ============================================================================
 # Volume Thresholds
 # ============================================================================
-VOLUME_IMPULSE_MULTIPLIER = 1.5  # EMA(20) × 1.5 for impulse
-VOLUME_AGGRESSION_MULTIPLIER = 2.5  # EMA(20) × 2.5 for aggression
-AGGRESSIVE_PRINT_SIGMA = 2.5  # sigma threshold for volume bubble
+VOLUME_IMPULSE_MULTIPLIER = _G.get("volume_impulse_multiplier", 1.5)
+VOLUME_AGGRESSION_MULTIPLIER = _G.get("volume_aggression_multiplier", 2.5)
 
 # ============================================================================
-# Time (FR-10)
+# Time
 # ============================================================================
-WARM_UP_MINUTES_MCX = 15  # FR-10-09: avoid first 15 min of MCX
-WARM_UP_MINUTES_NSE = 15  # NSE warm-up
-IB_CANDLES = 2  # FR-03-14: first 2 candles for IB
+WARM_UP_MINUTES_MCX = _G.get("warm_up_minutes_mcx", 15)
+WARM_UP_MINUTES_NSE = _G.get("warm_up_minutes_nse", 15)
+IB_CANDLES = _G.get("ib_candles", 2)
 
 # ============================================================================
-# Delta Volume Profile (FR-02 — Gap #1)
+# LLM Throttling
 # ============================================================================
-DELTA_ZONE_SIGMA_MULT = 2.5  # High delta = abs(net) > mean × 2.5
-DELTA_PROFILE_BUCKETS = 200  # Number of histogram buckets
-DELTA_BUCKET_SIZE_DEFAULT = 0.05  # Default bucket size (computed from tick_size)
+LLM_COOLDOWN_SECONDS = _G.get("llm_cooldown_seconds", 10)
+STALENESS_TIMEOUT_SECONDS = _G.get("staleness_timeout_seconds", 30)
 
 # ============================================================================
-# Signal Validation (FR-07 — Audit Fix)
+# Grade
 # ============================================================================
-SIGNAL_TTL_SECONDS = 600  # Max age for signals before they're considered stale
-VWAP_EXTREME_MULTIPLIER = 1.01  # Beyond +2σ by 1% = institutional anomaly
-
-# ============================================================================
-# LLM Throttling (Audit Fix)
-# ============================================================================
-LLM_COOLDOWN_SECONDS = 10  # Minimum seconds between LLM calls per symbol
-STALENESS_TIMEOUT_SECONDS = 30  # Max seconds a request can sit in queue
-
-# ============================================================================
-# Grade Thresholds (Audit Fix)
-# ============================================================================
-GRADE_EXTREME_THRESHOLD = -5  # Below this = disaster prevention block
-
-# ============================================================================
-# CVD Market-Specific Thresholds (Audit Fix)
-# ============================================================================
-CVD_BLOCK_THRESHOLD_NSE = 5000  # NSE: higher volume, wider threshold
-CVD_BLOCK_THRESHOLD_MCX = 50  # MCX: thinner books, tighter threshold
+GRADE_EXTREME_THRESHOLD = _G.get("grade_extreme_threshold", -5)
 
 # ============================================================================
 # Data Limits
 # ============================================================================
-MAX_CANDLES = 1000
-TICK_BATCH_SIZE = 50
-TICK_FLUSH_INTERVAL_SECS = 5.0
+MAX_CANDLES = _G.get("max_candles", 1000)
+TICK_BATCH_SIZE = _G.get("tick_batch_size", 50)
+TICK_FLUSH_INTERVAL_SECS = _G.get("tick_flush_interval_secs", 5.0)

@@ -1,0 +1,492 @@
+# GlassyTrade AI — Base Configuration
+# All symbols, all exchanges, all defaults
+# Loaded first, then overridden by environment and strategy files
+
+system:
+  name: GlassyTrade AI
+  version: "2.0.0"
+  candle_timeframe_minutes: 5
+  tick_history_depth: 500
+  db_path: "glassytrade.db"
+  log_level: "INFO"
+  capital: 5000000.0
+
+# ── Global Constants (migrated from constants.py) ──
+globals:
+  # Volume Profile
+  lvn_threshold: 0.15
+  hvn_threshold: 2.00
+  value_area_pct: 0.70
+  lvn_smoothing: 3
+  lvn_min_persistence_bars: 3
+  lvn_removal_threshold: 0.30
+  delta_bucket_size_default: 0.05
+  delta_profile_buckets: 200
+
+  # Order Flow / CVD
+  cvd_slope_window: 20
+  cvd_strong_slope: 2.0
+  cvd_slope_hard_block: 50.0
+  cvd_slope_warning: 30.0
+  cvd_slope_extreme: 100.0
+  cvd_slope_persistence_bars: 3
+  cvd_slope_extended_window: 40
+  cvd_block_threshold_nse: 5000
+  cvd_block_threshold_mcx: 50
+  footprint_imbalance_ratio: 3.0
+  footprint_imbalance_pct: 0.40
+  absorption_range_atr: 0.30
+  absorption_vol_mult: 2.0
+  big_trade_multiplier: 5.0
+  big_trade_cluster_count: 3
+  big_trade_cluster_ticks: 2
+  volume_bubble_sigma: 2.0
+  ofi_window: 10
+  delta_zone_sigma_mult: 2.5
+
+  # Market State
+  poc_no_trade_ticks: 2
+  balance_ratio_threshold: 0.55
+  drive_rejection_wick_ratio: 0.5
+  displacement_multiplier: 1.5
+
+  # Aggression Scoring
+  aggression_footprint: 1.0
+  aggression_cvd: 1.0
+  aggression_big_trade: 1.0
+  aggression_absorption: 0.5
+  aggression_ofi: 0.5
+  aggression_confluence: 0.5
+  aggression_bubble: 0.5
+  min_aggression_score: 2.0
+  pyramid_aggression_score: 3.0
+  aggression_persistence_bars: 3
+  aggressive_print_sigma: 2.5
+
+  # Structure
+  structure_dwell_ticks: 3
+  structure_cooldown_ticks: 3
+  structure_confidence_gate: 60
+  structure_bypass_confidence: 70
+
+  # Trade Setup
+  min_rr_ratio: 1.5
+  max_cushion_ticks: 10
+  signal_ttl_seconds: 600
+  vwap_extreme_multiplier: 1.01
+  decision_history_limit: 1000
+
+  # Risk
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.020
+  max_consecutive_losses: 3
+  max_drawdown_pct: 0.030
+  absolute_ceiling_pct: 0.010
+
+  # Volume Thresholds
+  volume_impulse_multiplier: 1.5
+  volume_aggression_multiplier: 2.5
+
+  # Time
+  warm_up_minutes_mcx: 15
+  warm_up_minutes_nse: 15
+  ib_candles: 2
+
+  # LLM Throttling
+  llm_cooldown_seconds: 10
+  staleness_timeout_seconds: 30
+
+  # Grade
+  grade_extreme_threshold: -5
+
+  # Data Limits
+  max_candles: 1000
+  tick_batch_size: 50
+  tick_flush_interval_secs: 5.0
+
+# ── Exchange Configurations ──
+
+exchanges:
+  NSE:
+    enabled: true
+    segment: "NFO"
+    session_open: "09:15"
+    session_close: "15:15"
+    warmup_minutes: 15
+    timezone: "Asia/Kolkata"
+    symbols:
+      NIFTY:
+        enabled: true
+        exchange: "NSE"
+        segment: "NFO"
+        instrument_type: "OPT"
+        lot_size: 25
+        tick_size: 0.05
+        vp_bucket_size: 10.0
+        vp_num_buckets: 200
+        value_area_pct: 0.70
+        lvn_threshold: 0.15
+        hvn_threshold: 2.00
+        lvn_persistence_bars: 3
+        lvn_removal_threshold: 0.30
+        imbalance_threshold: 50.0
+        displacement_multiplier: 1.5
+        displacement_min_bars: 3
+        balance_ratio_threshold: 0.70
+        no_trade_ticks_from_poc: 2
+        aggression_sigma: 2.5
+        cvd_slope_warning: 30.0
+        cvd_slope_hard_block: 50.0
+        cvd_slope_extreme: 100.0
+        cvd_strong_slope: 2.0
+        cvd_rolling_bars: 20
+        min_oi: 500000
+        strike_interval: 50
+        strikes_around_atm: 2
+        slippage_bps: 15
+        max_notional_pct: 0.20
+        min_rr_ratio: 1.5
+        ml_thresholds:
+          imbalance_continuation:
+            long: 0.55
+            short: 0.58
+          return_to_value:
+            long: 0.51
+            short: 0.51
+          probing_breakout:
+            long: 0.58
+            short: 0.58
+        cost_profile:
+          slippage_bps: 15
+          stt_pct: 0.000625
+          exchange_fee_pct: 0.000495
+          brokerage_per_order: 20.0
+          gst_on_brokerage_pct: 0.18
+          sebi_charges_pct: 0.000001
+      BANKNIFTY:
+        enabled: true
+        exchange: "NSE"
+        segment: "NFO"
+        instrument_type: "OPT"
+        lot_size: 15
+        tick_size: 0.05
+        vp_bucket_size: 25.0
+        vp_num_buckets: 200
+        value_area_pct: 0.70
+        lvn_threshold: 0.15
+        hvn_threshold: 2.00
+        lvn_persistence_bars: 3
+        lvn_removal_threshold: 0.30
+        imbalance_threshold: 100.0
+        displacement_multiplier: 1.5
+        displacement_min_bars: 3
+        balance_ratio_threshold: 0.70
+        no_trade_ticks_from_poc: 2
+        aggression_sigma: 2.5
+        cvd_slope_warning: 30.0
+        cvd_slope_hard_block: 50.0
+        cvd_slope_extreme: 100.0
+        cvd_strong_slope: 2.0
+        cvd_rolling_bars: 20
+        min_oi: 300000
+        strike_interval: 100
+        strikes_around_atm: 2
+        slippage_bps: 20
+        max_notional_pct: 0.20
+        min_rr_ratio: 1.5
+        ml_thresholds:
+          imbalance_continuation:
+            long: 0.55
+            short: 0.58
+          return_to_value:
+            long: 0.51
+            short: 0.51
+          probing_breakout:
+            long: 0.58
+            short: 0.58
+        cost_profile:
+          slippage_bps: 20
+          stt_pct: 0.000625
+          exchange_fee_pct: 0.000495
+          brokerage_per_order: 20.0
+          gst_on_brokerage_pct: 0.18
+          sebi_charges_pct: 0.000001
+      FINNIFTY:
+        enabled: true
+        exchange: "NSE"
+        segment: "NFO"
+        instrument_type: "OPT"
+        lot_size: 25
+        tick_size: 0.05
+        vp_bucket_size: 10.0
+        vp_num_buckets: 200
+        value_area_pct: 0.70
+        lvn_threshold: 0.15
+        hvn_threshold: 2.00
+        lvn_persistence_bars: 3
+        lvn_removal_threshold: 0.30
+        imbalance_threshold: 50.0
+        displacement_multiplier: 1.5
+        displacement_min_bars: 3
+        balance_ratio_threshold: 0.70
+        no_trade_ticks_from_poc: 2
+        aggression_sigma: 2.5
+        cvd_slope_warning: 30.0
+        cvd_slope_hard_block: 50.0
+        cvd_slope_extreme: 100.0
+        cvd_strong_slope: 2.0
+        cvd_rolling_bars: 20
+        min_oi: 50000
+        strike_interval: 50
+        strikes_around_atm: 2
+        slippage_bps: 30
+        max_notional_pct: 0.20
+        min_rr_ratio: 1.5
+        ml_thresholds:
+          imbalance_continuation:
+            long: 0.55
+            short: 0.58
+          return_to_value:
+            long: 0.51
+            short: 0.51
+          probing_breakout:
+            long: 0.58
+            short: 0.58
+        cost_profile:
+          slippage_bps: 30
+          stt_pct: 0.000625
+          exchange_fee_pct: 0.000495
+          brokerage_per_order: 20.0
+          gst_on_brokerage_pct: 0.18
+          sebi_charges_pct: 0.000001
+  MCX:
+    enabled: true
+    segment: "MCX_COMM"
+    session_open: "09:00"
+    session_close: "23:15"
+    warmup_minutes: 15
+    timezone: "Asia/Kolkata"
+    eia_suppression_minutes: 15
+    symbols:
+      CRUDEOIL:
+        enabled: true
+        exchange: "MCX"
+        segment: "MCX_COMM"
+        instrument_type: "OPT"
+        lot_size: 100
+        tick_size: 1.0
+        vp_bucket_size: 10.0
+        vp_num_buckets: 200
+        value_area_pct: 0.70
+        lvn_threshold: 0.15
+        hvn_threshold: 2.00
+        lvn_persistence_bars: 3
+        lvn_removal_threshold: 0.30
+        imbalance_threshold: 20.0
+        displacement_multiplier: 1.2
+        displacement_min_bars: 3
+        balance_ratio_threshold: 0.55
+        no_trade_ticks_from_poc: 2
+        aggression_sigma: 2.0
+        cvd_slope_warning: 30.0
+        cvd_slope_hard_block: 50.0
+        cvd_slope_extreme: 100.0
+        cvd_strong_slope: 2.0
+        cvd_rolling_bars: 20
+        min_oi: 10
+        strike_interval: 50
+        strikes_around_atm: 2
+        slippage_bps: 10
+        max_notional_pct: 0.20
+        min_rr_ratio: 1.5
+        ml_thresholds:
+          imbalance_continuation:
+            long: 0.55
+            short: 0.58
+          return_to_value:
+            long: 0.51
+            short: 0.51
+          probing_breakout:
+            long: 0.58
+            short: 0.58
+        cost_profile:
+          slippage_bps: 10
+          stt_pct: 0.000625
+          exchange_fee_pct: 0.000495
+          brokerage_per_order: 20.0
+          gst_on_brokerage_pct: 0.18
+          sebi_charges_pct: 0.000001
+      NATURALGAS:
+        enabled: true
+        exchange: "MCX"
+        segment: "MCX_COMM"
+        instrument_type: "OPT"
+        lot_size: 1250
+        tick_size: 0.1
+        vp_bucket_size: 1.0
+        vp_num_buckets: 200
+        value_area_pct: 0.70
+        lvn_threshold: 0.15
+        hvn_threshold: 2.00
+        lvn_persistence_bars: 3
+        lvn_removal_threshold: 0.30
+        imbalance_threshold: 5.0
+        displacement_multiplier: 1.2
+        displacement_min_bars: 3
+        balance_ratio_threshold: 0.55
+        no_trade_ticks_from_poc: 2
+        aggression_sigma: 2.0
+        cvd_slope_warning: 30.0
+        cvd_slope_hard_block: 50.0
+        cvd_slope_extreme: 100.0
+        cvd_strong_slope: 2.0
+        cvd_rolling_bars: 20
+        min_oi: 500
+        strike_interval: 5
+        strikes_around_atm: 2
+        slippage_bps: 12
+        max_notional_pct: 0.20
+        min_rr_ratio: 1.5
+        ml_thresholds:
+          imbalance_continuation:
+            long: 0.55
+            short: 0.58
+          return_to_value:
+            long: 0.51
+            short: 0.51
+          probing_breakout:
+            long: 0.58
+            short: 0.58
+        cost_profile:
+          slippage_bps: 12
+          stt_pct: 0.000625
+          exchange_fee_pct: 0.000495
+          brokerage_per_order: 20.0
+          gst_on_brokerage_pct: 0.18
+          sebi_charges_pct: 0.000001
+      GOLD:
+        enabled: true
+        exchange: "MCX"
+        segment: "MCX_COMM"
+        instrument_type: "OPT"
+        lot_size: 100
+        tick_size: 1.0
+        vp_bucket_size: 10.0
+        vp_num_buckets: 200
+        value_area_pct: 0.70
+        lvn_threshold: 0.15
+        hvn_threshold: 2.00
+        lvn_persistence_bars: 3
+        lvn_removal_threshold: 0.30
+        imbalance_threshold: 50.0
+        displacement_multiplier: 1.2
+        displacement_min_bars: 3
+        balance_ratio_threshold: 0.55
+        no_trade_ticks_from_poc: 2
+        aggression_sigma: 2.0
+        cvd_slope_warning: 30.0
+        cvd_slope_hard_block: 50.0
+        cvd_slope_extreme: 100.0
+        cvd_strong_slope: 2.0
+        cvd_rolling_bars: 20
+        min_oi: 1
+        strike_interval: 100
+        strikes_around_atm: 2
+        slippage_bps: 8
+        max_notional_pct: 0.20
+        min_rr_ratio: 1.5
+        ml_thresholds:
+          imbalance_continuation:
+            long: 0.55
+            short: 0.58
+          return_to_value:
+            long: 0.51
+            short: 0.51
+          probing_breakout:
+            long: 0.58
+            short: 0.58
+        cost_profile:
+          slippage_bps: 8
+          stt_pct: 0.000625
+          exchange_fee_pct: 0.000495
+          brokerage_per_order: 20.0
+          gst_on_brokerage_pct: 0.18
+          sebi_charges_pct: 0.000001
+      SILVER:
+        enabled: true
+        exchange: "MCX"
+        segment: "MCX_COMM"
+        instrument_type: "OPT"
+        lot_size: 30
+        tick_size: 1.0
+        vp_bucket_size: 25.0
+        vp_num_buckets: 200
+        value_area_pct: 0.70
+        lvn_threshold: 0.15
+        hvn_threshold: 2.00
+        lvn_persistence_bars: 3
+        lvn_removal_threshold: 0.30
+        imbalance_threshold: 100.0
+        displacement_multiplier: 1.2
+        displacement_min_bars: 3
+        balance_ratio_threshold: 0.55
+        no_trade_ticks_from_poc: 2
+        aggression_sigma: 2.0
+        cvd_slope_warning: 30.0
+        cvd_slope_hard_block: 50.0
+        cvd_slope_extreme: 100.0
+        cvd_strong_slope: 2.0
+        cvd_rolling_bars: 20
+        min_oi: 1
+        strike_interval: 500
+        strikes_around_atm: 2
+        slippage_bps: 10
+        max_notional_pct: 0.20
+        min_rr_ratio: 1.5
+        ml_thresholds:
+          imbalance_continuation:
+            long: 0.55
+            short: 0.58
+          return_to_value:
+            long: 0.51
+            short: 0.51
+          probing_breakout:
+            long: 0.58
+            short: 0.58
+        cost_profile:
+          slippage_bps: 10
+          stt_pct: 0.000625
+          exchange_fee_pct: 0.000495
+          brokerage_per_order: 20.0
+          gst_on_brokerage_pct: 0.18
+          sebi_charges_pct: 0.000001
+
+# ── Risk Configuration ──
+
+risk:
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.02
+  max_consecutive_losses: 3
+  max_drawdown_pct: 0.03
+  absolute_ceiling_pct: 0.01
+  max_concurrent_positions: 5
+  portfolio_notional_cap: 0.60
+  per_symbol_notional_cap: 0.20
+  kelly_fraction: 0.25
+  kelly_win_prob: 0.55
+  kelly_win_loss_ratio: 2.0
+  bootstrap_trade_count: 30
+
+# ── LLM Configuration ──
+
+llm:
+  model_id: "glassytrade-qwen-mlx-fused"
+  reasoning_model_id: "Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled"
+  temperature_entry: 0.4
+  temperature_overseer: 0.3
+  max_tokens: 120
+  timeout_seconds: 15
+  instruction: >
+    You are READING the auction using Fabio Valentini's AMT methodology.
+    You are NOT predicting — you are interpreting market structure, order flow,
+    and institutional behavior.

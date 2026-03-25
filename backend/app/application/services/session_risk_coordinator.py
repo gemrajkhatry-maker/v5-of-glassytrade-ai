@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from app.domain.trading.services.risk_manager import RiskManager
 from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager
+from app.domain.services.risk_tier_engine import RiskTierEngine, TierAPremiumCheck
 
 if TYPE_CHECKING:
     from app.domain.trading.models.entities import Signal
@@ -41,23 +42,31 @@ class SystemRiskState:
 
 class SessionRiskCoordinator:
     """Coordinates session-level risk management.
-    
+
     This module encapsulates all session-level risk management logic,
     providing a single source of truth for risk decisions across the codebase.
     """
 
-    def __init__(self, storage=None):
+    def __init__(
+        self,
+        storage=None,
+        capital: float = 5000000.0,
+        use_risk_tier_engine: bool = False,
+    ):
         self._risk_managers: dict[str, RiskManager] = {}
         self._session_risk_managers: dict[str, SessionRiskManager] = {}
+        self._risk_tier_engines: dict[str, RiskTierEngine] = {}
+        self._use_risk_tier_engine = use_risk_tier_engine
+        self._capital = capital
         self._session_creation_lock = threading.Lock()
         self._storage = storage
 
     def _get_risk_manager(self, symbol: str) -> RiskManager:
         """Return per-symbol RiskManager, creating one if needed.
-        
+
         Args:
             symbol: Trading symbol
-        
+
         Returns:
             RiskManager for the symbol
         """
@@ -68,10 +77,10 @@ class SessionRiskCoordinator:
 
     def get_session_risk_manager(self, symbol: str) -> SessionRiskManager:
         """Get or create SessionRiskManager for a symbol.
-        
+
         Args:
             symbol: Trading symbol
-        
+
         Returns:
             SessionRiskManager for the symbol
         """
@@ -79,37 +88,95 @@ class SessionRiskCoordinator:
             if symbol not in self._session_risk_managers:
                 srm = SessionRiskManager()
                 # Try to restore from storage
-                if self._storage and hasattr(self._storage, 'kv_get'):
+                if self._storage and hasattr(self._storage, "kv_get"):
                     try:
                         import json
                         from datetime import date
-                        saved = self._storage.kv_get(f"risk_state_{symbol}_{date.today().isoformat()}")
+
+                        saved = self._storage.kv_get(
+                            f"risk_state_{symbol}_{date.today().isoformat()}"
+                        )
                         if saved:
                             srm.load_from_dict(json.loads(saved))
-                            logger.info("Restored risk state for %s: tier=%s, pnl=%.2f",
-                                        symbol, srm.risk_tier.name, srm.session_pnl)
+                            logger.info(
+                                "Restored risk state for %s: tier=%s, pnl=%.2f",
+                                symbol,
+                                srm.risk_tier.name,
+                                srm.session_pnl,
+                            )
                     except Exception:
-                        logger.debug("Could not load risk state for %s", symbol, exc_info=True)
+                        logger.debug(
+                            "Could not load risk state for %s", symbol, exc_info=True
+                        )
                 self._session_risk_managers[symbol] = srm
+
+                # Create RiskTierEngine if feature flag enabled
+                if self._use_risk_tier_engine:
+                    engine = RiskTierEngine(capital=self._capital)
+                    # Restore engine state if available
+                    if self._storage and hasattr(self._storage, "kv_get"):
+                        try:
+                            import json
+                            from datetime import date
+
+                            saved = self._storage.kv_get(
+                                f"rte_state_{symbol}_{date.today().isoformat()}"
+                            )
+                            if saved:
+                                engine.load_from_dict(json.loads(saved))
+                                logger.info(
+                                    "Restored RiskTierEngine for %s: tier=%s",
+                                    symbol,
+                                    engine.tier.value,
+                                )
+                        except Exception:
+                            pass
+                    self._risk_tier_engines[symbol] = engine
+                    logger.info(
+                        "RiskTierEngine enabled for %s (capital=%.0f)",
+                        symbol,
+                        self._capital,
+                    )
+
             return self._session_risk_managers[symbol]
+
+    def get_risk_tier_engine(self, symbol: str) -> RiskTierEngine | None:
+        """Get RiskTierEngine for a symbol (if feature flag enabled)."""
+        return self._risk_tier_engines.get(symbol)
+
+    def record_trade_with_engine(
+        self,
+        symbol: str,
+        pnl_r: float,
+        premium_check: TierAPremiumCheck | None = None,
+    ) -> None:
+        """Record a trade in the RiskTierEngine (if enabled) and SRM (always)."""
+        srm = self.get_session_risk_manager(symbol)
+        srm.record_trade(pnl_r)  # Always record in SRM
+
+        engine = self._risk_tier_engines.get(symbol)
+        if engine:
+            engine.record_trade(pnl_r, premium_check)
 
     def validate_entry(self, symbol: str, signal: Signal, portfolio: Portfolio) -> bool:
         """Validate entry against risk limits.
-        
+
         Args:
             symbol: Trading symbol
             signal: Trade signal
             portfolio: Portfolio
-        
+
         Returns:
             True if entry is valid
         """
         risk_manager = self._get_risk_manager(symbol)
         return risk_manager.validate(signal, portfolio)
 
-    def record_trade_result(self, symbol: str, pnl: float, portfolio: Portfolio) -> None:
+    def record_trade_result(
+        self, symbol: str, pnl: float, portfolio: Portfolio
+    ) -> None:
         """Record a trade result for risk tracking.
-        
+
         Args:
             symbol: Trading symbol
             pnl: Profit/loss amount
@@ -120,15 +187,23 @@ class SessionRiskCoordinator:
 
     def is_halted(self, symbol: str) -> bool:
         """Check if trading is halted for a symbol.
-        
+
         Args:
             symbol: Trading symbol
-        
+
         Returns:
             True if trading is halted
         """
         risk_manager = self._get_risk_manager(symbol)
-        return risk_manager.is_halted
+        if risk_manager.is_halted:
+            return True
+
+        # Also check RiskTierEngine if active
+        engine = self._risk_tier_engines.get(symbol)
+        if engine and engine.is_halted:
+            return True
+
+        return False
 
     def halt_trading(self) -> None:
         """Activate the global emergency kill switch."""
@@ -140,7 +215,7 @@ class SessionRiskCoordinator:
 
     def get_system_risk_state(self) -> SystemRiskState:
         """Return an aggregated system-wide view of runtime risk state.
-        
+
         Returns:
             SystemRiskState with aggregated risk information
         """
@@ -150,7 +225,9 @@ class SessionRiskCoordinator:
         if not managers:
             return SystemRiskState(
                 halted=RiskManager._global_halt,
-                halt_reason="Emergency kill switch active" if RiskManager._global_halt else "",
+                halt_reason="Emergency kill switch active"
+                if RiskManager._global_halt
+                else "",
                 daily_drawdown_pct=0.0,
                 consecutive_losses=0,
                 peak_equity=0.0,
@@ -161,7 +238,9 @@ class SessionRiskCoordinator:
 
         peak_equity = max((rm.daily_state.peak_equity for rm in managers), default=0.0)
         current_equity = sum(rm.daily_state.current_equity for rm in managers)
-        consecutive_losses = max((rm.daily_state.consecutive_losses for rm in managers), default=0)
+        consecutive_losses = max(
+            (rm.daily_state.consecutive_losses for rm in managers), default=0
+        )
         drift_alert = any(getattr(rm, "_drift_alert", False) for rm in managers)
         drift_messages = [
             getattr(rm, "_drift_message", "")
@@ -198,16 +277,17 @@ class SessionRiskCoordinator:
 
     def persist_risk_state(self, symbol: str) -> None:
         """Persist risk state to storage.
-        
+
         Args:
             symbol: Trading symbol
         """
-        if not self._storage or not hasattr(self._storage, 'kv_set'):
+        if not self._storage or not hasattr(self._storage, "kv_set"):
             return
-        
+
         try:
             import json
             from datetime import date
+
             srm = self._session_risk_managers.get(symbol)
             if srm:
                 self._storage.kv_set(
@@ -219,7 +299,7 @@ class SessionRiskCoordinator:
 
     def get_risk_manager_count(self) -> int:
         """Get count of active risk managers.
-        
+
         Returns:
             Number of active risk managers
         """

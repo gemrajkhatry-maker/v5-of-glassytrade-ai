@@ -56,6 +56,11 @@ class Settings(SharedSettings):
     # Risk & Execution
     SLIPPAGE_PCT: float = Field(default=0.0005)
 
+    # Feature flags
+    RISK_TIER_ENGINE: bool = Field(default=False)
+    SHORT_SIGNALS_ENABLED: bool = Field(default=False)
+    LLM_PRE_CANDLE_ADVISORY: bool = Field(default=True)
+
     # Trading settings
     PORT: int = Field(default=9090)
     STREAM_INTERVAL: str = Field(default="5m")

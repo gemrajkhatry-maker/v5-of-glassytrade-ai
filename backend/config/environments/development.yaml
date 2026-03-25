@@ -1,0 +1,32 @@
+# GlassyTrade AI — Development Environment
+# 1 symbol (NIFTY), paper broker, DEBUG logs
+
+environment: "development"
+broker_mode: "paper"
+log_level: "DEBUG"
+
+# Disable all symbols except NIFTY in development
+exchanges:
+  NSE:
+    enabled: true
+    symbols:
+      NIFTY:
+        enabled: true
+      BANKNIFTY:
+        enabled: false
+      FINNIFTY:
+        enabled: false
+  MCX:
+    enabled: false
+
+# Relaxed risk for development
+risk:
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.10  # generous for testing
+  max_consecutive_losses: 10  # generous for testing
+  max_concurrent_positions: 3
+
+# Paper broker costs
+cost_model:
+  enabled: true
+  base_slippage_bps: 15

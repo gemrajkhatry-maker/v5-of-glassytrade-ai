@@ -62,10 +62,20 @@ class AggressionScorer:
 
     Each component adds to a running total. The scorer does NOT make
     decisions — it computes a score that other modules use for gating.
+
+    Configurable via SymbolConfig for per-symbol thresholds.
     """
 
-    @staticmethod
+    def __init__(
+        self,
+        min_score: float = MIN_AGGRESSION_SCORE,
+        pyramid_score: float = PYRAMID_AGGRESSION_SCORE,
+    ) -> None:
+        self._min_score = min_score
+        self._pyramid_score = pyramid_score
+
     def score(
+        self,
         footprint_confirmed: bool = False,
         cvd_confirmed: bool = False,
         big_trade_confirmed: bool = False,
@@ -126,18 +136,18 @@ class AggressionScorer:
         # Cap at 4.5 (plan FR-06 max)
         total = min(total, 4.5)
 
-        # Confidence classification
-        if total >= PYRAMID_AGGRESSION_SCORE:
+        # Confidence classification (configurable thresholds)
+        if total >= self._pyramid_score:
             confidence = "HIGH"
-        elif total >= MIN_AGGRESSION_SCORE:
+        elif total >= self._min_score:
             confidence = "MEDIUM"
         else:
             confidence = "LOW"
 
         return AggressionResult(
             score=total,
-            confirmed=total >= MIN_AGGRESSION_SCORE,
-            pyramid_eligible=total >= PYRAMID_AGGRESSION_SCORE,
+            confirmed=total >= self._min_score,
+            pyramid_eligible=total >= self._pyramid_score,
             confidence=confidence,
             breakdown=breakdown,
         )
@@ -164,8 +174,19 @@ class PersistentAggressionScorer:
         # result.confirmed is True only if score >= 2.0 for 3 consecutive bars
     """
 
-    def __init__(self, persistence_bars: int = AGGRESSION_PERSISTENCE_BARS) -> None:
+    def __init__(
+        self,
+        persistence_bars: int = AGGRESSION_PERSISTENCE_BARS,
+        min_score: float = MIN_AGGRESSION_SCORE,
+        pyramid_score: float = PYRAMID_AGGRESSION_SCORE,
+    ) -> None:
         self._persistence_bars = persistence_bars
+        self._min_score = min_score
+        self._pyramid_score = pyramid_score
+        self._scorer = AggressionScorer(
+            min_score=min_score,
+            pyramid_score=pyramid_score,
+        )
         self._confirmed_streak: int = 0
         self._pyramid_streak: int = 0
         self._raw_score_history: list[float] = []
@@ -191,7 +212,7 @@ class PersistentAggressionScorer:
         Raw score is computed each bar. Confirmed/pyramid flags require
         the raw score to be above threshold for N consecutive bars.
         """
-        raw_result = AggressionScorer.score(
+        raw_result = self._scorer.score(
             footprint_confirmed=footprint_confirmed,
             cvd_confirmed=cvd_confirmed,
             big_trade_confirmed=big_trade_confirmed,
@@ -203,13 +224,13 @@ class PersistentAggressionScorer:
 
         self._raw_score_history.append(raw_result.score)
 
-        # Update persistence streaks
-        if raw_result.score >= MIN_AGGRESSION_SCORE:
+        # Update persistence streaks (configurable thresholds)
+        if raw_result.score >= self._min_score:
             self._confirmed_streak += 1
         else:
             self._confirmed_streak = 0
 
-        if raw_result.score >= PYRAMID_AGGRESSION_SCORE:
+        if raw_result.score >= self._pyramid_score:
             self._pyramid_streak += 1
         else:
             self._pyramid_streak = 0

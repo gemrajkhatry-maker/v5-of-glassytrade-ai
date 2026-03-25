@@ -1,0 +1,25 @@
+# GlassyTrade AI — Live Environment
+# All symbols, live broker, WARNING logs, tight risk
+
+environment: "live"
+broker_mode: "live"
+log_level: "WARNING"
+
+exchanges:
+  NSE:
+    enabled: true
+  MCX:
+    enabled: true
+
+# Tight risk for live
+risk:
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.02
+  max_consecutive_losses: 3
+  max_concurrent_positions: 3  # tighter than paper
+
+# LLM restrictions for live
+llm:
+  # llm_entry_gate is HARDCODED false — never enabled in live
+  temperature_entry: 0.4
+  temperature_overseer: 0.3

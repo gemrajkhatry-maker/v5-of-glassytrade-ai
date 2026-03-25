@@ -1,0 +1,24 @@
+# GlassyTrade AI — Paper Environment
+# All symbols, paper broker, INFO logs, realistic costs
+
+environment: "paper"
+broker_mode: "paper"
+log_level: "INFO"
+
+exchanges:
+  NSE:
+    enabled: true
+  MCX:
+    enabled: true
+
+# Realistic risk
+risk:
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.02
+  max_consecutive_losses: 3
+  max_concurrent_positions: 5
+
+# Full realistic cost model
+cost_model:
+  enabled: true
+  base_slippage_bps: 15

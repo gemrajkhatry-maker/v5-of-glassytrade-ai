@@ -1,0 +1,36 @@
+# GlassyTrade AI — Feature Flags
+# All feature flags with their default values
+# Environment-specific overrides can change these
+
+features:
+  # ── Phase 0 flags ──
+  true_delta_lee_ready: false          # true activates Lee-Ready, false = Gaussian proxy
+  realistic_cost_model: false          # true activates full NSE cost model in PaperBroker
+
+  # ── Phase 1 flags ──
+  parallel_symbol_sessions: false      # Multi-symbol concurrent execution
+  duckdb_storage: false                # switches from SQLite to DuckDB
+
+  # ── Phase 2 flags ──
+  short_signals_enabled: false         # enables PE / SHORT gate logic
+  risk_tier_engine: false              # enables A/B/C dynamic risk tiers
+  initial_balance_engine: false        # enables IB High/Low/Mid tracking
+  correlation_guard: true              # blocks NIFTY+BANKNIFTY same-direction
+
+  # ── Phase 3 flags ──
+  iv_vix_features: false              # adds VIX, IV Rank, PCR to feature vector
+  walk_forward_validation: false       # requires WF-validated models before entry
+  shap_feature_pruning: false          # prunes features with |SHAP| < 0.001
+
+  # ── LLM role flags (individual per role) ──
+  llm_entry_gate: false               # HARDCODED FALSE — never enabled in any env
+  llm_pre_candle_advisory: true       # non-blocking, fires T-60s before bar close
+  llm_overseer: true                  # position monitoring (keep as-is)
+  llm_post_trade: true                # post-trade analysis (keep as-is)
+
+  # ── Phase 4 flags ──
+  scalp_engine_enabled: false          # enables 1-min/15-sec MTF stack
+  ib_breakout_scalp: false            # enables Initial Balance breakout setups
+  print_level_trigger: false           # enables 15-sec tick-level aggression trigger
+
+  # ── Infrastructure flags ──

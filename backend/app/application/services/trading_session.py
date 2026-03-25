@@ -43,6 +43,7 @@ from app.application.handlers.llm_entry_handler import LLMEntryHandler
 from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
 from app.application.handlers.rl_handler import RLHandler
 from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
+from app.application.handlers.pre_candle_advisor import PreCandleAdvisor
 from app.domain.fabio_ai.services.option_selector import OptionSelector
 from app.domain.fabio_ai.services.trade_thesis import validate_trade_thesis
 from app.domain.fabio_ai.services.entry_gate import build_entry_signal
@@ -59,6 +60,9 @@ from app.application.services.session_risk_coordinator import (
     SystemRiskState,
 )
 from app.application.services.session_event_logger import SessionEventLogger
+
+# Import extracted modules
+from app.application.services.state_snapshot_builder import build_state_snapshot
 
 # Import error handling utilities
 from shared.error_handling import (
@@ -91,11 +95,15 @@ class TradingSessionService:
         probability_engine: ProbabilityInferencePort | None = None,
         exchange_config=None,  # ExchangeConfig — injected from ServiceGraph
         allow_short: bool = False,
+        gate_tracker=None,  # GateRejectionTracker — observability
+        latency_tracker=None,  # LatencyTracker — observability
     ) -> None:
         self._event_bus = event_bus
         self._broker = broker
         self._storage = storage
         self._probability_engine = probability_engine or NoOpProbabilityAdapter()
+        self._gate_tracker = gate_tracker
+        self._latency_tracker = latency_tracker
 
         # Injected config — replaces inline Settings() calls
         self._exchange_config = exchange_config
@@ -104,7 +112,11 @@ class TradingSessionService:
 
         # Delegated modules
         self._state_manager = SessionStateManager(storage=storage)
-        self._risk_coordinator = SessionRiskCoordinator(storage=storage)
+        self._risk_coordinator = SessionRiskCoordinator(
+            storage=storage,
+            capital=float(getattr(settings, "CAPITAL", 5000000)),
+            use_risk_tier_engine=getattr(settings, "RISK_TIER_ENGINE", False),
+        )
         self._event_logger = SessionEventLogger(storage=storage)
 
         # Focused handlers — per-symbol AMT handlers (VP state is per-instrument)
@@ -183,6 +195,12 @@ class TradingSessionService:
             storage=storage,
             llm_handler=self._llm_handler,
             risk_coordinator=self._risk_coordinator,
+        )
+
+        # Pre-Candle Advisor — non-blocking advisory for dashboard (T-60s before bar close)
+        self._pre_candle_advisor = PreCandleAdvisor(
+            gen_ai_service=gen_ai_service,
+            enabled=getattr(settings, "LLM_PRE_CANDLE_ADVISORY", True),
         )
 
         self._event_bus.subscribe(TickReceived, self._on_tick)
@@ -276,7 +294,14 @@ class TradingSessionService:
             self._risk_coordinator.record_trade_result(
                 symbol, pos.pnl, session.portfolio
             )
-            self._event_bus.publish(PositionClosed(symbol=symbol, position=pos))
+            # Direct call to exit coordinator (avoids PositionClosed serialization bug)
+            try:
+                self._exit_coordinator.on_position_closed(
+                    symbol=symbol,
+                    position=pos,
+                )
+            except Exception:
+                log.debug("Exit coordinator error", exc_info=True)
             if self._storage:
                 try:
                     self._storage.save_trade(
@@ -384,7 +409,20 @@ class TradingSessionService:
     # ----- event handlers -----
 
     def _on_tick(self, event: TickReceived) -> None:
+        import time as _tick_time
+
+        _tick_start = _tick_time.monotonic()
         session = self.get_or_create_session(event.symbol)
+
+        # Initialize IB engine for this symbol if not exists
+        if not hasattr(self, "_ib_engines"):
+            self._ib_engines = {}
+        if event.symbol not in self._ib_engines:
+            from app.domain.services.initial_balance_engine import InitialBalanceEngine
+
+            self._ib_engines[event.symbol] = InitialBalanceEngine(
+                ib_minutes=30 if self._exchange == "NSE" else 30,
+            )
 
         # 0. Session phase check — force exit all positions in Phase 5 (15:15-15:30 IST)
         try:
@@ -521,6 +559,26 @@ class TradingSessionService:
             session.last_footprint = fp_dto
             session._last_fp_domain = fp_dto
             session._last_aggressive_prints = amt_result.aggressive_prints
+
+        # Update IB engine
+        ib_engine = self._ib_engines.get(event.symbol)
+        if ib_engine:
+            ib_state = ib_engine.update(event.tick)
+            session._ib_state = ib_state
+
+        # Pre-candle advisory: fire T-60s before 5-min bar close (bar minute 4)
+        try:
+            bar_minute = (
+                int(event.tick.time.split("T")[1].split(":")[1]) % 5
+                if "T" in str(event.tick.time)
+                else -1
+            )
+            if self._pre_candle_advisor.should_fire(event.symbol, bar_minute):
+                self._pre_candle_advisor.fire_advisory(
+                    event.symbol, event.tick, amt_result
+                )
+        except Exception:
+            pass  # Advisory is non-critical
 
         # Record level approaches for second drive tracking
         if hasattr(self._llm_handler, "_regime_detector"):
@@ -800,6 +858,50 @@ class TradingSessionService:
                 )
 
                 if gate_passed:
+                    # Record gate pass
+                    if self._gate_tracker:
+                        self._gate_tracker.record(event.symbol, "gate_pipeline", True)
+                    # SHORT gate check (S1-S5) — only for SHORT signals
+                    if _exec_dir == "SHORT":
+                        from app.domain.services.short_signal_gates import (
+                            evaluate_short_gates,
+                        )
+
+                        short_ok, short_results = evaluate_short_gates(
+                            short_enabled=getattr(
+                                settings, "SHORT_SIGNALS_ENABLED", False
+                            ),
+                            market_state=amt_result.market_state,
+                            displacement_direction=getattr(
+                                amt_result, "displacement_direction", ""
+                            ),
+                            failed_breakout=getattr(
+                                amt_result, "failed_breakout", False
+                            ),
+                            playbook=str(amt_result.setup or "return_to_value"),
+                            ml_probability=_exec_prob,
+                            bid_volume=float(getattr(amt_result, "bid_volume", 0)),
+                            ask_volume=float(getattr(amt_result, "ask_volume", 0)),
+                            cvd_slope=float(getattr(amt_result, "cvd_slope", 0)),
+                            delta_normalized=float(
+                                getattr(amt_result, "delta_normalized", 0)
+                            ),
+                            contract_type="PE",
+                        )
+                        if not short_ok:
+                            failed_gate = next(r for r in short_results if not r.passed)
+                            log.info(
+                                "SHORT BLOCKED: %s — %s (%s)",
+                                event.symbol,
+                                failed_gate.gate_name,
+                                failed_gate.reason,
+                            )
+                            gate_passed = False
+                            if self._gate_tracker:
+                                self._gate_tracker.record(
+                                    event.symbol, failed_gate.gate_name, False
+                                )
+
                     _ts = (
                         self._exchange_config.get_tick_size(event.symbol)
                         if self._exchange_config
@@ -849,6 +951,11 @@ class TradingSessionService:
                         gate_reason,
                         gate_detail,
                     )
+                    # Record gate rejection for observability
+                    if self._gate_tracker:
+                        self._gate_tracker.record(
+                            event.symbol, f"gate_{gate_passed}", False
+                        )
 
                 # Persist gate decision for decision history
                 try:
@@ -906,6 +1013,11 @@ class TradingSessionService:
                 base_rationale + " [Cooldown — waiting before next entry]"
             )
             session.last_ai_analysis = cooldown_status
+
+        # Record tick-to-signal latency
+        if self._latency_tracker:
+            elapsed_ms = (_tick_time.monotonic() - _tick_start) * 1000
+            self._latency_tracker.record(event.symbol, elapsed_ms)
 
     def _on_signal_generated(self, event: SignalGenerated) -> None:
         """Event bus handler — may be called from any thread."""
@@ -971,149 +1083,6 @@ class TradingSessionService:
     # ----- state snapshot -----
 
     def _build_state_snapshot(self, session: SessionState) -> dict:
-        weights = session.learning.weights
+        return build_state_snapshot(session, self._risk_coordinator, self._rl_handler)
 
-        with session._lock:
-            ai_analysis = session.last_ai_analysis
-            portfolio_dto = portfolio_to_dto(session.portfolio)
-            llm_stats = stats_to_dto(session.portfolio.get_stats(Source.LLM))
-            agent_stats = stats_to_dto(session.portfolio.get_stats(Source.AGENT))
-            stats_by_source = {
-                "amt": stats_to_dto(session.portfolio.get_stats(Source.AMT)),
-                "prediction": stats_to_dto(
-                    session.portfolio.get_stats(Source.PREDICTION)
-                ),
-                "rl": stats_to_dto(session.portfolio.get_stats(Source.RL)),
-                "llm": llm_stats,
-                "agent": agent_stats,
-            }
-
-        rm = self._risk_coordinator._get_risk_manager(session.symbol)
-
-        return {
-            "_symbol": session.symbol,
-            "portfolio": portfolio_dto,
-            "amt": session.last_amt,
-            "prediction": session.last_prediction,
-            "footprint": session.last_footprint,
-            "genAIAnalysis": self._camel_case_ai(ai_analysis),
-            "overseerAction": (ai_analysis or {}).get("overseer_action", ""),
-            "overseerReason": (ai_analysis or {}).get("overseer_reason", ""),
-            "modelWeights": {
-                "trend": weights.trend,
-                "momentum": weights.momentum,
-                "delta": weights.delta,
-                "orderBook": weights.order_book,
-                "volatility": weights.volatility,
-            },
-            "generation": session.learning.generation,
-            "stats": llm_stats,
-            "statsBySource": stats_by_source,
-            "agentDecision": self._agent_decision_dto(session),
-            "playbookGuard": self._playbook_guard_status(session),
-            "explainabilityMonitor": self._explainability_status(session),
-            "rlStatus": self._rl_handler.get_status(),
-            "riskState": {
-                "halted": rm.is_halted,
-                "haltReason": rm.halt_reason,
-                "consecutiveLosses": rm.daily_state.consecutive_losses,
-                "dailyPnl": rm.daily_state.realized_pnl,
-                "driftAlert": rm._drift_alert,
-                "driftMessage": rm._drift_message,
-            },
-        }
-
-    def _playbook_guard_status(self, session: SessionState) -> dict:
-        session_info = getattr(session, "_last_session_info", None)
-        agent = getattr(session, "_agent_decision", None)
-        amt = session.last_amt or {}
-        market_state = str(amt.get("marketState", ""))
-        expected = self._expected_playbook_for(session_info, market_state)
-        candidate = getattr(agent, "playbook", "") if agent is not None else ""
-        session_name = getattr(session_info, "session", "")
-        session_compatible = expected != "" or not session_name
-        return {
-            "session": session_name,
-            "marketState": market_state,
-            "expectedPlaybook": expected,
-            "candidatePlaybook": candidate,
-            "guardTripped": self._state_manager._playbook_guard_tripped(session),
-            "maxRejections": settings.PLAYBOOK_GUARD_MAX_REJECTIONS,
-            "totalRejections": self._state_manager._playbook_guard_total(session),
-            "sessionCompatible": session_compatible,
-            "agentAligned": (candidate == expected)
-            if candidate and expected
-            else False,
-            "lastRejectionReason": getattr(session, "_last_playbook_guard_reason", ""),
-            "rejections": dict(getattr(session, "_playbook_guard_rejections", {})),
-        }
-
-    @staticmethod
-    def _expected_playbook_for(session_info, market_state: str) -> str:
-        if not session_info:
-            return ""
-        if MarketStateCodec.is_imbalanced(market_state) and getattr(
-            session_info, "allow_trend", False
-        ):
-            return "imbalance_continuation"
-        if MarketStateCodec.is_balanced(market_state) and getattr(
-            session_info, "allow_reversion", False
-        ):
-            return "return_to_value"
-        return ""
-
-    def _explainability_status(self, session: SessionState) -> dict:
-        total = getattr(session, "_explainability_entries", 0)
-        explained = getattr(session, "_explained_entries", 0)
-        aggression = getattr(session, "_aggression_explained_entries", 0)
-        coverage_rate = round((explained / total * 100.0), 1) if total else 0.0
-        aggression_rate = round((aggression / total * 100.0), 1) if total else 0.0
-        min_trades = settings.EXPLAINABILITY_ALERT_MIN_TRADES
-        alert = getattr(session, "_last_explainability_alert", "")
-        return {
-            "entries": total,
-            "explainedEntries": explained,
-            "aggressionExplainedEntries": aggression,
-            "coverageRate": coverage_rate,
-            "aggressionDriverRate": aggression_rate,
-            "minTrades": min_trades,
-            "minCoverageRate": settings.EXPLAINABILITY_MIN_DRIVER_COVERAGE_PCT,
-            "minAggressionRate": settings.EXPLAINABILITY_MIN_AGGRESSION_DRIVER_PCT,
-            "alertActive": bool(alert) and total >= min_trades,
-            "alertReason": alert,
-        }
-
-    @staticmethod
-    def _agent_decision_dto(session) -> dict | None:
-        ad = getattr(session, "_agent_decision", None)
-        if ad is None:
-            return None
-        return {
-            "direction": ad.direction,
-            "probability": round(ad.probability, 3),
-            "regime": ad.regime,
-            "playbook": getattr(ad, "playbook", ""),
-            "featureDrivers": list(getattr(ad, "feature_drivers", ())),
-            "timing": ad.timing,
-            "sizeFraction": round(ad.size_fraction, 3),
-            "slAdjust": round(ad.sl_adjust, 2),
-            "tpAdjust": round(ad.tp_adjust, 2),
-            "latencyUs": ad.latency_us,
-            "rationale": ad.rationale,
-        }
-
-    @staticmethod
-    def _camel_case_ai(data: dict | None) -> dict | None:
-        if not data:
-            return data
-        return {
-            "direction": data.get("direction", "FLAT"),
-            "rationale": data.get("rationale", ""),
-            "confidence": data.get("confidence", "Medium"),
-            "inputPrompt": data.get("input_prompt", ""),
-            "rawOutput": data.get("raw_output", ""),
-            "marketState": data.get("market_state", "Unknown"),
-            "aggression": data.get("aggression", ""),
-            "quantProbability": data.get("quant_probability", 0.0),
-            "quantDirection": data.get("quant_direction", ""),
-        }
+    # State snapshot helpers delegated to state_snapshot_builder module

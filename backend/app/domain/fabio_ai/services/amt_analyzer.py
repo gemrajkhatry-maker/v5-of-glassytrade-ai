@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from app.domain.fabio_ai.services import mlx_compute as mc
 
@@ -48,6 +49,23 @@ from app.domain.fabio_ai.services.aggression_scorer import (
     AggressionScorer,
     PersistentAggressionScorer,
 )
+from app.domain.services.aggressive_prints import (
+    AggressivePrintConfig,
+    AggressivePrintRegistry,
+    compute_aggression_sigma,
+    find_aggressive_prints,
+)
+from app.domain.services.acceptance_rejection import (
+    AcceptanceRejectionEngine,
+    ARResult,
+)
+from app.domain.services.initial_balance import InitialBalanceTracker
+from app.domain.services.break_detector import detect_break
+from app.domain.services.lvn_play_detector import detect_lvn_play
+from app.domain.services.volume_profile import create_profile
+
+if TYPE_CHECKING:
+    from app.config_models import SymbolConfig
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +95,7 @@ class AMTConfig:
     # Configurable via env — tune for MCX with lower values
     # Default values from Fabio spec (overridable via env)
     AGGRESSION_SIGMA_THRESHOLD: float = 2.5
+    AGGRESSION_EXPIRY_CANDLES: int = 30
     DISPLACEMENT_MULTIPLIER: float = 1.5
     BALANCE_RATIO_THRESHOLD: float = 0.55
 
@@ -105,6 +124,8 @@ class AMTConfig:
 # ---------------------------------------------------------------------------
 # Pure helpers
 # ---------------------------------------------------------------------------
+# Volume Profile — imported from app.domain.services.volume_profile
+# ---------------------------------------------------------------------------
 
 
 def smooth_array(data: list[float], window: int) -> list[float]:
@@ -112,245 +133,15 @@ def smooth_array(data: list[float], window: int) -> list[float]:
     return mc.smooth_array(data, window)
 
 
-def create_profile(data: list[OHLC], buckets: int = 200) -> list[VolumeProfileLevel]:
-    """Build a volume profile from OHLCV data using real volume-at-price histogram.
-
-    Volume is distributed uniformly across each candle's [low, high] range,
-    representing the real auction (Fabio AMT style).  Gaussian smoothing is
-    applied separately only for LVN/HVN detection — see find_lvns/find_hvns.
-    """
-    if not data:
-        return []
-
-    min_price = float(min(d.low for d in data))
-    max_price = float(max(d.high for d in data))
-
-    buffer = (max_price - min_price) * 0.01
-    min_price -= buffer
-    max_price += buffer
-    price_range = max_price - min_price
-
-    if price_range == 0:
-        total_vol = sum(d.volume for d in data)
-        avg_price = data[0].close
-        return [VolumeProfileLevel(price=avg_price, volume=total_vol)]
-
-    step = price_range / buckets
-    profile = [
-        VolumeProfileLevel(price=min_price + (i * step) + (step / 2))
-        for i in range(buckets)
-    ]
-
-    for d in data:
-        if d.volume <= 0:
-            continue
-
-        start_bucket = int((d.low - min_price) / step)
-        end_bucket = int((d.high - min_price) / step)
-        start_bucket = max(0, min(buckets - 1, start_bucket))
-        end_bucket = max(0, min(buckets - 1, end_bucket))
-
-        # FIX #3: Delta approximation for Indian markets
-        # taker_buy_volume may not be available from all brokers
-        # Use delta as proxy when available, otherwise infer from price action
-        if hasattr(d, "taker_buy_volume") and d.taker_buy_volume > 0:
-            buy_ratio = float(d.taker_buy_volume) / float(d.volume)
-        elif hasattr(d, "delta") and d.delta != 0:
-            # Delta available: infer buy ratio from delta
-            buy_ratio = 0.5 + (float(d.delta) / (2.0 * float(d.volume)))
-            buy_ratio = max(0.0, min(1.0, buy_ratio))  # Clamp to [0, 1]
-        else:
-            # Fallback: infer from candle close vs midpoint
-            # Bullish candle (close > midpoint) suggests more buying
-            midpoint = (d.high + d.low) / 2
-            if d.close > midpoint:
-                buy_ratio = 0.6  # Slight bullish bias
-            elif d.close < midpoint:
-                buy_ratio = 0.4  # Slight bearish bias
-            else:
-                buy_ratio = 0.5  # Neutral
-
-        # Uniform distribution across candle range (real volume-at-price)
-        n_buckets = end_bucket - start_bucket + 1
-        vol_per_bucket = float(d.volume) / n_buckets if n_buckets > 0 else 0.0
-
-        for i in range(start_bucket, end_bucket + 1):
-            profile[i].volume += vol_per_bucket
-            profile[i].buy_volume += vol_per_bucket * float(buy_ratio)
-            profile[i].sell_volume += vol_per_bucket * (1 - float(buy_ratio))
-
-    return profile
-
-
 # ---------------------------------------------------------------------------
-# Incremental Volume Profile
+# Volume Profile + LVN/HVN Detection — imported from extracted services
 # ---------------------------------------------------------------------------
-
-
-class IncrementalVolumeProfile:
-    """Maintains volume profile bucket state between ticks.
-
-    Instead of rebuilding the full profile from all candles each tick,
-    this class incrementally adds new candles and removes expired ones,
-    then recomputes POC/VA from the bucket totals in O(buckets) time.
-    """
-
-    def __init__(self, buckets: int = 200) -> None:
-        self._buckets = buckets
-        # Per-bucket accumulators: [volume, buy_volume, sell_volume]
-        self._volumes: list[list[float]] = [[0.0, 0.0, 0.0] for _ in range(buckets)]
-        # Track price range so we know bucket boundaries
-        self._min_price: float = 0.0
-        self._max_price: float = 0.0
-        self._step: float = 0.0
-        self._initialized: bool = False
-        # Window of candles currently in the profile (for range recalculation)
-        self._candles: list[OHLC] = []
-
-    def _needs_rebuild(self, new_candle: OHLC) -> bool:
-        """Check if the new candle would fall outside the current price range."""
-        if not self._initialized:
-            return True
-        # If candle exceeds current range, we need a full rebuild
-        return new_candle.low < self._min_price or new_candle.high > self._max_price
-
-    def _full_rebuild(self) -> None:
-        """Rebuild all buckets from self._candles."""
-        if not self._candles:
-            self._initialized = False
-            return
-
-        min_price = float(min(d.low for d in self._candles))
-        max_price = float(max(d.high for d in self._candles))
-        buffer = (max_price - min_price) * 0.01
-        self._min_price = min_price - buffer
-        self._max_price = max_price + buffer
-        price_range = self._max_price - self._min_price
-
-        if price_range == 0:
-            total_vol = sum(d.volume for d in self._candles)
-            vol_per = total_vol / self._buckets
-            self._volumes = [
-                [vol_per, vol_per * 0.5, vol_per * 0.5] for _ in range(self._buckets)
-            ]
-            self._step = 1.0
-            self._initialized = True
-            return
-
-        self._step = price_range / self._buckets
-        self._volumes = [[0.0, 0.0, 0.0] for _ in range(self._buckets)]
-        for d in self._candles:
-            self._add_candle_to_buckets(d)
-        self._initialized = True
-
-    def _add_candle_to_buckets(self, candle: OHLC) -> None:
-        """Distribute a candle's volume uniformly across buckets (real volume-at-price)."""
-        c_vol = float(candle.volume)
-        if c_vol <= 0:
-            return
-        c_low = float(candle.low)
-        c_high = float(candle.high)
-        start_bucket = int((c_low - self._min_price) / self._step)
-        end_bucket = int((c_high - self._min_price) / self._step)
-        start_bucket = max(0, min(self._buckets - 1, start_bucket))
-        end_bucket = max(0, min(self._buckets - 1, end_bucket))
-
-        buy_ratio = float(candle.taker_buy_volume) / c_vol if c_vol > 0 else 0.5
-        n_buckets = end_bucket - start_bucket + 1
-        vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
-
-        for i in range(start_bucket, end_bucket + 1):
-            self._volumes[i][0] += vol_per_bucket
-            self._volumes[i][1] += vol_per_bucket * float(buy_ratio)
-            self._volumes[i][2] += vol_per_bucket * (1 - float(buy_ratio))
-
-    def _remove_candle_from_buckets(self, candle: OHLC) -> None:
-        """Remove a candle's uniform volume contribution from buckets."""
-        c_vol = float(candle.volume)
-        if c_vol <= 0:
-            return
-        c_low = float(candle.low)
-        c_high = float(candle.high)
-        start_bucket = int((c_low - self._min_price) / self._step)
-        end_bucket = int((c_high - self._min_price) / self._step)
-        start_bucket = max(0, min(self._buckets - 1, start_bucket))
-        end_bucket = max(0, min(self._buckets - 1, end_bucket))
-
-        buy_ratio = float(candle.taker_buy_volume) / c_vol if c_vol > 0 else 0.5
-        n_buckets = end_bucket - start_bucket + 1
-        vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
-
-        for i in range(start_bucket, end_bucket + 1):
-            self._volumes[i][0] = max(0.0, self._volumes[i][0] - vol_per_bucket)
-            self._volumes[i][1] = max(
-                0.0, self._volumes[i][1] - vol_per_bucket * float(buy_ratio)
-            )
-            self._volumes[i][2] = max(
-                0.0, self._volumes[i][2] - vol_per_bucket * (1 - float(buy_ratio))
-            )
-
-    def update(
-        self, new_candle: OHLC, oldest_candle_to_remove: OHLC | None = None
-    ) -> None:
-        """Incrementally update the profile with a new candle.
-
-        Args:
-            new_candle: The latest candle to add.
-            oldest_candle_to_remove: If the lookback window is exceeded,
-                pass the candle that just fell out so its volume is subtracted.
-        """
-        # Remove expired candle from window
-        needs_remove = False
-        if oldest_candle_to_remove is not None and self._candles:
-            # Match by value (time) rather than identity to avoid silent skips
-            if self._candles[0].time == oldest_candle_to_remove.time:
-                self._candles.pop(0)
-                needs_remove = True
-
-        self._candles.append(new_candle)
-
-        if self._needs_rebuild(new_candle):
-            self._full_rebuild()
-            return
-
-        # Fast path: remove old, add new within existing range
-        if needs_remove:
-            # Check if removed candle was near the original (pre-buffer) range boundary.
-            # Compute the pre-buffer range from current min_price/max_price:
-            # original_min = min_price + buffer, original_max = max_price - buffer
-            # where buffer = (original_max - original_min) * 0.01
-            # Simplified: candle is boundary if its low/high is close to the range edge
-            range_size = self._max_price - self._min_price
-            edge_tolerance = range_size * 0.015  # slightly wider than the 1% buffer
-            was_boundary = (
-                oldest_candle_to_remove.low <= self._min_price + edge_tolerance
-                or oldest_candle_to_remove.high >= self._max_price - edge_tolerance
-            )
-            if was_boundary:
-                self._full_rebuild()
-                return
-            self._remove_candle_from_buckets(oldest_candle_to_remove)
-
-        self._add_candle_to_buckets(new_candle)
-
-    def get_profile(self) -> list[VolumeProfileLevel]:
-        """Return the current profile in the same format as create_profile().
-
-        POC and value area are computed by the caller (AMTAnalyzer.analyze).
-        """
-        if not self._initialized or not self._candles:
-            return []
-
-        step = self._step
-        return [
-            VolumeProfileLevel(
-                price=self._min_price + (i * step) + (step / 2),
-                volume=self._volumes[i][0],
-                buy_volume=self._volumes[i][1],
-                sell_volume=self._volumes[i][2],
-            )
-            for i in range(self._buckets)
-        ]
+from app.domain.services.volume_profile import IncrementalVolumeProfile
+from app.domain.services.lvn_detector import (
+    find_lvns as _find_lvns_extracted,
+    find_hvns as _find_hvns_extracted,
+    LVNPersistenceTracker,
+)
 
 
 def find_lvns(
@@ -358,121 +149,14 @@ def find_lvns(
     cfg: AMTConfig | None = None,
     smoothed: list[float] | None = None,
 ) -> list[float]:
-    """Detect Low Volume Nodes using smoothing + mean-threshold method.
-
-    Formula: smooth histogram, then find local minima where
-    smoothed_volume(i) <= LVN_THRESHOLD × mean(smoothed_volume).
-    """
+    """Thin wrapper — extracts prices from LVNLevel objects."""
     cfg = cfg or AMTConfig()
-    if len(profile) < 3:
-        return []
-
-    raw = [p.volume for p in profile]
-    sm = smoothed if smoothed else smooth_array(raw, cfg.LVN_SMOOTHING)
-    mean_vol = sum(sm) / len(sm) if sm else 0.0
-    if mean_vol <= 0:
-        return []
-
-    threshold = mean_vol * cfg.LVN_THRESHOLD
-    step = profile[1].price - profile[0].price if len(profile) > 1 else 1.0
-    lvns: list[float] = []
-
-    for i in range(1, len(sm) - 1):
-        if sm[i] < sm[i - 1] and sm[i] < sm[i + 1] and sm[i] <= threshold:
-            if not lvns or abs(profile[i].price - lvns[-1]) > step * 2:
-                lvns.append(profile[i].price)
-    return lvns
-
-
-class LVNPersistenceTracker:
-    """Tracks LVN persistence across bars to prevent appearing/disappearing.
-
-    An LVN must be detected for N consecutive bars before it is emitted.
-    Once emitted, it persists until the volume at that level rises above
-    the removal threshold (LVN_REMOVAL_THRESHOLD × mean volume).
-
-    This prevents the "LVN appears for 1 bar then disappears" problem.
-    """
-
-    def __init__(self, min_bars: int = LVN_MIN_PERSISTENCE_BARS) -> None:
-        self._min_bars = min_bars
-        # price -> (birth_bar_index, emitted)
-        self._candidates: dict[float, tuple[int, bool]] = {}
-        self._bar_index: int = 0
-        self._emitted_lvns: dict[float, int] = {}  # price -> bar when emitted
-
-    def reset(self) -> None:
-        """Reset at session boundary."""
-        self._candidates.clear()
-        self._emitted_lvns.clear()
-        self._bar_index = 0
-
-    def update(
-        self,
-        raw_lvns: list[float],
-        profile: list[VolumeProfileLevel],
-    ) -> list[float]:
-        """Process new raw LVNs and return stable (persisted) LVNs.
-
-        Args:
-            raw_lvns: LVN prices detected this bar from find_lvns().
-            profile: Current volume profile (for removal threshold check).
-
-        Returns:
-            List of stable LVN prices.
-        """
-        self._bar_index += 1
-        tick_size = profile[1].price - profile[0].price if len(profile) > 1 else 1.0
-        snap = tick_size * 2  # snapping distance
-
-        # 1. Update candidates: add new, refresh existing
-        raw_set = set(raw_lvns)
-        matched_raw: set[float] = set()
-
-        for price in list(self._candidates.keys()):
-            # Check if this candidate has a matching raw LVN
-            found_match = False
-            for rlvn in raw_lvns:
-                if abs(rlvn - price) < snap:
-                    found_match = True
-                    matched_raw.add(rlvn)
-                    break
-            if not found_match and price not in self._emitted_lvns:
-                # Candidate disappeared before being emitted — remove
-                del self._candidates[price]
-
-        # Add new candidates
-        for rlvn in raw_lvns:
-            if rlvn not in matched_raw:
-                # Check if close to an existing candidate
-                is_new = all(abs(rlvn - p) >= snap for p in self._candidates)
-                if is_new:
-                    self._candidates[rlvn] = (self._bar_index, False)
-
-        # 2. Promote candidates that have persisted long enough
-        # Age = _bar_index - birth + 1 (inclusive counting: bar 1 through bar 3 = age 3)
-        for price, (birth, emitted) in list(self._candidates.items()):
-            age = self._bar_index - birth + 1
-            if not emitted and age >= self._min_bars:
-                self._candidates[price] = (birth, True)
-                self._emitted_lvns[price] = self._bar_index
-
-        # 3. Check removal of emitted LVNs: remove if volume rose above threshold
-        if profile:
-            mean_vol = sum(p.volume for p in profile) / len(profile)
-            removal_threshold = mean_vol * LVN_REMOVAL_THRESHOLD
-            for price in list(self._emitted_lvns):
-                # Find the nearest profile bucket
-                nearest_idx = min(
-                    range(len(profile)),
-                    key=lambda i: abs(profile[i].price - price),
-                )
-                if profile[nearest_idx].volume > removal_threshold:
-                    del self._emitted_lvns[price]
-                    self._candidates.pop(price, None)
-
-        # 4. Return all emitted LVNs sorted by price
-        return sorted(self._emitted_lvns.keys())
+    levels = _find_lvns_extracted(
+        profile,
+        lvn_threshold=cfg.LVN_THRESHOLD,
+        smoothing_window=cfg.LVN_SMOOTHING,
+    )
+    return [lvn.price for lvn in levels]
 
 
 def find_hvns(
@@ -480,519 +164,33 @@ def find_hvns(
     cfg: AMTConfig | None = None,
     smoothed: list[float] | None = None,
 ) -> list[float]:
-    """Detect High Volume Nodes using smoothing + mean-threshold method.
-
-    Formula: smooth histogram, then find local maxima where
-    smoothed_volume(i) >= HVN_THRESHOLD × mean(smoothed_volume).
-
-    Uses MEAN (not MAX) as reference for consistency with LVN detection.
-    HVN = volume significantly above average (high participation level).
-    """
+    """Thin wrapper — extracts prices from HVNLevel objects."""
     cfg = cfg or AMTConfig()
-    if len(profile) < 3:
-        return []
-
-    raw = [p.volume for p in profile]
-    sm = smoothed if smoothed else smooth_array(raw, cfg.LVN_SMOOTHING)
-    mean_vol = sum(sm) / len(sm) if sm else 0.0
-    if mean_vol <= 0:
-        return []
-
-    # HVN: local maxima where volume > HVN_THRESHOLD × mean (per Fabio spec)
-    threshold = mean_vol * cfg.HVN_THRESHOLD  # 200% of mean = high volume node
-    step = profile[1].price - profile[0].price if len(profile) > 1 else 1.0
-    hvns: list[float] = []
-
-    for i in range(1, len(sm) - 1):
-        # Use >= on right side to handle smoothing plateaus
-        if sm[i] > sm[i - 1] and sm[i] >= sm[i + 1] and sm[i] >= threshold:
-            if not hvns or abs(profile[i].price - hvns[-1]) > step * 2:
-                hvns.append(profile[i].price)
-    return hvns
-
-
-def compute_aggression_sigma(
-    candle: OHLC,
-    data: list[OHLC],
-    ema_period: int = 20,
-) -> float:
-    """Z-score of candle volume vs EMA-based dynamic threshold (MLX-accelerated)."""
-    if len(data) < 10 or candle.volume == 0:
-        return 0.0
-    return mc.aggression_sigma(candle.volume, [d.volume for d in data], ema_period)
-
-
-def find_aggressive_prints(
-    data: list[OHLC],
-    cfg: AMTConfig | None = None,
-    previous_prints: list[AggressivePrint] | None = None,
-    previous_data_len: int = 0,
-) -> list[AggressivePrint]:
-    """Detect aggressive buying/selling 'volume bubbles' using 2.5σ filter.
-
-    Incremental: if data grew by 1 and previous_prints is provided, only
-    check the last candle and append to previous results.
-
-    A print is aggressive when:
-    1. Volume exceeds 2.5 standard deviations above the rolling mean, AND
-    2. Delta directionality is at least 15% of total volume.
-    """
-    cfg = cfg or AMTConfig()
-    if len(data) < 20:
-        return list(previous_prints) if previous_prints else []
-
-    # Incremental path: only check the last candle
-    if (
-        previous_prints is not None
-        and previous_data_len > 0
-        and len(data) == previous_data_len + 1
-    ):
-        prints = list(previous_prints)
-        # Expire prints older than 30 candles
-        if len(data) > 30:
-            cutoff_time = data[-30].time
-            prints = [p for p in prints if p.time >= cutoff_time]
-        i = len(data) - 1
-        d = data[i]
-        lookback = data[max(0, i - 50) : i]
-        if len(lookback) >= 10:
-            sigma = compute_aggression_sigma(d, lookback, cfg.AGGRESSION_EMA_PERIOD)
-            if sigma >= cfg.AGGRESSION_SIGMA_THRESHOLD:
-                delta_ratio = abs(d.delta) / d.volume if d.volume > 0 else 0
-                if delta_ratio >= cfg.DELTA_DIRECTIONALITY_THRESHOLD:
-                    prints.append(
-                        AggressivePrint(
-                            price=d.close,
-                            time=d.time,
-                            volume=d.volume,
-                            delta=d.delta,
-                            side="BUY" if d.delta > 0 else "SELL",
-                        )
-                    )
-        return prints
-
-    # Full rebuild with 30-candle expiry
-    cutoff_idx = max(0, len(data) - 30)
-    prints: list[AggressivePrint] = []
-    for i, d in enumerate(data):
-        if i < cutoff_idx:
-            continue  # skip candles older than 30 from end
-        lookback = data[max(0, i - 50) : i] if i > 10 else data[:i]
-        if len(lookback) < 10:
-            continue
-        sigma = compute_aggression_sigma(d, lookback, cfg.AGGRESSION_EMA_PERIOD)
-        if sigma >= cfg.AGGRESSION_SIGMA_THRESHOLD:
-            delta_ratio = abs(d.delta) / d.volume if d.volume > 0 else 0
-            if delta_ratio >= cfg.DELTA_DIRECTIONALITY_THRESHOLD:
-                prints.append(
-                    AggressivePrint(
-                        price=d.close,
-                        time=d.time,
-                        volume=d.volume,
-                        delta=d.delta,
-                        side="BUY" if d.delta > 0 else "SELL",
-                    )
-                )
-    return prints
+    levels = _find_hvns_extracted(
+        profile,
+        hvn_threshold=cfg.HVN_THRESHOLD,
+        smoothing_window=cfg.LVN_SMOOTHING,
+    )
+    return [hvn.price for hvn in levels]
 
 
 # ---------------------------------------------------------------------------
-# Initial Balance Tracker
+# Initial Balance Tracker — imported from app.domain.services.initial_balance
+# Acceptance / Rejection — imported from app.domain.services.acceptance_rejection
+# Aggressive Prints — imported from app.domain.services.aggressive_prints
 # ---------------------------------------------------------------------------
 
 
-class InitialBalanceTracker:
-    """Tracks Initial Balance (IB) — high/low of the first N minutes of session."""
-
-    def __init__(self, ib_minutes: int = 10) -> None:
-        self._ib_minutes = ib_minutes
-        self._ib_high: float = 0.0
-        self._ib_low: float = float("inf")
-        self._session_open_time: str = ""
-        self._complete: bool = False
-
-    def reset(self) -> None:
-        self._ib_high = 0.0
-        self._ib_low = float("inf")
-        self._session_open_time = ""
-        self._complete = False
-
-    def update(self, candle: OHLC) -> tuple[float, float, bool]:
-        """Update IB tracking. Returns (ib_high, ib_low, is_complete)."""
-        if self._complete:
-            return self._ib_high, self._ib_low, True
-
-        if not self._session_open_time:
-            self._session_open_time = candle.time
-
-        # Check if IB window has elapsed
-        try:
-            open_dt = datetime.fromisoformat(self._session_open_time)
-            curr_dt = datetime.fromisoformat(candle.time)
-            elapsed_minutes = (curr_dt - open_dt).total_seconds() / 60
-            if elapsed_minutes >= self._ib_minutes:
-                self._complete = True
-                return self._ib_high, self._ib_low, True
-        except (ValueError, TypeError):
-            pass
-
-        self._ib_high = max(self._ib_high, candle.high)
-        self._ib_low = min(self._ib_low, candle.low)
-        return self._ib_high, self._ib_low, False
-
-
 # ---------------------------------------------------------------------------
-# Acceptance / Rejection Engine
+# Acceptance / Rejection — imported from app.domain.services.acceptance_rejection
+# Aggressive Prints — imported from app.domain.services.aggressive_prints
 # ---------------------------------------------------------------------------
 
 
-class AcceptanceRejectionEngine:
-    """Tracks acceptance/rejection at VA boundaries using time, volume, and price action."""
-
-    def __init__(self) -> None:
-        self._time_above_vah: float = 0.0  # cumulative seconds outside VAH
-        self._time_below_val: float = 0.0  # cumulative seconds outside VAL
-        self._last_time: str = ""
-        self._acceptance_time_threshold: float = 120.0  # seconds
-        self._acceptance_vol_ratio: float = 1.2  # volume must be > 1.2x baseline
-
-    def reset(self) -> None:
-        self._time_above_vah = 0.0
-        self._time_below_val = 0.0
-        self._last_time = ""
-
-    def update(
-        self,
-        candle: OHLC,
-        vah: float,
-        val: float,
-        baseline_vol: float,
-    ) -> dict:
-        """Update acceptance/rejection state.
-
-        Returns dict with keys: acceptance_above, acceptance_below,
-        rejection_at_high, rejection_at_low, price_velocity.
-        """
-        result = {
-            "acceptance_above": False,
-            "acceptance_below": False,
-            "rejection_at_high": False,
-            "rejection_at_low": False,
-            "liquidity_sweep": "",
-            "price_velocity": 0.0,
-        }
-
-        # Estimate candle duration from timestamps
-        duration = 60.0  # default 1-minute candle
-        if self._last_time:
-            try:
-                prev_dt = datetime.fromisoformat(self._last_time)
-                curr_dt = datetime.fromisoformat(candle.time)
-                dt = (curr_dt - prev_dt).total_seconds()
-                if 0 < dt < 600:  # sanity: max 10 min
-                    duration = dt
-            except (ValueError, TypeError):
-                pass
-        self._last_time = candle.time
-
-        # Velocity: price movement per second
-        body = abs(candle.close - candle.open)
-        if duration > 0:
-            result["price_velocity"] = body / duration
-
-        # Time accumulation outside VA
-        if candle.close > vah and vah > 0:
-            self._time_above_vah += duration
-            self._time_below_val = max(
-                0, self._time_below_val - duration * 0.5
-            )  # decay
-        elif candle.close < val and val > 0:
-            self._time_below_val += duration
-            self._time_above_vah = max(
-                0, self._time_above_vah - duration * 0.5
-            )  # decay
-        else:
-            # Inside VA — decay both
-            self._time_above_vah = max(0, self._time_above_vah - duration * 0.5)
-            self._time_below_val = max(0, self._time_below_val - duration * 0.5)
-
-        # Acceptance: enough time outside + volume confirmation
-        vol_ok = (
-            candle.volume > baseline_vol * self._acceptance_vol_ratio
-            if baseline_vol > 0
-            else False
-        )
-        if self._time_above_vah >= self._acceptance_time_threshold and vol_ok:
-            result["acceptance_above"] = True
-        if self._time_below_val >= self._acceptance_time_threshold and vol_ok:
-            result["acceptance_below"] = True
-
-        # Rejection detection: wick > body at VA edge + volume spike
-        candle_range = candle.high - candle.low
-        if candle_range > 0:
-            upper_wick = candle.high - max(candle.open, candle.close)
-            lower_wick = min(candle.open, candle.close) - candle.low
-            body_size = abs(candle.close - candle.open)
-            vol_spike = (
-                candle.volume > baseline_vol * 1.5 if baseline_vol > 0 else False
-            )
-
-            # Rejection at high (near VAH): upper wick > body, price near VAH
-            threshold = candle.close * 0.003
-            if (
-                upper_wick > body_size
-                and vol_spike
-                and vah > 0
-                and abs(candle.high - vah) < threshold
-            ):
-                result["rejection_at_high"] = True
-
-            # Rejection at low (near VAL): lower wick > body, price near VAL
-            if (
-                lower_wick > body_size
-                and vol_spike
-                and val > 0
-                and abs(candle.low - val) < threshold
-            ):
-                result["rejection_at_low"] = True
-
-            # Liquidity Sweep High: Pierced VAH, closed below, strong wick
-            if (
-                candle.high > vah > 0
-                and candle.close < vah
-                and upper_wick > body_size
-                and vol_spike
-            ):
-                result["liquidity_sweep"] = "SWEEP_HIGH"
-
-            # Liquidity Sweep Low: Pierced VAL, closed above, strong wick
-            elif (
-                candle.low < val > 0
-                and candle.close > val
-                and lower_wick > body_size
-                and vol_spike
-            ):
-                result["liquidity_sweep"] = "SWEEP_LOW"
-
-        return result
-
-
 # ---------------------------------------------------------------------------
-# Break Detection — Initiative vs Responsive
+# Break Detection — imported from app.domain.services.break_detector
+# LVN Play Detection — imported from app.domain.services.lvn_play_detector
 # ---------------------------------------------------------------------------
-
-
-def detect_break(
-    data: list[OHLC],
-    vah: float,
-    val: float,
-    ib_high: float,
-    ib_low: float,
-    baseline_vol: float,
-) -> dict:
-    """Detect initiative breaks, responsive fades, and absorption at key levels.
-
-    Returns dict with break_direction, break_type, break_level, volume_ratio.
-    """
-    empty = {
-        "break_direction": "",
-        "break_type": "",
-        "break_level": 0.0,
-        "volume_ratio": 0.0,
-    }
-    if len(data) < 3 or baseline_vol <= 0:
-        return empty
-
-    current = data[-1]
-    prev = data[-2]
-    vol_ratio = current.volume / baseline_vol if baseline_vol > 0 else 0.0
-    body = abs(current.close - current.open)
-    candle_range = current.high - current.low
-
-    # Key levels to check
-    levels_up: list[tuple[str, float]] = []  # levels that indicate upward break
-    levels_down: list[tuple[str, float]] = []  # levels that indicate downward break
-    if vah > 0:
-        levels_up.append(("VAH", vah))
-        levels_down.append(("VAL", val))
-    if ib_high > 0:
-        levels_up.append(("IBH", ib_high))
-    if ib_low > 0 and ib_low != float("inf"):
-        levels_down.append(("IBL", ib_low))
-
-    # Check INITIATIVE BREAK upward
-    for _label, level in levels_up:
-        if level > 0 and current.close > level and prev.close <= level:
-            if vol_ratio > 1.5:
-                # Delta confirms: last 2 candles have positive delta
-                delta_confirms = all(d.delta > 0 for d in data[-2:])
-                if delta_confirms:
-                    return {
-                        "break_direction": "UP",
-                        "break_type": "INITIATIVE",
-                        "break_level": level,
-                        "volume_ratio": round(vol_ratio, 2),
-                    }
-
-    # Check INITIATIVE BREAK downward
-    for _label, level in levels_down:
-        if level > 0 and current.close < level and prev.close >= level:
-            if vol_ratio > 1.5:
-                delta_confirms = all(d.delta < 0 for d in data[-2:])
-                if delta_confirms:
-                    return {
-                        "break_direction": "DOWN",
-                        "break_type": "INITIATIVE",
-                        "break_level": level,
-                        "volume_ratio": round(vol_ratio, 2),
-                    }
-
-    # Check ABSORPTION: flat candle + high absolute delta at key level
-    threshold = current.close * 0.003
-    if candle_range > 0 and body < candle_range * 0.30:
-        delta_ratio = abs(current.delta) / current.volume if current.volume > 0 else 0
-        if delta_ratio > 0.25:  # strong hidden delta
-            for _label, level in levels_up + levels_down:
-                if level > 0 and abs(current.close - level) < threshold:
-                    return {
-                        "break_direction": "UP" if current.delta > 0 else "DOWN",
-                        "break_type": "ABSORPTION",
-                        "break_level": level,
-                        "volume_ratio": round(vol_ratio, 2),
-                    }
-
-    # Check RESPONSIVE FADE: touch extreme + no vol expansion + wick rejection
-    upper_wick = current.high - max(current.open, current.close)
-    lower_wick = min(current.open, current.close) - current.low
-
-    # Responsive fade at high (touch VAH/IBH, rejected)
-    for _label, level in levels_up:
-        if level > 0 and abs(current.high - level) < threshold:
-            if vol_ratio < 1.2 and upper_wick > body:
-                return {
-                    "break_direction": "DOWN",
-                    "break_type": "RESPONSIVE",
-                    "break_level": level,
-                    "volume_ratio": round(vol_ratio, 2),
-                }
-
-    # Responsive fade at low (touch VAL/IBL, rejected)
-    for _label, level in levels_down:
-        if level > 0 and abs(current.low - level) < threshold:
-            if vol_ratio < 1.2 and lower_wick > body:
-                return {
-                    "break_direction": "UP",
-                    "break_type": "RESPONSIVE",
-                    "break_level": level,
-                    "volume_ratio": round(vol_ratio, 2),
-                }
-
-    return empty
-
-
-# ---------------------------------------------------------------------------
-# LVN Velocity Play Detection
-# ---------------------------------------------------------------------------
-
-
-def detect_lvn_play(
-    candle: OHLC,
-    lvns: list[float],
-    hvns: list[float],
-    poc: float,
-    baseline_vol: float,
-    cvd_slope: float,
-    prev_cvd_slope: float = 0.0,
-) -> dict | None:
-    """Detect LVN rejection play: velocity spike + rejection candle + delta flip at LVN.
-
-    Returns play details dict or None if no play detected.
-    """
-    if not lvns or candle.volume <= 0:
-        return None
-
-    threshold = candle.close * 0.003  # 0.3% proximity
-
-    # Find nearest LVN
-    nearest_lvn = None
-    nearest_dist = float("inf")
-    for lvn in lvns:
-        dist = abs(candle.close - lvn)
-        if dist < threshold and dist < nearest_dist:
-            nearest_lvn = lvn
-            nearest_dist = dist
-
-    if nearest_lvn is None:
-        return None
-
-    # Velocity spike: volume > 2x baseline
-    velocity_ratio = candle.volume / baseline_vol if baseline_vol > 0 else 0.0
-    has_velocity = velocity_ratio > 2.0
-
-    # Rejection candle: wick > body
-    body = abs(candle.close - candle.open)
-    upper_wick = candle.high - max(candle.open, candle.close)
-    lower_wick = min(candle.open, candle.close) - candle.low
-    has_rejection = max(upper_wick, lower_wick) > body and body > 0
-
-    # Delta flip: CVD slope sign change
-    has_delta_flip = (cvd_slope * prev_cvd_slope < 0) if prev_cvd_slope != 0 else False
-
-    # Need at least 2 of 3 conditions
-    score = sum([has_velocity, has_rejection, has_delta_flip])
-    if score < 2:
-        return None
-
-    # Determine direction from rejection
-    if lower_wick > upper_wick:
-        direction = "LONG"  # rejected lower prices -> bounce up
-    else:
-        direction = "SHORT"  # rejected higher prices -> move down
-
-    # Target: POC or nearest HVN
-    target = poc
-    if hvns:
-        if direction == "LONG":
-            above_hvns = [h for h in hvns if h > candle.close]
-            if above_hvns:
-                target = min(above_hvns)
-        else:
-            below_hvns = [h for h in hvns if h < candle.close]
-            if below_hvns:
-                target = max(below_hvns)
-
-    return {
-        "lvn_price": nearest_lvn,
-        "direction": direction,
-        "target": target,
-        "velocity_ratio": round(velocity_ratio, 2),
-        "has_rejection": has_rejection,
-        "has_delta_flip": has_delta_flip,
-    }
-
-
-class AggressivePrintRegistry:
-    """Registry of high-volume 'bubble' levels for re-test analysis."""
-
-    def __init__(self, proximity_pct: float = 0.001) -> None:
-        self.prints: list[AggressivePrint] = []
-        self.proximity_pct = proximity_pct
-
-    def register(self, prints: list[AggressivePrint]) -> None:
-        """Add new prints to the session registry (prevents duplicates)."""
-        existing_times = {p.time for p in self.prints}
-        for p in prints:
-            if p.time not in existing_times:
-                self.prints.append(p)
-
-    def get_retests(self, current_price: float) -> list[AggressivePrint]:
-        """Return prints that are currently being re-tested by price."""
-        retests = []
-        for p in self.prints:
-            dist = abs(current_price - p.price) / p.price
-            if dist <= self.proximity_pct:
-                retests.append(p)
-        return retests
 
 
 # ---------------------------------------------------------------------------
@@ -1010,7 +208,11 @@ class AMTAnalyzer:
     classification, POC migration, session context, and 2.5σ aggression.
     """
 
-    def __init__(self, config: AMTConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: AMTConfig | None = None,
+        symbol_config: "SymbolConfig | None" = None,
+    ) -> None:
         self.config = config or AMTConfig()
         self._cvd_tracker = CVDTracker()
         self._poc_tracker = POCMigrationTracker()
@@ -1047,8 +249,15 @@ class AMTAnalyzer:
         self._bubble_detector = BubbleDetector()
         self._ofi_calculator = OFICalculator()
         self._absorption_detector = AbsorptionDetector()
-        # Persistent aggression scorer (prevents delta score flicker)
-        self._persistent_agg_scorer = PersistentAggressionScorer()
+        # Persistent aggression scorer (per-symbol config when available)
+        if symbol_config:
+            self._persistent_agg_scorer = PersistentAggressionScorer(
+                persistence_bars=symbol_config.aggression_persistence_bars,
+                min_score=symbol_config.min_aggression_score,
+                pyramid_score=symbol_config.pyramid_aggression_score,
+            )
+        else:
+            self._persistent_agg_scorer = PersistentAggressionScorer()
         # LVN persistence tracker (prevents LVN appearing/disappearing)
         self._lvn_tracker = LVNPersistenceTracker()
 
@@ -1344,7 +553,12 @@ class AMTAnalyzer:
         # Incremental aggressive prints — only compute last candle if data grew by 1
         agg_prints = find_aggressive_prints(
             recent_data,
-            self.config,
+            AggressivePrintConfig(
+                sigma_threshold=self.config.AGGRESSION_SIGMA_THRESHOLD,
+                ema_period=self.config.AGGRESSION_EMA_PERIOD,
+                delta_directionality_threshold=self.config.DELTA_DIRECTIONALITY_THRESHOLD,
+                expiry_candles=getattr(self.config, "AGGRESSION_EXPIRY_CANDLES", 30),
+            ),
             previous_prints=self._prev_agg_prints,
             previous_data_len=self._prev_agg_data_len,
         )

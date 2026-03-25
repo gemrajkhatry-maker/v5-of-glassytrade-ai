@@ -65,6 +65,7 @@ from app.api.routers.analysis import router as analysis_router
 from app.api.routers.trading import router as trading_router
 from app.api.routers.ai import router as ai_router
 from app.api.routers.rl import router as rl_router
+from app.api.routers.metrics import router as metrics_router
 from app.api.websocket.gameloop import router as gameloop_router
 
 
@@ -187,6 +188,7 @@ app.include_router(analysis_router, prefix="/api")
 app.include_router(trading_router, prefix="/api")
 app.include_router(ai_router, prefix="/api")
 app.include_router(rl_router, prefix="/api")
+app.include_router(metrics_router, prefix="/api")
 app.include_router(gameloop_router, prefix="/api")
 
 

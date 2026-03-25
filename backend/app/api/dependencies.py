@@ -160,6 +160,19 @@ class ServiceGraph:
         # NPOC Tracker — naked POC tracking for secondary targets
         self.npoc_tracker = NPOCTracker(storage_port=self.storage)
 
+        # Observability trackers (Phase -1)
+        from app.domain.services.gate_rejection_tracker import GateRejectionTracker
+        from app.domain.services.latency_tracker import LatencyTracker
+        from app.api.routers.metrics import set_trackers
+
+        self.gate_tracker = GateRejectionTracker()
+        self.latency_tracker = LatencyTracker()
+        set_trackers(self.gate_tracker, self.latency_tracker)
+
+        # Pass trackers to session
+        self.trading_session._gate_tracker = self.gate_tracker
+        self.trading_session._latency_tracker = self.latency_tracker
+
         # OI Analyzer (Gap #5 — OI Pressure)
         from app.domain.fabio_ai.services.oi_analyzer import OIAnalyzer
 

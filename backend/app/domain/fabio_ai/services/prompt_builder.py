@@ -722,3 +722,69 @@ def compute_tighten_sl(pos_state: dict) -> float:
     if pos_state["side"] == "LONG":
         return max((sl + current) / 2, sl)
     return min((sl + current) / 2, sl)
+
+
+# =====================================================================
+# Pre-Candle Advisory
+# =====================================================================
+
+
+def build_advisory_prompt(
+    symbol: str,
+    tick: "OHLC",
+    amt_result: "AMTResult",
+) -> str:
+    """Build advisory prompt for pre-candle analysis.
+
+    Triggered T-60s before 5-min bar close. Output is advisory-only
+    for the React dashboard — not used by any gate.
+    """
+    lines = [
+        f"=== PRE-CANDLE ADVISORY: {symbol} ===",
+        f"Current bar: O={tick.open} H={tick.high} L={tick.low} C={tick.close} V={tick.volume}",
+        f"Market state: {amt_result.market_state}",
+        f"POC={amt_result.poc} VAH={amt_result.value_area_high} VAL={amt_result.value_area_low}",
+    ]
+
+    if getattr(amt_result, "has_displacement", False):
+        lines.append(
+            f"Displacement: {getattr(amt_result, 'displacement_direction', 'N/A')}"
+        )
+    if getattr(amt_result, "zone", None):
+        lines.append(f"Zone: {amt_result.zone}")
+    if getattr(amt_result, "aggression", None):
+        lines.append(f"Aggression: {amt_result.aggression}")
+
+    lines.append(
+        "\nWhat setup is forming? Key levels to watch? Expected next-bar behavior?"
+    )
+    return "\n".join(lines)
+
+
+def parse_advisory_response(raw_response: str) -> Dict[str, str]:
+    """Parse advisory LLM response into structured fields.
+
+    Expects JSON: {"scenario": "...", "expected_setup": "...", "key_levels": "..."}
+    Falls back to extracting from raw text.
+    """
+    try:
+        import json as _json
+
+        # Try JSON parse
+        match = re.search(r"\{[^{}]+\}", raw_response, re.DOTALL)
+        if match:
+            parsed = _json.loads(match.group())
+            return {
+                "scenario": parsed.get("scenario", ""),
+                "expected_setup": parsed.get("expected_setup", ""),
+                "key_levels": parsed.get("key_levels", ""),
+            }
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # Fallback: return raw text as scenario
+    return {
+        "scenario": raw_response.strip()[:200],
+        "expected_setup": "",
+        "key_levels": "",
+    }

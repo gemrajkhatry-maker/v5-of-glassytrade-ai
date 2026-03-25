@@ -342,11 +342,15 @@ class TradingEngine:
                     continue
 
                 # Skip positions from other exchanges
-                if registry and registry.exchange_for(symbol) != current_exchange:
+                # Use inline check to avoid dependency on registry being initialized
+                _nse_underlyings = {"NIFTY", "BANKNIFTY", "FINNIFTY"}
+                _underlying = symbol.split(" ")[0].upper() if symbol else ""
+                _symbol_exchange = "NSE" if _underlying in _nse_underlyings else "MCX"
+                if _symbol_exchange != current_exchange:
                     skipped += 1
                     logger.debug(
                         "Engine: skipping %s position recovery (current=%s): %s",
-                        registry.exchange_for(symbol),
+                        _symbol_exchange,
                         current_exchange,
                         symbol,
                     )
@@ -617,6 +621,8 @@ class TradingEngine:
                     cum_buy,
                     cum_sell,
                     oi,
+                    best_bid=float(best_bid),
+                    best_ask=float(best_ask),
                 )
                 if tick is None:
                     continue

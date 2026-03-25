@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from app.domain.ports.storage import StoragePort
 from app.domain.ports.broker import BrokerPort
 from app.domain.trading.events import PositionClosed
+from app.application.handlers.post_trade_analyst import PostTradeAnalyst
 
 if TYPE_CHECKING:
     from app.application.handlers.llm_entry_handler import LLMEntryHandler
@@ -45,6 +46,7 @@ class ExitCoordinator:
         storage: StoragePort | None,
         llm_handler: LLMEntryHandler,
         risk_coordinator: SessionRiskCoordinator,
+        post_trade_analyst: PostTradeAnalyst | None = None,
     ) -> None:
         self._broker = broker
         self._lifecycle_handler = lifecycle_handler
@@ -54,6 +56,7 @@ class ExitCoordinator:
         self._storage = storage
         self._llm_handler = llm_handler
         self._risk_coordinator = risk_coordinator
+        self._post_trade_analyst = post_trade_analyst
 
     def on_partial_exit(
         self,
@@ -130,11 +133,15 @@ class ExitCoordinator:
         si = _get_si(timestamp=now_ist, market=_market)
         self._llm_handler.record_stop_out(level, direction, si.phase)
 
-    def on_position_closed(self, event: PositionClosed) -> None:
-        """Handle full position close — learning, risk, persistence."""
-        if not event.position:
+    def on_position_closed(self, symbol: str, position) -> None:
+        """Handle full position close — learning, risk, persistence.
+
+        Called directly from trading_session with the Position object
+        (avoids PositionClosed event serialization issues).
+        """
+        if not position:
             return
-        pos = event.position
+        pos = position
 
         # Cancel broker hardware SL
         dhan_sl_id = (pos.metadata or {}).get("dhan_sl_order_id")
@@ -149,7 +156,7 @@ class ExitCoordinator:
             except Exception as e:
                 log.error("Failed to scrub broker hardware SL %s: %s", dhan_sl_id, e)
 
-        session = self._state_manager.get_or_create_session(event.symbol)
+        session = self._state_manager.get_or_create_session(symbol)
 
         # Record consistency
         try:
@@ -160,7 +167,7 @@ class ExitCoordinator:
             record_position_consistency(
                 session.portfolio,
                 self._lifecycle_handler.trade_manager,
-                event.symbol,
+                symbol,
                 context="post_close",
             )
         except Exception:
@@ -187,7 +194,7 @@ class ExitCoordinator:
 
         # Log exit
         self._event_logger.log_exit(
-            symbol=event.symbol,
+            symbol=symbol,
             position=pos,
             time_in_trade=time_in_trade,
             mfe=float(mp_metrics["mfe"]) if mp_metrics else 0,
@@ -196,12 +203,27 @@ class ExitCoordinator:
             amt=session.last_amt,
         )
 
+        # Post-trade LLM analysis (non-blocking)
+        if self._post_trade_analyst:
+            try:
+                self._post_trade_analyst.analyze(
+                    symbol=symbol,
+                    entry_price=float(pos.entry_price),
+                    exit_price=float(pos.exit_price) if pos.exit_price else 0,
+                    side=pos.side,
+                    pnl=float(pos.pnl) if pos.pnl else 0,
+                    hold_time_seconds=time_in_trade,
+                    close_reason=getattr(pos, "close_reason", "UNKNOWN"),
+                )
+            except Exception:
+                log.debug("Post-trade analysis fire failed", exc_info=True)
+
         # Record successful exit
         if pos.pnl and pos.pnl > 0:
-            self._llm_handler.record_successful_exit(symbol=event.symbol)
+            self._llm_handler.record_successful_exit(symbol=symbol)
 
         # Session risk
-        srm = self._risk_coordinator.get_session_risk_manager(event.symbol)
+        srm = self._risk_coordinator.get_session_risk_manager(symbol)
         srm.record_trade(pos.pnl)
 
         log.info(
@@ -213,7 +235,7 @@ class ExitCoordinator:
             srm.consecutive_losses,
         )
 
-        self._risk_coordinator.persist_risk_state(event.symbol)
+        self._risk_coordinator.persist_risk_state(symbol)
 
         # Persist
         if self._storage:

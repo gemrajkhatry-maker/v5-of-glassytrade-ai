@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
 from app.domain.fabio_ai.services.footprint_analyzer import TickFootprintAccumulator
+from app.domain.services.tick_delta import TickDeltaClassifier, candle_delta_proxy
 
 if TYPE_CHECKING:
     pass
@@ -29,20 +30,31 @@ IST = timezone(timedelta(hours=5, minutes=30))
 def _new_candle_state() -> dict:
     """Create a new candle state dictionary."""
     return {
-        "start": None, "open": 0, "high": 0, "low": 0, "close": 0,
-        "volume": 0, "buy_volume": 0, "oi": 0, "vwap_num": 0, "vwap_den": 0,
-        "prev_cum_vol": -1, "candle_vol": 0,
-        "prev_cum_buy": -1, "prev_cum_sell": -1,
-        "candle_buy_vol": 0, "candle_sell_vol": 0,
+        "start": None,
+        "open": 0,
+        "high": 0,
+        "low": 0,
+        "close": 0,
+        "volume": 0,
+        "buy_volume": 0,
+        "oi": 0,
+        "vwap_num": 0,
+        "vwap_den": 0,
+        "prev_cum_vol": -1,
+        "candle_vol": 0,
+        "prev_cum_buy": -1,
+        "prev_cum_sell": -1,
+        "candle_buy_vol": 0,
+        "candle_sell_vol": 0,
     }
 
 
 def _interval_to_seconds(interval: str) -> int:
     """Convert interval string to seconds.
-    
+
     Args:
         interval: Interval string (e.g., "5m", "1h", "1d")
-    
+
     Returns:
         Interval in seconds
     """
@@ -59,7 +71,7 @@ def _interval_to_seconds(interval: str) -> int:
 
 class CandleAggregator:
     """Aggregates ticks into OHLCV candles.
-    
+
     This module encapsulates all candle aggregation logic, providing a single
     source of truth for candle building across the codebase.
     """
@@ -68,28 +80,35 @@ class CandleAggregator:
         self._interval_secs = _interval_to_seconds(interval)
         self._candle_states: dict[str, dict] = {}
         self._fp_accumulators: dict[str, TickFootprintAccumulator] = {}
+        self._delta_classifiers: dict[str, TickDeltaClassifier] = {}
+        self._use_lee_ready: bool = False  # Set from feature flag
 
     def initialize_symbol(self, symbol: str) -> None:
         """Initialize state for a symbol.
-        
+
         Args:
             symbol: Trading symbol
         """
         self._candle_states[symbol] = _new_candle_state()
         self._fp_accumulators[symbol] = TickFootprintAccumulator()
+        self._delta_classifiers[symbol] = TickDeltaClassifier()
 
     def _candle_start(self, ts: datetime) -> datetime:
         """Get candle start time by flooring to interval boundary.
-        
+
         Args:
             ts: Timestamp
-        
+
         Returns:
             Candle start time
         """
         epoch = int(ts.timestamp())
         floored = epoch - (epoch % self._interval_secs)
         return datetime.fromtimestamp(floored, tz=IST)
+
+    def set_delta_mode(self, use_lee_ready: bool) -> None:
+        """Set delta classification mode. True = Lee-Ready, False = body_ratio proxy."""
+        self._use_lee_ready = use_lee_ready
 
     def aggregate(
         self,
@@ -100,9 +119,11 @@ class CandleAggregator:
         cum_buy: int,
         cum_sell: int,
         oi: int,
+        best_bid: float = 0.0,
+        best_ask: float = 0.0,
     ) -> OHLC | None:
         """Aggregate a tick into the current candle.
-        
+
         Args:
             symbol: Trading symbol
             now: Current timestamp
@@ -111,7 +132,9 @@ class CandleAggregator:
             cum_buy: Cumulative buy quantity
             cum_sell: Cumulative sell quantity
             oi: Open interest
-        
+            best_bid: Best bid price (for Lee-Ready delta)
+            best_ask: Best ask price (for Lee-Ready delta)
+
         Returns:
             OHLC if candle updated, None if tick invalid
         """
@@ -131,7 +154,11 @@ class CandleAggregator:
         else:
             candle_vol = vol - cs["prev_cum_vol"]
             # Contextual spike cap: >5% of cumulative likely means session reset
-            vol_cap = max(10000, cs["prev_cum_vol"] * 0.05) if cs["prev_cum_vol"] > 0 else 10000
+            vol_cap = (
+                max(10000, cs["prev_cum_vol"] * 0.05)
+                if cs["prev_cum_vol"] > 0
+                else 10000
+            )
             if candle_vol > vol_cap:
                 cs["prev_cum_vol"] = vol
                 candle_vol = 0
@@ -195,12 +222,24 @@ class CandleAggregator:
             delta = float(cbuy - csell)
             buy_vol = float(cbuy)
         else:
-            spread = cs["high"] - cs["low"]
-            if spread > 0 and cv > 0:
-                body_ratio = (cs["close"] - cs["open"]) / spread
-                delta = body_ratio * cv
+            if self._use_lee_ready and best_bid > 0 and best_ask > 0:
+                if symbol not in self._delta_classifiers:
+                    self._delta_classifiers[symbol] = TickDeltaClassifier()
+                td = self._delta_classifiers[symbol].classify(
+                    price=cs["close"],
+                    volume=cv,
+                    bid=best_bid,
+                    ask=best_ask,
+                )
+                delta = td.delta
             else:
-                delta = 0.0
+                delta = candle_delta_proxy(
+                    open_=cs["open"],
+                    high=cs["high"],
+                    low=cs["low"],
+                    close=cs["close"],
+                    volume=cv,
+                )
             buy_vol = max(0.0, (cv + delta) / 2)
 
         return OHLC(
@@ -225,7 +264,7 @@ class CandleAggregator:
         candle_time: datetime | None = None,
     ) -> None:
         """Update footprint accumulator with a tick.
-        
+
         Args:
             symbol: Trading symbol
             ltp: Last traded price
@@ -236,19 +275,22 @@ class CandleAggregator:
         """
         if symbol not in self._fp_accumulators:
             self._fp_accumulators[symbol] = TickFootprintAccumulator()
-        
+
         candle_t = candle_time or self._candle_start(datetime.now(IST))
         self._fp_accumulators[symbol].on_tick(
-            ltp, ltq, float(best_bid), float(best_ask),
+            ltp,
+            ltq,
+            float(best_bid),
+            float(best_ask),
             candle_t.isoformat(),
         )
 
     def get_footprint(self, symbol: str) -> dict | None:
         """Get footprint data for a symbol.
-        
+
         Args:
             symbol: Trading symbol
-        
+
         Returns:
             Footprint data or None
         """
@@ -258,15 +300,19 @@ class CandleAggregator:
 
     def validate_tick(self, tick: OHLC) -> str | None:
         """Validate a tick for obvious errors.
-        
+
         Args:
             tick: OHLC tick to validate
-        
+
         Returns:
             Error message if invalid, None if valid
         """
-        for name, val in [("open", tick.open), ("high", tick.high),
-                          ("low", tick.low), ("close", tick.close)]:
+        for name, val in [
+            ("open", tick.open),
+            ("high", tick.high),
+            ("low", tick.low),
+            ("close", tick.close),
+        ]:
             if math.isnan(val) or math.isinf(val) or val <= 0:
                 return f"Invalid tick: {name}={val}"
         if math.isnan(tick.volume) or math.isinf(tick.volume) or tick.volume < 0:
