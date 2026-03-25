@@ -9,16 +9,13 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
-from shared.entities.models import (
-    Side as SharedSide,
-    OrderSide,
-    OrderStatus
-)
+from shared.entities.models import Side as SharedSide, OrderSide, OrderStatus
 
 
 # ---------------------------------------------------------------------------
 # Enums (mirrored for OpenAPI docs)
 # ---------------------------------------------------------------------------
+
 
 class MessageRoleDTO(str, Enum):
     USER = "user"
@@ -29,6 +26,7 @@ class MessageRoleDTO(str, Enum):
 # ---------------------------------------------------------------------------
 # Market Data DTOs
 # ---------------------------------------------------------------------------
+
 
 class OHLCDataDTO(BaseModel):
     time: str
@@ -57,6 +55,7 @@ class OrderBookDTO(BaseModel):
 # ---------------------------------------------------------------------------
 # AMT DTOs
 # ---------------------------------------------------------------------------
+
 
 class VolumeProfileLevelDTO(BaseModel):
     price: float
@@ -100,7 +99,9 @@ class AMTAnalysisDTO(BaseModel):
     signal: Optional[TradeSignalDTO] = None
     setup: Optional[str] = None
     profile: list[VolumeProfileLevelDTO] = []
-    aggressive_prints: list[AggressivePrintDTO] = Field(alias="aggressivePrints", default=[])
+    aggressive_prints: list[AggressivePrintDTO] = Field(
+        alias="aggressivePrints", default=[]
+    )
     cvd_slope: float = Field(alias="cvdSlope", default=0.0)
     cvd_divergence: str = Field(alias="cvdDivergence", default="")
     profile_shape: str = Field(alias="profileShape", default="")
@@ -157,6 +158,7 @@ class AMTAnalysisDTO(BaseModel):
 # AI / Prediction DTOs
 # ---------------------------------------------------------------------------
 
+
 class ModelWeightsDTO(BaseModel):
     trend: float = 0.40
     momentum: float = 0.25
@@ -195,6 +197,7 @@ class AIAnalysisDTO(BaseModel):
 # ---------------------------------------------------------------------------
 # Trading DTOs
 # ---------------------------------------------------------------------------
+
 
 class TradePositionDTO(BaseModel):
     id: str
@@ -269,6 +272,7 @@ class PositionEventDTO(BaseModel):
 # Footprint DTOs
 # ---------------------------------------------------------------------------
 
+
 class FootprintLevelDTO(BaseModel):
     price: float
     bid: float
@@ -291,6 +295,7 @@ class FootprintCandleDTO(BaseModel):
 # Chat / AI Command DTOs
 # ---------------------------------------------------------------------------
 
+
 class ChatMessageDTO(BaseModel):
     id: str
     role: MessageRoleDTO
@@ -300,7 +305,9 @@ class ChatMessageDTO(BaseModel):
 
 class AICommandResponseDTO(BaseModel):
     message: str
-    config_updates: Optional[dict[str, Any]] = Field(alias="configUpdates", default=None)
+    config_updates: Optional[dict[str, Any]] = Field(
+        alias="configUpdates", default=None
+    )
     action: Optional[str] = None
 
     model_config = {"populate_by_name": True}
@@ -309,6 +316,7 @@ class AICommandResponseDTO(BaseModel):
 # ---------------------------------------------------------------------------
 # Request DTOs
 # ---------------------------------------------------------------------------
+
 
 class AMTRequestDTO(BaseModel):
     data: list[OHLCDataDTO]
@@ -348,6 +356,7 @@ class CommandRequestDTO(BaseModel):
 # Converters: Domain ↔ DTO
 # ---------------------------------------------------------------------------
 
+
 def ohlc_to_dto(o) -> dict:
     """Convert a domain OHLC to a serialisable dict with camelCase keys."""
     return {
@@ -366,10 +375,17 @@ def ohlc_to_dto(o) -> dict:
 def dto_to_ohlc(d: OHLCDataDTO):
     """Convert a Pydantic DTO to a domain OHLC value object."""
     from app.domain.trading.models.value_objects import OHLC
+
     return OHLC(
-        time=d.time, open=d.open, high=d.high, low=d.low,
-        close=d.close, volume=d.volume, vwap=d.vwap,
-        taker_buy_volume=d.taker_buy_volume, delta=d.delta,
+        time=d.time,
+        open=d.open,
+        high=d.high,
+        low=d.low,
+        close=d.close,
+        volume=d.volume,
+        vwap=d.vwap,
+        taker_buy_volume=d.taker_buy_volume,
+        delta=d.delta,
     )
 
 
@@ -378,6 +394,7 @@ def dto_to_order_book(d: Optional[OrderBookDTO]):
     if d is None:
         return None
     from app.domain.trading.models.value_objects import OrderBook, OrderBookLevel
+
     return OrderBook(
         bids=tuple(OrderBookLevel(price=b.price, quantity=b.quantity) for b in d.bids),
         asks=tuple(OrderBookLevel(price=a.price, quantity=a.quantity) for a in d.asks),
@@ -386,9 +403,13 @@ def dto_to_order_book(d: Optional[OrderBookDTO]):
 
 def dto_to_weights(d: ModelWeightsDTO):
     from app.domain.fabio_ai.models.predictions import ModelWeights
+
     return ModelWeights(
-        trend=d.trend, momentum=d.momentum, delta=d.delta,
-        order_book=d.order_book, volatility=d.volatility,
+        trend=d.trend,
+        momentum=d.momentum,
+        delta=d.delta,
+        order_book=d.order_book,
+        volatility=d.volatility,
     )
 
 
@@ -403,14 +424,16 @@ def position_to_dto(p) -> dict:
         "size": float(p.size),
         "stopLoss": float(p.stop_loss),
         "takeProfit": float(p.take_profit),
-        "pnl": float(p.pnl),
+        "pnl": round(float(p.pnl), 2),
         "entryTime": p.entry_time,
         "status": p.status.value if hasattr(p.status, "value") else p.status,
         "exitPrice": float(p.exit_price) if p.exit_price is not None else None,
         "exitTime": p.exit_time,
         "closeReason": p.close_reason,
         "metadata": p.metadata,
-        "partialRealizedPnl": float((p.metadata or {}).get("partial_realized_pnl", 0.0)),
+        "partialRealizedPnl": round(
+            float((p.metadata or {}).get("partial_realized_pnl", 0.0)), 2
+        ),
         "originalSize": float((p.metadata or {}).get("full_size", p.size)),
     }
 
@@ -459,8 +482,10 @@ def signal_to_dto(s) -> Optional[dict]:
         return None
     return {
         "type": s.type.value if hasattr(s.type, "value") else s.type,
-        "price": s.price, "reason": s.reason,
-        "stopLoss": s.stop_loss, "takeProfit": s.take_profit,
+        "price": s.price,
+        "reason": s.reason,
+        "stopLoss": s.stop_loss,
+        "takeProfit": s.take_profit,
         "timestamp": s.timestamp,
         "setup": s.setup.value if hasattr(s.setup, "value") else s.setup,
         "source": s.source.value if hasattr(s.source, "value") else s.source,
@@ -477,20 +502,32 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         llm_json: Reasoning model JSON output (from session state).
     """
     return {
-        "marketState": r.market_state, "poc": r.poc,
-        "valueAreaHigh": r.value_area_high, "valueAreaLow": r.value_area_low,
-        "lvns": list(r.lvns), "hvns": list(r.hvns),
+        "marketState": r.market_state,
+        "poc": r.poc,
+        "valueAreaHigh": r.value_area_high,
+        "valueAreaLow": r.value_area_low,
+        "lvns": list(r.lvns),
+        "hvns": list(r.hvns),
         "aggression": r.aggression,
         "signal": signal_to_dto(r.signal),
         "setup": r.setup,
         "profile": [
-            {"price": p.price, "volume": p.volume,
-             "buyVolume": p.buy_volume, "sellVolume": p.sell_volume}
+            {
+                "price": p.price,
+                "volume": p.volume,
+                "buyVolume": p.buy_volume,
+                "sellVolume": p.sell_volume,
+            }
             for p in r.profile
         ],
         "aggressivePrints": [
-            {"price": ap.price, "time": ap.time, "volume": ap.volume,
-             "delta": ap.delta, "side": ap.side}
+            {
+                "price": ap.price,
+                "time": ap.time,
+                "volume": ap.volume,
+                "delta": ap.delta,
+                "side": ap.side,
+            }
             for ap in r.aggressive_prints
         ],
         # All fields below are guaranteed to exist on AMTResult (frozen
@@ -505,8 +542,12 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         "vwapLower2": r.vwap_lower_2,
         "balanceRatio": r.balance_ratio,
         "legProfile": [
-            {"price": p.price, "volume": p.volume,
-             "buyVolume": p.buy_volume, "sellVolume": p.sell_volume}
+            {
+                "price": p.price,
+                "volume": p.volume,
+                "buyVolume": p.buy_volume,
+                "sellVolume": p.sell_volume,
+            }
             for p in r.leg_profile
         ],
         "legLvns": list(r.leg_lvns),
@@ -557,10 +598,14 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
 
 def stats_to_dto(s) -> dict:
     return {
-        "totalTrades": s.total_trades, "wins": s.wins, "losses": s.losses,
-        "winRate": s.win_rate, "netProfit": s.net_profit,
+        "totalTrades": s.total_trades,
+        "wins": s.wins,
+        "losses": s.losses,
+        "winRate": s.win_rate,
+        "netProfit": s.net_profit,
         "avgProfit": s.avg_profit,
-        "largestWin": s.largest_win, "largestLoss": s.largest_loss,
+        "largestWin": s.largest_win,
+        "largestLoss": s.largest_loss,
     }
 
 
@@ -569,9 +614,14 @@ def footprint_to_dto(fp) -> dict:
     return {
         "time": fp.time,
         "levels": [
-            {"price": l.price, "bid": l.bid, "ask": l.ask,
-             "delta": l.delta, "imbalance": l.imbalance,
-             "stacked": getattr(l, "stacked", False)}
+            {
+                "price": l.price,
+                "bid": l.bid,
+                "ask": l.ask,
+                "delta": l.delta,
+                "imbalance": l.imbalance,
+                "stacked": getattr(l, "stacked", False),
+            }
             for l in fp.levels
         ],
         "pocPrice": fp.poc_price,

@@ -54,6 +54,8 @@ class TradeManagerConfig:
     cvd_breakeven: bool = True
     # Trail activation at 1R instead of 50% TP distance
     trail_activation_r: float = 1.0
+    # Instrument tick size for SL/TP rounding
+    tick_size: float = 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +94,11 @@ class ManagedPosition:
     # Session-aware time stop fields
     session_phase: str = ""  # "MORNING" or "AFTERNOON"
     is_expiry: bool = False  # True on options expiry day
+
+    # Reconciliation protection
+    registered_at: float = (
+        0.0  # time.time() when registered — protects from race condition
+    )
     applied_time_stop: float = 0.0  # computed session time stop (never shrinks)
 
     # Scale-in state (Fabio Rule 4: 40/30/30)
@@ -526,6 +533,7 @@ class TradeManager:
             scale_breakout_price=breakout_price,
             session_phase=session_phase,
             is_expiry=is_expiry,
+            registered_at=time.time(),
         )
         with self._lock:
             self._positions[position_id] = mp
@@ -897,9 +905,28 @@ class TradeManager:
 
         This is the canonical reconciliation hook between the portfolio's open
         positions and the lifecycle manager's managed-position registry.
+
+        Protects recently registered positions (< 5s) from being removed by
+        race conditions between signal execution and tick processing threads.
         """
         consistency = self.get_position_consistency(open_ids, symbol=symbol)
         stale_ids = list(consistency.stale_managed_ids)
+
+        # Protect recently registered positions from race condition removal
+        now = current_time or time.time()
+        with self._lock:
+            protected = {
+                pid
+                for pid in stale_ids
+                if pid in self._positions
+                and (now - self._positions[pid].registered_at) < 5.0
+            }
+            stale_ids = [pid for pid in stale_ids if pid not in protected]
+            if protected:
+                logger.info(
+                    "TradeManager: protecting %d recently registered positions from reconciliation",
+                    len(protected),
+                )
 
         for position_id in stale_ids:
             self.unregister_position(position_id, current_time=current_time)
@@ -911,7 +938,16 @@ class TradeManager:
         For LONG positions, new_sl must be > current stop_loss (tighten up).
         For SHORT positions, new_sl must be < current stop_loss (tighten down).
         Returns True if adjusted, False if rejected or position not found.
+
+        SL is rounded to tick_size boundary before applying.
         """
+        from app.domain.services.tick_utils import round_to_tick
+
+        # Round new SL to tick boundary
+        ts = self.config.tick_size
+        if ts > 0:
+            new_sl = round_to_tick(new_sl, ts)
+
         with self._lock:
             mp = self._positions.get(position_id)
             if mp is None:
@@ -981,7 +1017,12 @@ class TradeManager:
         - 2 sigma tighten: if price at/beyond 2-sigma band, SL tightened to 50%
           of current price-to-SL distance.
         - SL only ratchets (never loosens).
+        - SL is rounded to tick_size boundary.
         """
+        from app.domain.services.tick_utils import round_to_tick
+
+        ts = self.config.tick_size
+
         with self._lock:
             mp = self._positions.get(position_id)
             if mp is None:
@@ -1022,13 +1063,13 @@ class TradeManager:
                     tightened = current_price - (current_distance * 0.5)
                     trail_sl = max(trail_sl, tightened)
 
-                # Never lower SL (ratchet only)
+                # Never lower SL (ratchet only) — round to tick boundary
                 if trail_sl > mp.stop_loss:
-                    mp.stop_loss = trail_sl
+                    mp.stop_loss = round_to_tick(trail_sl, ts) if ts > 0 else trail_sl
                     logger.info(
                         "TradeManager: VWAP trail for %s — SL moved to %.2f (%.1fR)",
                         position_id,
-                        trail_sl,
+                        mp.stop_loss,
                         unrealised_r,
                     )
 
@@ -1050,13 +1091,13 @@ class TradeManager:
                     tightened = current_price + (current_distance * 0.5)
                     trail_sl = min(trail_sl, tightened)
 
-                # Never loosen SL (ratchet only)
+                # Never loosen SL (ratchet only) — round to tick boundary
                 if trail_sl < mp.stop_loss:
-                    mp.stop_loss = trail_sl
+                    mp.stop_loss = round_to_tick(trail_sl, ts) if ts > 0 else trail_sl
                     logger.info(
                         "TradeManager: VWAP trail for %s — SL moved to %.2f (%.1fR)",
                         position_id,
-                        trail_sl,
+                        mp.stop_loss,
                         unrealised_r,
                     )
 

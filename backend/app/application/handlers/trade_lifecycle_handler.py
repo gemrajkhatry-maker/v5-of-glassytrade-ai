@@ -197,6 +197,11 @@ class TradeLifecycleHandler:
                                 realized_pnl,
                             )
 
+                # Apply partition manager's trail SL (breakeven/P3 trail) to trade manager
+                p_state_after = self._partition_states.get(pos.id)
+                if p_state_after and p_state_after.trail_sl is not None:
+                    self._trade_manager.adjust_stop_loss(pos.id, p_state_after.trail_sl)
+
             exit_sig = self._trade_manager.check_position(
                 pos.id,
                 current_price,
@@ -323,22 +328,14 @@ class TradeLifecycleHandler:
 
     def get_position_consistency(self, portfolio: Portfolio, symbol: str | None = None):
         """Return a comparison of portfolio-open positions vs lifecycle-managed positions."""
-        open_ids = {
-            p.id
-            for p in portfolio.positions
-            if getattr(p, "status", None) == "OPEN" or getattr(p, "is_open", False)
-        }
+        open_ids = portfolio.open_position_ids()
         return self._trade_manager.get_position_consistency(open_ids, symbol=symbol)
 
     def reconcile_portfolio(
         self, portfolio: Portfolio, symbol: str | None = None
     ) -> tuple[str, ...]:
         """Reconcile managed lifecycle state with the portfolio's open positions."""
-        open_ids = {
-            p.id
-            for p in portfolio.positions
-            if getattr(p, "status", None) == "OPEN" or getattr(p, "is_open", False)
-        }
+        open_ids = portfolio.open_position_ids()
         return self._trade_manager.sync_with_open_position_ids(open_ids, symbol=symbol)
 
     def ensure_position_consistency(

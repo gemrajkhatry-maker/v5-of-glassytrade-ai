@@ -75,6 +75,7 @@ class DriveTracker:
         level: float,
         candle: OHLC,
         direction: str,
+        tick_size: float = 0.05,
     ) -> DriveResult:
         """Classify the current touch of a key level.
 
@@ -87,7 +88,9 @@ class DriveTracker:
         Returns:
             DriveResult with drive number and entry validity.
         """
-        bucket = round(level, 1)
+        from app.domain.services.tick_utils import round_to_tick
+
+        bucket = round_to_tick(level, tick_size)
 
         # First touch of this level
         if bucket not in self._levels:
@@ -112,11 +115,11 @@ class DriveTracker:
             if self._alert_manager and rejected:
                 try:
                     self._alert_manager.set_price_alert(
-                        symbol=getattr(self, '_current_symbol', ''),
+                        symbol=getattr(self, "_current_symbol", ""),
                         price=level,
                         direction=direction,
-                        level_type='DRIVE_LEVEL',
-                        tick_size=0.1,  # Will be overridden by caller
+                        level_type="DRIVE_LEVEL",
+                        tick_size=tick_size,
                     )
                 except Exception:
                     pass
@@ -140,15 +143,20 @@ class DriveTracker:
                 if state.d1_rejected:
                     # QUANT SAFUGUARD: Enforce Time/Price Decay (FR-05-06)
                     from dateutil import parser
+
                     try:
                         t1 = parser.parse(state.last_touch_time)
                         t2 = parser.parse(candle.time)
                         time_decay_seconds = (t2 - t1).total_seconds()
                     except Exception:
                         time_decay_seconds = 180  # bypass if no time is provided
-                        
+
                     if time_decay_seconds < 180:
-                        logger.info("D2 at level %.2f suppressed: insufficient time decay (%.0fs)", level, time_decay_seconds)
+                        logger.info(
+                            "D2 at level %.2f suppressed: insufficient time decay (%.0fs)",
+                            level,
+                            time_decay_seconds,
+                        )
                         # Revert the count increment so it can still fire later
                         state.drive_count = 1
                         return DriveResult(
@@ -157,9 +165,9 @@ class DriveTracker:
                             rejection_detected=False,
                             fading_momentum=False,
                             level=level,
-                            reason="D2: Insufficient time decay between touches (requires 3 minutes)"
+                            reason="D2: Insufficient time decay between touches (requires 3 minutes)",
                         )
-                        
+
                     # Check momentum fade
                     current_vol = float(candle.volume)
                     current_range = float(candle.high - candle.low)
@@ -203,7 +211,7 @@ class DriveTracker:
             if self._alert_manager and state.drive_count >= 3:
                 try:
                     self._alert_manager.clear_alerts_for_level(
-                        getattr(self, '_current_symbol', ''), level
+                        getattr(self, "_current_symbol", ""), level
                     )
                 except Exception:
                     pass
@@ -250,20 +258,24 @@ class DriveTracker:
 
     def is_level_exhausted(self, level: float) -> bool:
         """Check if a level has been tested 3+ times (D3+)."""
-        bucket = round(level, 1)
+        from app.domain.services.tick_utils import round_to_tick
+
+        bucket = round_to_tick(level, tick_size)
         state = self._levels.get(bucket)
         return state is not None and state.drive_count >= 3
 
     def get_drive_count(self, level: float) -> int:
         """Get current drive count for a level."""
-        bucket = round(level, 1)
+        from app.domain.services.tick_utils import round_to_tick
+
+        bucket = round_to_tick(level, tick_size)
         state = self._levels.get(bucket)
         return state.drive_count if state else 0
-
 
     def set_current_symbol(self, symbol: str) -> None:
         """Set current symbol for alert tracking."""
         self._current_symbol = symbol
+
     def reset(self) -> None:
         """Reset all drive states. Call at session open (FR-05-08)."""
         self._levels.clear()

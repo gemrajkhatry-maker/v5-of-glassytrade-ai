@@ -36,6 +36,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 # ---------------------------------------------------------------------------
 
+
 def _delta_proxy(o: float, h: float, l: float, c: float, v: float) -> float:
     """Approximate delta from candle body when taker_buy_volume unavailable."""
     spread = h - l
@@ -48,6 +49,7 @@ def _delta_proxy(o: float, h: float, l: float, c: float, v: float) -> float:
 def _exchange_enum(exchange_str: str | None):
     """Convert exchange string to brokers Exchange enum."""
     from brokers.broker.types import Exchange
+
     mapping = {
         "NSE": Exchange.NSE,
         "NFO": Exchange.NFO,
@@ -69,8 +71,13 @@ class DhanMarketDataAdapter(MarketDataPort):
     wait on the result.
     """
 
-    def __init__(self, symbols: list[str] | None = None, exchange: str | None = None,
-                 client_id: str | None = None, access_token: str | None = None) -> None:
+    def __init__(
+        self,
+        symbols: list[str] | None = None,
+        exchange: str | None = None,
+        client_id: str | None = None,
+        access_token: str | None = None,
+    ) -> None:
         self._symbols = symbols or ["NIFTY", "BANKNIFTY"]
         self._exchange_str = exchange  # e.g. "MCX", "NSE", "NFO"
         self._client_id = client_id
@@ -84,6 +91,7 @@ class DhanMarketDataAdapter(MarketDataPort):
         """Return DhanBroker instance (lazy-created, cached)."""
         if self._broker is None:
             from brokers.broker.dhan.application.broker import DhanBroker
+
             self._broker = DhanBroker.create(
                 client_id=self._client_id,
                 access_token=self._access_token,
@@ -103,7 +111,9 @@ class DhanMarketDataAdapter(MarketDataPort):
                 return
             broker = self.get_broker()
             if not broker.is_initialized:
-                logger.info("Initializing DhanBroker (sync path, timeout=%ss)...", timeout)
+                logger.info(
+                    "Initializing DhanBroker (sync path, timeout=%ss)...", timeout
+                )
                 try:
                     loop = asyncio.new_event_loop()
                     try:
@@ -136,10 +146,23 @@ class DhanMarketDataAdapter(MarketDataPort):
             self._initialized = True
             logger.info("DhanBroker initialized (instrument cache ready)")
 
-    _MCX_UNDERLYINGS = frozenset({
-        "CRUDEOIL", "GOLD", "SILVER", "NATURALGAS", "GOLDM", "SILVERM",
-        "CRUDEOILM", "COPPER", "ZINC", "ALUMINIUM", "LEAD", "NICKEL", "COTTONCANDY",
-    })
+    _MCX_UNDERLYINGS = frozenset(
+        {
+            "CRUDEOIL",
+            "GOLD",
+            "SILVER",
+            "NATURALGAS",
+            "GOLDM",
+            "SILVERM",
+            "CRUDEOILM",
+            "COPPER",
+            "ZINC",
+            "ALUMINIUM",
+            "LEAD",
+            "NICKEL",
+            "COTTONCANDY",
+        }
+    )
 
     def _make_instrument(self, symbol: str):
         """Build Instrument for the given display symbol.
@@ -151,6 +174,7 @@ class DhanMarketDataAdapter(MarketDataPort):
         WS exchange segment (MCX_FNO vs MCX_COMM).
         """
         from brokers.broker.entities import Instrument, OptionType
+
         sym_upper = symbol.upper()
         is_option = "CALL" in sym_upper or "PUT" in sym_upper
         if is_option:
@@ -163,14 +187,25 @@ class DhanMarketDataAdapter(MarketDataPort):
             exchange = _exchange_enum(self._exchange_str)
             return Instrument(symbol=symbol, exchange=exchange)
 
-    def get_option_chain(self, underlying: str, exchange: str = "NFO", expiry_index: int = 0):
-        """Fetch option chain, converting string exchange to broker enum."""
-        self.ensure_initialized_sync()
-        broker = self.get_broker()
-        ex = _exchange_enum(exchange)
-        return broker.get_option_chain(
-            underlying=underlying, exchange=ex, expiry_index=expiry_index,
-        )
+    def get_option_chain(
+        self, underlying: str, exchange: str = "NFO", expiry_index: int = 0
+    ):
+        """Fetch option chain, converting string exchange to broker enum.
+
+        Returns None if chain is unavailable (e.g., MCX commodity without options).
+        """
+        try:
+            self.ensure_initialized_sync()
+            broker = self.get_broker()
+            ex = _exchange_enum(exchange)
+            return broker.get_option_chain(
+                underlying=underlying,
+                exchange=ex,
+                expiry_index=expiry_index,
+            )
+        except Exception as e:
+            logger.debug("get_option_chain(%s, %s) failed: %s", underlying, exchange, e)
+            return None
 
     async def scan_candidates(self, limit: int = 6) -> list[str]:
         return self._symbols[:limit]
@@ -184,7 +219,18 @@ class DhanMarketDataAdapter(MarketDataPort):
 
             instrument = self._make_instrument(symbol)
 
-            is_intraday = interval in ("1m", "5m", "15m", "25m", "1h", "60", "1", "5", "15", "25")
+            is_intraday = interval in (
+                "1m",
+                "5m",
+                "15m",
+                "25m",
+                "1h",
+                "60",
+                "1",
+                "5",
+                "15",
+                "25",
+            )
             # FIX: Use 90 days for intraday (Dhan allows 90 days in one go)
             days_back = 90 if is_intraday else 365
 
@@ -193,13 +239,24 @@ class DhanMarketDataAdapter(MarketDataPort):
 
             # Map common interval names to Dhan format
             interval_map = {
-                "1m": "1", "5m": "5", "15m": "15", "25m": "25",
-                "1h": "60", "60": "60", "1d": "1d",
+                "1m": "1",
+                "5m": "5",
+                "15m": "15",
+                "25m": "25",
+                "1h": "60",
+                "60": "60",
+                "1d": "1d",
             }
             dhan_interval = interval_map.get(interval, interval)
 
-            logger.info("fetch_history: symbol=%s exchange=%s interval=%s from=%s to=%s",
-                        instrument.symbol, instrument.exchange, dhan_interval, start, end)
+            logger.info(
+                "fetch_history: symbol=%s exchange=%s interval=%s from=%s to=%s",
+                instrument.symbol,
+                instrument.exchange,
+                dhan_interval,
+                start,
+                end,
+            )
             df = broker.get_historical(
                 instrument=instrument,
                 from_date=start,
@@ -226,6 +283,7 @@ class DhanMarketDataAdapter(MarketDataPort):
                     time_str = ts.astimezone(IST).isoformat()
                 elif isinstance(ts, (int, float)):
                     from datetime import datetime as _dt
+
                     time_str = _dt.fromtimestamp(float(ts), tz=IST).isoformat()
                 else:
                     time_str = str(ts)
@@ -238,13 +296,19 @@ class DhanMarketDataAdapter(MarketDataPort):
                 delta = _delta_proxy(o, h, l, c, v)
                 vwap = (h + l + c) / 3  # industry-standard typical price
 
-                result.append(OHLC(
-                    time=time_str,
-                    open=o, high=h, low=l, close=c,
-                    volume=v, vwap=vwap,
-                    taker_buy_volume=0.0,
-                    delta=delta,
-                ))
+                result.append(
+                    OHLC(
+                        time=time_str,
+                        open=o,
+                        high=h,
+                        low=l,
+                        close=c,
+                        volume=v,
+                        vwap=vwap,
+                        taker_buy_volume=0.0,
+                        delta=delta,
+                    )
+                )
 
             logger.info("Fetched %d candles for %s (%s)", len(result), symbol, interval)
             return result
@@ -265,11 +329,19 @@ class DhanMarketDataAdapter(MarketDataPort):
             if quote.bid_depth:
                 for lvl in quote.bid_depth:
                     if lvl.price > 0:
-                        bids.append(OrderBookLevel(price=float(lvl.price), quantity=float(lvl.quantity)))
+                        bids.append(
+                            OrderBookLevel(
+                                price=float(lvl.price), quantity=float(lvl.quantity)
+                            )
+                        )
             if quote.ask_depth:
                 for lvl in quote.ask_depth:
                     if lvl.price > 0:
-                        asks.append(OrderBookLevel(price=float(lvl.price), quantity=float(lvl.quantity)))
+                        asks.append(
+                            OrderBookLevel(
+                                price=float(lvl.price), quantity=float(lvl.quantity)
+                            )
+                        )
             if not bids and not asks:
                 return None
             return OrderBook(bids=tuple(bids), asks=tuple(asks))
@@ -302,7 +374,9 @@ class DhanMarketDataAdapter(MarketDataPort):
         async for pkt in broker.stream_full(instruments):
             pkt_count += 1
             if pkt_count <= 3 or pkt_count % 100 == 0:
-                logger.debug("stream_full pkt #%d: ltp=%s", pkt_count, getattr(pkt, 'ltp', '?'))
+                logger.debug(
+                    "stream_full pkt #%d: ltp=%s", pkt_count, getattr(pkt, "ltp", "?")
+                )
             yield asdict(pkt)
 
     async def stream_poll(
@@ -321,7 +395,8 @@ class DhanMarketDataAdapter(MarketDataPort):
 
         logger.info(
             "stream_poll: REST polling %d symbol(s) every %.1fs (MCX OPTFUT fallback)",
-            len(symbols), poll_interval,
+            len(symbols),
+            poll_interval,
         )
 
         while True:
@@ -349,7 +424,9 @@ class DhanMarketDataAdapter(MarketDataPort):
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    logger.debug("stream_poll: LTP fetch failed for %s", sym, exc_info=True)
+                    logger.debug(
+                        "stream_poll: LTP fetch failed for %s", sym, exc_info=True
+                    )
 
             # Sleep the remainder of poll_interval (accounting for fetch time)
             elapsed = loop.time() - poll_start

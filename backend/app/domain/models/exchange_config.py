@@ -60,6 +60,37 @@ class ExchangeConfig:
     eia_symbols: FrozenSet[str] = frozenset()
     eia_suppression_minutes: int = 15
 
+    # Instrument-level config — per underlying
+    tick_sizes: Dict[str, float] = field(default_factory=dict)  # underlying → tick_size
+    lot_sizes: Dict[str, int] = field(default_factory=dict)  # underlying → lot_size
+    point_values: Dict[str, float] = field(
+        default_factory=dict
+    )  # underlying → point_value (INR per tick)
+
+    def get_tick_size(self, symbol_or_underlying: str) -> float:
+        """Get tick size for a symbol or underlying. Defaults to 0.05."""
+        clean = (
+            symbol_or_underlying.upper().replace("NSE:", "").replace("MCX:", "").strip()
+        )
+        underlying = clean.split("-")[0].split(" ")[0]
+        return self.tick_sizes.get(underlying, 0.05)
+
+    def get_lot_size(self, symbol_or_underlying: str) -> int:
+        """Get lot size for a symbol or underlying. Defaults to 25."""
+        clean = (
+            symbol_or_underlying.upper().replace("NSE:", "").replace("MCX:", "").strip()
+        )
+        underlying = clean.split("-")[0].split(" ")[0]
+        return self.lot_sizes.get(underlying, 25)
+
+    def get_point_value(self, symbol_or_underlying: str) -> float:
+        """Get point value (INR per tick) for a symbol or underlying. Defaults to 1.0."""
+        clean = (
+            symbol_or_underlying.upper().replace("NSE:", "").replace("MCX:", "").strip()
+        )
+        underlying = clean.split("-")[0].split(" ")[0]
+        return self.point_values.get(underlying, 1.0)
+
     @classmethod
     def for_exchange(cls, exchange: str) -> ExchangeConfig:
         """Factory — returns the correct config for the given exchange.
@@ -135,6 +166,9 @@ class ExchangeConfig:
             eia_suppression_minutes=int(
                 data.get("eia_suppression_minutes", base.eia_suppression_minutes)
             ),
+            tick_sizes=data.get("tick_sizes", base.tick_sizes),
+            lot_sizes=data.get("lot_sizes", base.lot_sizes),
+            point_values=data.get("point_values", base.point_values),
         )
 
     @classmethod
@@ -164,6 +198,21 @@ class ExchangeConfig:
             ),
             eia_symbols=frozenset(),
             eia_suppression_minutes=0,
+            tick_sizes={
+                "NIFTY": 0.05,
+                "BANKNIFTY": 0.05,
+                "FINNIFTY": 0.05,
+            },
+            lot_sizes={
+                "NIFTY": 25,
+                "BANKNIFTY": 15,
+                "FINNIFTY": 25,
+            },
+            point_values={
+                "NIFTY": 1.0,
+                "BANKNIFTY": 1.0,
+                "FINNIFTY": 1.0,
+            },
         )
 
     @classmethod
@@ -209,6 +258,39 @@ class ExchangeConfig:
             ),
             eia_symbols=frozenset({"NATURALGAS", "CRUDEOIL"}),
             eia_suppression_minutes=15,
+            tick_sizes={
+                "CRUDEOIL": 1.0,
+                "NATURALGAS": 0.1,
+                "GOLD": 1.0,
+                "SILVER": 1.0,
+                "COPPER": 0.05,
+                "ZINC": 0.05,
+                "ALUMINIUM": 0.05,
+                "LEAD": 0.05,
+                "NICKEL": 1.0,
+            },
+            lot_sizes={
+                "CRUDEOIL": 100,
+                "NATURALGAS": 1250,
+                "GOLD": 100,
+                "SILVER": 30,
+                "COPPER": 2500,
+                "ZINC": 5000,
+                "ALUMINIUM": 5000,
+                "LEAD": 5000,
+                "NICKEL": 1500,
+            },
+            point_values={
+                "CRUDEOIL": 100.0,
+                "NATURALGAS": 1250.0,
+                "GOLD": 100.0,
+                "SILVER": 30.0,
+                "COPPER": 2500.0,
+                "ZINC": 5000.0,
+                "ALUMINIUM": 5000.0,
+                "LEAD": 5000.0,
+                "NICKEL": 1500.0,
+            },
         )
 
     def is_mcx(self) -> bool:

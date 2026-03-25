@@ -21,6 +21,7 @@ def mgr() -> TradeManager:
 
 # ---- 1. Registration ----
 
+
 def test_register_position_creates_managed_position(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 99.0, 102.0)
     assert mgr.has_managed_positions("NIFTY")
@@ -29,6 +30,7 @@ def test_register_position_creates_managed_position(mgr: TradeManager):
 
 
 # ---- 2. Stop Loss — Long ----
+
 
 def test_stop_loss_long(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
@@ -40,6 +42,7 @@ def test_stop_loss_long(mgr: TradeManager):
 
 # ---- 3. Stop Loss — Short ----
 
+
 def test_stop_loss_short(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "SHORT", 100.0, 105.0, 90.0)
     sig = mgr.check_position("P1", 105.0)
@@ -48,6 +51,7 @@ def test_stop_loss_short(mgr: TradeManager):
 
 
 # ---- 4. Take Profit — Long ----
+
 
 @pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_take_profit_long(mgr: TradeManager):
@@ -59,6 +63,7 @@ def test_take_profit_long(mgr: TradeManager):
 
 # ---- 5. Take Profit — Short ----
 
+
 @pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_take_profit_short(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "SHORT", 100.0, 105.0, 90.0)
@@ -69,6 +74,7 @@ def test_take_profit_short(mgr: TradeManager):
 
 # ---- 6. No Exit ----
 
+
 def test_no_exit_when_price_between_sl_and_tp(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     # Price at 102 is within SL-TP range and below partial TP threshold (105)
@@ -77,6 +83,7 @@ def test_no_exit_when_price_between_sl_and_tp(mgr: TradeManager):
 
 
 # ---- 7. Trailing Stop Activation ----
+
 
 @pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_trailing_stop_activation(mgr: TradeManager):
@@ -94,6 +101,7 @@ def test_trailing_stop_activation(mgr: TradeManager):
 
 
 # ---- 8. Trailing Stop Ratchet ----
+
 
 @pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_trailing_stop_ratchets_up(mgr: TradeManager):
@@ -113,6 +121,7 @@ def test_trailing_stop_ratchets_up(mgr: TradeManager):
 
 # ---- 9. Trailing Stop Hit ----
 
+
 @pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_trailing_stop_hit(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=True)
@@ -128,6 +137,7 @@ def test_trailing_stop_hit(mgr: TradeManager):
 
 # ---- 10. Trail Not Allowed ----
 
+
 def test_trail_not_allowed(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=False)
     mgr.check_position("P1", 105.0)  # partial TP fires at 50% of TP distance
@@ -137,6 +147,7 @@ def test_trail_not_allowed(mgr: TradeManager):
 
 
 # ---- 11. Time Stop ----
+
 
 def test_time_stop(mgr: TradeManager):
     config = TradeManagerConfig(max_hold_seconds=60)
@@ -153,6 +164,7 @@ def test_time_stop(mgr: TradeManager):
 
 
 # ---- 12. Cooldown ----
+
 
 def test_cooldown_after_unregister(mgr: TradeManager):
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
@@ -171,11 +183,13 @@ def test_cooldown_expires():
 
 # ---- 13. Unregistered Position ----
 
+
 def test_check_unknown_position(mgr: TradeManager):
     assert mgr.check_position("UNKNOWN", 100.0) is None
 
 
 # ---- 14. has_managed_positions ----
+
 
 def test_has_managed_positions(mgr: TradeManager):
     assert mgr.has_managed_positions("NIFTY") is False
@@ -187,11 +201,21 @@ def test_has_managed_positions(mgr: TradeManager):
 
 # ---- 15. Runner logic (Trend model) ----
 
+
 @pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_runner_activates_on_tp_with_allow_trail():
     """When allow_trail=True and TP is hit, runner should activate (partial exit)."""
     mgr = TradeManager()
-    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=True, market_state="IMBALANCED")
+    mgr.register_position(
+        "P1",
+        "NIFTY",
+        "LONG",
+        100.0,
+        95.0,
+        110.0,
+        allow_trail=True,
+        market_state="IMBALANCED",
+    )
     # Price hits TP
     result = mgr.check_position("P1", 110.0)
     assert result is not None
@@ -207,13 +231,23 @@ def test_runner_activates_on_tp_with_allow_trail():
 def test_no_runner_on_mean_reversion():
     """Mean reversion (allow_trail=False) should close 100% at TP."""
     mgr = TradeManager()
-    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=False, market_state="BALANCED")
+    mgr.register_position(
+        "P1",
+        "NIFTY",
+        "LONG",
+        100.0,
+        95.0,
+        110.0,
+        allow_trail=False,
+        market_state="BALANCED",
+    )
     result = mgr.check_position("P1", 110.0)
     assert result is not None
     assert result.reason == ExitReason.TAKE_PROFIT  # full close, not partial
 
 
 # ---- 16. MAE/MFE tracking ----
+
 
 def test_mae_mfe_tracking():
     """MAE and MFE should be tracked as price moves."""
@@ -242,6 +276,7 @@ def test_initial_stop_preserved():
 
 
 # ---- 17. R-multiple in position state ----
+
 
 def test_r_multiple_in_position_state():
     """get_position_state should include r_multiple."""
@@ -278,11 +313,14 @@ def test_get_managed_position_ids_filters_by_symbol_and_open_ids():
 
 
 def test_sync_with_open_position_ids_removes_stale_managed_positions():
+    import time as _time
+
     mgr = TradeManager()
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
     mgr.register_position("P2", "BANKNIFTY", "SHORT", 200.0, 210.0, 180.0)
 
-    stale = mgr.sync_with_open_position_ids({"P1"})
+    # Pass current_time > registered_at + 5s to bypass race condition protection
+    stale = mgr.sync_with_open_position_ids({"P1"}, current_time=_time.time() + 10)
 
     assert stale == ("P2",)
     assert mgr.has_managed_positions("BANKNIFTY") is False
@@ -318,6 +356,7 @@ def test_get_position_consistency_symbol_filter_excludes_other_symbols():
 
 
 # ---- 18. Breakeven at 1R ----
+
 
 @pytest.mark.skip(reason="Migrated to PartitionExitManager (FR-08)")
 def test_breakeven_at_1r_long():
@@ -450,6 +489,7 @@ def test_cvd_breakeven_then_doji_holds():
 
 # ---- 22. Spread Blowout Detection ----
 
+
 def test_spread_below_threshold_no_exit():
     """Spread < 3% of premium should not trigger exit."""
     mgr = TradeManager()
@@ -487,7 +527,9 @@ def test_spread_no_order_book_data_skips():
     # Zero bid/ask
     assert mgr.check_spread_blowout("P1", best_bid=0, best_ask=0, premium=100.0) is None
     # Negative values
-    assert mgr.check_spread_blowout("P1", best_bid=-1, best_ask=101, premium=100.0) is None
+    assert (
+        mgr.check_spread_blowout("P1", best_bid=-1, best_ask=101, premium=100.0) is None
+    )
     # Zero premium
     assert mgr.check_spread_blowout("P1", best_bid=99, best_ask=101, premium=0) is None
 
@@ -501,11 +543,14 @@ def test_spread_unknown_position_returns_none():
 
 # ---- Session-Aware Time Stops ----
 
+
 def test_session_time_stop_morning_balanced():
     """Morning balanced session should use 1200s time stop."""
     stop = TradeManager.get_session_time_stop(
-        market_state="BALANCED", session_phase="MORNING",
-        is_expiry=False, time_to_close=0.0,
+        market_state="BALANCED",
+        session_phase="MORNING",
+        is_expiry=False,
+        time_to_close=0.0,
     )
     assert stop == 1200.0
 
@@ -513,8 +558,10 @@ def test_session_time_stop_morning_balanced():
 def test_session_time_stop_afternoon_imbalanced():
     """Afternoon imbalanced session should use 1800s time stop."""
     stop = TradeManager.get_session_time_stop(
-        market_state="IMBALANCED", session_phase="AFTERNOON",
-        is_expiry=False, time_to_close=0.0,
+        market_state="IMBALANCED",
+        session_phase="AFTERNOON",
+        is_expiry=False,
+        time_to_close=0.0,
     )
     assert stop == 1800.0
 
@@ -522,8 +569,10 @@ def test_session_time_stop_afternoon_imbalanced():
 def test_session_time_stop_expiry_day():
     """Expiry day should use flat 600s regardless of session/state."""
     stop = TradeManager.get_session_time_stop(
-        market_state="BALANCED", session_phase="MORNING",
-        is_expiry=True, time_to_close=0.0,
+        market_state="BALANCED",
+        session_phase="MORNING",
+        is_expiry=True,
+        time_to_close=0.0,
     )
     assert stop == 600.0
 
@@ -533,8 +582,10 @@ def test_session_time_stop_near_close():
     # 20 min to close = 1200s; phase stop for morning balanced = 1200s
     # near_close = 1200 - 300 = 900; min(1200, 900) = 900
     stop = TradeManager.get_session_time_stop(
-        market_state="BALANCED", session_phase="MORNING",
-        is_expiry=False, time_to_close=1200.0,
+        market_state="BALANCED",
+        session_phase="MORNING",
+        is_expiry=False,
+        time_to_close=1200.0,
     )
     assert stop == 900.0
 
@@ -542,8 +593,10 @@ def test_session_time_stop_near_close():
 def test_session_time_stop_very_near_close():
     """Less than 5 min to close should force immediate exit (1s)."""
     stop = TradeManager.get_session_time_stop(
-        market_state="BALANCED", session_phase="MORNING",
-        is_expiry=False, time_to_close=200.0,
+        market_state="BALANCED",
+        session_phase="MORNING",
+        is_expiry=False,
+        time_to_close=200.0,
     )
     assert stop == 1.0
 
@@ -553,8 +606,14 @@ def test_session_time_stop_never_shrinks():
     mgr = TradeManager()
     entry_time = time.time() - 100  # entered 100s ago
     mgr.register_position(
-        "P1", "NIFTY", "LONG", 100.0, 95.0, 110.0,
-        market_state="BALANCED", session_phase="MORNING",
+        "P1",
+        "NIFTY",
+        "LONG",
+        100.0,
+        95.0,
+        110.0,
+        market_state="BALANCED",
+        session_phase="MORNING",
         entry_time=entry_time,
     )
     mp = mgr._positions["P1"]
@@ -579,14 +638,18 @@ def test_session_time_stop_never_shrinks():
 def test_session_time_stop_no_session_fallback():
     """No session data should fall back to 1800/7200."""
     stop = TradeManager.get_session_time_stop(
-        market_state="BALANCED", session_phase="",
-        is_expiry=False, time_to_close=0.0,
+        market_state="BALANCED",
+        session_phase="",
+        is_expiry=False,
+        time_to_close=0.0,
     )
     assert stop == 1800.0
 
     stop = TradeManager.get_session_time_stop(
-        market_state="IMBALANCED", session_phase="",
-        is_expiry=False, time_to_close=0.0,
+        market_state="IMBALANCED",
+        session_phase="",
+        is_expiry=False,
+        time_to_close=0.0,
     )
     assert stop == 7200.0
 
@@ -597,8 +660,14 @@ def test_session_time_stop_fires_at_correct_time():
     mgr = TradeManager(config)
     entry_time = time.time() - 1300  # 1300s ago (>1200s morning balanced)
     mgr.register_position(
-        "P1", "NIFTY", "LONG", 100.0, 95.0, 110.0,
-        market_state="BALANCED", session_phase="MORNING",
+        "P1",
+        "NIFTY",
+        "LONG",
+        100.0,
+        95.0,
+        110.0,
+        market_state="BALANCED",
+        session_phase="MORNING",
         entry_time=entry_time,
     )
     # Advance past grace period
@@ -612,8 +681,10 @@ def test_session_time_stop_fires_at_correct_time():
 def test_session_time_stop_morning_imbalanced():
     """Morning imbalanced session should use 2700s."""
     stop = TradeManager.get_session_time_stop(
-        market_state="IMBALANCED", session_phase="MORNING",
-        is_expiry=False, time_to_close=0.0,
+        market_state="IMBALANCED",
+        session_phase="MORNING",
+        is_expiry=False,
+        time_to_close=0.0,
     )
     assert stop == 2700.0
 
@@ -621,13 +692,16 @@ def test_session_time_stop_morning_imbalanced():
 def test_session_time_stop_afternoon_balanced():
     """Afternoon balanced session should use 900s."""
     stop = TradeManager.get_session_time_stop(
-        market_state="BALANCED", session_phase="AFTERNOON",
-        is_expiry=False, time_to_close=0.0,
+        market_state="BALANCED",
+        session_phase="AFTERNOON",
+        is_expiry=False,
+        time_to_close=0.0,
     )
     assert stop == 900.0
 
 
 # ---- VWAP Trail Tests ----
+
 
 def test_vwap_trail_at_1_5r_long():
     """At 1.5R profit, SL moves to nearest VWAP band above entry."""
@@ -636,9 +710,13 @@ def test_vwap_trail_at_1_5r_long():
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0, allow_trail=True)
     # VWAP bands: vwap=100, upper1=103, upper2=106, lower1=97, lower2=94
     mgr.apply_vwap_trail(
-        "P1", current_price=107.5,
-        vwap=100.0, vwap_upper_1=103.0, vwap_lower_1=97.0,
-        vwap_upper_2=106.0, vwap_lower_2=94.0,
+        "P1",
+        current_price=107.5,
+        vwap=100.0,
+        vwap_upper_1=103.0,
+        vwap_lower_1=97.0,
+        vwap_upper_2=106.0,
+        vwap_lower_2=94.0,
     )
     mp = mgr._positions["P1"]
     # Should trail to highest band below price and above entry: 106
@@ -654,9 +732,13 @@ def test_vwap_trail_at_2sigma_tighten():
     # Price at vwap_upper_2 (110) -> overextended, triggers 2sigma tighten
     # unrealised_r = (110 - 100) / 5 = 2.0 >= 1.5
     mgr.apply_vwap_trail(
-        "P1", current_price=110.0,
-        vwap=100.0, vwap_upper_1=103.0, vwap_lower_1=97.0,
-        vwap_upper_2=110.0, vwap_lower_2=90.0,
+        "P1",
+        current_price=110.0,
+        vwap=100.0,
+        vwap_upper_1=103.0,
+        vwap_lower_1=97.0,
+        vwap_upper_2=110.0,
+        vwap_lower_2=90.0,
     )
     mp = mgr._positions["P1"]
     # 2sigma tighten: current_distance = 110 - 95 = 15, tightened = 110 - 7.5 = 102.5
@@ -667,14 +749,22 @@ def test_vwap_trail_at_2sigma_tighten():
 
 # ---- Imbalance Tighten Tests (Task 21) ----
 
+
 class TestImbalanceTighten:
     def test_opposing_imbalance_tightens_sl_long(self):
         """LONG position + SELL imbalance -> SL tightened by 30% of distance."""
         from app.domain.trading.models.value_objects import StackedImbalance
+
         mgr = TradeManager()
         mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
         imbalances = [
-            StackedImbalance(direction="SELL", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+            StackedImbalance(
+                direction="SELL",
+                price_low=99,
+                price_high=101,
+                magnitude=3,
+                candle_time="t1",
+            ),
         ]
         result = mgr.check_imbalance_tighten("P1", imbalances, current_price=102.0)
         assert result is True
@@ -685,10 +775,17 @@ class TestImbalanceTighten:
     def test_aligned_imbalance_no_tighten(self):
         """LONG position + BUY imbalance -> no tighten."""
         from app.domain.trading.models.value_objects import StackedImbalance
+
         mgr = TradeManager()
         mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0)
         imbalances = [
-            StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+            StackedImbalance(
+                direction="BUY",
+                price_low=99,
+                price_high=101,
+                magnitude=3,
+                candle_time="t1",
+            ),
         ]
         result = mgr.check_imbalance_tighten("P1", imbalances, current_price=102.0)
         assert result is False
@@ -708,10 +805,17 @@ class TestImbalanceTighten:
     def test_opposing_imbalance_tightens_sl_short(self):
         """SHORT position + BUY imbalance -> SL tightened by 30%."""
         from app.domain.trading.models.value_objects import StackedImbalance
+
         mgr = TradeManager()
         mgr.register_position("P1", "NIFTY", "SHORT", 100.0, 105.0, 90.0)
         imbalances = [
-            StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
+            StackedImbalance(
+                direction="BUY",
+                price_low=99,
+                price_high=101,
+                magnitude=3,
+                candle_time="t1",
+            ),
         ]
         result = mgr.check_imbalance_tighten("P1", imbalances, current_price=98.0)
         assert result is True
@@ -728,9 +832,13 @@ def test_vwap_trail_cap_at_1_5r():
     # Very wide VWAP bands — nearest valid band is far below
     # Price at 108 -> unrealised_r = 8/5 = 1.6 >= 1.5
     mgr.apply_vwap_trail(
-        "P1", current_price=108.0,
-        vwap=100.0, vwap_upper_1=101.0, vwap_lower_1=99.0,
-        vwap_upper_2=102.0, vwap_lower_2=98.0,
+        "P1",
+        current_price=108.0,
+        vwap=100.0,
+        vwap_upper_1=101.0,
+        vwap_lower_1=99.0,
+        vwap_upper_2=102.0,
+        vwap_lower_2=98.0,
     )
     mp = mgr._positions["P1"]
     # Valid bands below price and above entry: 100, 101, 102
@@ -741,38 +849,41 @@ def test_vwap_trail_cap_at_1_5r():
 
 # ---- 23. Per-Symbol Daily Loss Limits (Task 21 Fixes) ----
 
+
 def test_daily_loss_limit_isolation():
     """Verify daily losses are isolated per-symbol but respect a global limit multiplier."""
     mgr = TradeManager()
     mgr.MAX_DAILY_LOSSES = 2
-    
+
     mgr.record_loss("NIFTY")
     assert not mgr.should_block_entry("NIFTY")
     assert not mgr.should_block_entry("BANKNIFTY")
-    
+
     mgr.record_loss("NIFTY")
     # NIFTY should be blocked (reached its limit of 2)
     assert mgr.should_block_entry("NIFTY")
     # BANKNIFTY should NOT be blocked (has 0 losses)
     assert not mgr.should_block_entry("BANKNIFTY")
-    
+
     # Global limit allows more symbols to trade
     mgr.record_loss("BANKNIFTY")
     mgr.record_loss("BANKNIFTY")
     assert mgr.should_block_entry("BANKNIFTY")
-    
+
     # Global limit = MAX_DAILY_LOSSES * 3 = 6
     assert mgr._global_daily_losses == 4
     assert not mgr.should_block_entry("FINNIFTY")
-    
+
     mgr.record_loss("FINNIFTY")
     mgr.record_loss("FINNIFTY")
     assert mgr._global_daily_losses == 6
-    
+
     # Now global limit is reached, EVERY symbol should be blocked
     assert mgr.should_block_entry("MIDCPNIFTY")
 
+
 # ---- 24. Consecutive Loss Circuit Breaker Tests ----
+
 
 class TestConsecutiveLossCircuitBreaker:
     def test_blocks_after_two_consecutive_losses(self):
@@ -781,7 +892,7 @@ class TestConsecutiveLossCircuitBreaker:
         # Record two losses
         mgr.record_loss("NIFTY", stop_price=100.0)
         mgr.record_loss("NIFTY", stop_price=99.0)
-        
+
         # Checking entry at 99.5, with ATR 1.0 (requires 1.5 distance)
         # Distance from last stop (99.0) is 0.5. 1.5 * 1.0 = 1.5
         # Since 0.5 < 1.5, entry should be BLOCKED
@@ -794,7 +905,7 @@ class TestConsecutiveLossCircuitBreaker:
         # Record two losses
         mgr.record_loss("NIFTY", stop_price=100.0)
         mgr.record_loss("NIFTY", stop_price=99.0)
-        
+
         # Checking entry at 97.0, with ATR 1.0 (requires 1.5 distance)
         # Distance from last stop (99.0) is 2.0. 1.5 * 1.0 = 1.5
         # Since 2.0 >= 1.5, entry should be ALLOWED
@@ -806,13 +917,13 @@ class TestConsecutiveLossCircuitBreaker:
         mgr = TradeManager()
         # Record one loss
         mgr.record_loss("NIFTY", stop_price=100.0)
-        
+
         # A profit trade clears it
         mgr.reset_consecutive_losses("NIFTY")
-        
+
         # Another single loss happens
         mgr.record_loss("NIFTY", stop_price=100.0)
-        
+
         # Now we only have 1 consecutive loss, so entry shouldn't be blocked!
         blocked = mgr.should_block_entry("NIFTY", current_price=100.5, current_atr=1.0)
         assert blocked is False

@@ -51,10 +51,10 @@ class OptionScannerService:
         "NIFTY": 500_000,
         "BANKNIFTY": 300_000,
         "FINNIFTY": 50_000,
-        "CRUDEOIL": 5_000,
-        "NATURALGAS": 5_000,
-        "GOLD": 1_000,
-        "SILVER": 1_000,
+        "CRUDEOIL": 10,
+        "NATURALGAS": 500,
+        "GOLD": 1,
+        "SILVER": 1,
     }
 
     def __init__(self, broker) -> None:
@@ -109,6 +109,39 @@ class OptionScannerService:
                     expiry_index=expiry_index,
                 )
                 if chain is None:
+                    logger.info("%s: option chain returned None — skipping", u)
+                    continue
+
+                atm = chain.atm_strike
+                interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
+
+                # Log available strikes near ATM for debugging
+                all_strikes = sorted(chain.calls.keys())
+                near_atm = [s for s in all_strikes if abs(s - atm) <= interval * 3]
+                logger.info(
+                    "%s: chain OK — spot=%.0f atm=%.0f step=%.0f strikes_near_atm=%s",
+                    u,
+                    chain.spot_price,
+                    atm,
+                    interval,
+                    near_atm[:10],
+                )
+
+                # Detect momentum (for logging/sorting, not filtering)
+                bias, bias_strength, bias_reason = self._detect_momentum(
+                    chain, atm, interval
+                )
+                logger.info(
+                    "MOMENTUM: %s — %s (strength=%d) [calls=%d puts=%d atm=%.0f]",
+                    u,
+                    bias,
+                    bias_strength,
+                    len(chain.calls),
+                    len(chain.puts),
+                    atm,
+                )
+                if chain is None:
+                    logger.info("%s: option chain returned None — skipping", u)
                     continue
 
                 atm = chain.atm_strike
@@ -118,7 +151,15 @@ class OptionScannerService:
                 bias, bias_strength, bias_reason = self._detect_momentum(
                     chain, atm, interval
                 )
-                logger.info("MOMENTUM: %s — %s (strength=%d)", u, bias, bias_strength)
+                logger.info(
+                    "MOMENTUM: %s — %s (strength=%d) [calls=%d puts=%d atm=%.0f]",
+                    u,
+                    bias,
+                    bias_strength,
+                    len(chain.calls),
+                    len(chain.puts),
+                    atm,
+                )
 
                 # Scan BOTH CE and PE contracts near ATM
                 # LLM decides direction based on full market context
@@ -143,6 +184,13 @@ class OptionScannerService:
 
                         ltp = float(opt.ltp or 0)
                         if ltp <= 0:
+                            logger.info(
+                                "%s %s %d: ltp=%.2f — filtered out (ltp<=0)",
+                                u,
+                                opt_type,
+                                strike,
+                                ltp,
+                            )
                             continue
 
                         oi = int(opt.oi or 0)
@@ -151,6 +199,14 @@ class OptionScannerService:
                         # Hard filters
                         min_oi = self._MIN_OI.get(u.upper(), 5000)
                         if oi < min_oi:
+                            logger.info(
+                                "%s %s %d: oi=%d < min_oi=%d — filtered out",
+                                u,
+                                opt_type,
+                                strike,
+                                oi,
+                                min_oi,
+                            )
                             continue
 
                         bid = float(opt.bid or 0)
@@ -168,7 +224,10 @@ class OptionScannerService:
                         # ATM proximity (40 pts max)
                         score += max(0, 40 - (atm_dist * 15))
                         # OI liquidity scaling (30 pts max)
-                        score += min(30, (oi / min_oi) * 10)
+                        if min_oi > 0:
+                            score += min(30, (oi / min_oi) * 10)
+                        else:
+                            score += 15  # default if min_oi is 0
                         # Volume momentum scaling (20 pts max)
                         score += min(20, (vol / 1000) * 5)
 
@@ -188,6 +247,18 @@ class OptionScannerService:
                             score += 25  # Always boost CE (bullish bet)
                         elif opt_type == "PE" and strike >= atm:
                             score += 15  # Boost ITM PE (high delta, bullish hedge)
+
+                        logger.info(
+                            "SCORED: %s %s %d: ltp=%.2f oi=%d vol=%d score=%.0f sym=%s",
+                            u,
+                            opt_type,
+                            strike,
+                            ltp,
+                            oi,
+                            vol,
+                            score,
+                            opt.symbol,
+                        )
 
                         results.append(
                             ScanResult(
@@ -249,7 +320,7 @@ class OptionScannerService:
                                 symbol=atm_ce.symbol,
                                 underlying=u,
                                 strike=int(atm),
-                                option_type=opt_type,
+                                option_type="CE",
                                 expiry=chain.expiry.date().isoformat()
                                 if hasattr(chain.expiry, "date")
                                 else "",

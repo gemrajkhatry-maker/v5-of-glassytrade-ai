@@ -207,16 +207,20 @@ def three_align_check(
 
     # FIX #8: Higher threshold for options (±100 instead of ±50)
     # Options have natural noise from Greeks, need wider threshold
-    CVD_EXTREME_THRESHOLD = 100.0  # Adjusted for options markets
+    from app.domain.constants import (
+        CVD_SLOPE_EXTREME,
+        CVD_SLOPE_HARD_BLOCK,
+        CVD_SLOPE_WARNING,
+    )
 
     # Extreme CVD in balance = don't fade (institutional pressure building)
-    if cvd_slope < -CVD_EXTREME_THRESHOLD and amt_result.market_state == "BALANCED":
+    if cvd_slope < -CVD_SLOPE_EXTREME and amt_result.market_state == "BALANCED":
         logger.info(
             "Three-Align: BLOCKED — CVD extreme selling (%.0f) in balance, do not fade",
             cvd_slope,
         )
         return False, False, False
-    if cvd_slope > CVD_EXTREME_THRESHOLD and amt_result.market_state == "BALANCED":
+    if cvd_slope > CVD_SLOPE_EXTREME and amt_result.market_state == "BALANCED":
         logger.info(
             "Three-Align: BLOCKED — CVD extreme buying (+%.0f) in balance, do not fade",
             cvd_slope,
@@ -484,6 +488,7 @@ def build_entry_signal(
     confidence: str = "Medium",
     session_risk_pct: float | None = None,  # COMPOUNDING: dynamic risk from session
     inside_cluster: bool = True,  # Place SL 1-2 ticks inside aggressive print cluster
+    tick_size: float = 0.05,  # Instrument tick size for SL/TP rounding
 ) -> Signal:
     """Build Signal from LLM decision using Fabio Playbook SL/TP.
 
@@ -622,6 +627,24 @@ def build_entry_signal(
                 stop_price = tick.close + cushion_dist
 
     setup_label = "MeanRev" if setup_type == SetupType.MEAN_REVERSION else "Trend"
+    # ── Round SL/TP to tick_size boundaries (Fabio: clean levels) ──
+    from app.domain.services.tick_utils import (
+        round_to_tick,
+        round_down_to_tick,
+        round_up_to_tick,
+    )
+
+    if is_buy:
+        stop_price = round_down_to_tick(
+            float(stop_price), tick_size
+        )  # SL below for LONG
+        tp_price = round_up_to_tick(float(tp_price), tick_size)  # TP above for LONG
+    else:
+        stop_price = round_up_to_tick(
+            float(stop_price), tick_size
+        )  # SL above for SHORT
+        tp_price = round_down_to_tick(float(tp_price), tick_size)  # TP below for SHORT
+
     risk = abs(tick.close - stop_price)
     reward = abs(tp_price - tick.close)
     rr = reward / risk if risk > 0 else 0
@@ -746,16 +769,18 @@ def compute_grade_score(
     footprint_candle=None,
 ) -> int:
     """Compute A/B/C setup grade score from market confluence."""
+    from app.domain.constants import CVD_SLOPE_HARD_BLOCK
+
     score = 0
 
     # ── HARD GATE: Extreme CVD Opposition ────────────────────────────
     # Fabio Rule: If CVD is strongly against you, NO TRADE.
-    if direction == "LONG" and amt_result.cvd_slope < -50.0:
+    if direction == "LONG" and amt_result.cvd_slope < -CVD_SLOPE_HARD_BLOCK:
         logger.warning(
             f"Grade score killed (CVD Hard Gate): LONG blocked due to extreme bearish CVD ({amt_result.cvd_slope})"
         )
         return -10  # Guaranteed C-grade
-    if direction == "SHORT" and amt_result.cvd_slope > 50.0:
+    if direction == "SHORT" and amt_result.cvd_slope > CVD_SLOPE_HARD_BLOCK:
         logger.warning(
             f"Grade score killed (CVD Hard Gate): SHORT blocked due to extreme bullish CVD ({amt_result.cvd_slope})"
         )
@@ -910,6 +935,7 @@ def run_gate_pipeline(
     min_aggression_score: float = 2.0,
     max_cushion_ticks: float = 10.0,
     min_rr_ratio: float = 1.5,
+    tick_size: float = 0.05,
 ) -> tuple[bool, str, str]:
     """Run the 12-gate pipeline for additional validation.
 
@@ -936,7 +962,6 @@ def run_gate_pipeline(
     if amt_result.lvns:
         levels.extend(amt_result.lvns)
     nearest = min(levels, key=lambda lv: abs(price - lv)) if levels else 0
-    tick_size = abs(price) * 0.0005 if price != 0 else 0.05
     dist_ticks = abs(price - nearest) / tick_size if tick_size > 0 else 999
 
     # R:R

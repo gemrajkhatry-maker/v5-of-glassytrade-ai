@@ -27,6 +27,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 @dataclass
 class DriveDecayResult:
     """Result of drive decay validation."""
+
     valid: bool
     time_decay_met: bool
     price_decay_met: bool
@@ -71,7 +72,9 @@ class DriveDecay:
             timestamp: Time of Drive 1.
             tick_size: Instrument tick size.
         """
-        bucket = round(level, 1)
+        from app.domain.services.tick_utils import round_to_tick
+
+        bucket = round_to_tick(level, tick_size)
         self._drive_1_records[bucket] = {
             "level": level,
             "direction": direction,
@@ -107,7 +110,9 @@ class DriveDecay:
         Returns:
             DriveDecayResult with validity and details.
         """
-        bucket = round(level, 1)
+        from app.domain.services.tick_utils import round_to_tick
+
+        bucket = round_to_tick(level, tick_size)
         record = self._drive_1_records.get(bucket)
 
         if record is None:
@@ -133,20 +138,27 @@ class DriveDecay:
         if valid:
             reasons = []
             if time_decay_met:
-                reasons.append(f"time: {time_since_drive1/60:.1f}min >= {self._min_minutes}min")
+                reasons.append(
+                    f"time: {time_since_drive1 / 60:.1f}min >= {self._min_minutes}min"
+                )
             if price_decay_met:
-                reasons.append(f"price rotation: {record['max_rotation']:.1f} >= {min_rotation:.1f}")
+                reasons.append(
+                    f"price rotation: {record['max_rotation']:.1f} >= {min_rotation:.1f}"
+                )
             reason = f"Drive 2 valid: {', '.join(reasons)}"
         else:
             remaining_time = (self._min_minutes * 60) - time_since_drive1
             reason = (
-                f"Drive 2 blocked: time {time_since_drive1/60:.1f}min < {self._min_minutes}min, "
+                f"Drive 2 blocked: time {time_since_drive1 / 60:.1f}min < {self._min_minutes}min, "
                 f"rotation {record['max_rotation']:.1f} < {min_rotation:.1f} ticks"
             )
 
         logger.info(
             "Drive decay: level=%.2f time_decay=%s price_decay=%s valid=%s",
-            level, time_decay_met, price_decay_met, valid,
+            level,
+            time_decay_met,
+            price_decay_met,
+            valid,
         )
 
         return DriveDecayResult(
@@ -158,7 +170,9 @@ class DriveDecay:
 
     def clear_level(self, level: float) -> None:
         """Clear Drive 1 record for a level (e.g., on session reset)."""
-        bucket = round(level, 1)
+        from app.domain.services.tick_utils import round_to_tick
+
+        bucket = round_to_tick(level, tick_size)
         self._drive_1_records.pop(bucket, None)
 
     def reset(self) -> None:

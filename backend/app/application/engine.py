@@ -315,6 +315,9 @@ class TradingEngine:
         Loads all open positions from the open_positions table and restores
         them to the TradeManager so the engine can resume managing them
         without losing position context.
+
+        Filters by current exchange — only recovers positions belonging to
+        the active exchange (NSE or MCX) to prevent cross-exchange contamination.
         """
         storage = self._session_service._storage
         if not storage:
@@ -327,10 +330,26 @@ class TradingEngine:
                 logger.info("Engine: no open positions to recover")
                 return
 
+            # Exchange-aware filtering
+            registry = getattr(self._graph, "symbol_registry", None)
+            current_exchange = getattr(self._graph.exchange_config, "exchange", "MCX")
+
             recovered = 0
+            skipped = 0
             for pos_data in open_positions:
                 symbol = pos_data.get("symbol", "")
                 if not symbol:
+                    continue
+
+                # Skip positions from other exchanges
+                if registry and registry.exchange_for(symbol) != current_exchange:
+                    skipped += 1
+                    logger.debug(
+                        "Engine: skipping %s position recovery (current=%s): %s",
+                        registry.exchange_for(symbol),
+                        current_exchange,
+                        symbol,
+                    )
                     continue
 
                 # Add symbol to active list if not already there
@@ -346,8 +365,45 @@ class TradingEngine:
                     session = self._session_service.get_or_create_session(symbol)
                     position = session.portfolio.recover_position(pos_data)
                     if position:
+                        # Register with TradeManager so overseer and lifecycle can manage it
+                        from app.domain.trading.models.enums import Side
+                        from app.domain.trading.models.entities import SignalType
+
+                        side_str = (
+                            "LONG"
+                            if str(pos_data.get("side", "")).upper() == "LONG"
+                            else "SHORT"
+                        )
+                        sig_type = (
+                            SignalType.BUY if side_str == "LONG" else SignalType.SELL
+                        )
+
+                        # Build a minimal signal for registration
+                        from app.domain.trading.models.entities import (
+                            Signal as _Sig,
+                            Source as _Src,
+                        )
+                        from decimal import Decimal
+
+                        _ep = Decimal(str(pos_data.get("entry_price", 0)))
+                        _sl = Decimal(str(pos_data.get("stop_loss", 0)))
+                        _tp = Decimal(str(pos_data.get("take_profit", 0)))
+
+                        recovered_signal = _Sig(
+                            type=sig_type,
+                            price=_ep,
+                            reason="recovered_from_db",
+                            source=_Src.LLM,
+                            stop_loss=_sl,
+                            take_profit=_tp,
+                        )
+
+                        self._session_service._lifecycle_handler.register_position(
+                            symbol, position, recovered_signal
+                        )
+
                         logger.info(
-                            "Engine: recovered position %s for %s (side=%s, entry=%.2f, SL=%.2f, TP=%.2f)",
+                            "Engine: recovered position %s for %s (side=%s, entry=%.2f, SL=%.2f, TP=%.2f) — registered with TradeManager",
                             pos_data.get("id", "?"),
                             symbol,
                             pos_data.get("side", "?"),
@@ -365,9 +421,17 @@ class TradingEngine:
                     )
 
             if recovered > 0:
-                logger.info("Engine: recovered %d open positions from DB", recovered)
+                logger.info(
+                    "Engine: recovered %d open positions (skipped %d from other exchanges)",
+                    recovered,
+                    skipped,
+                )
             else:
-                logger.info("Engine: no positions were recovered")
+                logger.info(
+                    "Engine: no positions recovered for %s (skipped %d)",
+                    current_exchange,
+                    skipped,
+                )
 
         except Exception as e:
             logger.error("Engine: position recovery failed: %s", e, exc_info=True)

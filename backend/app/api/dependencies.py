@@ -139,6 +139,15 @@ class ServiceGraph:
         self.delta_profile = DeltaProfileAdapter(
             bucket_size=DELTA_BUCKET_SIZE_DEFAULT,
         )
+
+        # VP Contract Selector — Volume Profile based contract selection
+        from app.domain.fabio_ai.services.vp_contract_selector import VPContractSelector
+
+        self.vp_contract_selector = VPContractSelector(
+            broker=self.market_data,  # Use market data adapter for history
+            exchange=self.exchange_config.exchange,
+        )
+
         self.trading_session = TradingSessionService(
             event_bus=self.event_bus,
             broker=self.broker,
@@ -234,6 +243,64 @@ class ServiceGraph:
         finally:
             _scan_pool.shutdown(wait=False)
 
+        # VP-based contract selection (Volume Profile structure-driven)
+        # Runs in parallel with the momentum scanner above
+        _vp_scan_pool = _cf.ThreadPoolExecutor(max_workers=1)
+        try:
+            from app.domain.fabio_ai.services.vp_contract_selector import (
+                VPContractSelector as _VPCS,
+            )
+
+            def _vp_scan():
+                _vp = _VPCS(
+                    broker=self.market_data, exchange=self.exchange_config.exchange
+                )
+                return _vp.select_contracts()
+
+            _vp_result = _vp_scan_pool.submit(_vp_scan).result(timeout=120)
+
+            if _vp_result and _vp_result.total_contracts > 0:
+                # Log VP-selected contracts
+                for i, c in enumerate(_vp_result.candidates, 1):
+                    logger.info(
+                        "VP #%d: %s %s strike=%d entry=%.0f stop=%.0f "
+                        "target=%.0f R:R=%.1f state=%s zone=%s",
+                        i,
+                        c.underlying,
+                        c.option_type,
+                        c.strike,
+                        c.entry_price,
+                        c.stop_price,
+                        c.target_price,
+                        c.rr_ratio,
+                        c.market_state,
+                        c.lvn_zone,
+                    )
+
+                # Log market states
+                for idx, ms in _vp_result.market_states.items():
+                    logger.info(
+                        "VP State %s: %s (price=%.0f VAH=%.0f VAL=%.0f POC=%.0f)",
+                        idx,
+                        ms.state,
+                        ms.price,
+                        ms.vah,
+                        ms.val,
+                        ms.poc,
+                    )
+
+                # Store VP result for API access
+                self.vp_result = _vp_result
+            else:
+                logger.info("VP selection: no contracts found (market may be closed)")
+                self.vp_result = None
+
+        except (_cf.TimeoutError, Exception) as e:
+            logger.warning("VP contract selection failed: %s", e)
+            self.vp_result = None
+        finally:
+            _vp_scan_pool.shutdown(wait=False)
+
 
 @lru_cache(maxsize=1)
 def get_service_graph() -> ServiceGraph:
@@ -290,3 +357,8 @@ def get_symbol_registry() -> SymbolRegistry:
 def get_session_factory() -> SessionContextFactory:
     """Get the DIP-compliant session context factory."""
     return get_service_graph().session_factory
+
+
+def get_vp_contract_selector():
+    """Get the VP-based contract selector."""
+    return get_service_graph().vp_contract_selector

@@ -350,7 +350,7 @@ class RegimeDetector:
             if level <= 0:
                 continue
             proximity = abs(price - level) / level
-            bucket = round(level, 1)  # normalize to avoid float drift
+            bucket = round(level, 2)  # normalize to avoid float drift
             if proximity <= 0.003:  # within 0.3%
                 if bucket not in self._level_touches:
                     self._level_touches[bucket] = _LevelTouch(

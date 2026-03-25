@@ -191,14 +191,16 @@ class SignalGateProcessor(BaseProcessor):
 
         Returns (is_blocked, reason).
         """
+        from app.domain.constants import CVD_SLOPE_HARD_BLOCK
+
         cvd = p.cvd_slope
 
         # Extreme selling in balance = don't fade (potential breakdown)
-        if cvd < -50.0 and p.market_state == "BALANCED":
+        if cvd < -CVD_SLOPE_HARD_BLOCK and p.market_state == "BALANCED":
             return True, f"CVD extreme selling ({cvd:.0f}) in balance — do not fade"
 
         # Extreme buying in balance = don't fade (potential breakout)
-        if cvd > 50.0 and p.market_state == "BALANCED":
+        if cvd > CVD_SLOPE_HARD_BLOCK and p.market_state == "BALANCED":
             return True, f"CVD extreme buying (+{cvd:.0f}) in balance — do not fade"
 
         # CVD divergence against trade direction

@@ -258,10 +258,12 @@ def assess_timing(
         return "WAIT"  # Low delta + no prints = no directional commitment
 
     # Also block if CVD contradicts direction significantly
+    from app.domain.constants import CVD_SLOPE_HARD_BLOCK
+
     cvd_slope = float(getattr(amt_result, "cvd_slope", 0) or 0)
-    if direction == "LONG" and cvd_slope < -50:
+    if direction == "LONG" and cvd_slope < -CVD_SLOPE_HARD_BLOCK:
         return "WAIT"  # Strong bearish CVD contradicts LONG
-    if direction == "SHORT" and cvd_slope > 50:
+    if direction == "SHORT" and cvd_slope > CVD_SLOPE_HARD_BLOCK:
         return "WAIT"  # Strong bullish CVD contradicts SHORT
 
     # Mean reversion must not enter back at fair value.

@@ -9,13 +9,13 @@ VALUE_AREA_PCT = 0.70  # FR-02-03: 70% value area
 LVN_SMOOTHING = 3  # Smoothing window for LVN/HVN detection
 
 # ============================================================================
-# Order Flow Metrics (FR-03)
+# Order Flow Metrics (FR-03) — Single source of truth for CVD thresholds
 # ============================================================================
 CVD_SLOPE_WINDOW = 20  # FR-03-02: rolling 20-candle window
 CVD_STRONG_SLOPE = 2.0  # FR-08-04: CVD slope for P3 trail
-CVD_WARNING_THRESHOLD = 50.0  # CVD warning level
-CVD_BLOCK_THRESHOLD = 100.0  # CVD block level at gate
-CVD_EXTREME_THRESHOLD = 500.0  # CVD extreme (safety block)
+CVD_SLOPE_HARD_BLOCK = 50.0  # Hard gate: block entries when |slope| >= this
+CVD_SLOPE_WARNING = 30.0  # Warning level: log + reduce confidence
+CVD_SLOPE_EXTREME = 100.0  # Extreme: block ALL entries regardless of other factors
 
 FOOTPRINT_IMBALANCE_RATIO = 3.0  # FR-03-06: 300% (3:1 ratio)
 FOOTPRINT_IMBALANCE_PCT = 0.40  # FR-03-06: ≥ 40% cells confirmed

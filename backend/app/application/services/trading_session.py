@@ -46,6 +46,8 @@ from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
 from app.domain.fabio_ai.services.option_selector import OptionSelector
 from app.domain.fabio_ai.services.trade_thesis import validate_trade_thesis
 from app.domain.fabio_ai.services.entry_gate import build_entry_signal
+from app.application.services.entry_coordinator import EntryCoordinator
+from app.application.services.exit_coordinator import ExitCoordinator
 
 # Import delegated modules
 from app.application.services.session_state_manager import (
@@ -146,6 +148,42 @@ class TradingSessionService:
 
         # Option selector for NSE options signal enrichment
         self._option_selector = OptionSelector()
+
+        # Exit Coordinator — extracted exit callback logic
+        self._exit_coordinator = ExitCoordinator(
+            broker=broker,
+            lifecycle_handler=self._lifecycle_handler,
+            event_logger=self._event_logger,
+            overseer_handler=self._overseer_handler,
+            state_manager=self._state_manager,
+            storage=storage,
+            llm_handler=self._llm_handler,
+            risk_coordinator=self._risk_coordinator,
+        )
+
+        # Entry Coordinator — extracted signal execution logic
+        self._entry_coordinator = EntryCoordinator(
+            broker=broker,
+            event_bus=event_bus,
+            lifecycle_handler=self._lifecycle_handler,
+            event_logger=self._event_logger,
+            storage=storage,
+            risk_coordinator=self._risk_coordinator,
+            option_selector=self._option_selector,
+            state_manager=self._state_manager,
+        )
+
+        # Exit Coordinator — extracted exit callback logic
+        self._exit_coordinator = ExitCoordinator(
+            broker=broker,
+            lifecycle_handler=self._lifecycle_handler,
+            event_logger=self._event_logger,
+            overseer_handler=self._overseer_handler,
+            state_manager=self._state_manager,
+            storage=storage,
+            llm_handler=self._llm_handler,
+            risk_coordinator=self._risk_coordinator,
+        )
 
         self._event_bus.subscribe(TickReceived, self._on_tick)
         self._event_bus.subscribe(SignalGenerated, self._on_signal_generated)
@@ -578,7 +616,7 @@ class TradingSessionService:
                     event.symbol,
                     exc_info=True,
                 )
-            has_position = any(p.status == "OPEN" for p in session.portfolio.positions)
+            has_position = session.portfolio.has_open_positions()
 
             overseer_time = session._last_overseer_time
             overseer_running = session._overseer_running
@@ -762,6 +800,11 @@ class TradingSessionService:
                 )
 
                 if gate_passed:
+                    _ts = (
+                        self._exchange_config.get_tick_size(event.symbol)
+                        if self._exchange_config
+                        else 0.05
+                    )
                     signal = build_entry_signal(
                         direction=_exec_dir,
                         tick=event.tick,
@@ -777,6 +820,7 @@ class TradingSessionService:
                             session._last_session_info, "session", ""
                         ),
                         confidence="High" if _exec_prob >= 0.65 else "Medium",
+                        tick_size=_ts,
                     )
 
                     if signal:
@@ -871,187 +915,9 @@ class TradingSessionService:
         self._execute_signal(event.symbol, event.signal, session)
 
     def _execute_signal(self, symbol: str, sig, session: SessionState) -> None:
-        """Execute a trade signal — MUST run on main thread or under lock."""
-        import time as _time
-
-        thesis = (getattr(sig, "metadata", None) or {}).get("trade_thesis")
-        thesis_valid, thesis_reason = validate_trade_thesis(thesis)
-        if not thesis_valid:
-            log.info("Signal rejected by trade thesis gate: %s", thesis_reason)
-            _ad = getattr(session, "_agent_decision", None)
-            decision_source, attribution = self._event_logger._decision_attribution(
-                sig, _ad
-            )
-            self._event_logger.log_rejection(
-                symbol=symbol,
-                reason=f"THESIS_{thesis_reason.upper()}",
-                amt=session.last_amt,
-                llm_direction="BUY" if sig.is_buy else "SELL",
-                agent_direction=_ad.direction if _ad else "",
-                agent_regime=_ad.regime if _ad else "",
-                agent_feature_drivers=getattr(_ad, "feature_drivers", ())
-                if _ad
-                else (),
-                decision_source=decision_source,
-                attribution=attribution,
-                trade_thesis=thesis,
-            )
-            return
-
-        sig_id = getattr(sig, "signal_id", None)
-        if sig_id:
-            with session._lock:
-                if sig_id in session._executed_signal_ids:
-                    log.warning("Duplicate signal %s — skipping execution", sig_id)
-                    return
-                session._executed_signal_ids.add(sig_id)
-                if len(session._executed_signal_ids) > 1000:
-                    session._executed_signal_ids = set(
-                        list(session._executed_signal_ids)[-500:]
-                    )
-
-        log.info(
-            "Signal received: %s @ %.2f (SL=%.2f, TP=%.2f, source=%s, id=%s)",
-            sig.type,
-            sig.price,
-            sig.stop_loss,
-            sig.take_profit,
-            sig.source,
-            sig_id,
-        )
-
-        with session._lock:
-            if not self._risk_coordinator.validate_entry(
-                symbol, sig, session.portfolio
-            ):
-                log.info("Signal rejected by risk manager")
-                _ad = getattr(session, "_agent_decision", None)
-                self._event_logger.log_rejection(
-                    symbol=symbol,
-                    reason="risk_manager",
-                    amt=session.last_amt,
-                    llm_direction="BUY" if sig.is_buy else "SELL",
-                    agent_direction=_ad.direction if _ad else "",
-                    agent_regime=_ad.regime if _ad else "",
-                    agent_feature_drivers=getattr(_ad, "feature_drivers", ())
-                    if _ad
-                    else (),
-                    decision_source="quant"
-                    if (getattr(sig, "metadata", None) or {}).get("agent_entry")
-                    else "llm",
-                    attribution=self._event_logger._decision_attribution(sig, _ad)[1],
-                    trade_thesis=(getattr(sig, "metadata", None) or {}).get(
-                        "trade_thesis"
-                    ),
-                )
-                return
-
-        # Enrich signal with option selection
-        try:
-            _clean = symbol.replace("NSE:", "").replace("MCX:", "").strip()
-            underlying = _clean.split("-")[0].split(" ")[0]
-            direction = "LONG" if sig.is_buy else "SHORT"
-            selected_strike = self._option_selector.select_strike(
-                spot_price=sig.price,
-                direction=direction,
-                underlying=underlying,
-            )
-            if sig.metadata is None:
-                sig.metadata = {}
-            sig.metadata["option_strike"] = selected_strike
-            _sym_upper = symbol.upper()
-            if "CALL" in _sym_upper or "CE" in _sym_upper:
-                sig.metadata["option_type"] = "CE"
-            elif "PUT" in _sym_upper or "PE" in _sym_upper:
-                sig.metadata["option_type"] = "PE"
-            else:
-                sig.metadata["option_type"] = "CE"
-            sig.metadata["option_underlying"] = underlying
-            sig.metadata["option_lot_size"] = self._option_selector._lot_size_for(
-                underlying
-            )
-            log.info(
-                "Option selection: %s %s %d",
-                underlying,
-                sig.metadata["option_type"],
-                selected_strike,
-            )
-        except Exception:
-            log.debug("Option selection skipped", exc_info=True)
-
-        # Portfolio mutation under lock
-        with session._lock:
-            session._last_entry_time = _time.time()
-            position = self._broker.execute_order(sig, session.portfolio, symbol)
-
-        if position:
-            if (sig.metadata or {}).get("agent_entry"):
-                self._state_manager._record_explainability_entry(
-                    session,
-                    getattr(
-                        getattr(session, "_agent_decision", None), "feature_drivers", ()
-                    ),
-                )
-            self._lifecycle_handler.register_position(symbol, position, sig)
-            self._event_logger.log_position_event(
-                position_id=position.id,
-                symbol=symbol,
-                event_type="OPENED",
-                event_time=position.entry_time,
-                side=position.side.value
-                if hasattr(position.side, "value")
-                else str(position.side),
-                entry_price=position.entry_price,
-                stop_loss=position.stop_loss,
-                take_profit=position.take_profit,
-                source=position.source.value
-                if hasattr(position.source, "value")
-                else str(position.source),
-            )
-            self._event_bus.publish(
-                PositionOpened(
-                    symbol=symbol,
-                    trade_id=getattr(position, "id", ""),
-                    side=getattr(position, "side", ""),
-                    entry_price=float(getattr(position, "entry_price", 0)),
-                    quantity=float(getattr(position, "size", 0)),
-                )
-            )
-            _meta = sig.metadata or {}
-            _is_agent = _meta.get("agent_entry", False)
-            _ad = getattr(session, "_agent_decision", None)
-            decision_source, attribution = self._event_logger._decision_attribution(
-                sig, _ad
-            )
-            self._event_logger.log_entry(
-                symbol=symbol,
-                position=position,
-                signal=sig,
-                agent_decision=_ad,
-                amt=session.last_amt,
-            )
-            if self._storage:
-                try:
-                    self._storage.save_open_position(
-                        {
-                            "id": position.id,
-                            "symbol": symbol,
-                            "side": position.side.value
-                            if hasattr(position.side, "value")
-                            else str(position.side),
-                            "entry_price": position.entry_price,
-                            "size": position.size,
-                            "stop_loss": position.stop_loss,
-                            "take_profit": position.take_profit,
-                            "source": position.source.value
-                            if hasattr(position.source, "value")
-                            else str(position.source),
-                            "opened_at": position.entry_time,
-                        }
-                    )
-                except Exception:
-                    log.debug("Failed to persist open position", exc_info=True)
-            self._record_position_consistency(session, symbol, context="post_open")
+        """Execute a trade signal — delegates to EntryCoordinator."""
+        self._entry_coordinator.execute_signal(symbol, sig, session)
+        self._record_position_consistency(session, symbol, context="post_open")
 
     def _on_partial_exit(
         self,
@@ -1064,138 +930,25 @@ class TradingSessionService:
         size_remaining: float,
         realized_pnl: float,
     ) -> None:
-        """Callback from TradeLifecycleHandler when a partial exit fires."""
-        symbol = ""
-        position = None
-        for sym, sess in self._state_manager.get_all_sessions().items():
-            for p in sess.portfolio.positions:
-                if p.id == pos_id:
-                    symbol = sym
-                    position = p
-                    break
-            if symbol:
-                break
-
-        if position:
-            dhan_sl_id = (position.metadata or {}).get("dhan_sl_order_id")
-            if dhan_sl_id:
-                try:
-                    self._broker.cancel_order(dhan_sl_id)
-                    position.metadata.pop("dhan_sl_order_id", None)
-                    log.info(
-                        "Scrubbed broker hardware SL %s for partially closed pos %s",
-                        dhan_sl_id,
-                        pos_id,
-                    )
-                except Exception as e:
-                    log.error(
-                        "Failed to scrub broker hardware SL %s: %s", dhan_sl_id, e
-                    )
-
-        self._event_logger.log_partial_exit(
-            symbol=symbol,
-            position_id=pos_id,
-            side=side,
-            entry_price=entry_price,
-            exit_price=exit_price,
-            partial_pct=partial_pct,
-            size_closed=size_closed,
-            size_remaining=size_remaining,
-            realized_pnl=realized_pnl,
-        )
-        log.info(
-            "Journal: PARTIAL_EXIT pos=%s side=%s %d→%d @ %.2f pnl=%.2f",
+        """Callback from TradeLifecycleHandler — delegates to ExitCoordinator."""
+        self._exit_coordinator.on_partial_exit(
             pos_id,
             side,
+            entry_price,
+            exit_price,
+            partial_pct,
             size_closed,
             size_remaining,
-            exit_price,
             realized_pnl,
         )
 
     def _on_stop_out(self, level: float, direction: str) -> None:
-        """Callback from TradeLifecycleHandler when a position is stopped out (Rule 11)."""
-        from app.domain.fabio_ai.services.session_context import (
-            get_session_info as _get_si,
-        )
-        from datetime import datetime, timezone, timedelta
-
-        ist = timezone(timedelta(hours=5, minutes=30))
-        now_ist = datetime.now(ist).strftime("%H:%M:%S")
-        _market = self._exchange
-        if _market in ("NFO", "BSE"):
-            _market = "NSE"
-        si = _get_si(timestamp=now_ist, market=_market)
-        self._llm_handler.record_stop_out(level, direction, si.phase)
+        """Callback from TradeLifecycleHandler — delegates to ExitCoordinator."""
+        self._exit_coordinator.on_stop_out(level, direction, self._exchange)
 
     def _on_position_closed(self, event: PositionClosed) -> None:
-        if not event.position:
-            return
-        pos = event.position
-
-        dhan_sl_id = (pos.metadata or {}).get("dhan_sl_order_id")
-        if dhan_sl_id:
-            try:
-                self._broker.cancel_order(dhan_sl_id)
-                log.info(
-                    "Scrubbed broker hardware SL %s for fully closed pos %s",
-                    dhan_sl_id,
-                    pos.id,
-                )
-            except Exception as e:
-                log.error("Failed to scrub broker hardware SL %s: %s", dhan_sl_id, e)
-
-        session = self.get_or_create_session(event.symbol)
-        self._record_position_consistency(session, event.symbol, context="post_close")
-        session.learning.learn(pos)
-        self._overseer_handler.reset_position_state()
-
-        mp_metrics = self._lifecycle_handler.trade_manager.get_position_metrics(pos.id)
-        time_in_trade = 0.0
-        if pos.exit_time and pos.entry_time:
-            try:
-                from datetime import datetime as _dt
-
-                _exit = _dt.fromisoformat(pos.exit_time.replace("Z", "+00:00"))
-                _entry = _dt.fromisoformat(pos.entry_time.replace("Z", "+00:00"))
-                time_in_trade = (_exit - _entry).total_seconds()
-            except Exception:
-                time_in_trade = (
-                    float(mp_metrics["tick_count"]) * 0.5 if mp_metrics else 0.0
-                )
-
-        self._event_logger.log_exit(
-            symbol=event.symbol,
-            position=pos,
-            time_in_trade=time_in_trade,
-            mfe=float(mp_metrics["mfe"]) if mp_metrics else 0,
-            mae=float(mp_metrics["mae"]) if mp_metrics else 0,
-            tick_count=int(mp_metrics["tick_count"]) if mp_metrics else 0,
-            amt=session.last_amt,
-        )
-
-        if pos.pnl and pos.pnl > 0:
-            self._llm_handler.record_successful_exit(symbol=event.symbol)
-
-        srm = self._risk_coordinator.get_session_risk_manager(event.symbol)
-        srm.record_trade(pos.pnl)
-
-        log.info(
-            "SessionRisk: tier=%s sl_pct=%.4f pnl=%.2f wins=%d losses=%d",
-            srm.risk_tier.value,
-            srm.stop_loss_pct,
-            srm.session_pnl,
-            srm.consecutive_wins,
-            srm.consecutive_losses,
-        )
-
-        self._risk_coordinator.persist_risk_state(event.symbol)
-
-        if self._storage:
-            try:
-                self._storage.delete_open_position(event.position.id)
-            except Exception:
-                log.debug("Failed to delete persisted position", exc_info=True)
+        """Handle position closed — delegates to ExitCoordinator."""
+        self._exit_coordinator.on_position_closed(event)
 
     # ----- control-plane helpers -----
 

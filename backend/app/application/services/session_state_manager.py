@@ -51,6 +51,16 @@ class SessionState:
     last_footprint: dict | None = None
     last_ai_analysis: dict | None = None
 
+    def update_ai_analysis(self, **kwargs) -> None:
+        """Single source of truth for updating AI analysis state.
+
+        All locations that write to last_ai_analysis should use this method
+        instead of direct assignment, ensuring consistent merging.
+        """
+        if self.last_ai_analysis is None:
+            self.last_ai_analysis = {}
+        self.last_ai_analysis.update(kwargs)
+
     # Thread safety lock for portfolio reads/writes AND throttle flags
     _lock: threading.Lock = field(default_factory=threading.Lock)
 

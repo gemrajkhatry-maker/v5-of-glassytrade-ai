@@ -1813,7 +1813,14 @@ class AMTAnalyzer:
         has_high_aggression: bool = False,
         session_vwap: float = 0.0,
     ) -> Signal | None:
-        """Generate a trade signal from current market microstructure."""
+        """Generate direction signal from market microstructure.
+
+        NOTE: SL/TP in this signal are PLACEHOLDERS (VA-based). The real SL/TP
+        is computed by build_entry_signal() in entry_gate.py using the full
+        Fabio playbook (aggressive print, VWAP, ATR floor, cushion override).
+        This signal's only purpose: direction for fallback in LLM handler
+        and serialization for UI display.
+        """
         now_iso = current.time  # use tick timestamp, not wall clock
 
         # GATE 3: NO_TRADE state never generates signals

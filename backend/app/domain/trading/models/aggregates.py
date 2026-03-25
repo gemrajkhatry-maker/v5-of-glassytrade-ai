@@ -88,6 +88,14 @@ class Portfolio:
 
     # ----- queries -----
 
+    def has_open_positions(self) -> bool:
+        """Single source of truth: does this portfolio have any OPEN positions?"""
+        return any(p.status == PositionStatus.OPEN for p in self.positions)
+
+    def open_position_ids(self) -> set[str]:
+        """Return set of IDs for all OPEN positions."""
+        return {p.id for p in self.positions if p.status == PositionStatus.OPEN}
+
     def has_open_position_for_source(self, source: Source) -> bool:
         return any(p.source == source and p.is_open for p in self.positions)
 

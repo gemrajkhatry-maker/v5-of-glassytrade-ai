@@ -87,9 +87,11 @@ class AMTSetupDetector:
             return None
 
         confidence = 0.7
-        if context.cvd_slope > 50:
+        from app.domain.constants import CVD_SLOPE_HARD_BLOCK, CVD_SLOPE_WARNING
+
+        if context.cvd_slope > CVD_SLOPE_HARD_BLOCK:
             confidence = 0.9
-        elif context.cvd_slope > 20:
+        elif context.cvd_slope > CVD_SLOPE_WARNING:
             confidence = 0.8
 
         return Setup(
@@ -118,15 +120,17 @@ class AMTSetupDetector:
             return None
 
         # Direction based on trend
+        from app.domain.constants import CVD_SLOPE_WARNING
+
         if context.delta > 0:
             direction = "LONG"
             confidence = 0.7
-            if context.cvd_slope > 30:
+            if context.cvd_slope > CVD_SLOPE_WARNING:
                 confidence = 0.9
         elif context.delta < 0:
             direction = "SHORT"
             confidence = 0.7
-            if context.cvd_slope < -30:
+            if context.cvd_slope < -CVD_SLOPE_WARNING:
                 confidence = 0.9
         else:
             return None

@@ -73,7 +73,9 @@ class LVNPlayEngine:
         distance_ticks = distance / tick_size if tick_size > 0 else 999
 
         # Already played this LVN?
-        lvn_bucket = round(nearest_lvn, 1)
+        from app.domain.services.tick_utils import round_to_tick
+
+        lvn_bucket = round_to_tick(nearest_lvn, tick_size)
         if lvn_bucket in self._played_lvns:
             return None
 
