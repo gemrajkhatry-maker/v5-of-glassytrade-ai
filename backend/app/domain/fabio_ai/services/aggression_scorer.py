@@ -181,6 +181,7 @@ class PersistentAggressionScorer:
         pyramid_score: float = PYRAMID_AGGRESSION_SCORE,
     ) -> None:
         self._persistence_bars = persistence_bars
+        self._default_persistence = persistence_bars
         self._min_score = min_score
         self._pyramid_score = pyramid_score
         self._scorer = AggressionScorer(
@@ -190,6 +191,23 @@ class PersistentAggressionScorer:
         self._confirmed_streak: int = 0
         self._pyramid_streak: int = 0
         self._raw_score_history: list[float] = []
+
+    def set_persistence_for_state(self, market_state: str) -> None:
+        """Dynamically adjust persistence bars based on market state.
+
+        PROBING/IMBALANCED: 2 bars (10 min — moves are fast)
+        BALANCED: 3 bars (15 min — mean reversion needs more confirmation)
+        """
+        if market_state in ("PROBING", "IMBALANCED"):
+            self._persistence_bars = 2
+        elif market_state == "BALANCED":
+            self._persistence_bars = 3
+        else:
+            self._persistence_bars = self._default_persistence
+
+    @property
+    def current_persistence(self) -> int:
+        return self._persistence_bars
 
     def reset(self) -> None:
         """Reset persistence state (call at session boundary)."""

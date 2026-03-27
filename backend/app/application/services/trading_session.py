@@ -108,7 +108,7 @@ class TradingSessionService:
         # Injected config — replaces inline Settings() calls
         self._exchange_config = exchange_config
         self._exchange = exchange_config.exchange if exchange_config else "MCX"
-        self._allow_short = False  # BUY-only mode — SHORT entries disabled
+        self._allow_short = allow_short  # Use injected allow_short (from settings.ALLOW_SHORT)
 
         # Delegated modules
         self._state_manager = SessionStateManager(storage=storage)
@@ -161,6 +161,15 @@ class TradingSessionService:
         # Option selector for NSE options signal enrichment
         self._option_selector = OptionSelector()
 
+        # Post-Trade Analyst (Phase 3) — must be created before ExitCoordinator
+        from app.application.handlers.post_trade_analyst import PostTradeAnalyst
+
+        self._post_trade_analyst = PostTradeAnalyst(
+            gen_ai_service=gen_ai_service,
+            storage=storage,
+            enabled=getattr(settings, "LLM_POST_TRADE", True),
+        )
+
         # Exit Coordinator — extracted exit callback logic
         self._exit_coordinator = ExitCoordinator(
             broker=broker,
@@ -171,6 +180,7 @@ class TradingSessionService:
             storage=storage,
             llm_handler=self._llm_handler,
             risk_coordinator=self._risk_coordinator,
+            post_trade_analyst=self._post_trade_analyst,
         )
 
         # Entry Coordinator — extracted signal execution logic
@@ -185,27 +195,34 @@ class TradingSessionService:
             state_manager=self._state_manager,
         )
 
-        # Exit Coordinator — extracted exit callback logic
-        self._exit_coordinator = ExitCoordinator(
-            broker=broker,
-            lifecycle_handler=self._lifecycle_handler,
-            event_logger=self._event_logger,
-            overseer_handler=self._overseer_handler,
-            state_manager=self._state_manager,
-            storage=storage,
-            llm_handler=self._llm_handler,
-            risk_coordinator=self._risk_coordinator,
-        )
-
         # Pre-Candle Advisor — non-blocking advisory for dashboard (T-60s before bar close)
         self._pre_candle_advisor = PreCandleAdvisor(
             gen_ai_service=gen_ai_service,
             enabled=getattr(settings, "LLM_PRE_CANDLE_ADVISORY", True),
         )
 
-        self._event_bus.subscribe(TickReceived, self._on_tick)
-        self._event_bus.subscribe(SignalGenerated, self._on_signal_generated)
-        self._event_bus.subscribe(PositionClosed, self._on_position_closed)
+        # Scalping components (Phase 4)
+        self._scalp_enabled = getattr(settings, "SCALP_ENGINE_ENABLED", False)
+        self._one_min_engines: dict = {}
+        self._fifteen_sec_engines: dict = {}
+        self._ib_scalp_engines: dict = {}
+
+        # Mobile alerts (Phase 5)
+        from app.domain.services.mobile_alerts import MobileAlertSystem
+
+        self._alerts = MobileAlertSystem(
+            bot_token=getattr(settings, "TELEGRAM_BOT_TOKEN", ""),
+            chat_id=getattr(settings, "TELEGRAM_CHAT_ID", ""),
+        )
+
+        # Self-healing (Phase 5)
+        from app.domain.services.self_healing import (
+            OrderRejectionHandler,
+            DBFallbackBuffer,
+        )
+
+        self._order_rejection = OrderRejectionHandler()
+        self._db_fallback = DBFallbackBuffer()
 
     def get_or_create_session(self, symbol: str) -> SessionState:
         """Get or create a session for the symbol."""
@@ -220,11 +237,11 @@ class TradingSessionService:
     ) -> dict:
         """Process a new tick and return the current state snapshot."""
         session = self.get_or_create_session(symbol)
-        session._last_tick_time = time.time()
         self._state_manager._maybe_reset_symbol_state(session, symbol, tick.time)
 
-        # Drain pending signal from LLM worker thread
+        # Drain pending signal from LLM worker thread + update tick time
         with session._lock:
+            session._last_tick_time = time.time()
             pending = session._pending_signal
             session._pending_signal = None
         if pending:
@@ -249,33 +266,34 @@ class TradingSessionService:
         if pending:
             self._execute_signal(pending_symbol, pending_signal, session)
 
-        # Update data store
-        new_candle = not (session.data and session.data[-1].time == tick.time)
-        if not new_candle:
-            session.data[-1] = tick
-        else:
-            if self._storage and session.data:
-                closed = session.data[-1]
-                try:
-                    self._storage.save_tick(
-                        symbol,
-                        {
-                            "time": closed.time,
-                            "open": closed.open,
-                            "high": closed.high,
-                            "low": closed.low,
-                            "close": closed.close,
-                            "volume": closed.volume,
-                            "delta": closed.delta,
-                        },
-                    )
-                except Exception:
-                    log.debug("Silent exception handled", exc_info=True)
-            session.data.append(tick)
-            session._last_candle_time = tick.time
-            if len(session.data) > MAX_CANDLES_PER_SYMBOL:
-                del session.data[: len(session.data) - MAX_CANDLES_PER_SYMBOL]
-        session.order_book = order_book
+        # Update data store (under lock — session.data is shared with LLM handler)
+        with session._lock:
+            new_candle = not (session.data and session.data[-1].time == tick.time)
+            if not new_candle:
+                session.data[-1] = tick
+            else:
+                if self._storage and session.data:
+                    closed = session.data[-1]
+                    try:
+                        self._storage.save_tick(
+                            symbol,
+                            {
+                                "time": closed.time,
+                                "open": closed.open,
+                                "high": closed.high,
+                                "low": closed.low,
+                                "close": closed.close,
+                                "volume": closed.volume,
+                                "delta": closed.delta,
+                            },
+                        )
+                    except Exception:
+                        log.debug("Silent exception handled", exc_info=True)
+                session.data.append(tick)
+                session._last_candle_time = tick.time
+                if len(session.data) > MAX_CANDLES_PER_SYMBOL:
+                    del session.data[: len(session.data) - MAX_CANDLES_PER_SYMBOL]
+            session.order_book = order_book
 
         # Process tick in portfolio
         with session._lock:
@@ -354,15 +372,17 @@ class TradingSessionService:
                 except Exception:
                     log.debug("Failed to persist performance snapshot", exc_info=True)
 
-        # Publish tick event
-        self._event_bus.publish(
-            TickReceived(
+        # Call entry logic directly (avoids event bus overhead)
+        try:
+            tick_event = TickReceived(
                 symbol=symbol,
                 tick=tick,
                 order_book=order_book,
                 data=tuple(session.data),
             )
-        )
+            self._on_tick(tick_event)
+        except Exception:
+            log.debug("Entry logic error for %s", symbol, exc_info=True)
 
         return self._build_state_snapshot(session)
 
@@ -565,6 +585,55 @@ class TradingSessionService:
         if ib_engine:
             ib_state = ib_engine.update(event.tick)
             session._ib_state = ib_state
+
+            # IB Breakout Scalp evaluation (Phase 4)
+            if self._scalp_enabled and ib_state.is_complete:
+                if event.symbol not in self._ib_scalp_engines:
+                    from app.domain.services.ib_breakout_scalp import (
+                        IBBreakoutScalpEngine,
+                    )
+
+                    self._ib_scalp_engines[event.symbol] = IBBreakoutScalpEngine()
+                scalp_sig = self._ib_scalp_engines[event.symbol].evaluate_setup_a(
+                    ib_state=ib_state,
+                    current_price=float(event.tick.close),
+                    current_high=float(event.tick.high),
+                    current_low=float(event.tick.low),
+                    current_volume=float(event.tick.volume),
+                    avg_volume=float(
+                        getattr(amt_result, "baseline_volume", event.tick.volume)
+                    ),
+                    cvd_slope_1m=float(getattr(amt_result, "cvd_slope", 0)),
+                    bar_index=len(session.data),
+                    tick_size=self._exchange_config.get_tick_size(event.symbol)
+                    if self._exchange_config
+                    else 0.05,
+                )
+                if scalp_sig.setup_valid:
+                    log.info(
+                        "IB SCALP [%s] %s: entry=%.1f sl=%.1f tp=%.1f rr=%.1f",
+                        event.symbol,
+                        scalp_sig.scalp_type.value,
+                        scalp_sig.entry_price,
+                        scalp_sig.stop_loss,
+                        scalp_sig.take_profit,
+                        scalp_sig.rr_ratio,
+                    )
+
+        # Update 1-min bar engine (Phase 4)
+        if self._scalp_enabled:
+            if event.symbol not in self._one_min_engines:
+                from app.domain.services.one_min_bar_engine import OneMinBarEngine
+
+                self._one_min_engines[event.symbol] = OneMinBarEngine()
+            self._one_min_engines[event.symbol].update(
+                symbol=event.symbol,
+                price=float(event.tick.close),
+                volume=float(event.tick.volume),
+                delta=float(getattr(amt_result, "delta_normalized", 0))
+                * float(event.tick.volume),
+                timestamp=event.tick.time,
+            )
 
         # Pre-candle advisory: fire T-60s before 5-min bar close (bar minute 4)
         try:
@@ -935,9 +1004,10 @@ class TradingSessionService:
                             _exec_prob,
                         )
                         self._execute_signal(event.symbol, signal, session)
-                        session._pending_decision = None
-                        session._pending_amt = None
-                        session._pending_tick = None
+                        with session._lock:
+                            session._pending_decision = None
+                            session._pending_amt = None
+                            session._pending_tick = None
                     else:
                         log.info(
                             "ENTRY BLOCKED: %s — signal construction failed",
@@ -1019,13 +1089,6 @@ class TradingSessionService:
             elapsed_ms = (_tick_time.monotonic() - _tick_start) * 1000
             self._latency_tracker.record(event.symbol, elapsed_ms)
 
-    def _on_signal_generated(self, event: SignalGenerated) -> None:
-        """Event bus handler — may be called from any thread."""
-        if not event.signal:
-            return
-        session = self.get_or_create_session(event.symbol)
-        self._execute_signal(event.symbol, event.signal, session)
-
     def _execute_signal(self, symbol: str, sig, session: SessionState) -> None:
         """Execute a trade signal — delegates to EntryCoordinator."""
         self._entry_coordinator.execute_signal(symbol, sig, session)
@@ -1057,10 +1120,6 @@ class TradingSessionService:
     def _on_stop_out(self, level: float, direction: str) -> None:
         """Callback from TradeLifecycleHandler — delegates to ExitCoordinator."""
         self._exit_coordinator.on_stop_out(level, direction, self._exchange)
-
-    def _on_position_closed(self, event: PositionClosed) -> None:
-        """Handle position closed — delegates to ExitCoordinator."""
-        self._exit_coordinator.on_position_closed(event)
 
     # ----- control-plane helpers -----
 

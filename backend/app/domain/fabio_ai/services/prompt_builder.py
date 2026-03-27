@@ -416,81 +416,71 @@ def build_overseer_prompt(
     session_info: Optional[SessionInfo] = None,
     footprint_candle: Optional[FootprintCandle] = None,
 ) -> str:
-    """Build rich context prompt for position management."""
+    """Build 4-section overseer prompt per spec P3-3.
 
-    # Map objects to core dict
-    # Safely handle attributes that might be missing or MagicMocks
+    Section 1: Position state (entry, current, unrealized, SL, TP, hold time)
+    Section 2: Market context (AMT state, POC/VAH/VAL, aggression, CVD)
+    Section 3: Risk constraints (tier, daily PnL, loss streak, daily loss %)
+    Section 4: Instruction (action: HOLD/TIGHTEN_SL/PARTIAL_EXIT/FULL_EXIT/ADD)
+    """
+
     def _safe_float(obj, attr, default=0.0):
         val = getattr(obj, attr, default)
         try:
             return float(val)
-        except:
+        except Exception:
             return default
 
-    core_data = {
-        "ltp": _safe_float(tick, "close"),
-        "vah": getattr(amt_result, "value_area_high", getattr(amt_result, "vah", 0.0)),
-        "val": getattr(amt_result, "value_area_low", getattr(amt_result, "val", 0.0)),
-        "poc": _safe_float(amt_result, "poc"),
-        "delta": _safe_float(tick, "delta"),
-        "volume": _safe_float(tick, "volume"),
-        "cvd": getattr(amt_result, "cvd", getattr(amt_result, "cvd_slope", 0.0)),
-        "cvd_divergence": getattr(amt_result, "cvd_divergence", ""),
-        "market_state": getattr(amt_result, "market_state", "Balanced"),
-        "profile_shape": getattr(amt_result, "profile_shape", ""),
-        "is_second_drive": getattr(amt_result, "is_second_drive", False),
-        "market_structure": getattr(amt_result, "market_structure_state", ""),
-        "aggressive_prints": [
-            {"side": ap.side, "price": ap.price} for ap in amt_result.aggressive_prints
-        ]
-        if hasattr(amt_result, "aggressive_prints") and amt_result.aggressive_prints
-        else [],
-        "bubble_retests": [
-            {"side": ap.side, "price": ap.price}
-            for ap in getattr(amt_result, "bubble_retests", [])
-        ],
-        "lvn_play": getattr(amt_result, "lvn_play", None),
-    }
+    # Section 1: Position state
+    entry = pos_state.get("entry_price", 0)
+    current = pos_state.get("current_price", 0)
+    unrealized_pct = pos_state.get("unrealized_pnl_pct", 0) * 100
+    sl = pos_state.get("stop_loss", 0)
+    tp = pos_state.get("take_profit", 0)
+    hold_sec = pos_state.get("hold_time_seconds", 0)
+    section_1 = (
+        f"Side={pos_state.get('side', 'LONG')} "
+        f"Entry={entry:.2f} Current={current:.2f} "
+        f"Unrealized={unrealized_pct:+.2f}% "
+        f"SL={sl:.2f} TP={tp:.2f} Hold={hold_sec:.0f}s"
+    )
 
-    if session_info:
-        core_data.update(
-            {
-                "gap_type": getattr(session_info, "gap_type", ""),
-                "opening_bias": getattr(session_info, "opening_inventory_bias", ""),
-                "ib_high": _safe_float(session_info, "ib_high"),
-                "ib_low": _safe_float(session_info, "ib_low"),
-            }
-        )
-        # Add session info if it doesn't fit core narrative perfectly
-        core_data["session_name"] = getattr(session_info, "session", "")
-        core_data["favor_strategy"] = getattr(session_info, "favor_strategy", "")
+    # Section 2: Market context
+    poc = _safe_float(amt_result, "poc")
+    vah = getattr(amt_result, "value_area_high", getattr(amt_result, "vah", 0.0))
+    val = getattr(amt_result, "value_area_low", getattr(amt_result, "val", 0.0))
+    market_state = getattr(amt_result, "market_state", "Unknown")
+    aggression = _safe_float(amt_result, "aggression")
+    cvd_slope = getattr(amt_result, "cvd_slope", getattr(amt_result, "cvd", 0))
+    delta_norm = _safe_float(tick, "delta")
+    section_2 = (
+        f"State={market_state} POC={poc:.2f} VAH={vah:.2f} VAL={val:.2f} "
+        f"Aggression={aggression:.1f} CVD_slope={cvd_slope:.1f} Delta={delta_norm:.2f}"
+    )
 
-    if footprint_candle:
-        # Check for stacked imbalances
-        levels = getattr(footprint_candle, "levels", [])
-        stacked = [lv for lv in levels if getattr(lv, "stacked", False)]
-        if stacked:
-            core_data["stacked_imbalances"] = f"{len(stacked)} levels"
+    # Section 3: Risk constraints
+    tier = pos_state.get("risk_tier", "C")
+    daily_pnl = pos_state.get("daily_pnl", 0)
+    loss_streak = pos_state.get("consecutive_losses", 0)
+    daily_loss_pct = pos_state.get("daily_loss_pct", 0)
+    section_3 = (
+        f"Tier={tier} DailyPnL={daily_pnl:.2f} "
+        f"LossStreak={loss_streak} DailyLoss={daily_loss_pct:.2%}"
+    )
 
-    # Core narrative
-    narrative = _build_core_amt_narrative(core_data)
+    # Section 4: Instruction
+    section_4 = "Action: HOLD | TIGHTEN_SL | PARTIAL_EXIT | FULL_EXIT | ADD. JSON only."
 
-    # Extra session context not covered by core
-    if session_info:
-        sess_line = f"Session: {core_data['session_name']}. Favor {core_data['favor_strategy']}."
-        narrative = sess_line + " " + narrative
-
-    # Position state enrichment
-    pos_parts = [
-        f"Open {pos_state['side']} position from {pos_state['entry_price']:.2f}.",
-        f"Current price: {pos_state['current_price']:.2f} (unrealized: {pos_state['unrealized_pnl_pct'] * 100:+.2f}%).",
-        f"Stop loss: {pos_state['stop_loss']:.2f}, Take profit: {pos_state['take_profit']:.2f}.",
+    # Build final prompt
+    lines = [
+        f"=== OVERSEER: {pos_state.get('symbol', '')} ===",
+        f"[Position] {section_1}",
+        f"[Market] {section_2}",
+        f"[Risk] {section_3}",
+        f"[Instruction] {section_4}",
     ]
 
-    final_prompt = " ".join(pos_parts) + " " + narrative
-
-    # Overseer instruction
-    return final_prompt + "\n\n" + OVERSEER_INSTRUCTION
+    return "\n".join(lines) + "\n\n" + OVERSEER_INSTRUCTION
 
 
 # =====================================================================
@@ -734,29 +724,56 @@ def build_advisory_prompt(
     tick: "OHLC",
     amt_result: "AMTResult",
 ) -> str:
-    """Build advisory prompt for pre-candle analysis.
+    """Build 5-section advisory prompt per spec P3-3.
 
-    Triggered T-60s before 5-min bar close. Output is advisory-only
-    for the React dashboard — not used by any gate.
+    Section 1: Date + timeline context
+    Section 2: Current 5-min bar data
+    Section 3: AMT state (market state, POC/VAH/VAL, zone)
+    Section 4: Aggression + CVD direction
+    Section 5: Instruction (scenario narrative only)
     """
+    from datetime import datetime
+
+    bar_time = tick.time
+    try:
+        dt = datetime.fromisoformat(bar_time)
+        section_1 = dt.strftime("%A, %B %d, %Y %H:%M IST")
+    except Exception:
+        section_1 = bar_time
+
+    section_2 = (
+        f"O={tick.open} H={tick.high} L={tick.low} C={tick.close} V={tick.volume}"
+    )
+
+    market_state = getattr(amt_result, "market_state", "UNKNOWN")
+    poc = getattr(amt_result, "poc", 0)
+    vah = getattr(amt_result, "value_area_high", 0)
+    val = getattr(amt_result, "value_area_low", 0)
+    zone = getattr(amt_result, "zone", "N/A")
+    section_3 = f"State={market_state} POC={poc} VAH={vah} VAL={val} Zone={zone}"
+
+    aggression = getattr(amt_result, "aggression", 0)
+    cvd_slope = getattr(amt_result, "cvd_slope", 0)
+    delta_norm = getattr(amt_result, "delta_normalized", 0)
+    section_4 = (
+        f"Aggression={aggression} CVD_slope={cvd_slope:.1f} Delta={delta_norm:.2f}"
+    )
+
     lines = [
         f"=== PRE-CANDLE ADVISORY: {symbol} ===",
-        f"Current bar: O={tick.open} H={tick.high} L={tick.low} C={tick.close} V={tick.volume}",
-        f"Market state: {amt_result.market_state}",
-        f"POC={amt_result.poc} VAH={amt_result.value_area_high} VAL={amt_result.value_area_low}",
+        f"[Date+Timeline] {section_1}",
+        f"[Current Bar] {section_2}",
+        f"[Market State] {section_3}",
+        f"[Aggression] {section_4}",
     ]
 
-    if getattr(amt_result, "has_displacement", False):
-        lines.append(
-            f"Displacement: {getattr(amt_result, 'displacement_direction', 'N/A')}"
-        )
-    if getattr(amt_result, "zone", None):
-        lines.append(f"Zone: {amt_result.zone}")
-    if getattr(amt_result, "aggression", None):
-        lines.append(f"Aggression: {amt_result.aggression}")
+    if getattr(amt_result, "lvns", None):
+        lines.append(f"LVNs: {amt_result.lvns[:3]}")
+    if getattr(amt_result, "hvns", None):
+        lines.append(f"HVNs: {amt_result.hvns[:3]}")
 
     lines.append(
-        "\nWhat setup is forming? Key levels to watch? Expected next-bar behavior?"
+        "[Instruction] Scenario narrative for dashboard only. Not a trade signal."
     )
     return "\n".join(lines)
 

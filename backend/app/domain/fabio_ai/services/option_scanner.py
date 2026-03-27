@@ -48,13 +48,13 @@ class OptionScannerService:
     }
 
     _MIN_OI = {
-        "NIFTY": 500_000,
+        "NIFTY": 100_000,
         "BANKNIFTY": 300_000,
         "FINNIFTY": 50_000,
         "CRUDEOIL": 10,
         "NATURALGAS": 500,
-        "GOLD": 1,
-        "SILVER": 1,
+        "GOLD": 0,
+        "SILVER": 0,
     }
 
     def __init__(self, broker) -> None:
@@ -73,7 +73,7 @@ class OptionScannerService:
         exchange: str | None = None,
         expiry_index: int = 0,
         strikes_around_atm: int = 2,
-        bullish_only: bool = True,  # Only select bullish option contracts
+        bullish_only: bool = False,  # Allow both CE and PE by default
     ) -> list[ScanResult]:
         """Select top N contracts based on momentum and liquidity.
 
@@ -183,13 +183,29 @@ class OptionScannerService:
                             continue
 
                         ltp = float(opt.ltp or 0)
-                        if ltp <= 0:
+                        # Scalping filter: require premium in valid range
+                        # MCX commodities have much higher premiums than NSE options
+                        mcx_min, mcx_max = 20, 50000  # MCX: ₹20-50,000
+                        nse_min, nse_max = 20, 800  # NSE: ₹20-800
+                        is_mcx = u.upper() in (
+                            "CRUDEOIL",
+                            "GOLD",
+                            "SILVER",
+                            "NATURALGAS",
+                            "COPPER",
+                        )
+                        ltp_min, ltp_max = (
+                            (mcx_min, mcx_max) if is_mcx else (nse_min, nse_max)
+                        )
+                        if not (ltp_min <= ltp <= ltp_max):
                             logger.info(
-                                "%s %s %d: ltp=%.2f — filtered out (ltp<=0)",
+                                "%s %s %d: ltp=%.2f — filtered out (outside %d-%d range)",
                                 u,
                                 opt_type,
                                 strike,
                                 ltp,
+                                ltp_min,
+                                ltp_max,
                             )
                             continue
 
@@ -242,11 +258,9 @@ class OptionScannerService:
                                 penalty = min(20, (spread_pct - 0.5) * 10)
                                 score -= penalty
 
-                        # Quant Improvement 3: Bullish Momentum Bias (+25 pts)
-                        if opt_type == "CE":
-                            score += 25  # Always boost CE (bullish bet)
-                        elif opt_type == "PE" and strike >= atm:
-                            score += 15  # Boost ITM PE (high delta, bullish hedge)
+                        # Quant Improvement 3: Momentum Bias (removed hardcoded CE boost)
+                        # Direction is now decided by AMT engine + MLX
+                        pass
 
                         logger.info(
                             "SCORED: %s %s %d: ltp=%.2f oi=%d vol=%d score=%.0f sym=%s",

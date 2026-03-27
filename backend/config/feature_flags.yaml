@@ -5,16 +5,16 @@
 features:
   # ── Phase 0 flags ──
   true_delta_lee_ready: false          # true activates Lee-Ready, false = Gaussian proxy
-  realistic_cost_model: false          # true activates full NSE cost model in PaperBroker
+  realistic_cost_model: true           # true activates full NSE cost model in PaperBroker
 
   # ── Phase 1 flags ──
   parallel_symbol_sessions: false      # Multi-symbol concurrent execution
   duckdb_storage: false                # switches from SQLite to DuckDB
 
   # ── Phase 2 flags ──
-  short_signals_enabled: false         # enables PE / SHORT gate logic
-  risk_tier_engine: false              # enables A/B/C dynamic risk tiers
-  initial_balance_engine: false        # enables IB High/Low/Mid tracking
+  short_signals_enabled: true          # enables PE / SHORT gate logic
+  risk_tier_engine: true               # enables A/B/C dynamic risk tiers
+  initial_balance_engine: true         # enables IB High/Low/Mid tracking
   correlation_guard: true              # blocks NIFTY+BANKNIFTY same-direction
 
   # ── Phase 3 flags ──
@@ -29,8 +29,8 @@ features:
   llm_post_trade: true                # post-trade analysis (keep as-is)
 
   # ── Phase 4 flags ──
-  scalp_engine_enabled: false          # enables 1-min/15-sec MTF stack
-  ib_breakout_scalp: false            # enables Initial Balance breakout setups
+  scalp_engine_enabled: true           # enables 1-min/15-sec MTF stack
+  ib_breakout_scalp: true             # enables Initial Balance breakout setups
   print_level_trigger: false           # enables 15-sec tick-level aggression trigger
 
   # ── Infrastructure flags ──

@@ -192,13 +192,23 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       }
     });
 
-    if (isFootprint || isRange) {
+    if (isFootprint) {
       candleSeries.applyOptions({
         visible: true,
         upColor: 'rgba(0,0,0,0)',
         downColor: 'rgba(0,0,0,0)',
         wickUpColor: 'rgba(0,0,0,0)',
         wickDownColor: 'rgba(0,0,0,0)',
+        borderVisible: false
+      });
+      predSeries.applyOptions({ visible: false });
+    } else if (isRange) {
+      candleSeries.applyOptions({
+        visible: true,
+        upColor: config.bullColor,
+        downColor: config.bearColor,
+        wickUpColor: config.bullColor,
+        wickDownColor: config.bearColor,
         borderVisible: false
       });
       predSeries.applyOptions({ visible: false });
@@ -224,7 +234,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     // Initial Data Load
     if (isRange && rangeBarData && rangeBarData.bars.length > 0) {
-      // RANGE mode: load range bars into candlestick series
+      // RANGE mode: synth_time is a plain monotonic integer — do NOT add IST offset
       candleSeries.setData(rangeBarData.bars.map(b => ({
         time: b.time as any,
         open: b.open,
@@ -261,10 +271,14 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     if (!tickBus || !symbol || !candleSeriesRef.current || !volumeSeriesRef.current) return;
 
     const handleTick = (e: Event) => {
+      // CRITICAL: Do not inject standard UNIX timestamps into the chart if it's currently
+      // rendering RANGE bars (which use small synthetic integer timestamps).
+      if (mode === 'RANGE') return;
+
       const customEvent = e as CustomEvent;
       if (customEvent.detail.symbol !== symbol) return;
 
-      const { tick, fullData } = customEvent.detail;
+      const { tick } = customEvent.detail;
 
       // Common Time
       const unixTime = (new Date(tick.time).getTime() / 1000 + 19800) as any;
@@ -281,22 +295,21 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         value: tick.volume,
         color: tick.close >= tick.open ? '#22c55e80' : '#ef444480'
       });
-
-      // Optional: Update predictions if we want smooth native rendering there too
-      // But for now, we just update the overlay since we have the data
-      if (overlayRef.current) {
-        // We'll let the standard overlay draw interval handle it, or we could trigger a tiny redraw here
-      }
     };
 
     tickBus.addEventListener('tick', handleTick);
     return () => {
       tickBus.removeEventListener('tick', handleTick);
     };
-  }, [tickBus, symbol]);
+  }, [tickBus, symbol, mode]);
 
+  const prevIsHiddenRef = useRef(isHidden);
   useEffect(() => {
-    if (!isHidden && chartRef.current && chartContainerRef.current) {
+    // Only fire when visibility actually changes (tab switch), NOT on every data tick.
+    const becameVisible = prevIsHiddenRef.current && !isHidden;
+    prevIsHiddenRef.current = isHidden;
+
+    if (becameVisible && chartRef.current && chartContainerRef.current) {
       const { clientWidth, clientHeight } = chartContainerRef.current;
       if (clientWidth > 0 && clientHeight > 0) {
         chartRef.current.applyOptions({ width: clientWidth, height: clientHeight });
@@ -304,26 +317,45 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           overlayRef.current.width = clientWidth;
           overlayRef.current.height = clientHeight;
         }
-        chartRef.current.timeScale().scrollToPosition(0, false);
-
-        // Reload data when chart becomes visible (for RANGE mode)
-        if (mode === 'RANGE' && rangeBarData && rangeBarData.bars.length > 0 && candleSeriesRef.current && volumeSeriesRef.current) {
-          candleSeriesRef.current.setData(rangeBarData.bars.map(b => ({
-            time: b.time as any,
-            open: b.open,
-            high: b.high,
-            low: b.low,
-            close: b.close,
-          })));
-          volumeSeriesRef.current.setData(rangeBarData.bars.map(b => ({
-            time: b.time as any,
-            value: b.volume,
-            color: b.close >= b.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
-          })));
-        }
+        // Do NOT call scrollToPosition here — respect the user's current pan/zoom.
+        // Effect 4b will handle loading range bar data independently.
       }
     }
-  }, [isHidden, mode, rangeBarData]);
+  }, [isHidden]);
+
+  // Handle mode switches dynamically without remount
+  useEffect(() => {
+    if (!candleSeriesRef.current || !predictionSeriesRef.current) return;
+    
+    if (mode === 'FOOTPRINT') {
+      candleSeriesRef.current.applyOptions({
+        upColor: 'rgba(0,0,0,0)',
+        downColor: 'rgba(0,0,0,0)',
+        wickUpColor: 'rgba(0,0,0,0)',
+        wickDownColor: 'rgba(0,0,0,0)',
+        borderVisible: false
+      });
+      predictionSeriesRef.current.applyOptions({ visible: false });
+    } else if (mode === 'RANGE') {
+      candleSeriesRef.current.applyOptions({
+        upColor: config.bullColor,
+        downColor: config.bearColor,
+        wickUpColor: config.bullColor,
+        wickDownColor: config.bearColor,
+        borderVisible: false
+      });
+      predictionSeriesRef.current.applyOptions({ visible: false });
+    } else {
+      candleSeriesRef.current.applyOptions({
+        upColor: config.bullColor,
+        downColor: config.bearColor,
+        wickUpColor: config.bullColor,
+        wickDownColor: config.bearColor,
+        borderVisible: false
+      });
+      predictionSeriesRef.current.applyOptions({ visible: true });
+    }
+  }, [mode, config.bullColor, config.bearColor]);
 
   // 3. Canvas Overlay Drawing
   useEffect(() => {
@@ -339,22 +371,25 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       try {
-        if (stableAmtAnalysis) {
-          if (config.showVolumeProfile) {
-            drawVolumeProfile(ctx, canvas, series, stableAmtAnalysis, config);
-          }
-          // Render Aggressive Bubbles (Fabio Valentini Style)
-          if (stableAmtAnalysis.aggressivePrints && stableAmtAnalysis.aggressivePrints.length > 0) {
-            drawAggressiveBubbles(ctx, canvas, chart, series, stableAmtAnalysis.aggressivePrints, config);
-          }
-        }
-
-        if (mode === 'FOOTPRINT' && footprintData && stableData.length > 0) {
-          drawFootprint(ctx, canvas, chart, series, stableData, footprintData, cumulativeDeltas, config, stableAmtAnalysis);
-        }
-
         if (mode === 'RANGE' && rangeBarData && rangeBarData.bars.length > 0) {
+          if (config.showVolumeProfile) {
+            drawRangeVolumeProfile(ctx, canvas, series, rangeBarData, config);
+          }
           drawRangeBars(ctx, canvas, chart, series, rangeBarData, config);
+        } else {
+          if (stableAmtAnalysis) {
+            if (config.showVolumeProfile) {
+              drawVolumeProfile(ctx, canvas, series, stableAmtAnalysis, config);
+            }
+            // Render Aggressive Bubbles (Fabio Valentini Style)
+            if (stableAmtAnalysis.aggressivePrints && stableAmtAnalysis.aggressivePrints.length > 0) {
+              drawAggressiveBubbles(ctx, canvas, chart, series, stableAmtAnalysis.aggressivePrints, config);
+            }
+          }
+
+          if (mode === 'FOOTPRINT' && footprintData && stableData.length > 0) {
+            drawFootprint(ctx, canvas, chart, series, stableData, footprintData, cumulativeDeltas, config, stableAmtAnalysis);
+          }
         }
       } catch (e) {
         console.error("Overlay draw error", e);
@@ -594,6 +629,37 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       ctx.fillStyle = '#FF990060';
       ctx.font = '11px monospace';
       ctx.fillText('No active displacement leg', rightEdge - 200, 20);
+    }
+  };
+
+  const drawRangeVolumeProfile = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, series: ISeriesApi<"Candlestick">, rangeData: RangeBarData, cfg: ChartConfig) => {
+    const mode = cfg.vpMode || 'combined';
+    const session = rangeData.sessionProfile || rangeData.volumeProfile;
+    const leg = rangeData.legProfile;
+    const hasLeg = leg && leg.levels && leg.levels.length > 0;
+    const rightEdge = canvas.width - 50;
+
+    if (session && session.levels) {
+      if (mode === 'session' || mode === 'combined') {
+        const sessionOffset = (hasLeg && mode === 'combined') ? canvas.width * 0.12 : 0;
+        drawProfileBars(ctx, canvas, series, session.levels, 0.15, sessionOffset, '#4488cc', '#cc4444', true,
+          undefined, undefined, session.vah, session.val, session.poc);
+        drawVerticalLabel(ctx, canvas, 'RANGE SESSION', rightEdge - sessionOffset - canvas.width * 0.08, '#6699cc');
+      }
+    }
+
+    if (leg && leg.levels) {
+      if (hasLeg && (mode === 'leg' || mode === 'combined')) {
+        drawProfileBars(ctx, canvas, series, leg.levels, 0.10, 0, '#FF9900', '#FF6600', false,
+          undefined, undefined, leg.vah > 0 ? leg.vah : undefined, leg.val > 0 ? leg.val : undefined, leg.poc > 0 ? leg.poc : undefined);
+        drawVerticalLabel(ctx, canvas, 'RANGE LEG', rightEdge - canvas.width * 0.05, '#FF9900');
+      }
+    }
+    
+    if (!hasLeg && mode === 'leg') {
+      ctx.fillStyle = '#FF990060';
+      ctx.font = '11px monospace';
+      ctx.fillText('No range displacement leg', rightEdge - 200, 20);
     }
   };
 
@@ -1007,8 +1073,9 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     return Math.floor(val).toString();
   };
 
-  // 4. Update Data
+  // 4a. Update Candlestick Series (STANDARD mode)
   useEffect(() => {
+    if (mode === 'RANGE') return; // Do not overwrite chart with standard candles if in Range mode
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !predictionSeriesRef.current) return;
 
     // Offset UTC → IST (+5:30) so chart axis shows Indian Standard Time
@@ -1045,25 +1112,55 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     } else {
       predictionSeriesRef.current.setData([]);
     }
-  }, [data, predictions, config.bullColor, config.bearColor]);
+  }, [data, predictions, config.bullColor, config.bearColor, mode]);
 
-  // 4b. Reload range bars when data arrives or updates
+  // 4b. Reload range bars when data arrives or updates.
+  // Only call setData() when the number of CLOSED bars changes (new bar finalized).
+  // For the forming bar, call update() to avoid wiping historical data on every tick.
+  const prevRangeBarCountRef = useRef<number>(0);
+  // Reset count when leaving RANGE mode so next entry always does a full setData().
+  useEffect(() => {
+    if (mode !== 'RANGE') { prevRangeBarCountRef.current = 0; }
+  }, [mode]);
   useEffect(() => {
     if (mode !== 'RANGE' || !rangeBarData || !rangeBarData.bars.length) return;
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
-    candleSeriesRef.current.setData(rangeBarData.bars.map(b => ({
-      time: b.time as any,
-      open: b.open,
-      high: b.high,
-      low: b.low,
-      close: b.close,
-    })));
-    volumeSeriesRef.current.setData(rangeBarData.bars.map(b => ({
-      time: b.time as any,
-      value: b.volume,
-      color: b.close >= b.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
-    })));
+    const bars = rangeBarData.bars;
+    const barCount = bars.length;
+    const prevCount = prevRangeBarCountRef.current;
+
+    if (barCount !== prevCount) {
+      // Bar count changed: a new bar was closed (or mode just switched) — full reload.
+      prevRangeBarCountRef.current = barCount;
+      candleSeriesRef.current.setData(bars.map(b => ({
+        time: b.time as any,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+      })));
+      volumeSeriesRef.current.setData(bars.map(b => ({
+        time: b.time as any,
+        value: b.volume,
+        color: b.close >= b.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+      })));
+    } else if (barCount > 0) {
+      // Same bar count: only the forming bar changed — update() the last entry.
+      const last = bars[barCount - 1];
+      candleSeriesRef.current.update({
+        time: last.time as any,
+        open: last.open,
+        high: last.high,
+        low: last.low,
+        close: last.close,
+      });
+      volumeSeriesRef.current.update({
+        time: last.time as any,
+        value: last.volume,
+        color: last.close >= last.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+      });
+    }
   }, [mode, rangeBarData]);
 
   // 5. Update Markers & Lines

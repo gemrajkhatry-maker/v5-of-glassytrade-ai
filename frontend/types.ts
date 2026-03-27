@@ -181,6 +181,8 @@ export interface TripleAPattern {
 export interface RangeBarData {
   bars: RangeBar[];
   volumeProfile: RangeBarVP;
+  sessionProfile?: RangeBarVP;
+  legProfile?: RangeBarVP;
   vwap: number;
   cumulativeDelta: number;
   tripleA: TripleAPattern;

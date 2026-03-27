@@ -701,6 +701,8 @@ class AMTAnalyzer:
         volume_bubble_near = bubble.detected
 
         # Aggression scorer (FR-06 additive, max 4.5) — with persistence filter
+        # Adjust persistence bars based on market state (Section 10.2 fix)
+        self._persistent_agg_scorer.set_persistence_for_state(market_state)
         agg_result = self._persistent_agg_scorer.score(
             footprint_confirmed=footprint_confirmed,
             cvd_confirmed=cvd_confirmed,

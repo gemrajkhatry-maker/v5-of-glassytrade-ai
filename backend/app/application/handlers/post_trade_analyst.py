@@ -61,21 +61,34 @@ def build_post_trade_prompt(
     entry_context: str = "",
     exit_context: str = "",
 ) -> str:
-    """Build post-trade analysis prompt."""
+    """Build 4-section post-trade prompt per spec P3-3.
+
+    Section 1: Trade data (entry, exit, PnL, hold time, close reason)
+    Section 2: Entry context (AMT state, setup type, confidence)
+    Section 3: Market state at close (POC/VAH/VAL, regime, aggression)
+    Section 4: Instruction (quality score, mistake, improvement)
+    """
+    pnl_str = f"{pnl:.2f}"
+    hold_str = f"{hold_time_seconds:.0f}s"
+    rr = abs(exit_price - entry_price) / max(abs(entry_price * 0.01), 0.01)
+
     lines = [
         f"=== POST-TRADE ANALYSIS: {symbol} ===",
-        f"Side: {side} | Entry: {entry_price} | Exit: {exit_price}",
-        f"PnL: {pnl:.2f} | Hold time: {hold_time_seconds:.0f}s",
-        f"Close reason: {close_reason}",
+        f"[Trade Data] Side={side} Entry={entry_price} Exit={exit_price} PnL={pnl_str} Hold={hold_str} Close={close_reason} R={rr:.1f}",
     ]
 
     if entry_context:
-        lines.append(f"\nEntry context: {entry_context}")
+        lines.append(f"[Entry Context] {entry_context}")
+    else:
+        lines.append("[Entry Context] Not recorded")
+
     if exit_context:
-        lines.append(f"Exit context: {exit_context}")
+        lines.append(f"[Market at Close] {exit_context}")
+    else:
+        lines.append("[Market at Close] Not recorded")
 
     lines.append(
-        "\nWhat was the trade quality? Any mistakes? What to improve next time?"
+        "[Instruction] Score 1-10, identify mistake if any, suggest one improvement."
     )
     return "\n".join(lines)
 

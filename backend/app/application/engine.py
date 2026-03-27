@@ -236,10 +236,13 @@ class TradingEngine:
             return self._generation
 
     def get_history(self, symbol: str) -> list[OHLC]:
-        """Get seeded history for a symbol."""
+        """Get seeded history for a symbol. Always sorted ascending by time."""
         session = self._session_service.get_or_create_session(symbol)
         if session:
-            return list(session.data)
+            try:
+                return sorted(session.data, key=lambda x: x.time)
+            except Exception:
+                return list(session.data)
         return []
 
     def get_depth(self, symbol: str) -> OrderBook | None:
@@ -778,22 +781,20 @@ class TradingEngine:
         so the range bar builder has initial data.
         """
         try:
-            state = self._latest_states.get(symbol)
-            if not state:
-                return
-            data = state.get("data", [])
-            if not data:
+            session = self._session_service.get_or_create_session(symbol)
+            if not session or not session.data:
                 return
 
             # Process last 200 candles to seed range bars
-            for candle in data[-200:]:
-                ts = str(candle.get("time", ""))
-                o = float(candle.get("open", 0))
-                h = float(candle.get("high", 0))
-                l = float(candle.get("low", 0))
-                c = float(candle.get("close", 0))
-                v = float(candle.get("volume", 0))
-                tb = float(candle.get("takerBuyVolume", v / 2))
+            for candle in session.data[-200:]:
+                # Note: session.data is a list of OHLC dataclasses
+                ts = str(candle.time) if hasattr(candle, "time") else ""
+                o = float(candle.open)
+                h = float(candle.high)
+                l = float(candle.low)
+                c = float(candle.close)
+                v = float(candle.volume)
+                tb = float(getattr(candle, "taker_buy_volume", v / 2))
 
                 if o <= 0 or h <= 0 or l <= 0 or c <= 0:
                     continue

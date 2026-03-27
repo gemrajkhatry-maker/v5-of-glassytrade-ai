@@ -58,15 +58,17 @@ class Settings(SharedSettings):
 
     # Feature flags
     RISK_TIER_ENGINE: bool = Field(default=False)
-    SHORT_SIGNALS_ENABLED: bool = Field(default=False)
+    SHORT_SIGNALS_ENABLED: bool = Field(default=True)
     LLM_PRE_CANDLE_ADVISORY: bool = Field(default=True)
+    REALISTIC_COST_MODEL: bool = Field(default=False)
+    SCALP_ENGINE_ENABLED: bool = Field(default=False)
 
     # Trading settings
     PORT: int = Field(default=9090)
     STREAM_INTERVAL: str = Field(default="5m")
     TICK_POLL_SECONDS: float = Field(default=5.0)
     ALLOW_SHORT: bool = Field(
-        default=False, description="Short entries disabled — BUY-only mode"
+        default=True, description="Short entries enabled — Direction-agnostic AMT mode"
     )
     LLM_EXECUTION_ENABLED: bool = Field(default=False)
     PLAYBOOK_GUARD_MAX_REJECTIONS: int = Field(default=3)

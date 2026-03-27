@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS trades (
     opened_at TEXT,
     closed_at TEXT,
     extra TEXT,
+    llm_analysis TEXT,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -137,6 +138,35 @@ CREATE TABLE IF NOT EXISTS npoc_records (
     created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_npoc_underlying_date ON npoc_records(underlying, session_date);
+
+CREATE TABLE IF NOT EXISTS fine_tuning_features (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id INTEGER,
+    symbol TEXT NOT NULL,
+    direction TEXT,
+    market_state TEXT,
+    poc REAL, vah REAL, val REAL,
+    aggression REAL,
+    cvd_slope REAL,
+    delta_normalized REAL,
+    volume REAL,
+    imbalance REAL,
+    vix_normalized REAL,
+    vix_regime TEXT,
+    iv_rank REAL,
+    pcr_oi REAL,
+    ib_location TEXT,
+    ib_width_pct REAL,
+    lvn_count INTEGER,
+    hvn_count INTEGER,
+    drive_number INTEGER,
+    setup_type TEXT,
+    result TEXT,
+    pnl_r REAL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_finetune_symbol ON fine_tuning_features(symbol, created_at);
+CREATE INDEX IF NOT EXISTS idx_finetune_result ON fine_tuning_features(result);
 
 CREATE TABLE IF NOT EXISTS kv_store (
     key TEXT PRIMARY KEY,
@@ -393,6 +423,54 @@ class SQLiteStorageAdapter(StoragePort):
                                 )
                             }
                         ),
+                    ),
+                )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def save_fine_tuning_features(self, features: dict[str, Any]) -> None:
+        """Save fine-tuning feature vector for ML model training.
+
+        Called after each closed trade to build the training dataset.
+        Features include AMT state, aggression, VIX/PCR, IB location, etc.
+        """
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT INTO fine_tuning_features "
+                    "(trade_id, symbol, direction, market_state, poc, vah, val, "
+                    "aggression, cvd_slope, delta_normalized, volume, imbalance, "
+                    "vix_normalized, vix_regime, iv_rank, pcr_oi, "
+                    "ib_location, ib_width_pct, lvn_count, hvn_count, "
+                    "drive_number, setup_type, result, pnl_r) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        features.get("trade_id"),
+                        features.get("symbol", ""),
+                        features.get("direction", ""),
+                        features.get("market_state", ""),
+                        features.get("poc", 0),
+                        features.get("vah", 0),
+                        features.get("val", 0),
+                        features.get("aggression", 0),
+                        features.get("cvd_slope", 0),
+                        features.get("delta_normalized", 0),
+                        features.get("volume", 0),
+                        features.get("imbalance", 0),
+                        features.get("vix_normalized", 0),
+                        features.get("vix_regime", ""),
+                        features.get("iv_rank", 0),
+                        features.get("pcr_oi", 0),
+                        features.get("ib_location", ""),
+                        features.get("ib_width_pct", 0),
+                        features.get("lvn_count", 0),
+                        features.get("hvn_count", 0),
+                        features.get("drive_number", 0),
+                        features.get("setup_type", ""),
+                        features.get("result", ""),
+                        features.get("pnl_r", 0),
                     ),
                 )
                 self._conn.commit()

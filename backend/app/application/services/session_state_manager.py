@@ -62,7 +62,7 @@ class SessionState:
         self.last_ai_analysis.update(kwargs)
 
     # Thread safety lock for portfolio reads/writes AND throttle flags
-    _lock: threading.Lock = field(default_factory=threading.Lock)
+    _lock: threading.RLock = field(default_factory=threading.RLock)
 
     # LLM throttling state — MUST be accessed under _lock
     _last_ai_time: float = 0

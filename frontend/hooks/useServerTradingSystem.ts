@@ -100,6 +100,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         [],
     );
 
+    // Helper: build URL directly to backend, bypassing Vite proxy.
+    // Vite proxy (/api path) re-uses connections and can return 500 when overwhelmed.
+    const backendUrl = (path: string) =>
+        `${window.location.protocol}//${window.location.hostname}:9090${path}`;
+
     // ----------------------------------------------------------------
     // 0.  Fetch backend config on mount (retries if backend not ready)
     // ----------------------------------------------------------------
@@ -108,7 +113,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
         const fetchConfig = (attempt: number) => {
-            fetch('/api/system/config')
+            fetch(backendUrl('/api/system/config'))
                 .then(res => {
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     return res.json();
@@ -150,7 +155,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // 1.  Load persisted LLM decision history on mount
     // ----------------------------------------------------------------
     useEffect(() => {
-        fetch('/api/ai/history')
+        fetch(backendUrl('/api/ai/history'))
             .then(res => res.json())
             .then(data => {
                 if (!data.decisions || data.decisions.length === 0) return;
@@ -468,17 +473,16 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // 3.  WebSocket connection
     // ----------------------------------------------------------------
     const retryCountRef = useRef(0);
-    const backendPortRef = useRef<number | null>(null);
+    // Default to 9090 so WS connects directly to backend even before config loads.
+    // Config fetch may update this, but we never fall back to the Vite dev server port.
+    const backendPortRef = useRef<number>(9090);
 
     const connect = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
         const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        // Connect directly to backend WS (bypass Vite proxy which drops frames)
-        const bport = backendPortRef.current;
-        const wsHost = bport && bport !== Number(window.location.port)
-            ? `${window.location.hostname}:${bport}`
-            : window.location.host;
+        // Always connect directly to backend port (default: 9090) — never route through Vite proxy.
+        const wsHost = `${window.location.hostname}:${backendPortRef.current}`;
         const ws = new WebSocket(`${protocol}://${wsHost}/api/trading/ws/gameloop`);
 
         ws.onopen = () => {

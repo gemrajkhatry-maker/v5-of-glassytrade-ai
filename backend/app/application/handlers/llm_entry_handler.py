@@ -77,7 +77,7 @@ class LLMEntryHandler:
         self._trade_manager = trade_manager
         self._journal = journal
         self._exchange = exchange
-        self._allow_short = False  # BUY-only mode — SHORT entries disabled
+        self._allow_short = allow_short  # Use injected allow_short
         self._llm_timeout = llm_timeout
         self._regime_detectors: dict[str, RegimeDetector] = {}
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)

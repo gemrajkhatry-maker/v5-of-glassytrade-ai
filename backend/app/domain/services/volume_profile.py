@@ -185,11 +185,15 @@ def build_snapshot(
 def create_profile(
     data: list[OHLC],
     buckets: int = 200,
+    concentrated: bool = False,
 ) -> list[VolumeProfileLevel]:
-    """Build a volume profile from OHLCV data using real volume-at-price histogram.
+    """Build a volume profile from OHLCV data.
 
-    Volume is distributed uniformly across each candle's [low, high] range,
-    representing the real auction (Fabio AMT style).
+    Args:
+        data: OHLC candles
+        buckets: Number of price buckets (default 200)
+        concentrated: If True, place volume at close price only (more accurate POC).
+                     If False, distribute uniformly across [low, high] range.
     """
     if not data:
         return []
@@ -217,13 +221,9 @@ def create_profile(
         if d.volume <= 0:
             continue
 
-        start_bucket = int((float(d.low) - min_price) / step)
-        end_bucket = int((float(d.high) - min_price) / step)
-        start_bucket = max(0, min(buckets - 1, start_bucket))
-        end_bucket = max(0, min(buckets - 1, end_bucket))
+        c_vol = float(d.volume)
 
         # Buy ratio inference
-        c_vol = float(d.volume)
         if hasattr(d, "taker_buy_volume") and float(d.taker_buy_volume) > 0:
             buy_ratio = float(d.taker_buy_volume) / c_vol
         elif hasattr(d, "delta") and float(d.delta) != 0:
@@ -238,13 +238,27 @@ def create_profile(
             else:
                 buy_ratio = 0.5
 
-        n_buckets = end_bucket - start_bucket + 1
-        vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
+        if concentrated:
+            # Place volume at close price (more accurate POC)
+            close_bucket = int((float(d.close) - min_price) / step)
+            close_bucket = max(0, min(buckets - 1, close_bucket))
+            profile[close_bucket].volume += c_vol
+            profile[close_bucket].buy_volume += c_vol * buy_ratio
+            profile[close_bucket].sell_volume += c_vol * (1 - buy_ratio)
+        else:
+            # Uniform distribution across [low, high] range
+            start_bucket = int((float(d.low) - min_price) / step)
+            end_bucket = int((float(d.high) - min_price) / step)
+            start_bucket = max(0, min(buckets - 1, start_bucket))
+            end_bucket = max(0, min(buckets - 1, end_bucket))
 
-        for i in range(start_bucket, end_bucket + 1):
-            profile[i].volume += vol_per_bucket
-            profile[i].buy_volume += vol_per_bucket * buy_ratio
-            profile[i].sell_volume += vol_per_bucket * (1 - buy_ratio)
+            n_buckets = end_bucket - start_bucket + 1
+            vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
+
+            for i in range(start_bucket, end_bucket + 1):
+                profile[i].volume += vol_per_bucket
+                profile[i].buy_volume += vol_per_bucket * buy_ratio
+                profile[i].sell_volume += vol_per_bucket * (1 - buy_ratio)
 
     return profile
 
@@ -257,8 +271,9 @@ class IncrementalVolumeProfile:
     then recomputes POC/VA from the bucket totals in O(buckets) time.
     """
 
-    def __init__(self, buckets: int = 200) -> None:
+    def __init__(self, buckets: int = 200, concentrated: bool = False) -> None:
         self._buckets = buckets
+        self._concentrated = concentrated  # True = volume at close price only
         self._volumes: list[list[float]] = [[0.0, 0.0, 0.0] for _ in range(buckets)]
         self._min_price: float = 0.0
         self._max_price: float = 0.0
@@ -306,45 +321,69 @@ class IncrementalVolumeProfile:
         c_vol = float(candle.volume)
         if c_vol <= 0:
             return
-        c_low = float(candle.low)
-        c_high = float(candle.high)
-        start_bucket = int((c_low - self._min_price) / self._step)
-        end_bucket = int((c_high - self._min_price) / self._step)
-        start_bucket = max(0, min(self._buckets - 1, start_bucket))
-        end_bucket = max(0, min(self._buckets - 1, end_bucket))
-
         buy_ratio = float(candle.taker_buy_volume) / c_vol if c_vol > 0 else 0.5
-        n_buckets = end_bucket - start_bucket + 1
-        vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
 
-        for i in range(start_bucket, end_bucket + 1):
-            self._volumes[i][0] += vol_per_bucket
-            self._volumes[i][1] += vol_per_bucket * float(buy_ratio)
-            self._volumes[i][2] += vol_per_bucket * (1 - float(buy_ratio))
+        if self._concentrated:
+            # Place volume at close price (more accurate POC)
+            close_bucket = int((float(candle.close) - self._min_price) / self._step)
+            close_bucket = max(0, min(self._buckets - 1, close_bucket))
+            self._volumes[close_bucket][0] += c_vol
+            self._volumes[close_bucket][1] += c_vol * float(buy_ratio)
+            self._volumes[close_bucket][2] += c_vol * (1 - float(buy_ratio))
+        else:
+            # Uniform distribution across [low, high] range
+            c_low = float(candle.low)
+            c_high = float(candle.high)
+            start_bucket = int((c_low - self._min_price) / self._step)
+            end_bucket = int((c_high - self._min_price) / self._step)
+            start_bucket = max(0, min(self._buckets - 1, start_bucket))
+            end_bucket = max(0, min(self._buckets - 1, end_bucket))
+
+            n_buckets = end_bucket - start_bucket + 1
+            vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
+
+            for i in range(start_bucket, end_bucket + 1):
+                self._volumes[i][0] += vol_per_bucket
+                self._volumes[i][1] += vol_per_bucket * float(buy_ratio)
+                self._volumes[i][2] += vol_per_bucket * (1 - float(buy_ratio))
 
     def _remove_candle_from_buckets(self, candle: OHLC) -> None:
         c_vol = float(candle.volume)
         if c_vol <= 0:
             return
-        c_low = float(candle.low)
-        c_high = float(candle.high)
-        start_bucket = int((c_low - self._min_price) / self._step)
-        end_bucket = int((c_high - self._min_price) / self._step)
-        start_bucket = max(0, min(self._buckets - 1, start_bucket))
-        end_bucket = max(0, min(self._buckets - 1, end_bucket))
-
         buy_ratio = float(candle.taker_buy_volume) / c_vol if c_vol > 0 else 0.5
-        n_buckets = end_bucket - start_bucket + 1
-        vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
 
-        for i in range(start_bucket, end_bucket + 1):
-            self._volumes[i][0] = max(0.0, self._volumes[i][0] - vol_per_bucket)
-            self._volumes[i][1] = max(
-                0.0, self._volumes[i][1] - vol_per_bucket * float(buy_ratio)
+        if self._concentrated:
+            close_bucket = int((float(candle.close) - self._min_price) / self._step)
+            close_bucket = max(0, min(self._buckets - 1, close_bucket))
+            self._volumes[close_bucket][0] = max(
+                0.0, self._volumes[close_bucket][0] - c_vol
             )
-            self._volumes[i][2] = max(
-                0.0, self._volumes[i][2] - vol_per_bucket * (1 - float(buy_ratio))
+            self._volumes[close_bucket][1] = max(
+                0.0, self._volumes[close_bucket][1] - c_vol * float(buy_ratio)
             )
+            self._volumes[close_bucket][2] = max(
+                0.0, self._volumes[close_bucket][2] - c_vol * (1 - float(buy_ratio))
+            )
+        else:
+            c_low = float(candle.low)
+            c_high = float(candle.high)
+            start_bucket = int((c_low - self._min_price) / self._step)
+            end_bucket = int((c_high - self._min_price) / self._step)
+            start_bucket = max(0, min(self._buckets - 1, start_bucket))
+            end_bucket = max(0, min(self._buckets - 1, end_bucket))
+
+            n_buckets = end_bucket - start_bucket + 1
+            vol_per_bucket = c_vol / n_buckets if n_buckets > 0 else 0.0
+
+            for i in range(start_bucket, end_bucket + 1):
+                self._volumes[i][0] = max(0.0, self._volumes[i][0] - vol_per_bucket)
+                self._volumes[i][1] = max(
+                    0.0, self._volumes[i][1] - vol_per_bucket * float(buy_ratio)
+                )
+                self._volumes[i][2] = max(
+                    0.0, self._volumes[i][2] - vol_per_bucket * (1 - float(buy_ratio))
+                )
 
     def update(
         self, new_candle: OHLC, oldest_candle_to_remove: OHLC | None = None

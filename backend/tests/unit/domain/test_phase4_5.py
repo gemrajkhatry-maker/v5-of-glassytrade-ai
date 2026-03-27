@@ -1,0 +1,268 @@
+"""Tests for Phase 3-5 components: scalp gates, 15-sec trigger, 1-min bar, reconciliation."""
+
+import pytest
+
+from app.domain.services.scalp_gate_pipeline import (
+    ScalpGate,
+    ScalpGateResult,
+    check_g1_session_timing,
+    check_g2_mtf_alignment,
+    check_g3_level_proximity,
+    check_g4_risk_tier,
+    check_g5_portfolio_headroom,
+    check_g6_no_double_exposure,
+    evaluate_scalp_gates,
+)
+from app.domain.services.fifteen_sec_trigger import (
+    FifteenSecTriggerEngine,
+    TriggerDirection,
+    TriggerResult,
+)
+from app.domain.services.one_min_bar_engine import OneMinBarEngine, OneMinBarState
+from app.domain.services.position_reconciliation import (
+    PositionReconciliationEngine,
+    ReconciliationIssue,
+    ReconciliationResult,
+)
+
+
+# ===== Scalp Gate Pipeline =====
+
+
+class TestScalpGates:
+    def test_g1_nse_prime_window(self):
+        r = check_g1_session_timing("NSE", 60)  # 10:15
+        assert r.passed
+
+    def test_g1_nse_first_30_min(self):
+        r = check_g1_session_timing("NSE", 20)  # 09:35
+        assert not r.passed
+
+    def test_g1_nse_last_15_min(self):
+        r = check_g1_session_timing("NSE", 350)  # 15:05
+        assert not r.passed
+
+    def test_g1_mcx_prime_window(self):
+        r = check_g1_session_timing("MCX", 150)  # 11:30
+        assert r.passed
+
+    def test_g2_mtf_alignment_long(self):
+        r = check_g2_mtf_alignment("LONG", 3.0, 20.0, True, "LONG")
+        assert r.passed
+
+    def test_g2_mtf_conflict(self):
+        r = check_g2_mtf_alignment("SHORT", 3.0, 20.0, True, "LONG")
+        assert not r.passed
+
+    def test_g3_level_proximity(self):
+        r = check_g3_level_proximity(100.5, [100.0, 105.0], 1.0, max_ticks=5)
+        assert r.passed
+
+    def test_g3_no_proximity(self):
+        r = check_g3_level_proximity(100.0, [50.0, 150.0], 1.0, max_ticks=5)
+        assert not r.passed
+
+    def test_g4_halt_blocks(self):
+        r = check_g4_risk_tier("HALT")
+        assert not r.passed
+
+    def test_g4_c_tier_passes(self):
+        r = check_g4_risk_tier("C")
+        assert r.passed
+
+    def test_g5_headroom(self):
+        r = check_g5_portfolio_headroom(3, max_positions=5)
+        assert r.passed
+
+    def test_g5_no_headroom(self):
+        r = check_g5_portfolio_headroom(5, max_positions=5)
+        assert not r.passed
+
+    def test_g6_nse_double_exposure(self):
+        r = check_g6_no_double_exposure("NIFTY", ["NIFTY", "BANKNIFTY"], "NSE")
+        assert not r.passed
+
+    def test_g6_mcx_different_commodities(self):
+        r = check_g6_no_double_exposure("GOLD", ["CRUDEOIL"], "MCX")
+        assert r.passed
+
+    def test_full_evaluation_pass(self):
+        passed, results = evaluate_scalp_gates(
+            exchange="NSE",
+            minutes_since_open=60,
+            tf5_bias="LONG",
+            tf1_aggression=3.0,
+            tf1_cvd_slope=20.0,
+            tf15_trigger=True,
+            direction="LONG",
+            price=100.5,
+            structural_levels=[100.0],
+            tick_size=0.5,
+            tier="B",
+            open_positions=2,
+            scalp_underlying="NIFTY",
+            open_position_underlyings=["BANKNIFTY"],
+        )
+        assert passed
+
+    def test_full_evaluation_fail_at_g1(self):
+        passed, results = evaluate_scalp_gates(
+            exchange="NSE",
+            minutes_since_open=10,
+            tf5_bias="LONG",
+            tf1_aggression=3.0,
+            tf1_cvd_slope=20.0,
+            tf15_trigger=True,
+            direction="LONG",
+            price=100.5,
+            structural_levels=[100.0],
+            tick_size=0.5,
+            tier="B",
+            open_positions=2,
+            scalp_underlying="NIFTY",
+            open_position_underlyings=[],
+        )
+        assert not passed
+        assert len(results) == 1
+
+
+# ===== 15-Sec Trigger Engine =====
+
+
+class TestFifteenSecTrigger:
+    def test_no_trigger_on_small_prints(self):
+        engine = FifteenSecTriggerEngine(large_print_multiplier=3.0)
+        result = engine.update(price=100, volume=10, delta=5, timestamp=1.0)
+        assert not result.triggered
+
+    def test_large_print_detected(self):
+        engine = FifteenSecTriggerEngine(large_print_multiplier=3.0, ema_alpha=0.5)
+        # Build rolling average at 10
+        for i in range(20):
+            engine.update(price=100, volume=10, delta=1, timestamp=float(i))
+        # Large print: needs to be 3× current EMA (which will be ~15 after update)
+        # Use volume=100 to ensure it's 3× even after EMA update
+        result = engine.update(price=100, volume=100, delta=50, timestamp=20.0)
+        assert result.large_print_detected
+
+    def test_absorption_detected(self):
+        engine = FifteenSecTriggerEngine(
+            large_print_multiplier=3.0,
+            absorption_multiplier=2.5,
+            ema_alpha=0.1,
+        )
+        for i in range(50):
+            engine.update(price=100, volume=10, delta=1, timestamp=float(i))
+        # Large buy print (Condition 1) — EMA ≈ 10
+        engine.update(price=100, volume=100, delta=50, timestamp=51.0)
+        # Opposing large sell print at same price — EMA ≈ 19, 200 >= 3*19 = 57 ✓
+        result = engine.update(price=100, volume=200, delta=-100, timestamp=52.0)
+        assert result.opposing_absorption
+
+    def test_reset(self):
+        engine = FifteenSecTriggerEngine()
+        engine.update(price=100, volume=10, delta=5, timestamp=1.0)
+        engine.reset()
+        result = engine.update(price=100, volume=10, delta=5, timestamp=1.0)
+        assert not result.triggered
+
+
+# ===== 1-Min Bar Engine =====
+
+
+class TestOneMinBarEngine:
+    def test_new_bar_created(self):
+        engine = OneMinBarEngine()
+        state = engine.update("NIFTY", 100.0, 5.0, 2.0, "2024-01-01T09:15:00")
+        assert state.close == 100.0
+        assert state.is_new_bar
+
+    def test_bar_accumulates(self):
+        engine = OneMinBarEngine()
+        engine.update("NIFTY", 100.0, 5.0, 2.0, "2024-01-01T09:15:00")
+        state = engine.update("NIFTY", 101.0, 3.0, 1.0, "2024-01-01T09:15:30")
+        assert state.close == 101.0
+        assert state.volume == 8.0
+        assert not state.is_new_bar
+
+    def test_new_bar_on_minute_change(self):
+        engine = OneMinBarEngine()
+        engine.update("NIFTY", 100.0, 5.0, 2.0, "2024-01-01T09:15:00")
+        state = engine.update("NIFTY", 101.0, 3.0, 1.0, "2024-01-01T09:16:00")
+        assert state.is_new_bar
+
+    def test_cvd_slope_computed(self):
+        engine = OneMinBarEngine(cvd_window=3)
+        # Create 3 bars
+        engine.update("NIFTY", 100, 5, 2, "2024-01-01T09:15:00")
+        engine.update("NIFTY", 101, 5, 2, "2024-01-01T09:16:00")  # bar 1 closes
+        engine.update("NIFTY", 102, 5, 3, "2024-01-01T09:17:00")  # bar 2 closes
+        state = engine.update("NIFTY", 103, 5, 4, "2024-01-01T09:18:00")  # bar 3 closes
+        assert state.cvd_slope != 0  # should have slope from 3 bars
+
+
+# ===== Position Reconciliation =====
+
+
+class TestPositionReconciliation:
+    def test_no_issues(self):
+        engine = PositionReconciliationEngine()
+        results = engine.reconcile(
+            internal_positions={"P1": _make_position("NIFTY", 25)},
+            broker_positions=[{"trading_symbol": "NIFTY", "netQty": 25}],
+        )
+        issues = [r for r in results if r.issue != ReconciliationIssue.OK]
+        assert len(issues) == 0
+
+    def test_ghost_position(self):
+        engine = PositionReconciliationEngine()
+        results = engine.reconcile(
+            internal_positions={"P1": _make_position("NIFTY", 25)},
+            broker_positions=[],  # not in broker
+        )
+        assert any(r.issue == ReconciliationIssue.GHOST_POSITION for r in results)
+
+    def test_missing_position(self):
+        engine = PositionReconciliationEngine()
+        results = engine.reconcile(
+            internal_positions={},  # no internal
+            broker_positions=[{"trading_symbol": "NIFTY", "netQty": 25}],
+        )
+        assert any(r.issue == ReconciliationIssue.MISSING_POSITION for r in results)
+
+    def test_quantity_mismatch(self):
+        engine = PositionReconciliationEngine()
+        results = engine.reconcile(
+            internal_positions={"P1": _make_position("NIFTY", 25)},
+            broker_positions=[{"trading_symbol": "NIFTY", "netQty": 20}],
+        )
+        assert any(r.issue == ReconciliationIssue.QUANTITY_MISMATCH for r in results)
+
+    def test_stats_tracking(self):
+        engine = PositionReconciliationEngine()
+        engine.reconcile(
+            internal_positions={"P1": _make_position("NIFTY", 25)},
+            broker_positions=[],
+        )
+        stats = engine.get_stats()
+        assert stats["ghost_positions"] == 1
+
+    def test_reset_stats(self):
+        engine = PositionReconciliationEngine()
+        engine.reconcile(
+            internal_positions={"P1": _make_position("NIFTY", 25)},
+            broker_positions=[],
+        )
+        engine.reset_stats()
+        stats = engine.get_stats()
+        assert stats["issues_found"] == 0
+
+
+def _make_position(symbol: str, size: float):
+    """Create a mock position for testing."""
+    from unittest.mock import MagicMock
+
+    pos = MagicMock()
+    pos.symbol = symbol
+    pos.size = size
+    return pos

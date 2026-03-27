@@ -240,6 +240,6 @@ class ExitCoordinator:
         # Persist
         if self._storage:
             try:
-                self._storage.delete_open_position(event.position.id)
+                self._storage.delete_open_position(pos.id)
             except Exception:
                 log.debug("Failed to delete persisted position", exc_info=True)

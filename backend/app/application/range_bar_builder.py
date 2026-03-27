@@ -34,6 +34,7 @@ class RangeBar:
     tick_count: int = 0
     time_open: str = ""
     time_close: str = ""
+    synth_time: int = 0
 
 
 @dataclass
@@ -123,6 +124,9 @@ class RangeBarBuilder:
         self._triple_a_phase: str = ""  # "", "ABSORPTION", "ACCUMULATION"
         self._triple_a_absorption_idx: int = -1
         self._triple_a_direction: str = ""
+        self._leg_start_idx: int = 0
+        import time
+        self._next_ts: int = int(time.time()) - (self._max_bars * 60)
 
     def reset(self) -> None:
         """Reset at session boundary."""
@@ -137,6 +141,9 @@ class RangeBarBuilder:
         self._triple_a_phase = ""
         self._triple_a_absorption_idx = -1
         self._triple_a_direction = ""
+        self._leg_start_idx = 0
+        import time
+        self._next_ts = int(time.time()) - (self._max_bars * 60)
 
     def on_tick(
         self,
@@ -211,6 +218,8 @@ class RangeBarBuilder:
 
     def _finalize_bar(self, bar: RangeBar) -> None:
         """Add closed bar to history and update indicators."""
+        bar.synth_time = self._next_ts
+        self._next_ts += 60
         self._bars.append(bar)
 
         # Trim old bars
@@ -265,25 +274,20 @@ class RangeBarBuilder:
 
     # ── Volume Profile ──────────────────────────────────────────────
 
-    def get_volume_profile(self) -> RangeBarVP:
-        """Compute volume profile from range bars."""
-        if not self._vp_levels:
+    def _compute_vp_from_dicts(self, vp_levels: dict, vp_buy: dict, vp_sell: dict) -> RangeBarVP:
+        if not vp_levels:
             return RangeBarVP()
 
-        sorted_levels = sorted(self._vp_levels.items())
+        sorted_levels = sorted(vp_levels.items())
         total_vol = sum(v for _, v in sorted_levels)
 
         if total_vol <= 0:
             return RangeBarVP()
 
-        # POC = price with highest volume
         poc_price = max(sorted_levels, key=lambda x: x[1])[0]
-
-        # VAH/VAL = 70% value area boundaries
         target = total_vol * 0.70
-        poc_vol = self._vp_levels.get(poc_price, 0.0)
+        poc_vol = vp_levels.get(poc_price, 0.0)
 
-        # Expand from POC outward to capture 70% of volume
         poc_idx = next(i for i, (p, _) in enumerate(sorted_levels) if p == poc_price)
         accumulated = poc_vol
         lo_idx = poc_idx
@@ -291,12 +295,12 @@ class RangeBarBuilder:
 
         while accumulated < target:
             lo_vol = (
-                self._vp_levels.get(sorted_levels[lo_idx - 1][0], 0.0)
+                vp_levels.get(sorted_levels[lo_idx - 1][0], 0.0)
                 if lo_idx > 0
                 else -1
             )
             hi_vol = (
-                self._vp_levels.get(sorted_levels[hi_idx + 1][0], 0.0)
+                vp_levels.get(sorted_levels[hi_idx + 1][0], 0.0)
                 if hi_idx < len(sorted_levels) - 1
                 else -1
             )
@@ -317,13 +321,53 @@ class RangeBarBuilder:
             VolumeProfileLevel(
                 price=p,
                 volume=v,
-                buy_volume=self._vp_buy.get(p, 0.0),
-                sell_volume=self._vp_sell.get(p, 0.0),
+                buy_volume=vp_buy.get(p, 0.0),
+                sell_volume=vp_sell.get(p, 0.0),
             )
             for p, v in sorted_levels
         ]
 
         return RangeBarVP(poc=poc_price, vah=vah, val=val, levels=levels)
+
+    def get_volume_profile(self) -> RangeBarVP:
+        """Compute session volume profile from all range bars."""
+        return self._compute_vp_from_dicts(self._vp_levels, self._vp_buy, self._vp_sell)
+
+    def get_leg_volume_profile(self) -> RangeBarVP:
+        """Compute leg volume profile from range bars (since last TripleA aggression)."""
+        if not self._bars:
+            return RangeBarVP()
+            
+        ta = self.detect_triple_a()
+        if ta.detected and ta.phase == "AGGRESSION":
+            self._leg_start_idx = max(0, ta.aggression_bar_index)
+            
+        vp_levels = {}
+        vp_buy = {}
+        vp_sell = {}
+        step = self._tick_size
+        
+        bars = self._bars[self._leg_start_idx:] if hasattr(self, '_leg_start_idx') else self._bars
+        for bar in bars:
+            mid_price = (bar.high + bar.low) / 2.0
+            bucket = round(mid_price / step) * step
+            vp_levels[bucket] = vp_levels.get(bucket, 0.0) + bar.volume
+            vp_buy[bucket] = vp_buy.get(bucket, 0.0) + bar.buy_volume
+            vp_sell[bucket] = vp_sell.get(bucket, 0.0) + bar.sell_volume
+            
+            price = bar.low
+            v_per_tick = bar.volume / max(1, (bar.high - bar.low) / step + 1)
+            bv_per_tick = bar.buy_volume / max(1, (bar.high - bar.low) / step + 1)
+            sv_per_tick = bar.sell_volume / max(1, (bar.high - bar.low) / step + 1)
+            
+            while price <= bar.high:
+                bkt = round(price / step) * step
+                vp_levels[bkt] = vp_levels.get(bkt, 0.0) + v_per_tick
+                vp_buy[bkt] = vp_buy.get(bkt, 0.0) + bv_per_tick
+                vp_sell[bkt] = vp_sell.get(bkt, 0.0) + sv_per_tick
+                price += step
+                
+        return self._compute_vp_from_dicts(vp_levels, vp_buy, vp_sell)
 
     # ── VWAP ────────────────────────────────────────────────────────
 
@@ -441,20 +485,23 @@ class RangeBarBuilder:
     def to_dict(self) -> dict:
         """Serialize state for WebSocket streaming."""
         bars = self.get_all_bars()
-        vp = self.get_volume_profile()
+        session_vp = self.get_volume_profile()
+        leg_vp = self.get_leg_volume_profile()
         triple_a = self.detect_triple_a()
 
-        # Convert bars to OHLC-like format with sequential synthetic timestamps
-        # Range bars don't have real time ordering, so we use bar index as time
-        # The frontend renders these on the candlestick series
-        import time
-
-        base_ts = int(time.time()) - len(bars) * 60  # 1 bar per minute synthetic
+        # Convert bars to OHLC-like format with sequential synthetic timestamps.
+        # Closed bars always have synth_time > 0 (assigned in _finalize_bar).
+        # The forming bar has synth_time == 0 — we use _next_ts + 1 so it is
+        # strictly greater than the last closed bar (_next_ts - 60) and strictly
+        # less than what the NEXT closed bar will receive (_next_ts), guaranteeing
+        # lightweight-charts never sees a non-ascending time value.
         serialized_bars = []
-        for i, b in enumerate(bars):
+        forming_ts = self._next_ts + 1  # safe placeholder for the live forming bar
+        for b in bars:
+            t = b.synth_time if getattr(b, "synth_time", 0) > 0 else forming_ts
             serialized_bars.append(
                 {
-                    "time": base_ts + i * 60,
+                    "time": t,
                     "open": b.open,
                     "high": b.high,
                     "low": b.low,
@@ -469,10 +516,10 @@ class RangeBarBuilder:
 
         return {
             "bars": serialized_bars,
-            "volumeProfile": {
-                "poc": vp.poc,
-                "vah": vp.vah,
-                "val": vp.val,
+            "sessionProfile": {
+                "poc": session_vp.poc,
+                "vah": session_vp.vah,
+                "val": session_vp.val,
                 "levels": [
                     {
                         "price": l.price,
@@ -480,7 +527,35 @@ class RangeBarBuilder:
                         "buyVolume": l.buy_volume,
                         "sellVolume": l.sell_volume,
                     }
-                    for l in vp.levels[-200:]  # Cap VP levels to prevent huge payloads
+                    for l in session_vp.levels[-200:]
+                ],
+            },
+            "legProfile": {
+                "poc": leg_vp.poc,
+                "vah": leg_vp.vah,
+                "val": leg_vp.val,
+                "levels": [
+                    {
+                        "price": l.price,
+                        "volume": l.volume,
+                        "buyVolume": l.buy_volume,
+                        "sellVolume": l.sell_volume,
+                    }
+                    for l in leg_vp.levels[-200:]
+                ],
+            },
+            "volumeProfile": {
+                "poc": session_vp.poc,
+                "vah": session_vp.vah,
+                "val": session_vp.val,
+                "levels": [
+                    {
+                        "price": l.price,
+                        "volume": l.volume,
+                        "buyVolume": l.buy_volume,
+                        "sellVolume": l.sell_volume,
+                    }
+                    for l in session_vp.levels[-200:]  # Retain for backward compat
                 ],
             },
             "vwap": self.get_vwap(),
