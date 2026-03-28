@@ -537,6 +537,7 @@ class TradingSessionService:
                             "symbol": event.symbol,
                             "market": _market,
                             "session_date": session_date,
+                            # Use underlying futures POC/VAH/VAL when available (Phase 1B/1C)
                             "poc": session.last_amt.get("poc", 0),
                             "vah": session.last_amt.get("vah", 0),
                             "val": session.last_amt.get("val", 0),
@@ -546,6 +547,9 @@ class TradingSessionService:
                                 {"price": p, "side": "MIXED"}
                                 for p in _print_clusters[:5]
                             ],
+                            # Flag if this is underlying futures profile
+                            "is_underlying": hasattr(session, "_underlying_data")
+                            and bool(session._underlying_data),
                         }
                         self._storage.save_session_profile(profile_data)
                         session._profile_saved = True
@@ -615,10 +619,14 @@ class TradingSessionService:
             session._last_fp_domain = fp_dto
             session._last_aggressive_prints = amt_result.aggressive_prints
 
-        # Update IB engine
+        # Update IB engine — use underlying futures when available (Phase 1B)
+        ib_tick = event.tick
+        if hasattr(session, "_underlying_data") and session._underlying_data:
+            ib_tick = session._underlying_data[-1]
+
         ib_engine = self._ib_engines.get(event.symbol)
         if ib_engine:
-            ib_state = ib_engine.update(event.tick)
+            ib_state = ib_engine.update(ib_tick)
             session._ib_state = ib_state
 
             # IB Breakout Scalp evaluation (Phase 4)
