@@ -869,6 +869,7 @@ class LLMEntryHandler:
                                                 risk_sl_pct=_cushion_sl,
                                                 session_context=session_info.session,
                                                 confidence=confidence,
+                                                inside_extreme=settings.SL_INSIDE_EXTREME,
                                             )
                                         )
 

@@ -1035,6 +1035,7 @@ class TradingSessionService:
                         ),
                         confidence="High" if _exec_prob >= 0.65 else "Medium",
                         tick_size=_ts,
+                        inside_extreme=self._scalp_enabled,
                     )
 
                     if signal:

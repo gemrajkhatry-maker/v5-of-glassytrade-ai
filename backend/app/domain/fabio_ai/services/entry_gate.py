@@ -488,6 +488,7 @@ def build_entry_signal(
     confidence: str = "Medium",
     session_risk_pct: float | None = None,  # COMPOUNDING: dynamic risk from session
     inside_cluster: bool = True,  # Place SL 1-2 ticks inside aggressive print cluster
+    inside_extreme: bool = False,  # Fabio Tip: SL 1-2 ticks INSIDE VAH/VAL/POC
     tick_size: float = 0.05,  # Instrument tick size for SL/TP rounding
 ) -> Signal:
     """Build Signal from LLM decision using Fabio Playbook SL/TP.
@@ -527,7 +528,11 @@ def build_entry_signal(
     if setup_type == SetupType.MEAN_REVERSION:
         tp_price = amt_result.poc
         if is_buy:
-            stop_price = agg_sl or (amt_result.value_area_low - buffer)
+            # Inside Extreme: move SL UP into the safe zone (+buffer)
+            # Traditional: move SL DOWN beyond the zone (-buffer)
+            extreme_val = amt_result.value_area_low
+            sl_dir = 1 if inside_extreme else -1
+            stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
             # Cap SL distance: don't risk more than 50% of VA width or 2% of price
             # This cap applies even when aggressive print SL is used
             max_sl_dist = (
@@ -547,7 +552,11 @@ def build_entry_signal(
                 tp_price = tick.close * 1.010
                 stop_price = tick.close * 0.995
         else:
-            stop_price = agg_sl or (amt_result.value_area_high + buffer)
+            # Inside Extreme: move SL DOWN into the safe zone (-buffer)
+            # Traditional: move SL UP beyond the zone (+buffer)
+            extreme_val = amt_result.value_area_high
+            sl_dir = -1 if inside_extreme else 1
+            stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
             max_sl_dist = (
                 min(va_width * 0.5, tick.close * 0.02)
                 if va_width > 0
@@ -570,7 +579,10 @@ def build_entry_signal(
             tp_price = amt_result.value_area_high + (
                 amt_result.value_area_high - amt_result.poc
             )
-            stop_price = agg_sl or (amt_result.poc - buffer)
+            # Trend SL: move SL INWARD if enabled
+            extreme_val = amt_result.poc
+            sl_dir = 1 if inside_extreme else -1
+            stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
             max_sl_dist = (
                 min(va_width * 0.75, tick.close * 0.03)
                 if va_width > 0
@@ -587,7 +599,10 @@ def build_entry_signal(
             tp_price = amt_result.value_area_low - (
                 amt_result.poc - amt_result.value_area_low
             )
-            stop_price = agg_sl or (amt_result.poc + buffer)
+            # Trend SL: move SL INWARD if enabled
+            extreme_val = amt_result.poc
+            sl_dir = -1 if inside_extreme else 1
+            stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
             max_sl_dist = (
                 min(va_width * 0.75, tick.close * 0.03)
                 if va_width > 0

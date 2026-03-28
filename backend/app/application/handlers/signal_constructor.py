@@ -48,6 +48,7 @@ class SignalConstructor:
         session_context: str = "",
         confidence: str = "Medium",
         session_risk_pct: float | None = None,
+        inside_extreme: bool = False,
         tick_size: float = 0.05,
     ) -> Signal | None:
         """Construct a trade signal from LLM decision.
@@ -83,6 +84,7 @@ class SignalConstructor:
                 session_context=session_context,
                 confidence=confidence,
                 session_risk_pct=session_risk_pct,
+                inside_extreme=inside_extreme,
                 tick_size=tick_size,
             )
 

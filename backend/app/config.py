@@ -79,6 +79,9 @@ class Settings(SharedSettings):
     # Fabio Gap #13: Place SL 1-2 ticks INSIDE the aggressive print cluster
     SL_INSIDE_CLUSTER: bool = Field(default=True)
 
+    # Fabio Slippage Protection: Place SL 1-2 ticks INSIDE the extreme (high/low/VAH/VAL)
+    SL_INSIDE_EXTREME: bool = Field(default=True)
+
     # LLM Inference Paths
     LLM_BASE_MODEL_PATH: str = Field(default="")
     LLM_ADAPTER_PATH: str = Field(default="")
