@@ -1,0 +1,104 @@
+{
+  "MCX": {
+    "CRUDEOIL": {
+      "underlying_symbol": "CRUDEOIL25APRFUT",
+      "underlying_segment": "MCX_COMM",
+      "options_segment": "MCX_COMM",
+      "strike_step": 50,
+      "lot_size": 100,
+      "tick_size": 1.0,
+      "session_start": "09:00",
+      "session_end": "23:30",
+      "ib_window_minutes": 30,
+      "big_order_filter_lots": 30,
+      "range_bar_size": 20,
+      "dead_volume_pct": 5
+    },
+    "NATURALGAS": {
+      "underlying_symbol": "NATURALGAS25APRFUT",
+      "underlying_segment": "MCX_COMM",
+      "options_segment": "MCX_COMM",
+      "strike_step": 5,
+      "lot_size": 1250,
+      "tick_size": 0.10,
+      "session_start": "09:00",
+      "session_end": "23:30",
+      "ib_window_minutes": 30,
+      "big_order_filter_lots": 20,
+      "range_bar_size": 2,
+      "dead_volume_pct": 5
+    },
+    "GOLD": {
+      "underlying_symbol": "GOLD25APRFUT",
+      "underlying_segment": "MCX_COMM",
+      "options_segment": "MCX_COMM",
+      "strike_step": 100,
+      "lot_size": 1,
+      "tick_size": 1.0,
+      "session_start": "09:00",
+      "session_end": "23:30",
+      "ib_window_minutes": 30,
+      "big_order_filter_lots": 5,
+      "range_bar_size": 100,
+      "dead_volume_pct": 5
+    },
+    "SILVER": {
+      "underlying_symbol": "SILVER25APRFUT",
+      "underlying_segment": "MCX_COMM",
+      "options_segment": "MCX_COMM",
+      "strike_step": 500,
+      "lot_size": 30,
+      "tick_size": 1.0,
+      "session_start": "09:00",
+      "session_end": "23:30",
+      "ib_window_minutes": 30,
+      "big_order_filter_lots": 5,
+      "range_bar_size": 500,
+      "dead_volume_pct": 5
+    }
+  },
+  "NSE": {
+    "NIFTY": {
+      "underlying_symbol": "NIFTY25APRFUT",
+      "underlying_segment": "NSE_FNO",
+      "options_segment": "NSE_FNO",
+      "strike_step": 50,
+      "lot_size": 75,
+      "tick_size": 0.05,
+      "session_start": "09:15",
+      "session_end": "15:30",
+      "ib_window_minutes": 30,
+      "big_order_filter_lots": 50,
+      "range_bar_size": 20,
+      "dead_volume_pct": 5
+    },
+    "BANKNIFTY": {
+      "underlying_symbol": "BANKNIFTY25APRFUT",
+      "underlying_segment": "NSE_FNO",
+      "options_segment": "NSE_FNO",
+      "strike_step": 100,
+      "lot_size": 15,
+      "tick_size": 0.05,
+      "session_start": "09:15",
+      "session_end": "15:30",
+      "ib_window_minutes": 30,
+      "big_order_filter_lots": 30,
+      "range_bar_size": 50,
+      "dead_volume_pct": 5
+    },
+    "FINNIFTY": {
+      "underlying_symbol": "FINNIFTY25APRFUT",
+      "underlying_segment": "NSE_FNO",
+      "options_segment": "NSE_FNO",
+      "strike_step": 50,
+      "lot_size": 40,
+      "tick_size": 0.05,
+      "session_start": "09:15",
+      "session_end": "15:30",
+      "ib_window_minutes": 30,
+      "big_order_filter_lots": 20,
+      "range_bar_size": 15,
+      "dead_volume_pct": 5
+    }
+  }
+}
