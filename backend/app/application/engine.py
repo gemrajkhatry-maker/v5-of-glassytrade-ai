@@ -29,6 +29,7 @@ from app.application.stream_manager import StreamManager
 from app.application.candle_aggregator import CandleAggregator
 from app.application.range_bar_builder import RangeBarBuilder
 from app.application.watchdog_manager import WatchdogManager
+from app.domain.services.underlying_futures_provider import UnderlyingFuturesProvider
 
 if TYPE_CHECKING:
     from app.api.dependencies import ServiceGraph
@@ -91,6 +92,13 @@ class TradingEngine:
             failure_threshold=5,
             recovery_timeout=300.0,
         )
+
+        # Underlying futures provider — maps option symbols → futures for AMT analysis
+        self._underlying_provider = UnderlyingFuturesProvider()
+        # Separate candle aggregator for underlying futures (5-min OHLCV)
+        self._underlying_aggregator = CandleAggregator(interval="5m")
+        # Cache: underlying_symbol → latest OHLC tick
+        self._underlying_ticks: dict[str, OHLC] = {}
 
         # Delegated modules
         self._stream_manager = StreamManager(market_data=self._market_data)
@@ -646,7 +654,27 @@ class TradingEngine:
 
                 self._last_process_times[pkt_symbol] = now_time
 
-                # Full process_tick
+                # Dual feed: aggregate underlying futures for AMT analysis
+                mapping = self._underlying_provider.get_mapping(pkt_symbol)
+                underlying_tick = None
+                if mapping:
+                    ut_sym = mapping.underlying_symbol
+                    # Aggregate underlying futures tick
+                    underlying_tick = self._underlying_aggregator.aggregate(
+                        ut_sym,
+                        now,
+                        ltp,
+                        vol,
+                        cum_buy,
+                        cum_sell,
+                        oi,
+                        best_bid=float(best_bid),
+                        best_ask=float(best_ask),
+                    )
+                    if underlying_tick:
+                        self._underlying_ticks[ut_sym] = underlying_tick
+
+                # Full process_tick — pass underlying futures for AMT
                 try:
                     state = await asyncio.to_thread(
                         self._session_service.process_tick,
@@ -654,6 +682,7 @@ class TradingEngine:
                         tick,
                         self._current_depths[pkt_symbol]["book"],
                         oi_data=oi_data,
+                        underlying_tick=underlying_tick,
                     )
                     state["tick"] = ohlc_to_dto(tick)
                     state["ltp"] = ltp

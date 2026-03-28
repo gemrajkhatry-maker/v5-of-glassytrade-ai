@@ -108,7 +108,9 @@ class TradingSessionService:
         # Injected config — replaces inline Settings() calls
         self._exchange_config = exchange_config
         self._exchange = exchange_config.exchange if exchange_config else "MCX"
-        self._allow_short = allow_short  # Use injected allow_short (from settings.ALLOW_SHORT)
+        self._allow_short = (
+            allow_short  # Use injected allow_short (from settings.ALLOW_SHORT)
+        )
 
         # Delegated modules
         self._state_manager = SessionStateManager(storage=storage)
@@ -234,8 +236,17 @@ class TradingSessionService:
         tick: OHLC,
         order_book: OrderBook | None = None,
         oi_data: dict | None = None,
+        underlying_tick: OHLC | None = None,
     ) -> dict:
-        """Process a new tick and return the current state snapshot."""
+        """Process a new tick and return the current state snapshot.
+
+        Args:
+            symbol: Option contract symbol (e.g., "CRUDEOIL 16 APR 8900 CALL")
+            tick: Option contract OHLC candle (for execution price)
+            order_book: Current order book snapshot
+            oi_data: Open interest data
+            underlying_tick: Underlying futures OHLC candle (for AMT analysis)
+        """
         session = self.get_or_create_session(symbol)
         self._state_manager._maybe_reset_symbol_state(session, symbol, tick.time)
 
@@ -293,6 +304,25 @@ class TradingSessionService:
                 session._last_candle_time = tick.time
                 if len(session.data) > MAX_CANDLES_PER_SYMBOL:
                     del session.data[: len(session.data) - MAX_CANDLES_PER_SYMBOL]
+
+            # Store underlying futures data for AMT analysis (dual feed)
+            if underlying_tick is not None:
+                if not hasattr(session, "_underlying_data"):
+                    session._underlying_data = []
+                ut = underlying_tick
+                ut_new = not (
+                    session._underlying_data
+                    and session._underlying_data[-1].time == ut.time
+                )
+                if not ut_new:
+                    session._underlying_data[-1] = ut
+                else:
+                    session._underlying_data.append(ut)
+                    if len(session._underlying_data) > MAX_CANDLES_PER_SYMBOL:
+                        del session._underlying_data[
+                            : len(session._underlying_data) - MAX_CANDLES_PER_SYMBOL
+                        ]
+
             session.order_book = order_book
 
         # Process tick in portfolio
@@ -555,10 +585,15 @@ class TradingSessionService:
         if event.symbol not in self._amt_handlers:
             self._amt_handlers[event.symbol] = AMTHandler()
 
+        # Dual feed: use underlying futures data for AMT analysis
+        amt_data = list(event.data)
+        if hasattr(session, "_underlying_data") and session._underlying_data:
+            amt_data = list(session._underlying_data)
+
         srm = self._risk_coordinator.get_session_risk_manager(event.symbol)
         try:
             amt_result, amt_dto, fp_dto = self._amt_handlers[event.symbol].analyze(
-                list(event.data),
+                amt_data,
                 event.order_book,
                 prior_poc=prior.get("poc", 0.0) if prior else 0.0,
                 prior_vah=prior.get("vah", 0.0) if prior else 0.0,
