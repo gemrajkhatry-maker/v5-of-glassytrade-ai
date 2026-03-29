@@ -28,17 +28,21 @@ class DhanBrokerAdapter(BrokerPort):
     and forward-test acceptance criteria are met.
     """
 
-    def __init__(self, client_id: str, access_token: str) -> None:
+    def __init__(
+        self, client_id: str, access_token: str, dry_run: bool = False
+    ) -> None:
         self._client_id = client_id
         self._access_token = access_token
-        logger.warning(
-            "DhanBrokerAdapter initialized — LIVE mode. "
-            "Ensure forward test acceptance criteria met before deploying."
-        )
+        self._dry_run = dry_run
+        if dry_run:
+            logger.info("DhanBrokerAdapter initialized in DRY_RUN mode")
+        else:
+            logger.warning(
+                "DhanBrokerAdapter initialized — LIVE mode. "
+                "Ensure forward test acceptance criteria met before deploying."
+            )
 
     def execute_order(self, signal, portfolio, symbol: str):
-        from app.config import settings
-
         # Calculate risk-managed size using Domain Portfolio
         scale_in = (signal.metadata or {}).get("scale_in", False)
         scale_fraction = 0.4 if scale_in else 1.0
@@ -53,7 +57,7 @@ class DhanBrokerAdapter(BrokerPort):
             return None
 
         # Ensure DRY_RUN behaves appropriately
-        if settings.DRY_RUN:
+        if self._dry_run:
             logger.warning(
                 "[DRY_RUN] Simulated Live Execution for %s via DhanBrokerAdapter",
                 symbol,
@@ -146,9 +150,7 @@ class DhanBrokerAdapter(BrokerPort):
 
     def cancel_order(self, order_id: str) -> bool:
         """Cancel a live working order (useful for scrubbing Hard SLs)"""
-        from app.config import settings
-
-        if settings.DRY_RUN:
+        if self._dry_run:
             logger.debug("[DRY_RUN] Simulated cancel order %s", order_id)
             return True
 
