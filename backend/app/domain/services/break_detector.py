@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from app.domain.services.candle_metrics import body as calc_body
+
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC
 
@@ -47,7 +49,7 @@ def detect_break(
     current = data[-1]
     prev = data[-2]
     vol_ratio = current.volume / baseline_vol if baseline_vol > 0 else 0.0
-    body = abs(current.close - current.open)
+    body_size = calc_body(current.open, current.high, current.low, current.close)
     candle_range = current.high - current.low
 
     # Key levels to check
@@ -89,7 +91,7 @@ def detect_break(
 
     # Check ABSORPTION: flat candle + high absolute delta at key level
     threshold = current.close * 0.003
-    if candle_range > 0 and body < candle_range * 0.30:
+    if candle_range > 0 and body_size < candle_range * 0.30:
         delta_ratio = abs(current.delta) / current.volume if current.volume > 0 else 0
         if delta_ratio > 0.25:
             for _label, level in levels_up + levels_down:
@@ -107,7 +109,7 @@ def detect_break(
 
     for _label, level in levels_up:
         if level > 0 and abs(current.high - level) < threshold:
-            if vol_ratio < 1.2 and upper_wick > body:
+            if vol_ratio < 1.2 and upper_wick > body_size:
                 return {
                     "break_direction": "DOWN",
                     "break_type": "RESPONSIVE",
@@ -117,7 +119,7 @@ def detect_break(
 
     for _label, level in levels_down:
         if level > 0 and abs(current.low - level) < threshold:
-            if vol_ratio < 1.2 and lower_wick > body:
+            if vol_ratio < 1.2 and lower_wick > body_size:
                 return {
                     "break_direction": "UP",
                     "break_type": "RESPONSIVE",

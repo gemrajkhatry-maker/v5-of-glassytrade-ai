@@ -9,10 +9,14 @@ to detect acceptance above/below value area and rejection at edges.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 
-from app.domain.trading.models.value_objects import OHLC
+from app.domain.services.candle_metrics import (
+    body as calc_body,
+    body_pct,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +91,13 @@ class AcceptanceRejectionEngine:
         self._last_time = candle.time
 
         # Velocity
-        body = abs(float(candle.close) - float(candle.open))
-        velocity = body / duration if duration > 0 else 0.0
+        calc_body_size = calc_body(
+            float(candle.open),
+            float(candle.high),
+            float(candle.low),
+            float(candle.close),
+        )
+        velocity = calc_body_size / duration if duration > 0 else 0.0
 
         # Time accumulation outside VA
         c_close = float(candle.close)
@@ -128,21 +137,21 @@ class AcceptanceRejectionEngine:
         if candle_range > 0:
             upper_wick = c_high - max(c_open, c_close)
             lower_wick = min(c_open, c_close) - c_low
-            body_size = abs(c_close - c_open)
+            calc_body_size = calc_body(c_open, c_high, c_low, c_close)
             vol_spike = (
                 float(candle.volume) > baseline_vol * 1.5 if baseline_vol > 0 else False
             )
             threshold = c_close * 0.003
 
             if (
-                upper_wick > body_size
+                upper_wick > calc_body_size
                 and vol_spike
                 and vah > 0
                 and abs(c_high - vah) < threshold
             ):
                 rejection_at_high = True
             if (
-                lower_wick > body_size
+                lower_wick > calc_body_size
                 and vol_spike
                 and val > 0
                 and abs(c_low - val) < threshold
@@ -151,14 +160,14 @@ class AcceptanceRejectionEngine:
             if (
                 c_high > vah > 0
                 and c_close < vah
-                and upper_wick > body_size
+                and upper_wick > calc_body_size
                 and vol_spike
             ):
                 liquidity_sweep = "SWEEP_HIGH"
             elif (
                 c_low < val > 0
                 and c_close > val
-                and lower_wick > body_size
+                and lower_wick > calc_body_size
                 and vol_spike
             ):
                 liquidity_sweep = "SWEEP_LOW"

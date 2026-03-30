@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app.domain.services.candle_metrics import body as calc_body
+
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC
 
@@ -47,7 +49,7 @@ def detect_lvn_play(
     has_velocity = velocity_ratio > 2.0
 
     # Rejection candle: wick > body
-    body = abs(candle.close - candle.open)
+    body_size = calc_body(candle.open, candle.high, candle.low, candle.close)
     upper_wick = candle.high - max(candle.open, candle.close)
     lower_wick = min(candle.open, candle.close) - candle.low
     has_rejection = max(upper_wick, lower_wick) > body and body > 0
