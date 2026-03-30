@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from app.domain.trading.models.enums import SignalType, Source, SetupType
 from app.domain.trading.models.entities import Signal
 from app.domain.fabio_ai.services.trade_thesis import build_trade_thesis
+from app.domain.services.candle_metrics import body as calc_body
 
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult, AggressivePrint
@@ -43,9 +44,9 @@ def full_body_close_gate(tick: OHLC, break_level: float, direction: str) -> bool
 
     Returns True if confirmed, False to BLOCK.
     """
-    body = abs(tick.close - tick.open)
+    body_size = calc_body(tick.open, tick.high, tick.low, tick.close)
     rng = tick.high - tick.low
-    body_pct = body / rng if rng > 0 else 0
+    body_pct = body_size / rng if rng > 0 else 0
     if body_pct < 0.5:  # Needs at least 50% body
         return False
     if direction == "LONG" and tick.close > break_level:
@@ -192,8 +193,10 @@ def three_align_check(
         return False, False, False
 
     va_range = amt_result.value_area_high - amt_result.value_area_low
+    # AAA PRE-1 (FR-07-02): Session state must be IMBALANCED or PROBING
+    # IMBALANCED = Trend Continuation, PROBING = Absorption Displacement Setup
     state_ok = (
-        amt_result.market_state in ("BALANCED", "IMBALANCED")
+        amt_result.market_state in ("BALANCED", "IMBALANCED", "PROBING")
         and va_range > amt_result.poc * 0.001
     )
     if not state_ok:
@@ -425,11 +428,11 @@ def check_momentum_fade(data: list[OHLC], tick: OHLC, direction: str) -> bool:
     if tick.volume < (ema_vol * 2.5):
         return False
 
-    body = abs(tick.close - tick.open)
+    body_size = calc_body(tick.open, tick.high, tick.low, tick.close)
     candle_range = tick.high - tick.low
 
     # Must be a strong directional candle (body is large part of range)
-    if candle_range <= 0 or body < (candle_range * 0.70):
+    if candle_range <= 0 or body_size < (candle_range * 0.70):
         return False
 
     upper_wick = tick.high - max(tick.open, tick.close)
@@ -522,8 +525,8 @@ def build_entry_signal(
     # VA width as proxy for reasonable SL distance
     va_width = abs(amt_result.value_area_high - amt_result.value_area_low)
 
-    # Minimum reward threshold: at least 0.3% of price to avoid dust trades
-    min_reward = tick.close * 0.003
+    # Minimum reward threshold (approved plan): at least 0.5% of price to avoid marginal trades
+    min_reward = tick.close * 0.005
 
     if setup_type == SetupType.MEAN_REVERSION:
         tp_price = amt_result.poc

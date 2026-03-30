@@ -8,6 +8,8 @@ This prevents the system from fighting extreme momentum moves.
 
 from __future__ import annotations
 
+from app.domain.services.candle_metrics import body as calc_body
+
 import logging
 import math
 
@@ -57,7 +59,7 @@ class MomentumFadeGate(EntryGate):
             )
 
         # Check if it's a strong directional candle (body > 70% of range)
-        body = abs(tick.close - tick.open)
+        body_size = calc_body(tick.open, tick.high, tick.low, tick.close)
         candle_range = tick.high - tick.low
 
         if candle_range <= 0 or body < (candle_range * 0.70):
