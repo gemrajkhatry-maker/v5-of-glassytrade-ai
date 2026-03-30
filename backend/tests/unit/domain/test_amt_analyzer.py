@@ -6,7 +6,6 @@ import math
 import pytest
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
 from app.domain.fabio_ai.services.amt_analyzer import (
-    smooth_array,
     create_profile,
     find_lvns,
     find_hvns,
@@ -15,6 +14,7 @@ from app.domain.fabio_ai.services.amt_analyzer import (
     AMTConfig,
     AcceptanceRejectionEngine,
 )
+from app.domain.fabio_ai.services import mlx_compute as mc
 from app.domain.trading.models.value_objects import VolumeProfileLevel
 from app.infrastructure.adapters.data_generator import generate_market_data
 
@@ -46,12 +46,12 @@ def _make_candle(
 class TestSmoothArray:
     def test_identity_window_1(self):
         data = [1.0, 2.0, 3.0, 4.0, 5.0]
-        result = smooth_array(data, 1)
+        result = mc.smooth_array(data, 1)
         assert result == data
 
     def test_smoothing_window_3(self):
         data = [0.0, 10.0, 0.0]
-        result = smooth_array(data, 3)
+        result = mc.smooth_array(data, 3)
         assert abs(result[1] - 10.0 / 3) < 0.01
 
 

@@ -63,6 +63,14 @@ from app.domain.services.initial_balance import InitialBalanceTracker
 from app.domain.services.break_detector import detect_break
 from app.domain.services.lvn_play_detector import detect_lvn_play
 from app.domain.services.volume_profile import create_profile
+from app.domain.services.displacement_detector import (
+    detect_displacement,
+    detect_acceptance,
+)
+from app.domain.services.signal_generator import (
+    generate_signal,
+    MarketState as SignalMarketState,
+)
 
 if TYPE_CHECKING:
     from app.config_models import SymbolConfig
@@ -126,11 +134,6 @@ class AMTConfig:
 # ---------------------------------------------------------------------------
 # Volume Profile — imported from app.domain.services.volume_profile
 # ---------------------------------------------------------------------------
-
-
-def smooth_array(data: list[float], window: int) -> list[float]:
-    """Centered simple moving average smoothing (MLX-accelerated)."""
-    return mc.smooth_array(data, window)
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +304,7 @@ class AMTAnalyzer:
         if len(leg_candles) < 2:
             return empty
 
-        is_disp = self.detect_displacement(data)
+        is_disp = detect_displacement(data, self.config.DISPLACEMENT_MULTIPLIER)
         leg_profile = create_profile(leg_candles, buckets=200)
         if len(leg_profile) < 3:
             return {
@@ -378,73 +381,6 @@ class AMTAnalyzer:
             "val": leg_val,
             "swing_delta": sum(c.delta for c in leg_candles),
         }
-
-    def detect_displacement(self, data: list[OHLC]) -> bool:
-        """Check for impulsive move: 3+ candles with direction + range expansion.
-
-        Formula: N>=3 consecutive candles, (N-1)/N directional,
-        total leg range >= 1.5 × avg_range × N, closes near extremes for 2/3.
-        """
-        if len(data) < 23:
-            return False
-
-        N = 3
-        recent = data[-N:]
-
-        # Direction check: at least (N-1) of N must be directional
-        bullish_count = sum(1 for c in recent if c.close > c.open)
-        bearish_count = sum(1 for c in recent if c.close < c.open)
-
-        is_bullish = bullish_count >= N - 1
-        is_bearish = bearish_count >= N - 1
-
-        if not (is_bullish or is_bearish):
-            return False
-
-        # Range expansion: leg range >= 1.5 × avg_range × N
-        prev_data = data[-(20 + N) : -N]
-        if len(prev_data) < 10:
-            return False
-
-        avg_range = sum(d.high - d.low for d in prev_data) / len(prev_data)
-        leg_range = max(c.high for c in recent) - min(c.low for c in recent)
-
-        if leg_range < avg_range * AMTConfig.DISPLACEMENT_MULTIPLIER:
-            return False
-
-        # Efficiency check: closes near extremes for at least 2/3 of candles
-        efficient_count = 0
-        for c in recent:
-            rng = c.high - c.low
-            if rng == 0:
-                efficient_count += 1
-                continue
-            if is_bullish and c.close >= c.low + 0.75 * rng:
-                efficient_count += 1
-            elif is_bearish and c.close <= c.low + 0.25 * rng:
-                efficient_count += 1
-
-        if efficient_count < math.ceil(N * 2 / 3):
-            return False
-
-        return True
-
-    def detect_acceptance(self, data: list[OHLC], vah: float, val: float) -> bool:
-        """Check for acceptance: 2+ consecutive closes outside VA."""
-        if len(data) < 2:
-            return False
-
-        recent = data[-2:]
-
-        # Check acceptance above VAH
-        if all(c.close > vah for c in recent):
-            return True
-
-        # Check acceptance below VAL
-        if all(c.close < val for c in recent):
-            return True
-
-        return False
 
     def analyze(
         self,
@@ -583,7 +519,7 @@ class AMTAnalyzer:
         # Uses standalone detect_market_state() per FR-04
         leg_data = self.detect_displacement_leg(recent_data)
         has_displacement = leg_data["has_displacement"]
-        has_acceptance = self.detect_acceptance(recent_data, vah, val)
+        has_acceptance = detect_acceptance(recent_data, vah, val)
 
         # Merge with AR engine state
         if ar_state["acceptance_above"] or ar_state["acceptance_below"]:
