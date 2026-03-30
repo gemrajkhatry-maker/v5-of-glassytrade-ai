@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import ChartScene from './components/ChartScene';
-import AIControls from './components/AIControls';
+import { LiveOpportunityCard } from './components/ai';
 import { AIAnalysisPanel } from './components/AIAnalysisPanel';
 import MarketSidebar from './components/MarketSidebar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { DEFAULT_CONFIG } from './constants';
-import { ChartConfig, ChatMessage, MessageRole, ChartMode } from './types';
+import { ChartConfig, ChartMode, AgentDecision } from './types';
 import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, Grid, BookOpen, Eye, TrendingUp } from 'lucide-react';
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
 import JournalPage from './components/JournalPage';
@@ -17,8 +17,6 @@ function App() {
     // 1. UI State
     const [config, setConfig] = useState<ChartConfig>(DEFAULT_CONFIG);
     const [chartMode, setChartMode] = useState<ChartMode>('STANDARD');
-    const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-    const [isProcessing, setIsProcessing] = useState(false);
     const [showControls, setShowControls] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
@@ -80,37 +78,20 @@ function App() {
         setActiveSymbol(symbol);
     }, [setActiveSymbol]);
 
-    const handleSendMessage = async (text: string) => {
-        setChatHistory(prev => [...prev, { id: simpleId(), role: MessageRole.USER, text }]);
-        setIsProcessing(true);
-        try {
-            const res = await fetch('/api/ai/command', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt: text, currentConfig: config }),
-            });
-            if (!res.ok) throw new Error(`AI API error: ${res.status}`);
-            const result = await res.json();
-            setChatHistory(prev => [...prev, { id: simpleId(), role: MessageRole.ASSISTANT, text: result.message }]);
-
-            if (result.configUpdates) {
-                if (result.configUpdates.symbol) {
-                    const newSym = result.configUpdates.symbol;
-                    if (instruments[newSym]) {
-                        setActiveSymbol(newSym);
-                    } else {
-                        setChatHistory(prev => [...prev, { id: simpleId(), role: MessageRole.SYSTEM, text: `Switched view to ${newSym}, but not currently in scanned universe.` }]);
-                    }
+    // Find the best live opportunity across all scanned instruments
+    const bestOpportunity = useMemo(() => {
+        let best: { symbol: string, agentDecision: AgentDecision, ltp: number } | null = null;
+        Object.entries(instruments).forEach(([sym, data]) => {
+            const dec = data.agentDecision;
+            if (dec && dec.timing === 'ENTER_NOW') {
+                if (!best || dec.probability > best.agentDecision.probability) {
+                    const ltp = data.data && data.data.length > 0 ? data.data[data.data.length - 1].close : 0;
+                    best = { symbol: sym, agentDecision: dec, ltp };
                 }
-                setConfig(prev => ({ ...prev, ...result.configUpdates }));
             }
-        } catch (e) {
-            console.error(e);
-            setChatHistory(prev => [...prev, { id: simpleId(), role: MessageRole.ASSISTANT, text: "Error processing command." }]);
-        } finally {
-            setIsProcessing(false);
-        }
-    };
+        });
+        return best;
+    }, [instruments]);
 
     const effectiveConfig = useMemo<ChartConfig>(() => ({
         ...config,
@@ -162,7 +143,7 @@ function App() {
             {/* CENTER: Main Content */}
             <div className={`
         flex-1 relative h-full transition-all duration-300 flex flex-col
-        ${sidebarOpen ? 'ml-64' : 'ml-0'}
+        ${sidebarOpen ? 'ml-[360px]' : 'ml-0'}
         ${rightSidebarOpen ? 'mr-80' : 'mr-0'}
       `}>
 
@@ -237,11 +218,11 @@ function App() {
                                 </button>
                             )}
 
-                            {/* CHART MODE TABS */}
-                            <div className="flex bg-white/5 backdrop-blur rounded-lg p-1 gap-1 border border-white/10">
+                            {/* CHART MODE TABS (Pills) */}
+                            <div className="flex bg-white/10 backdrop-blur-md rounded-full p-1 gap-1 shadow-inner border border-white/10">
                                 <button
                                     onClick={() => setChartMode('STANDARD')}
-                                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${chartMode === 'STANDARD' ? 'bg-purple-500/20 text-purple-200 shadow-sm' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'STANDARD' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <BarChart2 size={14} /> Candles
@@ -249,7 +230,7 @@ function App() {
                                 </button>
                                 <button
                                     onClick={() => setChartMode('FOOTPRINT')}
-                                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${chartMode === 'FOOTPRINT' ? 'bg-blue-500/20 text-blue-200 shadow-sm' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'FOOTPRINT' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <Grid size={14} /> Footprint
@@ -257,7 +238,7 @@ function App() {
                                 </button>
                                 <button
                                     onClick={() => setChartMode('RANGE')}
-                                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${chartMode === 'RANGE' ? 'bg-violet-500/20 text-violet-200 shadow-sm' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'RANGE' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <TrendingUp size={14} /> Range
@@ -265,19 +246,19 @@ function App() {
                                 </button>
                             </div>
 
-                            {/* Dual Volume Profile Tabs */}
-                            <div className="flex bg-white/5 backdrop-blur rounded-lg border border-white/10 overflow-hidden">
+                            {/* Dual Volume Profile Tabs (Pills) */}
+                            <div className="flex bg-white/10 backdrop-blur-md rounded-full p-1 gap-1 shadow-inner border border-white/10 ml-2">
                                 {([
-                                    { key: 'session', label: '1. Session' },
-                                    { key: 'leg', label: '2. Leg' },
-                                    { key: 'combined', label: '3. Combined' },
+                                    { key: 'session', label: 'Session' },
+                                    { key: 'leg', label: 'Leg' },
+                                    { key: 'combined', label: 'Combined' },
                                     { key: 'off', label: 'Off' },
                                 ] as const).map(({ key, label }) => (
                                     <button
                                         key={key}
                                         onClick={() => setConfig(s => ({ ...s, vpMode: key, showVolumeProfile: key !== 'off' }))}
-                                        className={`px-3 py-1.5 text-xs font-medium transition-all ${config.vpMode === key
-                                            ? key === 'combined' ? 'bg-blue-500/30 text-blue-100 shadow-sm' : 'bg-white/10 text-white'
+                                        className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${config.vpMode === key
+                                            ? 'bg-blue-500 text-white shadow-md shadow-blue-500/20'
                                             : 'text-white/40 hover:text-white hover:bg-white/5'
                                             }`}
                                     >
@@ -285,6 +266,46 @@ function App() {
                                     </button>
                                 ))}
                             </div>
+                            
+                            {/* Breadcrumb Info Mode */}
+                            <div className="flex items-center bg-black/40 backdrop-blur rounded-full px-3 py-1.5 text-[10px] font-bold tracking-wider text-white/50 border border-white/10 ml-2">
+                                {chartMode === 'STANDARD' ? 'Standard Candles' : chartMode === 'FOOTPRINT' ? 'Footprint' : 'Range'} 
+                                <span className="mx-2 text-white/20">→</span> 
+                                {config.vpMode === 'off' ? 'No Profile' :
+                                 config.vpMode === 'session' ? 'Session Profile' :
+                                 config.vpMode === 'leg' ? 'Leg Profile' : 'Combined Profile'}
+                            </div>
+                        </div>
+
+                        {/* Top Bar Status Pin */}
+                        <div className="absolute top-14 left-0 right-0 pointer-events-none flex justify-center">
+                            {(() => {
+                                const genAI = activeInstrument.genAIAnalysis;
+                                const amtResult = activeInstrument.amtAnalysis;
+                                const isDead = genAI?.rationale?.includes('DEAD') || genAI?.rawOutput?.includes('QUANT_DEAD_MARKET');
+                                const volMsg = amtResult?.aggression && amtResult.aggression < 0.2 ? 'Vol < 5% avg' : 'Vol OK';
+                                
+                                return (
+                                    <div className="pointer-events-auto flex items-center bg-[#0f172a]/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-2xl overflow-hidden">
+                                        <div className="px-4 py-2 border-r border-white/10 flex items-center gap-2">
+                                            <Brain className="w-3.5 h-3.5 text-blue-400" />
+                                            <span className="text-[10px] font-bold text-white/80 uppercase tracking-widest">
+                                                MODEL: {genAI?.direction && genAI.direction !== 'FLAT' ? `ENTRY (${genAI.direction})` : isDead ? 'SLEEPING' : 'MONITORING'}
+                                            </span>
+                                        </div>
+                                        <div className={`px-4 py-2 border-r border-white/10 flex items-center gap-2 font-mono text-[10px] font-bold ${isDead ? 'bg-red-500/20 text-red-400' : 'bg-green-500/10 text-emerald-400'}`}>
+                                            {isDead ? (
+                                                 <><div className="w-1.5 h-1.5 bg-red-500 rounded-full" /> <span>DEAD MARKET</span></>
+                                            ) : (
+                                                 <><div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> <span>LIVE SCANNING</span></>
+                                            )}
+                                        </div>
+                                        <div className={`px-4 py-2 font-mono text-[10px] ${amtResult?.aggression && amtResult.aggression < 0.2 ? 'text-white/40' : 'text-blue-300'}`}>
+                                            {volMsg}
+                                        </div>
+                                    </div>
+                                );
+                            })()}
                         </div>
 
                         {/* Right Toggle (Analysis) + Chat Toggle */}
@@ -300,105 +321,16 @@ function App() {
                         </div>
                     </div>
 
-                    {/* Floating Info Box — Overseer (position open) OR Model I/O (always show LLM output) */}
-                    {(() => {
-                        const hasOpenPos = activeInstrument.portfolio.positions.some(p => p.status === 'OPEN');
-                        const genAI = activeInstrument.genAIAnalysis;
-                        const hasModelOutput = !!(genAI?.rawOutput || genAI?.direction);
-                        const showOverseer = hasOpenPos;
-                        const hasOverseer = !!(activeInstrument.overseerAction && activeInstrument.overseerAction !== 'NONE');
-                        const showBox = showOverseer || hasModelOutput;
-                        if (!showBox) return null;
-                        return (
-                            <div
-                                ref={overseerBoxRef}
-                                onMouseDown={onOverseerMouseDown}
-                                className="pointer-events-auto absolute cursor-grab active:cursor-grabbing select-none"
-                                style={{
-                                    ...(overseerPos.x < 0
-                                        ? { right: 16, top: overseerPos.y }
-                                        : { left: overseerPos.x, top: overseerPos.y }),
-                                    zIndex: 20,
-                                }}
-                            >
-                                <div className="backdrop-blur-xl bg-[#0f172a]/60 border border-white/10 rounded-xl px-4 py-3 shadow-2xl min-w-[220px] max-w-[340px]">
-                                    {showOverseer ? (
-                                        <>
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <Eye className="w-3.5 h-3.5 text-blue-400" />
-                                                <span className="text-[10px] font-bold text-white/60 uppercase tracking-widest">Overseer</span>
-                                                <div className="ml-auto h-1.5 w-1.5 rounded-full bg-green-400 animate-pulse" />
-                                            </div>
-                                            {hasOverseer ? (
-                                                <>
-                                                    <div className={`text-sm font-bold uppercase tracking-wide ${activeInstrument.overseerAction === 'HOLD' ? 'text-blue-300' :
-                                                        activeInstrument.overseerAction === 'TIGHTEN' ? 'text-yellow-400' :
-                                                            activeInstrument.overseerAction === 'FULL_EXIT' ? 'text-red-400' :
-                                                                activeInstrument.overseerAction === 'PARTIAL' ? 'text-orange-400' :
-                                                                    activeInstrument.overseerAction === 'ADD' ? 'text-green-400' :
-                                                                        'text-white/60'
-                                                        }`}>
-                                                        {activeInstrument.overseerAction}
-                                                    </div>
-                                                    {activeInstrument.overseerReason && (
-                                                        <div className="text-[9px] text-white/40 font-mono mt-1 leading-relaxed line-clamp-3">
-                                                            {activeInstrument.overseerReason}
-                                                        </div>
-                                                    )}
-                                                </>
-                                            ) : (
-                                                <div className="text-[10px] text-white/25">Awaiting decision...</div>
-                                            )}
-                                        </>
-                                    ) : (
-                                        <>
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <Brain className="w-3.5 h-3.5 text-cyan-400" />
-                                                <span className="text-[10px] font-bold text-white/60 uppercase tracking-widest">Model I/O</span>
-                                                {genAI?.direction && (
-                                                    <span className={`text-[10px] font-bold ml-auto ${genAI.direction === 'LONG' ? 'text-emerald-400' :
-                                                        genAI.direction === 'SHORT' ? 'text-red-400' :
-                                                            'text-white/40'
-                                                        }`}>{genAI.direction}</span>
-                                                )}
-                                            </div>
-                                            {genAI?.rawOutput ? (
-                                                <div className="text-[9px] text-amber-400/70 font-mono leading-relaxed line-clamp-4 mb-1">
-                                                    {genAI.rawOutput}
-                                                </div>
-                                            ) : genAI?.rationale ? (
-                                                <div className="text-[9px] text-yellow-400/70 font-mono leading-relaxed mb-1">
-                                                    {genAI.rationale}
-                                                </div>
-                                            ) : (
-                                                <div className="text-[9px] text-white/25 font-mono">Waiting for LLM call...</div>
-                                            )}
-                                            {genAI?.inputPrompt && (
-                                                <details className="group">
-                                                    <summary className="text-[8px] text-cyan-400/50 cursor-pointer hover:text-cyan-400/80 transition-colors">
-                                                        Prompt
-                                                    </summary>
-                                                    <div className="text-[8px] text-white/30 font-mono leading-relaxed mt-1 max-h-[120px] overflow-y-auto whitespace-pre-wrap">
-                                                        {genAI.inputPrompt}
-                                                    </div>
-                                                </details>
-                                            )}
-                                        </>
-                                    )}
-                                </div>
-                            </div>
-                        );
-                    })()}
+                    {/* Removed obsolete AI Floating Overlays */}
 
-                    {/* Bottom Right: Chat Overlay */}
+                    {/* Bottom Right: Live Opportunity Panel */}
                     <div className="flex justify-end items-end pointer-events-none">
                         <div className={`pointer-events-auto transition-all duration-300 origin-bottom-right ${showControls ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none translate-y-10'}`}>
-                            <AIControls
-                                onSendMessage={handleSendMessage}
-                                isProcessing={isProcessing}
-                                history={chatHistory}
-                                hasApiKey={true}
-                                onSetApiKey={() => { }}
+                            <LiveOpportunityCard 
+                                symbol={bestOpportunity?.symbol || null}
+                                agentDecision={bestOpportunity?.agentDecision || null}
+                                ltp={bestOpportunity?.ltp || 0}
+                                onSelect={(sym) => { setActiveSymbol(sym); setShowControls(false); }}
                                 onClose={() => setShowControls(false)}
                             />
                         </div>

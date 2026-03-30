@@ -247,11 +247,15 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             if (state.status === 'history_loaded') {
                 if (state.history && state.symbol) {
                     const sym = state.symbol;
+                    // CRITICAL: Ensure history is sorted by time to prevent Lightweight Charts crash
+                    const sortedHistory = [...state.history].sort((a, b) => 
+                        new Date(a.time).getTime() - new Date(b.time).getTime()
+                    );
                     setInstruments(prev => {
                         const inst = prev[sym] || createInstrumentState(sym);
                         return {
                             ...prev,
-                            [sym]: { ...inst, data: state.history },
+                            [sym]: { ...inst, data: sortedHistory },
                         };
                     });
                 }
@@ -323,7 +327,8 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         const last = newData[newData.length - 1];
                         if (last && state.tick.time === last.time) {
                             newData[newData.length - 1] = state.tick;
-                        } else {
+                        } else if (!last || new Date(state.tick.time).getTime() > new Date(last.time).getTime()) {
+                            // Only append if it's strictly newer to maintain ascending order
                             newData.push(state.tick);
                             if (newData.length > 1000) newData.shift();
                         }
@@ -393,7 +398,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     const last = newData[newData.length - 1];
                     if (last && state.tick.time === last.time) {
                         newData[newData.length - 1] = state.tick;
-                    } else {
+                    } else if (!last || new Date(state.tick.time).getTime() > new Date(last.time).getTime()) {
                         newData.push(state.tick);
                         if (newData.length > 1000) newData.shift();
                     }

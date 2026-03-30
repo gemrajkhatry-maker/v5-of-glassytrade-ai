@@ -1,8 +1,8 @@
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import GlassPanel from './GlassPanel';
 import { InstrumentState } from '../types';
-import { TrendingUp, TrendingDown, Search, BarChart3, History, Radio } from 'lucide-react';
+import { TrendingUp, TrendingDown, Search, BarChart3, History, Radio, Filter } from 'lucide-react';
 
 interface MarketSidebarProps {
     instruments: Record<string, InstrumentState>;
@@ -44,69 +44,84 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const hasData = inst.data.length > 0;
     const { name, tag } = shortSymbol(sym);
 
-    // Position status & unrealized PnL
-    const openPos = inst.portfolio.positions.filter(p => p.status === 'OPEN');
-    const unrealizedPnl = openPos.reduce((sum, p) => {
-        const multiplier = p.side === 'LONG' ? 1 : -1;
-        return sum + (price - p.entryPrice) * multiplier * p.size;
-    }, 0);
+    const isDead = inst.genAIAnalysis?.rationale?.includes('DEAD') || inst.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
+    const prob = inst.agentDecision?.probability || 0;
+    const timing = inst.agentDecision?.timing || 'SKIP';
+    const direction = inst.agentDecision?.direction || 'FLAT';
+    const mode = inst.amtAnalysis?.marketState || 'BALANCED';
 
     return (
         <button
             onClick={() => onSelect(sym)}
             className={`
-                w-full p-3 rounded-xl flex items-center justify-between group transition-all duration-200
-                ${openPos.length > 0
-                    ? unrealizedPnl >= 0
-                        ? 'bg-emerald-500/10 border border-emerald-500/20'
-                        : 'bg-red-500/10 border border-red-500/20'
-                    : isActive
-                        ? 'bg-purple-500/20 border border-purple-500/30 shadow-[0_0_15px_rgba(168,85,247,0.15)]'
-                        : 'hover:bg-white/5 border border-transparent hover:border-white/5'}
+                w-full px-2 py-1.5 rounded flex items-center gap-0 group transition-all duration-200 text-left border-l-2
+                ${isActive
+                    ? 'bg-purple-500/10 border-l-purple-500 bg-gradient-to-r from-purple-500/5 to-transparent'
+                    : 'bg-white/[0.02] hover:bg-white/[0.05] border-l-transparent'}
+                ${isDead ? 'opacity-40 saturate-0' : ''}
+                border-b border-white/[0.03]
             `}
         >
-            <div className="flex flex-col items-start gap-0.5">
+            {/* Symbol & Tag (25%) */}
+            <div className="flex flex-col w-[25%] overflow-hidden pr-2">
                 <div className="flex items-center gap-1.5">
                     <Radio size={8} className={hasData ? 'text-emerald-400' : 'text-white/20'} />
-                    <span className={`font-bold text-xs ${isActive ? 'text-white' : 'text-white/70 group-hover:text-white'}`}>
+                    <span className="font-bold text-[10px] text-white/90 truncate">
                         {name}
                     </span>
-                    {tag && (
-                        <span className={`text-[9px] px-1 rounded font-medium ${tag === 'CE' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
-                            }`}>
-                            {tag}
-                        </span>
-                    )}
                 </div>
-                <div className="flex items-center gap-2 ml-3.5">
-                    {openPos.length > 0 && (
-                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold font-mono ${unrealizedPnl >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                            }`}>
-                            {unrealizedPnl >= 0 ? '+' : ''}{unrealizedPnl.toFixed(1)} ({openPos.length})
-                        </span>
-                    )}
-                    {inst.amtAnalysis?.marketState && (
-                        <span className="text-[8px] text-white/25">
-                            {inst.amtAnalysis.marketState}
-                        </span>
-                    )}
+                <span className="text-[8px] text-white/30 font-mono ml-3">{tag}</span>
+            </div>
+
+            {/* Mode (15%) */}
+            <div className="w-[15%]">
+                <span className={`text-[8px] font-mono px-1 py-0.5 rounded ${
+                    mode === 'BALANCED' ? 'text-amber-500 bg-amber-500/10' :
+                    mode === 'PROBING' ? 'text-blue-400 bg-blue-500/10' :
+                    mode === 'TRENDING' ? 'text-emerald-400 bg-emerald-500/10' :
+                    mode === 'BREAKING' ? 'text-red-400 bg-red-500/10' :
+                    'text-white/40 bg-white/5'
+                }`}>
+                    {mode?.substring(0, 4)}
+                </span>
+            </div>
+
+            {/* Action (15%) */}
+            <div className="w-[15%] flex items-center gap-1">
+                <div className={`w-1 h-1 rounded-full ${timing === 'ENTER_NOW' ? 'bg-emerald-400 animate-pulse' : timing === 'SKIP' ? 'bg-red-400' : 'bg-yellow-400'}`} />
+                <span className={`text-[9px] font-mono font-bold ${timing === 'ENTER_NOW' ? 'text-emerald-400' : timing === 'SKIP' ? 'text-red-400' : 'text-yellow-400'}`}>
+                    {timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing}
+                </span>
+            </div>
+
+            {/* Probability & Bar (20%) */}
+            <div className="w-[20%] flex flex-col gap-0.5 pr-2">
+                <span className={`text-[9px] font-mono font-bold ${prob >= 0.6 ? 'text-emerald-400' : prob >= 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
+                    {Math.round(prob * 100)}%
+                </span>
+                <div className="w-full h-0.5 bg-white/10 rounded-full overflow-hidden">
+                    <div className="h-full transition-all duration-500" style={{ width: `${prob * 100}%`, backgroundColor: prob >= 0.6 ? '#34d399' : prob >= 0.5 ? '#fbbf24' : '#f87171' }} />
                 </div>
             </div>
 
-            <div className="flex flex-col items-end">
-                {price > 0 ? (
-                    <>
-                        <span className="font-mono text-xs text-white/90">
-                            {price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </span>
-                        <div className={`flex items-center gap-1 text-[10px] ${isUp ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {isUp ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
-                            <span>{Math.abs(percentChange).toFixed(2)}%</span>
-                        </div>
-                    </>
+            {/* LTP / DEAD (15%) */}
+            <div className="w-[15%] flex flex-col items-end pr-2">
+                {isDead ? (
+                    <span className="text-[7px] font-mono font-bold text-red-400/70 border border-red-500/20 px-1 rounded animate-pulse">
+                        🔴 DEAD
+                    </span>
                 ) : (
-                    <span className="text-[10px] text-white/20">Loading...</span>
+                    <span className="font-mono text-[10px] text-white/70 font-bold">
+                        {price > 0 ? price.toFixed(1) : '—'}
+                    </span>
                 )}
+            </div>
+
+            {/* Change (10%) */}
+            <div className="w-[10%] text-right">
+                <span className={`text-[9px] font-mono ${isUp ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
+                    {isUp ? '+' : ''}{percentChange.toFixed(1)}%
+                </span>
             </div>
         </button>
     );
@@ -116,10 +131,59 @@ SymbolCard.displayName = 'SymbolCard';
 
 const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol, onSelect }) => {
     const [filter, setFilter] = useState('');
+    const [modeFilter, setModeFilter] = useState('ALL');
+    const [actionFilter, setActionFilter] = useState('ALL');
+    const [sortBy, setSortBy] = useState<'ACTION' | 'PROB'>('PROB');
+
     const symbols = Object.keys(instruments);
-    const filtered = filter
-        ? symbols.filter(s => s.toLowerCase().includes(filter.toLowerCase()))
-        : symbols;
+    const filtered = useMemo(() => {
+        let f = symbols;
+        
+        // Apply text filter
+        if (filter) f = f.filter(s => s.toLowerCase().includes(filter.toLowerCase()));
+        
+        // Apply Mode filter
+        if (modeFilter !== 'ALL') f = f.filter(s => instruments[s].amtAnalysis?.marketState?.includes(modeFilter) || (modeFilter === 'DEAD' && instruments[s].genAIAnalysis?.rationale?.includes('DEAD')));
+        
+        // Apply Action filter
+        if (actionFilter !== 'ALL') f = f.filter(s => instruments[s].agentDecision?.timing === actionFilter);
+
+        // Sort: Default to "Opportunity First" (ENTER_NOW > MONITOR > SKIP > DEAD)
+        return f.sort((a, b) => {
+            const instA = instruments[a];
+            const instB = instruments[b];
+            
+            const isDeadA = instA.genAIAnalysis?.rationale?.includes('DEAD') || instA.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
+            const isDeadB = instB.genAIAnalysis?.rationale?.includes('DEAD') || instB.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
+
+            // 0. Dead markets always at the bottom
+            if (isDeadA !== isDeadB) return isDeadA ? 1 : -1;
+
+            const pA = instA.agentDecision?.probability || 0;
+            const pB = instB.agentDecision?.probability || 0;
+            
+            if (sortBy === 'ACTION') {
+                const getRank = (sym: string) => {
+                    const t = instruments[sym].agentDecision?.timing;
+                    if (t === 'ENTER_NOW') return 3;
+                    if (t === 'MONITOR' || t === 'WAIT') return 2; 
+                    if (t === 'SKIP') return 1;
+                    return 0;
+                };
+                const rankA = getRank(a);
+                const rankB = getRank(b);
+                if (rankA !== rankB) return rankB - rankA;
+                return pB - pA; // secondary sort by probability
+            } else {
+                // Primary sort by probability
+                if (Math.abs(pA - pB) > 0.01) return pB - pA;
+                // Secondary sort by timing
+                const tA = instA.agentDecision?.timing === 'ENTER_NOW' ? 1 : 0;
+                const tB = instB.agentDecision?.timing === 'ENTER_NOW' ? 1 : 0;
+                return tB - tA;
+            }
+        });
+    }, [symbols, filter, modeFilter, actionFilter, instruments, sortBy]);
 
     // Filter trades for the ACTIVE symbol only
     const recentTrades = React.useMemo(() => {
@@ -128,30 +192,79 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
 
         return [...activeInstrument.portfolio.closedTrades]
             .sort((a, b) => new Date(b.exitTime || 0).getTime() - new Date(a.exitTime || 0).getTime());
-    }, [instruments[activeSymbol]?.portfolio?.closedTrades, activeSymbol]);
+    }, [instruments, activeSymbol]);
 
     return (
-        <GlassPanel className="h-full w-64 flex flex-col border-r border-white/10 rounded-none rounded-r-2xl bg-slate-900/50">
+        <GlassPanel className="h-full w-[360px] flex flex-col border-r border-white/10 rounded-none rounded-r-2xl bg-[#0f172a] shadow-2xl z-50">
 
             {/* --- MARKET SCANNER (Top Section) --- */}
             <div className="flex-1 flex flex-col min-h-0">
-                {/* Header */}
-                <div className="p-4 border-b border-white/10 shrink-0">
-                    <div className="flex items-center gap-2 mb-4">
-                        <BarChart3 className="text-purple-400" size={20} />
-                        <h2 className="font-bold text-sm tracking-widest text-white/90">MARKET SCANNER</h2>
-                        <span className="ml-auto text-[10px] text-white/30 bg-white/5 px-1.5 py-0.5 rounded">{symbols.length}</span>
+                {/* Custom Sticky Header */}
+                <div className="p-3 border-b border-white/10 bg-[#0f172a] sticky top-0 z-10 shrink-0">
+                    <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                            <BarChart3 className="text-purple-400" size={18} />
+                            <h2 className="font-bold text-[13px] tracking-widest text-white/90">MARKET SCANNER</h2>
+                        </div>
+                        <span className="text-[10px] text-white/30 bg-black/20 px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
+                            <span className="w-1 h-1 rounded-full bg-white/30"></span> {filtered.length} of {symbols.length}
+                        </span>
                     </div>
 
-                    <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" size={14} />
-                        <input
-                            type="text"
-                            placeholder="Filter symbols..."
-                            value={filter}
-                            onChange={e => setFilter(e.target.value)}
-                            className="w-full bg-black/20 border border-white/10 rounded-lg py-2 pl-9 pr-3 text-xs text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50"
-                        />
+                    <div className="flex flex-col gap-2">
+                        {/* Text Search */}
+                        <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" size={14} />
+                            <input
+                                type="text"
+                                placeholder="Filter symbols..."
+                                value={filter}
+                                onChange={e => setFilter(e.target.value)}
+                                className="w-full bg-black/30 border border-white/10 rounded py-1.5 pl-8 pr-3 text-xs text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50"
+                            />
+                        </div>
+                        
+                        {/* Dropdown Filters */}
+                        <div className="flex gap-2">
+                            <div className="relative flex-1">
+                                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" size={10} />
+                                <select 
+                                    value={modeFilter} onChange={e => setModeFilter(e.target.value)}
+                                    className="w-full bg-black/30 border border-white/10 rounded py-1 pl-6 pr-2 text-[10px] text-white/70 appearance-none outline-none focus:border-white/20 cursor-pointer"
+                                >
+                                    <option value="ALL">All Modes</option>
+                                    <option value="BALANCED">Balanced</option>
+                                    <option value="IMBALANCED">Imbalanced</option>
+                                    <option value="DEAD">Dead Market</option>
+                                </select>
+                            </div>
+                            <div className="relative flex-1">
+                                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" size={10} />
+                                <select 
+                                    value={actionFilter} onChange={e => setActionFilter(e.target.value)}
+                                    className="w-full bg-black/30 border border-white/10 rounded py-1 pl-6 pr-2 text-[10px] text-white/70 appearance-none outline-none focus:border-white/20 cursor-pointer"
+                                >
+                                    <option value="ALL">All Actions</option>
+                                    <option value="ENTER_NOW">Enter Now</option>
+                                    <option value="SKIP">Skip</option>
+                                    <option value="MONITOR">Monitor/Wait</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        {/* Column Header */}
+                        <div className="flex w-full text-[9px] text-white/30 font-mono mt-3 px-2 pb-1 border-b border-white/5 uppercase tracking-tighter">
+                            <div className="w-[25%]">Symbol</div>
+                            <div className="w-[15%]">Mode</div>
+                            <div className="w-[15%] cursor-pointer hover:text-white/60" onClick={() => setSortBy('ACTION')}>
+                                Action {sortBy === 'ACTION' ? '↓' : '↕'}
+                            </div>
+                            <div className="w-[20%] cursor-pointer hover:text-white/60" onClick={() => setSortBy('PROB')}>
+                                Prob% {sortBy === 'PROB' ? '↓' : '↕'}
+                            </div>
+                            <div className="w-[15%] text-right pr-2">LTP</div>
+                            <div className="w-[10%] text-right">Chg</div>
+                        </div>
                     </div>
                 </div>
 

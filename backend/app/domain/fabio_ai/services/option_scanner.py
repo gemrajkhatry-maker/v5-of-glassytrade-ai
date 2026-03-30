@@ -140,27 +140,6 @@ class OptionScannerService:
                     len(chain.puts),
                     atm,
                 )
-                if chain is None:
-                    logger.info("%s: option chain returned None — skipping", u)
-                    continue
-
-                atm = chain.atm_strike
-                interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
-
-                # Detect momentum (for logging/sorting, not filtering)
-                bias, bias_strength, bias_reason = self._detect_momentum(
-                    chain, atm, interval
-                )
-                logger.info(
-                    "MOMENTUM: %s — %s (strength=%d) [calls=%d puts=%d atm=%.0f]",
-                    u,
-                    bias,
-                    bias_strength,
-                    len(chain.calls),
-                    len(chain.puts),
-                    atm,
-                )
-
                 # Scan BOTH CE and PE contracts near ATM
                 # LLM decides direction based on full market context
                 strikes = [
@@ -209,8 +188,9 @@ class OptionScannerService:
                             )
                             continue
 
-                        oi = int(opt.oi or 0)
+                        ltp = float(opt.ltp or 0)
                         vol = int(opt.volume or 0)
+                        oi = int(opt.oi or 0)
 
                         # Hard filters
                         min_oi = self._MIN_OI.get(u.upper(), 5000)
@@ -237,26 +217,30 @@ class OptionScannerService:
                         delta_val = abs(float(opt.delta or 0.5))
 
                         score = 0
-                        # ATM proximity (40 pts max)
-                        score += max(0, 40 - (atm_dist * 15))
-                        # OI liquidity scaling (30 pts max)
-                        if min_oi > 0:
-                            score += min(30, (oi / min_oi) * 10)
+                        # DEAD market check: no volume = no score
+                        if vol <= 0:
+                            score = 0
                         else:
-                            score += 15  # default if min_oi is 0
-                        # Volume momentum scaling (20 pts max)
-                        score += min(20, (vol / 1000) * 5)
+                            # ATM proximity (40 pts max)
+                            score += max(0, 40 - (atm_dist * 15))
+                            # OI liquidity scaling (30 pts max)
+                            if min_oi > 0:
+                                score += min(30, (oi / min_oi) * 10)
+                            else:
+                                score += 15  # default if min_oi is 0
+                            # Volume momentum scaling (20 pts max)
+                            score += min(20, (vol / 1000) * 5)
 
-                        # Quant Improvement 1: Delta sweet spot +10 pts
-                        if 0.40 <= delta_val <= 0.60:
-                            score += 10
+                            # Quant Improvement 1: Delta sweet spot +10 pts
+                            if 0.40 <= delta_val <= 0.60:
+                                score += 10
 
-                        # Quant Improvement 2: Dynamic Spread Penalty (-20 pts max)
-                        if ltp > 0:
-                            spread_pct = (ask - bid) / ltp * 100
-                            if spread_pct > 0.5:
-                                penalty = min(20, (spread_pct - 0.5) * 10)
-                                score -= penalty
+                            # Quant Improvement 2: Dynamic Spread Penalty (-20 pts max)
+                            if ltp > 0:
+                                spread_pct = (ask - bid) / ltp * 100
+                                if spread_pct > 0.5:
+                                    penalty = min(20, (spread_pct - 0.5) * 10)
+                                    score -= penalty
 
                         # Quant Improvement 3: Momentum Bias (removed hardcoded CE boost)
                         # Direction is now decided by AMT engine + MLX
@@ -326,31 +310,34 @@ class OptionScannerService:
                     if chain is None:
                         continue
                     atm = chain.atm_strike
-                    # Get ATM CE for display
-                    atm_ce = chain.calls.get(float(atm))
-                    if atm_ce and float(atm_ce.ltp or 0) > 0:
-                        final.append(
-                            ScanResult(
-                                symbol=atm_ce.symbol,
-                                underlying=u,
-                                strike=int(atm),
-                                option_type="CE",
-                                expiry=chain.expiry.date().isoformat()
-                                if hasattr(chain.expiry, "date")
-                                else "",
-                                ltp=float(atm_ce.ltp),
-                                oi=int(atm_ce.oi or 0),
-                                volume=int(atm_ce.volume or 0),
-                                spread=float(atm_ce.ask or 0) - float(atm_ce.bid or 0),
-                                score=50,  # Neutral score
-                                bias="NEUTRAL",
-                                bias_reason="No momentum — monitoring ATM",
-                                delta=float(atm_ce.delta or 0.5),
-                                iv=float(atm_ce.iv or 0),
+                    
+                    # Get BOTH CE and PE for a balanced view in neutral markets
+                    for opt_type, opt_map in [("CE", chain.calls), ("PE", chain.puts)]:
+                        atm_opt = opt_map.get(float(atm))
+                        if atm_opt and float(atm_opt.ltp or 0) > 0:
+                            final.append(
+                                ScanResult(
+                                    symbol=atm_opt.symbol,
+                                    underlying=u,
+                                    strike=int(atm),
+                                    option_type=opt_type,
+                                    expiry=chain.expiry.date().isoformat()
+                                    if hasattr(chain.expiry, "date")
+                                    else "",
+                                    ltp=float(atm_opt.ltp),
+                                    oi=int(atm_opt.oi or 0),
+                                    volume=int(atm_opt.volume or 0),
+                                    spread=float(atm_opt.ask or 0) - float(atm_opt.bid or 0),
+                                    score=50,  # Neutral score
+                                    bias="NEUTRAL",
+                                    bias_reason="Monitoring ATM (No strong momentum)",
+                                    delta=0.5 if opt_type == "CE" else 0.5,
+                                    iv=float(atm_opt.iv or 0) if hasattr(atm_opt, "iv") else 0.0,
+                                )
                             )
-                        )
-                        break
-                except Exception:
+                            logger.info("Fallback: Selected %s for monitoring", atm_opt.symbol)
+                except Exception as e:
+                    logger.debug("Fallback scan failed for %s: %s", u, e)
                     continue
 
         logger.info(

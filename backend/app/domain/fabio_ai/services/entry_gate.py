@@ -165,6 +165,7 @@ def three_align_check(
     footprint_domain: dict | None = None,
     return_is_second_drive: bool = False,
     session_info=None,  # NEW: session context for strategy enforcement
+    tick_size: float = 0.05,  # NEW: tick-size awareness (FR-07-06)
 ) -> tuple[bool, bool] | tuple[bool, bool, bool]:
     """Three-Align Gate: Market State + Location + Confirmation Bundle.
 
@@ -196,7 +197,7 @@ def three_align_check(
     # AAA PRE-1 (FR-07-02): Session state must be IMBALANCED or PROBING
     # IMBALANCED = Trend Continuation, PROBING = Absorption Displacement Setup
     state_ok = (
-        amt_result.market_state in ("BALANCED", "IMBALANCED", "PROBING")
+        amt_result.market_state in ("IMBALANCED", "PROBING")
         and va_range > amt_result.poc * 0.001
     )
     if not state_ok:
@@ -231,10 +232,10 @@ def three_align_check(
         return False, False, False
 
     near_level = False
-    # Dynamic near-level threshold: 50% of VA width (capped at 3% of price).
-    threshold = (
-        min(va_range * 0.5, tick.close * 0.03) if va_range > 0 else tick.close * 0.003
-    )
+    # Dynamic near-level threshold: 5 ticks or 10% of VA width (whichever is larger for commodities).
+    # Fabio: "We need to be tight at the level."
+    # 5 ticks is the gold standard for MR Location.
+    threshold = max(tick_size * 5, va_range * 0.1) if va_range > 0 else tick_size * 5
 
     # Collect all structural levels to check against
     levels_to_check: list[float] = [
@@ -284,6 +285,24 @@ def three_align_check(
             near_level = True
             active_level = level
             break
+
+    # Rule 2 mode-aware location check:
+    # PROB mode → prefer Leg LVNs (impulse zones) over Session VAH/VAL
+    # BALA mode → prefer Session POC/Mid-VA over LVNs
+    if near_level and amt_result.market_state == "PROBING":
+        # For PROB mode, check if we're near a Leg LVN (not Session VAH/VAL)
+        leg_lvns = getattr(amt_result, "leg_lvns", []) or []
+        is_near_leg_lvn = any(abs(active_level - lvn) < threshold for lvn in leg_lvns)
+        is_near_session_va = (
+            abs(active_level - amt_result.value_area_high) < threshold
+            or abs(active_level - amt_result.value_area_low) < threshold
+        )
+        # In PROB mode, Session VAH/VAL locations are weak — prefer Leg LVNs
+        if is_near_session_va and not is_near_leg_lvn:
+            logger.debug(
+                "Three-Align: PROB mode near Session VA (not Leg LVN) — weaker location"
+            )
+            # Still pass but with lower confidence (don't block)
 
     # ── Second Drive Detection ──
     is_second_drive = False
@@ -365,11 +384,34 @@ def check_confirmation_bundle(data: list[OHLC], tick: OHLC, order_book=None) -> 
     # ── Volume impulse is MANDATORY ──
     # Fabio: "Aggression is the trigger" — without volume impulse,
     # there's no institutional participation.
+    # FIX #7: Time-aware volume threshold for MCX afternoon lull (13:00-17:00 IST)
+    multiplier = 1.5
+    try:
+        from datetime import datetime, time as pytime
+
+        # Extract IST home time (current local time on the machine is IST per metadata)
+        curr_time = datetime.fromisoformat(tick.time.replace("Z", "+05:30")).time()
+        # MCX Lull: 1:00 PM to 5:00 PM IST (participation drops before evening session)
+        if pytime(13, 0) <= curr_time <= pytime(17, 0):
+            multiplier = (
+                1.0  # Lower threshold during lull (participation is naturally lower)
+            )
+            logger.debug(
+                "MCX Lull detected (%.2f IST) - lowering volume multiplier to %.1f",
+                curr_time.hour + curr_time.minute / 60,
+                multiplier,
+            )
+    except Exception:
+        pass
+
+    vol_impulse = tick.volume > (ema_vol * multiplier)
+
     if not vol_impulse:
         logger.debug(
-            "Confirmation bundle BLOCKED: no volume impulse (vol=%.0f, ema=%.0f)",
+            "Confirmation bundle BLOCKED: no volume impulse (vol=%.0f, ema=%.0f, mult=%.1f)",
             tick.volume,
             ema_vol,
+            multiplier,
         )
         return False
 

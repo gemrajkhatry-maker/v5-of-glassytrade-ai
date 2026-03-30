@@ -1,5 +1,6 @@
 import React from 'react';
 import { GenAIAnalysis } from '../../types';
+import { sanitizeLlmText } from '../../utils/textSanitizer';
 
 interface ModelIOPanelProps {
     displayAnalysis: GenAIAnalysis;
@@ -20,12 +21,7 @@ const ModelIOPanel = React.memo<ModelIOPanelProps>(({ displayAnalysis }) => (
                 <div className="text-[9px] text-amber-400/60 uppercase font-bold mb-1">Model &rarr; Output</div>
                 <div className="text-[9px] font-mono text-white/50 leading-relaxed whitespace-pre-wrap break-words">
                     {(() => {
-                        let text = (displayAnalysis.rawOutput || "No output yet.");
-                        // Simple cleanup for structured text
-                        text = text.replace(/^[{\s"']+|[}\s"']+$/g, '')
-                            .replace(/\\n/g, '\n')
-                            .replace(/\\"/g, '"')
-                            .trim();
+                        let text = sanitizeLlmText(displayAnalysis.rawOutput) || "No output yet.";
                         return text;
                     })()}
                 </div>

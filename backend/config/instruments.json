@@ -11,7 +11,7 @@
       "session_end": "23:30",
       "ib_window_minutes": 30,
       "big_order_filter_lots": 30,
-      "range_bar_size": 20,
+      "range_bar_size": 10,
       "dead_volume_pct": 5
     },
     "NATURALGAS": {
@@ -25,7 +25,7 @@
       "session_end": "23:30",
       "ib_window_minutes": 30,
       "big_order_filter_lots": 20,
-      "range_bar_size": 2,
+      "range_bar_size": 1.5,
       "dead_volume_pct": 5
     },
     "GOLD": {
@@ -39,7 +39,7 @@
       "session_end": "23:30",
       "ib_window_minutes": 30,
       "big_order_filter_lots": 5,
-      "range_bar_size": 100,
+      "range_bar_size": 80,
       "dead_volume_pct": 5
     },
     "SILVER": {
@@ -53,7 +53,7 @@
       "session_end": "23:30",
       "ib_window_minutes": 30,
       "big_order_filter_lots": 5,
-      "range_bar_size": 500,
+      "range_bar_size": 180,
       "dead_volume_pct": 5
     }
   },
@@ -69,7 +69,7 @@
       "session_end": "15:30",
       "ib_window_minutes": 30,
       "big_order_filter_lots": 50,
-      "range_bar_size": 20,
+      "range_bar_size": 15,
       "dead_volume_pct": 5
     },
     "BANKNIFTY": {
@@ -83,7 +83,7 @@
       "session_end": "15:30",
       "ib_window_minutes": 30,
       "big_order_filter_lots": 30,
-      "range_bar_size": 50,
+      "range_bar_size": 55,
       "dead_volume_pct": 5
     },
     "FINNIFTY": {
@@ -97,7 +97,7 @@
       "session_end": "15:30",
       "ib_window_minutes": 30,
       "big_order_filter_lots": 20,
-      "range_bar_size": 15,
+      "range_bar_size": 12,
       "dead_volume_pct": 5
     }
   }

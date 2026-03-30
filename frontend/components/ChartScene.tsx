@@ -250,8 +250,15 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     } else {
       const IST_OFFSET = 19800;
       const toIST = (timeStr: string) => (new Date(timeStr).getTime() / 1000 + IST_OFFSET) as any;
-      candleSeries.setData(data.map(d => ({ ...d, time: toIST(d.time as string) })));
-      const volumeData = data.map(d => ({
+      
+      // CRITICAL: Ensure data is sorted by time to prevent Lightweight Charts crash
+      // Although the hook now sorts history, we keep this as a secondary safety layer.
+      const sortedData = [...data].sort((a, b) => 
+        new Date(a.time as string).getTime() - new Date(b.time as string).getTime()
+      );
+
+      candleSeries.setData(sortedData.map(d => ({ ...d, time: toIST(d.time as string) })));
+      const volumeData = sortedData.map(d => ({
         time: toIST(d.time as string),
         value: d.volume,
         color: d.close >= d.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
@@ -283,18 +290,25 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       // Common Time
       const unixTime = (new Date(tick.time).getTime() / 1000 + 19800) as any;
 
-      // Update Candlestick directly Native API
-      candleSeriesRef.current?.update({
-        ...tick,
-        time: unixTime
-      } as any);
+      // CRITICAL: In server-mode, sometimes delayed ticks can arrive.
+      // Lightweight charts will crash if we update with an older timestamp.
+      // The hook now drops stale ticks, but we wrap in try-catch for total UI safety.
+      try {
+        // Update Candlestick directly Native API
+        candleSeriesRef.current?.update({
+          ...tick,
+          time: unixTime
+        } as any);
 
-      // Update Volume Native API
-      volumeSeriesRef.current?.update({
-        time: unixTime,
-        value: tick.volume,
-        color: tick.close >= tick.open ? '#22c55e80' : '#ef444480'
-      });
+        // Update Volume Native API
+        volumeSeriesRef.current?.update({
+          time: unixTime,
+          value: tick.volume,
+          color: tick.close >= tick.open ? '#22c55e80' : '#ef444480'
+        });
+      } catch (e) {
+        console.warn('[ChartScene] Ignored stale/out-of-order tick update:', tick.time);
+      }
     };
 
     tickBus.addEventListener('tick', handleTick);

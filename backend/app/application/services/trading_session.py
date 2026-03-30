@@ -593,6 +593,14 @@ class TradingSessionService:
         amt_data = list(event.data)
         if hasattr(session, "_underlying_data") and session._underlying_data:
             amt_data = list(session._underlying_data)
+        elif amt_data:
+            # WARNING: falling back to option premium data for AMT analysis
+            # VAH/VAL will be in option premium units, not underlying futures units
+            # This produces wrong LOCATION when profile is on premium data
+            log.debug(
+                "AMT: using option premium data for %s (no underlying futures available) — VAH/VAL will be in premium units",
+                event.symbol,
+            )
 
         srm = self._risk_coordinator.get_session_risk_manager(event.symbol)
         try:
@@ -728,6 +736,11 @@ class TradingSessionService:
                     event.order_book,
                     is_mcx=is_mcx,
                 )
+                tick_size = (
+                    self._exchange_config.get_tick_size(event.symbol)
+                    if self._exchange_config
+                    else 0.05
+                )
                 agent_decision = run_agent_pipeline(
                     data=list(event.data),
                     amt_result=amt_result,
@@ -735,6 +748,9 @@ class TradingSessionService:
                     probability_engine=self._probability_engine,
                     features=features,
                     order_book=event.order_book,
+                    tick_size=tick_size,
+                    symbol=event.symbol,
+                    tick_age_seconds=1.0,
                 )
                 log.info(
                     "Agent pipeline [%s]: dir=%s P=%.3f regime=%s timing=%s kelly=%.1f%% (%dus) — %s",
@@ -950,6 +966,11 @@ class TradingSessionService:
             if run_entry:
                 from app.domain.fabio_ai.services.entry_gate import run_gate_pipeline
 
+                tick_size = (
+                    self._exchange_config.get_tick_size(event.symbol)
+                    if self._exchange_config
+                    else 0.05
+                )
                 gate_passed, gate_reason, gate_detail = run_gate_pipeline(
                     data=list(event.data),
                     amt_result=amt_result,
@@ -962,11 +983,14 @@ class TradingSessionService:
                     halt_reason="",
                     tick_age_seconds=1.0,
                     symbol=event.symbol,
-                    max_distance_to_level_ticks=self._exchange_config.max_distance_to_level_ticks,
+                    max_distance_to_level_ticks=self._exchange_config.max_distance_to_level_ticks
+                    if self._exchange_config
+                    else 3.0,
                     probing_aggression_threshold=0.0,
                     min_aggression_score=0.0,
                     max_cushion_ticks=500.0,
                     min_rr_ratio=0.1,
+                    tick_size=tick_size,  # Pass tick size
                 )
 
                 if gate_passed:

@@ -50,6 +50,8 @@ if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook
     from app.domain.ports.probability_inference import ProbabilityInferencePort
 
+from app.domain.fabio_ai.services.entry_gate import three_align_check
+
 logger = logging.getLogger(__name__)
 
 
@@ -120,10 +122,11 @@ def classify_regime(
     )
     vol_ratio = latest_vol / ema_vol if ema_vol > 0 else 0
 
-    # Only flag DEAD if volume is truly negligible (<5% of EMA).
-    if vol_ratio < 0.05:
+    # Hard DEAD check: No price or no volume activity
+    if tick.close <= 0 or vol_ratio < 0.05:
         logger.info(
-            "Regime: DEAD — vol_ratio=%.3f (latest_vol=%.0f, ema=%.0f)",
+            "Regime: DEAD — ltp=%.2f, vol_ratio=%.3f (latest_vol=%.0f, ema=%.0f)",
+            tick.close,
             vol_ratio,
             latest_vol,
             ema_vol,
@@ -227,6 +230,9 @@ def assess_timing(
     amt_result: AMTResult,
     direction: str,
     playbook: str,
+    tick_size: float = 0.05,
+    symbol: str = "",  # NEW: symbol for gate checks
+    tick_age_seconds: float = 1.0,  # NEW: tick age for gate checks
 ) -> str:
     """Decide whether to enter NOW or WAIT for a better price.
 
@@ -291,6 +297,46 @@ def assess_timing(
         aggression = float(getattr(amt_result, "aggression", 0) or 0)
         if aggression < 2.0:
             return "WAIT"  # Insufficient aggression for breakout entry
+
+    # ── FABIO THREE-ALIGN GATE (SYNCHRONIZATION) ──
+    # Mirror the actual execution gate to prevent scanner false positives.
+    gate_passed, confirmation_strong = three_align_check(
+        data=data,
+        amt_result=amt_result,
+        tick=tick,
+        tick_size=tick_size,
+    )
+    if not gate_passed:
+        return "WAIT"
+
+    # ── FULL 12-GATE PIPELINE (EXECUTION SYNC) ──
+    from app.domain.fabio_ai.services.entry_gate import run_gate_pipeline
+    
+    # Use generic thresholds for scanner; actual execution gate is still the final decider
+    # symbol and tick_age_seconds are now passed from the session service
+    gate_passed, gate_reason, gate_detail = run_gate_pipeline(
+        data=data,
+        amt_result=amt_result,
+        tick=tick,
+        market_state=amt_result.market_state,
+        drive_number=getattr(amt_result, "drive_number", 0),
+        drive_entry_valid=getattr(amt_result, "drive_entry_valid", False),
+        aggression_score=amt_result.aggression,
+        is_risk_halted=False,
+        halt_reason="",
+        tick_age_seconds=tick_age_seconds,
+        symbol=symbol,
+        tick_size=tick_size,
+    )
+    if not gate_passed:
+        return "WAIT"
+
+    # ── DISPLACEMENT LEG GATE ──
+    # Fabio Rule: Don't chase displacement legs. Wait for the pullback (Phase 2).
+    # If the leg status is DISPLACEMENT, we must wait.
+    leg_status = getattr(amt_result, "leg_status", "")
+    if leg_status == "DISPLACEMENT":
+        return "WAIT"
 
     # Aggressive print momentum — enter NOW
     if amt_result.aggressive_prints:
@@ -535,6 +581,9 @@ def run_agent_pipeline(
     probability_engine: ProbabilityInferencePort,
     features: dict[str, float],
     order_book: "OrderBook | None" = None,
+    tick_size: float = 0.05,
+    symbol: str = "",  # NEW: symbol for gate checks
+    tick_age_seconds: float = 1.0,  # NEW: tick age for gate checks
 ) -> AgentDecision:
     """Run the full 4-agent pipeline. Target: <1ms total."""
     t0 = time.perf_counter_ns()
@@ -583,6 +632,52 @@ def run_agent_pipeline(
         p_threshold_short=p_threshold_short,
         margin=margin,
     )
+
+    # ── DELTA SCORE WIRING ──
+    # Delta Score (+/-1.5) represents the net institutional aggression.
+    # We combine Aggression Score (momentum) with Footprint Delta (commitment).
+    aggression = float(getattr(amt_result, "aggression", 1.0) or 1.0)
+    # norm_delta: -1 to +1
+    norm_delta = tick.delta / tick.volume if tick.volume > 0 else 0
+    
+    # delta_score: positive if bull aggression + bull delta, negative if bear
+    # range: approx -1.5 to +1.5
+    delta_score = (aggression - 1.0) * (1.0 if norm_delta >= 0 else -1.0)
+    # Add a floor/boost from the pure delta ratio
+    delta_score += norm_delta * 0.5
+    
+    p_long = signal.p_long
+    p_short = signal.p_short
+    
+    # Influence: shift probability by up to 25% based on delta confluence
+    if delta_score > 0.15:
+        # Bullish aggression: boost long, penalize short
+        shift = min(0.25, delta_score * 0.15)
+        p_long = min(0.99, p_long + shift)
+        p_short = max(0.01, p_short - shift * 0.6)
+    elif delta_score < -0.15:
+        # Bearish aggression: boost short, penalize long
+        shift = min(0.25, abs(delta_score) * 0.15)
+        p_short = min(0.99, p_short + shift)
+        p_long = max(0.01, p_long - shift * 0.6)
+
+    # Re-evaluate chosen direction based on shifted probabilities
+    new_dir = signal.direction
+    new_edge = signal.edge
+    if p_long >= p_threshold_long and p_long > p_short + margin and regime.allowed_long:
+        new_dir = "LONG"
+        new_edge = p_long - 0.27
+    elif p_short >= p_threshold_short and p_short > p_long + margin and regime.allowed_short:
+        new_dir = "SHORT"
+        new_edge = p_short - 0.29
+    elif abs(p_long - p_short) < margin and max(p_long, p_short) >= 0.50:
+        new_dir = "LONG" if p_long >= p_short else "SHORT"
+        new_edge = abs(p_long - p_short)
+    else:
+        new_dir = "FLAT"
+        new_edge = 0.0
+
+    signal = DirectionSignal(new_dir, p_long, p_short, new_edge)
     if signal.direction == "FLAT":
         elapsed_us = (time.perf_counter_ns() - t0) // 1000
         return AgentDecision(
@@ -602,7 +697,16 @@ def run_agent_pipeline(
         )
 
     # Agent 3: Timing
-    timing = assess_timing(data, tick, amt_result, signal.direction, playbook)
+    timing = assess_timing(
+        data, 
+        tick, 
+        amt_result, 
+        signal.direction, 
+        playbook, 
+        tick_size=tick_size,
+        symbol=symbol,
+        tick_age_seconds=tick_age_seconds
+    )
 
     # Agent 4: Sizing
     chosen_p = signal.p_long if signal.direction == "LONG" else signal.p_short
