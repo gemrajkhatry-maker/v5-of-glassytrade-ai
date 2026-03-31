@@ -41,6 +41,7 @@ class EntryGateCoordinator:
         aggressive_levels: list[float] | None = None,
         footprint_domain: dict | None = None,
         session_info=None,
+        tick_size: float = 0.05,  # NEW: tick-size awareness
     ) -> tuple[bool, str, bool]:
         """Check if entry is eligible through all gates.
 
@@ -55,6 +56,7 @@ class EntryGateCoordinator:
             aggressive_levels: Aggressive print cluster levels
             footprint_domain: Footprint domain data
             session_info: Session context information
+            tick_size: Tick size of the instrument
 
         Returns:
             Tuple of (eligible: bool, reason: str, is_second_drive: bool)
@@ -77,6 +79,7 @@ class EntryGateCoordinator:
             footprint_domain=footprint_domain,
             return_is_second_drive=True,
             session_info=session_info,
+            tick_size=tick_size,  # Pass tick size
         )
 
         if not gate_passed:
@@ -99,6 +102,7 @@ class EntryGateCoordinator:
             halt_reason="",
             tick_age_seconds=1.0,
             symbol=getattr(tick, "symbol", ""),
+            tick_size=tick_size,  # Pass tick size
         )
 
         if not gate_passed:

@@ -15,8 +15,13 @@ class TestDetectMarketState:
     def test_no_trade_at_poc(self):
         """Price at POC ± 2 ticks → NO_TRADE."""
         result = detect_market_state(
-            price=100.05, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=False, has_acceptance=False,
+            price=100.05,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=False,
+            has_acceptance=False,
         )
         assert result.state == MarketState.NO_TRADE
         assert result.zone == "NEAR_POC"
@@ -25,48 +30,81 @@ class TestDetectMarketState:
     def test_no_trade_exact_poc(self):
         """Price exactly at POC → NO_TRADE."""
         result = detect_market_state(
-            price=100.0, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=False, has_acceptance=False,
+            price=100.0,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=False,
+            has_acceptance=False,
         )
         assert result.state == MarketState.NO_TRADE
 
     def test_no_trade_boundary(self):
         """Price at POC + 1 tick → NO_TRADE (within boundary)."""
         result = detect_market_state(
-            price=100.10, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=False, has_acceptance=False,
+            price=100.10,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=False,
+            has_acceptance=False,
         )
         assert result.state == MarketState.NO_TRADE
 
     def test_balanced_inside_va(self):
         """Price inside VAH-VAL → BALANCED."""
         result = detect_market_state(
-            price=100.0, poc=97.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=False, has_acceptance=False,
+            price=100.0,
+            poc=97.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=False,
+            has_acceptance=False,
+            balance_ratio=0.50,
         )
         assert result.state == MarketState.BALANCED
 
     def test_balanced_at_vah(self):
         """Price at VAH → BALANCED (inside boundary)."""
         result = detect_market_state(
-            price=105.0, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=False, has_acceptance=False,
+            price=105.0,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=False,
+            has_acceptance=False,
+            balance_ratio=0.50,
         )
         assert result.state == MarketState.BALANCED
 
     def test_balanced_at_val(self):
         """Price at VAL → BALANCED (inside boundary)."""
         result = detect_market_state(
-            price=95.0, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=False, has_acceptance=False,
+            price=95.0,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=False,
+            has_acceptance=False,
+            balance_ratio=0.50,
         )
         assert result.state == MarketState.BALANCED
 
     def test_imbalanced_outside_va_with_displacement(self):
         """Price outside VA + displacement + acceptance → IMBALANCED."""
         result = detect_market_state(
-            price=106.0, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=True, has_acceptance=True,
+            price=106.0,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=True,
+            has_acceptance=True,
         )
         assert result.state == MarketState.IMBALANCED
         assert result.zone == "OUTSIDE_VA"
@@ -74,8 +112,13 @@ class TestDetectMarketState:
     def test_probing_outside_va_no_displacement(self):
         """Price outside VA without displacement → PROBING."""
         result = detect_market_state(
-            price=106.0, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=False, has_acceptance=False,
+            price=106.0,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=False,
+            has_acceptance=False,
         )
         assert result.state == MarketState.PROBING
         assert result.zone == "OUTSIDE_VA"
@@ -83,12 +126,22 @@ class TestDetectMarketState:
     def test_probing_lower_confidence(self):
         """PROBING has lower confidence than IMBALANCED."""
         probing = detect_market_state(
-            price=106.0, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=False, has_acceptance=False,
+            price=106.0,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=False,
+            has_acceptance=False,
         )
         imbalanced = detect_market_state(
-            price=106.0, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=True, has_acceptance=True,
+            price=106.0,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=True,
+            has_acceptance=True,
         )
         assert probing.confidence < imbalanced.confidence
 
@@ -127,21 +180,36 @@ class TestMarketStateTrigger:
 
     def test_no_trade_trigger(self):
         result = detect_market_state(
-            price=100.05, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=False, has_acceptance=False,
+            price=100.05,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=False,
+            has_acceptance=False,
         )
         assert "POC" in result.trigger
 
     def test_balanced_trigger(self):
         result = detect_market_state(
-            price=100.0, poc=97.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=False, has_acceptance=False,
+            price=100.0,
+            poc=97.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=False,
+            has_acceptance=False,
         )
         assert "VA" in result.trigger
 
     def test_imbalanced_trigger(self):
         result = detect_market_state(
-            price=106.0, poc=100.0, vah=105.0, val=95.0,
-            tick_size=0.10, has_displacement=True, has_acceptance=True,
+            price=106.0,
+            poc=100.0,
+            vah=105.0,
+            val=95.0,
+            tick_size=0.10,
+            has_displacement=True,
+            has_acceptance=True,
         )
         assert "displacement" in result.trigger.lower()

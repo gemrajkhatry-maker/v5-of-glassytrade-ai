@@ -105,7 +105,9 @@ class AMTConfig:
     AGGRESSION_SIGMA_THRESHOLD: float = 2.5
     AGGRESSION_EXPIRY_CANDLES: int = 30
     DISPLACEMENT_MULTIPLIER: float = 1.5
-    BALANCE_RATIO_THRESHOLD: float = 0.55
+    BALANCE_RATIO_THRESHOLD: float = (
+        0.70  # 70% of candles inside VA = BALANCED (Fabio's rule)
+    )
 
     @classmethod
     def from_exchange_config(cls, exchange_config) -> AMTConfig:
@@ -895,10 +897,13 @@ class AMTAnalyzer:
             leg_vah=leg_data.get("vah", 0.0),
             leg_val=leg_data.get("val", 0.0),
             swing_delta=leg_data.get("swing_delta", 0.0),
-            has_displacement=leg_data.get("has_displacement", False),
-            market_structure=structure.state,
-            structure_confidence=structure.confidence_score,
-            day_type=day_type,
+            has_displacement=leg_data.get("has_displacement", False)
+            and (
+                ib_complete
+                and (float(current.close) > ib_high or float(current.close) < ib_low)
+                if ib_high > 0 and ib_low > 0
+                else leg_data.get("has_displacement", False)
+            ),
             ib_high=ib_high,
             ib_low=ib_low if ib_low != float("inf") else 0.0,
             ib_complete=ib_complete,

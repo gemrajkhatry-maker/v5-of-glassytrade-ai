@@ -14,7 +14,7 @@ class MLXInferenceAdapter(LLMInferencePort):
 
     _instance = None
 
-    def __new__(cls):
+    def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
@@ -38,6 +38,15 @@ class MLXInferenceAdapter(LLMInferencePort):
     def _start_background_loading(self):
         """Kick off model loading on a daemon thread so the server starts immediately."""
         if not self._is_loading and self.model is None:
+            # Check if model path is configured
+            model_path = self._model_path or os.environ.get("MLX_MODEL_PATH", "")
+            if not model_path:
+                logger.info(
+                    "MLX: No model path configured — will use cloud fallback when available"
+                )
+                self._is_loading = False
+                self._initialized = True
+                return
             self._is_loading = True
             logger.info("Starting MLX model loading in background...")
             thread = threading.Thread(target=self._load_model, daemon=True)
@@ -49,7 +58,7 @@ class MLXInferenceAdapter(LLMInferencePort):
             from mlx_lm import load
 
             model_path = self._model_path or os.environ.get("MLX_MODEL_PATH", "")
-            adapter_path = getattr(settings, "MLX_ADAPTER_PATH", "")
+            adapter_path = os.environ.get("MLX_ADAPTER_PATH", "")
 
             with MLX_GPU_LOCK:
                 if adapter_path and os.path.exists(adapter_path):
@@ -69,6 +78,71 @@ class MLXInferenceAdapter(LLMInferencePort):
             logger.error(f"Failed to load MLX model: {e}")
             self._load_error = str(e)
             self._is_loading = False
+
+    def _predict_cloud(
+        self,
+        instruction: str,
+        input_text: str,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        """Fallback: call OpenRouter cloud API when no local MLX model is available."""
+        import json
+        import urllib.request
+        import urllib.error
+
+        api_key = os.environ.get("OPENROUTER_API_KEY", "")
+        model_id = os.environ.get("MODEL_ID", "x-ai/grok-4.1-fast:free")
+        fallback_url = os.environ.get(
+            "CLOUD_FALLBACK_URL", "https://openrouter.ai/api/v1/chat/completions"
+        )
+
+        if not api_key:
+            raise LLMNotReadyError(
+                "No OPENROUTER_API_KEY configured for cloud fallback"
+            )
+
+        temp = temperature if temperature is not None else self._temperature
+        max_t = max_tokens if max_tokens is not None else self._max_new_tokens
+
+        messages = [
+            {"role": "system", "content": instruction},
+            {"role": "user", "content": input_text},
+        ]
+
+        payload = json.dumps(
+            {
+                "model": model_id,
+                "messages": messages,
+                "temperature": temp,
+                "max_tokens": max_t,
+            }
+        ).encode()
+
+        req = urllib.request.Request(
+            fallback_url,
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "http://localhost:5190",
+                "X-Title": "GlassyTrade AI",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                result = json.loads(resp.read())
+                return result["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as e:
+            logger.error(f"Cloud LLM fallback HTTP {e.code} failed: {e.reason}")
+            raise LLMNotReadyError(
+                f"Cloud fallback failed: HTTP Error {e.code}: {e.reason}"
+            )
+        except (urllib.error.URLError, json.JSONDecodeError, KeyError) as e:
+            logger.error(f"Cloud LLM fallback failed: {e}")
+            raise LLMNotReadyError(f"Cloud fallback failed: {e}")
 
     def predict(
         self,
@@ -90,6 +164,12 @@ class MLXInferenceAdapter(LLMInferencePort):
         if not self.model:
             if self._is_loading:
                 raise LLMNotReadyError("Model is still loading")
+            # Cloud fallback — use OpenRouter API when no local model
+            model_path = self._model_path or os.environ.get("MLX_MODEL_PATH", "")
+            if not model_path:
+                return self._predict_cloud(
+                    instruction, input_text, temperature, max_tokens
+                )
             raise LLMNotReadyError("Model failed to load")
 
         from mlx_lm import generate
@@ -153,7 +233,7 @@ class MLXInferenceAdapter(LLMInferencePort):
             duration = _time.time() - t0
             logger.info(f"[{target}] Generation complete in {duration:.2f}s.")
 
-        rendered = prefill + response.strip()
+        rendered = prefill + (response or "").strip()
         if is_overseer:
             return self._truncate_repetition(rendered)
         return self._extract_json_candidate(rendered)
@@ -243,10 +323,16 @@ class MLXInferenceAdapter(LLMInferencePort):
         return text
 
     def is_ready(self) -> bool:
-        """Return True when the model is fully loaded and ready for inference."""
-        return (
-            self.model is not None and not self._is_loading and self._load_error is None
-        )
+        """Return True when the model is loaded OR when no local model is configured (cloud fallback)."""
+        if self._is_loading:
+            return False
+        if self._load_error is not None:
+            return False
+        # If no local model path is configured, allow system to use cloud fallback
+        model_path = self._model_path or os.environ.get("MLX_MODEL_PATH", "")
+        if not model_path and self.model is None:
+            return True  # Cloud fallback — system can proceed
+        return self.model is not None
 
     def wait_until_ready(self, timeout: float = 120.0) -> bool:
         """Block until model is loaded or timeout. Returns True if ready."""
@@ -270,7 +356,7 @@ class MLXInferenceAdapter(LLMInferencePort):
                 instruction="Respond with OK if you can process this.",
                 input_text="Validation check.",
             )
-            ok = len(result.strip()) > 0
+            ok = len((result or "").strip()) > 0
             if ok:
                 logger.info(
                     f"MLX model validation passed. Sample output: {result[:80]}"

@@ -504,6 +504,8 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
     return {
         "marketState": r.market_state,
         "poc": r.poc,
+        "vah": r.value_area_high,
+        "val": r.value_area_low,
         "valueAreaHigh": r.value_area_high,
         "valueAreaLow": r.value_area_low,
         "lvns": list(r.lvns),

@@ -471,6 +471,17 @@ class VPContractSelector:
             stop = hvn_below
             target = ms.vah
 
+            # Minimum SL floor per instrument (prevents guaranteed losses from tight SL)
+            min_sl_dist = {
+                "NATURALGAS": 0.50,
+                "CRUDEOIL": 2.00,
+                "NIFTY": 5.00,
+                "BANKNIFTY": 15.00,
+                "FINNIFTY": 10.00,
+            }.get(index, 0.50)
+            if abs(entry - stop) < min_sl_dist:
+                stop = entry - min_sl_dist  # widen SL to minimum distance
+
             # Step 4: R:R filter
             risk = abs(entry - stop)
             reward = abs(target - entry)
@@ -552,6 +563,17 @@ class VPContractSelector:
             entry = lvn
             stop = hvn_above
             target = ms.val
+
+            # Minimum SL floor per instrument (prevents guaranteed losses from tight SL)
+            min_sl_dist = {
+                "NATURALGAS": 0.50,
+                "CRUDEOIL": 2.00,
+                "NIFTY": 5.00,
+                "BANKNIFTY": 15.00,
+                "FINNIFTY": 10.00,
+            }.get(index, 0.50)
+            if abs(entry - stop) < min_sl_dist:
+                stop = entry + min_sl_dist  # widen SL to minimum distance (SHORT)
 
             # Step 4: R:R filter
             risk = abs(stop - entry)

@@ -346,6 +346,7 @@ class SignalGateProcessor(BaseProcessor):
                 aggressive_levels=None,
                 footprint_domain=None,
                 return_is_second_drive=True,
+                tick_size=p.tick_size,
             )
             # Returns (gate_passed, confirmation_strong, is_second_drive)
             gate_passed = bool(gate_result[0])
@@ -470,6 +471,7 @@ class SignalGateProcessor(BaseProcessor):
             # CVD hard block
             cvd_hard_block=cvd_block[0],
             cvd_hard_block_reason=cvd_block[1],
+            tick_size=p.tick_size,
         )
 
         gate_msg = Message(

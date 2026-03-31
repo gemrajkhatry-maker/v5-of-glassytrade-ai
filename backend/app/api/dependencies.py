@@ -97,7 +97,11 @@ class ServiceGraph:
             access_token=settings.DHAN_ACCESS_TOKEN,
         )
         self.broker = PaperBrokerAdapter()
-        self.llm_inference: LLMInferencePort = MLXInferenceAdapter()
+        self.llm_inference: LLMInferencePort = MLXInferenceAdapter(
+            model_path=settings.MLX_MODEL_PATH,
+            temperature=settings.LLM_TEMPERATURE,
+            max_new_tokens=settings.LLM_MAX_NEW_TOKENS,
+        )
         self.gen_ai_service = GenerativeAIService(
             llm_adapter=self.llm_inference,
             instruction=self.exchange_config.llm_instruction,

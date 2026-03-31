@@ -531,7 +531,7 @@ def _try_parse_json(raw: str) -> Optional[Dict[str, Any]]:
 
     IMPROVED: Attempts to fix common LLM JSON formatting issues before parsing.
     """
-    text = raw.strip()
+    text = (raw or "").strip()
     if not text:
         return None
 
@@ -801,7 +801,7 @@ def parse_advisory_response(raw_response: str) -> Dict[str, str]:
 
     # Fallback: return raw text as scenario
     return {
-        "scenario": raw_response.strip()[:200],
+        "scenario": (raw_response or "").strip()[:200],
         "expected_setup": "",
         "key_levels": "",
     }

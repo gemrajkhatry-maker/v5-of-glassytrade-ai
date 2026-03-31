@@ -112,7 +112,7 @@ def parse_post_trade_response(raw_response: str) -> dict[str, Any]:
     return {
         "quality_score": 5,
         "mistake": "none",
-        "improvement": raw_response.strip()[:200],
+        "improvement": (raw_response or "").strip()[:200],
     }
 
 

@@ -110,6 +110,7 @@ class AMTResultPayload:
 
     # NEW: Bubble retests (Fabio: high volume area being re-tested)
     bubble_retests: tuple[dict, ...] = ()
+    tick_size: float = 0.05
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,7 @@ class SignalGatePayload:
     # Aggressive prints
     aggressive_prints: tuple[dict, ...] = ()
     bubble_retests: tuple[dict, ...] = ()
+    tick_size: float = 0.05
 
     # Session context (added by gate processor)
     session_name: str = ""

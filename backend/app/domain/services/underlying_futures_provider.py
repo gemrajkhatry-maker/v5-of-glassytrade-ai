@@ -61,7 +61,9 @@ class UnderlyingFuturesProvider:
     def __init__(self, config_path: str | Path | None = None) -> None:
         if config_path is None:
             config_path = (
-                Path(__file__).parent.parent.parent / "config" / "instruments.json"
+                Path(__file__).parent.parent.parent.parent
+                / "config"
+                / "instruments.json"
             )
         self._config_path = Path(config_path)
         self._instruments: dict[str, dict[str, InstrumentConfig]] = {}

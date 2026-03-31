@@ -16,21 +16,28 @@ from app.domain.fabio_ai.services import mlx_compute as mc
 # Value Objects
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ProfileShape:
     """Classification of a volume profile's distribution shape."""
-    shape: str          # "D" (bell/balanced), "P" (top-heavy), "b" (bottom-heavy), "B" (bimodal)
-    skewness: float     # Negative = P-shape, Positive = b-shape, ~0 = D-shape
-    kurtosis: float     # High = narrow peak, Low = flat
+
+    shape: (
+        str  # "D" (bell/balanced), "P" (top-heavy), "b" (bottom-heavy), "B" (bimodal)
+    )
+    skewness: float  # Negative = P-shape, Positive = b-shape, ~0 = D-shape
+    kurtosis: float  # High = narrow peak, Low = flat
 
 
 @dataclass(frozen=True)
 class POCMigration:
     """Direction of POC movement over recent sessions."""
-    direction: str      # "RISING" | "FALLING" | "STABLE"
-    slope: float        # Linear-regression slope of POC values
-    count: int          # Number of POC samples used
-    signal: str = ""    # "POC_RISING_BULLISH" / "POC_FALLING_BEARISH" / "POC_DIVERGENCE" / ""
+
+    direction: str  # "RISING" | "FALLING" | "STABLE"
+    slope: float  # Linear-regression slope of POC values
+    count: int  # Number of POC samples used
+    signal: str = (
+        ""  # "POC_RISING_BULLISH" / "POC_FALLING_BEARISH" / "POC_DIVERGENCE" / ""
+    )
     poc_vs_price: str = ""  # "ALIGNED" / "DIVERGENT" / ""
 
 
@@ -52,6 +59,7 @@ def classify_shape(profile: list[VolumeProfileLevel]) -> ProfileShape:
     - **D-shape** (Bell curve): balanced market, rotational.
     - **P-shape** (Negative skew, heavy top): short covering / long liquidation.
     - **b-shape** (Positive skew, heavy bottom): selling exhaustion / accumulation.
+    - **B-shape** (Bimodal, two peaks): distributional transition — has LVN gap.
     """
     if not profile or len(profile) < 3:
         return ProfileShape(shape="D", skewness=0.0, kurtosis=0.0)
@@ -68,20 +76,71 @@ def classify_shape(profile: list[VolumeProfileLevel]) -> ProfileShape:
 
     # Classification — check bimodal first (two distinct volume peaks)
     if _count_peaks(volumes) >= 2:
-        shape = "B"   # Bimodal = double distribution, two value areas
+        shape = "B"  # Bimodal = double distribution, two value areas
     elif skewness < -SKEW_THRESHOLD:
-        shape = "P"   # Negative skew = volume concentrated at higher prices
+        shape = "P"  # Negative skew = volume concentrated at higher prices
     elif skewness > SKEW_THRESHOLD:
-        shape = "b"   # Positive skew = volume concentrated at lower prices
+        shape = "b"  # Positive skew = volume concentrated at lower prices
     else:
-        shape = "D"   # Symmetric = balanced bell curve
+        shape = "D"  # Symmetric = balanced bell curve
 
     return ProfileShape(shape=shape, skewness=skewness, kurtosis=kurtosis)
+
+
+def extract_bimodal_lvn(profile: list[VolumeProfileLevel]) -> list[float]:
+    """Extract LVN prices from bimodal profile gap zone.
+
+    B-Bimodal shape has two high-volume peaks separated by a low-volume gap.
+    The LVN(s) in this gap are the most important entry zones.
+    """
+    if len(profile) < 5:
+        return []
+
+    volumes = [lvl.volume for lvl in profile]
+    prices = [lvl.price for lvl in profile]
+    n = len(volumes)
+    if n == 0:
+        return []
+
+    # Find peaks
+    peaks = []
+    for i in range(1, n - 1):
+        if volumes[i] > volumes[i - 1] and volumes[i] > volumes[i + 1]:
+            if volumes[i] > max(volumes) * 0.3:  # significant peak
+                peaks.append(i)
+
+    if len(peaks) < 2:
+        return []
+
+    # Find gap between peaks (LVN zone)
+    # Sort peaks by volume descending, take top 2
+    peak_vols = [(i, volumes[i]) for i in peaks]
+    peak_vols.sort(key=lambda x: -x[1])
+    top_2 = sorted([peak_vols[0][0], peak_vols[1][0]])
+
+    # LVN zone = region between the two peaks with minimum volume
+    gap_start = top_2[0]
+    gap_end = top_2[1]
+
+    # Find minimum volume in gap
+    gap_volumes = volumes[gap_start + 1 : gap_end]
+    if not gap_volumes:
+        return []
+
+    gap_mean = sum(gap_volumes) / len(gap_volumes)
+    lvn_prices = []
+
+    for i in range(gap_start + 1, gap_end):
+        if volumes[i] < gap_mean * 0.5:  # below 50% of gap average
+            lvn_prices.append(prices[i])
+
+    return lvn_prices if lvn_prices else [prices[(gap_start + gap_end) // 2]]
 
 
 # ---------------------------------------------------------------------------
 # POC Migration Tracker
 # ---------------------------------------------------------------------------
+
 
 class POCMigrationTracker:
     """Tracks Point of Control movement over multiple profile snapshots."""
@@ -97,7 +156,7 @@ class POCMigrationTracker:
         """Record a new POC value and return migration assessment."""
         self._poc_history.append(poc)
         if len(self._poc_history) > self._max_history:
-            self._poc_history = self._poc_history[-self._max_history:]
+            self._poc_history = self._poc_history[-self._max_history :]
         return self.state(current_price)
 
     def state(self, current_price: float = 0.0) -> POCMigration:
@@ -136,4 +195,10 @@ class POCMigrationTracker:
                 signal = "POC_DIVERGENCE"
                 poc_vs_price = "DIVERGENT"
 
-        return POCMigration(direction=direction, slope=slope, count=n, signal=signal, poc_vs_price=poc_vs_price)
+        return POCMigration(
+            direction=direction,
+            slope=slope,
+            count=n,
+            signal=signal,
+            poc_vs_price=poc_vs_price,
+        )

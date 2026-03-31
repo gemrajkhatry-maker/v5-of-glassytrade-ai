@@ -92,19 +92,47 @@ def detect_market_state(
     # Inside value area
     inside_va = val <= price <= vah
 
+    # ── BREAKOUT SENSITIVITY (Approved Fix) ──
+    # If price is at the very edge of VA (95%+) and has DISPLACEMENT,
+    # pre-emptively classify as PROBING to avoid the "stale BALANCED" lag.
+    if inside_va and has_displacement:
+        edge_threshold = va_range * 0.05
+        at_upper_edge = price > (vah - edge_threshold)
+        at_lower_edge = price < (val + edge_threshold)
+        if at_upper_edge or at_lower_edge:
+            return MarketStateResult(
+                state=MarketState.PROBING,
+                zone="OUTSIDE_VA" if at_upper_edge else "OUTSIDE_VA",
+                confidence=0.70,
+                trigger=f"Pre-emptive PROBING: Price {price:.2f} at VA edge with displacement",
+                has_displacement=has_displacement,
+                has_acceptance=has_acceptance,
+                balance_ratio=balance_ratio,
+            )
+
     if inside_va:
+        # BALANCED requires price inside VA AND meaningful balance ratio (>30%)
+        # prevents "0% in VA (Above ↑)" being classified as BALANCED
+        if balance_ratio < 0.30:
+            return MarketStateResult(
+                state=MarketState.PROBING,
+                zone="OUTSIDE_VA",
+                confidence=0.55,
+                trigger=f"Price {price:.2f} inside VA but balance_ratio {balance_ratio:.0%} < 30% — probing edge",
+                has_displacement=has_displacement,
+                has_acceptance=has_acceptance,
+                balance_ratio=balance_ratio,
+            )
         zone = classify_zone(price, poc, vah, val)
         return MarketStateResult(
             state=MarketState.BALANCED,
             zone=zone,
             confidence=0.80,
-            trigger=f"Price {price:.2f} inside VA [{val:.2f}, {vah:.2f}]",
+            trigger=f"Price {price:.2f} inside VA [{val:.2f}, {vah:.2f}] (ratio={balance_ratio:.0%})",
             has_displacement=has_displacement,
             has_acceptance=has_acceptance,
             balance_ratio=balance_ratio,
         )
-
-    # Outside VA — determine if IMBALANCED or PROBING
     if has_displacement and has_acceptance:
         return MarketStateResult(
             state=MarketState.IMBALANCED,

@@ -189,7 +189,46 @@ class LLMEntryHandler:
         # Build session context for LLM
         session_context_for_llm = ""
         if not session_info.allow_entry:
-            session_context_for_llm += f"[WARNING] Current session phase: {session_info.session} — entries discouraged. "
+            logger.info("SESSION GATE: Phase %s blocks entries — skipping LLM for %s", session_info.session, symbol)
+            
+            ai_result = {
+                "direction": "FLAT",
+                "rationale": f"Market in {session_info.session} phase. Entries are blocked by Session Gate.",
+                "confidence": "High",
+                "input_prompt": "",
+                "raw_output": "QUANT_PHASE_BLOCKED",
+                "market_state": market_state_str,
+            }
+            
+            with session._lock:
+                session.last_ai_analysis = ai_result
+                session._ai_running = False
+                
+            if self._storage:
+                try:
+                    self._storage.save_llm_decision({
+                        "symbol": symbol,
+                        "direction": "FLAT",
+                        "confidence": "High",
+                        "rationale": ai_result["rationale"],
+                        "input_prompt": "",
+                        "raw_output": "QUANT_PHASE_BLOCKED",
+                        "market_state": market_state_str,
+                        "aggression": f"{amt_result.aggression:.4f}",
+                        "price": tick.close,
+                        "vah": amt_result.value_area_high,
+                        "val": amt_result.value_area_low,
+                        "poc": amt_result.poc,
+                        "delta": tick.delta,
+                        "volume": tick.volume,
+                        "profile_shape": getattr(amt_result, "profile_shape", ""),
+                        "setup_type": "SESSION_BLOCK",
+                        "strategy_hint": "",
+                    })
+                except Exception:
+                    pass
+            return
+
         if session_info.allow_trend:
             session_context_for_llm += "Trend setups allowed. "
         else:
@@ -567,6 +606,13 @@ class LLMEntryHandler:
                     market_data_ai["cvd_warning"] = (
                         f"Extreme CVD ({amt_result.cvd_slope:.0f}) — respect institutional pressure"
                     )
+
+                # Update LTP to use the absolute latest tick to avoid stale context during inference delay
+                try:
+                    if session.data:
+                        market_data_ai["ltp"] = session.data[-1].close
+                except Exception:
+                    pass
 
                 # Call LLM
                 try:

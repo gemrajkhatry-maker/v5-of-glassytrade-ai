@@ -223,7 +223,7 @@ export interface AggressivePrint {
 }
 
 export interface AMTAnalysis {
-  marketState: 'BALANCED' | 'IMBALANCED';
+  marketState: string;
   poc: number;
   valueAreaHigh: number;
   valueAreaLow: number;
@@ -289,6 +289,7 @@ export interface AMTAnalysis {
   } | null;
   llmThinking?: string;
   llmJson?: string;
+  tickSize?: number;
 }
 
 export interface TradeSignal {

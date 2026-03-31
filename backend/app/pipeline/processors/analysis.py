@@ -26,6 +26,7 @@ from app.pipeline.message import (
     Message,
 )
 from app.pipeline.processor import BaseProcessor, ProcessorConfig
+from app.domain.models.exchange_config import ExchangeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,8 @@ class AMTAnalysisProcessor(BaseProcessor):
         await super().setup(config)
 
         self._lookback: int = int(config.settings.get("lookback", 50))
+        self._market: str = str(config.settings.get("market", "NSE"))
+        self._exch_config = ExchangeConfig.for_exchange(self._market)
 
         # Lazy-initialised per-symbol AMTHandler instances.
         # We import here rather than at module level so the processor module
@@ -242,6 +245,7 @@ class AMTAnalysisProcessor(BaseProcessor):
             aggressive_prints=aggressive_prints,
             # ── NEW: Bubble retests ──
             bubble_retests=bubble_retests,
+            tick_size=self._exch_config.get_tick_size(symbol),
         )
 
         result_msg = Message(
