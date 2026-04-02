@@ -145,9 +145,10 @@ class LLMEntryHandler:
             )
             return False
 
-        # Simple 10s cooldown between LLM calls
+        # Fix-429: Extended cooldown between LLM calls to prevent rate limiting
+        # 30s minimum between calls (was 10s) — prevents hammering during error loops
         elapsed = _time.time() - last_ai_time
-        if elapsed < 10:
+        if elapsed < 30:
             return False
 
         return True
@@ -189,42 +190,48 @@ class LLMEntryHandler:
         # Build session context for LLM
         session_context_for_llm = ""
         if not session_info.allow_entry:
-            logger.info("SESSION GATE: Phase %s blocks entries — skipping LLM for %s", session_info.session, symbol)
-            
+            logger.info(
+                "SESSION GATE: Phase %s blocks entries — skipping LLM for %s",
+                session_info.session,
+                symbol,
+            )
+
             ai_result = {
                 "direction": "FLAT",
                 "rationale": f"Market in {session_info.session} phase. Entries are blocked by Session Gate.",
                 "confidence": "High",
-                "input_prompt": "",
+                "input_prompt": f"[SESSION GATE: Bypassed LLM] Market is currently in the {session_info.session} phase. Entering new trades is blocked by system rules until the active trading window resumes.",
                 "raw_output": "QUANT_PHASE_BLOCKED",
                 "market_state": market_state_str,
             }
-            
+
             with session._lock:
                 session.last_ai_analysis = ai_result
                 session._ai_running = False
-                
+
             if self._storage:
                 try:
-                    self._storage.save_llm_decision({
-                        "symbol": symbol,
-                        "direction": "FLAT",
-                        "confidence": "High",
-                        "rationale": ai_result["rationale"],
-                        "input_prompt": "",
-                        "raw_output": "QUANT_PHASE_BLOCKED",
-                        "market_state": market_state_str,
-                        "aggression": f"{amt_result.aggression:.4f}",
-                        "price": tick.close,
-                        "vah": amt_result.value_area_high,
-                        "val": amt_result.value_area_low,
-                        "poc": amt_result.poc,
-                        "delta": tick.delta,
-                        "volume": tick.volume,
-                        "profile_shape": getattr(amt_result, "profile_shape", ""),
-                        "setup_type": "SESSION_BLOCK",
-                        "strategy_hint": "",
-                    })
+                    self._storage.save_llm_decision(
+                        {
+                            "symbol": symbol,
+                            "direction": "FLAT",
+                            "confidence": "High",
+                            "rationale": ai_result["rationale"],
+                            "input_prompt": "",
+                            "raw_output": "QUANT_PHASE_BLOCKED",
+                            "market_state": market_state_str,
+                            "aggression": f"{amt_result.aggression:.4f}",
+                            "price": tick.close,
+                            "vah": amt_result.value_area_high,
+                            "val": amt_result.value_area_low,
+                            "poc": amt_result.poc,
+                            "delta": tick.delta,
+                            "volume": tick.volume,
+                            "profile_shape": getattr(amt_result, "profile_shape", ""),
+                            "setup_type": "SESSION_BLOCK",
+                            "strategy_hint": "",
+                        }
+                    )
                 except Exception:
                     pass
             return
@@ -413,7 +420,7 @@ class LLMEntryHandler:
                     "direction": "FLAT",
                     "rationale": "DEAD market: volume < 5% of average. No trade.",
                     "confidence": "High",
-                    "input_prompt": "",
+                    "input_prompt": "[QUANT GATE: Bypassed LLM] Market regime is DEAD (no volume). Waiting for expansion.",
                     "raw_output": "QUANT_DEAD_MARKET",
                     "market_state": market_state_str,
                 }
@@ -437,7 +444,7 @@ class LLMEntryHandler:
                         "direction": "FLAT",
                         "rationale": f"No quant edge: P={agent_prob:.3f} near 50/50. Wait for clearer setup.",
                         "confidence": "High",
-                        "input_prompt": "",
+                        "input_prompt": f"[QUANT GATE: Bypassed LLM] The ML probability engine sees no edge (P={agent_prob:.3f}). The LLM call is skipped to save computation and token costs until a viable setup appears.",
                         "raw_output": "QUANT_FLAT_NO_EDGE",
                         "market_state": market_state_str,
                     }
@@ -488,6 +495,12 @@ class LLMEntryHandler:
             "acceptance_below": amt_result.acceptance_below,
             "rejection_at_high": amt_result.rejection_at_high,
             "rejection_at_low": amt_result.rejection_at_low,
+            # #22: Absorption context (primary AAA/Failed Auction trigger)
+            "absorption_side": getattr(amt_result, "absorption_side", ""),
+            "absorption_range_ratio": getattr(
+                amt_result, "absorption_range_ratio", 0.0
+            ),
+            "absorption_vol_ratio": getattr(amt_result, "absorption_vol_ratio", 0.0),
             "price_velocity": amt_result.price_velocity,
             "break_direction": amt_result.break_direction,
             "break_type": amt_result.break_type,
@@ -573,7 +586,8 @@ class LLMEntryHandler:
                 market_state_str = item["market_state_str"]
 
                 # Staleness check
-                if time.time() - enqueue_time > 30.0:
+                # Tightened to 20s (from 30s) to ensuring we don't start stale inferences
+                if time.time() - enqueue_time > 20.0:
                     logger.warning(
                         f"Dropping stale LLM request for {symbol} (queued {time.time() - enqueue_time:.1f}s ago)"
                     )
@@ -640,7 +654,7 @@ class LLMEntryHandler:
                             "direction": fallback_direction,
                             "rationale": "Volatility bypass — quant signal",
                             "confidence": "High",
-                            "input_prompt": "",
+                            "input_prompt": f"[VOLATILITY GATE: Bypassed LLM] Extreme volatility detected in the market. The LLM call has been skipped to ensure execution speed, and we are relying on the Quant engine's {fallback_direction} signal.",
                             "raw_output": "QUANT_FALLBACK",
                             "market_state": market_state_str,
                         }
@@ -661,7 +675,7 @@ class LLMEntryHandler:
                             "direction": fallback_direction,
                             "rationale": "Timeout fallback — quant signal",
                             "confidence": "Medium",
-                            "input_prompt": "",
+                            "input_prompt": f"[TIMEOUT GATE: LLM Request Aborted] The LLM failed to respond within the {self._llm_timeout}s timeout limit. Falling back to the Quant engine's {fallback_direction} signal.",
                             "raw_output": "TIMEOUT_FALLBACK",
                             "market_state": market_state_str,
                         }
@@ -677,9 +691,17 @@ class LLMEntryHandler:
                     worker_queue.task_done()
                     continue
 
-                direction = ai_result["direction"]
-                confidence = ai_result.get("confidence", "Medium")
-                rationale = ai_result.get("rationale", "")
+                # Final safety guard against malformed ai_result
+                if not ai_result or not isinstance(ai_result, dict):
+                    logger.error(f"LLM worker received invalid ai_result: {ai_result}")
+                    with session._lock:
+                        session._ai_running = False
+                    worker_queue.task_done()
+                    continue
+
+                direction = ai_result.get("direction", "FLAT")
+                confidence = ai_result.get("confidence", "Low")
+                rationale = ai_result.get("rationale", "System error: invalid AI return")
 
                 # SAFETY NETS ONLY
                 if direction == "SHORT" and not self._allow_short:
@@ -904,19 +926,17 @@ class LLMEntryHandler:
                                         )
 
                                         # Delegate signal construction to SignalConstructor
-                                        entry_signal = (
-                                            self._signal_constructor.construct_signal(
-                                                direction=direction,
-                                                tick=tick,
-                                                amt_result=amt_result,
-                                                ai_result=ai_result,
-                                                setup_type=setup_type,
-                                                data=session.data,
-                                                risk_sl_pct=_cushion_sl,
-                                                session_context=session_info.session,
-                                                confidence=confidence,
-                                                inside_extreme=settings.SL_INSIDE_EXTREME,
-                                            )
+                                        entry_signal = self._signal_constructor.construct_signal(
+                                            direction=direction,
+                                            tick=tick,
+                                            amt_result=amt_result,
+                                            ai_result=ai_result,
+                                            setup_type=setup_type,
+                                            data=session.data,
+                                            risk_sl_pct=_cushion_sl,
+                                            session_context=session_info.session,
+                                            confidence=confidence,
+                                            inside_extreme=settings.SL_INSIDE_EXTREME,
                                         )
 
                                         if (

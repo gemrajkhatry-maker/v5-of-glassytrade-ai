@@ -366,15 +366,12 @@ def _build_core_amt_narrative(data: Dict[str, Any]) -> str:
                 f"This is the statistical model's estimate — consider it alongside your AMT analysis."
             )
 
-    # ── §9 FABIO'S CORE RULES ──────────────────────────────────────
+    # ── §9 FABIO RULES & CONSTRAINTS ──────────────────────────────
+    # #23: Compressed for faster inference while maintaining core AMT logic
     parts.append(
-        "FABIO RULES: "
-        "1) READ the market — State + Location + Aggression. "
-        "2) SECOND DRIVE has higher probability than first. "
-        "3) Target = POC for reversion, extended VA for trend. "
-        "4) If wrong, be wrong IMMEDIATELY. Never widen stop. "
-        "5) Respect institutional pressure (CVD extremes). "
-        "6) Profile shape: P-shape = avoid LONG, b-shape = avoid SHORT."
+        "AMT RULES: 1) READ State+Location+Aggression. 2) SECOND DRIVE > First. "
+        "3) Target=POC/VA Boundary. 4) Use 1.5:1 min R:R. 5) No counter-flow (CVD). "
+        "6) Entry MUST be at structural LVN/VA boundary — never mid-VA."
     )
 
     return " ".join(parts)
@@ -490,6 +487,15 @@ def build_overseer_prompt(
 
 def parse_entry_response(text: str) -> Dict[str, Any]:
     """Parse model output into direction, trying JSON first then keyword fallback."""
+    # Ensure text is not None and is a string
+    text = str(text or "").strip()
+    if not text:
+        return {
+            "direction": "FLAT",
+            "rationale": "LLM returned empty response",
+            "confidence": "High",
+        }
+
     parsed = _try_parse_json(text)
     if parsed is not None:
         return _normalize_entry_json(parsed, text)
@@ -543,7 +549,11 @@ def _try_parse_json(raw: str) -> Optional[Dict[str, Any]]:
     except:
         pass
 
-    # Extract JSON block
+    # Extract JSON block — ensure text is not None and is a string
+    text = str(raw or "").strip()
+    if not text:
+        return None
+
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         json_text = match.group(0)

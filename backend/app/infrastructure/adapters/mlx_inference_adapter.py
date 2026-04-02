@@ -88,6 +88,7 @@ class MLXInferenceAdapter(LLMInferencePort):
     ) -> str:
         """Fallback: call OpenRouter cloud API when no local MLX model is available."""
         import json
+        import time
         import urllib.request
         import urllib.error
 
@@ -102,47 +103,83 @@ class MLXInferenceAdapter(LLMInferencePort):
                 "No OPENROUTER_API_KEY configured for cloud fallback"
             )
 
-        temp = temperature if temperature is not None else self._temperature
-        max_t = max_tokens if max_tokens is not None else self._max_new_tokens
+        # #Fix-429: Exponential backoff on rate limit errors
+        max_retries = 3
+        base_delay = 5.0  # seconds
+        last_error = None
 
-        messages = [
-            {"role": "system", "content": instruction},
-            {"role": "user", "content": input_text},
-        ]
+        for attempt in range(max_retries):
+            temp = temperature if temperature is not None else self._temperature
+            max_t = max_tokens if max_tokens is not None else self._max_new_tokens
 
-        payload = json.dumps(
-            {
-                "model": model_id,
-                "messages": messages,
-                "temperature": temp,
-                "max_tokens": max_t,
-            }
-        ).encode()
+            messages = [
+                {"role": "system", "content": instruction},
+                {"role": "user", "content": input_text},
+            ]
 
-        req = urllib.request.Request(
-            fallback_url,
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "http://localhost:5190",
-                "X-Title": "GlassyTrade AI",
-            },
-            method="POST",
-        )
+            payload = json.dumps(
+                {
+                    "model": model_id,
+                    "messages": messages,
+                    "temperature": temp,
+                    "max_tokens": max_t,
+                }
+            ).encode()
 
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                result = json.loads(resp.read())
-                return result["choices"][0]["message"]["content"]
-        except urllib.error.HTTPError as e:
-            logger.error(f"Cloud LLM fallback HTTP {e.code} failed: {e.reason}")
-            raise LLMNotReadyError(
-                f"Cloud fallback failed: HTTP Error {e.code}: {e.reason}"
+            req = urllib.request.Request(
+                fallback_url,
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "http://localhost:5190",
+                    "X-Title": "GlassyTrade AI",
+                },
+                method="POST",
             )
-        except (urllib.error.URLError, json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Cloud LLM fallback failed: {e}")
-            raise LLMNotReadyError(f"Cloud fallback failed: {e}")
+
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    result = json.loads(resp.read())
+                    choices = result.get("choices", [])
+                    if not choices:
+                        logger.warning(f"Cloud LLM returned no choices: {result}")
+                        continue
+                    
+                    content = choices[0].get("message", {}).get("content")
+                    # Validate content is not None before returning
+                    if content is None:
+                        logger.warning("Cloud LLM returned None content")
+                        continue
+                    return str(content)
+            except urllib.error.HTTPError as e:
+                last_error = e
+                if e.code == 429:
+                    # Rate limited — exponential backoff
+                    delay = base_delay * (2**attempt)
+                    logger.warning(
+                        f"Cloud LLM rate limited (429). "
+                        f"Retry {attempt + 1}/{max_retries} in {delay:.0f}s"
+                    )
+                    time.sleep(delay)
+                    continue
+                else:
+                    logger.error(f"Cloud LLM fallback HTTP {e.code} failed: {e.reason}")
+                    last_error = e
+            except urllib.error.URLError as e:
+                logger.error(f"Cloud LLM fallback network failed: {e}")
+                last_error = e
+            except (json.JSONDecodeError, KeyError, IndexError) as e:
+                logger.error(f"Cloud LLM response malformed: {e}")
+                last_error = e
+            except Exception as e:
+                logger.error(f"Unexpected error in cloud fallback: {e}")
+                last_error = e
+
+        # All retries exhausted or fatal error
+        msg = f"Cloud fallback failed after {max_retries} attempts. Last error: {last_error}"
+        logger.error(msg)
+        return json.dumps({"direction": "FLAT", "rationale": msg, "confidence": "Low"})
 
     def predict(
         self,

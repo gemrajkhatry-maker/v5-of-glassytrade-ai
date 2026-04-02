@@ -113,8 +113,8 @@ class Settings(SharedSettings):
     LLM_TEMPERATURE: float = Field(default=0.3)
     LLM_ENTRY_TEMPERATURE: float = Field(default=0.4)
     LLM_OVERSEER_TEMPERATURE: float = Field(default=0.3)
-    LLM_MAX_NEW_TOKENS: int = Field(default=120)
-    LLM_TIMEOUT_SECONDS: float = Field(default=15.0)
+    LLM_MAX_NEW_TOKENS: int = Field(default=100)
+    LLM_TIMEOUT_SECONDS: float = Field(default=30.0)
 
     # Notifications
     TELEGRAM_BOT_TOKEN: str = Field(default="")
