@@ -16,20 +16,31 @@ import pytest
 import numpy as np
 
 from app.domain.trading.models.value_objects import (
-    OHLC, VolumeProfileLevel, OrderBook, OrderBookLevel,
+    OHLC,
+    VolumeProfileLevel,
+    OrderBook,
+    OrderBookLevel,
 )
 from app.domain.fabio_ai.models.observation import AMTObservation
 from app.domain.fabio_ai.services.cvd_tracker import CVDTracker, CVDState
 from app.domain.fabio_ai.services.profile_classifier import (
-    classify_shape, POCMigrationTracker, ProfileShape,
+    classify_shape,
+    POCMigrationTracker,
+    ProfileShape,
 )
 from app.domain.fabio_ai.services.session_context import (
-    get_session, opening_relation, get_session_info,
+    get_session,
+    opening_relation,
+    get_session_info,
 )
 from app.domain.fabio_ai.rl.reward_shaper import ValentiniRewardShaper, TradeResult
 from app.domain.fabio_ai.rl.valentini_env import (
-    ValentiniAMTEnv, ACTION_HOLD, ACTION_TREND_BUY, ACTION_TREND_SELL,
-    ACTION_REVERT_BUY, ACTION_REVERT_SELL,
+    ValentiniAMTEnv,
+    ACTION_HOLD,
+    ACTION_TREND_BUY,
+    ACTION_TREND_SELL,
+    ACTION_REVERT_BUY,
+    ACTION_REVERT_SELL,
 )
 from app.domain.fabio_ai.rl.data_loader import generate_synthetic, split_data
 from app.domain.fabio_ai.services.amt_analyzer import compute_aggression_sigma
@@ -39,8 +50,11 @@ from app.domain.fabio_ai.services.amt_analyzer import compute_aggression_sigma
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_candle(
-    close: float, volume: float = 100.0, delta: float = 0.0,
+    close: float,
+    volume: float = 100.0,
+    delta: float = 0.0,
     time: str = "2025-01-01T12:00:00+00:00",
     high: float | None = None,
     low: float | None = None,
@@ -49,14 +63,20 @@ def _make_candle(
     h = high if high is not None else close * 1.001
     lo = low if low is not None else close * 0.998
     return OHLC(
-        time=time, open=o, high=h, low=lo, close=close,
-        volume=volume, delta=delta,
+        time=time,
+        open=o,
+        high=h,
+        low=lo,
+        close=close,
+        volume=volume,
+        delta=delta,
     )
 
 
 # ===================================
 # CVD Tracker Tests
 # ===================================
+
 
 class TestCVDTracker:
     def test_accumulates_delta(self):
@@ -105,6 +125,7 @@ class TestCVDTracker:
 # ===================================
 # Profile Classifier Tests
 # ===================================
+
 
 class TestProfileClassifier:
     def test_d_shape_symmetric(self):
@@ -161,6 +182,7 @@ class TestPOCMigrationTracker:
 # Session Context Tests
 # ===================================
 
+
 class TestSessionContext:
     def test_london_session(self):
         # 10:00 UTC → London
@@ -190,7 +212,10 @@ class TestSessionContext:
     def test_session_info_london_favors_reversion(self):
         # 04:30 UTC -> 10:00 IST -> NSE_PRIMARY
         info = get_session_info(
-            "2025-01-15T04:30:00+00:00", open_price=100, prior_vah=105, prior_val=95,
+            "2025-01-15T04:30:00+00:00",
+            open_price=100,
+            prior_vah=105,
+            prior_val=95,
         )
         assert info.session == "NSE_PRIMARY"
         assert info.favor_strategy == "TREND_CONTINUATION"
@@ -199,6 +224,7 @@ class TestSessionContext:
 # ===================================
 # Aggression Sigma Tests
 # ===================================
+
 
 class TestAggressionSigma:
     def test_normal_volume_low_sigma(self):
@@ -228,13 +254,19 @@ class TestAggressionSigma:
 # Reward Shaper Tests
 # ===================================
 
+
 class TestRewardShaper:
     def test_hit_target_positive(self):
         rs = ValentiniRewardShaper()
         r = TradeResult(
-            pnl=100, hit_target=True, moved_to_be=False,
-            risk_pct=0.1, bars_held=10, max_bars=50,
-            failed_auction_hold=False, fighting_flow=False,
+            pnl=100,
+            hit_target=True,
+            moved_to_be=False,
+            risk_pct=0.1,
+            bars_held=10,
+            max_bars=50,
+            failed_auction_hold=False,
+            fighting_flow=False,
         )
         reward = rs.compute(r)
         assert reward > 0
@@ -242,9 +274,14 @@ class TestRewardShaper:
     def test_drawdown_penalty(self):
         rs = ValentiniRewardShaper()
         r = TradeResult(
-            pnl=-200, hit_target=False, moved_to_be=False,
-            risk_pct=1.0, bars_held=5, max_bars=50,
-            failed_auction_hold=False, fighting_flow=False,
+            pnl=-200,
+            hit_target=False,
+            moved_to_be=False,
+            risk_pct=1.0,
+            bars_held=5,
+            max_bars=50,
+            failed_auction_hold=False,
+            fighting_flow=False,
         )
         reward = rs.compute(r)
         assert reward < -5  # big penalty
@@ -252,9 +289,14 @@ class TestRewardShaper:
     def test_fighting_flow_penalty(self):
         rs = ValentiniRewardShaper()
         r = TradeResult(
-            pnl=-50, hit_target=False, moved_to_be=False,
-            risk_pct=0.1, bars_held=10, max_bars=50,
-            failed_auction_hold=False, fighting_flow=True,
+            pnl=-50,
+            hit_target=False,
+            moved_to_be=False,
+            risk_pct=0.1,
+            bars_held=10,
+            max_bars=50,
+            failed_auction_hold=False,
+            fighting_flow=True,
         )
         reward = rs.compute(r)
         assert reward < 0
@@ -262,9 +304,14 @@ class TestRewardShaper:
     def test_be_move_bonus(self):
         rs = ValentiniRewardShaper()
         r = TradeResult(
-            pnl=50, hit_target=True, moved_to_be=True,
-            risk_pct=0.1, bars_held=10, max_bars=50,
-            failed_auction_hold=False, fighting_flow=False,
+            pnl=50,
+            hit_target=True,
+            moved_to_be=True,
+            risk_pct=0.1,
+            bars_held=10,
+            max_bars=50,
+            failed_auction_hold=False,
+            fighting_flow=False,
         )
         reward = rs.compute(r)
         # Should be > target_reward alone
@@ -274,6 +321,7 @@ class TestRewardShaper:
 # ===================================
 # Data Loader Tests
 # ===================================
+
 
 class TestDataLoader:
     def test_synthetic_generates_data(self):
@@ -298,6 +346,7 @@ class TestDataLoader:
 # Gym Environment Tests
 # ===================================
 
+
 class TestValentiniEnv:
     @pytest.fixture
     def env(self):
@@ -306,13 +355,13 @@ class TestValentiniEnv:
 
     def test_reset_returns_obs_shape(self, env):
         obs, info = env.reset()
-        assert obs.shape == (12,)
+        assert obs.shape == (27,)
         assert isinstance(info, dict)
 
     def test_step_returns_correct_types(self, env):
         obs, _ = env.reset()
         obs, reward, terminated, truncated, info = env.step(ACTION_HOLD)
-        assert obs.shape == (12,)
+        assert obs.shape == (27,)
         assert isinstance(reward, float)
         assert isinstance(terminated, bool)
         assert isinstance(truncated, bool)
@@ -320,7 +369,7 @@ class TestValentiniEnv:
     def test_action_mask_shape(self, env):
         env.reset()
         mask = env.action_masks()
-        assert mask.shape == (5,)
+        assert mask.shape == (7,)
         assert mask.dtype == bool
         # HOLD is always valid
         assert mask[ACTION_HOLD] == True
@@ -342,8 +391,8 @@ class TestValentiniEnv:
         for _ in range(10):
             env.step(ACTION_HOLD)
         mask = env.action_masks()
-        # Mask should be valid (5 booleans)
-        assert mask.shape == (5,)
+        # Mask should be valid (7 booleans)
+        assert mask.shape == (7,)
         # If in balance: trend masked, reversion allowed
         # If imbalanced: reversion masked, trend allowed
         # Either way, only one set of entry actions should be valid
@@ -361,7 +410,7 @@ class TestValentiniEnv:
             env.step(ACTION_HOLD)
         mask = env.action_masks()
         # Find a masked action
-        masked_actions = [i for i in range(5) if not mask[i]]
+        masked_actions = [i for i in range(7) if not mask[i]]
         if masked_actions:
             _, reward, _, _, _ = env.step(masked_actions[0])
             # Should have the -0.01 penalty (possibly combined with other rewards)
@@ -373,9 +422,11 @@ class TestValentiniEnv:
 # AMT Observation Builder Tests
 # ===================================
 
+
 class TestAMTObservation:
     def test_compute_observation_returns_correct_type(self):
         from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+
         data = generate_synthetic(100)
         analyzer = AMTAnalyzer()
         obs = analyzer.compute_observation(data)
@@ -383,10 +434,21 @@ class TestAMTObservation:
         assert isinstance(obs.dist_to_poc, float)
         assert obs.profile_shape in ("D", "P", "b", "B", "")
         assert obs.poc_migration in ("RISING", "FALLING", "STABLE")
-        assert obs.session in ("ASIA", "LONDON", "NEW_YORK", "OVERLAP", "PRE_MARKET", "NSE_PRIMARY", "NSE_MIDDAY", "NSE_POWER_HOUR", "POST_MARKET")
+        assert obs.session in (
+            "ASIA",
+            "LONDON",
+            "NEW_YORK",
+            "OVERLAP",
+            "PRE_MARKET",
+            "NSE_PRIMARY",
+            "NSE_MIDDAY",
+            "NSE_POWER_HOUR",
+            "POST_MARKET",
+        )
 
     def test_observation_with_order_book(self):
         from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+
         data = generate_synthetic(100)
         ob = OrderBook(
             bids=(OrderBookLevel(100, 50), OrderBookLevel(99, 30)),
