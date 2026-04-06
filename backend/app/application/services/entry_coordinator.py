@@ -19,9 +19,7 @@ import time
 from typing import TYPE_CHECKING
 
 from app.domain.ports.storage import StoragePort
-from app.domain.ports.event_bus import EventBusPort
 from app.domain.ports.broker import BrokerPort
-from app.domain.trading.events import PositionOpened
 
 if TYPE_CHECKING:
     from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
@@ -43,7 +41,6 @@ class EntryCoordinator:
     def __init__(
         self,
         broker: BrokerPort,
-        event_bus: EventBusPort,
         lifecycle_handler: TradeLifecycleHandler,
         event_logger: EventLogger,
         storage: StoragePort | None,
@@ -52,7 +49,6 @@ class EntryCoordinator:
         state_manager: SessionStateManager,
     ) -> None:
         self._broker = broker
-        self._event_bus = event_bus
         self._lifecycle_handler = lifecycle_handler
         self._event_logger = event_logger
         self._storage = storage
@@ -148,8 +144,15 @@ class EntryCoordinator:
             _clean = symbol.replace("NSE:", "").replace("MCX:", "").strip()
             underlying = _clean.split("-")[0].split(" ")[0]
             direction = "LONG" if sig.is_buy else "SHORT"
+
+            # ALWAYS use underlying futures price — never option premium
+            _underlying_price = getattr(sig, "price", 0)
+            if hasattr(session, "_underlying_data") and session._underlying_data:
+                _underlying_candle = session._underlying_data[-1]
+                _underlying_price = float(getattr(_underlying_candle, "close", 0))
+
             selected_strike = self._option_selector.select_strike(
-                spot_price=sig.price,
+                spot_price=_underlying_price,
                 direction=direction,
                 underlying=underlying,
             )
@@ -176,10 +179,13 @@ class EntryCoordinator:
         except Exception:
             log.debug("Option selection skipped", exc_info=True)
 
-        # Portfolio mutation under lock
-        with session._lock:
-            session._last_entry_time = time.time()
-            position = self._broker.execute_order(sig, session.portfolio, symbol)
+        # Execute order (network I/O — outside lock to avoid blocking all readers)
+        position = self._broker.execute_order(sig, session.portfolio, symbol)
+
+        if position:
+            # Mark entry time under lock (fast operation)
+            with session._lock:
+                session._last_entry_time = time.time()
 
         if position:
             if (sig.metadata or {}).get("agent_entry"):
@@ -204,15 +210,6 @@ class EntryCoordinator:
                 source=position.source.value
                 if hasattr(position.source, "value")
                 else str(position.source),
-            )
-            self._event_bus.publish(
-                PositionOpened(
-                    symbol=symbol,
-                    trade_id=getattr(position, "id", ""),
-                    side=getattr(position, "side", ""),
-                    entry_price=float(getattr(position, "entry_price", 0)),
-                    quantity=float(getattr(position, "size", 0)),
-                )
             )
             _meta = sig.metadata or {}
             _ad = getattr(session, "_agent_decision", None)

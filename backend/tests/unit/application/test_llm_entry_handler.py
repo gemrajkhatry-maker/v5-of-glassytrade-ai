@@ -160,7 +160,6 @@ def _make_handler():
         "aggression": "0.50",
     }
 
-    event_bus = MagicMock()
     storage = MagicMock()
     storage.get_recent_trades.return_value = []
     trade_manager = MagicMock()
@@ -168,13 +167,12 @@ def _make_handler():
 
     handler = LLMEntryHandler(
         gen_ai_service=gen_ai,
-        event_bus=event_bus,
         storage=storage,
         trade_manager=trade_manager,
         journal=journal,
     )
     _created_handlers.append(handler)
-    return handler, gen_ai, event_bus, storage, trade_manager, journal
+    return handler, gen_ai, storage, trade_manager, journal
 
 
 def _wait_for_worker(handler, symbol, timeout=5.0):
@@ -560,7 +558,7 @@ class TestLLMResponseHandling:
         self, mock_build_sig, mock_gate, mock_cluster, mock_si, mock_tm_cls
     ):
         mock_si.return_value = _session_info(allow_entry=True)
-        handler, gen_ai, _, _, _, journal = _make_handler()
+        handler, gen_ai, _, _, journal = _make_handler()
 
         gen_ai.analyze_market.return_value = {
             "direction": "LONG",

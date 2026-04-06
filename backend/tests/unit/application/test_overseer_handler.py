@@ -45,7 +45,7 @@ def _make_handler(predict_return='{"action":"HOLD","reason":"test"}', probabilit
 
     handler = LLMOverseerHandler(
         gen_ai_service=gen_ai,
-        event_bus=event_bus,
+        
         trade_manager=trade_manager,
         storage=storage,
         probability_engine=probability_engine,

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import threading
 from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
@@ -36,7 +37,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-IST = timezone(timedelta(hours=5, minutes=30))
+from app.shared.timezones import IST
 
 
 def _depth_to_dto(book: OrderBook | None) -> dict | None:
@@ -87,6 +88,8 @@ class TradingEngine:
         self._current_depths: dict[str, dict] = {}
         self._last_process_times: dict[str, float] = {}
         self._prev_oi_values: dict[str, int] = {}
+        # Per-symbol locks for _latest_states read-modify-write protection
+        self._state_locks: dict[str, threading.Lock] = {}
 
         self._circuit_breaker = PerEntityCircuitBreaker(
             failure_threshold=5,
@@ -206,17 +209,26 @@ class TradingEngine:
         This avoids the overhead of deep-copying the entire state on every
         viewer poll while still preventing mutation of shared portfolio data.
         """
+        import copy
+
+        lock = self._state_locks.get(symbol)
         state = self._latest_states.get(symbol)
         if state is None:
             return None
-        import copy
+
+        if lock:
+            with lock:
+                state = self._latest_states.get(symbol)
+                if state is None:
+                    return None
+                state = dict(state)
+        else:
+            state = dict(state)
 
         try:
-            snapshot = dict(state)
-            # Only deep-copy the portfolio (has mutable Position objects)
-            if "portfolio" in snapshot:
-                snapshot["portfolio"] = copy.deepcopy(snapshot["portfolio"])
-            return snapshot
+            if "portfolio" in state:
+                state["portfolio"] = copy.deepcopy(state["portfolio"])
+            return state
         except Exception:
             return copy.deepcopy(state)
 
@@ -480,7 +492,7 @@ class TradingEngine:
                         delta=float(row["delta"] or 0),
                     )
                 except Exception:
-                    continue
+                    continue  # Skip rows with non-numeric fields — legacy data cleanup
             # Explicit sort — ISO 8601 strings sort lexicographically = chronologically,
             # but guards against mixed timezone formats in older DB rows.
             return sorted(seen.values(), key=lambda x: x.time)[-limit:]
@@ -777,9 +789,14 @@ class TradingEngine:
         except Exception:
             logger.debug("Exception handled silently", exc_info=True)
         # Merge into existing latest state (don't overwrite full process_tick fields)
-        prev = self._latest_states.get(symbol, {})
-        prev.update(msg)
-        self._latest_states[symbol] = prev
+        if symbol not in self._latest_states:
+            self._latest_states[symbol] = msg
+        else:
+            lock = self._state_locks.setdefault(symbol, threading.Lock())
+            with lock:
+                prev = self._latest_states.get(symbol, {})
+                prev.update(msg)
+                self._latest_states[symbol] = prev
 
     # ------------------------------------------------------------------
     # Viewer notification
@@ -849,4 +866,4 @@ class TradingEngine:
                         sell_vol=sell_per_tick,
                     )
         except Exception:
-            pass  # Non-critical
+            pass  # Non-critical depth update — depth book degrades gracefully on parse errors

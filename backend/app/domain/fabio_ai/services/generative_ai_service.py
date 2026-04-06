@@ -70,7 +70,16 @@ class GenerativeAIService:
 
         try:
             raw_response = self.llm_adapter.predict(self._instruction, prompt_input)
-            parsed = parse_entry_response(raw_response)
+            # Fix-NoneType: Guard against None from LLM adapter
+            if raw_response is None:
+                logger.warning("LLM adapter returned None — returning FLAT")
+                parsed = {
+                    "direction": "FLAT",
+                    "rationale": "LLM returned None",
+                    "confidence": "High",
+                }
+            else:
+                parsed = parse_entry_response(raw_response)
             parsed["input_prompt"] = prompt_input
             parsed["market_state"] = market_data.get("market_state", "Unknown")
             parsed["aggression"] = market_data.get("aggression", "0.00")

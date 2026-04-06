@@ -2,26 +2,14 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from app.domain.ports.event_bus import EventBusPort
 from app.domain.trading.events import TickReceived
 from app.domain.trading.models.value_objects import Tick
-from app.application.services.trading_session import TradingSessionService
 from app.domain.trading.event_store import EventBus
 
 logging.basicConfig(level=logging.INFO)
 
 def test_queue():
     bus = EventBus()
-    
-    # Mock dependencies
-    class MockBroker: pass
-    class MockGenAI: pass
-    
-    svc = TradingSessionService(
-        event_bus=bus,
-        broker=MockBroker(),
-        gen_ai_service=MockGenAI()
-    )
     
     # Simulate first tick (establishes candle time)
     t1 = Tick(symbol="NIFTY", price=100.0, volume=1, time="2024-01-01T10:00:00Z")

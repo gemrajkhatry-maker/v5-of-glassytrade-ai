@@ -27,7 +27,7 @@ from app.domain.trading.models.entities import Signal
 from app.config import settings
 from app.domain.fabio_ai.services.regime_detector import RegimeDetector
 from app.domain.fabio_ai.services.trade_manager import TradeManager
-from app.domain.trading.events import AIAnalysisCompleted, SignalGenerated
+from app.domain.trading.events import SignalGenerated
 from app.domain.fabio_ai.services.session_context import get_session_info
 from app.domain.fabio_ai.services.entry_gate import (
     build_entry_signal,
@@ -37,6 +37,8 @@ from app.domain.fabio_ai.services.entry_gate import (
 # Import delegated modules
 from app.application.handlers.entry_gate_coordinator import EntryGateCoordinator
 from app.application.handlers.signal_constructor import SignalConstructor
+from app.shared.timezones import IST
+
 from app.application.handlers.position_sizer import PositionSizer
 
 # Import error handling utilities
@@ -51,7 +53,6 @@ from shared.error_handling import (
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    from app.domain.ports.event_bus import EventBusPort
     from app.domain.ports.storage import StoragePort
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,6 @@ class LLMEntryHandler:
     def __init__(
         self,
         gen_ai_service: GenerativeAIService,
-        event_bus: EventBusPort,
         storage: StoragePort | None = None,
         trade_manager: TradeManager | None = None,
         journal=None,
@@ -72,7 +72,6 @@ class LLMEntryHandler:
         llm_timeout: float = 15.0,
     ) -> None:
         self._gen_ai_service = gen_ai_service
-        self._event_bus = event_bus
         self._storage = storage
         self._trade_manager = trade_manager
         self._journal = journal
@@ -93,6 +92,230 @@ class LLMEntryHandler:
         self._gate_coordinator = EntryGateCoordinator()
         self._signal_constructor = SignalConstructor()
         self._position_sizer = PositionSizer()
+
+    # ------------------------------------------------------------------
+    # Extracted helpers for _llm_worker_loop (CC reduction)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _enrich_market_context(market_data_ai: dict, amt_result) -> None:
+        """Add contextual warning flags to market_data_ai for LLM prompt."""
+        if amt_result.aggression < 1.0:
+            market_data_ai["aggression_warning"] = "Weak aggression — higher risk"
+        if amt_result.market_state == "IMBALANCED":
+            market_data_ai["drive_warning"] = "First drive — wait for second if possible"
+        if abs(amt_result.cvd_slope) > 50:
+            market_data_ai["cvd_warning"] = (
+                f"Extreme CVD ({amt_result.cvd_slope:.0f}) — respect institutional pressure"
+            )
+
+    @staticmethod
+    def _resolve_fallback_direction(session, amt_result) -> str:
+        """Determine fallback direction when LLM is bypassed or times out."""
+        _ml_dir = getattr(session, "_agent_decision", None)
+        if _ml_dir and getattr(_ml_dir, "direction", "FLAT") != "FLAT":
+            return _ml_dir.direction
+        if getattr(amt_result, "signal", None):
+            if amt_result.signal.type == SignalType.BUY:
+                return "LONG"
+            else:
+                return "SHORT"
+        return "FLAT"
+
+    @staticmethod
+    def _compute_journal_attribution(_agent, direction: str) -> str:
+        """Determine attribution string for journaling (LLM vs Quant agreement)."""
+        if not _agent:
+            return "llm_only"
+        if _agent.direction == direction and direction != "FLAT":
+            return "llm_plus_quant_agree"
+        if _agent.direction not in ("", "FLAT", direction):
+            return "llm_override_quant"
+        return "llm_only"
+
+    @staticmethod
+    def _is_extreme_volatility(amt_result) -> bool:
+        """Check if market conditions warrant LLM bypass."""
+        return (
+            getattr(amt_result, "market_structure", "") == "EXPANSION"
+            or getattr(amt_result, "price_velocity", 0) > 5.0
+        )
+
+    @staticmethod
+    def _mark_ai_done(session, worker_queue) -> None:
+        """Reset session AI flag and mark queue task done. Used on skip/error paths."""
+        with session._lock:
+            session._ai_running = False
+        worker_queue.task_done()
+
+    def _check_direction_mismatch(self, _ad, direction: str, symbol: str,
+                                  session, worker_queue) -> bool:
+        """Check if agent decision conflicts with LLM direction. Returns True if mismatch."""
+        if (
+            _ad
+            and _ad.direction in ("LONG", "SHORT")
+            and _ad.direction != direction
+        ):
+            if self._journal:
+                self._journal.log_rejection(
+                    symbol=symbol,
+                    reason="AGENT_DIRECTION_MISMATCH",
+                    amt=session.last_amt,
+                    llm_direction=direction,
+                )
+            self._mark_ai_done(session, worker_queue)
+            return True
+        return False
+
+    def _apply_safety_nets(self, direction: str, confidence: str, rationale: str,
+                           tick, amt_result) -> tuple:
+        """Apply post-LLM safety nets: buy-only mode, VWAP extreme check.
+        
+        Returns (direction, confidence, rationale) possibly modified.
+        """
+        # Buy-only mode
+        if direction == "SHORT" and not self._allow_short:
+            logger.info("BUY-ONLY mode: SHORT blocked → FLAT")
+            direction = "FLAT"
+            rationale = "System in BUY-ONLY mode"
+
+        # VWAP EXTREME check: LONG at >+2σ is suspicious
+        if (
+            direction == "LONG"
+            and amt_result.vwap_upper_2 > 0
+            and tick.close >= amt_result.vwap_upper_2 * 1.01
+        ):
+            logger.info(
+                "VWAP EXTREME: LONG at >+2σ — institutional anomaly (price=%.2f, band=%.2f)",
+                tick.close,
+                amt_result.vwap_upper_2,
+            )
+            confidence = "Low"
+            rationale += " [VWAP extreme: >+2σ]"
+
+        return direction, confidence, rationale
+
+    def _process_build_signal(self, symbol, session, tick, direction, setup_type,
+                              ai_result, confidence, market_state_str, session_info,
+                              amt_result, profile_shape_str, strategy_hint,
+                              worker_queue) -> None:
+        """Check re-entry gates, circuit breakers, and build signal if eligible.
+        
+        Extracted from _llm_worker_loop for readability and CC reduction.
+        """
+        _ad = getattr(session, "_agent_decision", None)
+        if self._check_direction_mismatch(_ad, direction, symbol, session, worker_queue):
+            return
+
+        with session._lock:
+            live_positions = [
+                p for p in session.portfolio.positions if p.status == "OPEN"
+            ]
+            if not live_positions:
+                
+                # Circuit breaker check
+                _det = self._get_regime_detector(symbol)
+                if _det.is_circuit_breaker_active():
+                    logger.info(
+                        "Circuit breaker blocked %s entry for %s",
+                        direction,
+                        symbol,
+                    )
+                    if self._journal:
+                        self._journal.log_rejection(
+                            symbol=symbol,
+                            reason="CIRCUIT_BREAKER",
+                            amt=session.last_amt,
+                            llm_direction=direction,
+                        )
+                    return
+
+                # Re-entry gate check
+                _squeeze = _det.detect_squeeze(session.data, amt_result)
+                from app.domain.fabio_ai.services.entry_gate import compute_atr
+                _atr = compute_atr(session.data, 14)
+
+                if _det.is_re_entry_blocked(
+                    tick.close,
+                    direction,
+                    session_info.phase,
+                    squeeze_active=bool(_squeeze and _squeeze.direction == direction),
+                    atr=_atr,
+                ):
+                    if self._journal:
+                        self._journal.log_rejection(
+                            symbol=symbol,
+                            reason="RE_ENTRY_BLOCKED",
+                            amt=session.last_amt,
+                            llm_direction=direction,
+                        )
+                    return
+                
+                # Max trades check
+                _risk_mgr = getattr(session, "_session_risk_manager", None)
+                if _risk_mgr and not _risk_mgr.can_trade:
+                    logger.info(
+                        "Max trades per session cap reached (%d trades) — blocking entry",
+                        _risk_mgr.trade_count,
+                    )
+                    if self._journal:
+                        self._journal.log_rejection(
+                            symbol=symbol,
+                            reason="MAX_TRADES_CAP",
+                            amt=session.last_amt,
+                            llm_direction=direction,
+                        )
+                    return
+
+                _cushion_sl = _risk_mgr.stop_loss_pct if _risk_mgr else None
+                from app.domain.fabio_ai.services.trade_manager import TradeManager
+                from app.config import settings
+
+                entry_signal = self._signal_constructor.construct_signal(
+                    direction=direction,
+                    tick=tick,
+                    amt_result=amt_result,
+                    ai_result=ai_result,
+                    setup_type=setup_type,
+                    data=session.data,
+                    risk_sl_pct=_cushion_sl,
+                    session_context=session_info.session,
+                    confidence=confidence,
+                    inside_extreme=settings.SL_INSIDE_EXTREME,
+                )
+
+                if (
+                    not entry_signal
+                    or not TradeManager.is_valid_rr(
+                        entry_signal.price,
+                        entry_signal.stop_loss,
+                        entry_signal.take_profit,
+                    )
+                ):
+                    if self._journal:
+                        self._journal.log_rejection(
+                            symbol=symbol,
+                            reason="RR_FILTER",
+                            amt=session.last_amt,
+                            llm_direction=direction,
+                        )
+                else:
+                    logger.info(
+                        "LLM inference complete — advisory-only signal for %s",
+                        symbol,
+                    )
+                    if self._journal:
+                        self._journal.log_rejection(
+                            symbol=symbol,
+                            reason="LLM_ADVISORY_ONLY",
+                            amt=session.last_amt,
+                            llm_direction=direction,
+                            decision_source="llm",
+                            attribution=self._compute_journal_attribution(_ad, direction),
+                            trade_thesis=(
+                                entry_signal.metadata or {}
+                            ).get("trade_thesis"),
+                        )
 
     def _get_regime_detector(self, symbol: str) -> RegimeDetector:
         """Return per-symbol RegimeDetector, creating one if needed."""
@@ -233,8 +456,7 @@ class LLMEntryHandler:
                         }
                     )
                 except Exception:
-                    pass
-            return
+                    pass  # Non-critical session-state build failure — handler will return safely
 
         if session_info.allow_trend:
             session_context_for_llm += "Trend setups allowed. "
@@ -377,8 +599,8 @@ class LLMEntryHandler:
         episodic_memory = ""
         if self._storage:
             try:
-                _ist = timezone(timedelta(hours=5, minutes=30))
-                _today = datetime.now(_ist).strftime("%Y-%m-%d")
+                from app.shared.timezones import IST
+                _today = datetime.now(IST).strftime("%Y-%m-%d")
                 recent_trades = self._storage.get_recent_trades(limit=10)
                 if recent_trades:
                     today_trades = [
@@ -608,44 +830,27 @@ class LLMEntryHandler:
                     continue
 
                 # Add context flags to market_data_ai
-                if amt_result.aggression < 1.0:
-                    market_data_ai["aggression_warning"] = (
-                        "Weak aggression — higher risk"
-                    )
-                if amt_result.market_state == "IMBALANCED":
-                    market_data_ai["drive_warning"] = (
-                        "First drive — wait for second if possible"
-                    )
-                if abs(amt_result.cvd_slope) > 50:
-                    market_data_ai["cvd_warning"] = (
-                        f"Extreme CVD ({amt_result.cvd_slope:.0f}) — respect institutional pressure"
-                    )
+                self._enrich_market_context(market_data_ai, amt_result)
 
                 # Update LTP to use the absolute latest tick to avoid stale context during inference delay
                 try:
                     if session.data:
                         market_data_ai["ltp"] = session.data[-1].close
                 except Exception:
-                    pass
-
-                # Call LLM
+                    pass  # LTP refresh failure — non-critical; stale LTP is acceptable during active inference
                 try:
-                    is_extreme_volatility = (
-                        amt_result.market_structure == "EXPANSION"
-                        or amt_result.price_velocity > 5.0
+                    is_extreme_volatility = self._is_extreme_volatility(amt_result)
+                except Exception:
+                    is_extreme_volatility = False
+                try:
+                    fallback_direction = self._resolve_fallback_direction(
+                        session, amt_result
                     )
-
+                except Exception:
                     fallback_direction = "FLAT"
-                    _ml_dir = getattr(session, "_agent_decision", None)
-                    if _ml_dir and _ml_dir.direction != "FLAT":
-                        fallback_direction = _ml_dir.direction
-                    elif amt_result.signal:
-                        fallback_direction = (
-                            "LONG"
-                            if amt_result.signal.type == SignalType.BUY
-                            else "SHORT"
-                        )
 
+                try:
+                    predict_future = None
                     if is_extreme_volatility and fallback_direction != "FLAT":
                         logger.warning(
                             f"Extreme volatility detected. Bypassing LLM. Using: {fallback_direction}"
@@ -665,7 +870,8 @@ class LLMEntryHandler:
                         )
                         ai_result = predict_future.result(timeout=self._llm_timeout)
                 except concurrent.futures.TimeoutError:
-                    predict_future.cancel()
+                    if predict_future is not None:
+                        predict_future.cancel()
                     logger.warning(
                         "LLM timed out after %.0fs — using fallback",
                         self._llm_timeout,
@@ -703,25 +909,10 @@ class LLMEntryHandler:
                 confidence = ai_result.get("confidence", "Low")
                 rationale = ai_result.get("rationale", "System error: invalid AI return")
 
-                # SAFETY NETS ONLY
-                if direction == "SHORT" and not self._allow_short:
-                    logger.info("BUY-ONLY mode: SHORT blocked → FLAT")
-                    direction = "FLAT"
-                    rationale = "System in BUY-ONLY mode"
-
-                # VWAP EXTREME check
-                if (
-                    direction == "LONG"
-                    and amt_result.vwap_upper_2 > 0
-                    and tick.close >= amt_result.vwap_upper_2 * 1.01
-                ):
-                    logger.info(
-                        "VWAP EXTREME: LONG at >+2σ — institutional anomaly (price=%.2f, band=%.2f)",
-                        tick.close,
-                        amt_result.vwap_upper_2,
-                    )
-                    confidence = "Low"
-                    rationale += " [VWAP extreme: >+2σ]"
+                # Apply safety nets (buy-only mode, VWAP extreme)
+                direction, confidence, rationale = self._apply_safety_nets(
+                    direction, confidence, rationale, tick, amt_result
+                )
 
                 confidence = ai_result.get(
                     "confidence", "High" if direction != "FLAT" else "Medium"
@@ -752,18 +943,7 @@ class LLMEntryHandler:
                             if _agent and _agent.direction == "SHORT"
                             else 0,
                             decision_source="llm",
-                            attribution=(
-                                "llm_plus_quant_agree"
-                                if _agent
-                                and _agent.direction == direction
-                                and direction != "FLAT"
-                                else (
-                                    "llm_override_quant"
-                                    if _agent
-                                    and _agent.direction not in ("", "FLAT", direction)
-                                    else "llm_only"
-                                )
-                            ),
+                            attribution=self._compute_journal_attribution(_agent, direction),
                         )
                     except Exception:
                         logger.debug("Journal log_signal failed", exc_info=True)
@@ -841,161 +1021,12 @@ class LLMEntryHandler:
                         logger.debug("Exception handled silently", exc_info=True)
 
                 # Build signal using delegated SignalConstructor
-                if direction in ("LONG", "SHORT"):
-                    _ad = getattr(session, "_agent_decision", None)
-                    if (
-                        _ad
-                        and _ad.direction in ("LONG", "SHORT")
-                        and _ad.direction != direction
-                    ):
-                        if self._journal:
-                            self._journal.log_rejection(
-                                symbol=symbol,
-                                reason="AGENT_DIRECTION_MISMATCH",
-                                amt=session.last_amt,
-                                llm_direction=direction,
-                            )
-                        with session._lock:
-                            session._ai_running = False
-                        worker_queue.task_done()
-                        continue
-
-                    with session._lock:
-                        live_positions = [
-                            p for p in session.portfolio.positions if p.status == "OPEN"
-                        ]
-                        if not live_positions:
-                            _det = self._get_regime_detector(symbol)
-                            if _det.is_circuit_breaker_active():
-                                logger.info(
-                                    "Circuit breaker blocked %s entry for %s",
-                                    direction,
-                                    symbol,
-                                )
-                                if self._journal:
-                                    self._journal.log_rejection(
-                                        symbol=symbol,
-                                        reason="CIRCUIT_BREAKER",
-                                        amt=session.last_amt,
-                                        llm_direction=direction,
-                                    )
-                            else:
-                                _squeeze = _det.detect_squeeze(session.data, amt_result)
-                                from app.domain.fabio_ai.services.entry_gate import (
-                                    compute_atr,
-                                )
-
-                                _atr = compute_atr(session.data, 14)
-                                if _det.is_re_entry_blocked(
-                                    tick.close,
-                                    direction,
-                                    session_info.phase,
-                                    squeeze_active=bool(
-                                        _squeeze and _squeeze.direction == direction
-                                    ),
-                                    atr=_atr,
-                                ):
-                                    if self._journal:
-                                        self._journal.log_rejection(
-                                            symbol=symbol,
-                                            reason="RE_ENTRY_BLOCKED",
-                                            amt=session.last_amt,
-                                            llm_direction=direction,
-                                        )
-                                else:
-                                    _risk_mgr = getattr(
-                                        session, "_session_risk_manager", None
-                                    )
-                                    if _risk_mgr and not _risk_mgr.can_trade:
-                                        logger.info(
-                                            "Max trades per session cap reached (%d trades) — blocking entry",
-                                            _risk_mgr.trade_count,
-                                        )
-                                        if self._journal:
-                                            self._journal.log_rejection(
-                                                symbol=symbol,
-                                                reason="MAX_TRADES_CAP",
-                                                amt=session.last_amt,
-                                                llm_direction=direction,
-                                            )
-                                    else:
-                                        _cushion_sl = (
-                                            _risk_mgr.stop_loss_pct
-                                            if _risk_mgr
-                                            else None
-                                        )
-
-                                        # Delegate signal construction to SignalConstructor
-                                        entry_signal = self._signal_constructor.construct_signal(
-                                            direction=direction,
-                                            tick=tick,
-                                            amt_result=amt_result,
-                                            ai_result=ai_result,
-                                            setup_type=setup_type,
-                                            data=session.data,
-                                            risk_sl_pct=_cushion_sl,
-                                            session_context=session_info.session,
-                                            confidence=confidence,
-                                            inside_extreme=settings.SL_INSIDE_EXTREME,
-                                        )
-
-                                        if (
-                                            not entry_signal
-                                            or not TradeManager.is_valid_rr(
-                                                entry_signal.price,
-                                                entry_signal.stop_loss,
-                                                entry_signal.take_profit,
-                                            )
-                                        ):
-                                            if self._journal:
-                                                self._journal.log_rejection(
-                                                    symbol=symbol,
-                                                    reason="RR_FILTER",
-                                                    amt=session.last_amt,
-                                                    llm_direction=direction,
-                                                )
-                                        else:
-                                            logger.info(
-                                                "LLM inference complete — advisory-only signal for %s",
-                                                symbol,
-                                            )
-                                            if self._journal:
-                                                self._journal.log_rejection(
-                                                    symbol=symbol,
-                                                    reason="LLM_ADVISORY_ONLY",
-                                                    amt=session.last_amt,
-                                                    llm_direction=direction,
-                                                    decision_source="llm",
-                                                    attribution=(
-                                                        "llm_plus_quant_agree"
-                                                        if _ad
-                                                        and _ad.direction == direction
-                                                        and direction != "FLAT"
-                                                        else (
-                                                            "llm_override_quant"
-                                                            if _ad
-                                                            and _ad.direction
-                                                            not in (
-                                                                "",
-                                                                "FLAT",
-                                                                direction,
-                                                            )
-                                                            else "llm_only"
-                                                        )
-                                                    ),
-                                                    trade_thesis=(
-                                                        entry_signal.metadata or {}
-                                                    ).get("trade_thesis"),
-                                                )
-
-                self._event_bus.publish(
-                    AIAnalysisCompleted(
-                        symbol=symbol,
-                        direction=direction,
-                        rationale=ai_result["rationale"],
-                        confidence=confidence,
-                    )
+                self._process_build_signal(
+                    symbol, session, tick, direction, setup_type, ai_result,
+                    confidence, market_state_str, session_info, amt_result,
+                    profile_shape_str, strategy_hint, worker_queue,
                 )
+
 
                 with session._lock:
                     session._ai_running = False
@@ -1009,11 +1040,11 @@ class LLMEntryHandler:
                         with session._lock:
                             session._ai_running = False
                 except Exception:
-                    pass
+                    pass  # Cleanup: _ai_running reset failed — next heartbeat will time out and clear
                 try:
                     worker_queue.task_done()
                 except Exception:
-                    pass
+                    pass  # Cleanup: task_done on already-processed item — queue may be drained
 
     def record_stop_out(
         self, level: float, direction: str, session_phase: int, symbol: str = ""

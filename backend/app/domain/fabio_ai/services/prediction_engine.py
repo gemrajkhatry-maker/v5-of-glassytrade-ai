@@ -91,7 +91,7 @@ class PredictionEngine:
             last_time_ms = int(
                 datetime.fromisoformat(data[-1].time.replace("Z", "+00:00")).timestamp() * 1000
             )
-        except Exception:
+        except (ValueError, TypeError):
             last_time_ms = len(data) * 300_000  # fallback
 
         time_step = 5 * 60 * 1000  # 5 minutes

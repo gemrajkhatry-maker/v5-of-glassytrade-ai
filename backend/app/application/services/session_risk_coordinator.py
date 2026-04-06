@@ -104,7 +104,7 @@ class SessionRiskCoordinator:
                                 srm.risk_tier.name,
                                 srm.session_pnl,
                             )
-                    except Exception:
+                    except json.JSONDecodeError:
                         logger.debug(
                             "Could not load risk state for %s", symbol, exc_info=True
                         )
@@ -129,8 +129,8 @@ class SessionRiskCoordinator:
                                     symbol,
                                     engine.tier.value,
                                 )
-                        except Exception:
-                            pass
+                        except json.JSONDecodeError:
+                            logger.debug("Failed to restore RiskTierEngine state for %s", symbol, exc_info=True)
                     self._risk_tier_engines[symbol] = engine
                     logger.info(
                         "RiskTierEngine enabled for %s (capital=%.0f)",
@@ -294,7 +294,7 @@ class SessionRiskCoordinator:
                     f"risk_state_{symbol}_{date.today().isoformat()}",
                     json.dumps(srm.to_dict()),
                 )
-        except Exception:
+        except (TypeError, ValueError):
             logger.debug("Could not persist risk state", exc_info=True)
 
     def get_risk_manager_count(self) -> int:

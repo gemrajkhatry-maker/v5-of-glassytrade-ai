@@ -1,40 +1,8 @@
-"""Strategy sub-package - Modular strategy components."""
+"""Fabio AMT Strategy Layer — Stub Package.
 
-from app.domain.fabio_ai.strategy.protocols import (
-    Setup,
-    MarketContext,
-    EntrySignal,
-    RiskResult,
-    Order,
-    SetupDetector,
-    MarketAnalyzer,
-    SignalGenerator,
-    RiskCalculator,
-    ExecutionPlanner,
-    ExitEngine,
-    Strategy,
-)
+Planned feature: Structured AMT setup detection, market context protocols,
+and strategy abstractions for multi-setup trading.
 
-from app.domain.fabio_ai.strategy.setup_detector import (
-    AMTSetupDetector,
-    create_setup_detector,
-)
-
-__all__ = [
-    # Protocols
-    "Setup",
-    "MarketContext",
-    "EntrySignal",
-    "RiskResult",
-    "Order",
-    "SetupDetector",
-    "MarketAnalyzer",
-    "SignalGenerator",
-    "RiskCalculator",
-    "ExecutionPlanner",
-    "ExitEngine",
-    "Strategy",
-    # Implementations
-    "AMTSetupDetector",
-    "create_setup_detector",
-]
+Status: Planned but not yet implemented. The stubs allow the test suite
+to import while tracking planned types and interfaces.
+"""

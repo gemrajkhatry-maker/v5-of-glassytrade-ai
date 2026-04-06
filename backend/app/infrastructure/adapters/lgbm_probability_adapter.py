@@ -94,7 +94,7 @@ class LGBMProbabilityAdapter(ProbabilityInferencePort):
             return raw_prob
         try:
             return float(cal.predict_proba(np.array([[raw_prob]]))[0, 1])
-        except Exception:
+        except (TypeError, ValueError):
             return raw_prob
 
     @staticmethod

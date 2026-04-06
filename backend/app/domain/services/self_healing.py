@@ -146,7 +146,7 @@ class DBFallbackBuffer:
                     storage.save_performance_snapshot(item["data"])
                 flushed += 1
                 self._flush_successes += 1
-            except Exception:
+            except (KeyError, TypeError):
                 remaining.append(item)
                 break  # stop flushing on first failure
 

@@ -23,6 +23,7 @@ import time
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
+from app.shared.depth_dto import order_book_to_dto
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 logger = logging.getLogger(__name__)
@@ -40,7 +41,9 @@ async def _safe_send(ws: WebSocket, data: dict) -> bool:
         logger.debug("WS send failed (runtime): %s", e)
         return False
     except Exception as e:
-        logger.warning("WS send failed: %s (keys=%s)", type(e).__name__, list(data.keys())[:5])
+        logger.warning(
+            "WS send failed: %s (keys=%s)", type(e).__name__, list(data.keys())[:5]
+        )
         return False
 
 
@@ -58,13 +61,7 @@ def _compute_delta(prev: dict | None, current: dict) -> dict:
     return delta if changed else {}
 
 
-def _depth_to_dto(book: OrderBook | None) -> dict | None:
-    if not book:
-        return None
-    return {
-        "bids": [{"price": l.price, "quantity": l.quantity} for l in book.bids[:20]],
-        "asks": [{"price": l.price, "quantity": l.quantity} for l in book.asks[:20]],
-    }
+
 
 
 def _parse_tick(tick_raw: dict) -> OHLC:
@@ -97,8 +94,12 @@ def _parse_order_book(ob_raw: dict | None) -> OrderBook | None:
 
 
 def _validate_tick(tick: OHLC) -> str | None:
-    for name, val in [("open", tick.open), ("high", tick.high),
-                      ("low", tick.low), ("close", tick.close)]:
+    for name, val in [
+        ("open", tick.open),
+        ("high", tick.high),
+        ("low", tick.low),
+        ("close", tick.close),
+    ]:
         if math.isnan(val) or math.isinf(val) or val <= 0:
             return f"Invalid tick: {name}={val}"
     if math.isnan(tick.volume) or math.isinf(tick.volume) or tick.volume < 0:
@@ -113,6 +114,7 @@ async def gameloop_ws(ws: WebSocket):
     await ws.accept()
 
     from app.api.dependencies import get_service_graph
+
     graph = get_service_graph()
     session_service = graph.trading_session
 
@@ -143,7 +145,12 @@ async def gameloop_ws(ws: WebSocket):
                             continue
                     if candles:
                         session.data = candles
-                await ws.send_json({"status": "history_loaded", "count": len(session.data) if history_raw else 0})
+                await ws.send_json(
+                    {
+                        "status": "history_loaded",
+                        "count": len(session.data) if history_raw else 0,
+                    }
+                )
                 continue
 
             tick_raw = data.get("tick", {})
@@ -172,20 +179,20 @@ async def gameloop_ws(ws: WebSocket):
             await ws.send_json({"error": "Invalid JSON format"})
             await ws.close(code=1003)  # Unsupported Data
         except Exception:
-            pass
+            pass  # Client already disconnected, nothing to do
     except OSError as e:
         # Network errors, pipe errors, etc.
         logger.warning("OS error in WS handler: %s", e)
         try:
             await ws.close(code=1006)  # Abnormal closure
         except Exception:
-            pass
+            pass  # Socket may already be closed
     except Exception:
         logger.error("Unexpected error in WS handler", exc_info=True)
         try:
             await ws.close(code=1011)  # Internal error
         except Exception:
-            pass
+            pass  # Socket may already be closed
 
 
 async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
@@ -193,7 +200,7 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
     from app.config import settings
     from app.infrastructure.serialization.schemas import ohlc_to_dto
 
-    engine = getattr(graph, 'engine', None)
+    engine = getattr(graph, "engine", None)
     if engine is None:
         # Fallback: engine not yet started — tell frontend to retry
         await _safe_send(ws, {"error": "Trading engine not started yet"})
@@ -205,26 +212,32 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
     primary_symbol = active_symbols[0]
 
     # 1. Send config
-    if not await _safe_send(ws, {
-        "status": "server_mode",
-        "symbol": primary_symbol,
-        "activeSymbols": active_symbols,
-        "exchange": settings.DEFAULT_EXCHANGE,
-        "interval": settings.STREAM_INTERVAL,
-    }):
+    if not await _safe_send(
+        ws,
+        {
+            "status": "server_mode",
+            "symbol": primary_symbol,
+            "activeSymbols": active_symbols,
+            "exchange": settings.DEFAULT_EXCHANGE,
+            "interval": settings.STREAM_INTERVAL,
+        },
+    ):
         return
 
     # 2. Send history for all symbols
     for sym in active_symbols:
         history = engine.get_history(sym)
         if history:
-            if not await _safe_send(ws, {
-                "status": "history_loaded",
-                "symbol": sym,
-                "_symbol": sym,
-                "history": [ohlc_to_dto(c) for c in history[-500:]],
-                "count": len(history),
-            }):
+            if not await _safe_send(
+                ws,
+                {
+                    "status": "history_loaded",
+                    "symbol": sym,
+                    "_symbol": sym,
+                    "history": [ohlc_to_dto(c) for c in history[-500:]],
+                    "count": len(history),
+                },
+            ):
                 continue
 
     # 3. Send current snapshot for all symbols
@@ -241,7 +254,11 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
     known_gen = engine.generation
     _send_count = 0
 
-    logger.info("Viewer loop: entering polling (gen=%d, symbols=%d)", known_gen, len(active_symbols))
+    logger.info(
+        "Viewer loop: entering polling (gen=%d, symbols=%d)",
+        known_gen,
+        len(active_symbols),
+    )
 
     try:
         while True:
@@ -269,10 +286,12 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
                     if not await _safe_send(ws, {**state, "_type": "full"}):
                         send_ok = False
                         break
-                    # Shallow copy + selective deep copy of mutable portfolio
+                    # Shallow copy + selective deep copy of mutable portfolio and amt
                     _snap = dict(state)
                     if "portfolio" in _snap:
                         _snap["portfolio"] = copy.deepcopy(_snap["portfolio"])
+                    if "amt" in _snap:
+                        _snap["amt"] = copy.deepcopy(_snap["amt"])
                     previous_states[sym] = _snap
                     keyframe_times[sym] = now_kf
                 else:
@@ -281,14 +300,18 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
                         if not await _safe_send(ws, delta):
                             send_ok = False
                             break
-                        # Shallow copy + selective deep copy of mutable portfolio
+                        # Shallow copy + selective deep copy of mutable portfolio and amt
                         _snap = dict(state)
                         if "portfolio" in _snap:
                             _snap["portfolio"] = copy.deepcopy(_snap["portfolio"])
+                        if "amt" in _snap:
+                            _snap["amt"] = copy.deepcopy(_snap["amt"])
                         previous_states[sym] = _snap
                 _send_count += 1
             if not send_ok:
-                logger.warning("Viewer loop: send failed after %d successful sends", _send_count)
+                logger.warning(
+                    "Viewer loop: send failed after %d successful sends", _send_count
+                )
                 break
     except asyncio.CancelledError:
         logger.debug("Viewer loop cancelled (client disconnect)")
@@ -308,7 +331,10 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
             await client_task
         except (asyncio.CancelledError, Exception):
             pass
-        logger.info("WS viewer disconnected (sent %d updates) — engine continues trading", _send_count)
+        logger.info(
+            "WS viewer disconnected (sent %d updates) — engine continues trading",
+            _send_count,
+        )
 
 
 async def _listen_for_client(ws: WebSocket) -> None:

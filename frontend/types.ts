@@ -59,6 +59,8 @@ export interface AgentDecision {
   tpAdjust: number;
   latencyUs: number;
   rationale: string;
+  playbook?: string;
+  featureDrivers?: string[];
 }
 
 export interface RiskState {
@@ -66,6 +68,8 @@ export interface RiskState {
   haltReason: string;
   consecutiveLosses: number;
   dailyPnl: number;
+  driftAlert?: boolean;
+  driftMessage?: string;
 }
 
 export interface LLMHistoryEntry {
@@ -253,6 +257,7 @@ export interface AMTAnalysis {
   vwapLower1?: number;
   vwapUpper2?: number;
   vwapLower2?: number;
+  vwapDeviationSigmas?: number;
   // Market structure (5-state classifier)
   marketStructure?: string;
   structureConfidence?: number;
@@ -290,6 +295,9 @@ export interface AMTAnalysis {
   llmThinking?: string;
   llmJson?: string;
   tickSize?: number;
+  // Session identity and freshness (Phase 1, Task 1.6)
+  sessionId?: string;
+  computedAt?: string;
 }
 
 export interface TradeSignal {

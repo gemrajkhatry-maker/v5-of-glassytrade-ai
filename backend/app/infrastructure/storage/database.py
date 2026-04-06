@@ -212,8 +212,8 @@ class SQLiteStorageAdapter(StoragePort):
                 self._conn.execute(
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_ticks_symbol_time ON ticks(symbol, time)"
                 )
-            except Exception:
-                logger.debug("Exception handled silently", exc_info=True)
+            except sqlite3.Error:
+                logger.debug("Failed to create ticks index (may already exist)", exc_info=True)
             self._conn.commit()
             logger.info("SQLite database initialized at %s (WAL mode)", self._db_path)
 
@@ -243,8 +243,8 @@ class SQLiteStorageAdapter(StoragePort):
                 batch,
             )
             self._conn.commit()
-        except Exception:
-            self._conn.rollback()
+        except sqlite3.Error:
+            self._conn.rollback()  # Exception already caught at call site or handled above
             logger.debug("Failed to flush tick batch", exc_info=True)
 
     # ------------------------------------------------------------------
@@ -322,8 +322,8 @@ class SQLiteStorageAdapter(StoragePort):
                 )
                 if auto_commit:
                     self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     def save_llm_decision(
@@ -380,8 +380,8 @@ class SQLiteStorageAdapter(StoragePort):
                 )
                 if auto_commit:
                     self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     def flush(self) -> None:
@@ -389,7 +389,7 @@ class SQLiteStorageAdapter(StoragePort):
         with self._lock:
             try:
                 self._conn.commit()
-            except Exception:
+            except sqlite3.Error:
                 logger.debug("flush commit failed", exc_info=True)
 
     def save_performance_snapshot(self, snapshot: dict[str, Any]) -> None:
@@ -426,8 +426,8 @@ class SQLiteStorageAdapter(StoragePort):
                     ),
                 )
                 self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     def save_fine_tuning_features(self, features: dict[str, Any]) -> None:
@@ -474,8 +474,8 @@ class SQLiteStorageAdapter(StoragePort):
                     ),
                 )
                 self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     # ------------------------------------------------------------------
@@ -583,8 +583,8 @@ class SQLiteStorageAdapter(StoragePort):
                     ),
                 )
                 self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     def get_previous_session_profile(
@@ -642,8 +642,8 @@ class SQLiteStorageAdapter(StoragePort):
                     ),
                 )
                 self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     def delete_open_position(self, position_id: str) -> None:
@@ -653,8 +653,8 @@ class SQLiteStorageAdapter(StoragePort):
                     "DELETE FROM open_positions WHERE id = ?", (position_id,)
                 )
                 self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     def load_open_positions(self) -> list[dict[str, Any]]:
@@ -709,8 +709,8 @@ class SQLiteStorageAdapter(StoragePort):
                     ),
                 )
                 self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     def query_position_events(
@@ -777,8 +777,8 @@ class SQLiteStorageAdapter(StoragePort):
                     (key, value),
                 )
                 self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     # ------------------------------------------------------------------
@@ -795,8 +795,8 @@ class SQLiteStorageAdapter(StoragePort):
                     (underlying, session_date, poc_price),
                 )
                 self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     def mark_npoc_filled(
@@ -811,8 +811,8 @@ class SQLiteStorageAdapter(StoragePort):
                     (filled_at, underlying, session_date),
                 )
                 self._conn.commit()
-            except Exception:
-                self._conn.rollback()
+            except sqlite3.Error:
+                self._conn.rollback()  # Exception already caught at call site or handled above
                 raise
 
     def get_active_npocs(self, underlying: str) -> list[dict[str, Any]]:

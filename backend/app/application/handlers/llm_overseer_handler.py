@@ -36,7 +36,6 @@ from app.domain.fabio_ai.services.prompt_builder import (
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    from app.domain.ports.event_bus import EventBusPort
     from app.domain.ports.storage import StoragePort
     from app.domain.ports.probability_inference import ProbabilityInferencePort
 
@@ -59,14 +58,12 @@ class LLMOverseerHandler:
     def __init__(
         self,
         gen_ai_service: GenerativeAIService,
-        event_bus: EventBusPort,
         trade_manager: TradeManager,
         storage: StoragePort | None = None,
         probability_engine: ProbabilityInferencePort | None = None,
         session_risk_manager=None,
     ) -> None:
         self._gen_ai_service = gen_ai_service
-        self._event_bus = event_bus
         self._trade_manager = trade_manager
         self._storage = storage
         self._probability_engine = probability_engine
@@ -399,112 +396,91 @@ class LLMOverseerHandler:
         current_price: float,
         pos_state: dict,
     ) -> None:
-        """Execute the overseer's decision."""
+        """Execute the overseer's decision — dispatch table."""
         position_id = pos_state.get("position_id", "")
+        handlers = {
+            "HOLD": lambda: None,
+            "TIGHTEN_SL": lambda: self._exec_tighten_sl(decision, position_id, session),
+            "PARTIAL_EXIT": lambda: self._exec_partial_exit(
+                position_id, current_price, pos_state, session),
+            "FULL_EXIT": lambda: self._exec_full_exit(
+                position_id, current_price, session),
+            "ADD": lambda: self._exec_add(position_id, pos_state, session),
+        }
+        fn = handlers.get(decision.action)
+        if fn:
+            fn()
 
-        if decision.action == "HOLD":
-            return
-
-        elif decision.action == "TIGHTEN_SL":
-            if decision.new_sl_price and decision.new_sl_price > 0:
-                with session._lock:
-                    adjusted = self._trade_manager.adjust_stop_loss(
-                        position_id, decision.new_sl_price
-                    )
-                if adjusted:
-                    logger.info(
-                        "Overseer: tightened SL to %.2f for %s",
-                        decision.new_sl_price,
-                        position_id,
-                    )
-                else:
-                    logger.info("Overseer: SL adjustment rejected (would widen risk)")
-
-        elif decision.action == "PARTIAL_EXIT":
-            if not pos_state.get("partial_taken"):
-                with session._lock:
-                    portfolio = session.portfolio
-                    open_positions = [
-                        p
-                        for p in portfolio.positions
-                        if p.status == "OPEN" and p.id == position_id
-                    ]
-                    if open_positions:
-                        realized = portfolio.partial_close_position(
-                            open_positions[0].id,
-                            0.50,
-                            current_price,
-                            ExitReason.OVERSEER_PARTIAL,
-                        )
-                        logger.info(
-                            "Overseer: partial exit for %s, realized=%.2f",
-                            position_id,
-                            realized,
-                        )
-                        self._trade_manager.adjust_stop_loss(
-                            position_id, pos_state["entry_price"]
-                        )
-            else:
-                logger.info("Overseer: partial already taken, ignoring PARTIAL_EXIT")
-
-        elif decision.action == "FULL_EXIT":
+    def _exec_tighten_sl(self, decision, position_id: str, session) -> None:
+        """Execute TIGHTEN_SL: move stop loss tighter."""
+        if decision.new_sl_price and decision.new_sl_price > 0:
             with session._lock:
-                portfolio = session.portfolio
-                open_positions = [
-                    p
-                    for p in portfolio.positions
-                    if p.status == "OPEN" and p.id == position_id
-                ]
-                if open_positions:
-                    portfolio.close_position(
-                        position_id, current_price, ExitReason.OVERSEER_EXIT
-                    )
-                    self._trade_manager.unregister_position(position_id)
-                    logger.info(
-                        "Overseer: full exit for %s at %.2f", position_id, current_price
-                    )
-            self.reset_position_state()
-
-        elif decision.action == "ADD":
-            # Risk tier gate: block ADDs in cautious/defensive tiers
-            if self._session_risk_manager:
-                tier = self._session_risk_manager.current_tier
-                if hasattr(tier, "name") and tier.name in ("CAUTIOUS", "DEFENSIVE"):
-                    logger.info("Overseer: ADD blocked by risk tier %s", tier.name)
-                    return
-
-            # Rate-limiting: cooldown + max count
-            now = time.time()
-            if self._add_count >= MAX_ADDS_PER_POSITION:
-                logger.info(
-                    "Overseer: ADD rejected — max adds reached (%d/%d)",
-                    self._add_count,
-                    MAX_ADDS_PER_POSITION,
-                )
-                return
-            if now - self._last_add_time < ADD_COOLDOWN and self._last_add_time > 0:
-                logger.info(
-                    "Overseer: ADD rejected — cooldown (%.0fs remaining)",
-                    ADD_COOLDOWN - (now - self._last_add_time),
-                )
-                return
-
-            if pos_state["unrealized_pnl_pct"] > 0 and not pos_state.get(
-                "partial_taken"
-            ):
-                with session._lock:
-                    self._last_add_time = now
-                    self._add_count += 1
-                logger.info(
-                    "Overseer: ADD signal for %s — publishing pyramid signal (%d/%d)",
-                    position_id,
-                    self._add_count,
-                    MAX_ADDS_PER_POSITION,
-                )
+                adjusted = self._trade_manager.adjust_stop_loss(
+                    position_id, decision.new_sl_price)
+            if adjusted:
+                logger.info("Overseer: tightened SL to %.2f for %s",
+                            decision.new_sl_price, position_id)
             else:
-                logger.info(
-                    "Overseer: ADD rejected — not profitable or partial already taken"
-                )
+                logger.info("Overseer: SL adjustment rejected (would widen risk)")
+
+    def _exec_partial_exit(self, position_id, current_price, pos_state, session) -> None:
+        """Execute PARTIAL_EXIT: close 50% and move SL to breakeven."""
+        if pos_state.get("partial_taken"):
+            logger.info("Overseer: partial already taken, ignoring PARTIAL_EXIT")
+            return
+        with session._lock:
+            open_positions = [
+                p for p in session.portfolio.positions
+                if p.status == "OPEN" and p.id == position_id
+            ]
+            if open_positions:
+                realized = session.portfolio.partial_close_position(
+                    open_positions[0].id, 0.50, current_price,
+                    ExitReason.OVERSEER_PARTIAL)
+                logger.info("Overseer: partial exit for %s, realized=%.2f",
+                            position_id, realized)
+                self._trade_manager.adjust_stop_loss(
+                    position_id, pos_state["entry_price"])
+
+    def _exec_full_exit(self, position_id, current_price, session) -> None:
+        """Execute FULL_EXIT: close entire position."""
+        with session._lock:
+            open_positions = [
+                p for p in session.portfolio.positions
+                if p.status == "OPEN" and p.id == position_id
+            ]
+            if open_positions:
+                session.portfolio.close_position(
+                    position_id, current_price, ExitReason.OVERSEER_EXIT)
+                self._trade_manager.unregister_position(position_id)
+                logger.info("Overseer: full exit for %s at %.2f",
+                            position_id, current_price)
+        self.reset_position_state()
+
+    def _exec_add(self, position_id, pos_state, session) -> None:
+        """Execute ADD: pyramid into winning position with risk gates."""
+        if self._session_risk_manager:
+            tier = self._session_risk_manager.current_tier
+            if hasattr(tier, "name") and tier.name in ("CAUTIOUS", "DEFENSIVE"):
+                logger.info("Overseer: ADD blocked by risk tier %s", tier.name)
+                return
+        now = time.time()
+        if self._add_count >= MAX_ADDS_PER_POSITION:
+            logger.info("Overseer: ADD rejected — max adds reached (%d/%d)",
+                        self._add_count, MAX_ADDS_PER_POSITION)
+            return
+        if now - self._last_add_time < ADD_COOLDOWN and self._last_add_time > 0:
+            logger.info("Overseer: ADD rejected — cooldown (%.0fs remaining)",
+                        ADD_COOLDOWN - (now - self._last_add_time))
+            return
+        if pos_state.get("unrealized_pnl_pct", 0) > 0 and not pos_state.get("partial_taken"):
+            with session._lock:
+                self._last_add_time = now
+                self._add_count += 1
+            logger.info("Overseer: ADD signal for %s — publishing pyramid signal (%d/%d)",
+                        position_id, self._add_count, MAX_ADDS_PER_POSITION)
+        else:
+            logger.info("Overseer: ADD rejected — not profitable or partial already taken")
 
     def cleanup(self) -> None:
         """Shutdown thread pools on handler destruction."""

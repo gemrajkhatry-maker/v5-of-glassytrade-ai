@@ -136,15 +136,20 @@ class CVDTracker:
 
         self._slope_sign_history.append(current_sign)
 
-        # Check if current sign has persisted for N bars
-        if len(self._slope_sign_history) >= CVD_SLOPE_PERSISTENCE_BARS:
-            recent_signs = self._slope_sign_history[-CVD_SLOPE_PERSISTENCE_BARS:]
-            if all(s == current_sign for s in recent_signs):
-                # Sign is stable — emit raw slope
-                self._last_emitted_slope = raw_slope
-                return raw_slope
+        # Warm-start: before persistence buffer is full, emit raw slope
+        # so the UI shows directional info from the first candles instead of "—"
+        if len(self._slope_sign_history) < CVD_SLOPE_PERSISTENCE_BARS:
+            self._last_emitted_slope = raw_slope
+            return raw_slope
 
-        # Sign not stable yet — return last stable slope (or 0)
+        # Check if current sign has persisted for N bars
+        recent_signs = self._slope_sign_history[-CVD_SLOPE_PERSISTENCE_BARS:]
+        if all(s == current_sign for s in recent_signs):
+            # Sign is stable — emit raw slope
+            self._last_emitted_slope = raw_slope
+            return raw_slope
+
+        # Sign not stable yet — return last stable slope
         return self._last_emitted_slope
 
     def _detect_divergence(self) -> tuple[str, float]:

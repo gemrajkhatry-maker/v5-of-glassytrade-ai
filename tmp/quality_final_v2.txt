@@ -1,0 +1,8 @@
+
+--- Testing NEW (DeepSeek 1.5B) Quality ---
+OUTPUT:{response}
+
+STDERR: 
+Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]
+Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 115439.56it/s]
+

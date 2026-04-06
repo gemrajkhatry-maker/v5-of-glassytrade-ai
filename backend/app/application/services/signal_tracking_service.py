@@ -273,7 +273,7 @@ class SignalTrackingService:
                     }
                 )
             except Exception:
-                pass
+                logger.debug("Failed to persist signal tracking record", exc_info=True)
 
     def get_stats(self, symbol: str | None = None) -> dict:
         """Get signal generation statistics.

@@ -145,3 +145,21 @@ GRADE_EXTREME_THRESHOLD = _G.get("grade_extreme_threshold", -5)
 MAX_CANDLES = _G.get("max_candles", 1000)
 TICK_BATCH_SIZE = _G.get("tick_batch_size", 50)
 TICK_FLUSH_INTERVAL_SECS = _G.get("tick_flush_interval_secs", 5.0)
+
+# ============================================================================
+# Engine Throttling (extracted magic numbers)
+# ============================================================================
+TICK_PROCESS_INTERVAL = _G.get("tick_process_interval", 0.5)       # seconds between full process_tick
+NOTIFY_THROTTLE_INTERVAL = _G.get("notify_throttle_interval", 0.15) # seconds between WS notifications
+
+# ============================================================================
+# Agent Decision Thresholds
+# ============================================================================
+# Minimum agent probability to consider taking action (entry/execution)
+# Rationale: P >= 0.55 with 2:1 R/R → 37% break-even win rate actual
+AGENT_DECISION_THRESHOLD = _G.get("agent_decision_threshold", 0.55)
+
+# Confidence classification thresholds for UI/presentation
+# Used to label decisions as HIGH/MEDIUM/LOW conviction
+CONFIDENCE_HIGH_THRESHOLD = 0.65  # High conviction (35%+ WR at 2:1 R/R)
+CONFIDENCE_LOW_THRESHOLD = 0.50   # Minimum to consider (below AGENT_DECISION_THRESHOLD = reject)

@@ -44,6 +44,12 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const hasData = inst.data.length > 0;
     const { name, tag } = shortSymbol(sym);
 
+    // --- Live PnL from open positions ---
+    const openPositions = inst.portfolio?.positions?.filter(p => p.status === 'OPEN') || [];
+    const hasOpenPosition = openPositions.length > 0;
+    const totalPnl = openPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
+    const totalSize = openPositions.reduce((sum, p) => sum + (p.size || 0), 0);
+
     const isDead = inst.genAIAnalysis?.rationale?.includes('DEAD') || inst.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
     const prob = inst.agentDecision?.probability || 0;
     const timing = inst.agentDecision?.timing || 'SKIP';
@@ -55,9 +61,13 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
             onClick={() => onSelect(sym)}
             className={`
                 w-full px-2 py-1.5 rounded flex items-center gap-0 group transition-all duration-200 text-left border-l-2
-                ${isActive
-                    ? 'bg-purple-500/10 border-l-purple-500 bg-gradient-to-r from-purple-500/5 to-transparent'
-                    : 'bg-white/[0.02] hover:bg-white/[0.05] border-l-transparent'}
+                ${hasOpenPosition
+                    ? isActive
+                        ? 'bg-green-500/10 border-l-emerald-500 bg-gradient-to-r from-green-500/5 to-transparent'
+                        : 'bg-green-500/5 border-l-emerald-500/50 hover:bg-green-500/10'
+                    : isActive
+                        ? 'bg-purple-500/10 border-l-purple-500 bg-gradient-to-r from-purple-500/5 to-transparent'
+                        : 'bg-white/[0.02] hover:bg-white/[0.05] border-l-transparent'}
                 ${isDead ? 'opacity-40 saturate-0' : ''}
                 border-b border-white/[0.03]
             `}
@@ -65,7 +75,11 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
             {/* Symbol & Tag (25%) */}
             <div className="flex flex-col w-[25%] overflow-hidden pr-2">
                 <div className="flex items-center gap-1.5">
-                    <Radio size={8} className={hasData ? 'text-emerald-400' : 'text-white/20'} />
+                    {hasOpenPosition ? (
+                        <span className="text-[9px] font-bold text-emerald-400 animate-pulse">●</span>
+                    ) : (
+                        <Radio size={8} className={hasData ? 'text-emerald-400' : 'text-white/20'} />
+                    )}
                     <span className="font-bold text-[10px] text-white/90 truncate">
                         {name}
                     </span>
@@ -88,20 +102,36 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
 
             {/* Action (15%) */}
             <div className="w-[15%] flex items-center gap-1">
-                <div className={`w-1 h-1 rounded-full ${timing === 'ENTER_NOW' ? 'bg-emerald-400 animate-pulse' : timing === 'SKIP' ? 'bg-red-400' : 'bg-yellow-400'}`} />
-                <span className={`text-[9px] font-mono font-bold ${timing === 'ENTER_NOW' ? 'text-emerald-400' : timing === 'SKIP' ? 'text-red-400' : 'text-yellow-400'}`}>
-                    {timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing}
-                </span>
+                {hasOpenPosition ? (
+                    <span className="text-[9px] font-bold text-emerald-400">
+                        {totalSize.toFixed(0)}L
+                    </span>
+                ) : (
+                    <>
+                        <div className={`w-1 h-1 rounded-full ${timing === 'ENTER_NOW' ? 'bg-emerald-400 animate-pulse' : timing === 'SKIP' ? 'bg-red-400' : 'bg-yellow-400'}`} />
+                        <span className={`text-[9px] font-mono font-bold ${timing === 'ENTER_NOW' ? 'text-emerald-400' : timing === 'SKIP' ? 'text-red-400' : 'text-yellow-400'}`}>
+                            {timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing}
+                        </span>
+                    </>
+                )}
             </div>
 
             {/* Probability & Bar (20%) */}
             <div className="w-[20%] flex flex-col gap-0.5 pr-2">
-                <span className={`text-[9px] font-mono font-bold ${prob >= 0.6 ? 'text-emerald-400' : prob >= 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
-                    {Math.round(prob * 100)}%
-                </span>
-                <div className="w-full h-0.5 bg-white/10 rounded-full overflow-hidden">
-                    <div className="h-full transition-all duration-500" style={{ width: `${prob * 100}%`, backgroundColor: prob >= 0.6 ? '#34d399' : prob >= 0.5 ? '#fbbf24' : '#f87171' }} />
-                </div>
+                {hasOpenPosition ? (
+                    <span className={`text-[10px] font-mono font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(0)}
+                    </span>
+                ) : (
+                    <>
+                        <span className={`text-[9px] font-mono font-bold ${prob >= 0.6 ? 'text-emerald-400' : prob >= 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
+                            {Math.round(prob * 100)}%
+                        </span>
+                        <div className="w-full h-0.5 bg-white/10 rounded-full overflow-hidden">
+                            <div className="h-full transition-all duration-500" style={{ width: `${prob * 100}%`, backgroundColor: prob >= 0.6 ? '#34d399' : prob >= 0.5 ? '#fbbf24' : '#f87171' }} />
+                        </div>
+                    </>
+                )}
             </div>
 
             {/* LTP / DEAD (15%) */}
@@ -117,11 +147,17 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 )}
             </div>
 
-            {/* Change (10%) */}
+            {/* Change% or Live PnL indicator (10%) */}
             <div className="w-[10%] text-right">
-                <span className={`text-[9px] font-mono ${isUp ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
-                    {isUp ? '+' : ''}{percentChange.toFixed(1)}%
-                </span>
+                {hasOpenPosition ? (
+                    <span className={`text-[8px] font-mono ${totalPnl >= 0 ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
+                        {totalPnl >= 0 ? '▲' : '▼'}
+                    </span>
+                ) : (
+                    <span className={`text-[9px] font-mono ${isUp ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
+                        {isUp ? '+' : ''}{percentChange.toFixed(1)}%
+                    </span>
+                )}
             </div>
         </button>
     );

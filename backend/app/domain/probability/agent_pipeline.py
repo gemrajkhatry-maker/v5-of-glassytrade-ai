@@ -45,6 +45,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.domain.trading.models.enums import MarketStateCodec
+from app.domain.constants import (
+    CVD_SLOPE_HARD_BLOCK,
+    AGENT_DECISION_THRESHOLD,
+    BALANCE_RATIO_THRESHOLD,
+    CONFIDENCE_HIGH_THRESHOLD,
+    CONFIDENCE_LOW_THRESHOLD,
+)
 
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook
@@ -208,7 +215,10 @@ def pick_direction(
         and regime.allowed_short
     ):
         return DirectionSignal("SHORT", p_long, p_short, p_short - 0.29)
-    elif abs(p_long - p_short) < margin and max(p_long, p_short) >= 0.50:
+    elif (
+        abs(p_long - p_short) < margin
+        and max(p_long, p_short) >= CONFIDENCE_LOW_THRESHOLD
+    ):
         # Close probabilities — let LLM read the market
         # Pick the higher probability direction as suggestion
         direction = "LONG" if p_long >= p_short else "SHORT"
@@ -255,16 +265,15 @@ def assess_timing(
         return "WAIT"
 
     # ── UNIVERSAL DELTA GATE (applies to ALL playbooks) ──
-    # Fabio rule: no entry without directional commitment from order flow.
-    # Delta < 1.5 means insufficient buy/sell imbalance for a trade signal.
-    # This catches ENTER_NOW on low/zero delta for all playbooks.
+    # FIX BUG 6C: Lowered delta threshold from 1.5 to 0.5 for options
+    # Options have naturally smaller delta values (especially OTM)
+    # Aggressive prints can substitute for delta confirmation
     delta_abs = abs(float(getattr(tick, "delta", 0) or 0))
     has_aggression = bool(amt_result.aggressive_prints)
-    if delta_abs < 1.5 and not has_aggression:
+    if delta_abs < 0.5 and not has_aggression:
         return "WAIT"  # Low delta + no prints = no directional commitment
 
     # Also block if CVD contradicts direction significantly
-    from app.domain.constants import CVD_SLOPE_HARD_BLOCK
 
     cvd_slope = float(getattr(amt_result, "cvd_slope", 0) or 0)
     if direction == "LONG" and cvd_slope < -CVD_SLOPE_HARD_BLOCK:
@@ -311,7 +320,7 @@ def assess_timing(
 
     # ── FULL 12-GATE PIPELINE (EXECUTION SYNC) ──
     from app.domain.fabio_ai.services.entry_gate import run_gate_pipeline
-    
+
     # Use generic thresholds for scanner; actual execution gate is still the final decider
     # symbol and tick_age_seconds are now passed from the session service
     gate_passed, gate_reason, gate_detail = run_gate_pipeline(
@@ -449,7 +458,7 @@ def summarize_feature_drivers(
 
     if playbook == "return_to_value":
         balance_ratio = float(features.get("balance_ratio", 0.0))
-        if balance_ratio >= 0.55:
+        if balance_ratio >= BALANCE_RATIO_THRESHOLD:
             drivers.append((min(balance_ratio, 1.0), "auction: value holding"))
 
     ordered = sorted(drivers, key=lambda item: item[0], reverse=True)
@@ -561,9 +570,9 @@ def adjust_sl_tp(
             tp_mult = 1.2
 
     # Probability-based fine-tuning (thresholds re-calibrated post class-balancing)
-    if probability > 0.65:
+    if probability > CONFIDENCE_HIGH_THRESHOLD:
         tp_mult *= 1.1  # extend TP on high confidence
-    elif probability < 0.55:
+    elif probability < AGENT_DECISION_THRESHOLD:
         sl_mult *= 0.8  # tighter SL on low confidence
 
     return sl_mult, tp_mult
@@ -639,25 +648,26 @@ def run_agent_pipeline(
     aggression = float(getattr(amt_result, "aggression", 1.0) or 1.0)
     # norm_delta: -1 to +1
     norm_delta = tick.delta / tick.volume if tick.volume > 0 else 0
-    
+
     # delta_score: positive if bull aggression + bull delta, negative if bear
     # range: approx -1.5 to +1.5
     delta_score = (aggression - 1.0) * (1.0 if norm_delta >= 0 else -1.0)
     # Add a floor/boost from the pure delta ratio
     delta_score += norm_delta * 0.5
-    
+
     p_long = signal.p_long
     p_short = signal.p_short
-    
-    # Influence: shift probability by up to 25% based on delta confluence
+
+    # Influence: shift probability by up to 35% based on delta confluence
+    # FIX BUG 4A: Increased multiplier from 0.15 to 0.25 for stronger delta influence
     if delta_score > 0.15:
         # Bullish aggression: boost long, penalize short
-        shift = min(0.25, delta_score * 0.15)
+        shift = min(0.35, delta_score * 0.25)
         p_long = min(0.99, p_long + shift)
         p_short = max(0.01, p_short - shift * 0.6)
     elif delta_score < -0.15:
         # Bearish aggression: boost short, penalize long
-        shift = min(0.25, abs(delta_score) * 0.15)
+        shift = min(0.35, abs(delta_score) * 0.25)
         p_short = min(0.99, p_short + shift)
         p_long = max(0.01, p_long - shift * 0.6)
 
@@ -667,10 +677,17 @@ def run_agent_pipeline(
     if p_long >= p_threshold_long and p_long > p_short + margin and regime.allowed_long:
         new_dir = "LONG"
         new_edge = p_long - 0.27
-    elif p_short >= p_threshold_short and p_short > p_long + margin and regime.allowed_short:
+    elif (
+        p_short >= p_threshold_short
+        and p_short > p_long + margin
+        and regime.allowed_short
+    ):
         new_dir = "SHORT"
         new_edge = p_short - 0.29
-    elif abs(p_long - p_short) < margin and max(p_long, p_short) >= 0.50:
+    elif (
+        abs(p_long - p_short) < margin
+        and max(p_long, p_short) >= CONFIDENCE_LOW_THRESHOLD
+    ):
         new_dir = "LONG" if p_long >= p_short else "SHORT"
         new_edge = abs(p_long - p_short)
     else:
@@ -698,14 +715,14 @@ def run_agent_pipeline(
 
     # Agent 3: Timing
     timing = assess_timing(
-        data, 
-        tick, 
-        amt_result, 
-        signal.direction, 
-        playbook, 
+        data,
+        tick,
+        amt_result,
+        signal.direction,
+        playbook,
         tick_size=tick_size,
         symbol=symbol,
-        tick_age_seconds=tick_age_seconds
+        tick_age_seconds=tick_age_seconds,
     )
 
     # Agent 4: Sizing

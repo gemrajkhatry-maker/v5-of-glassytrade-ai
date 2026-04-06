@@ -6,8 +6,9 @@ from datetime import datetime, timedelta, timezone
 
 from app.domain.models.exchange_config import ExchangeConfig
 from app.domain.ports.exchange_strategy import ExchangeStrategy
+from app.shared.timezones import IST
 
-_IST = timezone(timedelta(hours=5, minutes=30))
+
 
 
 class NSEExchangeStrategy(ExchangeStrategy):

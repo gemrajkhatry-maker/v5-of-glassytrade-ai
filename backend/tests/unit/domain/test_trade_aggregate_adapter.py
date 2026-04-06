@@ -21,7 +21,6 @@ from app.domain.trading.services.trade_aggregate_adapter import (
     TradeAggregateService,
     create_trade_aggregate_service,
 )
-from app.domain.trading.event_store import EventBus
 
 
 class TestManagedPositionAdapter:
@@ -193,62 +192,3 @@ class TestTradeAggregateService:
         assert restored.symbol == "NIFTY"
 
 
-class TestEventPublishing:
-    """Tests for event publishing."""
-
-    def test_events_published_on_create(self):
-        """Events are published when trade is created."""
-        event_bus = EventBus()
-        service = TradeAggregateService(event_bus=event_bus)
-
-        received = []
-        event_bus.subscribe("SignalGenerated", lambda e: received.append(e))
-
-        service.create_trade(
-            symbol="NIFTY",
-            direction="LONG",
-            entry_price=100.0,
-            stop_loss=95.0,
-            take_profit=115.0,
-            position_size=75.0,
-            setup_type=SetupType.TREND_MODEL,
-            confidence="HIGH",
-        )
-
-        assert len(received) == 1
-        assert received[0].symbol == "NIFTY"
-
-    def test_events_published_on_fill(self):
-        """Events are published when fill is added."""
-        event_bus = EventBus()
-        service = TradeAggregateService(event_bus=event_bus)
-
-        received = []
-        event_bus.subscribe("FillReceived", lambda e: received.append(e))
-
-        adapter = service.create_trade(
-            symbol="NIFTY",
-            direction="LONG",
-            entry_price=100.0,
-            stop_loss=95.0,
-            take_profit=115.0,
-            position_size=75.0,
-            setup_type=SetupType.TREND_MODEL,
-            confidence="HIGH",
-        )
-
-        fill = Fill(
-            fill_id="F1",
-            trade_id=adapter.position_id,
-            symbol="NIFTY",  # Added symbol
-            side=Side.LONG,
-            price=Decimal("100"),
-            quantity=Decimal("75"),
-            fill_type=FillType.ENTRY,
-            timestamp="2025-01-01T10:00:00Z",
-        )
-
-        adapter.add_fill(fill)
-
-        assert len(received) == 1
-        assert received[0].trade_id == adapter.position_id

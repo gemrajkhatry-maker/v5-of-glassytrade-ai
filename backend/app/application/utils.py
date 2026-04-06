@@ -3,9 +3,10 @@
 import re
 from datetime import datetime, timezone, timedelta, date, time as dtime
 from zoneinfo import ZoneInfo
+from app.shared.timezones import IST
 
-_IST_ZONE = ZoneInfo("Asia/Kolkata")
-_IST = timezone(timedelta(hours=5, minutes=30))
+IST_ZONE = ZoneInfo("Asia/Kolkata")
+
 
 # ---------------------------------------------------------------------------
 # Symbol metadata parsing
@@ -47,7 +48,7 @@ def parse_symbol_metadata(symbol: str, spot: float = 0.0) -> dict:
 
     # Build expiry date (NSE weekly: last Thursday of the month — approximate with day+month)
     try:
-        now_ist = datetime.now(_IST_ZONE)
+        now_ist = datetime.now(IST_ZONE)
         month_num = _MONTH_MAP.get(month_str, now_ist.month)
         year = now_ist.year if month_num >= now_ist.month else now_ist.year + 1
         expiry = date(year, month_num, int(day_str))
@@ -77,20 +78,20 @@ def parse_symbol_metadata(symbol: str, spot: float = 0.0) -> dict:
 # ---------------------------------------------------------------------------
 
 # NSE equity + options: Mon-Fri 09:15-15:15 IST
-_NSE_OPEN_IST  = dtime(9, 15)
-_NSE_CLOSE_IST = dtime(15, 15)
+_NSE_OPENIST  = dtime(9, 15)
+_NSE_CLOSEIST = dtime(15, 15)
 
 # MCX commodity derivatives: Mon-Fri 09:00-23:15 IST
-_MCX_OPEN_IST  = dtime(9, 0)
-_MCX_CLOSE_IST = dtime(23, 15)
+_MCX_OPENIST  = dtime(9, 0)
+_MCX_CLOSEIST = dtime(23, 15)
 
 # Exchanges whose hours span midnight (none currently, but structure supports it)
 _EXCHANGE_HOURS: dict[str, tuple[dtime, dtime]] = {
-    "NSE":    (_NSE_OPEN_IST, _NSE_CLOSE_IST),
-    "NSE_EQ": (_NSE_OPEN_IST, _NSE_CLOSE_IST),
-    "BSE":    (_NSE_OPEN_IST, _NSE_CLOSE_IST),
-    "MCX":    (_MCX_OPEN_IST, _MCX_CLOSE_IST),
-    "NFO":    (_NSE_OPEN_IST, _NSE_CLOSE_IST),  # NSE F&O
+    "NSE":    (_NSE_OPENIST, _NSE_CLOSEIST),
+    "NSE_EQ": (_NSE_OPENIST, _NSE_CLOSEIST),
+    "BSE":    (_NSE_OPENIST, _NSE_CLOSEIST),
+    "MCX":    (_MCX_OPENIST, _MCX_CLOSEIST),
+    "NFO":    (_NSE_OPENIST, _NSE_CLOSEIST),  # NSE F&O
 }
 
 
@@ -107,16 +108,16 @@ def is_market_open(ts: str | None = None, exchange: str | None = None) -> bool:
     """
     try:
         if ts:
-            dt = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(_IST_ZONE)
+            dt = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(IST_ZONE)
         else:
-            dt = datetime.now(_IST_ZONE)
+            dt = datetime.now(IST_ZONE)
 
         if dt.weekday() >= 5:   # Saturday=5, Sunday=6
             return False
 
         t = dt.time()
         exch_upper = (exchange or "NSE").upper()
-        open_t, close_t = _EXCHANGE_HOURS.get(exch_upper, (_NSE_OPEN_IST, _NSE_CLOSE_IST))
+        open_t, close_t = _EXCHANGE_HOURS.get(exch_upper, (_NSE_OPENIST, _NSE_CLOSEIST))
         return open_t <= t <= close_t
     except Exception:
         return False   # fail-closed: don't allow trades on parse error
@@ -130,7 +131,7 @@ def time_to_epoch(time_str: str) -> int:
     try:
         dt = datetime.fromisoformat(time_str)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=_IST)
+            dt = dt.replace(tzinfo=IST)
         return int(dt.timestamp())
     except Exception:
         return 0

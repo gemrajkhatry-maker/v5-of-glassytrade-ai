@@ -129,9 +129,10 @@ class VPContractSelector:
     # Value Area: 70% of total volume
     VALUE_AREA_PCT: float = 0.70
 
-    def __init__(self, broker, exchange: str = "NSE") -> None:
+    def __init__(self, broker, exchange: str = "NSE", default_underlyings: list[str] | None = None) -> None:
         self._broker = broker
         self._exchange = exchange
+        self._default_underlyings = default_underlyings or []
 
     def select_contracts(
         self,
@@ -223,7 +224,7 @@ class VPContractSelector:
             import asyncio
             from datetime import datetime, timedelta, timezone
 
-            ist = timezone(timedelta(hours=5, minutes=30))
+            from app.shared.timezones import IST as ist
             now = datetime.now(ist)
 
             # Build symbol for the index future

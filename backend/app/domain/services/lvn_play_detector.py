@@ -52,7 +52,7 @@ def detect_lvn_play(
     body_size = calc_body(candle.open, candle.high, candle.low, candle.close)
     upper_wick = candle.high - max(candle.open, candle.close)
     lower_wick = min(candle.open, candle.close) - candle.low
-    has_rejection = max(upper_wick, lower_wick) > body and body > 0
+    has_rejection = max(upper_wick, lower_wick) > body_size and body_size > 0
 
     # Delta flip: CVD slope sign change
     has_delta_flip = (cvd_slope * prev_cvd_slope < 0) if prev_cvd_slope != 0 else False

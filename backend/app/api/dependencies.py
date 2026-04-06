@@ -17,7 +17,6 @@ import os
 from functools import lru_cache
 
 from app.config import settings
-from app.infrastructure.event_bus import InMemoryEventBus
 from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter
 from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 from app.infrastructure.adapters.mlx_inference_adapter import MLXInferenceAdapter
@@ -45,8 +44,6 @@ class ServiceGraph:
     """Holds the singleton service instances."""
 
     def __init__(self) -> None:
-        self.event_bus = InMemoryEventBus()
-
         # ------------------------------------------------------------------
         # Exchange abstraction layer (OOP / SOLID / DDD)
         # ------------------------------------------------------------------
@@ -150,10 +147,10 @@ class ServiceGraph:
         self.vp_contract_selector = VPContractSelector(
             broker=self.market_data,  # Use market data adapter for history
             exchange=self.exchange_config.exchange,
+            default_underlyings=settings.SCANNER_UNDERLYINGS,
         )
 
         self.trading_session = TradingSessionService(
-            event_bus=self.event_bus,
             broker=self.broker,
             gen_ai_service=self.gen_ai_service,
             storage=self.storage,
@@ -176,6 +173,7 @@ class ServiceGraph:
         # Pass trackers to session
         self.trading_session._gate_tracker = self.gate_tracker
         self.trading_session._latency_tracker = self.latency_tracker
+        # signal_tracker assigned below after creation
 
         # OI Analyzer (Gap #5 — OI Pressure)
         from app.domain.fabio_ai.services.oi_analyzer import OIAnalyzer
@@ -188,6 +186,7 @@ class ServiceGraph:
         )
 
         self.signal_tracker = SignalTrackingService(storage=self._raw_storage)
+        self.trading_session._signal_tracker = self.signal_tracker
 
         # Pre-warm broker: load instrument cache (date-stamped, refreshed once/day).
         # ensure_initialized_sync() is thread-safe and idempotent — no race with
@@ -215,7 +214,10 @@ class ServiceGraph:
             from app.domain.fabio_ai.services.option_scanner import OptionScannerService
 
             def _scan():
-                _scanner = OptionScannerService(self.market_data)
+                _scanner = OptionScannerService(
+                    self.market_data,
+                    default_underlyings=settings.SCANNER_UNDERLYINGS,
+                )
                 return _scanner.scan_top_n(
                     n=settings.SCANNER_TOP_N,
                     underlyings=settings.SCANNER_UNDERLYINGS,

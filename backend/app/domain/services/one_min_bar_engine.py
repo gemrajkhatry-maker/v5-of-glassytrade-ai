@@ -14,10 +14,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 
 from app.domain.trading.models.value_objects import OHLC
+from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
-IST = timezone(timedelta(hours=5, minutes=30))
+
 
 
 @dataclass(frozen=True)

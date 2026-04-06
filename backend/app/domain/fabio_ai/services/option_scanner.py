@@ -57,12 +57,101 @@ class OptionScannerService:
         "SILVER": 0,
     }
 
-    def __init__(self, broker) -> None:
+    def __init__(self, broker, default_underlyings: list[str] | None = None) -> None:
         self._broker = broker
+        self._default_underlyings = default_underlyings
         self._ib_high = 0.0
         self._ib_low = 0.0
         self._session_vwap = 0.0
         self._session_poc = 0.0
+
+    @staticmethod
+    def _score_contract(strike, atm, interval, oi, vol, opt, ltp, bid, ask, underlying_upper, bias=None) -> tuple:
+        """Score an option contract based on ATM proximity, liquidity, and momentum.
+        
+        Returns (score, atm_dist, delta_val).
+        """
+        atm_dist = abs(strike - atm) / interval if interval > 0 else 0
+        delta_val = abs(float(opt.delta or 0.5))
+
+        # DEAD market check
+        if vol <= 0:
+            return 0, atm_dist, delta_val
+
+        score = 0
+        # ATM proximity (40 pts max)
+        score += max(0, 40 - (atm_dist * 15))
+        # OI liquidity scaling (30 pts max)
+        min_oi = OptionScannerService._MIN_OI.get(underlying_upper, 5000)
+        if min_oi > 0:
+            score += min(30, (oi / min_oi) * 10)
+        else:
+            score += 15
+        # Volume momentum scaling (20 pts max)
+        score += min(20, (vol / 1000) * 5)
+
+        # Delta sweet spot +10 pts
+        if 0.40 <= delta_val <= 0.60:
+            score += 10
+
+        # Dynamic Spread Penalty (-20 pts max)
+        if ltp > 0 and bid > 0 and ask > 0:
+            spread_pct = (ask - bid) / ltp * 100
+            if spread_pct > 0.5:
+                score -= min(20, (spread_pct - 0.5) * 10)
+
+        return score, atm_dist, delta_val
+
+    def _process_contract(self, u, opt_type, strike, atm, interval, option_map,
+                          bullish_only, bias, bias_reason, chain, is_mcx):
+        """Process a single option contract — applies filters, scores, returns ScanResult or None."""
+        # Bullish-only filter: skip OTM
+        if bullish_only:
+            if opt_type == "CE" and strike > atm:
+                return None
+            if opt_type == "PE" and strike < atm:
+                return None
+
+        opt = option_map.get(float(strike))
+        if opt is None:
+            return None
+
+        ltp = float(opt.ltp or 0)
+        # Scalping filter: premium in valid range
+        mcx_min, mcx_max, nse_min, nse_max = 20, 50000, 20, 800
+        ltp_min, ltp_max = (mcx_min, mcx_max) if is_mcx else (nse_min, nse_max)
+        if not (ltp_min <= ltp <= ltp_max):
+            return None
+
+        vol = int(opt.volume or 0)
+        oi = int(opt.oi or 0)
+        min_oi = self._MIN_OI.get(u.upper(), 5000)
+        if oi < min_oi:
+            return None
+
+        bid = float(opt.bid or 0)
+        ask = float(opt.ask or 0)
+        if bid > 0 and ask > 0 and ltp > 0:
+            spread_pct = (ask - bid) / ltp * 100
+            if spread_pct > 2.5:
+                return None
+
+        # Score
+        score, _, delta_val = self._score_contract(
+            strike, atm, interval, oi, vol,
+            opt, ltp, bid, ask, u.upper(), bias,
+        )
+        logger.info("SCORED: %s %s %d: ltp=%.2f oi=%d vol=%d score=%.0f sym=%s",
+                    u, opt_type, strike, ltp, oi, vol, score, opt.symbol)
+
+        return ScanResult(
+            symbol=opt.symbol, underlying=u, strike=strike,
+            option_type=opt_type, expiry=chain.expiry.date().isoformat(),
+            ltp=ltp, oi=oi, volume=vol,
+            spread=ask - bid if bid > 0 and ask > 0 else 0,
+            score=score, bias=bias, bias_reason=bias_reason,
+            delta=delta_val, iv=float(opt.iv or 0) if hasattr(opt, "iv") else 0,
+        )
 
     def scan_top_n(
         self,
@@ -89,16 +178,23 @@ class OptionScannerService:
 
         results = []
 
-        # Use config underlyings if not specified
+        # Use injected default underlyings if not specified
         if underlyings is None:
-            underlyings = ["CRUDEOIL", "NATURALGAS"]
+            underlyings = self._default_underlyings or []
+
+        if not underlyings:
+            if exchange == "MCX" or (not exchange and "MCX" in str(self._broker)):
+                underlyings = ["CRUDEOIL", "NATURALGAS"]
+            else:
+                underlyings = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
 
         for u in underlyings:
             try:
                 # Auto-detect exchange from underlying
-                if u.upper() in _MCX_UNDERLYINGS:
+                u_upper = u.upper()
+                if u_upper in _MCX_UNDERLYINGS:
                     _exchange = "MCX"
-                elif u.upper() in _NSE_UNDERLYINGS:
+                elif u_upper in _NSE_UNDERLYINGS:
                     _exchange = "NFO"
                 else:
                     _exchange = exchange or "MCX"
@@ -150,132 +246,13 @@ class OptionScannerService:
                 # Process both CE and PE
                 for opt_type, option_map in [("CE", chain.calls), ("PE", chain.puts)]:
                     for strike in strikes:
-                        # Bullish-only filter: skip OTM strikes
-                        if bullish_only:
-                            if opt_type == "CE" and strike > atm:
-                                continue  # OTM call — not bullish
-                            if opt_type == "PE" and strike < atm:
-                                continue  # OTM put — bearish hedge, skip
-
-                        opt = option_map.get(float(strike))
-                        if opt is None:
-                            continue
-
-                        ltp = float(opt.ltp or 0)
-                        # Scalping filter: require premium in valid range
-                        # MCX commodities have much higher premiums than NSE options
-                        mcx_min, mcx_max = 20, 50000  # MCX: ₹20-50,000
-                        nse_min, nse_max = 20, 800  # NSE: ₹20-800
-                        is_mcx = u.upper() in (
-                            "CRUDEOIL",
-                            "GOLD",
-                            "SILVER",
-                            "NATURALGAS",
-                            "COPPER",
+                        result = self._process_contract(
+                            u, opt_type, int(strike), atm, interval,
+                            option_map, bullish_only, bias, bias_reason,
+                            chain, is_mcx=u.upper() in ("CRUDEOIL", "GOLD", "SILVER", "NATURALGAS", "COPPER"),
                         )
-                        ltp_min, ltp_max = (
-                            (mcx_min, mcx_max) if is_mcx else (nse_min, nse_max)
-                        )
-                        if not (ltp_min <= ltp <= ltp_max):
-                            logger.info(
-                                "%s %s %d: ltp=%.2f — filtered out (outside %d-%d range)",
-                                u,
-                                opt_type,
-                                strike,
-                                ltp,
-                                ltp_min,
-                                ltp_max,
-                            )
-                            continue
-
-                        ltp = float(opt.ltp or 0)
-                        vol = int(opt.volume or 0)
-                        oi = int(opt.oi or 0)
-
-                        # Hard filters
-                        min_oi = self._MIN_OI.get(u.upper(), 5000)
-                        if oi < min_oi:
-                            logger.info(
-                                "%s %s %d: oi=%d < min_oi=%d — filtered out",
-                                u,
-                                opt_type,
-                                strike,
-                                oi,
-                                min_oi,
-                            )
-                            continue
-
-                        bid = float(opt.bid or 0)
-                        ask = float(opt.ask or 0)
-                        if bid > 0 and ask > 0 and ltp > 0:
-                            spread_pct = (ask - bid) / ltp * 100
-                            if spread_pct > 2.5:
-                                continue
-
-                        # Advanced scoring: Spread penalty + Momentum Booster
-                        atm_dist = abs(strike - atm) / interval if interval > 0 else 0
-                        delta_val = abs(float(opt.delta or 0.5))
-
-                        score = 0
-                        # DEAD market check: no volume = no score
-                        if vol <= 0:
-                            score = 0
-                        else:
-                            # ATM proximity (40 pts max)
-                            score += max(0, 40 - (atm_dist * 15))
-                            # OI liquidity scaling (30 pts max)
-                            if min_oi > 0:
-                                score += min(30, (oi / min_oi) * 10)
-                            else:
-                                score += 15  # default if min_oi is 0
-                            # Volume momentum scaling (20 pts max)
-                            score += min(20, (vol / 1000) * 5)
-
-                            # Quant Improvement 1: Delta sweet spot +10 pts
-                            if 0.40 <= delta_val <= 0.60:
-                                score += 10
-
-                            # Quant Improvement 2: Dynamic Spread Penalty (-20 pts max)
-                            if ltp > 0:
-                                spread_pct = (ask - bid) / ltp * 100
-                                if spread_pct > 0.5:
-                                    penalty = min(20, (spread_pct - 0.5) * 10)
-                                    score -= penalty
-
-                        # Quant Improvement 3: Momentum Bias (removed hardcoded CE boost)
-                        # Direction is now decided by AMT engine + MLX
-                        pass
-
-                        logger.info(
-                            "SCORED: %s %s %d: ltp=%.2f oi=%d vol=%d score=%.0f sym=%s",
-                            u,
-                            opt_type,
-                            strike,
-                            ltp,
-                            oi,
-                            vol,
-                            score,
-                            opt.symbol,
-                        )
-
-                        results.append(
-                            ScanResult(
-                                symbol=opt.symbol,
-                                underlying=u,
-                                strike=int(strike),
-                                option_type=opt_type,
-                                expiry=chain.expiry.date().isoformat(),
-                                ltp=ltp,
-                                oi=oi,
-                                volume=vol,
-                                spread=ask - bid if bid > 0 and ask > 0 else 0,
-                                score=score,
-                                bias=bias,
-                                bias_reason=bias_reason,
-                                delta=delta_val,
-                                iv=float(opt.iv or 0) if hasattr(opt, "iv") else 0,
-                            )
-                        )
+                        if result:
+                            results.append(result)
 
             except Exception as e:
                 logger.error("scan_top_n failed for %s: %s", u, e)
@@ -300,11 +277,32 @@ class OptionScannerService:
         # If no contracts found (no momentum), return ATM contracts for monitoring
         if not final:
             logger.info("No momentum setups — selecting ATM contracts for monitoring")
-            for u in underlyings or ["CRUDEOIL", "NATURALGAS"]:
+            
+            # Determine exchange for fallback
+            _fb_exchange = exchange or ("MCX" if "MCX" in str(self._broker) else "NFO")
+            
+            # Use provided underlyings or detect from exchange
+            if not underlyings:
+                if _fb_exchange == "MCX":
+                    _fb_underlyings = ["CRUDEOIL", "NATURALGAS"]
+                else:
+                    _fb_underlyings = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+            else:
+                _fb_underlyings = underlyings
+
+            for u in _fb_underlyings:
                 try:
+                    # Auto-detect exchange for this underlying
+                    u_upper = u.upper()
+                    _u_exchange = _fb_exchange
+                    if u_upper in _MCX_UNDERLYINGS:
+                        _u_exchange = "MCX"
+                    elif u_upper in _NSE_UNDERLYINGS:
+                        _u_exchange = "NFO"
+
                     chain = self._broker.get_option_chain(
                         underlying=u,
-                        exchange=exchange or "MCX",
+                        exchange=_u_exchange,
                         expiry_index=expiry_index,
                     )
                     if chain is None:

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, OrderBook
     from app.domain.trading.models.aggregates import Portfolio
     from app.domain.fabio_ai.services.learning_engine import LearningEngine
+from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ class SessionStateManager:
                                     prior.get("val", 0),
                                     len(new_session._prior_print_levels),
                                 )
-                        except Exception:
+                        except (KeyError, TypeError):
                             logger.debug(
                                 "Failed to load prior session profile", exc_info=True
                             )
@@ -194,7 +195,7 @@ class SessionStateManager:
         Returns:
             Session day string (YYYY-MM-DD)
         """
-        ist = timezone(timedelta(hours=5, minutes=30))
+        
         try:
             stripped = str(timestamp).strip()
             if (
@@ -205,11 +206,11 @@ class SessionStateManager:
                 dt = datetime.fromtimestamp(float(stripped), tz=timezone.utc)
             else:
                 dt = datetime.fromisoformat(stripped.replace("Z", "+00:00"))
-        except Exception:
-            return datetime.now(ist).date().isoformat()
+        except (ValueError, TypeError):
+            return datetime.now(IST).date().isoformat()
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(ist).date().isoformat()
+        return dt.astimezone(IST).date().isoformat()
 
     @staticmethod
     def _record_playbook_guard_rejection(session: SessionState, reason: str) -> None:
@@ -379,7 +380,7 @@ class SessionStateManager:
                 continue
             self._reset_playbook_guard_state(session, target)
             session._playbook_guard_day = (
-                datetime.now(timezone(timedelta(hours=5, minutes=30)))
+                datetime.now(IST)
                 .date()
                 .isoformat()
             )

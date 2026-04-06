@@ -15,6 +15,9 @@ class TestLLMNotReadyError:
         adapter.model = None
         adapter.tokenizer = None
         adapter._is_loading = False
+        adapter._model_path = "fake_model_path"  # non-empty to skip cloud fallback
+        adapter._temperature = 0.7
+        adapter._max_new_tokens = 256
         with pytest.raises(LLMNotReadyError, match="failed to load"):
             adapter.predict("test", "test")
 

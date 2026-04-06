@@ -45,7 +45,7 @@ globals:
   delta_zone_sigma_mult: 2.5
 
   # Market State
-  poc_no_trade_ticks: 2
+  poc_no_trade_ticks: 20
   balance_ratio_threshold: 0.55
   drive_rejection_wick_ratio: 0.5
   displacement_multiplier: 1.5

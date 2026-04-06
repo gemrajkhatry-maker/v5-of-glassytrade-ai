@@ -153,11 +153,11 @@ class DhanHttpClientSync:
                     return {
                         "status": "failure",
                         "remarks": {
-                            "error_code": error_data.get("errorCode"),
-                            "error_type": error_data.get("errorType"),
+                            "error_code": error_data.get("errorCode") or "UNKNOWN_ERROR",
+                            "error_type": error_data.get("errorType") or "UNKNOWN_TYPE",
                             "error_message": error_data.get(
-                                "errorMessage", f"HTTP {response.status_code}"
-                            ),
+                                "errorMessage"
+                            ) or error_data.get("message") or f"HTTP {response.status_code}",
                         },
                         "data": error_data,
                     }

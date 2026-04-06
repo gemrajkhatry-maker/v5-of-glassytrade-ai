@@ -178,10 +178,11 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     const isRange = mode === 'RANGE';
 
     // Reserve space for Bottom Summary in Footprint/RANGE mode
+    // P0: Center price range (avoid extreme top/bottom edges)
     chartRef.current.priceScale('right').applyOptions({
       scaleMargins: {
-        top: 0.05,
-        bottom: (isFootprint || isRange) ? 0.25 : 0.0,
+        top: 0.15,
+        bottom: (isFootprint || isRange) ? 0.35 : 0.15,
       }
     });
 
@@ -490,9 +491,13 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     maxWidthPct: number, xOffset: number, bullColor: string, bearColor: string, useDirectionColors: boolean,
     hvnPrices?: number[], lvnPrices?: number[], vahPrice?: number, valPrice?: number, pocPrice?: number
   ) => {
-    if (!profile || profile.length === 0) return;
+    if (!profile || profile.length === 0) {
+      return;
+    }
     const maxVol = Math.max(...profile.map(p => p.volume));
-    if (maxVol === 0) return;
+    if (maxVol === 0) {
+      return;
+    }
     const maxBarWidth = canvas.width * maxWidthPct;
     const widthScale = maxBarWidth / maxVol;
     const step = profile.length > 1 ? Math.abs(profile[1].price - profile[0].price) : 0;
@@ -1399,42 +1404,59 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         {mode === 'FOOTPRINT' ? 'ORDERFLOW FOOTPRINT' : mode === 'RANGE' ? 'RANGE BARS' : 'STANDARD CANDLESTICKS'}
       </div>
 
-      {/* LLM Reasoning Card */}
-      {amtAnalysis?.llmThinking && (
+      {/* Current Decision Card */}
+      {(amtAnalysis?.direction || amtAnalysis?.llmThinking) && (
         <div className="absolute top-4 right-4 z-40 w-72 max-h-[80%] overflow-hidden">
-          <ReasoningCard thinking={amtAnalysis.llmThinking} jsonResult={amtAnalysis.llmJson} />
+          <DecisionCard 
+            direction={amtAnalysis.direction || 'FLAT'} 
+            setup={amtAnalysis.setup || 'NONE'}
+            pLong={amtAnalysis.pLong || 0}
+            pShort={amtAnalysis.pShort || 0}
+            regime={amtAnalysis.agentRegime || ''}
+            timing={amtAnalysis.agentTiming || ''}
+            kelly={amtAnalysis.agentKelly || 0}
+            rationale={amtAnalysis.agentRationale || amtAnalysis.llmThinking || ''}
+            marketState={amtAnalysis.marketState}
+            aggression={amtAnalysis.aggression}
+          />
         </div>
       )}
     </div>
   );
 };
 
-interface ReasoningCardProps {
-  thinking: string;
-  jsonResult?: string;
+interface DecisionCardProps {
+  direction: string;
+  setup: string;
+  pLong: number;
+  pShort: number;
+  regime: string;
+  timing: string;
+  kelly: number;
+  rationale: string;
+  marketState: string;
+  aggression: string;
 }
 
-const ReasoningCard: React.FC<ReasoningCardProps> = ({ thinking, jsonResult }) => {
+const DecisionCard: React.FC<DecisionCardProps> = ({ direction, setup, pLong, pShort, regime, timing, kelly, rationale, marketState, aggression }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   
-  const parsedJson = useMemo(() => {
-    try {
-      return jsonResult ? JSON.parse(jsonResult) : null;
-    } catch (e) {
-      return null;
-    }
-  }, [jsonResult]);
-
-  const decision = parsedJson?.setup || parsedJson?.direction || "ANALYZING";
-  const isYes = decision.includes("YES") || decision.includes("LONG") || decision.includes("SHORT");
+  const isLong = direction === 'LONG';
+  const isShort = direction === 'SHORT';
+  const isFlat = direction === 'FLAT';
+  
+  const directionColor = isLong ? 'text-emerald-400' : isShort ? 'text-red-400' : 'text-slate-400';
+  const directionBg = isLong ? 'bg-emerald-500/20 border-emerald-500/30' : isShort ? 'bg-red-500/20 border-red-500/30' : 'bg-slate-500/20 border-slate-500/30';
+  const directionIcon = isLong ? '▲' : isShort ? '▼' : '—';
+  const prob = isLong ? pLong : isShort ? pShort : 0;
 
   return (
     <div className="flex flex-col bg-slate-900/80 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl overflow-hidden font-sans">
       {/* Header */}
-      <div className="px-3 py-2 bg-blue-600/20 border-b border-white/5 flex items-center justify-between">
+      <div className={`px-3 py-2 border-b border-white/5 flex items-center justify-between ${directionBg}`}>
         <div className="flex items-center gap-2">
-          <Brain className="w-4 h-4 text-blue-400" />
-          <span className="text-[10px] font-bold text-blue-100 uppercase tracking-widest">AI Reasoning</span>
+          <Cpu className={`w-4 h-4 ${directionColor}`} />
+          <span className="text-[10px] font-bold text-white/80 uppercase tracking-widest">Current Decision</span>
         </div>
         <button 
           onClick={() => setIsExpanded(!isExpanded)}
@@ -1447,20 +1469,23 @@ const ReasoningCard: React.FC<ReasoningCardProps> = ({ thinking, jsonResult }) =
       {/* Body */}
       <div className={`transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-96' : 'max-h-0'} overflow-y-auto custom-scrollbar`}>
         <div className="p-3 text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap font-mono italic opacity-90 border-b border-white/5 bg-black/20">
-          {thinking}
+          {rationale}
         </div>
       </div>
 
-      {/* Outcome Footer */}
+      {/* Decision Footer */}
       <div className="p-3 flex items-center justify-between bg-black/40">
         <div className="flex flex-col">
-          <span className="text-[9px] text-white/30 uppercase font-bold tracking-tighter italic">Conclusion</span>
-          <span className={`text-xs font-black uppercase tracking-wider ${isYes ? 'text-emerald-400' : 'text-slate-400'}`}>
-            {decision}
+          <span className="text-[9px] text-white/30 uppercase font-bold tracking-tighter italic">Decision</span>
+          <span className={`text-xs font-black uppercase tracking-wider ${directionColor}`}>
+            {directionIcon} {direction}
           </span>
         </div>
-        <div className={`p-1.5 rounded-lg ${isYes ? 'bg-emerald-500/20 border-emerald-500/30' : 'bg-slate-500/20 border-slate-500/30'} border`}>
-          <Cpu className={`w-4 h-4 ${isYes ? 'text-emerald-400' : 'text-slate-400'}`} />
+        <div className="flex flex-col items-end">
+          <span className="text-[9px] text-white/30 uppercase font-bold tracking-tighter italic">P({direction})</span>
+          <span className={`text-xs font-black uppercase tracking-wider ${directionColor}`}>
+            {(prob * 100).toFixed(1)}%
+          </span>
         </div>
       </div>
     </div>

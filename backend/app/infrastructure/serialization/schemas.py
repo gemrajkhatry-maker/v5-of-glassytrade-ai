@@ -150,6 +150,15 @@ class AMTAnalysisDTO(BaseModel):
     llm_thinking: str = Field(alias="llmThinking", default="")
     llm_json: str = Field(alias="llmJson", default="{}")
     session_pnl: float = Field(alias="sessionPnl", default=0.0)
+    # MTF & Opening Type
+    opening_type: str = Field(alias="openingType", default="")
+    mtf_alignment: str = Field(alias="mtfAlignment", default="")
+    daily_vah: float = Field(alias="dailyVah", default=0.0)
+    daily_val: float = Field(alias="dailyVal", default=0.0)
+    daily_poc: float = Field(alias="dailyPoc", default=0.0)
+    hourly_vah: float = Field(alias="hourlyVah", default=0.0)
+    hourly_val: float = Field(alias="hourlyVal", default=0.0)
+    hourly_poc: float = Field(alias="hourlyPoc", default=0.0)
 
     model_config = {"populate_by_name": True}
 
@@ -542,6 +551,7 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         "vwapLower1": r.vwap_lower_1,
         "vwapUpper2": r.vwap_upper_2,
         "vwapLower2": r.vwap_lower_2,
+        "vwapDeviationSigmas": r.vwap_deviation_sigmas,
         "balanceRatio": r.balance_ratio,
         "legProfile": [
             {
@@ -595,6 +605,23 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         # Reasoning model output (injected from session state)
         "llmThinking": llm_thinking,
         "llmJson": llm_json,
+        # MTF & Opening Type
+        "openingType": r.opening_type,
+        "mtfAlignment": r.mtf_alignment,
+        "dailyVah": r.daily_vah,
+        "dailyVal": r.daily_val,
+        "dailyPoc": r.daily_poc,
+        "hourlyVah": r.hourly_vah,
+        "hourlyVal": r.hourly_val,
+        "hourlyPoc": r.hourly_poc,
+        # Day type classification
+        "dayType": r.day_type,
+        # Absorption context
+        "absorptionSide": r.absorption_side,
+        "absorptionRangeRatio": r.absorption_range_ratio,
+        "absorptionVolRatio": r.absorption_vol_ratio,
+        # Displacement
+        "swingDelta": r.swing_delta,
     }
 
 

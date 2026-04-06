@@ -186,7 +186,7 @@ def validate_trade_thesis(
             setup_family=str(thesis.get("setup_family", "")),
         )
 
-    if thesis.market_state not in {"BALANCED", "IMBALANCED"}:
+    if thesis.market_state not in {"BALANCED", "IMBALANCED", "PROBING"}:
         return False, "missing_state"
     if thesis.location_type == "MID_RANGE" or thesis.location_level <= 0:
         return False, "mid_range_entry"

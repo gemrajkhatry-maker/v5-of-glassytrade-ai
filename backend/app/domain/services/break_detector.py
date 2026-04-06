@@ -46,6 +46,77 @@ def detect_break(
     if len(data) < 3 or baseline_vol <= 0:
         return empty
 
+
+def check_ib_break_tick(
+    live_price: float,
+    ib_high: float,
+    ib_low: float,
+    ib_complete: bool,
+    current_break_direction: str = "",
+) -> dict:
+    """Check IB break using live tick price (not candle close).
+
+    This is the PRIMARY IB break detection path — fires on every tick,
+    not just on candle close. Once broken, the break is STICKY: it
+    remains BREAK_UP/BREAK_DOWN even if price re-enters IB.
+
+    Args:
+        live_price: Current LTP (live tick price).
+        ib_high: Initial Balance high.
+        ib_low: Initial Balance low.
+        ib_complete: Whether IB build window has elapsed.
+        current_break_direction: Existing break state ("UP", "DOWN", "").
+
+    Returns:
+        dict with break_direction, break_type, break_level, break_price.
+    """
+    if not ib_complete or ib_high <= 0 or ib_low <= 0:
+        return {
+            "break_direction": "",
+            "break_type": "",
+            "break_level": 0.0,
+            "break_price": 0.0,
+        }
+
+    # STICKY: once broken, stay broken
+    if current_break_direction == "UP":
+        return {
+            "break_direction": "UP",
+            "break_type": "INITIATIVE",
+            "break_level": ib_high,
+            "break_price": live_price,
+        }
+    if current_break_direction == "DOWN":
+        return {
+            "break_direction": "DOWN",
+            "break_type": "INITIATIVE",
+            "break_level": ib_low,
+            "break_price": live_price,
+        }
+
+    # Check for new break using live price
+    if live_price > ib_high:
+        return {
+            "break_direction": "UP",
+            "break_type": "INITIATIVE",
+            "break_level": ib_high,
+            "break_price": live_price,
+        }
+    if live_price < ib_low:
+        return {
+            "break_direction": "DOWN",
+            "break_type": "INITIATIVE",
+            "break_level": ib_low,
+            "break_price": live_price,
+        }
+
+    return {
+        "break_direction": "",
+        "break_type": "",
+        "break_level": 0.0,
+        "break_price": 0.0,
+    }
+
     current = data[-1]
     prev = data[-2]
     vol_ratio = current.volume / baseline_vol if baseline_vol > 0 else 0.0

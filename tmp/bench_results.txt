@@ -1,0 +1,39 @@
+
+--- Testing CURRENT (POC8 4B) ---
+Model: Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled
+Adapter: poc8/adapters
+SUBPROCESS_ERROR: generate_step() got an unexpected keyword argument 'temp'
+
+STDERR: 
+Fetching 8 files:   0%|          | 0/8 [00:00<?, ?it/s]
+Fetching 8 files: 100%|██████████| 8/8 [00:00<00:00, 106522.01it/s]
+The tokenizer you are loading from '/Users/apple/.cache/huggingface/hub/models--Jackrong--Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled/snapshots/94a0c2d8c661d81d93d622ea0b58506083e6092f' with an incorrect regex pattern: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/discussions/84#69121093e8b480e709447d5e. This will lead to incorrect tokenization. You should set the `fix_mistral_regex=True` flag when loading this tokenizer to fix this issue.
+Traceback (most recent call last):
+  File "/tmp/bench_sub_v3.py", line 20, in <module>
+    response = generate(model, tokenizer, prompt=prompt, max_tokens=300, temp=0.1)
+  File "/Users/apple/Downloads/v5-of-glassytrade-ai/backend/venv/lib/python3.14/site-packages/mlx_lm/generate.py", line 768, in generate
+    for response in stream_generate(model, tokenizer, prompt, **kwargs):
+                    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/apple/Downloads/v5-of-glassytrade-ai/backend/venv/lib/python3.14/site-packages/mlx_lm/generate.py", line 692, in stream_generate
+    token_generator = generate_step(prompt, model, **kwargs)
+TypeError: generate_step() got an unexpected keyword argument 'temp'
+
+
+--- Testing NEW (DeepSeek 1.5B) ---
+Model: mlx-community/DeepSeek-R1-Distill-Qwen-1.5B-4bit
+Adapter: 
+SUBPROCESS_ERROR: generate_step() got an unexpected keyword argument 'temp'
+
+STDERR: 
+Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]
+Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 13988.78it/s]
+Traceback (most recent call last):
+  File "/tmp/bench_sub_v3.py", line 20, in <module>
+    response = generate(model, tokenizer, prompt=prompt, max_tokens=300, temp=0.1)
+  File "/Users/apple/Downloads/v5-of-glassytrade-ai/backend/venv/lib/python3.14/site-packages/mlx_lm/generate.py", line 768, in generate
+    for response in stream_generate(model, tokenizer, prompt, **kwargs):
+                    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/apple/Downloads/v5-of-glassytrade-ai/backend/venv/lib/python3.14/site-packages/mlx_lm/generate.py", line 692, in stream_generate
+    token_generator = generate_step(prompt, model, **kwargs)
+TypeError: generate_step() got an unexpected keyword argument 'temp'
+

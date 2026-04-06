@@ -1,0 +1,49 @@
+
+--- Testing NEW (DeepSeek 1.5B) Quality ---
+OUTPUT:{"thought": "The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The analysis helps in determining the optimal trading strategy. The system is efficient and provides accurate results.", "trade": "LONG", "entry_price": 6540.0, "stop_loss": 6520.0, "target": 6580.0}
+}
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value, momentum and aggression, order flow context, and other indicators. The system is efficient and provides accurate results.
+
+The system is designed to analyze the current auction scenario using AMT methodology. The key factors considered include position relative to value
+
+STDERR: 
+Fetching 6 files:   0%|          | 0/6 [00:00<?, ?it/s]
+Fetching 6 files: 100%|██████████| 6/6 [00:00<00:00, 68947.46it/s]
+

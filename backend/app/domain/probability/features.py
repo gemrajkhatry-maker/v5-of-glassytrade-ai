@@ -364,7 +364,7 @@ def _parse_time(time_str: str):
         else:
             dt = datetime.strptime(time_str[:19], "%Y-%m-%d %H:%M:%S")
         return dt.hour, dt.minute, dt.weekday()
-    except Exception:
+    except (ValueError, TypeError):
         return None
 
 

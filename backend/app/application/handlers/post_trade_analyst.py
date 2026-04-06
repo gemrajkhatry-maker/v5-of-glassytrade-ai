@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    from app.domain.ports.event_bus import EventBusPort
     from app.domain.ports.storage import StoragePort
 
 logger = logging.getLogger(__name__)

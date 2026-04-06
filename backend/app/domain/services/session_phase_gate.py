@@ -15,6 +15,12 @@ Day-of-week filters:
   THURSDAY: Reduce size 50%, Phase 2 only, use next-week expiry
   FRIDAY:   Configurable reduce/skip flag per instrument
   EVENT DAYS: NO TRADE flag, full block
+
+#29: IB-based phase transitions added via evaluate_with_ib():
+  Phase 1 ends when IB is confirmed (enough volume to define it)
+  Phase 2 begins when price first tests the IB boundary
+  Phase 3 activates when price closes outside IB with conviction volume
+  Phase 4 is active until a failed extension is detected
 """
 
 from __future__ import annotations
@@ -197,6 +203,99 @@ class SessionPhaseGate:
             reason="Close protection — exit only, no new entries",
             day_of_week=day_name,
         )
+
+    def evaluate_with_ib(
+        self,
+        timestamp: datetime | None = None,
+        ib_complete: bool = False,
+        ib_tested: bool = False,
+        ib_broken: bool = False,
+        ib_failed_extension: bool = False,
+        ib_high: float = 0.0,
+        ib_low: float = 0.0,
+        current_price: float = 0.0,
+    ) -> PhaseState:
+        """Evaluate phase with IB-based transitions (#29).
+
+        Fabio's phases are market-structure-based, not clock-based:
+        - Phase 1 ends when IB is confirmed (enough volume to define it)
+        - Phase 2 begins when price first tests IB boundary
+        - Phase 3 activates when price closes outside IB with conviction
+        - Phase 4 is active until failed extension detected
+
+        Args:
+            timestamp: IST datetime
+            ib_complete: IB has been confirmed (enough volume/range)
+            ib_tested: Price has tested IB boundary
+            ib_broken: Price has closed outside IB with conviction volume
+            ib_failed_extension: Extension phase failed (price returned to IB)
+            ib_high: IB high price
+            ib_low: IB low price
+            current_price: Current market price
+        """
+        # Always respect hard time boundaries (market open/close)
+        time_state = self.evaluate(timestamp)
+        if time_state.phase in (TradingPhase.CLOSED, TradingPhase.CLOSE_PROTECTION):
+            return time_state
+
+        now = timestamp or datetime.now()
+        day_name = now.strftime("%A").upper()
+
+        # #29: IB-based phase transitions override time-based phases
+
+        # Phase 1: If IB is complete early, transition to Phase 2
+        if time_state.phase == TradingPhase.OPENING_NOISE:
+            if ib_complete:
+                return PhaseState(
+                    phase=TradingPhase.AAA_WINDOW,
+                    allowed_action=AllowedAction.ALL_MODELS,
+                    is_blocked=False,
+                    size_multiplier=1.0,
+                    reason=f"IB confirmed early — Phase 2 active (was {time_state.phase})",
+                    day_of_week=day_name,
+                )
+            return time_state
+
+        # Phase 2: IB tested → normal AAA window
+        if time_state.phase == TradingPhase.AAA_WINDOW:
+            if ib_tested:
+                return PhaseState(
+                    phase=TradingPhase.AAA_WINDOW,
+                    allowed_action=AllowedAction.ALL_MODELS,
+                    is_blocked=False,
+                    size_multiplier=1.0,
+                    reason="IB tested — Phase 2 active (all models)",
+                    day_of_week=day_name,
+                )
+            return time_state
+
+        # Phase 3: IB broken with conviction → extension phase
+        if time_state.phase == TradingPhase.MIDDAY:
+            if ib_broken:
+                return PhaseState(
+                    phase=TradingPhase.POWER_HOUR,
+                    allowed_action=AllowedAction.ALL_MODELS,
+                    is_blocked=False,
+                    size_multiplier=1.0,
+                    reason="IB broken with conviction — Phase 3 extension active",
+                    day_of_week=day_name,
+                )
+            return time_state
+
+        # Phase 4: Failed extension → revert to mean reversion
+        if time_state.phase == TradingPhase.POWER_HOUR:
+            if ib_failed_extension:
+                return PhaseState(
+                    phase=TradingPhase.MIDDAY,
+                    allowed_action=AllowedAction.MR_ONLY,
+                    is_blocked=False,
+                    size_multiplier=1.0,
+                    reason="Extension failed — reverted to mean reversion only",
+                    day_of_week=day_name,
+                )
+            return time_state
+
+        return time_state
 
     def can_trade(self, timestamp: datetime | None = None) -> bool:
         """Quick check: is trading allowed right now?"""

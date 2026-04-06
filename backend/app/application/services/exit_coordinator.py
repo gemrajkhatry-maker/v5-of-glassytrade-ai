@@ -17,6 +17,9 @@ from app.domain.ports.storage import StoragePort
 from app.domain.ports.broker import BrokerPort
 from app.domain.trading.events import PositionClosed
 from app.application.handlers.post_trade_analyst import PostTradeAnalyst
+from app.shared.timezones import IST
+from datetime import datetime
+
 
 if TYPE_CHECKING:
     from app.application.handlers.llm_entry_handler import LLMEntryHandler
@@ -73,7 +76,10 @@ class ExitCoordinator:
         symbol = ""
         position = None
         for sym, sess in self._state_manager.get_all_sessions().items():
-            for p in sess.portfolio.positions:
+            # Snapshot under lock to avoid RuntimeError during concurrent mutation
+            with sess._lock:
+                positions_snapshot = list(sess.portfolio.positions)
+            for p in positions_snapshot:
                 if p.id == pos_id:
                     symbol = sym
                     position = p
@@ -118,20 +124,21 @@ class ExitCoordinator:
             realized_pnl,
         )
 
-    def on_stop_out(self, level: float, direction: str, exchange: str) -> None:
+    def on_stop_out(self, level: float, direction: str, symbol: str, exchange: str) -> None:
         """Handle stop out — record session phase for pattern learning."""
         from app.domain.fabio_ai.services.session_context import (
             get_session_info as _get_si,
         )
-        from datetime import datetime, timezone, timedelta
 
-        ist = timezone(timedelta(hours=5, minutes=30))
-        now_ist = datetime.now(ist).strftime("%H:%M:%S")
+        now_ist = datetime.now(IST).strftime("%H:%M:%S")
         _market = exchange
         if _market in ("NFO", "BSE"):
             _market = "NSE"
         si = _get_si(timestamp=now_ist, market=_market)
-        self._llm_handler.record_stop_out(level, direction, si.phase)
+        # si.phase is a session-phase identifier (e.g. "LONDON", "NY");
+        # hash to int so the RegimeDetector's int-comparison still works.
+        phase_num = hash(si.phase) % 10
+        self._llm_handler.record_stop_out(level, direction, phase_num, symbol=symbol)
 
     def on_position_closed(self, symbol: str, position) -> None:
         """Handle full position close — learning, risk, persistence.

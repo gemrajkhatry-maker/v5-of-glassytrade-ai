@@ -18,12 +18,19 @@ interface AIAnalysisPanelProps {
 }
 
 const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, depth20Active, overseerAction, overseerReason }) => {
-    // Determine current best price proxy (LTP)
+    // Determine current best price proxy (LTP) with 3-tier fallback chain.
+    // Tier 1: Order book mid-price (most accurate, requires depth data)
+    // Tier 2: Session VWAP from AMT analysis (always available after first tick)
+    // Tier 3: 0 (no data available — location section shows "Building...")
     const currentLtp = React.useMemo(() => {
-        return (orderBook?.bids?.[0]?.price || 0) > 0 
-            ? ((orderBook!.bids[0].price + orderBook!.asks[0].price) / 2) 
-            : 0;
-    }, [orderBook]);
+        if (orderBook?.bids?.[0]?.price > 0 && orderBook?.asks?.[0]?.price > 0) {
+            return (orderBook.bids[0].price + orderBook.asks[0].price) / 2;
+        }
+        if (amtResult?.sessionVwap > 0) {
+            return amtResult.sessionVwap;
+        }
+        return 0;
+    }, [orderBook, amtResult?.sessionVwap]);
 
     // 2. Monitoring Mode: AMT ready, but no GenAI signal yet
     // We construct a "dummy" analysis object from AMT data to render the panel in "Monitoring" mode

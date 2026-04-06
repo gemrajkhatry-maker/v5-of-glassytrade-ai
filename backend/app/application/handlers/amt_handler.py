@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_IST = timezone(timedelta(hours=5, minutes=30))
+from app.shared.timezones import IST
 
 
 def _filter_today_session(data: list) -> list:
@@ -29,8 +29,8 @@ def _filter_today_session(data: list) -> list:
     """
     if not data:
         return data
-    today = datetime.now(_IST).strftime("%Y-%m-%d")
-    today_data = [c for c in data if today in str(c.time)]
+    today_str = datetime.now(IST).strftime("%Y-%m-%d")
+    today_data = [c for c in data if str(c.time)[:10] == today_str]
     
     # If we have enough today candles (>20 = ~2 hours at 5m), use session-only
     if len(today_data) > 20:
@@ -59,7 +59,7 @@ class AMTHandler:
         self._prev_data_len: int = 0
         self._session_only_vp = session_only_vp
         # Track current trading date (IST) to force VP rebuild on day boundary
-        self._trading_date: str = datetime.now(_IST).strftime("%Y-%m-%d")
+        self._trading_date: str = datetime.now(IST).strftime("%Y-%m-%d")
         # Cache profile arrays to avoid new list objects on sub-candle updates
         self._cached_profile: list | None = None
         self._cached_leg_profile: list | None = None
@@ -104,7 +104,7 @@ class AMTHandler:
         # Convert to float-based OHLC to prevent Decimal/float mismatch errors in analysis
         data = self._to_float_ohlc(data)
         # Detect day boundary — force full VP rebuild when trading date changes
-        current_date = datetime.now(_IST).strftime("%Y-%m-%d")
+        current_date = datetime.now(IST).strftime("%Y-%m-%d")
         if current_date != self._trading_date:
             logger.info("Trading day changed %s → %s, resetting VP", self._trading_date, current_date)
             self._inc_profile = IncrementalVolumeProfile()

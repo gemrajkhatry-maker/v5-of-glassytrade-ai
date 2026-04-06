@@ -1,0 +1,111 @@
+"""Gate Runner — 12-gate pipeline runner + position sizing wrapper."""
+
+from __future__ import annotations
+
+
+def run_gate_pipeline(
+    data,
+    amt_result,
+    tick,
+    market_state: str = "BALANCED",
+    drive_number: int = 0,
+    drive_entry_valid: bool = False,
+    aggression_score: float = 0.0,
+    is_risk_halted: bool = False,
+    halt_reason: str = "",
+    tick_age_seconds: float = 1.0,
+    symbol: str = "",
+    max_distance_to_level_ticks: float = 3.0,
+    probing_aggression_threshold: float = 3.0,
+    min_aggression_score: float = 2.0,
+    max_cushion_ticks: float = 10.0,
+    min_rr_ratio: float = 1.5,
+    tick_size: float = 0.05,
+) -> tuple[bool, str, str]:
+    """Run the 12-gate pipeline for additional validation.
+
+    Call this AFTER three_align_check passes. Returns (passed, reason, detail).
+    """
+    from app.domain.fabio_ai.services.gate_pipeline import GatePipeline, GateContext
+    from app.domain.fabio_ai.services.eia_calendar import EIACalendar
+    from app.domain.trading.models.enums import MarketState as MS
+
+    state_map = {
+        "NO_TRADE": MS.NO_TRADE,
+        "BALANCED": MS.BALANCED,
+        "BALANCE": MS.BALANCED,
+        "IMBALANCED": MS.IMBALANCED,
+        "IMBALANCE": MS.IMBALANCED,
+        "PROBING": MS.PROBING,
+    }
+    ms = state_map.get(market_state.upper(), MS.BALANCED)
+
+    price = float(tick.close)
+    levels = [amt_result.value_area_high, amt_result.value_area_low]
+    if amt_result.lvns:
+        levels.extend(amt_result.lvns)
+    valid_levels = [lv for lv in levels if lv > 0]
+    if valid_levels:
+        nearest = min(valid_levels, key=lambda lv: abs(price - lv))
+        dist_ticks = abs(price - nearest) / tick_size if tick_size > 0 else 999
+    else:
+        nearest = price
+        dist_ticks = 0
+
+    risk = (
+        abs(price - amt_result.value_area_low)
+        if price > amt_result.poc
+        else abs(amt_result.value_area_high - price)
+    )
+    reward = abs(amt_result.poc - price)
+    rr = reward / risk if risk > 0 else 0
+
+    eia_calendar = EIACalendar(suppression_minutes=15)
+    eia_suppressed = eia_calendar.is_suppressed(symbol) if symbol else False
+
+    ctx = GateContext(
+        symbol=symbol,
+        candle_count=len(data),
+        tick_age_seconds=tick_age_seconds,
+        market_state=ms,
+        poc=amt_result.poc,
+        vah=amt_result.value_area_high,
+        val=amt_result.value_area_low,
+        price=price,
+        tick_size=tick_size,
+        nearest_level=nearest,
+        distance_to_level_ticks=dist_ticks,
+        drive_number=drive_number,
+        drive_entry_valid=drive_entry_valid,
+        aggression_score=aggression_score,
+        is_risk_halted=is_risk_halted,
+        halt_reason=halt_reason,
+        eia_window_active=eia_suppressed,
+        setup_type=amt_result.setup or "NONE",
+        r_r_ratio=rr,
+        cushion_ticks=dist_ticks,
+        max_distance_to_level_ticks=max_distance_to_level_ticks,
+        probing_aggression_threshold=probing_aggression_threshold,
+        min_aggression_score=min_aggression_score,
+        max_cushion_ticks=max_cushion_ticks,
+        min_rr_ratio=min_rr_ratio,
+    )
+
+    result = GatePipeline().evaluate(ctx)
+    return result.passed, result.reason.value, result.detail
+
+
+def calculate_position_size(
+    equity: float,
+    entry_price: float,
+    stop_loss: float,
+    point_value: float = 10.0,
+) -> tuple[int, float, bool]:
+    """Calculate position size using PositionSizer.
+
+    Returns (lots, risk_amount, valid).
+    """
+    from app.domain.fabio_ai.services.position_sizer import PositionSizer
+
+    ps = PositionSizer.calculate(equity, entry_price, stop_loss, point_value)
+    return ps.lots, ps.risk_amount, ps.valid

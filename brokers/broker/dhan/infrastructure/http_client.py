@@ -602,17 +602,19 @@ class DhanHttpClient(IHttpClient):
                 
                 # Handle authentication errors
                 if response.status == 401:
-                    error_code = data.get("errorCode", ERROR_CODE_INVALID_TOKEN)
+                    error_code = data.get("errorCode") or ERROR_CODE_INVALID_TOKEN
+                    error_message = data.get("message") or "Invalid access token"
                     raise DhanTokenInvalidError(
-                        message=data.get("message", "Invalid access token"),
+                        message=error_message,
                         code=error_code,
                         details={"url": url, "response": data},
                     )
                 
                 if response.status == 403:
-                    error_code = data.get("errorCode", ERROR_CODE_TOKEN_EXPIRED)
+                    error_code = data.get("errorCode") or ERROR_CODE_TOKEN_EXPIRED
+                    error_message = data.get("message") or "Token expired or access denied"
                     raise DhanTokenExpiredError(
-                        message=data.get("message", "Token expired or access denied"),
+                        message=error_message,
                         code=error_code,
                         details={"url": url, "response": data},
                     )
@@ -628,7 +630,7 @@ class DhanHttpClient(IHttpClient):
                 # Handle other client errors
                 if response.status >= 400:
                     error_code = data.get("errorCode")
-                    error_message = data.get("message", f"HTTP {response.status}")
+                    error_message = data.get("message") or f"HTTP {response.status} (No message provided)"
                     
                     # Try to create specific error from response
                     if error_code:

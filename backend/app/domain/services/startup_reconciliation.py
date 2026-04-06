@@ -100,8 +100,8 @@ class StartupReconciliation:
                 if self._storage:
                     try:
                         self._storage.delete_open_position(pos.get("id", ""))
-                    except Exception:
-                        pass
+                    except (KeyError, TypeError):
+                        logger.debug("Failed to delete stale open position: %s", pos.get("id"), exc_info=True)
 
         # Case 3: Orphaned — at broker but NOT in DB
         for pos in broker_positions:

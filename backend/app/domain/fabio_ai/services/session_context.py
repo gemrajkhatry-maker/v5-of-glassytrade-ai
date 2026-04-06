@@ -49,17 +49,17 @@ class SessionInfo:
     market: str  # "NSE" | "MCX" | "GLOBAL"
 
 
+from app.shared.timezones import IST
+
 # ---------------------------------------------------------------------------
 # IST timezone offset
 # ---------------------------------------------------------------------------
-
-_IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def _to_ist(timestamp: str | datetime | None) -> datetime:
     """Convert timestamp to IST datetime."""
     if timestamp is None:
-        dt = datetime.now(_IST)
+        dt = datetime.now(IST)
     elif isinstance(timestamp, str):
         try:
             # Handle epoch timestamps (e.g. "1771832400.0" from Dhan adapter)
@@ -73,13 +73,13 @@ def _to_ist(timestamp: str | datetime | None) -> datetime:
             else:
                 dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
         except (ValueError, TypeError, OSError):
-            dt = datetime.now(_IST)
+            dt = datetime.now(IST)
     else:
         dt = timestamp
 
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(_IST)
+    return dt.astimezone(IST)
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +416,7 @@ MCX_SUB_SESSIONS = {
     "US_SESSION": (19, 30, 23, 30), # 19:30 - 23:30 IST (US-driven)
 }
 
-MCX_US_OPEN_IST = (19, 30)  # 7:30 PM IST = US market influence
+MCX_US_OPENIST = (19, 30)  # 7:30 PM IST = US market influence
 
 
 def get_ib_window(exchange: str, current_time: datetime | None = None) -> tuple[int, int, int, int]:
@@ -429,7 +429,7 @@ def get_ib_window(exchange: str, current_time: datetime | None = None) -> tuple[
     MCX US Session: 19:30 - 20:30 (60 min, US influence)
     """
     if current_time is None:
-        current_time = datetime.now(_IST)
+        current_time = datetime.now(IST)
     else:
         current_time = _to_ist(current_time)
     
@@ -463,7 +463,7 @@ def get_vwap_anchors(exchange: str, current_time: datetime | None = None,
     MCX: Full session (09:00) + US session (19:30) for energy commodities
     """
     if current_time is None:
-        current_time = datetime.now(_IST)
+        current_time = datetime.now(IST)
     else:
         current_time = _to_ist(current_time)
     
@@ -480,7 +480,7 @@ def get_vwap_anchors(exchange: str, current_time: datetime | None = None,
         if commodity_upper in ["CRUDEOIL", "NATURALGAS", "CRUDEOILM"]:
             hour = current_time.hour
             if hour >= 19 or (hour == 19 and current_time.minute >= 30):
-                anchors.append(MCX_US_OPEN_IST)
+                anchors.append(MCX_US_OPENIST)
     
     return anchors
 
@@ -494,7 +494,7 @@ def get_sub_session(exchange: str, current_time: datetime | None = None) -> str:
         return "NSE"
     
     if current_time is None:
-        current_time = datetime.now(_IST)
+        current_time = datetime.now(IST)
     else:
         current_time = _to_ist(current_time)
     
@@ -518,7 +518,7 @@ def is_late_session(exchange: str, current_time: datetime | None = None) -> bool
     MCX: US session (19:30-23:30) — driven by US futures
     """
     if current_time is None:
-        current_time = datetime.now(_IST)
+        current_time = datetime.now(IST)
     else:
         current_time = _to_ist(current_time)
     

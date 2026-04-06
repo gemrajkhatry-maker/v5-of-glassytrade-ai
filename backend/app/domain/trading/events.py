@@ -70,6 +70,8 @@ class TickReceived(DomainEvent):
     tick: OHLC = None
     order_book: OrderBook | None = None
     data: tuple[OHLC, ...] = ()  # full history window
+    daily_data: tuple[OHLC, ...] = ()  # Daily timeframe for structural bias
+    hourly_data: tuple[OHLC, ...] = ()  # Hourly timeframe for execution bias
 
     def __str__(self) -> str:
         return f"TickReceived(symbol={self.symbol}, price={self.tick.close if self.tick else 'N/A'})"
@@ -461,6 +463,21 @@ class DailyLossLimitReached(DomainEvent):
 
 
 # ---------------------------------------------------------------------------
+# Diagnostics Events
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DataAnomalyEvent(DomainEvent):
+    """A data anomaly was detected by the state bus validation middleware."""
+
+    symbol: str = ""
+    anomaly_type: str = ""  # "SESSION_MISMATCH", "INVARIANT_VIOLATION", "STALE_DATA"
+    detail: str = ""
+    timestamp: str = ""  # Override parent timestamp with anomaly detection time
+
+
+# ---------------------------------------------------------------------------
 # Event Type Registry
 # ---------------------------------------------------------------------------
 
@@ -477,4 +494,5 @@ EVENT_TYPES = {
     "PositionClosed": PositionClosed,
     "RiskCheckFailed": RiskCheckFailed,
     "DailyLossLimitReached": DailyLossLimitReached,
+    "DataAnomalyEvent": DataAnomalyEvent,
 }

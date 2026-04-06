@@ -379,9 +379,9 @@ class TestDTOContract:
 
     def test_genai_analysis_camelcase(self):
         """Verify _camel_case_ai produces keys matching frontend GenAIAnalysis."""
-        from app.application.services.trading_session import TradingSessionService
+        from app.application.services.state_snapshot_builder import _camel_case_ai
 
-        result = TradingSessionService._camel_case_ai({
+        result = _camel_case_ai({
             "direction": "LONG",
             "rationale": "test",
             "confidence": "High",

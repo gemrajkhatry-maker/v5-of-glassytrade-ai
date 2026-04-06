@@ -121,8 +121,8 @@ class DriveTracker:
                         level_type="DRIVE_LEVEL",
                         tick_size=tick_size,
                     )
-                except Exception:
-                    pass
+                except TypeError:
+                    pass  # Drive level extraction error — non-critical
             return DriveResult(
                 drive_number=1,
                 entry_valid=False,  # D1 never valid
@@ -213,7 +213,7 @@ class DriveTracker:
                     self._alert_manager.clear_alerts_for_level(
                         getattr(self, "_current_symbol", ""), level
                     )
-                except Exception:
+                except TypeError:
                     pass
             logger.info(
                 "D%d at level %.2f (dir=%s): level exhausted, entry suppressed",

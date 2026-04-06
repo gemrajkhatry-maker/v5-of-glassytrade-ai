@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_IST = timezone(timedelta(hours=5, minutes=30))
+from app.shared.timezones import IST
 
 
 class PromptEngineeringService:
@@ -77,7 +77,7 @@ class PromptEngineeringService:
                     )
                 volume_bubble_desc = "; ".join(bubble_parts)
             except Exception:
-                pass
+                logger.debug("Failed to build volume bubble description for prompt")
 
         # Stacked imbalances from footprint
         imbalance_desc = ""
@@ -175,8 +175,8 @@ class PromptEngineeringService:
         if not storage:
             return ""
         try:
-            _ist = timezone(timedelta(hours=5, minutes=30))
-            _today = datetime.now(_ist).strftime("%Y-%m-%d")
+            
+            _today = datetime.now(IST).strftime("%Y-%m-%d")
             recent_trades = storage.get_recent_trades(limit=10)
             if not recent_trades:
                 return ""

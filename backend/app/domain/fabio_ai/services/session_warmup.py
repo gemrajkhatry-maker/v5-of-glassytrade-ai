@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
-IST = timezone(timedelta(hours=5, minutes=30))
 
 
 class SessionWarmupFilter:

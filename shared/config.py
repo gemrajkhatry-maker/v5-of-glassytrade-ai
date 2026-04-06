@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 from typing import Optional, List
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
 
 class SharedSettings(BaseSettings):
     """
@@ -15,17 +14,17 @@ class SharedSettings(BaseSettings):
     Automatically loads from .env in the project root.
     """
     # Dhan Credentials
-    DHAN_CLIENT_ID: str = Field(default="", env="DHAN_CLIENT_ID")
-    DHAN_ACCESS_TOKEN: str = Field(default="", env="DHAN_ACCESS_TOKEN")
+    DHAN_CLIENT_ID: str = ""
+    DHAN_ACCESS_TOKEN: str = ""
     
     # Environment
-    ENVIRONMENT: str = Field(default="development", env="ENVIRONMENT")
-    DEBUG: bool = Field(default=False, env="DEBUG")
+    ENVIRONMENT: str = "development"
+    DEBUG: bool = False
     
     # Market Defaults
-    DEFAULT_EXCHANGE: str = Field(default="NFO", env="DEFAULT_EXCHANGE")
-    TRADING_MODE: str = Field(default="PAPER", env="TRADING_MODE")
-    DRY_RUN: bool = Field(default=False, env="DRY_RUN")
+    DEFAULT_EXCHANGE: str = "NFO"
+    TRADING_MODE: str = "PAPER"
+    DRY_RUN: bool = False
 
     model_config = SettingsConfigDict(
         env_file=str(Path(__file__).resolve().parent.parent / ".env"),

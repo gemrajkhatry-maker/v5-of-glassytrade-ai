@@ -271,6 +271,6 @@ class AsyncPersistenceBus:
                 self._execute_batch(batch)
                 batch.clear()
 
-            except Exception:
+            except ValueError:
                 logger.error("AsyncPersistenceBus worker error", exc_info=True)
                 batch.clear()

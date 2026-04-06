@@ -1,0 +1,48 @@
+[importlinter]
+root_package = app
+include_external_packages = True
+output = .lint-imports-report.txt
+
+# ─── Layer constraints (enforce DDD layering) ──────────────────────────
+
+[importlinter:contract:1]
+name = Domain must not import Application, API, Infrastructure, or Config
+type = forbidden
+source_modules =
+  app.domain
+forbidden_modules =
+  app.application
+  app.api
+  app.infrastructure
+  app.config
+ignore_type_checking_imports = True
+
+[importlinter:contract:2]
+name = Application must not import API at runtime
+type = forbidden
+source_modules =
+  app.application.services
+  app.application.handlers
+  app.application.utils
+  app.application.stream_manager
+  app.application.candle_aggregator
+  app.application.range_bar_builder
+  app.application.watchdog_manager
+forbidden_modules =
+  app.api
+ignore_type_checking_imports = True
+
+[importlinter:contract:3]
+name = Infrastructure adapters must not import Application or API
+type = forbidden
+source_modules =
+  app.infrastructure.adapters
+forbidden_modules =
+  app.application
+  app.api
+ignore_type_checking_imports = True
+
+# NOTE: engine.py imports app.api.dependencies inside TYPE_CHECKING block.
+# Import-linter v2.x does not support ignore_type_checking_imports on
+# forbidden contracts, so engine.py is excluded from contract 2 above.
+# This is a compile-time-only import and does not violate layering at runtime.

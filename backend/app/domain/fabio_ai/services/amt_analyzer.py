@@ -10,9 +10,12 @@ CVD tracking, profile shape classification, and session context.
 
 from __future__ import annotations
 
+import logging
 import math
 from datetime import datetime
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 from app.domain.fabio_ai.services import mlx_compute as mc
 
@@ -59,8 +62,12 @@ from app.domain.services.acceptance_rejection import (
     AcceptanceRejectionEngine,
     ARResult,
 )
-from app.domain.services.initial_balance import InitialBalanceTracker
-from app.domain.services.break_detector import detect_break
+from app.domain.services.initial_balance_engine import InitialBalanceEngine
+from app.domain.services.break_detector import (
+    detect_break,
+    check_ib_break_tick,
+    check_ib_break_tick,
+)
 from app.domain.services.lvn_play_detector import detect_lvn_play
 from app.domain.services.volume_profile import create_profile
 from app.domain.services.displacement_detector import (
@@ -71,6 +78,8 @@ from app.domain.services.signal_generator import (
     generate_signal,
     MarketState as SignalMarketState,
 )
+from app.domain.fabio_ai.services.opening_classifier import OpeningTypeClassifier
+from app.domain.fabio_ai.services.mtf_analyzer import MultiTimeframeAMTAnalyzer
 
 if TYPE_CHECKING:
     from app.config_models import SymbolConfig
@@ -234,7 +243,9 @@ class AMTAnalyzer:
         # VWAP variance accumulator for σ bands
         self._vwap_cum_sq_vol: float = 0.0  # Σ(price² × volume)
         # Initial Balance tracker
-        self._ib_tracker = InitialBalanceTracker()
+        self._ib_tracker = InitialBalanceEngine(ib_minutes=10)
+        # Sticky IB break state (survives price re-entry into IB)
+        self._ib_break_direction: str = ""
         # Acceptance/Rejection engine
         self._ar_engine = AcceptanceRejectionEngine()
         # Previous CVD slope for delta-flip detection in LVN play
@@ -265,6 +276,8 @@ class AMTAnalyzer:
             self._persistent_agg_scorer = PersistentAggressionScorer()
         # LVN persistence tracker (prevents LVN appearing/disappearing)
         self._lvn_tracker = LVNPersistenceTracker()
+        self._opening_classifier = OpeningTypeClassifier()
+        self._mtf_analyzer = MultiTimeframeAMTAnalyzer()
 
     def detect_displacement_leg(self, data: list[OHLC]) -> dict:
         """Detect displacement and return leg profile data.
@@ -384,6 +397,229 @@ class AMTAnalyzer:
             "swing_delta": sum(c.delta for c in leg_candles),
         }
 
+    def _update_session_vwap(self, current, typical_price) -> float:
+        """Update session VWAP with session boundary detection and accumulation.
+
+        Returns the current session VWAP value.
+        """
+        quote_vol = typical_price * current.volume if current.volume > 0 else 0.0
+        _reset_session = False
+        if self._vwap_last_time:
+            try:
+                if current.time[:10] != self._vwap_last_time[:10]:
+                    _reset_session = True
+            except (TypeError, IndexError):
+                pass
+            if not _reset_session and current.time < self._vwap_last_time:
+                _reset_session = True
+        if _reset_session:
+            self._vwap_cum_vol = 0.0
+            self._vwap_cum_quote_vol = 0.0
+            self._vwap_cum_sq_vol = 0.0
+            self._ib_tracker.reset()
+            self._ib_break_direction = ""
+            self._ar_engine.reset()
+            self._persistent_agg_scorer.reset()
+            self._lvn_tracker.reset()
+        _is_new_candle = current.time != self._vwap_last_time
+        self._vwap_last_time = current.time
+        if _is_new_candle:
+            self._vwap_cum_vol += float(current.volume)
+            self._vwap_cum_quote_vol += float(quote_vol)
+            self._vwap_cum_sq_vol += float(
+                typical_price * typical_price * current.volume
+            )
+        return float(
+            self._vwap_cum_quote_vol / self._vwap_cum_vol
+            if self._vwap_cum_vol > 0
+            else current.close
+        )
+
+    def _compute_order_flow_metrics(
+        self,
+        recent_data,
+        order_book,
+        current,
+        agg_prints,
+        market_state,
+        lvns,
+        vah,
+        val,
+        poc,
+        tick_size,
+    ) -> dict:
+        """Compute order flow detectors and aggression score. Extracted from analyze()."""
+        result = {}
+
+        # Average volume
+        result["avg_candle_vol"] = (
+            sum(float(d.volume) for d in recent_data) / len(recent_data)
+            if recent_data
+            else 0.0
+        )
+
+        # OBI from order book
+        result["obi"] = 0.0
+        result["toxicity"] = 0.0
+        if order_book:
+            bids_q = sum(b.quantity for b in order_book.bids)
+            asks_q = sum(a.quantity for a in order_book.asks)
+            total = bids_q + asks_q
+            if total > 0:
+                result["obi"] = (bids_q - asks_q) / total
+            if len(order_book.bids) >= 3 and len(order_book.asks) >= 3:
+                top_bids_q = sum(b.quantity for b in order_book.bids[:3])
+                top_asks_q = sum(a.quantity for a in order_book.asks[:3])
+                top_total = top_bids_q + top_asks_q
+                if top_total > 0:
+                    top_obi = (top_bids_q - top_asks_q) / top_total
+                    if abs(top_obi) > 0.7:
+                        result["toxicity"] = top_obi
+
+        result["norm_delta"] = (
+            current.delta / current.volume if current.volume > 0 else 0
+        )
+
+        # FR-06-01: Footprint imbalance
+        has_agg_prints = len(agg_prints) >= 2
+        has_strong_delta = abs(result["norm_delta"]) > 0.30
+        result["footprint_confirmed"] = has_agg_prints and has_strong_delta
+
+        # FR-06-02: CVD
+        cvd_state = self._cvd_tracker.state()
+        result["cvd_state"] = cvd_state
+        result["cvd_confirmed"] = False
+        if market_state == MarketState.IMBALANCED and cvd_state.slope > 0:
+            result["cvd_confirmed"] = True
+        elif market_state == MarketState.IMBALANCED and cvd_state.slope < 0:
+            result["cvd_confirmed"] = True
+        elif cvd_state.has_divergence:
+            result["cvd_confirmed"] = True
+
+        # FR-06-03: Big trade
+        big_trade = self._big_trade_detector.detect(current, result["avg_candle_vol"])
+        result["big_trade_confirmed"] = big_trade is not None
+
+        # FR-06-04: Absorption
+        atr = (
+            max(d.high for d in recent_data[-14:])
+            - min(d.low for d in recent_data[-14:])
+        ) / max(len(recent_data[-14:]), 1)
+        absorption = self._absorption_detector.detect(
+            current, atr, result["avg_candle_vol"]
+        )
+        result["absorption_detected"] = absorption.detected
+        result["absorption_side"] = absorption.side if absorption.detected else ""
+        result["absorption_range_ratio"] = absorption.range_ratio
+        result["absorption_vol_ratio"] = absorption.vol_ratio
+
+        # FR-06-05: OFI
+        ofi_result = self._ofi_calculator.update(current)
+        result["ofi_result"] = ofi_result
+        result["ofi_aligned"] = (ofi_result.ofi > 0.10) or (ofi_result.ofi < -0.10)
+
+        # FR-06-06: Confluence
+        result["confluence_bonus"] = False
+        for lvn in lvns:
+            for level in [vah, val, poc]:
+                if level > 0 and abs(lvn - level) < tick_size * 3:
+                    result["confluence_bonus"] = True
+                    break
+
+        # FR-06-07: Volume bubble
+        bubble = self._bubble_detector.detect(current)
+        result["volume_bubble_near"] = bubble.detected
+
+        # Aggression scorer
+        self._persistent_agg_scorer.set_persistence_for_state(market_state)
+        agg_result = self._persistent_agg_scorer.score(
+            footprint_confirmed=result["footprint_confirmed"],
+            cvd_confirmed=result["cvd_confirmed"],
+            big_trade_confirmed=result["big_trade_confirmed"],
+            absorption_detected=result["absorption_detected"],
+            ofi_aligned=result["ofi_aligned"],
+            confluence_bonus=result["confluence_bonus"],
+            volume_bubble_near=result["volume_bubble_near"],
+        )
+        result["agg_result"] = agg_result
+        result["aggression_score"] = agg_result.score
+        result["has_aggression"] = agg_result.confirmed
+
+        return result
+
+    @staticmethod
+    def _compute_developing_va(developing_profile):
+        """Compute developing Value Area from incremental profile."""
+        dev_poc, dev_vah, dev_val = 0.0, 0.0, 0.0
+        if developing_profile is not None:
+            dev_profile_data = developing_profile.get_profile()
+            if dev_profile_data and len(dev_profile_data) >= 3:
+                dev_max_vol = max(p.volume for p in dev_profile_data)
+                if dev_max_vol > 0:
+                    dev_poc_idx = next(
+                        i
+                        for i, p in enumerate(dev_profile_data)
+                        if p.volume == dev_max_vol
+                    )
+                    dev_poc = dev_profile_data[dev_poc_idx].price
+                    dev_total = sum(p.volume for p in dev_profile_data)
+                    dev_target = dev_total * 0.7
+                    dev_acc = dev_max_vol
+                    dev_up, dev_down = dev_poc_idx, dev_poc_idx
+                    while dev_acc < dev_target:
+                        can_up = dev_up + 1 < len(dev_profile_data)
+                        can_down = dev_down - 1 >= 0
+                        if not can_up and not can_down:
+                            break
+                        up_vol = dev_profile_data[dev_up + 1].volume if can_up else -1
+                        dn_vol = (
+                            dev_profile_data[dev_down - 1].volume if can_down else -1
+                        )
+                        if up_vol >= dn_vol:
+                            dev_up += 1
+                            dev_acc += dev_profile_data[dev_up].volume
+                        else:
+                            dev_down -= 1
+                            dev_acc += dev_profile_data[dev_down].volume
+                    dev_step = (
+                        (dev_profile_data[1].price - dev_profile_data[0].price)
+                        if len(dev_profile_data) > 1
+                        else 0
+                    )
+                    dev_vah = dev_profile_data[dev_up].price + dev_step / 2
+                    dev_val = dev_profile_data[dev_down].price - dev_step / 2
+        return dev_poc, dev_vah, dev_val
+
+    @staticmethod
+    def _extract_session_open(data, current):
+        """Extract session open price from first candle of current date."""
+        current_date_prefix = current.time[:10] if len(current.time) >= 10 else ""
+        if current_date_prefix:
+            for d in data:
+                if d.time.startswith(current_date_prefix):
+                    return d.open
+        return data[0].open if data else 0.0
+
+    @staticmethod
+    def _classify_day_type(data, ib_complete, ib_high, ib_low):
+        """Classify day type: NORMAL, NEUTRAL, TREND, NORMAL_VARIATION."""
+        if not ib_complete or ib_high <= 0 or ib_low <= 0:
+            return "UNKNOWN"
+        session_high = max(d.high for d in data)
+        session_low = min(d.low for d in data)
+        ib_range = ib_high - ib_low
+        if ib_range <= 0:
+            return "UNKNOWN"
+        dist_above = max(0.0, session_high - ib_high)
+        dist_below = max(0.0, ib_low - session_low)
+        if dist_above == 0 and dist_below == 0:
+            return "NORMAL"
+        elif dist_above > 0 and dist_below > 0:
+            return "NEUTRAL"
+        elif dist_above > ib_range or dist_below > ib_range:
+            return "TREND"
+        return "NORMAL_VARIATION"
+
     def analyze(
         self,
         data: list[OHLC],
@@ -397,6 +633,8 @@ class AMTAnalyzer:
         session_pnl: float = 0.0,
         npoc_tracker: "NPOCTracker | None" = None,
         underlying: str = "NIFTY",
+        daily_data: list[OHLC] | None = None,
+        hourly_data: list[OHLC] | None = None,
     ) -> AMTResult:
         """Run the full AMT analysis pipeline."""
         empty = AMTResult(
@@ -407,6 +645,9 @@ class AMTAnalyzer:
         )
 
         if not data or len(data) < 5:
+            logger.debug(
+                "AMT: insufficient data — len(data)=%d", len(data) if data else 0
+            )
             return empty
 
         lookback = len(data)
@@ -416,9 +657,37 @@ class AMTAnalyzer:
         # 1. Volume Profile — use incremental if available, else full rebuild
         if incremental_profile is not None:
             profile = incremental_profile.get_profile()
+            logger.debug(
+                "AMT: incremental profile — initialized=%s candles=%d profile_len=%d",
+                incremental_profile._initialized,
+                len(incremental_profile._candles),
+                len(profile),
+            )
         else:
             profile = create_profile(recent_data)
+            logger.info("AMT: full rebuild profile — profile_len=%d", len(profile))
         if not profile:
+            logger.info("AMT: empty profile — returning empty result")
+            return empty
+
+        lookback = len(data)
+        recent_data = data[-lookback:]
+        current = data[-1]
+
+        # 1. Volume Profile — use incremental if available, else full rebuild
+        if incremental_profile is not None:
+            profile = incremental_profile.get_profile()
+            logger.debug(
+                "AMT: incremental profile — initialized=%s candles=%d profile_len=%d",
+                incremental_profile._initialized,
+                len(incremental_profile._candles),
+                len(profile),
+            )
+        else:
+            profile = create_profile(recent_data)
+            logger.info("AMT: full rebuild profile — profile_len=%d", len(profile))
+        if not profile:
+            logger.info("AMT: empty profile — returning empty result")
             return empty
 
         # POC — tie-break: closest to VWAP when multiple bins share max volume
@@ -564,96 +833,39 @@ class AMTAnalyzer:
         self._previous_state = market_state
 
         # 3. Order Flow Detectors + Aggression Scoring (FR-03/06)
-        # Compute average volume for detectors
-        avg_candle_vol = (
-            sum(float(d.volume) for d in recent_data) / len(recent_data)
-            if recent_data
-            else 0.0
+        flow = self._compute_order_flow_metrics(
+            recent_data,
+            order_book,
+            current,
+            agg_prints,
+            market_state,
+            lvns,
+            vah,
+            val,
+            poc,
+            tick_size,
         )
+        avg_candle_vol = flow["avg_candle_vol"]
+        obi = flow["obi"]
+        toxicity = flow["toxicity"]
+        norm_delta = flow["norm_delta"]
+        footprint_confirmed = flow["footprint_confirmed"]
+        cvd_confirmed = flow["cvd_confirmed"]
+        cvd_state = flow["cvd_state"]
+        big_trade_confirmed = flow["big_trade_confirmed"]
+        absorption_detected = flow["absorption_detected"]
+        absorption_side = flow["absorption_side"]
+        absorption_range_ratio = flow["absorption_range_ratio"]
+        absorption_vol_ratio = flow["absorption_vol_ratio"]
+        ofi_result = flow["ofi_result"]
+        ofi_aligned = flow["ofi_aligned"]
+        confluence_bonus = flow["confluence_bonus"]
+        volume_bubble_near = flow["volume_bubble_near"]
+        agg_result = flow["agg_result"]
+        aggression_score = flow["aggression_score"]
+        has_aggression = flow["has_aggression"]
 
-        # OBI from order book (kept for backward compat)
-        obi = 0.0
-        toxicity = 0.0
-        if order_book:
-            bids_q = sum(b.quantity for b in order_book.bids)
-            asks_q = sum(a.quantity for a in order_book.asks)
-            total = bids_q + asks_q
-            if total > 0:
-                obi = (bids_q - asks_q) / total
-            if len(order_book.bids) >= 3 and len(order_book.asks) >= 3:
-                top_bids_q = sum(b.quantity for b in order_book.bids[:3])
-                top_asks_q = sum(a.quantity for a in order_book.asks[:3])
-                top_total = top_bids_q + top_asks_q
-                if top_total > 0:
-                    top_obi = (top_bids_q - top_asks_q) / top_total
-                    if abs(top_obi) > 0.7:
-                        toxicity = top_obi
-
-        norm_delta = current.delta / current.volume if current.volume > 0 else 0
-
-        # FR-06-01: Footprint imbalance confirmed (≥40% cells at ≥3:1)
-        # Two conditions must agree:
-        #   1. Aggressive volume prints detected (institutional activity)
-        #   2. Current candle has strong directional delta (|norm_delta| > 0.3)
-        # This aligns the aggression signal with the tick-level footprint delta
-        has_agg_prints = len(agg_prints) >= 2
-        has_strong_delta = abs(norm_delta) > 0.30
-        footprint_confirmed = has_agg_prints and has_strong_delta
-
-        # FR-06-02: CVD slope/divergence confirms
-        cvd_confirmed = False
-        cvd_state = self._cvd_tracker.state()
-        if market_state == MarketState.IMBALANCED and cvd_state.slope > 0:
-            cvd_confirmed = True  # Buying pressure confirms uptrend
-        elif market_state == MarketState.IMBALANCED and cvd_state.slope < 0:
-            cvd_confirmed = True  # Selling pressure confirms downtrend
-        elif cvd_state.has_divergence:
-            cvd_confirmed = True  # Divergence is a signal
-
-        # FR-06-03: Big trade cluster
-        big_trade = self._big_trade_detector.detect(current, avg_candle_vol)
-        big_trade_confirmed = big_trade is not None
-
-        # FR-06-04: Absorption
-        atr = (
-            max(d.high for d in recent_data[-14:])
-            - min(d.low for d in recent_data[-14:])
-        ) / max(len(recent_data[-14:]), 1)
-        absorption = self._absorption_detector.detect(current, atr, avg_candle_vol)
-        absorption_detected = absorption.detected
-
-        # FR-06-05: OFI aligned
-        ofi_result = self._ofi_calculator.update(current)
-        ofi_aligned = (ofi_result.ofi > 0.10) or (ofi_result.ofi < -0.10)
-
-        # FR-06-06: Confluence (LVN near session VAH/VAL/POC)
-        confluence_bonus = False
-        for lvn in lvns:
-            for level in [vah, val, poc]:
-                if level > 0 and abs(lvn - level) < tick_size * 3:
-                    confluence_bonus = True
-                    break
-
-        # FR-06-07: Volume bubble near entry
-        bubble = self._bubble_detector.detect(current)
-        volume_bubble_near = bubble.detected
-
-        # Aggression scorer (FR-06 additive, max 4.5) — with persistence filter
-        # Adjust persistence bars based on market state (Section 10.2 fix)
-        self._persistent_agg_scorer.set_persistence_for_state(market_state)
-        agg_result = self._persistent_agg_scorer.score(
-            footprint_confirmed=footprint_confirmed,
-            cvd_confirmed=cvd_confirmed,
-            big_trade_confirmed=big_trade_confirmed,
-            absorption_detected=absorption_detected,
-            ofi_aligned=ofi_aligned,
-            confluence_bonus=confluence_bonus,
-            volume_bubble_near=volume_bubble_near,
-        )
-        aggression_score = agg_result.score
-        has_aggression = agg_result.confirmed
-
-        # Compute profile shape once and attach to result
+        # Profile shape and bimodal override
         shape = classify_shape(profile)
 
         # Bimodal override: two-peaked profile = auction market, not trend.
@@ -662,42 +874,9 @@ class AMTAnalyzer:
         if shape.shape == "B" and market_state == MarketState.IMBALANCED:
             market_state = MarketState.BALANCED
 
-        # Session VWAP — rolling accumulator (resets on session boundary)
-        # Approximate quote volume from candle: typical_price * volume
+        # Session VWAP
         typical_price = (current.high + current.low + current.close) / 3
-        quote_vol = typical_price * current.volume if current.volume > 0 else 0.0
-
-        # Detect session boundary: different date = new session
-        _reset_session = False
-        if self._vwap_last_time:
-            try:
-                prev_date = self._vwap_last_time[:10]  # "YYYY-MM-DD"
-                curr_date = current.time[:10]
-                if curr_date != prev_date:
-                    _reset_session = True
-            except (TypeError, IndexError):
-                pass
-            # Fallback: time going backwards still triggers reset
-            if not _reset_session and current.time < self._vwap_last_time:
-                _reset_session = True
-        if _reset_session:
-            self._vwap_cum_vol = 0.0
-            self._vwap_cum_quote_vol = 0.0
-            self._vwap_cum_sq_vol = 0.0
-            self._ib_tracker.reset()
-            self._ar_engine.reset()
-            self._persistent_agg_scorer.reset()
-            self._lvn_tracker.reset()
-        self._vwap_last_time = current.time
-
-        self._vwap_cum_vol += float(current.volume)
-        self._vwap_cum_quote_vol += float(quote_vol)
-        self._vwap_cum_sq_vol += float(typical_price * typical_price * current.volume)
-        session_vwap = float(
-            self._vwap_cum_quote_vol / self._vwap_cum_vol
-            if self._vwap_cum_vol > 0
-            else current.close
-        )
+        session_vwap = self._update_session_vwap(current, typical_price)
 
         # VWAP standard deviation bands (±1σ, ±2σ)
         vwap_std = 0.0
@@ -710,6 +889,22 @@ class AMTAnalyzer:
         vwap_lower_1 = session_vwap - vwap_std
         vwap_upper_2 = session_vwap + 2 * vwap_std
         vwap_lower_2 = session_vwap - 2 * vwap_std
+        # FIX BUG #1 + #5: Use close price for deviation (not max of high/close)
+        live_price = float(current.close)
+        vwap_deviation_sigmas = (
+            (live_price - session_vwap) / vwap_std if vwap_std > 0 else 0.0
+        )
+        # Guard: extreme deviation suggests data source mismatch (e.g., VWAP from
+        # underlying futures but live_price from option premium)
+        if abs(vwap_deviation_sigmas) > 10:
+            logger.warning(
+                "VWAP deviation extreme: %.2fσ — possible data source mismatch "
+                "(vwap=%.2f, live=%.2f, std=%.2f)",
+                vwap_deviation_sigmas,
+                session_vwap,
+                live_price,
+                vwap_std,
+            )
 
         # CVD — wire to live path for entry/exit decisions
         cvd_state = self._cvd_tracker.update(current)
@@ -741,7 +936,8 @@ class AMTAnalyzer:
             )
 
         # Initial Balance tracking
-        ib_high, ib_low, ib_complete = self._ib_tracker.update(current)
+        ib_state = self._ib_tracker.update(current)
+        ib_high, ib_low, ib_complete = ib_state.ib_high, ib_state.ib_low, ib_state.is_complete
 
         # POC migration with price alignment
         poc_migration = self._poc_tracker.update(poc, current.close)
@@ -760,79 +956,55 @@ class AMTAnalyzer:
 
         # Break detection — initiative vs responsive at key levels
         break_state = detect_break(recent_data, vah, val, ib_high, ib_low, baseline_vol)
+        if break_state is None:
+            break_state = {
+                "break_direction": "",
+                "break_type": "",
+                "break_level": 0.0,
+                "volume_ratio": 0.0,
+            }
 
-        # Developing VA — short-lookback profile for fast adaptation
-        dev_poc, dev_vah, dev_val = 0.0, 0.0, 0.0
-        if developing_profile is not None:
-            dev_profile_data = developing_profile.get_profile()
-            if dev_profile_data and len(dev_profile_data) >= 3:
-                dev_max_vol = max(p.volume for p in dev_profile_data)
-                if dev_max_vol > 0:
-                    dev_poc_idx = next(
-                        i
-                        for i, p in enumerate(dev_profile_data)
-                        if p.volume == dev_max_vol
-                    )
-                    dev_poc = dev_profile_data[dev_poc_idx].price
-                    # Quick 70% VA
-                    dev_total = sum(p.volume for p in dev_profile_data)
-                    dev_target = dev_total * 0.7
-                    dev_acc = dev_max_vol
-                    dev_up, dev_down = dev_poc_idx, dev_poc_idx
-                    while dev_acc < dev_target:
-                        can_up = dev_up + 1 < len(dev_profile_data)
-                        can_down = dev_down - 1 >= 0
-                        if not can_up and not can_down:
-                            break
-                        up_vol = dev_profile_data[dev_up + 1].volume if can_up else -1
-                        dn_vol = (
-                            dev_profile_data[dev_down - 1].volume if can_down else -1
-                        )
-                        if up_vol >= dn_vol:
-                            dev_up += 1
-                            dev_acc += dev_profile_data[dev_up].volume
-                        else:
-                            dev_down -= 1
-                            dev_acc += dev_profile_data[dev_down].volume
-                    dev_step = (
-                        (dev_profile_data[1].price - dev_profile_data[0].price)
-                        if len(dev_profile_data) > 1
-                        else 0
-                    )
-                    dev_vah = dev_profile_data[dev_up].price + dev_step / 2
-                    dev_val = dev_profile_data[dev_down].price - dev_step / 2
+        # FIX BUG #2: Live-tick IB break detection (sticky)
+        ib_tick_break = check_ib_break_tick(
+            live_price=live_price,
+            ib_high=ib_high,
+            ib_low=ib_low,
+            ib_complete=ib_complete,
+            current_break_direction=self._ib_break_direction,
+        )
+        if ib_tick_break["break_direction"]:
+            self._ib_break_direction = ib_tick_break["break_direction"]
+            break_state = {
+                "break_direction": ib_tick_break["break_direction"],
+                "break_type": ib_tick_break["break_type"],
+                "break_level": ib_tick_break["break_level"],
+                "volume_ratio": 1.0,
+            }
 
-        # Extract the current session's open price.
-        # Find the first candle of the current date (used for gap and bias).
-        current_date_prefix = current.time[:10] if len(current.time) >= 10 else ""
-        session_open_price = current.open
-        if current_date_prefix:
-            for d in data:
-                if d.time.startswith(current_date_prefix):
-                    session_open_price = d.open
-                    break
-        else:
-            session_open_price = data[0].open if data else 0.0
+        # 5. Opening Type Classification (Valentini methodology)
+        opening_result = self._opening_classifier.classify(
+            data=recent_data,
+            prior_vah=prior_vah,
+            prior_val=prior_val,
+            prior_poc=prior_poc,
+        )
 
-        # Day-Type Classification (Fabio Phase 3)
-        day_type = "UNKNOWN"
-        if ib_complete and ib_high > 0 and ib_low > 0:
-            session_high = max(d.high for d in data)
-            session_low = min(d.low for d in data)
-            ib_range = ib_high - ib_low
+        # 6. Multi-Timeframe (MTF) Alignment
+        mtf_result = None
+        if daily_data and hourly_data:
+            mtf_result = self._mtf_analyzer.compute_alignment(
+                current_price=live_price,
+                daily_ohlc=daily_data,
+                hourly_ohlc=hourly_data,
+            )
 
-            if ib_range > 0:
-                dist_above = max(0.0, session_high - ib_high)
-                dist_below = max(0.0, ib_low - session_low)
+        # 7. Acceptance vs Rejection (AR) Logic
+        ar_state = self._ar_engine.update(current, vah, val, baseline_vol)
 
-                if dist_above == 0 and dist_below == 0:
-                    day_type = "NORMAL"
-                elif dist_above > 0 and dist_below > 0:
-                    day_type = "NEUTRAL"
-                elif dist_above > ib_range or dist_below > ib_range:
-                    day_type = "TREND"
-                else:
-                    day_type = "NORMAL_VARIATION"
+        # Developing VA, session open, and day type
+        dev_poc, dev_vah, dev_val = self._compute_developing_va(developing_profile)
+        session_open_price = self._extract_session_open(data, current)
+        day_type = self._classify_day_type(data, ib_complete, ib_high, ib_low)
 
         # NPOC (Naked POC) — check fills and get nearest targets
         npoc_above = 0.0
@@ -868,6 +1040,7 @@ class AMTAnalyzer:
             agg_result.direction_sign,
             agg_result.pyramid_eligible,
             session_vwap,
+            absorption_side=absorption_side,
         )
 
         return AMTResult(
@@ -890,6 +1063,7 @@ class AMTAnalyzer:
             vwap_lower_1=vwap_lower_1,
             vwap_upper_2=vwap_upper_2,
             vwap_lower_2=vwap_lower_2,
+            vwap_deviation_sigmas=vwap_deviation_sigmas,
             balance_ratio=balance_ratio,
             leg_profile=tuple(leg_data.get("profile", [])),
             leg_lvns=tuple(leg_data.get("lvns", [])),
@@ -944,7 +1118,7 @@ class AMTAnalyzer:
             break_direction=break_state["break_direction"],
             break_type=break_state["break_type"],
             break_level=break_state["break_level"],
-            ofi=obi,
+            ofi=ofi_result.ofi,
             dev_poc=dev_poc,
             dev_vah=dev_vah,
             dev_val=dev_val,
@@ -953,6 +1127,24 @@ class AMTAnalyzer:
             bubble_retests=bubble_retests,
             npoc_above=npoc_above,
             npoc_below=npoc_below,
+            # Phase 5: MTF & Opening Type
+            opening_type=opening_result.type,
+            mtf_alignment=mtf_result.alignment if mtf_result else "",
+            daily_vah=mtf_result.daily.vah if mtf_result else 0.0,
+            daily_val=mtf_result.daily.val if mtf_result else 0.0,
+            daily_poc=mtf_result.daily.poc if mtf_result else 0.0,
+            hourly_vah=mtf_result.hourly.vah if mtf_result else 0.0,
+            hourly_val=mtf_result.hourly.val if mtf_result else 0.0,
+            hourly_poc=mtf_result.hourly.poc if mtf_result else 0.0,
+            # Market structure classification (5-state)
+            market_structure=structure.state,
+            structure_confidence=structure.confidence_score,
+            # Day type classification
+            day_type=day_type,
+            # Absorption context
+            absorption_side=absorption_side,
+            absorption_range_ratio=absorption_range_ratio,
+            absorption_vol_ratio=absorption_vol_ratio,
         )
 
     def _generate_signal(
@@ -969,6 +1161,7 @@ class AMTAnalyzer:
         aggression_direction: int = 0,
         has_high_aggression: bool = False,
         session_vwap: float = 0.0,
+        absorption_side: str = "",
     ) -> Signal | None:
         """Generate direction signal from market microstructure.
 
@@ -983,6 +1176,36 @@ class AMTAnalyzer:
         # GATE 3: NO_TRADE state never generates signals
         if market_state == MarketState.NO_TRADE:
             return None
+
+        # #22: Absorption at structural level — primary AAA/Failed Auction trigger
+        # Fabio: absorption at LVN/VAH/VAL = smart money accumulating/distributing
+        # SELL_ABSORBED = buyers absorbing sellers → bullish → LONG signal
+        # BUY_ABSORBED = sellers absorbing buyers → bearish → SHORT signal
+        if absorption_side:
+            if absorption_side == "SELL_ABSORBED":
+                # Bullish absorption — LONG signal
+                return Signal(
+                    type=SignalType.BUY,
+                    price=current.close,
+                    reason=f"Absorption confirmed: SELL_ABSORBED at {current.close:.2f}. Smart money buying.",
+                    setup=SetupType.AAA,
+                    source=Source.AMT,
+                    stop_loss=val,
+                    take_profit=vah,
+                    timestamp=now_iso,
+                )
+            elif absorption_side == "BUY_ABSORBED":
+                # Bearish absorption — SHORT signal
+                return Signal(
+                    type=SignalType.SELL,
+                    price=current.close,
+                    reason=f"Absorption confirmed: BUY_ABSORBED at {current.close:.2f}. Smart money selling.",
+                    setup=SetupType.AAA,
+                    source=Source.AMT,
+                    stop_loss=vah,
+                    take_profit=val,
+                    timestamp=now_iso,
+                )
 
         # C. PROBING Playbook — unconfirmed break with high aggression
         # PROBING = price outside VA without displacement. Two scenarios:

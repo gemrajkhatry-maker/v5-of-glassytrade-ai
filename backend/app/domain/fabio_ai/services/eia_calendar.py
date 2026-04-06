@@ -12,10 +12,10 @@ from __future__ import annotations
 import logging
 from datetime import datetime, time, timedelta, timezone
 from dataclasses import dataclass
+from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
-_IST = timezone(timedelta(hours=5, minutes=30))
 _ET = timezone(timedelta(hours=-5))  # Eastern Time (EST)
 
 
@@ -75,7 +75,7 @@ class EIACalendar:
 
         window = EIA_SCHEDULE[symbol]
         if now is None:
-            now = datetime.now(_IST)
+            now = datetime.now(IST)
 
         # Convert current time to ET
         now_et = now.astimezone(_ET)
@@ -123,7 +123,7 @@ class EIACalendar:
 
         window = EIA_SCHEDULE[symbol]
         if now is None:
-            now = datetime.now(_IST)
+            now = datetime.now(IST)
 
         now_et = now.astimezone(_ET)
 
@@ -144,7 +144,7 @@ class EIACalendar:
             next_release_date, window.release_time_et, tzinfo=_ET
         )
 
-        return next_release_et.astimezone(_IST)
+        return next_release_et.astimezone(IST)
 
     def get_suppression_window(
         self, symbol: str, now: datetime | None = None
@@ -159,7 +159,7 @@ class EIACalendar:
 
         window = EIA_SCHEDULE[symbol]
         if now is None:
-            now = datetime.now(_IST)
+            now = datetime.now(IST)
 
         now_et = now.astimezone(_ET)
 
@@ -174,8 +174,8 @@ class EIACalendar:
 
         if suppression_start <= now_et <= suppression_end:
             return (
-                suppression_start.astimezone(_IST),
-                suppression_end.astimezone(_IST),
+                suppression_start.astimezone(IST),
+                suppression_end.astimezone(IST),
             )
 
         return None

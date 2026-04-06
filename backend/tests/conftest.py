@@ -1,31 +1,34 @@
 """Shared test fixtures and configuration.
 
 This conftest.py provides:
-1. Mock shared module for tests that import from shared
-2. Common fixtures for all test modules
+1. Project root on sys.path so 'shared' and 'config' packages resolve
+2. Mock for the shared module's subpackages before any imports that depend on them
 3. Test environment setup
 """
 
 from __future__ import annotations
 
-import sys
-from unittest.mock import MagicMock
 import os
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock
 
-# Ensure parent directory is on sys.path for 'shared' module
-_parent_dir = os.path.join(os.path.dirname(__file__), "..", "..")
-if _parent_dir not in sys.path:
-    sys.path.insert(0, _parent_dir)
+# ---------------------------------------------------------------------------
+# Path setup — add project root to sys.path so packages like 'shared' and
+# 'config' (which live at the monorepo root, not inside backend/) resolve.
+# ---------------------------------------------------------------------------
+_project_root = str(
+    Path(__file__).resolve().parent.parent.parent  # backend/tests → backend → project root
+)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
-# Mock the shared module before any imports that depend on it
-if "shared" not in sys.modules:
-    _shared = MagicMock()
-    _shared.conversion.to_float = lambda v: float(v) if v is not None else 0.0
-    _shared.conversion.to_decimal = lambda v: v
-    sys.modules["shared"] = _shared
-    sys.modules["shared.conversion"] = _shared.conversion
-    sys.modules["shared.config"] = MagicMock()
-    sys.modules["shared.resilience"] = MagicMock()
-    sys.modules["shared.entities"] = MagicMock()
-    sys.modules["shared.error_handling"] = MagicMock()
-    sys.modules["shared.session_context"] = MagicMock()
+# Also ensure backend/ is importable (sibling of project root relative to tests/)
+_backend_root = str(Path(__file__).resolve().parent.parent)  # backend/
+if _backend_root not in sys.path:
+    sys.path.insert(0, _backend_root)
+
+# ---------------------------------------------------------------------------
+# No global mocks needed — stub modules provide importable types.
+# Tests that require network/hardware should mock at the test level.
+# ---------------------------------------------------------------------------

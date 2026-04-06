@@ -13,6 +13,12 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from app.domain.constants import (
+    AGENT_DECISION_THRESHOLD,
+    CONFIDENCE_HIGH_THRESHOLD,
+    CONFIDENCE_LOW_THRESHOLD,
+)
+
 from app.domain.trading.models.enums import MarketStateCodec, SetupType
 
 logger = logging.getLogger(__name__)
@@ -40,8 +46,8 @@ class SignalCoordinator:
 
     # Conviction thresholds (from Fabio's methodology)
     HIGH_CONVICTION_PROB = 0.65  # Strong edge, execute regardless
-    MEDIUM_CONVICTION_PROB = 0.55  # Needs structural confirmation
-    MIN_PROB_FOR_ENTRY = 0.55  # Minimum to even consider
+    MEDIUM_CONVICTION_PROB = AGENT_DECISION_THRESHOLD  # Needs structural confirmation
+    MIN_PROB_FOR_ENTRY = AGENT_DECISION_THRESHOLD      # Minimum to even consider
 
     def evaluate_entry(
         self,
@@ -130,11 +136,11 @@ class SignalCoordinator:
         # the entry is valid. The run_entry check already verified this.
 
         # 3. Conviction assessment based on probability
-        if agent_prob >= 0.65:
+        if agent_prob >= CONFIDENCE_HIGH_THRESHOLD:
             conviction = "HIGH"
-        elif agent_prob >= 0.55:
+        elif agent_prob >= AGENT_DECISION_THRESHOLD:
             conviction = "MEDIUM"
-        elif agent_prob >= 0.50:
+        elif agent_prob >= CONFIDENCE_LOW_THRESHOLD:
             conviction = "LOW"
         else:
             return EntryEvaluation(
@@ -142,7 +148,7 @@ class SignalCoordinator:
                 direction="FLAT",
                 probability=agent_prob,
                 timing="SKIP",
-                reason=f"Probability too low (P={agent_prob:.3f} < 0.55)",
+                reason=f"Probability too low (P={agent_prob:.3f} < {AGENT_DECISION_THRESHOLD})",
                 conviction="NONE",
                 setup_type="NONE",
             )
@@ -174,13 +180,13 @@ class SignalCoordinator:
                 )
 
         # 5. Conviction assessment — aligned with run_entry threshold (0.55)
-        if agent_prob >= 0.65:
+        if agent_prob >= CONFIDENCE_HIGH_THRESHOLD:
             conviction = "HIGH"
             should_enter = True
-        elif agent_prob >= 0.55:
+        elif agent_prob >= AGENT_DECISION_THRESHOLD:
             conviction = "MEDIUM"
             should_enter = True  # run_entry allows P >= 0.55
-        elif agent_prob >= 0.50:
+        elif agent_prob >= CONFIDENCE_LOW_THRESHOLD:
             conviction = "LOW"
             should_enter = True  # Allow with warning
         else:

@@ -17,23 +17,13 @@ from typing import Optional
 
 from app.domain.trading.models.trade_aggregate import (
     Trade,
-    TradeStatus,
     Direction,
-    FillType,
     EntrySignal,
     Fill,
     create_trade as create_trade_aggregate,
     create_trade_from_snapshot,
 )
 from app.domain.trading.models.enums import Side, SetupType
-from app.domain.trading.event_store import EventBus
-from app.domain.trading.events import (
-    FillReceived,
-    SignalGenerated,
-    PositionChanged,
-    PositionOpened,
-    PositionClosed,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +37,6 @@ class ManagedPositionAdapter:
     """
 
     trade: Trade
-    event_bus: Optional[EventBus] = None
 
     @property
     def position_id(self) -> str:
@@ -136,60 +125,21 @@ class ManagedPositionAdapter:
         )
 
         # UPDATE TRADE FIRST (transactional consistency)
-        # Only publish event if trade update succeeds
         closed_trade = self.trade.close(close_reason, timestamp)
-
-        # Publish event AFTER successful update
-        if self.event_bus:
-            self.event_bus.publish(
-                PositionClosed(
-                    trade_id=closed_trade.trade_id,
-                    symbol=closed_trade.symbol,
-                    close_reason=reason,
-                    realized_pnl=float(closed_trade.realized_pnl),
-                )
-            )
 
         return closed_trade
 
     def add_fill(self, fill: Fill) -> Trade:
-        """Add a fill and return new Trade.
-
-        Order of operations (transactional consistency):
-        1. Update trade first (may throw on invalid fill)
-        2. Only publish event if trade update succeeds
-        """
-        # UPDATE TRADE FIRST (transactional consistency)
-        # Only publish event if trade update succeeds
-        updated_trade = self.trade.add_fill(fill)
-
-        # Publish event AFTER successful update
-        if self.event_bus:
-            self.event_bus.publish(
-                FillReceived(
-                    trade_id=fill.trade_id,
-                    fill_id=fill.fill_id,
-                    order_id=fill.order_id,
-                    symbol=fill.symbol,
-                    side=fill.side.value,
-                    fill_type=fill.fill_type.value,
-                    price=float(fill.price),
-                    quantity=float(fill.quantity),
-                    commission=float(fill.commission),
-                    slippage=float(fill.slippage),
-                )
-            )
-
-        return updated_trade
+        """Add a fill and return new Trade."""
+        return self.trade.add_fill(fill)
 
 
 class TradeAggregateService:
-    """Service that manages Trade aggregates with event publishing."""
+    """Service that manages Trade aggregates."""
 
-    def __init__(self, event_bus: Optional[EventBus] = None):
+    def __init__(self):
         self._trades: dict[str, Trade] = {}
         self._adapters: dict[str, ManagedPositionAdapter] = {}
-        self._event_bus = event_bus
 
     def create_trade(
         self,
@@ -224,24 +174,8 @@ class TradeAggregateService:
 
         # Store
         self._trades[trade.trade_id] = trade
-        adapter = ManagedPositionAdapter(trade=trade, event_bus=self._event_bus)
+        adapter = ManagedPositionAdapter(trade=trade)
         self._adapters[trade.trade_id] = adapter
-
-        # Publish event
-        if self._event_bus:
-            self._event_bus.publish(
-                SignalGenerated(
-                    signal_id=signal.signal_id,
-                    symbol=symbol,
-                    direction=direction,
-                    entry_price=entry_price,
-                    stop_loss=stop_loss,
-                    take_profit=take_profit,
-                    position_size=position_size,
-                    confidence=confidence,
-                    setup_type=setup_type.value,
-                )
-            )
 
         return adapter
 
@@ -279,13 +213,9 @@ class TradeAggregateService:
         for trade_id, data in snapshot.items():
             trade = create_trade_from_snapshot(data)
             self._trades[trade_id] = trade
-            self._adapters[trade_id] = ManagedPositionAdapter(
-                trade=trade, event_bus=self._event_bus
-            )
+            self._adapters[trade_id] = ManagedPositionAdapter(trade=trade)
 
 
-def create_trade_aggregate_service(
-    event_bus: Optional[EventBus] = None,
-) -> TradeAggregateService:
+def create_trade_aggregate_service() -> TradeAggregateService:
     """Factory function to create TradeAggregateService."""
-    return TradeAggregateService(event_bus)
+    return TradeAggregateService()

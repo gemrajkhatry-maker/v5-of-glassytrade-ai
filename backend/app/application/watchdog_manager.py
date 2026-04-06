@@ -20,10 +20,11 @@ from app.application.utils import is_market_open
 
 if TYPE_CHECKING:
     from app.application.stream_manager import StreamManager
+from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
-IST = timezone(timedelta(hours=5, minutes=30))
+
 
 _GC_INTERVAL_SECS = 1800
 _STALE_THRESHOLD_SECS = 60.0

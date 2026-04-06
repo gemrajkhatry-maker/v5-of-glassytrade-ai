@@ -1,0 +1,8 @@
+
+--- Testing NEW (DeepSeek 1.5B) Quality ---
+
+STDERR:   File "/tmp/bench_quality_final.py", line 31
+    prompt = f"<|im_start|>system\n{test_instruction}<|im_end|>\n<|im_start|>user\n{data_json}<|im_end|>\n<|im_start|>assistant\n{"
+                                                                                                                                  ^
+SyntaxError: f-string: expecting '}'
+

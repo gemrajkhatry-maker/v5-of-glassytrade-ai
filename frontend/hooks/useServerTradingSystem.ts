@@ -336,7 +336,9 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     }
 
                     if (state.portfolio !== undefined) merged.portfolio = { ...existing.portfolio, ...state.portfolio };
-                    if (state.amt !== undefined) merged.amtAnalysis = { ...existing.amtAnalysis, ...state.amt };
+                    if (state.amt !== undefined) {
+                        merged.amtAnalysis = state.amt === null ? null : { ...existing.amtAnalysis, ...state.amt };
+                    }
                     if (state.genAIAnalysis !== undefined) merged.genAIAnalysis = { ...existing.genAIAnalysis, ...state.genAIAnalysis };
                     if (state.prediction?.predictions !== undefined) merged.predictions = state.prediction.predictions;
                     if (state.prediction?.analysis !== undefined) merged.aiAnalysis = state.prediction.analysis;
@@ -405,7 +407,12 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 }
 
                 const newPortfolio = state.portfolio ?? inst.portfolio;
-                const newAmtAnalysis = state.amt ?? inst.amtAnalysis;
+                // FIX: When backend sends explicit `amt: null`, clear stale value instead of
+                // falling back to hours-old cached analysis. Only use cached value when the
+                // key is absent from the message (meaning "no change" in delta protocol).
+                const newAmtAnalysis = 'amt' in state
+                    ? (state.amt ?? null)
+                    : inst.amtAnalysis;
                 const newGenAIAnalysis = state.genAIAnalysis ?? inst.genAIAnalysis;
                 const newPredictions = state.prediction?.predictions ?? inst.predictions;
                 const newModelWeights = state.modelWeights ?? inst.modelWeights;

@@ -124,7 +124,7 @@ async def lifespan(app: FastAPI):
             try:
                 storage._flush_ticks()
             except Exception:
-                pass
+                pass  # Storage may be closed or empty — shutdown in progress
     except Exception:
         log.debug("Tick flush on shutdown failed", exc_info=True)
 
@@ -136,7 +136,7 @@ async def lifespan(app: FastAPI):
             if handler and hasattr(handler, "cleanup"):
                 handler.cleanup()
         log.info("Thread pools shut down.")
-    except Exception:
+    except AttributeError:
         log.debug("Thread pool cleanup failed", exc_info=True)
 
 

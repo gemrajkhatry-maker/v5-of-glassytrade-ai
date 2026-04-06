@@ -1,8 +1,8 @@
 """Valentini AMT Gym Environment — RL environment for AMT trading.
 
 Implements a Gymnasium environment with:
-  - 12-feature observation vector (AMTObservation)
-  - 5 discrete actions (HOLD, TREND_BUY, TREND_SELL, REVERT_BUY, REVERT_SELL)
+  - 28-feature observation vector (expanded from 12 per #28)
+  - 7 discrete actions (HOLD, TREND_BUY, TREND_SELL, REVERT_BUY, REVERT_SELL, SCALE_IN, SCALE_OUT)
   - Action masking (balance → reversion only, imbalance → trend only)
   - 2.5σ aggression trigger required for entry
   - Dynamic stop-loss at aggression candle extremes
@@ -19,7 +19,11 @@ from gymnasium import spaces
 
 from app.domain.trading.models.value_objects import OHLC
 from app.domain.fabio_ai.models.observation import AMTObservation
-from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer, AMTConfig, compute_aggression_sigma
+from app.domain.fabio_ai.services.amt_analyzer import (
+    AMTAnalyzer,
+    AMTConfig,
+    compute_aggression_sigma,
+)
 from app.domain.fabio_ai.rl.reward_shaper import ValentiniRewardShaper, TradeResult
 
 
@@ -32,6 +36,8 @@ ACTION_TREND_BUY = 1
 ACTION_TREND_SELL = 2
 ACTION_REVERT_BUY = 3
 ACTION_REVERT_SELL = 4
+ACTION_SCALE_IN = 5  # #28: New — pyramid add
+ACTION_SCALE_OUT = 6  # #28: New — partial exit
 
 ACTION_NAMES = {
     ACTION_HOLD: "HOLD",
@@ -39,6 +45,8 @@ ACTION_NAMES = {
     ACTION_TREND_SELL: "TREND_SELL",
     ACTION_REVERT_BUY: "REVERT_BUY",
     ACTION_REVERT_SELL: "REVERT_SELL",
+    ACTION_SCALE_IN: "SCALE_IN",
+    ACTION_SCALE_OUT: "SCALE_OUT",
 }
 
 
@@ -46,14 +54,20 @@ ACTION_NAMES = {
 # Position Tracker
 # ---------------------------------------------------------------------------
 
+
 class _Position:
     """Internal position state for the Gym environment."""
 
     def __init__(
-        self, side: str, entry_price: float, stop_loss: float,
-        take_profit: float, entry_bar: int, aggression_candle: OHLC,
+        self,
+        side: str,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        entry_bar: int,
+        aggression_candle: OHLC,
     ) -> None:
-        self.side = side              # "LONG" | "SHORT"
+        self.side = side  # "LONG" | "SHORT"
         self.entry_price = entry_price
         self.stop_loss = stop_loss
         self.take_profit = take_profit
@@ -63,20 +77,13 @@ class _Position:
         self.max_favorable = 0.0
         self.failed_auction_hold = False
         self.fighting_flow_count = 0
-
-    @property
-    def unrealised_pnl(self) -> float:
-        return 0.0  # placeholder — updated externally
-
-    def pnl_at(self, price: float) -> float:
-        if self.side == "LONG":
-            return price - self.entry_price
-        return self.entry_price - price
+        self.size_fraction = 1.0  # #28: 1.0 = full, 0.4 = initial, 0.7 = after scale-in
 
 
 # ---------------------------------------------------------------------------
 # Environment
 # ---------------------------------------------------------------------------
+
 
 class ValentiniAMTEnv(gym.Env):
     """Gymnasium environment for Valentini AMT RL training.
@@ -107,11 +114,15 @@ class ValentiniAMTEnv(gym.Env):
         self.render_mode = render_mode
 
         # Spaces
-        # 12 continuous features: obs vector (categoricals encoded as floats)
+        # #28: Expanded from 12 to 27 features
         self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(12,), dtype=np.float32,
+            low=-np.inf,
+            high=np.inf,
+            shape=(27,),
+            dtype=np.float32,
         )
-        self.action_space = spaces.Discrete(5)
+        # #28: Expanded from 5 to 7 actions
+        self.action_space = spaces.Discrete(7)
 
         # Internal state
         self._analyzer = AMTAnalyzer()
@@ -130,7 +141,10 @@ class ValentiniAMTEnv(gym.Env):
     # -------------------------------------------------------------------
 
     def reset(
-        self, *, seed: int | None = None, options: dict | None = None,
+        self,
+        *,
+        seed: int | None = None,
+        options: dict | None = None,
     ) -> tuple[np.ndarray, dict]:
         super().reset(seed=seed)
         self._step_idx = self._lookback  # start after enough lookback
@@ -166,20 +180,32 @@ class ValentiniAMTEnv(gym.Env):
 
             # Check stop loss
             if pos.side == "LONG" and current.low <= pos.stop_loss:
-                reward += self._close_position(pos.stop_loss, bars_held, hit_target=False)
+                reward += self._close_position(
+                    pos.stop_loss, bars_held, hit_target=False
+                )
             elif pos.side == "SHORT" and current.high >= pos.stop_loss:
-                reward += self._close_position(pos.stop_loss, bars_held, hit_target=False)
+                reward += self._close_position(
+                    pos.stop_loss, bars_held, hit_target=False
+                )
             # Check take profit
             elif pos.side == "LONG" and current.high >= pos.take_profit:
-                reward += self._close_position(pos.take_profit, bars_held, hit_target=True)
+                reward += self._close_position(
+                    pos.take_profit, bars_held, hit_target=True
+                )
             elif pos.side == "SHORT" and current.low <= pos.take_profit:
-                reward += self._close_position(pos.take_profit, bars_held, hit_target=True)
+                reward += self._close_position(
+                    pos.take_profit, bars_held, hit_target=True
+                )
             else:
                 # Update max favorable excursion
                 if pos.side == "LONG":
-                    pos.max_favorable = max(pos.max_favorable, current.high - pos.entry_price)
+                    pos.max_favorable = max(
+                        pos.max_favorable, current.high - pos.entry_price
+                    )
                 else:
-                    pos.max_favorable = max(pos.max_favorable, pos.entry_price - current.low)
+                    pos.max_favorable = max(
+                        pos.max_favorable, pos.entry_price - current.low
+                    )
 
                 # Move to break-even after first impulse (> 1R favorable)
                 risk_per_unit = abs(pos.entry_price - pos.stop_loss)
@@ -200,12 +226,16 @@ class ValentiniAMTEnv(gym.Env):
 
                 # Per-step shaping
                 reward += self._reward_shaper.step_reward(
-                    pnl, self._equity, is_fighting,
+                    pnl,
+                    self._equity,
+                    is_fighting,
                 )
 
                 # Max bars → force close
                 if bars_held >= self._max_bars:
-                    reward += self._close_position(current.close, bars_held, hit_target=False)
+                    reward += self._close_position(
+                        current.close, bars_held, hit_target=False
+                    )
 
         # --- Entry logic (only if no position) ---
         if self._position is None and action != ACTION_HOLD:
@@ -233,20 +263,28 @@ class ValentiniAMTEnv(gym.Env):
 
     def action_masks(self) -> np.ndarray:
         """Return boolean mask of valid actions for current state."""
-        mask = np.ones(5, dtype=bool)
+        # #28: 7 actions instead of 5
+        mask = np.ones(7, dtype=bool)
 
         if self._position is not None:
-            # While in position, only HOLD is valid
+            # While in position, only HOLD, SCALE_IN, SCALE_OUT are valid
             mask[ACTION_TREND_BUY] = False
             mask[ACTION_TREND_SELL] = False
             mask[ACTION_REVERT_BUY] = False
             mask[ACTION_REVERT_SELL] = False
+            # #28: SCALE_IN masked unless confirmation conditions met
+            if self._position.size_fraction >= 0.7:
+                mask[ACTION_SCALE_IN] = False
+            # #28: SCALE_OUT masked unless adverse conditions detected
+            if self._position.fighting_flow_count < 2:
+                mask[ACTION_SCALE_OUT] = False
             return mask
 
         obs = self._last_obs
         if obs is None:
             return mask
 
+        # Entry actions masked by market state
         if obs.is_in_balance:
             # In balance → mask out trend actions
             mask[ACTION_TREND_BUY] = False
@@ -255,6 +293,10 @@ class ValentiniAMTEnv(gym.Env):
             # Imbalanced → mask out reversion actions
             mask[ACTION_REVERT_BUY] = False
             mask[ACTION_REVERT_SELL] = False
+
+        # SCALE_IN/SCALE_OUT only valid when in position
+        mask[ACTION_SCALE_IN] = False
+        mask[ACTION_SCALE_OUT] = False
 
         return mask
 
@@ -271,37 +313,77 @@ class ValentiniAMTEnv(gym.Env):
     def _compute_obs_raw(self) -> AMTObservation:
         """Run AMT analyzer to get raw observation."""
         start = max(0, self._step_idx - self._lookback)
-        window = self._all_data[start:self._step_idx + 1]
+        window = self._all_data[start : self._step_idx + 1]
         return self._analyzer.compute_observation(
-            window, prior_vah=self._prior_vah, prior_val=self._prior_val,
+            window,
+            prior_vah=self._prior_vah,
+            prior_val=self._prior_val,
         )
 
     @staticmethod
     def _obs_to_array(obs: AMTObservation) -> np.ndarray:
-        """Convert AMTObservation to a float32 numpy array."""
+        """Convert AMTObservation to a float32 numpy array.
+
+        #28: Expanded from 12 to 28 features.
+        """
         # Encode categoricals as floats
         shape_map = {"D": 0.0, "P": 1.0, "b": -1.0}
         poc_map = {"RISING": 1.0, "FALLING": -1.0, "STABLE": 0.0}
         session_map = {"ASIA": 0.0, "LONDON": 1.0, "NEW_YORK": 2.0, "OVERLAP": 3.0}
         opening_map = {"IN_BALANCE": 0.0, "OUT_ABOVE": 1.0, "OUT_BELOW": -1.0}
+        drive_map = {"FRESH": 0.0, "MATURING": 0.33, "DECAYING": 0.66, "EXHAUSTED": 1.0}
+        absorption_map = {"SELL_ABSORBED": 1.0, "BUY_ABSORBED": -1.0}
+        tf_align_map = {
+            "ALIGNED_LONG": 1.0,
+            "ALIGNED_SHORT": -1.0,
+            "CONFLICTED": 0.0,
+            "NEUTRAL": 0.0,
+        }
 
-        return np.array([
-            obs.dist_to_poc,
-            1.0 if obs.is_in_balance else 0.0,
-            obs.delta_divergence,
-            obs.nearest_lvn,
-            obs.cvd_slope,
-            shape_map.get(obs.profile_shape, 0.0),
-            poc_map.get(obs.poc_migration, 0.0),
-            session_map.get(obs.session, 0.0),
-            opening_map.get(obs.opening_relation, 0.0),
-            obs.aggression_sigma,
-            obs.obi,
-            obs.norm_delta,
-        ], dtype=np.float32)
+        return np.array(
+            [
+                # Group A: Price Microstructure (12)
+                obs.dist_to_poc,
+                1.0 if obs.is_in_balance else 0.0,
+                obs.delta_divergence,
+                obs.nearest_lvn,
+                obs.cvd_slope,
+                shape_map.get(obs.profile_shape, 0.0),
+                poc_map.get(obs.poc_migration, 0.0),
+                session_map.get(obs.session, 0.0),
+                opening_map.get(obs.opening_relation, 0.0),
+                obs.aggression_sigma,
+                obs.obi,
+                obs.norm_delta,
+                # Group C: Order Book (3)
+                obs.bid_imbalance,
+                obs.depth_imbalance,
+                obs.spread_pct,
+                # Group D: Options-Specific (4)
+                obs.pcr_ratio,
+                obs.oi_change,
+                obs.moneyness,
+                obs.iv_rank,
+                # Group E: Temporal (3)
+                obs.session_minute,
+                obs.minutes_to_expiry,
+                obs.day_of_week,
+                # Group F: AMT Context (5)
+                drive_map.get(obs.drive_state, 0.0),
+                absorption_map.get(obs.absorption_side, 0.0),
+                obs.gap_fill_probability,
+                tf_align_map.get(obs.tf_alignment, 0.0),
+                # Opening type (1)
+                1.0 if obs.opening_type else 0.0,
+            ],
+            dtype=np.float32,
+        )
 
     def _open_position(
-        self, action: int, candle: OHLC, obs: AMTObservation,
+        self,
+        action: int,
+        candle: OHLC,
+        obs: AMTObservation,
     ) -> None:
         """Open a new position based on action."""
         if action in (ACTION_TREND_BUY, ACTION_REVERT_BUY):
@@ -340,7 +422,10 @@ class ValentiniAMTEnv(gym.Env):
         )
 
     def _close_position(
-        self, exit_price: float, bars_held: int, hit_target: bool,
+        self,
+        exit_price: float,
+        bars_held: int,
+        hit_target: bool,
     ) -> float:
         """Close the current position and return shaped reward."""
         pos = self._position
@@ -364,15 +449,17 @@ class ValentiniAMTEnv(gym.Env):
 
         reward = self._reward_shaper.compute(result)
 
-        self._trade_log.append({
-            "side": pos.side,
-            "entry": pos.entry_price,
-            "exit": exit_price,
-            "pnl": pnl,
-            "bars": bars_held,
-            "hit_target": hit_target,
-            "reward": reward,
-        })
+        self._trade_log.append(
+            {
+                "side": pos.side,
+                "entry": pos.entry_price,
+                "exit": exit_price,
+                "pnl": pnl,
+                "bars": bars_held,
+                "hit_target": hit_target,
+                "reward": reward,
+            }
+        )
 
         self._position = None
         return reward

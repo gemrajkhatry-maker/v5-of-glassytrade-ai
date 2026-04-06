@@ -93,7 +93,7 @@ class MLXInferenceAdapter(LLMInferencePort):
         import urllib.error
 
         api_key = os.environ.get("OPENROUTER_API_KEY", "")
-        model_id = os.environ.get("MODEL_ID", "x-ai/grok-4.1-fast:free")
+        model_id = os.environ.get("MODEL_ID", "openrouter/free")
         fallback_url = os.environ.get(
             "CLOUD_FALLBACK_URL", "https://openrouter.ai/api/v1/chat/completions"
         )
@@ -145,7 +145,7 @@ class MLXInferenceAdapter(LLMInferencePort):
                     if not choices:
                         logger.warning(f"Cloud LLM returned no choices: {result}")
                         continue
-                    
+
                     content = choices[0].get("message", {}).get("content")
                     # Validate content is not None before returning
                     if content is None:

@@ -6,8 +6,9 @@ from datetime import datetime, timedelta, timezone
 
 from app.domain.models.exchange_config import ExchangeConfig
 from app.domain.ports.exchange_strategy import ExchangeStrategy
+from app.shared.timezones import IST
 
-_IST = timezone(timedelta(hours=5, minutes=30))
+
 
 # EIA release times in IST (Wednesday/Thursday 10:30 AM ET = 21:00 IST)
 _EIA_WEEKDAYS = {2, 3}  # Wednesday=2, Thursday=3

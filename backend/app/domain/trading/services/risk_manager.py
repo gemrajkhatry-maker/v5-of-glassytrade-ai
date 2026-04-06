@@ -14,10 +14,10 @@ from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 
 # IST (UTC+5:30) — NSE/NFO trading timezone
-_IST = timezone(timedelta(hours=5, minutes=30))
 
 from app.domain.trading.models.entities import Signal
 from app.domain.trading.models.aggregates import Portfolio
+from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class DailyRiskState:
     """Tracks intra-day risk metrics.  Resets on new trading day."""
 
-    trade_date: date = field(default_factory=lambda: datetime.now(_IST).date())
+    trade_date: date = field(default_factory=lambda: datetime.now(IST).date())
     starting_equity: float = 0.0
     peak_equity: float = 0.0  # High-water mark for the day
     current_equity: float = 0.0  # Updated after every trade result
@@ -37,7 +37,7 @@ class DailyRiskState:
     halt_reason: str = ""
 
     def reset(self, equity: float) -> None:
-        self.trade_date = datetime.now(_IST).date()
+        self.trade_date = datetime.now(IST).date()
         self.starting_equity = equity
         self.peak_equity = equity
         self.current_equity = equity
@@ -176,6 +176,11 @@ class RiskManager:
 
     def record_trade_result(self, pnl: float, portfolio: Portfolio) -> None:
         """Update daily risk state after a trade closes."""
+        # Normalize Decimal values from Portfolio to float (this method
+        # expects float throughout, but callers may pass Decimal).
+        pnl = float(pnl)
+        equity = float(portfolio.equity)
+
         self._maybe_reset_day(portfolio)
         self._daily.realized_pnl += pnl
         self._daily.total_trades += 1
@@ -184,16 +189,14 @@ class RiskManager:
         # If the first trade is a loss, reconstruct pre-loss equity so the
         # drawdown denominator correctly reflects where we started the day.
         if self._daily.peak_equity <= 0:
-            pre_trade_equity = (
-                portfolio.equity + abs(pnl) if pnl < 0 else portfolio.equity
-            )
+            pre_trade_equity = equity + abs(pnl) if pnl < 0 else equity
             self._daily.peak_equity = pre_trade_equity
             self._daily.starting_equity = pre_trade_equity
 
         # Update current equity and high-water mark
-        self._daily.current_equity = portfolio.equity
-        if portfolio.equity > self._daily.peak_equity:
-            self._daily.peak_equity = portfolio.equity
+        self._daily.current_equity = equity
+        if equity > self._daily.peak_equity:
+            self._daily.peak_equity = equity
 
         if pnl <= 0:
             self._daily.consecutive_losses += 1
@@ -209,7 +212,7 @@ class RiskManager:
         # Percentage-based drawdown from day's peak equity
         if self._daily.peak_equity > 0:
             drawdown_pct = (
-                self._daily.peak_equity - portfolio.equity
+                self._daily.peak_equity - equity
             ) / self._daily.peak_equity
             if drawdown_pct >= self.MAX_DAILY_DRAWDOWN_PCT:
                 self._halt(
@@ -246,7 +249,7 @@ class RiskManager:
 
     def _maybe_reset_day(self, portfolio: Portfolio) -> None:
         """Reset daily state if the trading day has changed."""
-        today = datetime.now(_IST).date()
+        today = datetime.now(IST).date()
         if self._daily.trade_date != today:
             self._daily.reset(portfolio.equity)
 

@@ -13,7 +13,6 @@ pytest.skip("Outdated AMTHandler test assertions from legacy architecture (Float
 from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch, call
 
-import pytest
 
 from app.application.handlers.amt_handler import AMTHandler, _filter_today_session
 from app.domain.trading.models.value_objects import (

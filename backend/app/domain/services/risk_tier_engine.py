@@ -27,6 +27,8 @@ import logging
 from dataclasses import dataclass, field
 from enum import Enum
 
+from app.domain.constants import CONFIDENCE_HIGH_THRESHOLD
+
 logger = logging.getLogger(__name__)
 
 
@@ -74,7 +76,7 @@ class TierAPremiumCheck:
             and self.lvn_strength >= 0.85
             and self.cvd_divergence
             and self.is_second_drive
-            and self.ml_probability >= 0.65
+            and self.ml_probability >= CONFIDENCE_HIGH_THRESHOLD
         )
 
 

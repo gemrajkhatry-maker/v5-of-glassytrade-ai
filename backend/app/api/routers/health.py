@@ -25,8 +25,12 @@ router = APIRouter(tags=["health"])
 
 @router.get("/health")
 async def health_check():
-    from app.api.dependencies import get_service_graph
-    graph = get_service_graph()
+    try:
+        from app.api.dependencies import get_service_graph
+        graph = get_service_graph()
+    except Exception as e:
+        logger.error("Health check: failed to get service graph: %s", e, exc_info=True)
+        return {"status": "unhealthy", "checks": {"system": f"critical_error: {e}"}}
 
     checks: dict[str, str] = {}
 

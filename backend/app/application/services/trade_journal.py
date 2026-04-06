@@ -8,10 +8,11 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone, timedelta
 from threading import Lock
 from typing import Any
+from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
-IST = timezone(timedelta(hours=5, minutes=30))
+
 
 
 @dataclass

@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-IST = timezone(timedelta(hours=5, minutes=30))
+from app.shared.timezones import IST
 
 _DHAN_CONNECT_COOLDOWN: float = 5.0
 _MAX_STREAM_RETRIES = 10
