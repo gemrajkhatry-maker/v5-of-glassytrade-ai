@@ -4,10 +4,13 @@ This is the critical bridge between the AMT engine (Layer 1 — underlying futur
 and the execution layer (Layer 2 — option contracts).
 
 For each option symbol (e.g., "CRUDEOIL 16 APR 8900 CALL"):
-  → underlying_symbol: "CRUDEOIL25APRFUT" (for AMT analysis)
+  → underlying_symbol: "CRUDEOIL16APRFUT" (dynamically derived from option date)
   → option_symbol: "CRUDEOIL 16 APR 8900 CALL" (for execution)
 
-Loaded from config/instruments.json at startup.
+Loaded from config/instruments.json at startup. Only numeric config (lot_size,
+strike_step, etc.) is read from the JSON file — the underlying_symbol is
+derived dynamically from the option contract's expiry date, so it never goes
+stale when contracts expire.
 """
 
 from __future__ import annotations
@@ -15,10 +18,58 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Month abbreviation → two-digit number, for building futures symbols
+_MONTH_MAP = {
+    "JAN": "01", "FEB": "02", "MAR": "03", "APR": "04",
+    "MAY": "05", "JUN": "06", "JUL": "07", "AUG": "08",
+    "SEP": "09", "OCT": "10", "NOV": "11", "DEC": "12",
+}
+
+# Pattern: "UNDERLYING DD MON STRIKE CALL/PUT"
+# e.g. "CRUDEOIL 16 APR 9000 CALL" → groups: ("CRUDEOIL", "16", "APR", "9000", "CALL")
+_OPTION_SYMBOL_RE = re.compile(
+    r"^([A-Z]+?)\s+(\d{1,2})\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\s+(\d+)\s+(CALL|PUT|CE|PE)",
+    re.IGNORECASE,
+)
+
+
+def build_futures_symbol(underlying: str, day: str, month: str) -> str:
+    """Build a futures symbol from parsed option contract components.
+
+    Args:
+        underlying: "CRUDEOIL", "NIFTY", "GOLD", etc.
+        day: Day of month, e.g. "16" or "6"
+        month: Three-letter month, e.g. "APR"
+
+    Returns:
+        Futures symbol, e.g. "CRUDEOIL16APRFUT" or "NIFTY06APRFUT"
+    """
+    day_padded = day.zfill(2)
+    month_upper = month.upper()
+    month_num = _MONTH_MAP.get(month_upper, month_upper[:3].upper())
+    return f"{underlying.upper()}{day_padded}{month_num}FUT"
+
+
+def extract_option_date(symbol: str) -> tuple[str, str, str] | None:
+    """Extract (underlying, day, month) from an option symbol.
+
+    Args:
+        symbol: e.g. "CRUDEOIL 16 APR 9000 CALL"
+
+    Returns:
+        ("CRUDEOIL", "16", "APR") or None if pattern doesn't match.
+    """
+    clean = symbol.replace("NSE:", "").replace("MCX:", "").strip().upper()
+    m = _OPTION_SYMBOL_RE.match(clean)
+    if not m:
+        return None
+    return (m.group(1).upper(), m.group(2), m.group(3).upper())
 
 
 @dataclass(frozen=True)
@@ -44,7 +95,7 @@ class DualFeedMapping:
     """Maps an option contract to its underlying futures for AMT analysis."""
 
     option_symbol: str  # "CRUDEOIL 16 APR 8900 CALL"
-    underlying_symbol: str  # "CRUDEOIL25APRFUT"
+    underlying_symbol: str  # "CRUDEOIL16APRFUT" — derived dynamically
     underlying: str  # "CRUDEOIL"
     exchange: str  # "MCX" or "NSE"
     config: InstrumentConfig
@@ -78,19 +129,22 @@ class UnderlyingFuturesProvider:
             for exchange, underlyings in raw.items():
                 self._instruments[exchange] = {}
                 for underlying, cfg in underlyings.items():
+                    # underlying_symbol is now derived dynamically at lookup time.
+                    # We still store it from the JSON for backward compatibility,
+                    # but get_mapping() will prefer the dynamic version.
                     self._instruments[exchange][underlying] = InstrumentConfig(
-                        underlying_symbol=cfg["underlying_symbol"],
+                        underlying_symbol=cfg.get("underlying_symbol", f"{underlying}FUT"),
                         underlying_segment=cfg["underlying_segment"],
                         options_segment=cfg["options_segment"],
-                        strike_step=cfg["strike_step"],
-                        lot_size=cfg["lot_size"],
-                        tick_size=cfg["tick_size"],
-                        session_start=cfg["session_start"],
-                        session_end=cfg["session_end"],
-                        ib_window_minutes=cfg["ib_window_minutes"],
-                        big_order_filter_lots=cfg["big_order_filter_lots"],
-                        range_bar_size=cfg["range_bar_size"],
-                        dead_volume_pct=cfg["dead_volume_pct"],
+                        strike_step=cfg.get("strike_step", 1),
+                        lot_size=cfg.get("lot_size", 1),
+                        tick_size=cfg.get("tick_size", 0.05),
+                        session_start=cfg.get("session_start", "09:15"),
+                        session_end=cfg.get("session_end", "15:30"),
+                        ib_window_minutes=cfg.get("ib_window_minutes", 30),
+                        big_order_filter_lots=cfg.get("big_order_filter_lots", 10),
+                        range_bar_size=cfg.get("range_bar_size", 10),
+                        dead_volume_pct=cfg.get("dead_volume_pct", 5),
                     )
 
             logger.info(
@@ -104,6 +158,10 @@ class UnderlyingFuturesProvider:
 
     def get_mapping(self, option_symbol: str) -> DualFeedMapping | None:
         """Get the dual feed mapping for an option symbol.
+
+        The underlying futures symbol is derived DYNAMICALLY from the option
+        contract's expiry date (e.g., "CRUDEOIL 16 APR 9000 CALL" → "CRUDEOIL16APRFUT").
+        This avoids stale 2025 contract names from instruments.json.
 
         Args:
             option_symbol: e.g., "CRUDEOIL 16 APR 8900 CALL"
@@ -121,14 +179,31 @@ class UnderlyingFuturesProvider:
         if not exchange:
             return None
 
-        # Get instrument config
+        # Get instrument config (for numeric settings, NOT the hardcoded futures symbol)
         config = self._instruments.get(exchange, {}).get(underlying)
         if not config:
             return None
 
+        # Derive underlying futures symbol dynamically from the option contract date
+        dynamic_symbol = self._derive_futures_symbol(option_symbol, underlying)
+        if dynamic_symbol:
+            underlying_symbol = dynamic_symbol
+            logger.debug(
+                "Dual feed mapping: %s → %s (dynamic)", option_symbol, underlying_symbol
+            )
+        else:
+            # Fallback to the hardcoded value from instruments.json
+            underlying_symbol = config.underlying_symbol
+            logger.warning(
+                "Could not derive futures symbol from option date for %s — "
+                "falling back to config: %s",
+                option_symbol,
+                underlying_symbol,
+            )
+
         return DualFeedMapping(
             option_symbol=option_symbol,
-            underlying_symbol=config.underlying_symbol,
+            underlying_symbol=underlying_symbol,
             underlying=underlying,
             exchange=exchange,
             config=config,
@@ -146,6 +221,25 @@ class UnderlyingFuturesProvider:
     def get_all_underlyings(self, exchange: str) -> list[str]:
         """Get all underlyings for an exchange."""
         return list(self._instruments.get(exchange, {}).keys())
+
+    def _derive_futures_symbol(self, option_symbol: str, underlying: str) -> str | None:
+        """Derive futures symbol dynamically from option contract date.
+
+        Args:
+            option_symbol: e.g. "CRUDEOIL 16 APR 9000 CALL"
+            underlying: e.g. "CRUDEOIL"
+
+        Returns:
+            e.g. "CRUDEOIL16APRFUT" or None if date can't be parsed
+        """
+        date_parts = extract_option_date(option_symbol)
+        if date_parts:
+            _, day, month = date_parts
+            return build_futures_symbol(underlying, day, month)
+
+        # Not a standard option symbol — could be a futures symbol itself,
+        # or an index option with a different format. Fall back gracefully.
+        return None
 
     def _extract_underlying(self, symbol: str) -> str:
         """Extract underlying name from option symbol.

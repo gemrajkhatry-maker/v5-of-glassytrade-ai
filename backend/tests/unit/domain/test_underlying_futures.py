@@ -10,6 +10,8 @@ from app.domain.services.underlying_futures_provider import (
     InstrumentConfig,
     DualFeedMapping,
     UnderlyingFuturesProvider,
+    build_futures_symbol,
+    extract_option_date,
 )
 
 
@@ -78,14 +80,16 @@ class TestUnderlyingFuturesProvider:
     def test_get_mapping_crudeoil(self, provider):
         mapping = provider.get_mapping("CRUDEOIL 16 APR 8900 CALL")
         assert mapping is not None
-        assert mapping.underlying_symbol == "CRUDEOIL25APRFUT"
+        # Dynamic: derived from option date "16 APR" → CRUDEOIL1604FUT
+        assert mapping.underlying_symbol == "CRUDEOIL1604FUT"
         assert mapping.underlying == "CRUDEOIL"
         assert mapping.exchange == "MCX"
 
     def test_get_mapping_nifty(self, provider):
         mapping = provider.get_mapping("NIFTY 30 MAR 23300 PUT")
         assert mapping is not None
-        assert mapping.underlying_symbol == "NIFTY25APRFUT"
+        # Dynamic: derived from option date "30 MAR" → NIFTY3003FUT
+        assert mapping.underlying_symbol == "NIFTY3003FUT"
         assert mapping.underlying == "NIFTY"
         assert mapping.exchange == "NSE"
 
@@ -96,10 +100,10 @@ class TestUnderlyingFuturesProvider:
     def test_get_underlying_symbol(self, provider):
         assert (
             provider.get_underlying_symbol("CRUDEOIL 16 APR 8900 CALL")
-            == "CRUDEOIL25APRFUT"
+            == "CRUDEOIL1604FUT"
         )
         assert (
-            provider.get_underlying_symbol("NIFTY 30 MAR 23300 PUT") == "NIFTY25APRFUT"
+            provider.get_underlying_symbol("NIFTY 30 MAR 23300 PUT") == "NIFTY3003FUT"
         )
 
     def test_get_config(self, provider):
@@ -118,7 +122,7 @@ class TestUnderlyingFuturesProvider:
     def test_dual_feed_mapping(self, provider):
         mapping = provider.get_mapping("CRUDEOIL 16 APR 8850 PE")
         assert mapping.option_symbol == "CRUDEOIL 16 APR 8850 PE"
-        assert mapping.underlying_symbol == "CRUDEOIL25APRFUT"
+        assert mapping.underlying_symbol == "CRUDEOIL1604FUT"
         assert mapping.config.ib_window_minutes == 30
         assert mapping.config.session_start == "09:00"
 
@@ -128,3 +132,40 @@ class TestUnderlyingFuturesProvider:
         assert cfg.session_start == "09:15"
         assert cfg.session_end == "15:30"
         assert cfg.range_bar_size == 20
+
+
+class TestDynamicFuturesDerivation:
+    def test_build_futures_symbol_mcx(self):
+        assert build_futures_symbol("CRUDEOIL", "16", "APR") == "CRUDEOIL1604FUT"
+        assert build_futures_symbol("GOLD", "20", "APR") == "GOLD2004FUT"
+        assert build_futures_symbol("NATURALGAS", "6", "APR") == "NATURALGAS0604FUT"
+
+    def test_build_futures_symbol_nse(self):
+        assert build_futures_symbol("NIFTY", "27", "FEB") == "NIFTY2702FUT"
+        assert build_futures_symbol("BANKNIFTY", "10", "MAR") == "BANKNIFTY1003FUT"
+
+    def test_build_futures_symbol_single_digit_day(self):
+        # Single digit days should be zero-padded
+        assert build_futures_symbol("CRUDEOIL", "6", "APR") == "CRUDEOIL0604FUT"
+
+    def test_extract_option_date(self):
+        result = extract_option_date("CRUDEOIL 16 APR 9000 CALL")
+        assert result == ("CRUDEOIL", "16", "APR")
+
+    def test_extract_option_date_with_exchange_prefix(self):
+        result = extract_option_date("MCX:CRUDEOIL 16 APR 9000 CALL")
+        assert result == ("CRUDEOIL", "16", "APR")
+
+        result = extract_option_date("NSE:NIFTY 27 MAR 23000 PUT")
+        assert result == ("NIFTY", "27", "MAR")
+
+    def test_extract_option_date_ce_pe_format(self):
+        result = extract_option_date("NIFTY 10 MAR 22000 CE")
+        assert result == ("NIFTY", "10", "MAR")
+
+        result = extract_option_date("BANKNIFTY 15 APR 48000 PE")
+        assert result == ("BANKNIFTY", "15", "APR")
+
+    def test_extract_option_date_invalid(self):
+        assert extract_option_date("CRUDEOIL25APRFUT") is None
+        assert extract_option_date("SOME_RANDOM_SYMBOL") is None
