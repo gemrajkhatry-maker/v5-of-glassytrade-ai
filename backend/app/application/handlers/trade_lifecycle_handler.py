@@ -153,6 +153,13 @@ class TradeLifecycleHandler:
                     else str(pos.side) == "LONG"
                 )
                 if sl > 0 and tp > 0 and entry > 0:
+                    # Get current market state from AMT analysis or position metadata
+                    current_market_state = "BALANCED"
+                    if amt_result and hasattr(amt_result, "market_state"):
+                        current_market_state = getattr(amt_result, "market_state", "BALANCED")
+                        if not current_market_state:
+                            current_market_state = "BALANCED"
+
                     partition_signals = self._partition_manager.check_exits(
                         entry_price=entry,
                         initial_stop=sl,
@@ -161,6 +168,7 @@ class TradeLifecycleHandler:
                         is_long=is_long,
                         cvd_slope=cvd_slope,
                         state=p_state,
+                        market_state=current_market_state,
                     )
                     for psig in partition_signals:
                         if psig.exit_type in ("COUNTER_AGGRESSION", "TRAIL"):
@@ -202,6 +210,12 @@ class TradeLifecycleHandler:
                 if p_state_after and p_state_after.trail_sl is not None:
                     self._trade_manager.adjust_stop_loss(pos.id, p_state_after.trail_sl)
 
+            # Dynamic market state update (Fix: time stops adapt mid-trade)
+            if amt_result and hasattr(amt_result, "market_state"):
+                current_ms = getattr(amt_result, "market_state", None)
+                if current_ms:
+                    self._trade_manager.update_market_state(pos.id, current_ms)
+
             exit_sig = self._trade_manager.check_position(
                 pos.id,
                 current_price,
@@ -215,60 +229,21 @@ class TradeLifecycleHandler:
                     exit_sig.exit_price,
                     tick_count,
                 )
-                if exit_sig.reason == ExitReason.PARTIAL_TAKE_PROFIT:
-                    # Runner mode: close 75% at target, keep 25% trailing
-                    # Standard partial: close 50%
-                    metrics = self._trade_manager.get_position_metrics(pos.id)
-                    if metrics and bool(metrics["runner_active"]):
-                        partial_pct = self._trade_manager.config.runner_close_pct
-                    else:
-                        partial_pct = self._trade_manager.config.partial_size_pct
-                    size_before = pos.size
-                    realized_pnl = portfolio.partial_close_position(
-                        pos.id, partial_pct, exit_sig.exit_price, exit_sig.reason
-                    )
-                    logger.info(
-                        f"Position {pos.id} partial close: {exit_sig.reason} "
-                        f"at {exit_sig.exit_price:.2f}, realized PnL={realized_pnl:.2f}, "
-                        f"size {size_before:.0f} → {pos.size:.0f}"
-                    )
-                    # Notify journal/forward logger
-                    if self._on_partial_exit:
-                        side = (
-                            pos.side.value
-                            if hasattr(pos.side, "value")
-                            else str(pos.side)
-                        )
-                        self._on_partial_exit(
-                            pos.id,
-                            side,
-                            pos.entry_price,
-                            exit_sig.exit_price,
-                            partial_pct,
-                            size_before * partial_pct,
-                            pos.size,
-                            realized_pnl,
-                        )
-                    # Do NOT unregister — position is still open with remaining size
-                    return False
-                else:
-                    # Full close
-                    portfolio.close_position(
-                        pos.id, exit_sig.exit_price, exit_sig.reason
-                    )
-                    self._trade_manager.unregister_position(pos.id)
-                    # Track daily losses on stop loss exits
-                    if exit_sig.reason == ExitReason.STOP_LOSS:
-                        self._trade_manager.record_loss(pos.symbol)
-                        # Record stop-out for Rule 11 re-entry blocking
-                        if self._on_stop_out:
-                            side = "LONG" if pos.side.value == "LONG" else "SHORT"
-                            self._on_stop_out(pos.entry_price, side)
-                    logger.info(
-                        f"Position {pos.id} closed: {exit_sig.reason} "
-                        f"at {exit_sig.exit_price:.2f}"
-                    )
-                    return True
+                # Full close (PARTIAL_TAKE_PROFIT runner mode removed — dead code)
+                portfolio.close_position(
+                    pos.id, exit_sig.exit_price, exit_sig.reason
+                )
+                self._trade_manager.unregister_position(pos.id)
+                if exit_sig.reason == ExitReason.STOP_LOSS:
+                    self._trade_manager.record_loss(pos.symbol)
+                    if self._on_stop_out:
+                        side = "LONG" if pos.side.value == "LONG" else "SHORT"
+                        self._on_stop_out(pos.entry_price, side, pos.symbol)
+                logger.info(
+                    f"Position {pos.id} closed: {exit_sig.reason} "
+                    f"at {exit_sig.exit_price:.2f}"
+                )
+                return True
         return False
 
     def register_position(
@@ -280,7 +255,7 @@ class TradeLifecycleHandler:
         overseer can manage the position.
         """
         meta = signal.metadata or {}
-        allow_trail = meta.get("allow_trail", False)
+        # allow_trail is a no-op; retained for backward compat
         scale_in = meta.get("scale_in", False)
         market_state = meta.get("market_state_model", "BALANCED")
         session_phase = meta.get("session_phase", "")
@@ -314,7 +289,6 @@ class TradeLifecycleHandler:
             entry_price=entry_price,
             stop_loss=stop_loss,
             take_profit=take_profit,
-            allow_trail=allow_trail,
             market_state=market_state,
             enable_scale_in=scale_in,
             session_phase=session_phase,

@@ -70,11 +70,13 @@ def test_no_exit_when_price_between_sl_and_tp(mgr: TradeManager):
 
 
 def test_trail_not_allowed(mgr: TradeManager):
+    """allow_trail is now a deprecated no-op — VWAP trail still works
+    via the apply_vwap_trail side-channel, but ManagedPosition no longer
+    has trailing_active/sl fields."""
     mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 110.0, allow_trail=False)
-    mgr.check_position("P1", 105.0)  # partial TP fires at 50% of TP distance
-    mgr.check_position("P1", 105.0)  # second check — trail should NOT activate
     mp = mgr._positions["P1"]
-    assert mp.trailing_active is False
+    # trailing_active field removed — VWAP trail works via adjust_stop_loss
+    assert mp.stop_loss == 95.0  # original SL unchanged
 
 
 # ---- 11. Time Stop ----

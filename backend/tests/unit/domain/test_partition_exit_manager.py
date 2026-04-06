@@ -23,13 +23,27 @@ class TestPartitionExitP1:
         assert any(s.exit_type == "PARTITION_1" for s in signals)
         assert state.p1_taken is True
 
-    def test_p1_skipped_strong_momentum(self):
-        """P1 skipped when momentum is strong."""
+    def test_p1_balanced_fires_unconditionally(self):
+        """BALANCED: P1 fires at 0.25R regardless of CVD slope (mean reversion)."""
+        manager = PartitionExitManager()
+        state = PartitionState()
+        # 0.33R profit, CVD strong — but BALANCED ignores CVD
+        signals = manager.check_exits(
+            entry_price=100.0, initial_stop=99.0, take_profit=102.0,
+            current_price=100.33, is_long=True, cvd_slope=3.0, state=state,
+            market_state="BALANCED",
+        )
+        assert any(s.exit_type == "PARTITION_1" for s in signals)
+        assert state.p1_taken is True
+
+    def test_p1_imbalanced_skipped(self):
+        """IMBALANCED: P1 is skipped to let trend run."""
         manager = PartitionExitManager()
         state = PartitionState()
         signals = manager.check_exits(
             entry_price=100.0, initial_stop=99.0, take_profit=102.0,
-            current_price=100.33, is_long=True, cvd_slope=3.0, state=state,
+            current_price=100.33, is_long=True, cvd_slope=0.1, state=state,
+            market_state="IMBALANCED",
         )
         assert not any(s.exit_type == "PARTITION_1" for s in signals)
         assert state.p1_taken is False

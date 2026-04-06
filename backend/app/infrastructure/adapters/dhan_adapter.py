@@ -31,7 +31,7 @@ from app.domain.ports.market_data import MarketDataPort
 
 logger = logging.getLogger(__name__)
 
-IST = timezone(timedelta(hours=5, minutes=30))
+from app.shared.timezones import IST
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@ class DhanMarketDataAdapter(MarketDataPort):
     def _make_instrument(self, symbol: str):
         """Build Instrument for the given display symbol.
 
-        Auto-detects option symbols (containing CALL/PUT) and routes to
+        Auto-detects option symbols (CALL/PUT or CE/PE) and routes to
         the correct exchange: NFO for NSE underlyings, MCX for commodity underlyings.
         Sets option_type so Instrument.is_option() returns True for options —
         this is used downstream by streaming_service to select the correct
@@ -176,12 +176,13 @@ class DhanMarketDataAdapter(MarketDataPort):
         from brokers.broker.entities import Instrument, OptionType
 
         sym_upper = symbol.upper()
-        is_option = "CALL" in sym_upper or "PUT" in sym_upper
+        is_option = ("CALL" in sym_upper or "PUT" in sym_upper
+                     or sym_upper.endswith("CE") or sym_upper.endswith("PE"))
         if is_option:
             # Detect exchange from the underlying name embedded in the symbol
             is_mcx = any(sym_upper.startswith(u) for u in self._MCX_UNDERLYINGS)
             exchange = _exchange_enum("MCX" if is_mcx else "NFO")
-            option_type = OptionType.CALL if "CALL" in sym_upper else OptionType.PUT
+            option_type = OptionType.CALL if ("CALL" in sym_upper or sym_upper.endswith("CE")) else OptionType.PUT
             return Instrument(symbol=symbol, exchange=exchange, option_type=option_type)
         else:
             exchange = _exchange_enum(self._exchange_str)
@@ -391,9 +392,8 @@ class DhanMarketDataAdapter(MarketDataPort):
         await self._ensure_initialized()
         broker = self.get_broker()
         loop = asyncio.get_event_loop()
-        _IST = timezone(timedelta(hours=5, minutes=30))
 
-        logger.info(
+        logger.info,(
             "stream_poll: REST polling %d symbol(s) every %.1fs (MCX OPTFUT fallback)",
             len(symbols),
             poll_interval,
@@ -411,7 +411,7 @@ class DhanMarketDataAdapter(MarketDataPort):
                         yield {
                             "symbol": sym,
                             "ltp": ltp,
-                            "timestamp": datetime.now(_IST).isoformat(),
+                            "timestamp": datetime.now(IST).isoformat(),
                             # WS-absent fields — candle builder treats vol=0 as "no new volume"
                             "volume": 0,
                             "ltq": 0,

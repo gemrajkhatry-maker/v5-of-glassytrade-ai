@@ -34,8 +34,8 @@ MAX_PARTICIPATION_PCT: Decimal = Decimal("0.02")  # Never be > 2% of avg daily v
 COMMISSION_PER_LOT: Decimal = Decimal("50.0")  # ₹50 round-trip per lot (conservative)
 DEFAULT_LOT_SIZE: int = 1  # Overridden per-instrument at runtime
 SLIPPAGE_PCT: Decimal = Decimal(
-    "0.0005"
-)  # Default 0.05%; overridden via PortfolioConfig at runtime
+    "0.0015"
+)  # Default 0.15% (15 bps); overridden via PortfolioConfig at runtime
 
 # Tiered risk by confidence level (Fabio Valentini position sizing)
 RISK_BY_CONFIDENCE: dict[str, Decimal] = {
@@ -454,7 +454,7 @@ class Portfolio:
                 curr_ts = self._parse_ts(time_str)
                 last_ts = self._parse_ts(last_time)
                 should_add = (curr_ts - last_ts) > HISTORY_MIN_INTERVAL_SEC
-            except Exception:
+            except (ValueError, TypeError):
                 should_add = True
 
         if should_add or not self.history:

@@ -18,7 +18,7 @@ class TestSlippageModel:
         price = portfolio._apply_slippage(100.0, Side.LONG, is_entry=True)
 
         assert float(price) > 100.0
-        assert float(price) == pytest.approx(100.05, rel=0.001)
+        assert float(price) == pytest.approx(100.15, rel=0.001)
 
     def test_short_entry_slippage_adverse(self):
         """SHORT entry: should receive less (slippage = adverse selection)."""
@@ -28,7 +28,7 @@ class TestSlippageModel:
         price = portfolio._apply_slippage(100.0, Side.SHORT, is_entry=True)
 
         assert float(price) < 100.0
-        assert float(price) == pytest.approx(99.95, rel=0.001)
+        assert float(price) == pytest.approx(99.85, rel=0.001)
 
     def test_long_exit_slippage_adverse(self):
         """LONG exit: should receive less (slippage = adverse selection)."""
@@ -38,7 +38,7 @@ class TestSlippageModel:
         price = portfolio._apply_slippage(100.0, Side.LONG, is_entry=False)
 
         assert float(price) < 100.0
-        assert float(price) == pytest.approx(99.95, rel=0.001)
+        assert float(price) == pytest.approx(99.85, rel=0.001)
 
     def test_short_exit_slippage_adverse(self):
         """SHORT exit: should pay more (slippage = adverse selection)."""
@@ -48,7 +48,7 @@ class TestSlippageModel:
         price = portfolio._apply_slippage(100.0, Side.SHORT, is_entry=False)
 
         assert float(price) > 100.0
-        assert float(price) == pytest.approx(100.05, rel=0.001)
+        assert float(price) == pytest.approx(100.15, rel=0.001)
 
     def test_slippage_magnitude(self):
         """Slippage should be configurable percentage."""
@@ -61,8 +61,8 @@ class TestSlippageModel:
                 base_price, Side.SHORT, is_entry=True
             )
 
-            assert float(long_entry) == pytest.approx(base_price * 1.0005, rel=0.001)
-            assert float(short_entry) == pytest.approx(base_price * 0.9995, rel=0.001)
+            assert float(long_entry) == pytest.approx(base_price * 1.0015, rel=0.001)
+            assert float(short_entry) == pytest.approx(base_price * 0.9985, rel=0.001)
 
     def test_slippage_accumulates(self):
         """Round-trip should accumulate slippage twice."""
@@ -74,7 +74,7 @@ class TestSlippageModel:
 
         total_slippage_pct = (float(entry_price) - float(exit_price)) / 100.0
 
-        assert total_slippage_pct == pytest.approx(0.001, rel=0.1)
+        assert total_slippage_pct == pytest.approx(0.003, rel=0.1)
 
 
 class TestCommissionModel:

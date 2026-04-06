@@ -21,6 +21,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from app.domain.trading.models.enums import MarketStateCodec
+from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
@@ -73,14 +74,10 @@ class ManagedPosition:
     entry_price: float
     stop_loss: float
     take_profit: float
-    allow_trail: bool = False  # Only trail if market is Imbalanced
     market_state: str = "BALANCED"  # "BALANCED" or "IMBALANCED"
 
     entry_time: float = 0.0  # callers must set; 0 = use time.time() fallback
     initial_stop: float = 0.0  # original stop for R-multiple calculation
-    peak_price: float = 0.0  # best price since entry
-    trailing_active: bool = False
-    trailing_stop: float = 0.0
     partial_taken: bool = False  # True after partial profit booking
     runner_active: bool = False  # True when runner portion is being trailed
     mae: float = 0.0  # Maximum Adverse Excursion
@@ -226,8 +223,7 @@ class TradeManager:
         NSE/MCX daily loss limits must reset with the Indian trading day,
         not UTC midnight (which would reset at 05:30 AM IST mid-session).
         """
-        _IST = timezone(timedelta(hours=5, minutes=30))
-        now = datetime.now(_IST)
+        now = datetime.now(IST)
         tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
             days=1
         )
@@ -242,8 +238,7 @@ class TradeManager:
             if raw:
                 data = json.loads(raw)
                 # Only restore if same IST date
-                _IST = timezone(timedelta(hours=5, minutes=30))
-                today = datetime.now(_IST).strftime("%Y-%m-%d")
+                today = datetime.now(IST).strftime("%Y-%m-%d")
                 if data.get("date") == today:
                     self._global_daily_losses = data.get("global_count", 0)
                     self._symbol_daily_losses = data.get("symbol_counts", {})
@@ -260,8 +255,7 @@ class TradeManager:
         if not self._persist_fn:
             return
         try:
-            _IST = timezone(timedelta(hours=5, minutes=30))
-            today = datetime.now(_IST).strftime("%Y-%m-%d")
+            today = datetime.now(IST).strftime("%Y-%m-%d")
             payload = {
                 "date": today,
                 "global_count": self._global_daily_losses,
@@ -480,8 +474,8 @@ class TradeManager:
         entry_price: float,
         stop_loss: float,
         take_profit: float,
-        allow_trail: bool = False,
         market_state: str = "BALANCED",
+        allow_trail: bool = False,  # retained for backward compat; no-op
         entry_time: float | None = None,
         enable_scale_in: bool = False,
         session_phase: str = "",
@@ -523,9 +517,7 @@ class TradeManager:
             entry_price=float(entry_dec),
             stop_loss=float(stop_dec),
             take_profit=float(tp_dec),
-            allow_trail=allow_trail,
             market_state=market_state,
-            peak_price=float(entry_dec),
             initial_stop=float(stop_dec),
             entry_time=entry_time if entry_time is not None else time.time(),
             scale_step=1 if enable_scale_in else 3,  # 3 = fully deployed
@@ -558,6 +550,17 @@ class TradeManager:
                     current_time if current_time is not None else time.time()
                 )
                 logger.info(f"TradeManager: unregistered {position_id} ({symbol})")
+
+    def update_market_state(self, position_id: str, market_state: str) -> None:
+        """Update market state for open position (enables dynamic time stops).
+
+        If market transitions BALANCED->IMBALANCED mid-trade, the time stop
+        will be extended. The reverse is protected by the never-shrink guard in
+        check_position().
+        """
+        mp = self._positions.get(position_id)
+        if mp and mp.market_state != market_state:
+            mp.market_state = market_state
 
     # ------------------------------------------------------------------
     # Tick-level check
@@ -811,7 +814,6 @@ class TradeManager:
                 "distance_to_sl_pct": round(distance_to_sl, 6),
                 "distance_to_tp_pct": round(distance_to_tp, 6),
                 "partial_taken": mp.partial_taken,
-                "trailing_active": mp.trailing_active,
                 "runner_active": mp.runner_active,
                 "market_state": mp.market_state,
                 "mae": round(mp.mae, 4),
@@ -839,7 +841,6 @@ class TradeManager:
                 "tick_count": mp.tick_count,
                 "runner_active": mp.runner_active,
                 "partial_taken": mp.partial_taken,
-                "trailing_active": mp.trailing_active,
                 "mae": mp.mae,
                 "mfe": mp.mfe,
             }

@@ -113,7 +113,6 @@ class TestRegisterPositionAllSources:
         handler = TradeLifecycleHandler()
         pos = _make_position()
         sig = _make_signal(metadata={
-            "allow_trail": True,
             "scale_in": True,
             "market_state_model": "Trending",
             "session_phase": "LONDON",
@@ -123,8 +122,8 @@ class TestRegisterPositionAllSources:
         handler.register_position("NIFTY", pos, sig)
 
         mp = handler.trade_manager._positions[pos.id]
-        assert mp.allow_trail is True
         assert mp.market_state == "IMBALANCED"
+        # allow_trail was removed (dead code — see Fix #3 cleanup)
 
     def test_market_state_normalization(self):
         handler = TradeLifecycleHandler()

@@ -145,45 +145,7 @@ class PaperBrokerAdapter(BrokerPort):
         If cost_model_enabled, applies slippage to entry price before execution.
         Fabio Rule 4: LLM entries use 40/30/30 scale-in.
         """
-        if self._cost_model_enabled and signal.entry_price > 0:
-            # Apply slippage: buy → price goes UP, sell → price goes DOWN
-            slippage_amount = signal.entry_price * self._slippage_bps / 10000.0
-            if signal.is_buy:
-                signal = Signal(
-                    symbol=signal.symbol,
-                    direction=signal.direction,
-                    entry_price=signal.entry_price + slippage_amount,
-                    stop_loss=signal.stop_loss,
-                    take_profit=signal.take_profit,
-                    lot_size=signal.lot_size,
-                    contract_type=signal.contract_type,
-                    strike=signal.strike,
-                    is_buy=signal.is_buy,
-                    metadata=signal.metadata,
-                    timestamp=signal.timestamp,
-                    signal_type=signal.signal_type,
-                    size=signal.size,
-                    reason=signal.reason,
-                    confidence=signal.confidence,
-                )
-            else:
-                signal = Signal(
-                    symbol=signal.symbol,
-                    direction=signal.direction,
-                    entry_price=signal.entry_price - slippage_amount,
-                    stop_loss=signal.stop_loss,
-                    take_profit=signal.take_profit,
-                    lot_size=signal.lot_size,
-                    contract_type=signal.contract_type,
-                    strike=signal.strike,
-                    is_buy=signal.is_buy,
-                    metadata=signal.metadata,
-                    timestamp=signal.timestamp,
-                    signal_type=signal.signal_type,
-                    size=signal.size,
-                    reason=signal.reason,
-                    confidence=signal.confidence,
-                )
+        entry_price = float(getattr(signal, "price", 0))
 
         scale_in = (signal.metadata or {}).get("scale_in", False)
         scale_fraction = 0.4 if scale_in else 1.0
@@ -192,7 +154,7 @@ class PaperBrokerAdapter(BrokerPort):
         )
 
         if position and self._cost_model_enabled:
-            notional = position.entry_price * position.size
+            notional = float(position.entry_price) * float(position.size)
             costs = compute_trade_costs(
                 notional=notional,
                 slippage_bps=self._slippage_bps,

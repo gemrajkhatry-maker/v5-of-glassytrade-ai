@@ -63,6 +63,7 @@ def _make_mocked_handler():
 def _make_portfolio(positions=None):
     portfolio = MagicMock()
     portfolio.positions = positions or []
+    portfolio.open_position_ids.return_value = {p.id for p in (positions or [])}
     return portfolio
 
 
@@ -197,13 +198,16 @@ class TestRegisterPositionNormalization:
         assert kwargs["market_state"] == "BALANCED"
 
     def test_allow_trail_passed_through(self):
+        """allow_trail is now a deprecated no-op — no longer forwarded
+        from signal.metadata to TradeManager.register_position()."""
         handler = _make_mocked_handler()
         pos = _make_position()
         sig = _make_signal()
         sig.metadata["allow_trail"] = True
         handler.register_position("NIFTY25000CE", pos, sig)
         _, kwargs = handler._trade_manager.register_position.call_args
-        assert kwargs["allow_trail"] is True
+        # allow_trail removed from ManagedPosition — test confirms it's not passed
+        assert "allow_trail" not in kwargs
 
     def test_short_signal_registers_as_short(self):
         handler = _make_mocked_handler()
@@ -220,75 +224,50 @@ class TestRegisterPositionNormalization:
 
 
 class TestPartialExitCallback:
-    def test_on_partial_exit_called_with_correct_args(self):
+    def test_partial_take_profit_treated_as_full_close(self):
+        """After removing dead runner code, PARTIAL_TAKE_PROFIT is treated as full close."""
         callback = MagicMock()
         handler = _make_mocked_handler()
-        handler._on_partial_exit = callback
+        handler._on_stop_out = callback
 
         pos = _make_position(pos_id="P1")
         pos.entry_price = 200.0
         pos.size = 75.0
+        pos.stop_loss = 190.0
         portfolio = _make_portfolio([pos])
-        portfolio.partial_close_position.return_value = 150.0  # realized PnL
+        portfolio.close_position.return_value = 150.0  # realized PnL
 
-        # Make check_position return a PARTIAL_TAKE_PROFIT signal
+        # check_position returns PARTIAL_TAKE_PROFIT (no longer has special handling)
         exit_sig = MagicMock()
         exit_sig.reason = ExitReason.PARTIAL_TAKE_PROFIT
         exit_sig.exit_price = 210.0
         handler._trade_manager.check_position.return_value = exit_sig
 
-        # mp mock — not runner_active
-        mp = MagicMock()
-        mp.runner_active = False
-        mp.tick_count = 10
-        handler._trade_manager._positions = {"P1": mp}
-        # Must mock get_position_metrics to return the mock's attributes
-        handler._trade_manager.get_position_metrics.return_value = {
-            "runner_active": False,
-            "tick_count": 10,
-            "partial_taken": False,
-            "trailing_active": False,
-            "mae": 0.0,
-            "mfe": 0.0,
-        }
-        handler._trade_manager.config.partial_size_pct = 0.50
-        handler._trade_manager.config.runner_close_pct = 0.75
-
         result = handler.check_exits(portfolio, 210.0)
 
-        assert result is False  # partial = position still open
-        callback.assert_called_once()
-        args = callback.call_args[0]
-        assert args[0] == "P1"  # pos_id
-        assert args[2] == 200.0  # entry_price
-        assert args[3] == 210.0  # exit_price
-        assert args[4] == 0.50  # partial_pct
-        assert args[7] == 150.0  # realized_pnl
+        # Full close path — position closed, position still open = False
+        assert result is True
+        portfolio.close_position.assert_called_once()
+        handler._trade_manager.unregister_position.assert_called_once_with("P1")
 
-    def test_runner_uses_runner_close_pct(self):
+    def test_no_runner_close_pct_dead_code(self):
+        """Runner mode (75% at target) was dead code and has been removed.
+        PARTIAL_TAKE_PROFIT now falls through to standard full close."""
         handler = _make_mocked_handler()
         pos = _make_position()
         portfolio = _make_portfolio([pos])
-        portfolio.partial_close_position.return_value = 100.0
+        portfolio.close_position.return_value = 100.0  # realized PnL
 
         exit_sig = MagicMock()
         exit_sig.reason = ExitReason.PARTIAL_TAKE_PROFIT
         exit_sig.exit_price = 215.0
         handler._trade_manager.check_position.return_value = exit_sig
 
-        mp = MagicMock()
-        mp.runner_active = True  # ← runner mode
-        mp.tick_count = 10
-        handler._trade_manager._positions = {"P1": mp}
-        handler._trade_manager.config.runner_close_pct = 0.75
-        handler._trade_manager.config.partial_size_pct = 0.50
+        # PARTIAL_TAKE_PROFIT now triggers full close
+        result = handler.check_exits(portfolio, 215.0)
 
-        handler.check_exits(portfolio, 215.0)
-
-        # Close should use 75% (runner_close_pct), not 50%
-        portfolio.partial_close_position.assert_called_once_with(
-            "P1", 0.75, 215.0, ExitReason.PARTIAL_TAKE_PROFIT
-        )
+        assert result is True
+        portfolio.close_position.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -453,7 +432,7 @@ class TestStopLossExit:
 
         assert result is True
         handler._trade_manager.record_loss.assert_called_once_with("NIFTY25000CE")
-        on_stop_out.assert_called_once_with(pos.entry_price, "LONG")
+        on_stop_out.assert_called_once_with(pos.entry_price, "LONG", pos.symbol)
 
     def test_take_profit_exit_does_not_record_loss(self):
         handler = _make_mocked_handler()

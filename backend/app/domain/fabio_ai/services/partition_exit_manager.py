@@ -63,6 +63,7 @@ class PartitionExitManager:
         is_long: bool,
         cvd_slope: float,
         state: PartitionState,
+        market_state: str = "BALANCED",
     ) -> list[ExitSignal]:
         """Check all exit conditions and return exit signals.
 
@@ -74,9 +75,14 @@ class PartitionExitManager:
             is_long: True for long position.
             cvd_slope: Current CVD slope (positive = buying pressure).
             state: Current partition state.
+            market_state: "BALANCED" or "IMBALANCED" — affects P1 behavior.
 
         Returns:
             List of ExitSignal to execute (may be empty).
+
+        Market state awareness (Fix #6):
+            BALANCED: P1 fires aggressively at 0.25R (mean reversion regime).
+            IMBALANCED: P1 is skipped entirely to let trend run.
         """
         signals = []
         risk = abs(entry_price - initial_stop)
@@ -119,24 +125,27 @@ class PartitionExitManager:
                 "BREAK-EVEN triggered at %.2f R toward target", towards_target_r
             )
 
-        # P1: 30% at 33% R IF momentum weak (FR-08-01/02)
-        if not state.p1_taken and r_multiple >= self.P1_R_MULTIPLIER:
-            if abs(cvd_slope) < CVD_STRONG_SLOPE:  # Weak momentum → take P1
+        # P1: state-aware profit taking (FR-08-01/02)
+        if not state.p1_taken:
+            is_imbalanced = "TREND" in market_state.upper() or "IMBALANCE" in market_state.upper()
+
+            if is_imbalanced:
+                # IMBALANCED: skip P1 entirely — let trend run, don't clip winners
+                logger.debug("P1 skipped: IMBALANCED regime, momentum may continue")
+            elif r_multiple >= 0.25:
+                # BALANCED: lower threshold (0.25R instead of 0.33R) for mean reversion.
+                # Fire P1 regardless of CVD — reversion is likely in balanced markets.
                 signals.append(
                     ExitSignal(
                         exit_type="PARTITION_1",
                         size_pct=self.P1_SIZE,
                         price=current_price,
-                        reason=f"P1: seed recovery at {r_multiple:.1%} R, CVD weak",
+                        reason=f"P1: mean-reversion seed recovery at {r_multiple:.1%} R",
                     )
                 )
                 state.p1_taken = True
                 logger.info(
-                    "P1 exit at %.1f%% R (CVD slope %.2f)", r_multiple * 100, cvd_slope
-                )
-            else:
-                logger.debug(
-                    "P1 skipped: CVD strong (slope %.2f), momentum intact", cvd_slope
+                    "P1 exit at %.1f%% R (BALANCED regime)", r_multiple * 100
                 )
 
         # P2: 50% at target ALWAYS (FR-08-03)
