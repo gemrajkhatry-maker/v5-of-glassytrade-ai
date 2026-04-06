@@ -281,6 +281,25 @@ def test_cvd_breakeven_wrong_direction_no_move():
     assert mp.stop_loss == 95.0
 
 
+def test_cvd_breakeven_noise_skipped():
+    """CVD slope below minimum threshold should NOT trigger breakeven."""
+    mgr = TradeManager()
+    mgr.register_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0)
+    # Noise-level slope (0.2 < 0.5 threshold)
+    moved = mgr.apply_cvd_breakeven("P1", cvd_slope=0.2)
+    mp = mgr._positions["P1"]
+    assert moved is False
+    assert mp.breakeven_set is False
+    assert mp.stop_loss == 95.0
+
+    # Same for SHORT
+    mgr.register_position("P2", "NIFTY", "SHORT", 100.0, 105.0, 85.0)
+    moved = mgr.apply_cvd_breakeven("P2", cvd_slope=-0.2)
+    mp = mgr._positions["P2"]
+    assert moved is False
+    assert mp.breakeven_set is False
+
+
 def test_cvd_breakeven_then_doji_holds():
     """After CVD triggers breakeven, a doji candle should hold at BE."""
     mgr = TradeManager()

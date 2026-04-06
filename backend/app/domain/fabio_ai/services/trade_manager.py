@@ -53,6 +53,7 @@ class TradeManagerConfig:
     breakeven_at_1r: bool = True
     # CVD-based breakeven: move SL to entry when CVD confirms direction
     cvd_breakeven: bool = True
+    cvd_breakeven_min_slope: float = 0.5  # minimum CVD slope magnitude to trigger
     # Trail activation at 1R instead of 50% TP distance
     trail_activation_r: float = 1.0
     # Instrument tick size for SL/TP rounding
@@ -1168,8 +1169,8 @@ class TradeManager:
             if mp.breakeven_set:
                 return False  # already at breakeven
 
-            # Check CVD direction alignment
-            if mp.is_long and cvd_slope > 0:
+            # Check CVD direction alignment with minimum slope threshold
+            if mp.is_long and cvd_slope >= self.config.cvd_breakeven_min_slope:
                 mp.stop_loss = mp.entry_price
                 mp.breakeven_set = True
                 logger.info(
@@ -1178,7 +1179,7 @@ class TradeManager:
                     cvd_slope,
                 )
                 return True
-            elif not mp.is_long and cvd_slope < 0:
+            elif not mp.is_long and cvd_slope <= -self.config.cvd_breakeven_min_slope:
                 mp.stop_loss = mp.entry_price
                 mp.breakeven_set = True
                 logger.info(

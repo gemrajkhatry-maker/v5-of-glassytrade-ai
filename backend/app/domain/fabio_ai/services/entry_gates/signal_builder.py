@@ -78,7 +78,7 @@ def build_entry_signal(
     from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import compute_atr
 
     if setup_type is None:
-        setup_type = ST.TREND_MODEL
+        setup_type = ST.MEAN_REVERSION  # default: mean-reversion to POC
 
     is_buy = direction == "LONG"
     sig_type = SignalType.BUY if is_buy else SignalType.SELL

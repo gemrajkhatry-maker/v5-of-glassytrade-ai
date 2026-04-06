@@ -134,7 +134,20 @@ def check_momentum_fade(data: list, tick: OHLC, direction: str) -> bool:
 
 
 def compute_atr(data: list, period: int = 14) -> float:
-    """Compute Average True Range over the last *period* bars."""
-    if len(data) < period:
+    """Compute Average True Range over the last *period* bars.
+
+    Uses True Range: max(H−L, |H−prevC|, |L−prevC|) to account for
+    gaps between candles, which simple (H−L) misses.
+    """
+    if len(data) < 2:
         return 0.0
-    return sum(d.high - d.low for d in data[-period:]) / period
+    window = data[-period:] if len(data) > period else data
+    trs = []
+    prev_close = data[-len(window) - 1].close if len(data) > period else window[0].close
+    for c in window:
+        high_low = c.high - c.low
+        high_prev = abs(c.high - prev_close)
+        low_prev = abs(c.low - prev_close)
+        trs.append(max(high_low, high_prev, low_prev))
+        prev_close = c.close
+    return sum(trs) / len(trs) if trs else 0.0
