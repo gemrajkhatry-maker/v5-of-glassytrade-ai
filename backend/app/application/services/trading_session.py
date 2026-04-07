@@ -138,6 +138,7 @@ class TradingSessionService:
             on_stop_out=self._on_stop_out,
             on_partial_exit=self._on_partial_exit,
             persist_fn=_persist_fn,
+            on_trade_closed=lambda sym, pnl: self._on_trade_closed(sym, pnl),
         )
 
         self._llm_handler = LLMEntryHandler(

@@ -9,7 +9,9 @@ interface EquityPanelProps {
 /** Displays equity, open PnL, session P&L, and partial TP info. */
 const EquityPanel = React.memo<EquityPanelProps>(({ portfolio, openPnl }) => {
     const totalPartialPnl = portfolio.positions.reduce((acc, p) => acc + (p.partialRealizedPnl || 0), 0);
-    const sessionRealizedPnl = portfolio.equity - portfolio.balance;
+    const sessionRealizedPnl = portfolio.closedTrades.reduce(
+        (sum, t) => sum + (t.pnl || 0), 0
+    );
 
     return (
         <div className="pb-4 border-b border-white/5 space-y-2">

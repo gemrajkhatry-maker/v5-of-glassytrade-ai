@@ -574,6 +574,8 @@ class TradeManager:
         current_time: float | None = None,
         time_to_close: float = 0.0,
         cvd_slope: float = 0.0,
+        stop_price: float | None = None,  # tick.low for LONG, tick.high for SHORT
+        stop_price: float | None = None,  # tick.low for LONG, tick.high for SHORT
     ) -> Optional[ExitSignal]:
         """Check all exit rules for a managed position.
 
@@ -589,14 +591,15 @@ class TradeManager:
             mp.tick_count += 1
 
             # ----- 1. STOP LOSS -----
-            if mp.is_long and current_price <= mp.stop_loss:
+            sl_check = stop_price if stop_price is not None else current_price
+            if mp.is_long and sl_check <= mp.stop_loss:
                 logger.info(
                     f"TradeManager: STOP LOSS hit for {position_id} at {current_price:.2f}"
                 )
                 self.record_loss(mp.symbol, current_price)
                 return ExitSignal(position_id, ExitReason.STOP_LOSS, current_price)
 
-            if not mp.is_long and current_price >= mp.stop_loss:
+            if not mp.is_long and (stop_price if stop_price is not None else current_price) >= mp.stop_loss:
                 logger.info(
                     f"TradeManager: STOP LOSS hit for {position_id} at {current_price:.2f}"
                 )

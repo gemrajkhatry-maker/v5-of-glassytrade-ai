@@ -30,12 +30,14 @@ class TradeLifecycleHandler:
         ]
         | None = None,
         persist_fn=None,
+        on_trade_closed: Callable[[str, float], None] | None = None,
     ) -> None:
         self._trade_manager = TradeManager(persist_fn=persist_fn)
         self._partition_manager = PartitionExitManager()
         self._partition_states: dict[str, PartitionState] = {}
         self._on_stop_out = on_stop_out
         self._on_partial_exit = on_partial_exit
+        self._on_trade_closed = on_trade_closed
 
     @property
     def trade_manager(self) -> TradeManager:
@@ -52,6 +54,8 @@ class TradeLifecycleHandler:
         order_book=None,
         amt_result=None,
         imbalances=None,
+        tick_low: float = 0.0,
+        tick_high: float = 0.0,
     ) -> bool:
         """Check all open positions for exit conditions and scale-in triggers.
 
@@ -86,6 +90,7 @@ class TradeLifecycleHandler:
                 )
                 if blowout:
                     portfolio.close_position(pos.id, blowout.exit_price, blowout.reason)
+                    self._record_close(pos)
                     self._trade_manager.unregister_position(pos.id)
                     logger.info(
                         "Position %s closed: SPREAD BLOWOUT at %.2f",
@@ -111,6 +116,7 @@ class TradeLifecycleHandler:
                     portfolio.close_position(
                         pos.id, cvd_exit.exit_price, cvd_exit.reason
                     )
+                    self._record_close(pos)
                     self._trade_manager.unregister_position(pos.id)
                     logger.info(
                         f"Position {pos.id} closed: CVD kill signal at {cvd_exit.exit_price:.2f}"
@@ -216,10 +222,13 @@ class TradeLifecycleHandler:
                 if current_ms:
                     self._trade_manager.update_market_state(pos.id, current_ms)
 
+            sl_price = self._resolve_stop_price(pos, tick_low, tick_high)
+
             exit_sig = self._trade_manager.check_position(
                 pos.id,
                 current_price,
                 time_to_close=time_to_close,
+                stop_price=sl_price,
             )
             if exit_sig:
                 logger.info(
@@ -233,6 +242,7 @@ class TradeLifecycleHandler:
                 portfolio.close_position(
                     pos.id, exit_sig.exit_price, exit_sig.reason
                 )
+                self._record_close(pos)
                 self._trade_manager.unregister_position(pos.id)
                 if exit_sig.reason == ExitReason.STOP_LOSS:
                     self._trade_manager.record_loss(pos.symbol)
@@ -336,3 +346,20 @@ class TradeLifecycleHandler:
 
     def in_cooldown(self, symbol: str) -> bool:
         return self._trade_manager.in_cooldown(symbol)
+
+    def _record_close(self, pos) -> None:
+        """Invoke the on_trade_closed callback after a full close."""
+        if self._on_trade_closed and hasattr(pos, "pnl") and pos.pnl is not None:
+            self._on_trade_closed(pos.symbol, float(pos.pnl))
+
+    @staticmethod
+    def _resolve_stop_price(pos, tick_low: float, tick_high: float) -> float | None:
+        """Return tick.low for LONG, tick.high for SHORT, or None if extremes unavailable."""
+        if tick_low <= 0 and tick_high <= 0:
+            return None
+        is_long = (
+            pos.side.value == "LONG"
+            if hasattr(pos.side, "value")
+            else str(pos.side) == "LONG"
+        )
+        return tick_low if is_long else tick_high
