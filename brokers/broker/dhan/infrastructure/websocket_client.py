@@ -198,8 +198,14 @@ class DhanWebSocketClient(IWebSocketClient):
             logger.info("WebSocket connected successfully")
 
             self._receive_task = asyncio.create_task(self._receive_loop())
+            logger.info("Receive loop task started (task=%s)", self._receive_task.get_name() if hasattr(self._receive_task, 'get_name') else id(self._receive_task))
 
             if self._subscriptions:
+                logger.info(
+                    "Replaying %d subscriptions after reconnect (feed_type=%d)",
+                    len(self._subscriptions),
+                    self._current_feed_type,
+                )
                 try:
                     sids = list(self._subscriptions)
                     segs = [self._sid_to_segment.get(sid, "NSE_EQ") for sid in sids]
@@ -413,9 +419,13 @@ class DhanWebSocketClient(IWebSocketClient):
         return [raw]
 
     async def _receive_loop(self) -> None:
+        pkt_count: int = 0
         while self.is_connected and self._ws:
             try:
                 raw = await self._ws.recv()
+                pkt_count += 1
+                if pkt_count % 500 == 0:
+                    logger.info("WS recv pkt #%d: len=%d type=%s", pkt_count, len(raw), type(raw).__name__)
                 for chunk in self._split_raw(raw):
                     msg = self._parse_message(chunk)
                     if msg and self._message_queue:

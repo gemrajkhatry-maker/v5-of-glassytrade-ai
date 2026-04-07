@@ -10,6 +10,13 @@ from pathlib import Path
 from typing import Any, List
 
 from pydantic import Field, field_validator
+import os as _os
+import sys as _sys
+PROJECT_ROOT = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), '..', '..'))
+_shared_dir = _os.path.join(PROJECT_ROOT, 'shared')
+if _shared_dir not in _sys.path:
+    _sys.path.insert(0, _shared_dir)
+del _os, PROJECT_ROOT, _shared_dir, _sys
 from shared.config import SharedSettings
 
 # Import consolidated configuration

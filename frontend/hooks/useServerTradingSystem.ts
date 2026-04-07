@@ -493,9 +493,10 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // 3.  WebSocket connection
     // ----------------------------------------------------------------
     const retryCountRef = useRef(0);
-    // Default to 9090 so WS connects directly to backend even before config loads.
-    // Config fetch may update this, but we never fall back to the Vite dev server port.
-    const backendPortRef = useRef<number>(9090);
+    // Default port from env var (VITE_BACKEND_PORT) or fallback to 9090.
+    // WS connects directly to backend — never routes through Vite proxy.
+    const defaultPort = Number(import.meta.env.VITE_BACKEND_PORT) || 9090;
+    const backendPortRef = useRef<number>(defaultPort);
 
     const connect = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) return;

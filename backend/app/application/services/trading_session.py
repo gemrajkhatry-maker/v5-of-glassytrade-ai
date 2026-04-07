@@ -535,11 +535,27 @@ class TradingSessionService:
                         p for p in session.portfolio.positions if p.status == "OPEN"
                     ]
                     for pos in open_positions:
+                        # Calculate realized PnL before closing
+                        _close_price = event.tick.close
+                        realized_pnl = (
+                            (_close_price - pos.entry_price) * pos.size
+                            if pos.side.value == "LONG"
+                            else (pos.entry_price - _close_price) * pos.size
+                        )
+
                         session.portfolio.close_position(
                             pos.id,
-                            event.tick.close,
+                            _close_price,
                             "SESSION_CLOSE (Phase 5: 15:15 IST)",
                         )
+
+                        # Record PnL for session tracking
+                        if session and session.portfolio:
+                            self._risk_coordinator.record_trade_result(
+                                event.symbol, float(realized_pnl), session.portfolio
+                            )
+                        self._exit_coordinator.on_position_closed(event.symbol, None)
+
                         self._lifecycle_handler.trade_manager.unregister_position(
                             pos.id
                         )
@@ -551,9 +567,10 @@ class TradingSessionService:
                                     "Failed to delete open position %s: %s", pos.id, e
                                 )
                         log.info(
-                            "Session Phase 5: force-closed position %s at %.2f",
+                            "Session Phase 5: force-closed position %s at %.2f (pnl=%.2f)",
                             pos.id,
-                            event.tick.close,
+                            _close_price,
+                            realized_pnl,
                         )
 
                 if (
@@ -606,11 +623,26 @@ class TradingSessionService:
             with session._lock:
                 for pos in list(session.portfolio.positions):
                     try:
+                        # Calculate realized PnL before closing
+                        _ep = exit_price if exit_price is not None else 0
+                        _er_pnl = (
+                            (_ep - pos.entry_price) * pos.size
+                            if pos.side.value == "LONG"
+                            else (pos.entry_price - _ep) * pos.size
+                        )
+
                         session.portfolio.close_position(
                             pos.id,
                             exit_price if exit_price is not None else Decimal("0"),
                             "EMERGENCY_SESSION_PHASE",
                         )
+
+                        # Record PnL for session tracking
+                        if session and session.portfolio:
+                            self._risk_coordinator.record_trade_result(
+                                event.symbol, float(_er_pnl), session.portfolio
+                            )
+                        self._exit_coordinator.on_position_closed(event.symbol, None)
                     except Exception as close_err:
                         log.error(
                             "Failed to emergency close position %s: %s",
@@ -1272,11 +1304,13 @@ class TradingSessionService:
 
     def _on_trade_closed(self, symbol: str, pnl: float) -> None:
         """Callback from TradeLifecycleHandler — records PnL for session tracking."""
-        session = self._sessions.get(symbol)
+        session = self._state_manager.get_or_create_session(symbol)
         if session and session.portfolio:
             self._risk_coordinator.record_trade_result(
                 symbol, pnl, session.portfolio
             )
+        # Also record in ExitCoordinator for full lifecycle tracking
+        self._exit_coordinator.on_position_closed(symbol, None)
 
     # ----- control-plane helpers -----
 

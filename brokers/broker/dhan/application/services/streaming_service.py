@@ -1,8 +1,14 @@
 """
 Streaming Service - Real-time WebSocket streaming operations.
+
+Maintains a single persistent WebSocket per feed type (full + depth)
+that lives for the broker lifetime.  Instruments are dynamically
+subscribed/unsubscribed on the existing connection via the
+subscription management API — no new connections are created per call.
 """
 
-from typing import Dict, List, Tuple, AsyncIterator
+import asyncio
+from typing import Dict, List, Optional, Tuple, AsyncIterator
 
 from brokers.broker.entities import (
     Instrument,
@@ -30,9 +36,34 @@ logger = get_logger("dhan.services.streaming")
 
 
 class StreamingService(BaseDhanService):
-    """Handles real-time WebSocket streaming operations."""
+    """Handles real-time WebSocket streaming operations.
+
+    A single persistent WebSocket is created on first use and reused
+    for all subsequent `stream_full()` calls.  Instruments are
+    dynamically added/removed on the existing connection via
+    subscribe/unsubscribe — no new connections per call.
+    """
+
+    def __init__(self, *args, **kwargs):
+        # Forward all positional/keyword args to BaseDhanService
+        # Base __init__: (config, http_client, symbol_mapper, rate_limiter,
+        #                 circuit_breaker, option_symbol_cache, ensure_initialized)
+        self._config = kwargs.get("config", args[0] if len(args) > 0 else None)
+        self._http_client = kwargs.get("http_client", args[1] if len(args) > 1 else None)
+        self._symbol_mapper = kwargs.get("symbol_mapper", args[2] if len(args) > 2 else None)
+        self._rate_limiter = kwargs.get("rate_limiter", args[3] if len(args) > 3 else None)
+        self._circuit_breaker = kwargs.get("circuit_breaker", args[4] if len(args) > 4 else None)
+        self._option_symbol_cache = kwargs.get("option_symbol_cache", args[5] if len(args) > 5 else {})
+        self._ensure_initialized = kwargs.get("ensure_initialized", args[6] if len(args) > 6 else None)
+
+        # Persistent WebSocket state (lazy-initialized, one per lifetime)
+        self._persistent_ws: Optional[DhanWebSocketClient] = None
+        self._persistent_depth_ws: Optional[DepthWebSocketClient] = None
+        self._ws_lock = asyncio.Lock()
+        self._depth_ws_lock = asyncio.Lock()
 
     def _make_ws_client(self):
+        """For tests and factory injection — not used at runtime."""
         factory = getattr(self, '_ws_client_factory', None)
         if factory:
             return factory()
@@ -51,6 +82,68 @@ class StreamingService(BaseDhanService):
             access_token=self._config.access_token,
             client_id=self._config.client_id,
         )
+
+    async def _get_persistent_ws(self, instruments: List[Instrument]) -> DhanWebSocketClient:
+        """Return a single persistent WebSocket client.  Creates and connects
+        on first call; reuses on subsequent calls.
+
+        All instruments must be subscribed before the generator is consumed.
+        """
+        async with self._ws_lock:
+            ws = self._persistent_ws
+            if ws is not None and ws.is_connected:
+                return ws
+
+            # Connection lost or not yet created — build fresh
+            if ws is not None:
+                logger.warning("Persistent WS lost — reconnecting…")
+                try:
+                    await ws.disconnect()
+                except Exception:
+                    pass
+
+            ws = self._make_ws_client()
+            await ws.connect()
+            self._persistent_ws = ws
+            logger.info("Persistent WebSocket created and ready")
+            return ws
+
+    async def _get_persistent_depth_ws(self, instruments: List[Instrument]) -> DepthWebSocketClient:
+        async with self._depth_ws_lock:
+            ws = self._persistent_depth_ws
+            if ws is not None and ws.is_connected:
+                return ws
+
+            if ws is not None:
+                logger.warning("Persistent depth WS lost — reconnecting…")
+                try:
+                    await ws.disconnect()
+                except Exception:
+                    pass
+
+            ws = self._make_depth_client(20)
+            await ws.connect()
+            self._persistent_depth_ws = ws
+            logger.info("Persistent depth WebSocket created and ready")
+            return ws
+
+    async def disconnect_persistent(self) -> None:
+        """Close all persistent WebSockets.  Called during broker shutdown."""
+        if self._persistent_ws:
+            try:
+                await self._persistent_ws.disconnect()
+            except Exception:
+                pass
+            self._persistent_ws = None
+            logger.info("Persistent WS closed")
+
+        if self._persistent_depth_ws:
+            try:
+                await self._persistent_depth_ws.disconnect()
+            except Exception:
+                pass
+            self._persistent_depth_ws = None
+            logger.info("Persistent depth WS closed")
 
     async def _prepare_stream(
         self, instruments: List[Instrument]
@@ -222,27 +315,22 @@ class StreamingService(BaseDhanService):
     async def stream_depth_20(
         self, instruments: List[Instrument]
     ) -> AsyncIterator[MarketDepth]:
-        """
-        Stream 20-level market depth via the dedicated depth feed.
-
-        Supports up to 50 NSE instruments per connection.
-        Each yielded MarketDepth has symbol backfilled from the instrument map.
-        """
+        """Stream 20-level market depth via persistent depth WS."""
         security_ids, instrument_map = await self._prepare_stream(instruments)
         if not security_ids:
             return
 
         exchange_segments = self._exchange_segments_for(security_ids, instrument_map)
 
-        ws_client = self._make_depth_client(20)
-        await ws_client.connect()
+        ws = await self._get_persistent_depth_ws(instruments)
+
+        await ws.subscribe(
+            security_ids,
+            feed_type=20,
+            exchange_segments=exchange_segments,
+        )
         try:
-            await ws_client.subscribe(
-                security_ids,
-                feed_type=20,  # ignored inside DepthWebSocketClient, uses DEPTH_REQUEST_CODE=23
-                exchange_segments=exchange_segments,
-            )
-            async for msg in ws_client.messages():
+            async for msg in ws.messages():
                 if msg.type == "depth":
                     sid = str(msg.data.get("security_id", ""))
                     inst = instrument_map.get(sid)
@@ -261,8 +349,12 @@ class StreamingService(BaseDhanService):
                             ],
                             timestamp=msg.timestamp,
                         )
-        finally:
-            await ws_client.disconnect()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("stream_depth_20: WS error — will reconnect on next call: %s", e)
+            async with self._depth_ws_lock:
+                self._persistent_depth_ws = None
 
     async def stream_depth_200(
         self, instruments: List[Instrument]
@@ -323,16 +415,9 @@ class StreamingService(BaseDhanService):
         """
         Stream market data as FullPacket for any exchange segment.
 
-        For MCX instruments: uses FEED_TYPE_FULL (21) which includes 5-level
-        depth + OI.
-        For NSE/NFO instruments: uses FEED_TYPE_QUOTE (17) which is more
-        reliable (Dhan frequently drops FULL connections for NFO).  Depth
-        should be supplemented by a separate stream_depth_20() call.
-
-        Each yielded FullPacket contains:
-          symbol, ltp, open, high, low, close, volume, oi, atp,
-          total_buy_qty, total_sell_qty, depth_bids, depth_asks,
-          security_id, exchange_segment, timestamp
+        Uses a single persistent WebSocket across calls.  Instruments are
+        subscribed on the existing connection — no new connections are created.
+        Dropped symbols (expired options) are unsubscribed to free slots.
         """
         security_ids, instrument_map = await self._prepare_stream(instruments)
         if not security_ids:
@@ -340,15 +425,24 @@ class StreamingService(BaseDhanService):
 
         exchange_segments = self._exchange_segments_for(security_ids, instrument_map)
 
-        # Consolidate: Always use FEED_TYPE_FULL (21) for all exchange segments
         feed_type = FEED_TYPE_FULL
         accepted_types = ("full", "quote", "tick")
 
-        ws_client = self._make_ws_client()
-        await ws_client.connect()
+        # Get or create persistent WS (connects only once for the broker lifetime)
+        ws = await self._get_persistent_ws(instruments)
+
+        # Subscribe new instruments on the existing connection.
+        # Skip if already subscribed — avoids double-subscribe on reconnect
+        # (the WS client's connect() replay already re-sends all subs).
+        new_sids = [sid for sid in security_ids if sid not in ws.subscriptions]
+        if new_sids:
+            logger.info("Subscribing %d new instrument(s) on persistent WS", len(new_sids))
+            await ws.subscribe(new_sids, feed_type=feed_type,
+                               exchange_segments=exchange_segments)
+
+        # Yield packets until WS disconnects (expired symbols, network error)
         try:
-            await ws_client.subscribe(security_ids, feed_type=feed_type, exchange_segments=exchange_segments)
-            async for msg in ws_client.messages():
+            async for msg in ws.messages():
                 if msg.type in accepted_types:
                     sid = str(msg.data.get("security_id", ""))
                     inst = instrument_map.get(sid)
@@ -374,5 +468,10 @@ class StreamingService(BaseDhanService):
                             ltq=int(d.get("ltq", 0)),
                             ltt=int(d.get("last_trade_time", 0)),
                         )
-        finally:
-            await ws_client.disconnect()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("stream_full: WS error — will reconnect on next call: %s", e)
+            # Clear the persistent ref so next call gets a fresh connection
+            async with self._ws_lock:
+                self._persistent_ws = None

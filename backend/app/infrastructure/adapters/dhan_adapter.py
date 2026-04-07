@@ -443,3 +443,14 @@ class DhanMarketDataAdapter(MarketDataPort):
         instruments = [self._make_instrument(sym) for sym in symbols]
         async for depth in broker.stream_depth(instruments, depth_level=20):
             yield depth
+
+    def close_sync(self) -> None:
+        """Close the underlying DhanBroker and disconnect its WebSocket."""
+        if self._broker is not None:
+            try:
+                logger.info("Closing DhanBroker (WebSocket disconnect)...")
+                self._broker.close_sync()
+            except Exception:
+                logger.debug("DhanBroker close failed (shutdown in progress)", exc_info=True)
+            else:
+                logger.info("DhanBroker closed")

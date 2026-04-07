@@ -106,8 +106,8 @@ VALIDITY_GOOD_TILL_CANCELLED: str = "GTC"
 # Feed type codes for WebSocket subscriptions (regular feed)
 FEED_TYPE_TICKER: int = 15  # LTP only
 FEED_TYPE_QUOTE: int = 17  # LTP + OHLC + Volume
-FEED_TYPE_FULL: int = 21  # Quote + 5-level depth
-FEED_TYPE_FULL_DEPTH: int = 20  # 20-level depth (unused on regular feed)
+FEED_TYPE_FULL: int = 17  # Quote + 5-level depth (same as QUOTE — Dhan sends depth in rc=8 packets on this feed regardless of 15/17)
+FEED_TYPE_FULL_DEPTH: int = 20  # 20-level depth (depth-only endpoint)
 
 # Full Market Depth WebSocket — subscription and response codes
 # These apply to both WS_URL_DEPTH_20 and WS_URL_DEPTH_200 endpoints

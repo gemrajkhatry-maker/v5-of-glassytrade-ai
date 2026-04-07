@@ -12,6 +12,16 @@ import json
 import sys
 import os
 
+# Ensure shared/ and brokers/ are importable — they live outside backend/
+import sys as _sys
+import os as _os
+_project_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), '..', '..'))
+for _sub in ('shared', 'brokers'):
+    _p = _os.path.join(_project_root, _sub)
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+del _sys, _os, _project_root, _sub, _p
+
 # Fix OpenMP multiple initialization crash (LightGBM + MLX) on macOS
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -138,6 +148,15 @@ async def lifespan(app: FastAPI):
         log.info("Thread pools shut down.")
     except AttributeError:
         log.debug("Thread pool cleanup failed", exc_info=True)
+
+    # Disconnect market data feed (WebSocket)
+    try:
+        md = graph.market_data
+        if md and hasattr(md, "close_sync"):
+            md.close_sync()
+            log.info("Market data feed disconnected.")
+    except Exception:
+        log.debug("Market data disconnect failed", exc_info=True)
 
 
 app = FastAPI(

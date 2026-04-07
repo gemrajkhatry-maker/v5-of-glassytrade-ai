@@ -224,8 +224,10 @@ class TradePositionDTO(BaseModel):
     exit_time: Optional[str] = Field(alias="exitTime", default=None)
     close_reason: Optional[str] = Field(alias="closeReason", default=None)
     metadata: Optional[dict[str, Any]] = None
+    partial_realized_pnl: float = Field(alias="partialRealizedPnl", default=0.0)
+    original_size: float = Field(alias="originalSize", default=0.0)
 
-    model_config = {"populate_by_name": True}
+    model_config = {"populate_by_name": True, "extra": "forbid"}
 
 
 class PortfolioDTO(BaseModel):

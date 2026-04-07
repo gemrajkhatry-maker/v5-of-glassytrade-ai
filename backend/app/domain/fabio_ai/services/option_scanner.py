@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import date
 
 logger = logging.getLogger(__name__)
 
@@ -199,11 +200,31 @@ class OptionScannerService:
                 else:
                     _exchange = exchange or "MCX"
 
+                # Auto-advance expiry if the requested one is today or in the past.
+                # On expiry day, Dhan may return stale LTP from the option chain,
+                # but the WebSocket feed is silently killed for delisted contracts.
+                effective_expiry_index = expiry_index
                 chain = self._broker.get_option_chain(
                     underlying=u,
                     exchange=_exchange,
-                    expiry_index=expiry_index,
+                    expiry_index=effective_expiry_index,
                 )
+                while chain is not None and effective_expiry_index < 3:
+                    expiry_date = chain.expiry.date() if hasattr(chain.expiry, "date") else chain.expiry
+                    if expiry_date <= date.today():
+                        effective_expiry_index += 1
+                        logger.info(
+                            "%s: exp %s is today/past — advancing to index %d",
+                            u, expiry_date, effective_expiry_index,
+                        )
+                        chain = self._broker.get_option_chain(
+                            underlying=u,
+                            exchange=_exchange,
+                            expiry_index=effective_expiry_index,
+                        )
+                    else:
+                        break
+
                 if chain is None:
                     logger.info("%s: option chain returned None — skipping", u)
                     continue

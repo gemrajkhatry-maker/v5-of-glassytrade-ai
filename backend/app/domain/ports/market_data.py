@@ -11,7 +11,7 @@ Error contracts:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 
 from app.domain.trading.models.value_objects import OHLC, OrderBook
 
@@ -28,6 +28,13 @@ class MarketDataPort(ABC):
 
         Override in adapters that require lazy init (e.g. broker instrument
         cache loading). Default is a no-op so callers can always call safely.
+        """
+
+    def close_sync(self) -> None:
+        """Shutdown hook — releases all connections and background tasks.
+
+        Override in adapters that hold persistent network resources
+        (e.g. Dhan WebSocket). Default is a no-op.
         """
 
     # ------------------------------------------------------------------
