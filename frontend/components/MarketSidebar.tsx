@@ -349,7 +349,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                                         <span className={`text-[9px] px-1 rounded ${trade.side === 'LONG' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
                                             {trade.side}
                                         </span>
-                                        {trade.size > 0 && <span className="text-[9px] text-white/40">x{trade.size}</span>}
+                                        {trade.size > 0 && <span className="text-[9px] text-white/40">x{(trade.originalSize ?? trade.size).toFixed(0)}</span>}
                                     </div>
                                     <div className={`font-mono font-bold ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                                         {trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)}

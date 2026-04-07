@@ -575,7 +575,6 @@ class TradeManager:
         time_to_close: float = 0.0,
         cvd_slope: float = 0.0,
         stop_price: float | None = None,  # tick.low for LONG, tick.high for SHORT
-        stop_price: float | None = None,  # tick.low for LONG, tick.high for SHORT
     ) -> Optional[ExitSignal]:
         """Check all exit rules for a managed position.
 

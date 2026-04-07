@@ -180,6 +180,7 @@ class TradeLifecycleHandler:
                         if psig.exit_type in ("COUNTER_AGGRESSION", "TRAIL"):
                             # Full exit
                             portfolio.close_position(pos.id, psig.price, psig.exit_type)
+                            self._record_close(pos)
                             self._trade_manager.unregister_position(pos.id)
                             self._partition_states.pop(pos.id, None)
                             logger.info(

@@ -458,7 +458,7 @@ class TestDecisionHistory:
         for i in range(200):
             service.track_gate_block(
                 symbol="TEST",
-                gate_name="GATE_0",
+                gate_name=f"GATE_{i}",
                 gate_reason="TEST",
                 gate_detail="test",
             )

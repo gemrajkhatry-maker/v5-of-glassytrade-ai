@@ -142,7 +142,13 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             <div className="absolute top-0 left-1/2 w-px h-full bg-white/20 z-10" />
                             {(() => {
                                 const maxAbs = 30000;
-                                const currentPnl = portfolio.equity - portfolio.balance;
+                                const totalPartialPnl = (portfolio.positions as any[]).reduce(
+                                    (sum: number, p: any) => sum + (p.partialRealizedPnl || 0), 0
+                                );
+                                const closedPnl = (portfolio.closedTrades || []).reduce(
+                                    (sum: number, t: any) => sum + (t.pnl || 0), 0
+                                );
+                                const currentPnl = closedPnl + totalPartialPnl;
                                 const norm = Math.min(Math.abs(currentPnl) / maxAbs, 1);
                                 return (
                                     <div className="h-full absolute transition-all duration-500 rounded-full" style={{

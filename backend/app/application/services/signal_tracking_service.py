@@ -223,9 +223,25 @@ class SignalTrackingService:
         return decision
 
     def _record(self, symbol: str, decision: SignalDecision) -> None:
-        """Record a decision and update stats."""
+        """Record a decision and update stats.
+
+        Deduplication: skip if the last decision has the same
+        decision_type + gate_name + gate_reason (prevents repeated
+        identical BLOCKED entries during the same phase gate).
+        """
         if symbol not in self._decisions:
             self._decisions[symbol] = []
+
+        last = self._decisions[symbol][-1] if self._decisions[symbol] else None
+        if last and decision.decision_type == last.decision_type == "BLOCKED":
+            if (
+                decision.gate_name == last.gate_name
+                and decision.gate_reason == last.gate_reason
+            ):
+                # Update previous entry timestamp so the UI shows the latest time
+                last.timestamp = decision.timestamp
+                return  # skip duplicate append
+
         self._decisions[symbol].append(decision)
 
         # Update stats

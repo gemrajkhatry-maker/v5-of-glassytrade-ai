@@ -151,15 +151,21 @@ class TestSignalTrackingService:
         assert stats["block_rate"] == pytest.approx(66.7, abs=0.1)
 
     def test_get_gate_block_summary(self):
-        """Should summarize gate blocks by gate name."""
+        """Should summarize gate blocks by gate name (duplicates are deduped)."""
         service, _ = self._create_service()
         service.track_gate_block(
             symbol="CRUDEOIL", gate_name="CVD", gate_reason="CVD_OPPOSING",
             gate_detail="Blocked", market_state="BALANCED",
         )
+        # Same gate_name + gate_reason -> deduped (only 1 counted)
         service.track_gate_block(
             symbol="CRUDEOIL", gate_name="CVD", gate_reason="CVD_OPPOSING",
             gate_detail="Blocked again", market_state="BALANCED",
+        )
+        # Different reason -> new entry
+        service.track_gate_block(
+            symbol="CRUDEOIL", gate_name="CVD", gate_reason="CVD_WEAK",
+            gate_detail="Different reason", market_state="BALANCED",
         )
         service.track_gate_block(
             symbol="CRUDEOIL", gate_name="PROFILE_SHAPE", gate_reason="PROFILE_SHAPE_P",
@@ -167,17 +173,21 @@ class TestSignalTrackingService:
         )
 
         summary = service.get_gate_block_summary("CRUDEOIL")
-        assert summary["CVD"] == 2
+        assert summary["CVD"] == 2  # CVD_OPPOSING + CVD_WEAK
         assert summary["PROFILE_SHAPE"] == 1
 
     def test_get_recent_decisions(self):
         """Should return recent decisions in order."""
         service, _ = self._create_service()
-        for i in range(5):
-            service.track_gate_block(
-                symbol="CRUDEOIL", gate_name="CVD", gate_reason="CVD_OPPOSING",
-                gate_detail=f"Block {i}", market_state="BALANCED",
-            )
+        # Varied reasons so they don't deduplicate
+        service.track_gate_block(
+            symbol="CRUDEOIL", gate_name="CVD", gate_reason="CVD_OPPOSING",
+            gate_detail="Block 1", market_state="BALANCED",
+        )
+        service.track_gate_block(
+            symbol="CRUDEOIL", gate_name="THREE_ALIGN", gate_reason="THREE_ALIGN_NO",
+            gate_detail="Block 2", market_state="BALANCED",
+        )
         service.track_signal_generated(
             symbol="CRUDEOIL", direction="LONG", confidence="High",
             aggression_score=3.5, drive_number=2, market_state="BALANCED",
@@ -186,7 +196,6 @@ class TestSignalTrackingService:
 
         recent = service.get_recent_decisions("CRUDEOIL", limit=3)
         assert len(recent) == 3
-        # Should be the last 3 decisions
         assert recent[-1]["type"] == "GENERATED"
 
     def test_clear(self):

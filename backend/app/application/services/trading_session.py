@@ -1270,6 +1270,14 @@ class TradingSessionService:
         """Callback from TradeLifecycleHandler — delegates to ExitCoordinator."""
         self._exit_coordinator.on_stop_out(level, direction, symbol, self._exchange)
 
+    def _on_trade_closed(self, symbol: str, pnl: float) -> None:
+        """Callback from TradeLifecycleHandler — records PnL for session tracking."""
+        session = self._sessions.get(symbol)
+        if session and session.portfolio:
+            self._risk_coordinator.record_trade_result(
+                symbol, pnl, session.portfolio
+            )
+
     # ----- control-plane helpers -----
 
     def halt_trading(self) -> None:
