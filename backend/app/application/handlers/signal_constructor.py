@@ -95,11 +95,13 @@ class SignalConstructor:
             # Enrich signal with additional metadata
             enriched_signal = self._enrich_signal_metadata(
                 signal=signal,
+                direction=direction,
                 tick=tick,
                 amt_result=amt_result,
                 ai_result=ai_result,
                 setup_type=setup_type,
                 confidence=confidence,
+                data=data,
             )
 
             return enriched_signal
@@ -111,27 +113,32 @@ class SignalConstructor:
     def _enrich_signal_metadata(
         self,
         signal: Signal,
+        direction: str,
         tick: OHLC,
         amt_result: AMTResult,
         ai_result: dict,
         setup_type: SetupType,
         confidence: str,
+        data: list[OHLC] | None = None,
     ) -> Signal:
         """Enrich signal with additional metadata.
 
         Args:
             signal: Base signal to enrich
+            direction: Trade direction (LONG/SHORT)
             tick: Current tick data
             amt_result: AMT analysis result
             ai_result: LLM analysis result
             setup_type: Setup type
             confidence: Confidence level
+            data: Historical OHLC for footprint analysis
 
         Returns:
             Enriched signal
         """
         # Build trade thesis
         from app.domain.fabio_ai.services.trade_thesis import build_trade_thesis
+        from app.domain.fabio_ai.services.entry_gates.grading import compute_grade_score
 
         thesis = build_trade_thesis(
             tick=tick,
@@ -145,6 +152,17 @@ class SignalConstructor:
         conviction_multiplier = self._calculate_conviction_multiplier(
             amt_result=amt_result,
             confidence=confidence,
+        )
+
+        # Compute confluence grade score (A/B/C setup grade)
+        # Score breakdown: +1 per confirming factor (CVD slope, no divergence,
+        # session/setup alignment, profile shape, VWAP bias, imbalance alignment)
+        grade_score = compute_grade_score(
+            direction=direction,
+            tick=tick,
+            amt_result=amt_result,
+            setup_type=setup_type,
+            profile_shape=amt_result.profile_shape,
         )
 
         # Enrich metadata
@@ -161,6 +179,7 @@ class SignalConstructor:
                 "aggression": amt_result.aggression,
                 "cvd_slope": amt_result.cvd_slope,
                 "profile_shape": amt_result.profile_shape,
+                "grade_score": grade_score,
             }
         )
 

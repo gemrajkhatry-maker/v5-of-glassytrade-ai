@@ -162,6 +162,17 @@ def build_entry_signal(
 
     setup_label = "MeanRev" if setup_type == ST.MEAN_REVERSION else "Trend"
 
+    # Compute confluence grade score for gate validation
+    from app.domain.fabio_ai.services.entry_gates.grading import compute_grade_score
+
+    grade_score = compute_grade_score(
+        direction=direction,
+        tick=tick,
+        amt_result=amt_result,
+        setup_type=setup_type,
+        profile_shape=amt_result.profile_shape,
+    )
+
     # Round SL/TP to tick_size boundaries
     if is_buy:
         stop_price = round_down_to_tick(float(stop_price), tick_size)
@@ -216,5 +227,6 @@ def build_entry_signal(
             "raw_output": ai_result.get("raw_output", "")[:200],
             "trade_thesis": thesis.to_metadata(),
             "session_risk_pct": session_risk_pct,
+            "grade_score": grade_score,
         },
     )

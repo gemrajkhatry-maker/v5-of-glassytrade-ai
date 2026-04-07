@@ -167,7 +167,15 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (!entriesBySymbol[sym]) entriesBySymbol[sym] = [];
 
                     entriesBySymbol[sym].push({
-                        timestamp: new Date(d.created_at + 'Z').getTime(),
+                        timestamp: (() => {
+                            // Try parsing as-is first; only append 'Z' if it yields
+                            // NaN (handles strings that already contain timezone info).
+                            let ts = new Date(d.created_at).getTime();
+                            if (isNaN(ts)) {
+                                ts = new Date(d.created_at + 'Z').getTime();
+                            }
+                            return ts;
+                        })(),
                         direction: d.direction || 'FLAT',
                         confidence: d.confidence || 'Medium',
                         rationale: d.rationale || '',

@@ -183,16 +183,31 @@ class Portfolio:
         active: list[Position] = []
         newly_closed: list[Position] = []
 
+        # Use tick extremes for SL/TP checks — wicks breach stops even on recovery
+        # (LLM positions skip this path entirely — managed by TradeManager)
         for pos in self.positions:
-            # LLM positions: SL/TP managed exclusively by TradeManager
-            # (which handles trailing stops, partials, time-based exits).
-            # Portfolio SL/TP only fires for non-LLM sources as a safety net.
             if pos.source == Source.LLM:
                 pos.update_pnl(current_price)
                 active.append(pos)
                 unrealized_pnl += pos.pnl
                 continue
-            should_close, reason = pos.should_close(current_price)
+
+            # SL uses tick.low for LONG, tick.high for SHORT (wicks breach before recovery)
+            # TP uses tick.high for LONG, tick.low for SHORT (favorable extreme)
+            should_close = False
+            reason = ""
+
+            sl_close, sl_reason = pos.should_close(
+                tick.low if pos.side == Side.LONG else tick.high
+            )
+            tp_close, tp_reason = pos.should_close(
+                tick.high if pos.side == Side.LONG else tick.low
+            )
+
+            if sl_close:
+                should_close, reason = sl_close, sl_reason
+            elif tp_close:
+                should_close, reason = tp_close, tp_reason
             if should_close:
                 # Apply slippage to exit fill
                 fill_price = self._apply_slippage(

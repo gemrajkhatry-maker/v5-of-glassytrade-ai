@@ -53,6 +53,7 @@ class SessionRiskCoordinator:
         capital: float = 5000000.0,
         use_risk_tier_engine: bool = False,
         trade_manager=None,
+        min_grade_score: int | None = None,
     ):
         self._risk_managers: dict[str, RiskManager] = {}
         self._session_risk_managers: dict[str, SessionRiskManager] = {}
@@ -62,6 +63,11 @@ class SessionRiskCoordinator:
         self._session_creation_lock = threading.Lock()
         self._storage = storage
         self._trade_manager = trade_manager
+        from app.application.services.entry_coordinator import MIN_GRADE_SCORE_THRESHOLD
+
+        self._min_grade_score = (
+            min_grade_score if min_grade_score is not None else MIN_GRADE_SCORE_THRESHOLD
+        )
 
     def _get_risk_manager(self, symbol: str) -> RiskManager:
         """Return per-symbol RiskManager, creating one if needed.
@@ -163,15 +169,29 @@ class SessionRiskCoordinator:
     def validate_entry(self, symbol: str, signal: Signal, portfolio: Portfolio) -> bool:
         """Validate entry against risk limits.
 
-        Checks three independent guards:
-        1. SessionRiskManager — 3-loss circuit breaker
-        2. TradeManager — daily loss limit per symbol / global
-        3. RiskManager — position sizing, exposure, drawdown
+        Checks four independent guards:
+        1. Signal confluence grade score (must meet minimum threshold)
+        2. SessionRiskManager — 3-loss circuit breaker
+        3. TradeManager — daily loss limit per symbol / global
+        4. RiskManager — position sizing, exposure, drawdown
 
         Returns:
             True if entry is valid
         """
-        # Guard 1: Session circuit breaker (3 consecutive losses)
+        # Guard 1: Confluence grade score floor
+        meta = getattr(signal, "metadata", None) or {}
+        grade_score = meta.get("grade_score")
+        if grade_score is not None and grade_score < self._min_grade_score:
+            logger.warning(
+                "Entry BLOCKED — insufficient confluence: grade_score=%d "
+                "(minimum=%d) for %s",
+                grade_score,
+                self._min_grade_score,
+                symbol,
+            )
+            return False
+
+        # Guard 2: Session circuit breaker (3 consecutive losses)
         srm = self.get_session_risk_manager(symbol)
         if not srm.can_trade:
             logger.warning(
@@ -179,14 +199,14 @@ class SessionRiskCoordinator:
             )
             return False
 
-        # Guard 2: Daily loss limit (per-symbol or global)
+        # Guard 3: Daily loss limit (per-symbol or global)
         if self._trade_manager and self._trade_manager.is_daily_limit_reached(symbol):
             logger.warning(
                 "Entry BLOCKED — TradeManager daily loss limit reached for %s", symbol
             )
             return False
 
-        # Guard 3: Standard risk manager (position sizing, exposure)
+        # Guard 4: Standard risk manager (position sizing, exposure)
         risk_manager = self._get_risk_manager(symbol)
         return risk_manager.validate(signal, portfolio)
 

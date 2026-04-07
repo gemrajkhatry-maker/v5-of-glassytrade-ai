@@ -30,6 +30,13 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Minimum confluence gates that must pass before a signal may be executed.
+# This is the "2-of-N" floor: even if the pipeline marks a setup valid,
+# the grade_score must indicate at least MIN_A_B_C_GRADE independent
+# alignment factors (CVD, delta, session match, VWAP, imbalances…).
+# A-grade >= 3, B-grade >= 1.  We require B-grade or better.
+MIN_GRADE_SCORE_THRESHOLD = 1
+
 
 class EntryCoordinator:
     """Handles signal execution and position opening.
@@ -71,7 +78,39 @@ class EntryCoordinator:
         """
         from app.domain.fabio_ai.services.trade_thesis import validate_trade_thesis
 
-        thesis = (getattr(sig, "metadata", None) or {}).get("trade_thesis")
+        # Guard: confluence grade score must meet minimum threshold.
+        # Each signal that has traversed an AMT analysis carries a grade_score
+        # (0–6) in metadata.  Signals below the floor are blocked even if they
+        # passed the earlier boolean gates.
+        meta = getattr(sig, "metadata", None) or {}
+        grade_score = meta.get("grade_score")
+        if grade_score is not None and grade_score < MIN_GRADE_SCORE_THRESHOLD:
+            log.warning(
+                "Signal rejected by gate confluence floor: grade_score=%d (threshold=%d)",
+                grade_score,
+                MIN_GRADE_SCORE_THRESHOLD,
+            )
+            _ad = getattr(session, "_agent_decision", None)
+            decision_source, attribution = self._event_logger._decision_attribution(
+                sig, _ad
+            )
+            self._event_logger.log_rejection(
+                symbol=symbol,
+                reason=f"CONFLUENCE_GRADE_{grade_score}",
+                amt=session.last_amt,
+                llm_direction="BUY" if sig.is_buy else "SELL",
+                agent_direction=_ad.direction if _ad else "",
+                agent_regime=_ad.regime if _ad else "",
+                agent_feature_drivers=getattr(_ad, "feature_drivers", ())
+                if _ad
+                else (),
+                decision_source=decision_source,
+                attribution=attribution,
+                trade_thesis=meta.get("trade_thesis"),
+            )
+            return
+
+        thesis = meta.get("trade_thesis")
         thesis_valid, thesis_reason = validate_trade_thesis(thesis)
         if not thesis_valid:
             log.info("Signal rejected by trade thesis gate: %s", thesis_reason)

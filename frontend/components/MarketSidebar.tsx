@@ -154,7 +154,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                         {totalPnl >= 0 ? '▲' : '▼'}
                     </span>
                 ) : (
-                    <span className={`text-[9px] font-mono ${isUp ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
+                    <span className={`text-[9px] font-mono whitespace-nowrap ${isUp ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
                         {isUp ? '+' : ''}{percentChange.toFixed(1)}%
                     </span>
                 )}

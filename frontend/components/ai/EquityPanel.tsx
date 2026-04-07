@@ -19,13 +19,13 @@ const EquityPanel = React.memo<EquityPanelProps>(({ portfolio, openPnl }) => {
                 <div>
                     <div className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Equity</div>
                     <div className="text-sm font-bold font-mono text-white">
-                        {'\u20B9'}{portfolio.equity.toLocaleString('en-IN')}
+                        {'\u20B9'}{portfolio.equity.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                 </div>
                 <div className="text-right">
                     <div className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Open PNL</div>
-                    <div className={`text-sm font-bold font-mono ${openPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                        {openPnl >= 0 ? '+' : ''}{'\u20B9'}{openPnl.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    <div className={`text-sm font-bold font-mono ${openPnl > 0 ? 'text-green-400' : openPnl < 0 ? 'text-red-400' : 'text-white/60'}`}>
+                        {openPnl > 0 ? '+' : ''}{'\u20B9'}{openPnl.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </div>
                 </div>
             </div>
