@@ -564,7 +564,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // Connect once after config loads activeSymbol
     const hasConnected = useRef(false);
     useEffect(() => {
-        if (!activeSymbol || hasConnected.current) return;
+        if (!activeSymbol) return;
+        // React StrictMode double-mounts: first mount opens WS, cleanup closes it.
+        // On second mount, hasConnected is true but wsRef was nulled — must reconnect.
+        const wsStillAlive = wsRef.current?.readyState === WebSocket.OPEN;
+        if (hasConnected.current && wsStillAlive) return;
         hasConnected.current = true;
         connect();
         // eslint-disable-next-line react-hooks/exhaustive-deps

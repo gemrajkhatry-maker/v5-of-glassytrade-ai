@@ -198,7 +198,8 @@ class RiskManager:
         if equity > self._daily.peak_equity:
             self._daily.peak_equity = equity
 
-        if pnl <= 0:
+        # Consecutive losses — breakeven (pnl == 0) is neutral, not a loss
+        if pnl < 0:
             self._daily.consecutive_losses += 1
         else:
             self._daily.consecutive_losses = 0

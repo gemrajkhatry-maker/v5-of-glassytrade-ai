@@ -1,12 +1,12 @@
 """Partition Exit Manager — P1/P2/P3 partition exits per Fabio AMT spec (FR-08).
 
-Exit structure:
-  P1 (30%): Exit at 33% of R IF momentum weak (skip if CVD strong)
-  P2 (50%): ALWAYS exit at target (session POC)
-  P3 (20%): Trail if CVD slope > 2.0, else exit with P2
-  Break-even: Move SL to entry at 35% of R toward target
+Exit structure (Fabio spec):
+  P1 (30%): Exit at 1R — locks in first unit of risk
+  P2 (40%): Exit at 2R — locks in second unit of risk
+  P3 (30%): Trail with ATR or structure — let runner run
+  Break-even: Move SL to entry at 1R OR when CVD confirms
   Counter-aggression: 2+ opposite signals = exit ALL
-  Trail formula: SL = current - (remaining_to_target × 0.40)
+  Trail formula: SL = current - (remaining_to_target x 0.40)
 """
 
 from __future__ import annotations
@@ -44,14 +44,15 @@ class PartitionState:
 class PartitionExitManager:
     """Manages position exits in 3 partitions (FR-08)."""
 
-    # Partition sizes
-    P1_SIZE = 0.30  # 30% at 33% R
-    P2_SIZE = 0.50  # 50% at target
-    P3_SIZE = 0.20  # 20% trail
+    # Partition sizes — Fabio spec: 30/40/30
+    P1_SIZE = 0.30  # 30% at 1R
+    P2_SIZE = 0.40  # 40% at 2R
+    P3_SIZE = 0.30  # 30% trail
 
-    # Trigger levels
-    P1_R_MULTIPLIER = 0.33  # 33% of R
-    BE_R_MULTIPLIER = 0.35  # 35% of R toward target
+    # Trigger levels — Fabio spec: 1R / 2R / trail
+    P1_R_MULTIPLIER = 1.00  # 1.0R for first unit of risk
+    BE_R_MULTIPLIER = 1.00  # break-even at 1R (CVD-based BE handled by TradeManager separately)
+    P2_R_MULTIPLIER = 2.00  # 2.0R for second unit of risk
     TRAIL_REMAINING_RATIO = 0.40  # 40% of remaining distance
 
     def check_exits(
@@ -125,49 +126,53 @@ class PartitionExitManager:
                 "BREAK-EVEN triggered at %.2f R toward target", towards_target_r
             )
 
-        # P1: state-aware profit taking (FR-08-01/02)
+        # P1: state-aware profit taking at 1R (FR-08-01/02)
         if not state.p1_taken:
             is_imbalanced = "TREND" in market_state.upper() or "IMBALANCE" in market_state.upper()
 
             if is_imbalanced:
-                # IMBALANCED: skip P1 entirely — let trend run, don't clip winners
-                logger.debug("P1 skipped: IMBALANCED regime, momentum may continue")
-            elif r_multiple >= 0.25:
-                # BALANCED: lower threshold (0.25R instead of 0.33R) for mean reversion.
-                # Fire P1 regardless of CVD — reversion is likely in balanced markets.
+                # IMBALANCED: only fire at 1R if CVD confirms — don't clip trending winners
+                cvd_confirms = (is_long and cvd_slope >= 0.5) or (not is_long and cvd_slope <= -0.5)
+                if r_multiple >= 1.0 and cvd_confirms:
+                    signals.append(
+                        ExitSignal(
+                            exit_type="PARTITION_1",
+                            size_pct=self.P1_SIZE,
+                            price=current_price,
+                            reason=f"P1: seed recovery at {r_multiple:.1%} R with CVD confirmation",
+                        )
+                    )
+                    state.p1_taken = True
+                    logger.info("P1 exit at %.1f%% R (IMBALANCED, CVD confirmed)", r_multiple * 100)
+            elif r_multiple >= self.P1_R_MULTIPLIER:
+                # BALANCED: fire at 1R — mean reversion expects quick return
                 signals.append(
                     ExitSignal(
                         exit_type="PARTITION_1",
                         size_pct=self.P1_SIZE,
                         price=current_price,
-                        reason=f"P1: mean-reversion seed recovery at {r_multiple:.1%} R",
+                        reason=f"P1: first unit of risk locked at {r_multiple:.1%} R",
                     )
                 )
                 state.p1_taken = True
-                logger.info(
-                    "P1 exit at %.1f%% R (BALANCED regime)", r_multiple * 100
-                )
+                logger.info("P1 exit at %.1f%% R (BALANCED regime)", r_multiple * 100)
 
-        # P2: 50% at target ALWAYS (FR-08-03)
-        if not state.p2_taken:
-            at_target = (is_long and current_price >= take_profit) or (
-                not is_long and current_price <= take_profit
+        # P2: 40% at 2R (FR-08-03)
+        if not state.p2_taken and r_multiple >= self.P2_R_MULTIPLIER:
+            signals.append(
+                ExitSignal(
+                    exit_type="PARTITION_2",
+                    size_pct=self.P2_SIZE,
+                    price=current_price,
+                    reason=f"P2: second unit locked at {r_multiple:.1%} R",
+                )
             )
-            if at_target:
-                signals.append(
-                    ExitSignal(
-                        exit_type="PARTITION_2",
-                        size_pct=self.P2_SIZE,
-                        price=current_price,
-                        reason="P2: target reached, mandatory exit",
-                    )
-                )
-                state.p2_taken = True
-                # Move P3 SL to P2 exit price
-                state.trail_sl = current_price
-                logger.info("P2 exit at target %.2f", current_price)
+            state.p2_taken = True
+            # Move P3 SL to current price (runner is in profit)
+            state.trail_sl = current_price
+            logger.info("P2 exit at %g R", r_multiple)
 
-        # P3: 20% trail or exit (FR-08-04/05)
+        # P3: 30% trail or exit (FR-08-04/05)
         if state.p2_taken and not state.p3_taken:
             if abs(cvd_slope) >= CVD_STRONG_SLOPE:
                 # Strong momentum → trail

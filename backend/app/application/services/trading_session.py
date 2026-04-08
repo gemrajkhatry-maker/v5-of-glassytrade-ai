@@ -138,7 +138,9 @@ class TradingSessionService:
             on_stop_out=self._on_stop_out,
             on_partial_exit=self._on_partial_exit,
             persist_fn=_persist_fn,
-            on_trade_closed=lambda sym, pnl: self._on_trade_closed(sym, pnl),
+            on_trade_closed=lambda sym, pnl, pos_id=None: self._on_trade_closed(
+                sym, pnl, pos_id
+            ),
         )
 
         self._llm_handler = LLMEntryHandler(
@@ -1302,7 +1304,7 @@ class TradingSessionService:
         """Callback from TradeLifecycleHandler — delegates to ExitCoordinator."""
         self._exit_coordinator.on_stop_out(level, direction, symbol, self._exchange)
 
-    def _on_trade_closed(self, symbol: str, pnl: float) -> None:
+    def _on_trade_closed(self, symbol: str, pnl: float, pos_id: str | None = None) -> None:
         """Callback from TradeLifecycleHandler — records PnL for session tracking."""
         session = self._state_manager.get_or_create_session(symbol)
         if session and session.portfolio:
@@ -1310,7 +1312,15 @@ class TradingSessionService:
                 symbol, pnl, session.portfolio
             )
         # Also record in ExitCoordinator for full lifecycle tracking
-        self._exit_coordinator.on_position_closed(symbol, None)
+        self._exit_coordinator.on_position_closed(symbol, pos_id)
+
+        # Delete from persistent storage so recovery doesn't re-create it
+        if self._storage:
+            try:
+                delete_id = pos_id or symbol
+                self._storage.delete_open_position(delete_id)
+            except Exception as e:
+                log.error("Failed to delete closed position %s: %e", pos_id or symbol, e)
 
     # ----- control-plane helpers -----
 

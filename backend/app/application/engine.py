@@ -416,6 +416,8 @@ class TradingEngine:
                         _sl = Decimal(str(pos_data.get("stop_loss", 0)))
                         _tp = Decimal(str(pos_data.get("take_profit", 0)))
 
+                        from app.domain.trading.models.enums import SetupType
+
                         recovered_signal = _Sig(
                             type=sig_type,
                             price=_ep,
@@ -423,6 +425,8 @@ class TradingEngine:
                             source=_Src.LLM,
                             stop_loss=_sl,
                             take_profit=_tp,
+                            timestamp=pos_data.get("opened_at", ""),
+                            setup=SetupType.PREDICTION_ENTRY,
                         )
 
                         self._session_service._lifecycle_handler.register_position(

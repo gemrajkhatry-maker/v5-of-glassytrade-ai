@@ -100,8 +100,8 @@ class TestTradeManagerTickSize:
 class TestPartitionBreakeven:
     """Test partition exit manager breakeven logic."""
 
-    def test_breakeven_triggers_at_35_percent_r(self):
-        """Breakeven should trigger at 35% of R toward target."""
+    def test_breakeven_triggers_at_1r(self):
+        """Breakeven should trigger at 1.0R toward target (Fabio spec)."""
         from app.domain.fabio_ai.services.partition_exit_manager import (
             PartitionExitManager,
             PartitionState,
@@ -115,8 +115,8 @@ class TestPartitionBreakeven:
         tp = 6100.0
         risk = abs(entry - sl)
 
-        # At 35% of R = 3.5 points toward target
-        price_at_be = entry + risk * 0.35
+        # At 1.0R = 10 points toward target
+        price_at_be = entry + risk * 1.0
 
         pem.check_exits(
             entry_price=entry,
@@ -131,8 +131,8 @@ class TestPartitionBreakeven:
         assert state.breakeven_set is True
         assert state.trail_sl == pytest.approx(entry, abs=1e-9)
 
-    def test_p1_triggers_at_33_percent_r(self):
-        """P1 should trigger at 33% of R with weak CVD."""
+    def test_p1_triggers_at_1r(self):
+        """P1 should trigger at 1.0R (Fabio spec)."""
         from app.domain.fabio_ai.services.partition_exit_manager import (
             PartitionExitManager,
             PartitionState,
@@ -146,8 +146,8 @@ class TestPartitionBreakeven:
         tp = 6100.0
         risk = abs(entry - sl)
 
-        # At 33% R with weak CVD
-        price_at_p1 = entry + risk * 0.33
+        # At 1.0R with BALANCED market
+        price_at_p1 = entry + risk * 1.0
 
         signals = pem.check_exits(
             entry_price=entry,
@@ -155,8 +155,9 @@ class TestPartitionBreakeven:
             take_profit=tp,
             current_price=price_at_p1,
             is_long=True,
-            cvd_slope=0.5,  # weak
+            cvd_slope=0.0,
             state=state,
+            market_state="BALANCED",
         )
 
         assert state.p1_taken is True

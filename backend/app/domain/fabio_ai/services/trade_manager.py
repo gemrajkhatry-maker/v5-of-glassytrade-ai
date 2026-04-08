@@ -49,8 +49,6 @@ class TradeManagerConfig:
     # Runner logic (Fabio: close 75% at target, trail 25% as runner)
     runner_close_pct: float = 0.75  # close 75% at primary target
     runner_trail_pct: float = 0.25  # trail remaining 25%
-    # Breakeven at 1R: move SL to entry when unrealised profit reaches 1R
-    breakeven_at_1r: bool = True
     # CVD-based breakeven: move SL to entry when CVD confirms direction
     cvd_breakeven: bool = True
     cvd_breakeven_min_slope: float = 0.5  # minimum CVD slope magnitude to trigger
@@ -665,6 +663,14 @@ class TradeManager:
             mp = self._positions.get(position_id)
             if mp is None or mp.scale_step >= 3:
                 return 0.0
+
+            # Fabio rule: never scale-in to a losing position
+            risk = abs(mp.entry_price - mp.initial_stop)
+            if risk > 0:
+                if mp.is_long and current_price < mp.entry_price:
+                    return 0.0  # Below entry, don't add to losers
+                if not mp.is_long and current_price > mp.entry_price:
+                    return 0.0  # Above entry, don't add to losers
 
             if mp.scale_step == 1:
                 # Step 2: confirmation — price moved favorably past confirm level

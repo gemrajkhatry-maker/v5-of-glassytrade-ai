@@ -211,6 +211,10 @@ class TradeLifecycleHandler:
                                 psig.price,
                                 realized_pnl,
                             )
+                            # Fabio: partial PnL must feed into risk system
+                            self._trade_manager.add_realized_pnl(float(realized_pnl))
+                            if realized_pnl < 0:
+                                self._trade_manager.record_loss(pos.symbol, pos.entry_price)
 
                 # Apply partition manager's trail SL (breakeven/P3 trail) to trade manager
                 p_state_after = self._partition_states.get(pos.id)

@@ -264,7 +264,7 @@ class TestSLTPExit:
         assert pos.status == PositionStatus.CLOSED
 
     def test_hp04_position_takes_profit(self):
-        """TradeManager detects TP -> check_exits closes the position."""
+        """PartitionExitManager detects 2R TP -> P2 exits the position."""
         handler = TradeLifecycleHandler()
 
         entry_price = 200.0
@@ -280,9 +280,9 @@ class TestSLTPExit:
         metrics = trade_manager.get_position_metrics(pos.id)
         assert metrics is not None  # position is managed
 
-        # Tick above TP
-        result = handler.check_exits(portfolio, current_price=225.0)
-        assert result is True, "TP hit should return True"
+        # Tick at 2R+ (entry=200, sl=180, R=20, 2R=240). P2 fires at 2R per Fabio spec.
+        result = handler.check_exits(portfolio, current_price=241.0)
+        assert result is True, "2R profit hit should return True"
         assert pos.status == PositionStatus.CLOSED
         assert trade_manager.get_position_metrics(pos.id) is None
 

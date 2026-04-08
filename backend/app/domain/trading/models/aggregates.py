@@ -6,6 +6,8 @@ trade history, and enforcing risk constraints.
 
 from __future__ import annotations
 
+from typing import Any
+
 import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -356,6 +358,54 @@ class Portfolio:
                 return True
         return False
 
+    def recover_position(self, pos_data: dict[str, Any]) -> "Position | None":
+        """Reconstruct an open position from persistent storage data.
+
+        Called during engine startup to restore positions that were open
+        when the process crashed or was restarted.  Rebuilds a Position
+        entity from the raw dict saved by ``save_position`` and appends
+        it to the positions list so it can resume being managed.
+        """
+        from app.domain.trading.models.entities import Position
+        from decimal import Decimal
+
+        position_id = pos_data.get("id", "")
+        if not position_id:
+            return None
+
+        # Skip if already present
+        if any(p.id == position_id for p in self.positions):
+            return None
+
+        _dec = lambda v: Decimal(str(v)) if v is not None and v != 0 else Decimal("0")
+
+        side_val = str(pos_data.get("side", "LONG")).upper()
+        side = Side.LONG if side_val == "LONG" else Side.SHORT
+
+        source_val = str(pos_data.get("source", "AMT")).upper()
+        try:
+            source = Source(source_val)
+        except ValueError:
+            source = Source.AMT
+
+        pos = Position(
+            id=position_id,
+            symbol=str(pos_data.get("symbol", "")),
+            side=side,
+            source=source,
+            entry_price=_dec(pos_data.get("entry_price")),
+            size=_dec(pos_data.get("size")),
+            stop_loss=_dec(pos_data.get("stop_loss")),
+            take_profit=_dec(pos_data.get("take_profit")),
+            pnl=Decimal("0"),
+            entry_time=str(pos_data.get("opened_at", "")),
+            status=PositionStatus.OPEN,
+            metadata=pos_data.get("extra", pos_data.get("metadata", None)),
+        )
+
+        self.positions.append(pos)
+        return pos
+
     def partial_close_position(
         self,
         position_id: str,
@@ -402,6 +452,13 @@ class Portfolio:
 
                 # Move stop to break-even on the Position entity
                 pos.stop_loss = pos.entry_price
+
+                # If all partials sum to full size, treat as a full close
+                if pos.size <= 0:
+                    pos.size = Decimal("0")
+                    pos.status = PositionStatus.CLOSED
+                    pos.close_reason = f"{reason} — full size closed"
+                    pos.exit_price = price
 
                 return partial_pnl
         return Decimal("0")
