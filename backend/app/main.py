@@ -61,7 +61,8 @@ def _setup_logging() -> None:
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
-    root.setLevel(logging.INFO)
+    # DEBUG for enhanced audit logging
+    root.setLevel(logging.DEBUG)
 
 
 _setup_logging()
@@ -109,6 +110,14 @@ async def lifespan(app: FastAPI):
 
     engine = TradingEngine(graph)
     graph.engine = engine
+
+    # Inject engine reference into overseer handler for immediate UI updates
+    try:
+        graph.trading_session._overseer_handler._engine = engine
+        log.info("Injected engine reference into overseer handler (engine_id=%s)", id(engine))
+    except Exception:
+        log.warning("Failed to inject engine reference into overseer handler", exc_info=True)
+
     try:
         await engine.start()
         log.info("Trading engine started — backend trades independently of frontend.")

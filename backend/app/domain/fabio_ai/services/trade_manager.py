@@ -549,6 +549,10 @@ class TradeManager:
                     current_time if current_time is not None else time.time()
                 )
                 logger.info(f"TradeManager: unregistered {position_id} ({symbol})")
+                # Debug: log stack trace to find caller
+                if logger.isEnabledFor(logging.DEBUG):
+                    import traceback
+                    logger.debug("unregister_position stack trace:\n%s", "".join(traceback.format_stack()))
 
     def update_market_state(self, position_id: str, market_state: str) -> None:
         """Update market state for open position (enables dynamic time stops).
@@ -897,12 +901,22 @@ class TradeManager:
                     for position_id in open_ids
                     if position_id not in known_other_symbol_ids
                 }
-            return PositionConsistency(
+            consistency = PositionConsistency(
                 open_position_ids=tuple(sorted(filtered_open_ids)),
                 managed_position_ids=tuple(sorted(managed_ids)),
                 unmanaged_open_ids=tuple(sorted(filtered_open_ids - managed_ids)),
                 stale_managed_ids=tuple(sorted(managed_ids - filtered_open_ids)),
             )
+            # DEBUG: Log consistency check when there are unmanaged positions
+            if consistency.unmanaged_open_ids:
+                logger.debug(
+                    "TradeManager.get_position_consistency: symbol=%s, open_ids=%s, managed_ids=%s, unmanaged=%s",
+                    symbol or "ALL",
+                    ",".join(sorted(open_ids)) if open_ids else "(none)",
+                    ",".join(managed_ids) if managed_ids else "(none)",
+                    ",".join(consistency.unmanaged_open_ids),
+                )
+            return consistency
 
     def sync_with_open_position_ids(
         self,
@@ -937,6 +951,16 @@ class TradeManager:
                     "TradeManager: protecting %d recently registered positions from reconciliation",
                     len(protected),
                 )
+            # DEBUG: Log stack trace if we're about to unregister any positions
+            if stale_ids and logger.isEnabledFor(logging.DEBUG):
+                import traceback
+                logger.debug(
+                    "TradeManager.sync_with_open_position_ids: about to unregister %s (open_ids=%s, managed_ids=%s)",
+                    ",".join(stale_ids),
+                    ",".join(consistency.open_position_ids),
+                    ",".join(consistency.managed_position_ids),
+                )
+                logger.debug("Reconciliation stack trace:\n%s", "".join(traceback.format_stack()))
 
         for position_id in stale_ids:
             self.unregister_position(position_id, current_time=current_time)
@@ -964,6 +988,9 @@ class TradeManager:
                 logger.warning(
                     f"TradeManager: adjust_stop_loss — position {position_id} not found"
                 )
+                if logger.isEnabledFor(logging.DEBUG):
+                    import traceback
+                    logger.debug("adjust_stop_loss (pos not found) stack:\n%s", "".join(traceback.format_stack()))
                 return False
 
             # Breakeven floor: once set, SL cannot go below entry
@@ -987,6 +1014,11 @@ class TradeManager:
                         f"TradeManager: adjust_stop_loss REJECTED for {position_id} — "
                         f"new SL {new_sl:.2f} <= current {mp.stop_loss:.2f} (LONG can only tighten up)"
                     )
+                    # Log stack trace for suspicious new_sl (e.g., 0.00)
+                    if new_sl <= 0:
+                        if logger.isEnabledFor(logging.DEBUG):
+                            import traceback
+                            logger.debug("adjust_stop_loss (zero SL) stack:\n%s", "".join(traceback.format_stack()))
                     return False
             else:
                 if new_sl >= mp.stop_loss:

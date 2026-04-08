@@ -48,6 +48,8 @@ class TradeLifecycleHandler:
         self,
         portfolio: Portfolio,
         current_price: float,
+        *,
+        symbol: str | None = None,
         cvd_divergence: str = "",
         time_to_close: float = 0.0,
         cvd_slope: float = 0.0,
@@ -62,11 +64,16 @@ class TradeLifecycleHandler:
         Returns:
             True if a position was fully closed (so caller knows the slot is free).
         """
-        consistency = self.ensure_position_consistency(portfolio)
+        consistency = self.ensure_position_consistency(portfolio, symbol=symbol)
         if consistency.unmanaged_open_ids:
+            # Enhanced audit logging: show full consistency picture
+            open_ids = portfolio.open_position_ids()
             logger.error(
-                "Unmanaged open positions detected; deterministic exits are degraded: %s",
+                "Unmanaged open positions detected; deterministic exits are degraded: unmanaged=%s, open_ids=%s, managed_ids=%s, stale_managed=%s",
                 ",".join(consistency.unmanaged_open_ids),
+                ",".join(sorted(open_ids)) if open_ids else "(none)",
+                ",".join(consistency.managed_position_ids) if consistency.managed_position_ids else "(none)",
+                ",".join(consistency.stale_managed_ids) if consistency.stale_managed_ids else "(none)",
             )
         open_positions = [p for p in portfolio.positions if p.status == "OPEN"]
 
@@ -218,7 +225,7 @@ class TradeLifecycleHandler:
 
                 # Apply partition manager's trail SL (breakeven/P3 trail) to trade manager
                 p_state_after = self._partition_states.get(pos.id)
-                if p_state_after and p_state_after.trail_sl is not None:
+                if p_state_after and p_state_after.trail_sl and p_state_after.trail_sl > 0:
                     self._trade_manager.adjust_stop_loss(pos.id, p_state_after.trail_sl)
 
             # Dynamic market state update (Fix: time stops adapt mid-trade)

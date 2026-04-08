@@ -146,7 +146,12 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     (sum: number, p: any) => sum + (p.partialRealizedPnl || 0), 0
                                 );
                                 const closedPnl = (portfolio.closedTrades || []).reduce(
-                                    (sum: number, t: any) => sum + (t.pnl || 0), 0
+                                    (sum: number, t: any) => {
+                                        // For SL-hit exits, PnL may be stored directly on the position
+                                        // rather than in metadata
+                                        const tradePnl = t.pnl || 0;
+                                        return sum + tradePnl;
+                                    }, 0
                                 );
                                 const currentPnl = closedPnl + totalPartialPnl;
                                 const norm = Math.min(Math.abs(currentPnl) / maxAbs, 1);

@@ -551,7 +551,8 @@ class TradingSessionService:
                             "SESSION_CLOSE (Phase 5: 15:15 IST)",
                         )
 
-                        # Record PnL for session tracking
+                        # Record PnL for session tracking — MUST happen AFTER close_position
+                        # to ensure closed_trades list is updated
                         if session and session.portfolio:
                             self._risk_coordinator.record_trade_result(
                                 event.symbol, float(realized_pnl), session.portfolio
@@ -654,9 +655,9 @@ class TradingSessionService:
 
     def _run_amt_analysis(self, event: TickReceived, session, prior) -> object:
         """Run AMT analysis with data source selection and prior profile injection."""
-        # Dual feed: use underlying futures data for AMT analysis
+        # Dual feed: use underlying futures data for AMT analysis (only if we have enough data)
         amt_data = list(event.data)
-        if hasattr(session, "_underlying_data") and session._underlying_data:
+        if hasattr(session, "_underlying_data") and session._underlying_data and len(session._underlying_data) >= 20:
             amt_data = list(session._underlying_data)
         elif amt_data:
             log.debug(
@@ -1066,7 +1067,7 @@ class TradingSessionService:
 
         # Update IB engine — use underlying futures when available (Phase 1B)
         ib_tick = event.tick
-        if hasattr(session, "_underlying_data") and session._underlying_data:
+        if hasattr(session, "_underlying_data") and session._underlying_data and len(session._underlying_data) >= 20:
             ib_tick = session._underlying_data[-1]
 
         ib_engine = self._ib_engines.get(event.symbol)
@@ -1174,7 +1175,8 @@ class TradingSessionService:
             try:
                 self._lifecycle_handler.check_exits(
                     session.portfolio,
-                    event.tick.close,
+                    symbol=event.symbol,
+                    current_price=event.tick.close,
                     cvd_divergence=amt_result.cvd_divergence,
                     order_book=event.order_book,
                     amt_result=amt_result,

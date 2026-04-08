@@ -370,13 +370,21 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (newAi?.inputPrompt || hasNewReasoning) {
                         const lastEntry = existing.llmHistory[existing.llmHistory.length - 1];
                         const newPrompt = newAi?.inputPrompt || "Reasoning Model Analysis";
+                        const newDirection = newAi?.direction || state.amt.tradeDecision;
+                        const newRationale = newAi?.rationale || state.amt.llmThinking;
                         
-                        if (!lastEntry || lastEntry.inputPrompt !== newPrompt) {
+                        // FIX P1-B: Enhanced deduplication - check direction + rationale, not just prompt
+                        const isDuplicate = lastEntry && 
+                            lastEntry.direction === newDirection && 
+                            lastEntry.rationale === newRationale &&
+                            (Date.now() - lastEntry.timestamp) < 10000; // within 10 seconds
+                        
+                        if (!isDuplicate) {
                             merged.llmHistory = [...existing.llmHistory, {
-                                timestamp: Date.now(),
-                                direction: newAi?.direction || state.amt.tradeDecision,
+                                timestamp: Date.now(), // FIX P1-A: Captured at creation time, not render
+                                direction: newDirection,
                                 confidence: newAi?.confidence || 'High',
-                                rationale: newAi?.rationale || state.amt.llmThinking,
+                                rationale: newRationale,
                                 inputPrompt: newPrompt,
                                 rawOutput: newAi?.rawOutput || state.amt.llmThinking,
                             }].slice(-20);

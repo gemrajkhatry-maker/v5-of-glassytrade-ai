@@ -225,9 +225,10 @@ class SignalTrackingService:
     def _record(self, symbol: str, decision: SignalDecision) -> None:
         """Record a decision and update stats.
 
-        Deduplication: skip if the last decision has the same
-        decision_type + gate_name + gate_reason (prevents repeated
-        identical BLOCKED entries during the same phase gate).
+        Deduplication: skip entirely if the last decision has the same
+        decision_type + gate_name + gate_reason. The timestamp is updated
+        so the UI shows the latest time, but no new entry is created and
+        stats are not incremented.
         """
         if symbol not in self._decisions:
             self._decisions[symbol] = []
@@ -240,7 +241,7 @@ class SignalTrackingService:
             ):
                 # Update previous entry timestamp so the UI shows the latest time
                 last.timestamp = decision.timestamp
-                return  # skip duplicate append
+                return  # skip duplicate — do not count again
 
         self._decisions[symbol].append(decision)
 

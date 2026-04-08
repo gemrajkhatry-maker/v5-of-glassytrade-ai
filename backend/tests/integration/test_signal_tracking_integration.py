@@ -143,11 +143,15 @@ class TestSignalTrackingIntegration:
         assert total["block_rate"] == 50.0
 
     def test_generation_rate_calculation(self):
-        """Should correctly calculate generation rate."""
+        """Should correctly calculate generation rate.
+
+        Note: identical consecutive BLOCKED entries (same gate_name + gate_reason)
+        are deduped for both the decisions list and the stats count.
+        """
         storage = MagicMock()
         tracker = SignalTrackingService(storage=storage)
 
-        # 1 generated, 3 blocked, 2 waiting = 6 total
+        # 1 generated, 3 blocked (2 are deduped as identical CVD_OPPOSING), 2 waiting = 4 unique
         tracker.track_signal_generated(
             symbol="CRUDEOIL", direction="LONG", confidence="High",
             aggression_score=3.5, drive_number=2, market_state="BALANCED",
@@ -165,10 +169,10 @@ class TestSignalTrackingIntegration:
             )
 
         stats = tracker.get_stats()
-        # 1/6 = 16.7% generation rate
-        assert abs(stats["generation_rate"] - 16.7) < 0.1
-        # 3/6 = 50% block rate
-        assert abs(stats["block_rate"] - 50.0) < 0.1
+        # 1 generated / 4 total unique = 25.0%
+        assert abs(stats["generation_rate"] - 25.0) < 0.1
+        # 1 blocked / 4 total unique = 25.0%
+        assert abs(stats["block_rate"] - 25.0) < 0.1
 
     def test_persists_to_storage(self):
         """Should persist decisions to storage."""

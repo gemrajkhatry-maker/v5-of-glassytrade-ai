@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 import copy
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -16,6 +17,8 @@ from decimal import Decimal
 from app.domain.trading.models.enums import Side, Source, PositionStatus
 from app.domain.trading.models.entities import Position, Signal
 from app.domain.trading.models.value_objects import OHLC, StrategyStats
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -186,14 +189,8 @@ class Portfolio:
         newly_closed: list[Position] = []
 
         # Use tick extremes for SL/TP checks — wicks breach stops even on recovery
-        # (LLM positions skip this path entirely — managed by TradeManager)
+        # FIX P0-B: ALL positions (including LLM) must have SL checked on every tick
         for pos in self.positions:
-            if pos.source == Source.LLM:
-                pos.update_pnl(current_price)
-                active.append(pos)
-                unrealized_pnl += pos.pnl
-                continue
-
             # SL uses tick.low for LONG, tick.high for SHORT (wicks breach before recovery)
             # TP uses tick.high for LONG, tick.low for SHORT (favorable extreme)
             should_close = False
@@ -477,6 +474,14 @@ class Portfolio:
 
         for i, pos in enumerate(self.positions):
             if pos.id == position_id and pos.is_open:
+                logger.error(
+                    "Portfolio.close_position: CLOSING %s reason=%s price=%.2f",
+                    position_id,
+                    reason,
+                    float(price) if hasattr(price, "__float__") else price,
+                )
+                import traceback
+                logger.error("close_position stack:\n%s", "".join(traceback.format_stack()))
                 # Apply slippage to exit fill
                 fill_price = self._apply_slippage(price, pos.side, is_entry=False)
                 pos.close(

@@ -62,12 +62,14 @@ class LLMOverseerHandler:
         storage: StoragePort | None = None,
         probability_engine: ProbabilityInferencePort | None = None,
         session_risk_manager=None,
+        engine=None,  # TradingEngine reference for immediate UI updates
     ) -> None:
         self._gen_ai_service = gen_ai_service
         self._trade_manager = trade_manager
         self._storage = storage
         self._probability_engine = probability_engine
         self._session_risk_manager = session_risk_manager
+        self._engine = engine  # TradingEngine instance for push notifications
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._predict_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
@@ -306,6 +308,13 @@ class LLMOverseerHandler:
                     decision.reason[:80],
                 )
 
+                # FIX P1-C: CRITICAL SAFETY NOTE
+                # The Overseer's HOLD verdict ONLY affects NEW ENTRY decisions and
+                # position management actions (ADD, TIGHTEN_SL, PARTIAL_EXIT).
+                # It NEVER blocks Stop Loss exits — SL checks run independently in
+                # TradeManager.check_position() on every tick, before overseer logic.
+                # This is a hard safety guarantee: SL > LLM verdict, always.
+
                 if (
                     exit_probability is not None
                     and exit_probability > 0.65
@@ -355,6 +364,16 @@ class LLMOverseerHandler:
                     overseer_info["input_prompt"] = prompt
                     overseer_info["raw_output"] = raw
                     session.last_ai_analysis = overseer_info
+
+                # Push update to UI immediately (outside lock to avoid deadlock)
+                if self._engine:
+                    try:
+                        logger.info("Triggering immediate UI update for %s (engine=%s)", symbol, id(self._engine))
+                        self._engine.trigger_immediate_update(symbol)
+                    except Exception:
+                        logger.warning("Failed to trigger immediate UI update", exc_info=True)
+                else:
+                    logger.debug("No engine reference set — skipping immediate update for %s", symbol)
 
                 if self._storage:
                     try:

@@ -14,6 +14,7 @@ Architecture:
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import time
 import threading
@@ -121,6 +122,7 @@ class TradingEngine:
         self._gc_task: asyncio.Task | None = None
         self._running = False
         self._engine_start_time: float = 0.0
+        self._loop: asyncio.AbstractEventLoop | None = None  # Event loop reference for cross-thread notifications
 
     # ------------------------------------------------------------------
     # Public API
@@ -131,6 +133,9 @@ class TradingEngine:
         if self._running:
             return
         self._running = True
+
+        # Capture the event loop for cross-thread notifications
+        self._loop = asyncio.get_running_loop()
 
         # Initialize delegated modules
         self._stream_manager.set_active_symbols(self._active_symbols)
@@ -268,6 +273,97 @@ class TradingEngine:
     def get_depth(self, symbol: str) -> OrderBook | None:
         d = self._current_depths.get(symbol)
         return d["book"] if d else None
+
+    # ------------------------------------------------------------------
+    # Immediate update trigger (for cross-thread notifications)
+    # ------------------------------------------------------------------
+
+    def trigger_immediate_update(self, symbol: str) -> None:
+        """Build fresh state snapshot for symbol and notify all viewers.
+
+        Thread-safe: can be called from background threads (e.g., overseer).
+        Uses the same snapshot builder as the regular tick pipeline.
+        """
+        try:
+            logger.info("trigger_immediate_update called for %s", symbol)
+            session = self._session_service.get_or_create_session(symbol)
+            if not session:
+                logger.warning("No session for symbol %s", symbol)
+                return
+
+            # Build fresh snapshot using the same builder as process_tick
+            try:
+                from app.application.services.state_snapshot_builder import (
+                    build_state_snapshot,
+                )
+            except ImportError as e:
+                logger.error("state_snapshot_builder import failed: %s", e)
+                return
+            else:
+                state = build_state_snapshot(
+                    session,
+                    self._session_service._risk_coordinator,
+                    self._session_service._rl_handler,
+                )
+
+            # Enrich with engine-specific fields (matching full tick pipeline)
+            # Get latest tick from session data
+            try:
+                last_tick = session.data[-1] if session.data else None
+            except Exception:
+                last_tick = None
+
+            if last_tick:
+                try:
+                    from app.infrastructure.serialization.schemas import ohlc_to_dto
+                    state["tick"] = ohlc_to_dto(last_tick)
+                except Exception:
+                    state["tick"] = {}
+                state["ltp"] = float(last_tick.close)
+            else:
+                state["tick"] = {}
+                state["ltp"] = getattr(session, "_last_price", 0.0)
+
+            state["oi"] = getattr(session, "_last_oi", 0)
+            state["_symbol"] = symbol
+            state["depth"] = _depth_to_dto(
+                self._current_depths.get(symbol, {}).get("book")
+            )
+            # Range bars (visualization)
+            if symbol in self._range_builders:
+                state["rangeBars"] = self._range_builders[symbol].to_dict()
+
+            # Update _latest_states with thread safety
+            lock = self._state_locks.setdefault(symbol, threading.Lock())
+            with lock:
+                # Deep copy nested mutable structures to avoid race conditions
+                if "portfolio" in state:
+                    state["portfolio"] = copy.deepcopy(state["portfolio"])
+                if "amt" in state:
+                    state["amt"] = copy.deepcopy(state["amt"])
+                self._latest_states[symbol] = state
+            logger.info("Updated _latest_states for %s with fresh snapshot", symbol)
+
+            # Notify WebSocket viewers (must be called in async context)
+            # Use stored event loop reference to schedule notification from any thread
+            if self._loop and not self._loop.is_closed():
+                logger.info("Scheduling viewer notification for %s", symbol)
+                self._loop.call_soon_threadsafe(
+                    lambda: asyncio.create_task(self._notify_viewers(force=True))
+                )
+            else:
+                logger.warning("No event loop available for notification (loop=%s)", self._loop)
+        except Exception:
+            logger.error("Immediate update failed for %s", symbol, exc_info=True)
+
+    def _build_minimal_state(self, symbol: str, session) -> dict:
+        """Fallback state builder with cached session data."""
+        return {
+            "_symbol": symbol,
+            "ltp": getattr(session, "_last_price", 0.0),
+            "genAIAnalysis": getattr(session, "last_ai_analysis", None),
+            "amt": getattr(session, "last_amt", None),
+        }
 
     # ------------------------------------------------------------------
     # History seeding
@@ -441,6 +537,17 @@ class TradingEngine:
                             pos_data.get("entry_price", 0),
                             pos_data.get("stop_loss", 0),
                             pos_data.get("take_profit", 0),
+                        )
+                        # Audit log: show consistency after registration
+                        portfolio = session.portfolio
+                        open_ids = portfolio.open_position_ids()
+                        consistency = self._session_service._lifecycle_handler.get_position_consistency(portfolio, symbol=symbol)
+                        logger.info(
+                            "Engine: post-registration consistency for %s — portfolio_ids=%s, managed_ids=%s, unmanaged=%s",
+                            symbol,
+                            ",".join(sorted(open_ids)) if open_ids else "(none)",
+                            ",".join(consistency.managed_position_ids) if consistency.managed_position_ids else "(none)",
+                            ",".join(consistency.unmanaged_open_ids) if consistency.unmanaged_open_ids else "(none)",
                         )
                         recovered += 1
                 except Exception as e:

@@ -26,7 +26,7 @@ class MLXInferenceAdapter(LLMInferencePort):
         if self._initialized:
             return
         self.model = None
-        self.tokenizer = None
+        self.processor = None
         self._is_loading = False
         self._load_error: str | None = None
         self._model_path = model_path
@@ -55,7 +55,13 @@ class MLXInferenceAdapter(LLMInferencePort):
     def _load_model(self):
         """Load the MLX model and tokenizer from the configured path."""
         try:
-            from mlx_lm import load
+            # Try mlx_lm first (text-only models), fallback to mlx_vlm (vision models)
+            try:
+                from mlx_lm import load, generate
+                use_vlm = False
+            except ImportError:
+                from mlx_vlm import load, generate
+                use_vlm = True
 
             model_path = self._model_path or os.environ.get("MLX_MODEL_PATH", "")
             adapter_path = os.environ.get("MLX_ADAPTER_PATH", "")
@@ -65,12 +71,22 @@ class MLXInferenceAdapter(LLMInferencePort):
                     logger.info(
                         f"Loading MLX model from {model_path} with adapter {adapter_path}..."
                     )
-                    self.model, self.tokenizer = load(
-                        model_path, adapter_path=adapter_path
-                    )
+                    if use_vlm:
+                        self.model, self.processor = load(
+                            model_path, adapter_path=adapter_path
+                        )
+                    else:
+                        self.model, self.tokenizer = load(
+                            model_path, adapter_path=adapter_path
+                        )
+                        self.processor = self.tokenizer  # Compatibility
                 else:
                     logger.info(f"Loading MLX model from {model_path} (no adapter)...")
-                    self.model, self.tokenizer = load(model_path)
+                    if use_vlm:
+                        self.model, self.processor = load(model_path)
+                    else:
+                        self.model, self.tokenizer = load(model_path)
+                        self.processor = self.tokenizer  # Compatibility
 
             self._is_loading = False
             logger.info("MLX model loaded successfully!")
@@ -209,8 +225,7 @@ class MLXInferenceAdapter(LLMInferencePort):
                 )
             raise LLMNotReadyError("Model failed to load")
 
-        from mlx_lm import generate
-        from mlx_lm.sample_utils import make_sampler
+        from mlx_vlm import generate
 
         # ChatML format with response prefill to keep output aligned with the
         # canonical runtime contract. Legacy structured parsing still exists as
@@ -219,32 +234,22 @@ class MLXInferenceAdapter(LLMInferencePort):
         # Detect if this is an Overseer prompt or an Entry prompt
         is_overseer = "HOLD" in instruction and "FULL_EXIT" in instruction
 
-        if prefill is not None:
-            prompt = (
-                "<|im_start|>system\n"
-                f"{instruction}<|im_end|>\n"
-                f"<|im_start|>user\n{clean_input}<|im_end|>\n"
-                f"<|im_start|>assistant\n{prefill}"
-            )
-        elif is_overseer:
-            prompt = (
-                "<|im_start|>system\n"
-                f"{instruction}<|im_end|>\n"
-                f"<|im_start|>user\n{clean_input}<|im_end|>\n"
-                "<|im_start|>assistant\n{"
-            )
-            prefill = "{"
-        else:
-            prompt = (
-                "<|im_start|>system\n"
-                f"{instruction}\n{ENTRY_JSON_RUNTIME_REMINDER}<|im_end|>\n"
-                f"<|im_start|>user\n{clean_input}<|im_end|>\n"
-                "<|im_start|>assistant\n{"
-            )
+        sys_msg = instruction
+        if not is_overseer:
+            sys_msg = f"{instruction}\n{ENTRY_JSON_RUNTIME_REMINDER}"
+
+        if prefill is None:
             prefill = "{"
 
-        temp = temperature if temperature is not None else self._temperature
-        sampler = make_sampler(temp=temp)
+        messages = [
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": clean_input}
+        ]
+
+        prompt = self.processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        # Inject prefill (e.g., forcing JSON start)
+        prompt += prefill
+
         max_t = max_tokens if max_tokens is not None else self._max_new_tokens
 
         target = (
@@ -259,12 +264,12 @@ class MLXInferenceAdapter(LLMInferencePort):
         t0 = _time.time()
         with MLX_GPU_LOCK:
             logger.info(f"[{target}] Starting generation (max_tokens={max_t})...")
+            # mlx_vlm defaults to deterministic parsing when sampling kwargs are omitted seamlessly
             response = generate(
                 self.model,
-                self.tokenizer,
+                self.processor,
                 prompt=prompt,
                 max_tokens=max_t,
-                sampler=sampler,
                 verbose=False,
             )
             duration = _time.time() - t0

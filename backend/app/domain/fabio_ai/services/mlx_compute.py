@@ -11,11 +11,14 @@ MLX wins at 5000+ elements (training pipelines, batch indicator computation).
 from __future__ import annotations
 import math
 
-try:
-    import mlx.core as mx
-    _HAS_MLX = True
-except ImportError:
-    _HAS_MLX = False
+# MLX disabled - Metal GPU initialization crashes on this system
+# All computations will use optimized pure Python instead
+_HAS_MLX = False
+mx = None
+
+def _ensure_mlx():
+    """MLX is disabled on this system."""
+    return False
 
 # MLX crossover point: only use GPU above this array size
 _MLX_MIN_SIZE = 500
@@ -222,6 +225,7 @@ def std(values: list[float]) -> float:
 
 def batch_gaussian_weights(bucket_centers: list[float], center: float, sigma: float) -> list[float]:
     """MLX GPU Gaussian weights — use for arrays > 500 elements."""
+    _ensure_mlx()
     if not _HAS_MLX or len(bucket_centers) < _MLX_MIN_SIZE:
         return gaussian_weights(bucket_centers, center, sigma)
     c = mx.array(bucket_centers, dtype=mx.float32)
@@ -236,6 +240,7 @@ def batch_gaussian_weights(bucket_centers: list[float], center: float, sigma: fl
 
 def batch_weighted_moments(prices: list[float], volumes: list[float]) -> tuple[float, float, float]:
     """MLX GPU weighted moments — use for arrays > 500 elements."""
+    _ensure_mlx()
     if not _HAS_MLX or len(prices) < _MLX_MIN_SIZE:
         return weighted_moments(prices, volumes)
     p = mx.array(prices, dtype=mx.float32)
@@ -260,6 +265,7 @@ def batch_weighted_moments(prices: list[float], volumes: list[float]) -> tuple[f
 
 def batch_linreg_slope(ys: list[float]) -> float:
     """MLX GPU linreg — use for arrays > 500 elements."""
+    _ensure_mlx()
     if not _HAS_MLX or len(ys) < _MLX_MIN_SIZE:
         return linreg_slope(ys)
     n = len(ys)
@@ -278,6 +284,7 @@ def batch_linreg_slope(ys: list[float]) -> float:
 
 def batch_atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float:
     """MLX GPU ATR — use for arrays > 500 elements."""
+    _ensure_mlx()
     if not _HAS_MLX or len(highs) < _MLX_MIN_SIZE:
         return atr(highs, lows, closes, period)
     h = mx.array(highs[1:], dtype=mx.float32)

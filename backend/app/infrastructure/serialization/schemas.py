@@ -426,6 +426,9 @@ def dto_to_weights(d: ModelWeightsDTO):
 
 def position_to_dto(p) -> dict:
     """Convert a domain Position entity to a serialisable dict."""
+    metadata = p.metadata or {}
+    lot_size = metadata.get("option_lot_size", 0)
+    
     return {
         "id": p.id,
         "symbol": p.symbol,
@@ -441,11 +444,13 @@ def position_to_dto(p) -> dict:
         "exitPrice": float(p.exit_price) if p.exit_price is not None else None,
         "exitTime": p.exit_time,
         "closeReason": p.close_reason,
-        "metadata": p.metadata,
+        "metadata": metadata,
         "partialRealizedPnl": round(
-            float((p.metadata or {}).get("partial_realized_pnl", 0.0)), 2
+            float(metadata.get("partial_realized_pnl", 0.0)), 2
         ),
-        "originalSize": float((p.metadata or {}).get("full_size", p.size)),
+        "originalSize": float(metadata.get("full_size", p.size)),
+        # FIX P2-A: Include lot_size for frontend display consistency
+        "lotSize": float(lot_size) if lot_size else None,
     }
 
 
