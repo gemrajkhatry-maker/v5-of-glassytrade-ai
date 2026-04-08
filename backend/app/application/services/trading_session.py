@@ -20,7 +20,12 @@ import time
 from typing import TYPE_CHECKING
 
 from app.config import settings
-from app.domain.constants import AGENT_DECISION_THRESHOLD, CONFIDENCE_HIGH_THRESHOLD
+from app.domain.constants import (
+    AGENT_DECISION_THRESHOLD,
+    CONFIDENCE_HIGH_THRESHOLD,
+    RECENT_DATA_WINDOW,
+    CANDLE_INTERVAL_MINUTES,
+)
 from app.domain.trading.models.value_objects import OHLC, OrderBook
 from app.domain.trading.models.aggregates import Portfolio
 from app.domain.trading.models.enums import MarketStateCodec, Source
@@ -73,6 +78,9 @@ from shared.error_handling import (
     TradingError,
     StorageError,
 )
+
+# Import safe parsing utilities
+from app.shared.parsing import is_mcx_symbol, extract_bar_minute
 
 from app.infrastructure.serialization.schemas import portfolio_to_dto, stats_to_dto
 
@@ -272,8 +280,8 @@ class TradingSessionService:
                         "Discarding stale signal for %s (age=%.0fs)", symbol, signal_age
                     )
                     pending = None
-            except Exception:
-                log.debug("Silent exception handled", exc_info=True)
+            except (ValueError, KeyError) as e:
+                log.debug("Signal age check error: %s", e, exc_info=True)
         if pending:
             self._execute_signal(pending_symbol, pending_signal, session)
 
@@ -298,8 +306,8 @@ class TradingSessionService:
                                 "delta": closed.delta,
                             },
                         )
-                    except Exception:
-                        log.debug("Silent exception handled", exc_info=True)
+                    except (OSError, Exception) as e:
+                        log.warning("Failed to save tick for %s: %s", symbol, e, exc_info=True)
                 session.data.append(tick)
                 session._last_candle_time = tick.time
                 if len(session.data) > MAX_CANDLES_PER_SYMBOL:
@@ -348,8 +356,8 @@ class TradingSessionService:
                     symbol=symbol,
                     position=pos,
                 )
-            except Exception:
-                log.debug("Exit coordinator error", exc_info=True)
+            except (RuntimeError, ValueError) as e:
+                log.error("Exit check failed for %s: %s", symbol, e, exc_info=True)
             if self._storage:
                 try:
                     self._storage.save_trade(
@@ -371,9 +379,9 @@ class TradingSessionService:
                             "closed_at": pos.exit_time,
                         }
                     )
-                except Exception as e:
+                except (OSError, Exception) as e:
                     log.error(
-                        "Failed to persist trade for %s: %s", symbol, e, exc_info=True
+                        "Trade persistence failed: %s", e, exc_info=True
                     )
 
         # Sync portfolio-closed positions to TradeManager
@@ -399,8 +407,8 @@ class TradingSessionService:
                             "win_rate": stats.win_rate,
                         }
                     )
-                except Exception:
-                    log.debug("Failed to persist performance snapshot", exc_info=True)
+                except (ValueError, KeyError) as e:
+                    log.debug("Performance snapshot error: %s", e, exc_info=True)
 
         # Call entry logic directly (avoids event bus overhead)
         try:
@@ -411,8 +419,8 @@ class TradingSessionService:
                 data=tuple(session.data),
             )
             self._on_tick(tick_event)
-        except Exception:
-            log.debug("Entry logic error for %s", symbol, exc_info=True)
+        except (ValueError, RuntimeError) as e:
+            log.warning("Entry logic error for %s: %s", symbol, e, exc_info=True)
 
         return self._build_state_snapshot(session)
 
@@ -466,13 +474,7 @@ class TradingSessionService:
             from app.domain.probability.features import extract_features
             from app.domain.probability.agent_pipeline import run_agent_pipeline
 
-            is_mcx = event.symbol.split()[0] in [
-                "CRUDEOIL",
-                "GOLD",
-                "SILVER",
-                "NATURALGAS",
-                "COPPER",
-            ]
+            is_mcx = is_mcx_symbol(event.symbol)
             features = extract_features(
                 list(event.data),
                 amt_result,
@@ -508,10 +510,11 @@ class TradingSessionService:
                 agent_decision.rationale,
             )
             return agent_decision
-        except Exception:
+        except (ValueError, RuntimeError) as e:
             log.warning(
-                "Agent pipeline failed for %s (non-critical)",
+                "Agent pipeline error for %s: %s",
                 event.symbol,
+                e,
                 exc_info=True,
             )
             return None
@@ -597,7 +600,7 @@ class TradingSessionService:
                             "vah": session.last_amt.get("vah", 0),
                             "val": session.last_amt.get("val", 0),
                             "profile_shape": session.last_amt.get("profileShape", ""),
-                            "total_volume": sum(d.volume for d in session.data[-100:]),
+                            "total_volume": sum(d.volume for d in session.data[-RECENT_DATA_WINDOW:]),
                             "print_levels": [
                                 {"price": p, "side": "MIXED"}
                                 for p in _print_clusters[:5]
@@ -1126,11 +1129,7 @@ class TradingSessionService:
 
         # Pre-candle advisory: fire T-60s before 5-min bar close (bar minute 4)
         try:
-            bar_minute = (
-                int(event.tick.time.split("T")[1].split(":")[1]) % 5
-                if "T" in str(event.tick.time)
-                else -1
-            )
+            bar_minute = extract_bar_minute(str(event.tick.time), CANDLE_INTERVAL_MINUTES)
             if self._pre_candle_advisor.should_fire(event.symbol, bar_minute):
                 self._pre_candle_advisor.fire_advisory(
                     event.symbol, event.tick, amt_result

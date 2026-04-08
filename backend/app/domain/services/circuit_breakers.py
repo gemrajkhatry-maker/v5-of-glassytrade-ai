@@ -14,6 +14,11 @@ DAILY MAX DRAWDOWN:
 
 PROFIT TARGET LOCK:
   IF session_pnl >= configured daily profit target → STOP trading
+
+ACCOUNT LOSS ABSOLUTE (Fabio's AMT Strategy):
+  Hard cap of ₹30,000 cumulative loss across all sessions/symbols.
+  IF cumulative_account_pnl <= -₹30,000 → CIRCUIT BREAKER
+  This is NON-OVERRIDABLE and takes highest priority.
 """
 
 from __future__ import annotations
@@ -21,6 +26,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum
+
+from app.domain.constants import ACCOUNT_MAX_LOSS_ABSOLUTE
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +37,7 @@ class BreakerReason(str, Enum):
     CONSECUTIVE_LOSS = "CONSECUTIVE_LOSS"
     DAILY_DRAWDOWN = "DAILY_DRAWDOWN"
     PROFIT_TARGET = "PROFIT_TARGET"
+    ACCOUNT_LOSS_ABSOLUTE = "ACCOUNT_LOSS_ABSOLUTE"
 
 
 @dataclass(frozen=True)
@@ -54,19 +62,49 @@ class CircuitBreakers:
         max_consecutive_losses_winning: int = 5,
         max_daily_dd_pct: float = 0.01,  # 1% of equity
         daily_profit_target: float | None = None,
+        account_max_loss: float | None = None,  # ₹30,000 hard cap (defaults to constant)
     ) -> None:
         self._equity = equity
         self._max_consec_loss = max_consecutive_losses
         self._max_consec_loss_winning = max_consecutive_losses_winning
         self._max_daily_dd = equity * max_daily_dd_pct
         self._profit_target = daily_profit_target
+        # Non-overridable account loss cap (defaults to constant if not specified)
+        self._account_max_loss = (
+            account_max_loss if account_max_loss is not None else ACCOUNT_MAX_LOSS_ABSOLUTE
+        )
 
     def evaluate(
         self,
         consecutive_losses: int,
         session_pnl: float,
+        cumulative_account_pnl: float = 0.0,
     ) -> BreakerResult:
-        """Evaluate all circuit breakers. Any triggered = locked."""
+        """Evaluate all circuit breakers. Any triggered = locked.
+
+        Args:
+            consecutive_losses: Current consecutive loss count
+            session_pnl: Session-level P&L (resets daily)
+            cumulative_account_pnl: Cumulative account P&L across all sessions/symbols
+
+        Returns:
+            BreakerResult with locked status and reason
+        """
+
+        # HIGHEST PRIORITY: Account-level absolute loss cap
+        # This check is NON-OVERRIDABLE and must be first
+        if cumulative_account_pnl <= -self._account_max_loss:
+            logger.critical(
+                "ACCOUNT LOSS LIMIT BREACHED: ₹%.0f hard cap reached (cumulative P&L: ₹%.0f)",
+                self._account_max_loss,
+                cumulative_account_pnl,
+            )
+            return BreakerResult(
+                is_locked=True,
+                reason=BreakerReason.ACCOUNT_LOSS_ABSOLUTE,
+                detail=f"ACCOUNT LOSS LIMIT BREACHED: ₹{self._account_max_loss:.0f} hard cap reached "
+                f"(cumulative P&L: ₹{cumulative_account_pnl:.0f})",
+            )
 
         # Profit target lock
         if self._profit_target is not None and session_pnl >= self._profit_target:

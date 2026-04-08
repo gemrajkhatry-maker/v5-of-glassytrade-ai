@@ -310,14 +310,16 @@ class TradingEngine:
             # Get latest tick from session data
             try:
                 last_tick = session.data[-1] if session.data else None
-            except Exception:
+            except (KeyError, AttributeError) as e:
+                logger.debug("Last tick retrieval failed: %s", e)
                 last_tick = None
 
             if last_tick:
                 try:
                     from app.infrastructure.serialization.schemas import ohlc_to_dto
                     state["tick"] = ohlc_to_dto(last_tick)
-                except Exception:
+                except (KeyError, AttributeError, TypeError) as e:
+                    logger.debug("OHLC serialization failed: %s", e)
                     state["tick"] = {}
                 state["ltp"] = float(last_tick.close)
             else:
@@ -353,8 +355,8 @@ class TradingEngine:
                 )
             else:
                 logger.warning("No event loop available for notification (loop=%s)", self._loop)
-        except Exception:
-            logger.error("Immediate update failed for %s", symbol, exc_info=True)
+        except (ConnectionError, RuntimeError, OSError) as e:
+            logger.error("WebSocket notification failed: %s", e)
 
     def _build_minimal_state(self, symbol: str, session) -> dict:
         """Fallback state builder with cached session data."""

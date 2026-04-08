@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import math
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,14 @@ from app.domain.trading.models.value_objects import (
 )
 from app.domain.fabio_ai.models.observation import AMTObservation
 from app.domain.trading.models.entities import Signal
-from app.domain.constants import LVN_MIN_PERSISTENCE_BARS, LVN_REMOVAL_THRESHOLD
+from app.domain.constants import (
+    LVN_MIN_PERSISTENCE_BARS,
+    LVN_REMOVAL_THRESHOLD,
+    DELTA_PROFILE_BUCKETS,
+    DISPLACEMENT_LOOKBACK,
+    IB_MINUTES,
+    VALUE_AREA_PCT,
+)
 from app.domain.fabio_ai.services.cvd_tracker import CVDTracker
 from app.domain.fabio_ai.services.profile_classifier import (
     classify_shape,
@@ -81,8 +88,14 @@ from app.domain.services.signal_generator import (
 from app.domain.fabio_ai.services.opening_classifier import OpeningTypeClassifier
 from app.domain.fabio_ai.services.mtf_analyzer import MultiTimeframeAMTAnalyzer
 
-if TYPE_CHECKING:
-    from app.config_models import SymbolConfig
+@runtime_checkable
+class SymbolConfigLike(Protocol):
+    """Domain protocol for symbol configuration — avoids importing config_models into domain."""
+    tick_size: float
+    lot_size: int
+    aggression_persistence_bars: int
+    min_aggression_score: float
+    pyramid_aggression_score: float
 
 
 # ---------------------------------------------------------------------------
@@ -225,7 +238,7 @@ class AMTAnalyzer:
     def __init__(
         self,
         config: AMTConfig | None = None,
-        symbol_config: "SymbolConfig | None" = None,
+        symbol_config: "SymbolConfigLike | None" = None,
     ) -> None:
         self.config = config or AMTConfig()
         self._cvd_tracker = CVDTracker()
@@ -243,7 +256,7 @@ class AMTAnalyzer:
         # VWAP variance accumulator for σ bands
         self._vwap_cum_sq_vol: float = 0.0  # Σ(price² × volume)
         # Initial Balance tracker
-        self._ib_tracker = InitialBalanceEngine(ib_minutes=10)
+        self._ib_tracker = InitialBalanceEngine(ib_minutes=IB_MINUTES)
         # Sticky IB break state (survives price re-entry into IB)
         self._ib_break_direction: str = ""
         # Acceptance/Rejection engine
@@ -305,7 +318,7 @@ class AMTAnalyzer:
         leg_candles = [last]
         opposite_tolerance = 1  # allow 1 reversal candle within leg
         opposite_count = 0
-        for i in range(len(data) - 2, max(len(data) - 15, -1), -1):
+        for i in range(len(data) - 2, max(len(data) - DISPLACEMENT_LOOKBACK, -1), -1):
             c = data[i]
             if (c.close >= c.open) == is_bull:
                 leg_candles.insert(0, c)
@@ -320,7 +333,7 @@ class AMTAnalyzer:
             return empty
 
         is_disp = detect_displacement(data, self.config.DISPLACEMENT_MULTIPLIER)
-        leg_profile = create_profile(leg_candles, buckets=200)
+        leg_profile = create_profile(leg_candles, buckets=DELTA_PROFILE_BUCKETS)
         if len(leg_profile) < 3:
             return {
                 "has_displacement": is_disp,
@@ -352,7 +365,7 @@ class AMTAnalyzer:
 
         # Value Area (70%) — CME two-row pairs method (matches session logic)
         total_volume = sum(p.volume for p in leg_profile)
-        target_volume = total_volume * 0.7
+        target_volume = total_volume * VALUE_AREA_PCT
         current_volume = max_vol
         up_idx, down_idx = poc_idx, poc_idx
         while current_volume < target_volume:
@@ -670,26 +683,6 @@ class AMTAnalyzer:
             logger.info("AMT: empty profile — returning empty result")
             return empty
 
-        lookback = len(data)
-        recent_data = data[-lookback:]
-        current = data[-1]
-
-        # 1. Volume Profile — use incremental if available, else full rebuild
-        if incremental_profile is not None:
-            profile = incremental_profile.get_profile()
-            logger.debug(
-                "AMT: incremental profile — initialized=%s candles=%d profile_len=%d",
-                incremental_profile._initialized,
-                len(incremental_profile._candles),
-                len(profile),
-            )
-        else:
-            profile = create_profile(recent_data)
-            logger.info("AMT: full rebuild profile — profile_len=%d", len(profile))
-        if not profile:
-            logger.info("AMT: empty profile — returning empty result")
-            return empty
-
         # POC — tie-break: closest to VWAP when multiple bins share max volume
         max_vol = max(p.volume for p in profile)
         poc_candidates = [i for i, p in enumerate(profile) if p.volume == max_vol]
@@ -703,7 +696,7 @@ class AMTAnalyzer:
 
         # Value Area (70%) — CME two-row pairs method
         total_volume = sum(p.volume for p in profile)
-        target_volume = total_volume * 0.7
+        target_volume = total_volume * VALUE_AREA_PCT
         current_volume = max_vol
         up_idx, down_idx = poc_index, poc_index
 

@@ -39,6 +39,8 @@ if TYPE_CHECKING:
     from app.domain.ports.storage import StoragePort
     from app.domain.ports.probability_inference import ProbabilityInferencePort
 
+from app.shared.parsing import is_mcx_symbol
+
 logger = logging.getLogger(__name__)
 
 # Minimum seconds between overseer calls
@@ -224,7 +226,7 @@ class LLMOverseerHandler:
 
                         data = getattr(session, "data", [])
                         if len(data) >= 20:
-                            is_mcx = symbol.split()[0] in ["CRUDEOIL", "GOLD", "SILVER", "NATURALGAS", "COPPER"]
+                            is_mcx = is_mcx_symbol(symbol)
                             features = extract_features(
                                 data,
                                 amt_result,

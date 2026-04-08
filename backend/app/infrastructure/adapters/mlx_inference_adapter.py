@@ -29,6 +29,7 @@ class MLXInferenceAdapter(LLMInferencePort):
         self.processor = None
         self._is_loading = False
         self._load_error: str | None = None
+        self._use_vlm: bool | None = None
         self._model_path = model_path
         self._temperature = temperature
         self._max_new_tokens = max_new_tokens
@@ -88,11 +89,13 @@ class MLXInferenceAdapter(LLMInferencePort):
                         self.model, self.tokenizer = load(model_path)
                         self.processor = self.tokenizer  # Compatibility
 
+            self._use_vlm = use_vlm
             self._is_loading = False
             logger.info("MLX model loaded successfully!")
         except Exception as e:
             logger.error(f"Failed to load MLX model: {e}")
             self._load_error = str(e)
+            self._use_vlm = None
             self._is_loading = False
 
     def _predict_cloud(
@@ -225,7 +228,10 @@ class MLXInferenceAdapter(LLMInferencePort):
                 )
             raise LLMNotReadyError("Model failed to load")
 
-        from mlx_vlm import generate
+        if self._use_vlm:
+            from mlx_vlm import generate
+        else:
+            from mlx_lm import generate
 
         # ChatML format with response prefill to keep output aligned with the
         # canonical runtime contract. Legacy structured parsing still exists as

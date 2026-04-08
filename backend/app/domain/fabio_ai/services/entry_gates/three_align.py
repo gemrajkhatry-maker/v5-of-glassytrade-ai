@@ -130,7 +130,7 @@ def three_align_check(
 
     Returns (gate_passed, confirmation_strong[, is_second_drive]).
     """
-    from app.domain.constants import CVD_SLOPE_EXTREME
+    from app.domain.constants import CVD_SLOPE_EXTREME, D2_CVD_SLOPE_MAX
     from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import check_confirmation_bundle
 
     # Invalid profile values → block
@@ -210,7 +210,7 @@ def three_align_check(
             is_second_drive = True
 
     if amt_result.market_state == "IMBALANCED" and near_level and not is_second_drive:
-        if abs(cvd_slope) <= 50:
+        if abs(cvd_slope) <= D2_CVD_SLOPE_MAX:
             logger.debug("Three-Align: blocked — first drive only, waiting for re-test")
             return (False, False, False) if return_is_second_drive else (False, False)
 

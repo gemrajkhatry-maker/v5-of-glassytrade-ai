@@ -55,6 +55,9 @@ CVD_SLOPE_EXTENDED_WINDOW = _G.get("cvd_slope_extended_window", 40)
 CVD_BLOCK_THRESHOLD_NSE = _G.get("cvd_block_threshold_nse", 5000)
 CVD_BLOCK_THRESHOLD_MCX = _G.get("cvd_block_threshold_mcx", 50)
 
+# ── Entry Gate Thresholds ─────────────────────────────────────────
+D2_CVD_SLOPE_MAX: float = 80.0  # Max CVD slope for D2 entry (widened from 50)
+
 FOOTPRINT_IMBALANCE_RATIO = _G.get("footprint_imbalance_ratio", 3.0)
 FOOTPRINT_IMBALANCE_PCT = _G.get("footprint_imbalance_pct", 0.40)
 ABSORPTION_RANGE_ATR = _G.get("absorption_range_atr", 0.30)
@@ -115,6 +118,11 @@ MAX_CONSECUTIVE_LOSSES = _G.get("max_consecutive_losses", 3)
 MAX_DRAWDOWN_PCT = _G.get("max_drawdown_pct", 0.030)
 ABSOLUTE_CEILING_PCT = _G.get("absolute_ceiling_pct", 0.010)
 
+# ── Account-Level Risk Limits ─────────────────────────────────────
+# Hard cap on total cumulative losses across all sessions/symbols.
+# This is a NON-OVERRIDABLE circuit breaker per Fabio's AMT strategy spec.
+ACCOUNT_MAX_LOSS_ABSOLUTE: float = 30_000.0  # ₹30,000 hard account loss cap
+
 # ============================================================================
 # Volume Thresholds
 # ============================================================================
@@ -163,3 +171,18 @@ AGENT_DECISION_THRESHOLD = _G.get("agent_decision_threshold", 0.55)
 # Used to label decisions as HIGH/MEDIUM/LOW conviction
 CONFIDENCE_HIGH_THRESHOLD = 0.65  # High conviction (35%+ WR at 2:1 R/R)
 CONFIDENCE_LOW_THRESHOLD = 0.50   # Minimum to consider (below AGENT_DECISION_THRESHOLD = reject)
+
+# ============================================================================
+# Analysis Parameters
+# ============================================================================
+IB_MINUTES: int = 10                     # Initial Balance window in minutes
+DISPLACEMENT_LOOKBACK: int = 15          # Lookback for leg detection in displacement
+RECENT_DATA_WINDOW: int = 100            # Window for recent data calculations
+CANDLE_INTERVAL_MINUTES: int = 5         # Candle interval in minutes
+
+# ── ATR Trailing Stop ─────────────────────────────────────────────
+# Activates after cushioning (partial TP taken). Advances SL by tracking
+# peak unrealised profit and trailing at ATR_TRAIL_STEP_PCT behind the peak.
+ATR_TRAIL_ACTIVATION_R: float = 1.0      # Activate after 1.0R profit (post-cushioning)
+ATR_TRAIL_STEP_PCT: float = 0.20         # Trail 20% behind peak profit
+ATR_TRAIL_PERIOD: int = 14               # ATR lookback period (candles)

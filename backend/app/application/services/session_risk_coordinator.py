@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 from app.domain.trading.services.risk_manager import RiskManager
 from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager
 from app.domain.services.risk_tier_engine import RiskTierEngine, TierAPremiumCheck
+from app.domain.services.circuit_breakers import CircuitBreakers, BreakerReason, BreakerResult
+from app.domain.constants import ACCOUNT_MAX_LOSS_ABSOLUTE
 
 if TYPE_CHECKING:
     from app.domain.trading.models.entities import Signal
@@ -36,6 +38,7 @@ class SystemRiskState:
     consecutive_losses: int
     peak_equity: float
     current_equity: float
+    cumulative_account_pnl: float  # Added for account-level loss tracking
     drift_alert: bool
     drift_message: str
 
@@ -68,6 +71,8 @@ class SessionRiskCoordinator:
         self._min_grade_score = (
             min_grade_score if min_grade_score is not None else MIN_GRADE_SCORE_THRESHOLD
         )
+        # Circuit breakers for account-level risk limits
+        self._circuit_breakers = CircuitBreakers(equity=capital)
 
     def _get_risk_manager(self, symbol: str) -> RiskManager:
         """Return per-symbol RiskManager, creating one if needed.
@@ -166,10 +171,42 @@ class SessionRiskCoordinator:
         if engine:
             engine.record_trade(pnl_r, premium_check)
 
+    def _get_cumulative_account_pnl(self) -> float:
+        """Compute cumulative account P&L across all sessions/symbols.
+
+        Returns:
+            Cumulative P&L (negative = loss, positive = profit)
+        """
+        with self._session_creation_lock:
+            managers = list(self._risk_managers.values())
+
+        if not managers:
+            return 0.0
+
+        current_equity = sum(rm.daily_state.current_equity for rm in managers)
+        # Cumulative P&L = current equity - starting capital
+        return current_equity - self._capital
+
+    def check_account_loss_limit(self) -> BreakerResult:
+        """Check if account-level absolute loss limit has been breached.
+
+        This is the HIGHEST PRIORITY circuit breaker - checked before all others.
+
+        Returns:
+            BreakerResult with locked status and reason
+        """
+        cumulative_pnl = self._get_cumulative_account_pnl()
+        return self._circuit_breakers.evaluate(
+            consecutive_losses=0,  # Not relevant for account-level check
+            session_pnl=0.0,  # Not relevant for account-level check
+            cumulative_account_pnl=cumulative_pnl,
+        )
+
     def validate_entry(self, symbol: str, signal: Signal, portfolio: Portfolio) -> bool:
         """Validate entry against risk limits.
 
-        Checks four independent guards:
+        Checks five independent guards (in priority order):
+        0. Account-level absolute loss limit (₹30,000 hard cap) — HIGHEST PRIORITY
         1. Signal confluence grade score (must meet minimum threshold)
         2. SessionRiskManager — 3-loss circuit breaker
         3. TradeManager — daily loss limit per symbol / global
@@ -178,6 +215,14 @@ class SessionRiskCoordinator:
         Returns:
             True if entry is valid
         """
+        # Guard 0: Account-level absolute loss limit (HIGHEST PRIORITY)
+        account_breaker = self.check_account_loss_limit()
+        if account_breaker.is_locked:
+            logger.warning(
+                "Entry BLOCKED — Account loss limit: %s", account_breaker.detail
+            )
+            return False
+
         # Guard 1: Confluence grade score floor
         meta = getattr(signal, "metadata", None) or {}
         grade_score = meta.get("grade_score")
@@ -270,6 +315,7 @@ class SessionRiskCoordinator:
                 consecutive_losses=0,
                 peak_equity=0.0,
                 current_equity=0.0,
+                cumulative_account_pnl=0.0,
                 drift_alert=False,
                 drift_message="",
             )
@@ -302,6 +348,9 @@ class SessionRiskCoordinator:
         else:
             daily_drawdown_pct = 0.0
 
+        # Compute cumulative account P&L
+        cumulative_account_pnl = current_equity - self._capital
+
         return SystemRiskState(
             halted=halted,
             halt_reason=halt_reason,
@@ -309,6 +358,7 @@ class SessionRiskCoordinator:
             consecutive_losses=consecutive_losses,
             peak_equity=peak_equity,
             current_equity=current_equity,
+            cumulative_account_pnl=cumulative_account_pnl,
             drift_alert=drift_alert,
             drift_message=" | ".join(drift_messages[:3]),
         )

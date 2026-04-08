@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
-from functools import lru_cache
+import threading
 
 from app.config import settings
 from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter
@@ -321,10 +321,18 @@ class ServiceGraph:
             _vp_scan_pool.shutdown(wait=False)
 
 
-@lru_cache(maxsize=1)
+_sg_lock = threading.Lock()
+_sg_instance: ServiceGraph | None = None
+
+
 def get_service_graph() -> ServiceGraph:
-    """Singleton service graph created once."""
-    return ServiceGraph()
+    """Thread-safe singleton service graph created once."""
+    global _sg_instance
+    if _sg_instance is None:
+        with _sg_lock:
+            if _sg_instance is None:
+                _sg_instance = ServiceGraph()
+    return _sg_instance
 
 
 # FastAPI dependency helpers

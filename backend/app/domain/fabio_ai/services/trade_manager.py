@@ -18,12 +18,34 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
+from enum import Enum
 from typing import Optional
 
 from app.domain.trading.models.enums import MarketStateCodec
 from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Cushioning State Machine
+# ---------------------------------------------------------------------------
+
+
+class CushionState(str, Enum):
+    """Explicit state machine for position cushioning lifecycle.
+
+    The cushioning lifecycle follows a strict progression:
+    OPEN → CUSHIONED → TRAILING → CLOSED
+
+    This enum provides a single-field state check while individual boolean
+    flags remain for granular checks (backward compatibility).
+    """
+
+    OPEN = "OPEN"  # Position open, no cushioning yet
+    CUSHIONED = "CUSHIONED"  # Partial TP taken, SL moved to break-even
+    TRAILING = "TRAILING"  # Trailing stop active (ATR or VWAP)
+    CLOSED = "CLOSED"  # Position closed
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +124,88 @@ class ManagedPosition:
     scale_confirm_price: float = 0.0  # price level that triggers step 2
     scale_breakout_price: float = 0.0  # price level that triggers step 3
 
+    # ATR trailing state (Fabio spec: advance SL by ATR increments after cushioning)
+    peak_profit: float = 0.0       # highest unrealised profit seen since entry (price units)
+    atr_trail_active: bool = False  # True once ATR trail is armed (after cushioning + 1R profit)
+
+    # Cushioning state machine (explicit lifecycle tracking)
+    cushion_state: CushionState = CushionState.OPEN  # Single-field state for lifecycle
+
     @property
     def is_long(self) -> bool:
         return self.side == "LONG"
+
+    def validate_state_transition(self, new_state: CushionState) -> bool:
+        """Validate that state transitions follow: OPEN → CUSHIONED → TRAILING → CLOSED.
+
+        Valid transitions:
+        - OPEN → CUSHIONED (partial TP or breakeven set)
+        - OPEN → CLOSED (position closed before cushioning)
+        - CUSHIONED → TRAILING (ATR/VWAP trail activated)
+        - CUSHIONED → CLOSED (position closed during cushioning)
+        - TRAILING → CLOSED (trail hit or manual close)
+
+        Returns:
+            True if transition is valid, False otherwise.
+        """
+        valid_transitions = {
+            CushionState.OPEN: {CushionState.CUSHIONED, CushionState.CLOSED},
+            CushionState.CUSHIONED: {CushionState.TRAILING, CushionState.CLOSED},
+            CushionState.TRAILING: {CushionState.CLOSED},
+            CushionState.CLOSED: set(),
+        }
+        return new_state in valid_transitions.get(self.cushion_state, set())
+
+    def set_cushion_state(self, new_state: CushionState) -> None:
+        """Set cushion state with validation and logging.
+
+        Logs a warning if invalid transition is attempted but does not block it
+        (graceful degradation for backward compatibility).
+        """
+        old_state = self.cushion_state
+        if not self.validate_state_transition(new_state):
+            logger.warning(
+                "Invalid cushion state transition for %s: %s → %s (allowed but logged)",
+                self.position_id,
+                old_state.value,
+                new_state.value,
+            )
+        self.cushion_state = new_state
+        logger.debug(
+            "Cushion state transition for %s: %s → %s",
+            self.position_id,
+            old_state.value,
+            new_state.value,
+        )
+
+    def set_partial_taken(self, value: bool = True) -> None:
+        """Set partial_taken flag and transition cushion state to CUSHIONED.
+
+        This helper ensures state machine consistency when partial profit is taken.
+        Should be called when partial TP is executed.
+        """
+        if value and not self.partial_taken:
+            self.partial_taken = True
+            # Only transition to CUSHIONED if we're in OPEN state
+            if self.cushion_state == CushionState.OPEN:
+                self.set_cushion_state(CushionState.CUSHIONED)
+            logger.debug(
+                "ManagedPosition: partial_taken set for %s",
+                self.position_id,
+            )
+
+    def set_runner_active(self, value: bool = True) -> None:
+        """Set runner_active flag.
+
+        The runner state is independent of cushion state - runner can be active
+        in CUSHIONED or TRAILING states.
+        """
+        if value and not self.runner_active:
+            self.runner_active = True
+            logger.debug(
+                "ManagedPosition: runner_active set for %s",
+                self.position_id,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -598,6 +699,7 @@ class TradeManager:
                     f"TradeManager: STOP LOSS hit for {position_id} at {current_price:.2f}"
                 )
                 self.record_loss(mp.symbol, current_price)
+                mp.set_cushion_state(CushionState.CLOSED)
                 return ExitSignal(position_id, ExitReason.STOP_LOSS, current_price)
 
             if not mp.is_long and (stop_price if stop_price is not None else current_price) >= mp.stop_loss:
@@ -605,6 +707,7 @@ class TradeManager:
                     f"TradeManager: STOP LOSS hit for {position_id} at {current_price:.2f}"
                 )
                 self.record_loss(mp.symbol, current_price)
+                mp.set_cushion_state(CushionState.CLOSED)
                 return ExitSignal(position_id, ExitReason.STOP_LOSS, current_price)
 
             # ----- MAE/MFE tracking -----
@@ -621,6 +724,57 @@ class TradeManager:
             # ----- PROFIT EXITS & TRAILING -----
             # Break-Even, P1/P2/P3 rules, and trail logic are handled natively
             # upstream by the PartitionExitManager. TradeManager checks hard stops.
+
+            # ----- ATR TRAILING STOP (Fabio spec: advance SL by ATR increments after cushioning) -----
+            # Runs on every tick unconditionally after MAE/MFE update.
+            # Activates only when: cushioning done (partial_taken) AND profit >= 1R.
+            # SL only ratchets in the profitable direction — never loosens.
+            if mp.partial_taken:
+                from app.domain.constants import ATR_TRAIL_ACTIVATION_R, ATR_TRAIL_STEP_PCT
+
+                initial_risk = abs(mp.entry_price - mp.initial_stop)
+                if initial_risk > 0:
+                    # Update peak profit (highest favourable excursion in price units)
+                    if unrealised > mp.peak_profit:
+                        mp.peak_profit = unrealised
+
+                    activation_threshold = ATR_TRAIL_ACTIVATION_R * initial_risk
+                    if mp.peak_profit >= activation_threshold:
+                        if not mp.atr_trail_active:
+                            mp.atr_trail_active = True
+                            mp.set_cushion_state(CushionState.TRAILING)
+                            logger.info(
+                                "TradeManager: ATR trail ARMED for %s — peak_profit=%.2f >= %.2f (1R)",
+                                position_id,
+                                mp.peak_profit,
+                                activation_threshold,
+                            )
+
+                        # Trail SL = entry + peak_profit * (1 - step_pct)  [LONG]
+                        #           entry - peak_profit * (1 - step_pct)  [SHORT]
+                        retain_pct = 1.0 - ATR_TRAIL_STEP_PCT
+                        if mp.is_long:
+                            atr_trail_sl = mp.entry_price + mp.peak_profit * retain_pct
+                            if atr_trail_sl > mp.stop_loss:
+                                old_sl = mp.stop_loss
+                                mp.stop_loss = atr_trail_sl
+                                logger.info(
+                                    "TradeManager: ATR trail advanced for %s (LONG) — SL %.2f -> %.2f",
+                                    mp.symbol,
+                                    old_sl,
+                                    mp.stop_loss,
+                                )
+                        else:
+                            atr_trail_sl = mp.entry_price - mp.peak_profit * retain_pct
+                            if atr_trail_sl < mp.stop_loss:
+                                old_sl = mp.stop_loss
+                                mp.stop_loss = atr_trail_sl
+                                logger.info(
+                                    "TradeManager: ATR trail advanced for %s (SHORT) — SL %.2f -> %.2f",
+                                    mp.symbol,
+                                    old_sl,
+                                    mp.stop_loss,
+                                )
 
             # ----- 5. TIME STOP / SCRATCH -----
             # Grace period: skip time stop for first 5 ticks (position settling)
@@ -651,12 +805,14 @@ class TradeManager:
                         f"TradeManager: SCRATCH for {position_id} after "
                         f"{now - mp.entry_time:.0f}s (move={price_move_pct:.5f})"
                     )
+                    mp.set_cushion_state(CushionState.CLOSED)
                     return ExitSignal(position_id, ExitReason.SCRATCH, current_price)
                 else:
                     logger.info(
                         f"TradeManager: TIME STOP for {position_id} after "
                         f"{now - mp.entry_time:.0f}s"
                     )
+                    mp.set_cushion_state(CushionState.CLOSED)
                     return ExitSignal(position_id, ExitReason.TIME_STOP, current_price)
 
             return None
@@ -741,6 +897,7 @@ class TradeManager:
                     logger.info(
                         f"TradeManager: CVD kill signal — scratching {position_id}"
                     )
+                    mp.set_cushion_state(CushionState.CLOSED)
                     return ExitSignal(position_id, ExitReason.SCRATCH, current_price)
 
             # SHORT + BULLISH divergence = sellers losing steam → tighten
@@ -754,6 +911,7 @@ class TradeManager:
                     logger.info(
                         f"TradeManager: CVD kill signal — scratching {position_id}"
                     )
+                    mp.set_cushion_state(CushionState.CLOSED)
                     return ExitSignal(position_id, ExitReason.SCRATCH, current_price)
 
             return None
@@ -831,6 +989,7 @@ class TradeManager:
                 "market_state": mp.market_state,
                 "mae": round(mp.mae, 4),
                 "mfe": round(mp.mfe, 4),
+                "cushion_state": mp.cushion_state.value,
                 "r_multiple": round(
                     unrealised / abs(mp.entry_price - mp.initial_stop), 2
                 )
@@ -856,6 +1015,7 @@ class TradeManager:
                 "partial_taken": mp.partial_taken,
                 "mae": mp.mae,
                 "mfe": mp.mfe,
+                "cushion_state": mp.cushion_state.value,
             }
 
     def get_managed_position_ids(
@@ -1183,6 +1343,9 @@ class TradeManager:
             )
             # Use midpoint as exit price (best realistic fill in illiquid conditions)
             exit_price = (best_bid + best_ask) / 2
+            # Set cushion state to CLOSED (mp was retrieved earlier)
+            if mp is not None:
+                mp.set_cushion_state(CushionState.CLOSED)
             return ExitSignal(position_id, ExitReason.SPREAD_BLOWOUT, exit_price)
 
         return None
@@ -1213,6 +1376,7 @@ class TradeManager:
             if mp.is_long and cvd_slope >= self.config.cvd_breakeven_min_slope:
                 mp.stop_loss = mp.entry_price
                 mp.breakeven_set = True
+                mp.set_cushion_state(CushionState.CUSHIONED)
                 logger.info(
                     "TradeManager: CVD breakeven for %s — CVD slope %.2f confirms LONG",
                     position_id,
@@ -1222,6 +1386,7 @@ class TradeManager:
             elif not mp.is_long and cvd_slope <= -self.config.cvd_breakeven_min_slope:
                 mp.stop_loss = mp.entry_price
                 mp.breakeven_set = True
+                mp.set_cushion_state(CushionState.CUSHIONED)
                 logger.info(
                     "TradeManager: CVD breakeven for %s — CVD slope %.2f confirms SHORT",
                     position_id,
