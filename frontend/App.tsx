@@ -158,7 +158,6 @@ function App() {
                             symbol={activeInstrument.symbol}
                             predictions={activeInstrument.predictions}
                             config={effectiveConfig}
-                            activeSignal={activeInstrument.amtAnalysis?.signal}
                             positions={activeInstrument.portfolio.positions}
                             closedTrades={activeInstrument.portfolio.closedTrades}
                             amtAnalysis={activeInstrument.amtAnalysis}
@@ -175,7 +174,6 @@ function App() {
                             symbol={activeInstrument.symbol}
                             predictions={activeInstrument.predictions}
                             config={effectiveConfig}
-                            activeSignal={activeInstrument.amtAnalysis?.signal}
                             positions={activeInstrument.portfolio.positions}
                             closedTrades={activeInstrument.portfolio.closedTrades}
                             amtAnalysis={activeInstrument.amtAnalysis}
@@ -192,7 +190,6 @@ function App() {
                             symbol={activeInstrument.symbol}
                             predictions={activeInstrument.predictions}
                             config={effectiveConfig}
-                            activeSignal={activeInstrument.amtAnalysis?.signal}
                             positions={activeInstrument.portfolio.positions}
                             closedTrades={activeInstrument.portfolio.closedTrades}
                             amtAnalysis={activeInstrument.amtAnalysis}

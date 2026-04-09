@@ -111,6 +111,9 @@ class AMTResult:
     lvns: tuple[float, ...] = ()
     hvns: tuple[float, ...] = ()
     aggression: float = 0.0
+    # DEPRECATED: signals now generated exclusively by SignalPipeline.
+    # This field is kept for backward compatibility but will always be None.
+    # Signal creation goes through app.domain.fabio_ai.services.entry_gates.signal_builder.
     signal: "Signal | None" = None
     setup: str | None = None
     profile: tuple[VolumeProfileLevel, ...] = ()

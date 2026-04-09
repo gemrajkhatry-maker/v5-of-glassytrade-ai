@@ -19,7 +19,6 @@ interface ChartSceneProps {
   data: OHLCData[];
   predictions: OHLCData[];
   config: ChartConfig;
-  activeSignal?: TradeSignal | null;
   positions: TradePosition[];
   closedTrades?: TradePosition[];
   aiAnalysis?: AIAnalysis | null;
@@ -52,7 +51,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   data,
   predictions,
   config,
-  activeSignal,
   positions,
   closedTrades = [],
   aiAnalysis,
@@ -1331,18 +1329,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         }
       });
 
-      // Active signal (when no position yet)
-      if (activeSignal && positions.length === 0) {
-        markers.push({
-          time: (new Date(activeSignal.timestamp).getTime() / 1000 + 19800) as UTCTimestamp,
-          position: activeSignal.type === 'BUY' ? 'belowBar' : 'aboveBar',
-          color: activeSignal.type === 'BUY' ? '#10b981' : '#ef4444',
-          shape: activeSignal.type === 'BUY' ? 'arrowUp' : 'arrowDown',
-          text: `SIGNAL: ${activeSignal.type}`,
-          size: 2,
-        });
-      }
-
       // Sort markers by time (required by lightweight-charts)
       markers.sort((a, b) => (a.time as number) - (b.time as number));
       candleSeriesRef.current.setMarkers(markers);
@@ -1394,7 +1380,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       activePriceLinesRef.current.set(pos.id, lines);
     });
 
-  }, [positions, closedTrades, activeSignal, stableAmtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
+  }, [positions, closedTrades, stableAmtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
 
   return (
     <div className="w-full h-full relative bg-[#0f172a] overflow-hidden" style={{ display: isHidden ? 'none' : 'block' }}>
@@ -1506,7 +1492,6 @@ function chartSceneAreEqual(prev: ChartSceneProps, next: ChartSceneProps): boole
     if ((prev.closedTrades?.length ?? 0) !== (next.closedTrades?.length ?? 0)) return false;
     if (prev.cumulativeDeltas.length !== next.cumulativeDeltas.length) return false;
     if (prev.amtAnalysis !== next.amtAnalysis) return false;
-    if (prev.activeSignal !== next.activeSignal) return false;
     if (prev.footprintData !== next.footprintData) return false;
     if (prev.rangeBarData !== next.rangeBarData) return false;
     return true;

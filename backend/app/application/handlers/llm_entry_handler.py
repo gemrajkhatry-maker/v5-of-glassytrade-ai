@@ -2,7 +2,7 @@
 
 This module coordinates LLM inference and delegates to specialized modules:
 - EntryGateCoordinator: Gate checking orchestration
-- SignalConstructor: Signal building logic
+- build_entry_signal: Signal building logic (called directly)
 - PositionSizer: Position sizing logic
 """
 
@@ -36,7 +36,7 @@ from app.domain.fabio_ai.services.entry_gate import (
 
 # Import delegated modules
 from app.application.handlers.entry_gate_coordinator import EntryGateCoordinator
-from app.application.handlers.signal_constructor import SignalConstructor
+# SignalConstructor removed - use build_entry_signal directly
 from app.shared.timezones import IST
 
 from app.application.handlers.position_sizer import PositionSizer
@@ -90,7 +90,7 @@ class LLMEntryHandler:
 
         # Delegated modules
         self._gate_coordinator = EntryGateCoordinator()
-        self._signal_constructor = SignalConstructor()
+        # SignalConstructor removed - build_entry_signal used directly
         self._position_sizer = PositionSizer()
 
     # ------------------------------------------------------------------
@@ -202,6 +202,11 @@ class LLMEntryHandler:
         """Check re-entry gates, circuit breakers, and build signal if eligible.
         
         Extracted from _llm_worker_loop for readability and CC reduction.
+        
+        TODO(Task 51): Simplify - this method should return the raw LLM decision dict
+        instead of building signals. The caller (trading_session) should use SignalPipeline
+        to validate gates and create signals. This keeps LLMEntryHandler focused on
+        LLM inference management only.
         """
         _ad = getattr(session, "_agent_decision", None)
         if self._check_direction_mismatch(_ad, direction, symbol, session, worker_queue):
@@ -271,7 +276,7 @@ class LLMEntryHandler:
                 from app.domain.fabio_ai.services.trade_manager import TradeManager
                 from app.config import settings
 
-                entry_signal = self._signal_constructor.construct_signal(
+                entry_signal = build_entry_signal(
                     direction=direction,
                     tick=tick,
                     amt_result=amt_result,
@@ -1020,7 +1025,8 @@ class LLMEntryHandler:
                     except Exception:
                         logger.debug("Exception handled silently", exc_info=True)
 
-                # Build signal using delegated SignalConstructor
+                # Build signal using build_entry_signal (via _process_build_signal)
+                # TODO(Task 51): Simplify - return raw LLM decision and let caller use SignalPipeline
                 self._process_build_signal(
                     symbol, session, tick, direction, setup_type, ai_result,
                     confidence, market_state_str, session_info, amt_result,

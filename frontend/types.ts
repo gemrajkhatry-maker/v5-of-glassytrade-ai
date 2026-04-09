@@ -245,7 +245,6 @@ export interface AMTAnalysis {
   lvns: number[];
   hvns: number[]; // High Volume Nodes
   aggression: number;
-  signal: TradeSignal | null;
   setup: 'TREND_MODEL' | 'MEAN_REVERSION' | null;
   profile: VolumeProfileLevel[];
   aggressivePrints: AggressivePrint[]; // "Volume Bubbles"
@@ -306,6 +305,14 @@ export interface AMTAnalysis {
   llmThinking?: string;
   llmJson?: string;
   tickSize?: number;
+  // Decision card fields (from backend agent)
+  direction?: 'LONG' | 'SHORT' | 'FLAT';
+  pLong?: number;
+  pShort?: number;
+  agentRegime?: string;
+  agentTiming?: string;
+  agentKelly?: number;
+  agentRationale?: string;
   // Session identity and freshness (Phase 1, Task 1.6)
   sessionId?: string;
   computedAt?: string;
