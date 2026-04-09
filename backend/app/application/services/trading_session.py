@@ -68,6 +68,8 @@ from app.application.services.session_event_logger import SessionEventLogger
 
 # Import extracted modules
 from app.application.services.state_snapshot_builder import build_state_snapshot
+from app.application.services.session_cache import SessionCache
+from app.application.services.session_event_router import SessionEventRouter
 
 # Import error handling utilities
 from shared.error_handling import (
@@ -234,9 +236,42 @@ class TradingSessionService:
         self._order_rejection = OrderRejectionHandler()
         self._db_fallback = DBFallbackBuffer()
 
+        # Event Router — delegates all handler calls
+        self._event_router = SessionEventRouter(
+            lifecycle_handler=self._lifecycle_handler,
+            llm_handler=self._llm_handler,
+            overseer_handler=self._overseer_handler,
+            entry_coordinator=self._entry_coordinator,
+            exit_coordinator=self._exit_coordinator,
+            broker=broker,
+            storage=storage,
+            risk_coordinator=self._risk_coordinator,
+            probability_engine=self._probability_engine,
+            exchange_config=exchange_config,
+            exchange=self._exchange,
+            allow_short=self._allow_short,
+            gate_tracker=gate_tracker,
+            signal_tracker=signal_tracker,
+            scalp_enabled=self._scalp_enabled,
+        )
+
+        # Per-session caches (created on demand)
+        self._session_caches: dict[str, SessionCache] = {}
+
     def get_or_create_session(self, symbol: str) -> SessionState:
         """Get or create a session for the symbol."""
-        return self._state_manager.get_or_create_session(symbol)
+        session = self._state_manager.get_or_create_session(symbol)
+        # Ensure cache exists for this session
+        if symbol not in self._session_caches:
+            self._session_caches[symbol] = SessionCache(session)
+        return session
+
+    def _get_cache(self, symbol: str) -> SessionCache:
+        """Get the SessionCache for a symbol."""
+        if symbol not in self._session_caches:
+            session = self._state_manager.get_or_create_session(symbol)
+            self._session_caches[symbol] = SessionCache(session)
+        return self._session_caches[symbol]
 
     def process_tick(
         self,
@@ -256,13 +291,12 @@ class TradingSessionService:
             underlying_tick: Underlying futures OHLC candle (for AMT analysis)
         """
         session = self.get_or_create_session(symbol)
+        cache = self._get_cache(symbol)
         self._state_manager._maybe_reset_symbol_state(session, symbol, tick.time)
 
         # Drain pending signal from LLM worker thread + update tick time
-        with session._lock:
-            session._last_tick_time = time.time()
-            pending = session._pending_signal
-            session._pending_signal = None
+        cache.update_tick_time()
+        pending = cache.drain_pending_signal()
         if pending:
             pending_symbol, pending_signal = pending
 
@@ -283,55 +317,12 @@ class TradingSessionService:
             except (ValueError, KeyError) as e:
                 log.debug("Signal age check error: %s", e, exc_info=True)
         if pending:
-            self._execute_signal(pending_symbol, pending_signal, session)
+            self._event_router.execute_signal(pending_symbol, pending_signal, session)
 
-        # Update data store (under lock — session.data is shared with LLM handler)
-        with session._lock:
-            new_candle = not (session.data and session.data[-1].time == tick.time)
-            if not new_candle:
-                session.data[-1] = tick
-            else:
-                if self._storage and session.data:
-                    closed = session.data[-1]
-                    try:
-                        self._storage.save_tick(
-                            symbol,
-                            {
-                                "time": closed.time,
-                                "open": closed.open,
-                                "high": closed.high,
-                                "low": closed.low,
-                                "close": closed.close,
-                                "volume": closed.volume,
-                                "delta": closed.delta,
-                            },
-                        )
-                    except (OSError, Exception) as e:
-                        log.warning("Failed to save tick for %s: %s", symbol, e, exc_info=True)
-                session.data.append(tick)
-                session._last_candle_time = tick.time
-                if len(session.data) > MAX_CANDLES_PER_SYMBOL:
-                    del session.data[: len(session.data) - MAX_CANDLES_PER_SYMBOL]
-
-            # Store underlying futures data for AMT analysis (dual feed)
-            if underlying_tick is not None:
-                if not hasattr(session, "_underlying_data"):
-                    session._underlying_data = []
-                ut = underlying_tick
-                ut_new = not (
-                    session._underlying_data
-                    and session._underlying_data[-1].time == ut.time
-                )
-                if not ut_new:
-                    session._underlying_data[-1] = ut
-                else:
-                    session._underlying_data.append(ut)
-                    if len(session._underlying_data) > MAX_CANDLES_PER_SYMBOL:
-                        del session._underlying_data[
-                            : len(session._underlying_data) - MAX_CANDLES_PER_SYMBOL
-                        ]
-
-            session.order_book = order_book
+        # Update data store via SessionCache
+        cache.update_candle_buffer(tick, self._storage, symbol)
+        cache.update_underlying_data(underlying_tick)
+        cache.set_order_book(order_book)
 
         # Process tick in portfolio
         with session._lock:
@@ -426,60 +417,7 @@ class TradingSessionService:
 
     # ----- event handlers -----
 
-    def _run_micro_agent_pipeline(self, event: TickReceived, amt_result):
-        """Run the micro-agent (LightGBM) pipeline for agent decision."""
-        if not self._probability_engine.is_ready() or len(list(event.data)) < 20:
-            return None
-        try:
-            from app.domain.probability.features import extract_features
-            from app.domain.probability.agent_pipeline import run_agent_pipeline
-
-            is_mcx = is_mcx_symbol(event.symbol)
-            features = extract_features(
-                list(event.data),
-                amt_result,
-                event.tick,
-                event.order_book,
-                is_mcx=is_mcx,
-            )
-            tick_size = (
-                self._exchange_config.get_tick_size(event.symbol)
-                if self._exchange_config
-                else 0.05
-            )
-            agent_decision = run_agent_pipeline(
-                data=list(event.data),
-                amt_result=amt_result,
-                tick=event.tick,
-                probability_engine=self._probability_engine,
-                features=features,
-                order_book=event.order_book,
-                tick_size=tick_size,
-                symbol=event.symbol,
-                tick_age_seconds=1.0,
-            )
-            log.info(
-                "Agent pipeline [%s]: dir=%s P=%.3f regime=%s timing=%s kelly=%.1f%% (%dus) — %s",
-                event.symbol,
-                agent_decision.direction,
-                agent_decision.probability,
-                agent_decision.regime,
-                agent_decision.timing,
-                agent_decision.size_fraction * 100,
-                agent_decision.latency_us,
-                agent_decision.rationale,
-            )
-            return agent_decision
-        except (ValueError, RuntimeError) as e:
-            log.warning(
-                "Agent pipeline error for %s: %s",
-                event.symbol,
-                e,
-                exc_info=True,
-            )
-            return None
-
-    def _session_phase_check(self, event: TickReceived, session) -> None:
+    def _session_phase_check(self, event: TickReceived, session, cache: SessionCache) -> None:
         """Check session phase and force-exit positions if Phase 5 (15:15-15:30 IST)."""
         from datetime import datetime
         from app.domain.fabio_ai.services.session_context import (
@@ -493,7 +431,7 @@ class TradingSessionService:
             if _market in ("NFO", "BSE"):
                 _market = "NSE"
             session_phase = _get_si(timestamp=event.tick.time, market=_market)
-            session._last_session_info = session_phase
+            cache.set_last_session_info(session_phase)
             if session_phase.force_exit:
                 with session._lock:
                     open_positions = [
@@ -540,35 +478,35 @@ class TradingSessionService:
 
                 if (
                     self._storage
-                    and session.last_amt
+                    and cache.get_latest_amt()
                     and not getattr(session, "_profile_saved", False)
                 ):
                     try:
                         session_date = datetime.now(IST).strftime("%Y-%m-%d")
-                        _agg_prints = getattr(session, "_last_aggressive_prints", None)
+                        _agg_prints = cache.get_aggressive_prints()
                         _print_clusters = (
                             cluster_aggressive_prints(tuple(_agg_prints))
                             if _agg_prints
                             else []
                         )
+                        last_amt = cache.get_latest_amt()
                         profile_data = {
                             "symbol": event.symbol,
                             "market": _market,
                             "session_date": session_date,
-                            "poc": session.last_amt.get("poc", 0),
-                            "vah": session.last_amt.get("vah", 0),
-                            "val": session.last_amt.get("val", 0),
-                            "profile_shape": session.last_amt.get("profileShape", ""),
-                            "total_volume": sum(d.volume for d in session.data[-RECENT_DATA_WINDOW:]),
+                            "poc": last_amt.get("poc", 0),
+                            "vah": last_amt.get("vah", 0),
+                            "val": last_amt.get("val", 0),
+                            "profile_shape": last_amt.get("profileShape", ""),
+                            "total_volume": sum(d.volume for d in cache.get_data()[-RECENT_DATA_WINDOW:]),
                             "print_levels": [
                                 {"price": p, "side": "MIXED"}
                                 for p in _print_clusters[:5]
                             ],
-                            "is_underlying": hasattr(session, "_underlying_data")
-                            and bool(session._underlying_data),
+                            "is_underlying": cache.has_underlying_data(),
                         }
                         self._storage.save_session_profile(profile_data)
-                        session._profile_saved = True
+                        cache.set_profile_saved(True)
                         log.info(
                             "Saved session profile for %s on %s",
                             event.symbol,
@@ -615,12 +553,12 @@ class TradingSessionService:
                             close_err,
                         )
 
-    def _run_amt_analysis(self, event: TickReceived, session, prior) -> object:
+    def _run_amt_analysis(self, event: TickReceived, session, prior, cache: SessionCache) -> object:
         """Run AMT analysis with data source selection and prior profile injection."""
         # Dual feed: use underlying futures data for AMT analysis (only if we have enough data)
         amt_data = list(event.data)
-        if hasattr(session, "_underlying_data") and session._underlying_data and len(session._underlying_data) >= 20:
-            amt_data = list(session._underlying_data)
+        if cache.has_underlying_data(20):
+            amt_data = cache.get_underlying_data()
         elif amt_data:
             log.debug(
                 "AMT: using option premium data for %s (no underlying futures available) — VAH/VAL will be in premium units",
@@ -646,11 +584,8 @@ class TradingSessionService:
             )
             return None
 
-        with session._lock:
-            session.last_amt = amt_dto
-            session.last_footprint = fp_dto
-            session._last_fp_domain = fp_dto
-            session._last_aggressive_prints = amt_result.aggressive_prints
+        # Update cache with AMT results
+        cache.update_amt(amt_result, amt_dto, fp_dto)
 
         log.info(
             "AMT analysis done for %s: poc=%.2f vah=%.2f val=%.2f agg=%.2f ofi=%.3f cvd=%.1f state=%s ibH=%.2f ibL=%.2f",
@@ -669,7 +604,7 @@ class TradingSessionService:
         return amt_result
 
     def _resolve_entry_decision(
-        self, agent_decision, session, is_new_candle, has_position, _in_cooldown
+        self, agent_decision, cache: SessionCache, is_new_candle, has_position, _in_cooldown
     ):
         """Resolve entry decision from agent or pending, return execution params."""
         _allow_short = self._allow_short
@@ -690,20 +625,20 @@ class TradingSessionService:
                     agent_decision.probability,
                 )
 
-        if _exec_decision is None and getattr(session, "_pending_decision", None):
-            pending = session._pending_decision
+        pending_decision, pending_amt, pending_tick = cache.get_pending_decision()
+        if _exec_decision is None and pending_decision:
             if (
-                pending.direction != "FLAT"
-                and pending.probability >= AGENT_DECISION_THRESHOLD
+                pending_decision.direction != "FLAT"
+                and pending_decision.probability >= AGENT_DECISION_THRESHOLD
             ):
-                _exec_decision = pending
-                _exec_amt = getattr(session, "_pending_amt", None)
-                _exec_tick = getattr(session, "_pending_tick", None)
+                _exec_decision = pending_decision
+                _exec_amt = pending_amt
+                _exec_tick = pending_tick
                 if is_new_candle:
                     log.info(
                         "ENTRY: Using pending decision on new candle: %s P=%.3f",
-                        pending.direction,
-                        pending.probability,
+                        pending_decision.direction,
+                        pending_decision.probability,
                     )
 
         _exec_dir = (
@@ -720,275 +655,12 @@ class TradingSessionService:
         )
         return _exec_decision, _exec_amt, _exec_tick, _exec_dir, _exec_prob, run_entry
 
-    def _should_trigger_llm(
-        self,
-        session,
-        has_position,
-        ai_running,
-        _in_cooldown,
-        amt_result,
-        event,
-        ai_time,
-    ):
-        """Determine if LLM entry trigger should run."""
-        return self._llm_handler.should_run(
-            last_ai_time=ai_time,
-            ai_running=ai_running,
-            has_position=has_position,
-            has_managed_positions=self._lifecycle_handler.has_managed_positions(
-                event.symbol
-            ),
-            in_cooldown=_in_cooldown,
-            last_entry_time=session._last_entry_time,
-            data=session.data,
-            amt_result=amt_result,
-            tick=event.tick,
-            order_book=event.order_book,
-        )
-
-    def _run_overseer_if_needed(self, session, event, amt_result):
-        """Run overseer handler if positions exist."""
-        if self._lifecycle_handler.has_managed_positions(event.symbol):
-            _mkt = self._exchange
-            if _mkt in ("NFO", "BSE"):
-                _mkt = "NSE"
-            from app.domain.fabio_ai.services.session_context import (
-                get_session_info as _get_si,
-            )
-
-            _si = _get_si(timestamp=event.tick.time, market=_mkt)
-            _fp_candle = None
-            _fp_domain = getattr(session, "_last_fp_domain", None)
-            if _fp_domain:
-                try:
-                    _fp_vals = (
-                        list(_fp_domain.values())
-                        if isinstance(_fp_domain, dict)
-                        else None
-                    )
-                    _fp_candle = _fp_vals[-1] if _fp_vals else None
-                except Exception:
-                    log.debug("Silent exception handled", exc_info=True)
-            self._overseer_handler.run_overseer(
-                session,
-                event.symbol,
-                event.tick,
-                amt_result,
-                session_info=_si,
-                footprint_candle=_fp_candle,
-            )
-
-    def _execute_entry_path(
-        self, event, session, amt_result, _exec_dir, _exec_prob, run_entry
-    ):
-        """Execute entry path: gate pipeline, SHORT gates, signal build, persist."""
-        import time as _time_mod
-
-        _last_exec_mono = getattr(session, "_last_exec_mono", 0)
-        _time_since_last = _time_mod.monotonic() - _last_exec_mono
-        _can_execute = _time_since_last > 60
-
-        if run_entry and _can_execute:
-            srm = self._risk_coordinator.get_session_risk_manager(event.symbol)
-            if srm and not srm.can_trade:
-                log.info(
-                    "ENTRY BLOCKED: %s — session risk: %s",
-                    event.symbol,
-                    srm.halt_reason,
-                )
-                return
-
-            from app.domain.fabio_ai.services.entry_gate import run_gate_pipeline
-
-            tick_size = (
-                self._exchange_config.get_tick_size(event.symbol)
-                if self._exchange_config
-                else 0.05
-            )
-
-            gate_passed, gate_reason, gate_detail = run_gate_pipeline(
-                data=list(event.data),
-                amt_result=amt_result,
-                tick=event.tick,
-                market_state=amt_result.market_state,
-                drive_number=getattr(amt_result, "drive_number", 0),
-                drive_entry_valid=getattr(amt_result, "drive_entry_valid", False),
-                aggression_score=amt_result.aggression,
-                is_risk_halted=False,
-                halt_reason="",
-                tick_age_seconds=1.0,
-                symbol=event.symbol,
-                max_distance_to_level_ticks=self._exchange_config.max_distance_to_level_ticks
-                if self._exchange_config
-                else 3.0,
-                probing_aggression_threshold=0.0,
-                min_aggression_score=0.0,
-                max_cushion_ticks=500.0,
-                min_rr_ratio=0.1,
-                tick_size=tick_size,
-            )
-
-            if gate_passed:
-                if self._gate_tracker:
-                    self._gate_tracker.record(event.symbol, "gate_pipeline", True)
-
-                if _exec_dir == "SHORT":
-                    from app.domain.services.short_signal_gates import (
-                        evaluate_short_gates,
-                    )
-
-                    short_ok, short_results = evaluate_short_gates(
-                        short_enabled=getattr(settings, "SHORT_SIGNALS_ENABLED", False),
-                        market_state=amt_result.market_state,
-                        displacement_direction=getattr(
-                            amt_result, "displacement_direction", ""
-                        ),
-                        failed_breakout=getattr(amt_result, "failed_breakout", False),
-                        playbook=str(amt_result.setup or "return_to_value"),
-                        ml_probability=_exec_prob,
-                        bid_volume=float(getattr(amt_result, "bid_volume", 0)),
-                        ask_volume=float(getattr(amt_result, "ask_volume", 0)),
-                        cvd_slope=float(getattr(amt_result, "cvd_slope", 0)),
-                        delta_normalized=float(
-                            getattr(amt_result, "delta_normalized", 0)
-                        ),
-                        contract_type="PE",
-                    )
-                    if not short_ok:
-                        failed_gate = next(r for r in short_results if not r.passed)
-                        log.info(
-                            "SHORT BLOCKED: %s — %s (%s)",
-                            event.symbol,
-                            failed_gate.gate_name,
-                            failed_gate.reason,
-                        )
-                        gate_passed = False
-                        if self._gate_tracker:
-                            self._gate_tracker.record(
-                                event.symbol, failed_gate.gate_name, False
-                            )
-
-            if gate_passed:
-                signal = build_entry_signal(
-                    direction=_exec_dir,
-                    tick=event.tick,
-                    amt_result=amt_result,
-                    ai_result={
-                        "rationale": f"AMT pipeline: {amt_result.market_state} {amt_result.aggression:.1f} aggression",
-                        "confidence": "High"
-                        if _exec_prob >= CONFIDENCE_HIGH_THRESHOLD
-                        else "Medium",
-                        "market_state": amt_result.market_state,
-                    },
-                    setup_type=amt_result.setup or "MEAN_REVERSION",
-                    data=list(event.data),
-                    session_context=getattr(session._last_session_info, "session", ""),
-                    confidence="High"
-                    if _exec_prob >= CONFIDENCE_HIGH_THRESHOLD
-                    else "Medium",
-                    tick_size=tick_size,
-                    inside_extreme=self._scalp_enabled,
-                    risk_sl_pct=srm.stop_loss_pct if srm else None,
-                )
-                if signal:
-                    session._last_entry_candle_time = event.tick.time
-                    session._last_exec_mono = _time_mod.monotonic()
-                    log.info(
-                        "EXECUTING: %s dir=%s P=%.3f via AMT pipeline",
-                        event.symbol,
-                        _exec_dir,
-                        _exec_prob,
-                    )
-                    self._execute_signal(event.symbol, signal, session)
-                    with session._lock:
-                        session._pending_decision = None
-                        session._pending_amt = None
-                        session._pending_tick = None
-                else:
-                    log.info(
-                        "ENTRY BLOCKED: %s — signal construction failed", event.symbol
-                    )
-            else:
-                log.info(
-                    "ENTRY BLOCKED: %s — gate %s (%s): %s",
-                    event.symbol,
-                    gate_passed,
-                    gate_reason,
-                    gate_detail,
-                )
-                if self._gate_tracker:
-                    self._gate_tracker.record(
-                        event.symbol, f"gate_{gate_passed}", False
-                    )
-
-            self._persist_gate_decision(
-                event,
-                amt_result,
-                _exec_dir,
-                _exec_prob,
-                gate_passed,
-                gate_reason,
-                gate_detail,
-            )
-        elif run_entry and not _can_execute:
-            log.debug(
-                "COOLDOWN: %s waiting %.0fs before next trade",
-                event.symbol,
-                60 - _time_since_last,
-            )
-
-    def _persist_gate_decision(
-        self,
-        event,
-        amt_result,
-        _exec_dir,
-        _exec_prob,
-        gate_passed,
-        gate_reason,
-        gate_detail,
-    ):
-        """Persist gate decision via injected signal tracker."""
-        if not self._signal_tracker:
-            return
-        try:
-            if gate_passed:
-                self._signal_tracker.track_signal_generated(
-                    symbol=event.symbol,
-                    direction=_exec_dir,
-                    confidence="High"
-                    if _exec_prob >= CONFIDENCE_HIGH_THRESHOLD
-                    else "Medium",
-                    aggression_score=float(amt_result.aggression),
-                    drive_number=getattr(amt_result, "drive_number", 0),
-                    market_state=amt_result.market_state,
-                    price=float(event.tick.close),
-                    poc=float(amt_result.poc),
-                    vah=float(amt_result.value_area_high),
-                    val=float(amt_result.value_area_low),
-                    cvd_slope=float(amt_result.cvd_slope),
-                )
-            else:
-                self._signal_tracker.track_gate_block(
-                    symbol=event.symbol,
-                    gate_name=f"GATE_{gate_passed}",
-                    gate_reason=gate_reason or "FLAT",
-                    gate_detail=gate_detail or "",
-                    market_state=amt_result.market_state,
-                    price=float(event.tick.close),
-                    poc=float(amt_result.poc),
-                    vah=float(amt_result.value_area_high),
-                    val=float(amt_result.value_area_low),
-                    cvd_slope=float(amt_result.cvd_slope),
-                    aggression_score=float(amt_result.aggression),
-                )
-        except Exception:
-            pass  # Non-critical — tracking failure should not break pipeline
-
     def _on_tick(self, event: TickReceived) -> None:
         import time as _tick_time
 
         _tick_start = _tick_time.monotonic()
         session = self.get_or_create_session(event.symbol)
+        cache = self._get_cache(event.symbol)
 
         # Initialize IB engine for this symbol if not exists
         if not hasattr(self, "_ib_engines"):
@@ -1001,14 +673,14 @@ class TradingSessionService:
             )
 
         # 0. Session phase check + profile save
-        self._session_phase_check(event, session)
+        self._session_phase_check(event, session, cache)
 
         # 1. AMT Analysis + Footprint
         prior = getattr(session, "_prior_profile", None)
         if event.symbol not in self._amt_handlers:
             self._amt_handlers[event.symbol] = AMTHandler()
 
-        amt_result = self._run_amt_analysis(event, session, prior)
+        amt_result = self._run_amt_analysis(event, session, prior, cache)
         if amt_result is None:
             # AMT failure — use a minimal sentinel so downstream exit/position
             # management still runs.  Entering new positions requires valid AMT,
@@ -1029,13 +701,13 @@ class TradingSessionService:
 
         # Update IB engine — use underlying futures when available (Phase 1B)
         ib_tick = event.tick
-        if hasattr(session, "_underlying_data") and session._underlying_data and len(session._underlying_data) >= 20:
-            ib_tick = session._underlying_data[-1]
+        if cache.has_underlying_data(20):
+            ib_tick = cache.get_underlying_data()[-1]
 
         ib_engine = self._ib_engines.get(event.symbol)
         if ib_engine:
             ib_state = ib_engine.update(ib_tick)
-            session._ib_state = ib_state
+            cache.set_ib_state(ib_state)
 
             # IB Breakout Scalp evaluation (Phase 4)
             if self._scalp_enabled and ib_state.is_complete:
@@ -1055,7 +727,7 @@ class TradingSessionService:
                         getattr(amt_result, "baseline_volume", event.tick.volume)
                     ),
                     cvd_slope_1m=float(getattr(amt_result, "cvd_slope", 0)),
-                    bar_index=len(session.data),
+                    bar_index=len(cache.get_data()),
                     tick_size=self._exchange_config.get_tick_size(event.symbol)
                     if self._exchange_config
                     else 0.05,
@@ -1112,12 +784,12 @@ class TradingSessionService:
             )
 
         # 1b. Micro-agent pipeline
-        agent_decision = self._run_micro_agent_pipeline(event, amt_result)
-        session._agent_decision = agent_decision
+        agent_decision = self._event_router.run_micro_agent_pipeline(event, amt_result, self._exchange_config)
+        cache.set_agent_decision(agent_decision)
 
         # Extract stacked imbalances from footprint
         _imbalances = None
-        _fp_domain = getattr(session, "_last_fp_domain", None)
+        _fp_domain = cache.get_fp_domain()
         if _fp_domain:
             try:
                 _latest_fp = list(_fp_domain.values())[-1] if _fp_domain else None
@@ -1160,9 +832,7 @@ class TradingSessionService:
             )
 
             # Track candle boundaries for entry evaluation
-            is_new_candle = event.tick.time != getattr(
-                session, "_last_entry_candle_time", ""
-            )
+            is_new_candle = event.tick.time != cache.get_last_entry_candle_time()
             _in_cooldown = self._lifecycle_handler.in_cooldown(event.symbol)
 
             # SAVE last good decision for execution on next candle
@@ -1171,9 +841,7 @@ class TradingSessionService:
                 and agent_decision.direction != "FLAT"
                 and agent_decision.probability >= AGENT_DECISION_THRESHOLD
             ):
-                session._pending_decision = agent_decision
-                session._pending_amt = amt_result
-                session._pending_tick = event.tick
+                cache.set_pending_decision(agent_decision, amt_result, event.tick)
 
             # Priority score for UI display only
             _priority_score = 0.0
@@ -1186,18 +854,18 @@ class TradingSessionService:
                 _priority_score += 2.0
             _squeeze = self._llm_handler._get_regime_detector(
                 event.symbol
-            ).detect_squeeze(session.data, amt_result)
+            ).detect_squeeze(cache.get_data(), amt_result)
             if _squeeze:
                 _priority_score += 3.0
-            session._llm_priority_score = _priority_score
+            cache.set_llm_priority_score(_priority_score)
 
             # UNIFIED ENTRY PATH — delegated to focused helper methods
             _exec_decision, _exec_amt, _exec_tick, _exec_dir, _exec_prob, run_entry = (
                 self._resolve_entry_decision(
-                    agent_decision, session, is_new_candle, has_position, _in_cooldown
+                    agent_decision, cache, is_new_candle, has_position, _in_cooldown
                 )
             )
-            trigger_llm = self._should_trigger_llm(
+            trigger_llm = self._event_router.should_trigger_llm(
                 session,
                 has_position,
                 ai_running,
@@ -1207,25 +875,27 @@ class TradingSessionService:
                 ai_time,
             )
 
-        self._run_overseer_if_needed(session, event, amt_result)
+        self._event_router.run_overseer_if_needed(session, event, amt_result, self._exchange)
 
         # 4a. Execute entry using proper AMT pipeline
-        self._execute_entry_path(
-            event, session, amt_result, _exec_dir, _exec_prob, run_entry
+        self._event_router.execute_entry_path(
+            event, session, amt_result, _exec_dir, _exec_prob, run_entry,
+            self._exchange_config, self._allow_short, self._risk_coordinator,
+            self._scalp_enabled,
         )
         # 4b. Trigger LLM descriptor for UI
         if trigger_llm and is_new_candle:
-            self._llm_handler.run_entry(session, event.symbol, event.tick, amt_result)
+            self._event_router.trigger_llm_entry(session, event.symbol, event.tick, amt_result)
 
         elif not has_position and not ai_running and _in_cooldown:
-            cooldown_status = session.last_ai_analysis or {}
+            cooldown_status = cache.get_ai_analysis() or {}
             cooldown_status["direction"] = "FLAT"
             base_rationale = cooldown_status.get("rationale", "")
             base_rationale = base_rationale.split(" [Cooldown")[0]
             cooldown_status["rationale"] = (
                 base_rationale + " [Cooldown — waiting before next entry]"
             )
-            session.last_ai_analysis = cooldown_status
+            cache.set_ai_analysis(cooldown_status)
 
         # Record tick-to-signal latency
         if self._latency_tracker:
@@ -1233,8 +903,8 @@ class TradingSessionService:
             self._latency_tracker.record(event.symbol, elapsed_ms)
 
     def _execute_signal(self, symbol: str, sig, session: SessionState) -> None:
-        """Execute a trade signal — delegates to EntryCoordinator."""
-        self._entry_coordinator.execute_signal(symbol, sig, session)
+        """Execute a trade signal — delegates to EventRouter."""
+        self._event_router.execute_signal(symbol, sig, session)
 
     def _on_partial_exit(
         self,
@@ -1247,8 +917,8 @@ class TradingSessionService:
         size_remaining: float,
         realized_pnl: float,
     ) -> None:
-        """Callback from TradeLifecycleHandler — delegates to ExitCoordinator."""
-        self._exit_coordinator.on_partial_exit(
+        """Callback from TradeLifecycleHandler — delegates to EventRouter."""
+        self._event_router.on_partial_exit(
             pos_id,
             side,
             entry_price,
@@ -1260,26 +930,13 @@ class TradingSessionService:
         )
 
     def _on_stop_out(self, level: float, direction: str, symbol: str = "") -> None:
-        """Callback from TradeLifecycleHandler — delegates to ExitCoordinator."""
-        self._exit_coordinator.on_stop_out(level, direction, symbol, self._exchange)
+        """Callback from TradeLifecycleHandler — delegates to EventRouter."""
+        self._event_router.on_stop_out(level, direction, symbol, self._exchange)
 
     def _on_trade_closed(self, symbol: str, pnl: float, pos_id: str | None = None) -> None:
         """Callback from TradeLifecycleHandler — records PnL for session tracking."""
         session = self._state_manager.get_or_create_session(symbol)
-        if session and session.portfolio:
-            self._risk_coordinator.record_trade_result(
-                symbol, pnl, session.portfolio
-            )
-        # Also record in ExitCoordinator for full lifecycle tracking
-        self._exit_coordinator.on_position_closed(symbol, pos_id)
-
-        # Delete from persistent storage so recovery doesn't re-create it
-        if self._storage:
-            try:
-                delete_id = pos_id or symbol
-                self._storage.delete_open_position(delete_id)
-            except Exception as e:
-                log.error("Failed to delete closed position %s: %e", pos_id or symbol, e)
+        self._event_router.on_trade_closed(symbol, pnl, pos_id, session)
 
     # ----- control-plane helpers -----
 

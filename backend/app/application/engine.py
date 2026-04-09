@@ -4,6 +4,9 @@ Delegates to focused modules:
   - StreamManager: Market data streaming
   - CandleAggregator: Tick-to-candle aggregation
   - WatchdogManager: SL/TP watchdog and stream health
+  - TickProcessor: Tick processing and OI tracking
+  - StateBroadcaster: WebSocket state assembly and broadcast
+  - EngineLifecycle: Startup, shutdown, recovery
 
 Architecture:
   1. Backend starts trading on server startup (lifespan)
@@ -18,7 +21,7 @@ import copy
 import logging
 import time
 import threading
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from shared.resilience import PerEntityCircuitBreaker
@@ -33,6 +36,11 @@ from app.application.range_bar_builder import RangeBarBuilder
 from app.application.watchdog_manager import WatchdogManager
 from app.domain.services.underlying_futures_provider import UnderlyingFuturesProvider
 
+# New decomposed services
+from app.application.services.tick_processor import TickProcessor
+from app.application.services.state_broadcaster import StateBroadcaster
+from app.application.services.engine_lifecycle import EngineLifecycle
+
 if TYPE_CHECKING:
     from app.api.dependencies import ServiceGraph
 
@@ -42,6 +50,7 @@ from app.shared.timezones import IST
 
 
 def _depth_to_dto(book: OrderBook | None) -> dict | None:
+    """Convert OrderBook to DTO dict for JSON serialization."""
     if not book:
         return None
     return {
@@ -76,53 +85,46 @@ class TradingEngine:
         self._session_service = graph.trading_session
         self._active_symbols: list[str] = graph.active_symbols
 
-        # Per-symbol latest state snapshot (read by WS viewers)
-        self._latest_states: dict[str, dict] = {}
-        # Generation counter + condition for viewer notification
-        self._generation: int = 0
-        self._condition: asyncio.Condition = asyncio.Condition()
-        self._last_notify_time: float = 0.0
-        self._notify_scheduled: bool = False
-        self._notify_task: asyncio.Task | None = None
-
-        # Internal per-symbol mutable state
-        self._current_depths: dict[str, dict] = {}
-        self._last_process_times: dict[str, float] = {}
-        self._prev_oi_values: dict[str, int] = {}
-        # Per-symbol locks for _latest_states read-modify-write protection
-        self._state_locks: dict[str, threading.Lock] = {}
-
+        # Circuit breaker for tick processing
         self._circuit_breaker = PerEntityCircuitBreaker(
             failure_threshold=5,
             recovery_timeout=300.0,
         )
 
+        # Per-symbol mutable state (kept for backward compatibility)
+        self._current_depths: dict[str, dict] = {}
+        self._last_process_times: dict[str, float] = {}
+
         # Underlying futures provider — maps option symbols → futures for AMT analysis
         self._underlying_provider = UnderlyingFuturesProvider()
-        # Separate candle aggregator for underlying futures (5-min OHLCV)
         self._underlying_aggregator = CandleAggregator(interval="5m")
-        # Cache: underlying_symbol → latest OHLC tick
         self._underlying_ticks: dict[str, OHLC] = {}
 
-        # Delegated modules
+        # Delegated modules (existing)
         self._stream_manager = StreamManager(market_data=self._market_data)
         self._candle_aggregator = CandleAggregator(interval=settings.STREAM_INTERVAL)
-        # Range bar builder — per-symbol, ATR-based range size
-        self._range_builders: dict[str, RangeBarBuilder] = {}
-        self._range_default_size: float = 3.0  # Default range size (points)
         self._watchdog_manager = WatchdogManager(
             session_service=self._session_service,
             stream_manager=self._stream_manager,
         )
 
-        # Tasks
-        self._stream_task: asyncio.Task | None = None
-        self._watchdog_task: asyncio.Task | None = None
-        self._stale_watchdog_task: asyncio.Task | None = None
-        self._gc_task: asyncio.Task | None = None
-        self._running = False
-        self._engine_start_time: float = 0.0
-        self._loop: asyncio.AbstractEventLoop | None = None  # Event loop reference for cross-thread notifications
+        # New decomposed services
+        self._tick_processor = TickProcessor(
+            candle_aggregator=self._candle_aggregator,
+            range_default_size=3.0,
+        )
+        self._state_broadcaster = StateBroadcaster()
+        self._lifecycle = EngineLifecycle(
+            graph=graph,
+            stream_manager=self._stream_manager,
+            watchdog_manager=self._watchdog_manager,
+            state_broadcaster=self._state_broadcaster,
+            tick_processor=self._tick_processor,
+        )
+        self._lifecycle.set_candle_aggregator(self._candle_aggregator)
+
+        # Event loop reference for cross-thread notifications
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -130,138 +132,52 @@ class TradingEngine:
 
     async def start(self) -> None:
         """Seed history and begin streaming. Called from lifespan."""
-        if self._running:
-            return
-        self._running = True
-
         # Capture the event loop for cross-thread notifications
         self._loop = asyncio.get_running_loop()
+        self._state_broadcaster.set_event_loop(self._loop)
 
-        # Initialize delegated modules
-        self._stream_manager.set_active_symbols(self._active_symbols)
-        self._stream_manager.set_running(True)
-        self._watchdog_manager.set_active_symbols(self._active_symbols)
-        self._watchdog_manager.set_running(True)
-
-        # Initialize per-symbol state
-        for sym in self._active_symbols:
-            self._current_depths[sym] = {"book": None}
-            self._last_process_times[sym] = 0.0
-            self._prev_oi_values[sym] = 0
-            self._candle_aggregator.initialize_symbol(sym)
-
-        self._engine_start_time = time.time()
-
-        # ── Mid-Trade Recovery (Gap #8) ──
-        # Recover open positions from DB on startup to survive crashes
-        await self._recover_open_positions()
-
-        # Seed historical data
-        await self._seed_history()
-
-        # Start streaming tasks
-        self._stream_task = asyncio.create_task(self._tick_loop_forever())
-        self._watchdog_task = asyncio.create_task(
-            self._watchdog_manager.sl_watchdog_loop()
-        )
-        self._stale_watchdog_task = asyncio.create_task(
-            self._watchdog_manager.stale_stream_watchdog()
-        )
-        self._gc_task = asyncio.create_task(self._watchdog_manager.gc_loop())
-
-        logger.info(
-            "Trading engine started for %d symbols: %s",
-            len(self._active_symbols),
-            self._active_symbols,
+        # Start lifecycle (recovery, seeding, and background tasks)
+        await self._lifecycle.startup(
+            tick_loop_coro=self._tick_loop_forever(),
+            initialize_symbol_state=self._initialize_symbol_state,
         )
 
     async def stop(self) -> None:
         """Graceful shutdown."""
-        self._running = False
-        self._stream_manager.set_running(False)
-        self._watchdog_manager.set_running(False)
+        await self._lifecycle.shutdown()
+        await self._state_broadcaster.cancel_pending_notifications()
 
-        notify_task = getattr(self, "_notify_task", None)
-        for task in (
-            self._stream_task,
-            self._watchdog_task,
-            self._stale_watchdog_task,
-            self._gc_task,
-            notify_task,
-        ):
-            if task and not task.done():
-                task.cancel()
-        tasks = [
-            t
-            for t in (
-                self._stream_task,
-                self._watchdog_task,
-                self._stale_watchdog_task,
-                self._gc_task,
-                notify_task,
-            )
-            if t
-        ]
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-        logger.info("Trading engine stopped.")
+    def _initialize_symbol_state(self, symbol: str) -> None:
+        """Initialize per-symbol state for a new symbol."""
+        self._current_depths[symbol] = {"book": None}
+        self._last_process_times[symbol] = 0.0
+        self._candle_aggregator.initialize_symbol(symbol)
+        self._tick_processor.initialize_symbol(symbol)
+        self._state_broadcaster.initialize_symbol(symbol)
 
     def get_latest_state(self, symbol: str) -> dict | None:
-        """Read-only access for WS viewers.
-
-        Returns a shallow copy of the state dict with a selective deep copy of
-        only the mutable ``portfolio`` value (which contains Position objects).
-        This avoids the overhead of deep-copying the entire state on every
-        viewer poll while still preventing mutation of shared portfolio data.
-        """
-        import copy
-
-        lock = self._state_locks.get(symbol)
-        state = self._latest_states.get(symbol)
-        if state is None:
-            return None
-
-        if lock:
-            with lock:
-                state = self._latest_states.get(symbol)
-                if state is None:
-                    return None
-                state = dict(state)
-        else:
-            state = dict(state)
-
-        try:
-            if "portfolio" in state:
-                state["portfolio"] = copy.deepcopy(state["portfolio"])
-            return state
-        except Exception:
-            return copy.deepcopy(state)
+        """Read-only access for WS viewers."""
+        return self._state_broadcaster.get_latest_state(symbol)
 
     def get_all_latest_states(self) -> dict[str, dict]:
         """All symbol states for initial WS sync."""
-        return dict(self._latest_states)
+        return self._state_broadcaster.get_all_latest_states()
 
     def get_active_symbols(self) -> list[str]:
+        """Get list of active symbols."""
         return list(self._active_symbols)
 
     @property
     def generation(self) -> int:
-        return self._generation
+        """Get current generation counter."""
+        return self._state_broadcaster.generation
 
     async def wait_for_update(self, known_gen: int, timeout: float = 5.0) -> int:
-        """Block until generation advances past known_gen. Returns new generation."""
-        async with self._condition:
-            try:
-                await asyncio.wait_for(
-                    self._condition.wait_for(lambda: self._generation > known_gen),
-                    timeout=timeout,
-                )
-            except asyncio.TimeoutError:
-                pass
-            return self._generation
+        """Block until generation advances past known_gen."""
+        return await self._state_broadcaster.wait_for_update(known_gen, timeout)
 
     def get_history(self, symbol: str) -> list[OHLC]:
-        """Get seeded history for a symbol. Always sorted ascending by time."""
+        """Get seeded history for a symbol."""
         session = self._session_service.get_or_create_session(symbol)
         if session:
             try:
@@ -271,6 +187,7 @@ class TradingEngine:
         return []
 
     def get_depth(self, symbol: str) -> OrderBook | None:
+        """Get current order book depth for a symbol."""
         d = self._current_depths.get(symbol)
         return d["book"] if d else None
 
@@ -282,291 +199,15 @@ class TradingEngine:
         """Build fresh state snapshot for symbol and notify all viewers.
 
         Thread-safe: can be called from background threads (e.g., overseer).
-        Uses the same snapshot builder as the regular tick pipeline.
         """
-        try:
-            logger.info("trigger_immediate_update called for %s", symbol)
-            session = self._session_service.get_or_create_session(symbol)
-            if not session:
-                logger.warning("No session for symbol %s", symbol)
-                return
-
-            # Build fresh snapshot using the same builder as process_tick
-            try:
-                from app.application.services.state_snapshot_builder import (
-                    build_state_snapshot,
-                )
-            except ImportError as e:
-                logger.error("state_snapshot_builder import failed: %s", e)
-                return
-            else:
-                state = build_state_snapshot(
-                    session,
-                    self._session_service._risk_coordinator,
-                    self._session_service._rl_handler,
-                    self._session_service._lifecycle_handler,
-                )
-
-            # Enrich with engine-specific fields (matching full tick pipeline)
-            # Get latest tick from session data
-            try:
-                last_tick = session.data[-1] if session.data else None
-            except (KeyError, AttributeError) as e:
-                logger.debug("Last tick retrieval failed: %s", e)
-                last_tick = None
-
-            if last_tick:
-                try:
-                    from app.infrastructure.serialization.schemas import ohlc_to_dto
-                    state["tick"] = ohlc_to_dto(last_tick)
-                except (KeyError, AttributeError, TypeError) as e:
-                    logger.debug("OHLC serialization failed: %s", e)
-                    state["tick"] = {}
-                state["ltp"] = float(last_tick.close)
-            else:
-                state["tick"] = {}
-                state["ltp"] = getattr(session, "_last_price", 0.0)
-
-            state["oi"] = getattr(session, "_last_oi", 0)
-            state["_symbol"] = symbol
-            state["depth"] = _depth_to_dto(
-                self._current_depths.get(symbol, {}).get("book")
-            )
-            # Range bars (visualization)
-            if symbol in self._range_builders:
-                state["rangeBars"] = self._range_builders[symbol].to_dict()
-
-            # Update _latest_states with thread safety
-            lock = self._state_locks.setdefault(symbol, threading.Lock())
-            with lock:
-                # Deep copy nested mutable structures to avoid race conditions
-                if "portfolio" in state:
-                    state["portfolio"] = copy.deepcopy(state["portfolio"])
-                if "amt" in state:
-                    state["amt"] = copy.deepcopy(state["amt"])
-                self._latest_states[symbol] = state
-            logger.info("Updated _latest_states for %s with fresh snapshot", symbol)
-
-            # Notify WebSocket viewers (must be called in async context)
-            # Use stored event loop reference to schedule notification from any thread
-            if self._loop and not self._loop.is_closed():
-                logger.info("Scheduling viewer notification for %s", symbol)
-                self._loop.call_soon_threadsafe(
-                    lambda: asyncio.create_task(self._notify_viewers(force=True))
-                )
-            else:
-                logger.warning("No event loop available for notification (loop=%s)", self._loop)
-        except (ConnectionError, RuntimeError, OSError) as e:
-            logger.error("WebSocket notification failed: %s", e)
-
-    def _build_minimal_state(self, symbol: str, session) -> dict:
-        """Fallback state builder with cached session data."""
-        return {
-            "_symbol": symbol,
-            "ltp": getattr(session, "_last_price", 0.0),
-            "genAIAnalysis": getattr(session, "last_ai_analysis", None),
-            "amt": getattr(session, "last_amt", None),
-        }
-
-    # ------------------------------------------------------------------
-    # History seeding
-    # ------------------------------------------------------------------
-
-    async def _seed_history(self) -> None:
-        for i, sym in enumerate(self._active_symbols):
-            if i > 0:
-                await asyncio.sleep(1.0)
-            try:
-                history = await self._market_data.fetch_history(
-                    sym,
-                    settings.STREAM_INTERVAL,
-                    500,
-                )
-
-                # Fallback for MCX options: broker API returns empty, load closed candles from DB
-                if not history:
-                    history = self._load_candles_from_db(sym, limit=500)
-                    if history:
-                        logger.info(
-                            "Engine: seeded %d candles for %s from local DB",
-                            len(history),
-                            sym,
-                        )
-
-                if history:
-                    session = self._session_service.get_or_create_session(sym)
-                    if len(session.data) < 10:
-                        session.data = history
-                        logger.info(
-                            "Engine: seeded %d candles for %s", len(history), sym
-                        )
-
-                    # Build initial state from last candle (skip full pipeline / LLM during seed)
-                    if len(history) >= 1:
-                        try:
-                            last_candle = history[-1]
-                            from app.infrastructure.serialization.schemas import (
-                                ohlc_to_dto,
-                            )
-
-                            self._latest_states[sym] = {
-                                "tick": ohlc_to_dto(last_candle),
-                                "ltp": last_candle.close,
-                                "_symbol": sym,
-                                "status": "seeded",
-                            }
-                            logger.info(
-                                "Engine: initial seed done for %s (skipped LLM)", sym
-                            )
-                        except Exception:
-                            logger.debug(
-                                "Engine: initial seed failed for %s", sym, exc_info=True
-                            )
-            except Exception:
-                logger.warning(
-                    "Engine: history fetch failed for %s", sym, exc_info=True
-                )
-
-    # ------------------------------------------------------------------
-    # Mid-Trade Recovery (Gap #8)
-    # ------------------------------------------------------------------
-
-    async def _recover_open_positions(self) -> None:
-        """Recover open positions from DB on startup to survive crashes.
-
-        Loads all open positions from the open_positions table and restores
-        them to the TradeManager so the engine can resume managing them
-        without losing position context.
-
-        Filters by current exchange — only recovers positions belonging to
-        the active exchange (NSE or MCX) to prevent cross-exchange contamination.
-        """
-        storage = self._session_service._storage
-        if not storage:
-            logger.info("Engine: no storage available — skipping position recovery")
-            return
-
-        try:
-            open_positions = storage.load_open_positions()
-            if not open_positions:
-                logger.info("Engine: no open positions to recover")
-                return
-
-            # Exchange-aware filtering
-            registry = getattr(self._graph, "symbol_registry", None)
-            current_exchange = getattr(self._graph.exchange_config, "exchange", "MCX")
-
-            recovered = 0
-            skipped = 0
-            for pos_data in open_positions:
-                symbol = pos_data.get("symbol", "")
-                if not symbol:
-                    continue
-
-                # Skip positions from other exchanges
-                # Use inline check to avoid dependency on registry being initialized
-                _nse_underlyings = {"NIFTY", "BANKNIFTY", "FINNIFTY"}
-                _underlying = symbol.split(" ")[0].upper() if symbol else ""
-                _symbol_exchange = "NSE" if _underlying in _nse_underlyings else "MCX"
-                if _symbol_exchange != current_exchange:
-                    skipped += 1
-                    logger.debug(
-                        "Engine: skipping %s position recovery (current=%s): %s",
-                        _symbol_exchange,
-                        current_exchange,
-                        symbol,
-                    )
-                    continue
-
-                # Add symbol to active list if not already there
-                if symbol not in self._active_symbols:
-                    self._active_symbols.append(symbol)
-                    self._current_depths[symbol] = {"book": None}
-                    self._last_process_times[symbol] = 0.0
-                    self._prev_oi_values[symbol] = 0
-                    self._candle_aggregator.initialize_symbol(symbol)
-
-                # Restore position to the session's portfolio
-                try:
-                    session = self._session_service.get_or_create_session(symbol)
-                    position = session.portfolio.recover_position(pos_data)
-                    if position:
-                        # Initialize partition state for exit management
-                        # Position already has lifecycle fields from Position.recover_position()
-                        self._session_service._lifecycle_handler.initialize_partition_state(position.id)
-
-                        logger.info(
-                            "Engine: recovered position %s for %s (side=%s, entry=%.2f, SL=%.2f, TP=%.2f)",
-                            pos_data.get("id", "?"),
-                            symbol,
-                            pos_data.get("side", "?"),
-                            pos_data.get("entry_price", 0),
-                            pos_data.get("stop_loss", 0),
-                            pos_data.get("take_profit", 0),
-                        )
-                        recovered += 1
-                except Exception as e:
-                    logger.error(
-                        "Engine: failed to recover position %s for %s: %s",
-                        pos_data.get("id", "?"),
-                        symbol,
-                        e,
-                    )
-
-            if recovered > 0:
-                logger.info(
-                    "Engine: recovered %d open positions (skipped %d from other exchanges)",
-                    recovered,
-                    skipped,
-                )
-            else:
-                logger.info(
-                    "Engine: no positions recovered for %s (skipped %d)",
-                    current_exchange,
-                    skipped,
-                )
-
-        except Exception as e:
-            logger.error("Engine: position recovery failed: %s", e, exc_info=True)
-
-    def _load_candles_from_db(self, symbol: str, limit: int = 500) -> list[OHLC]:
-        """Load closed candles from SQLite.
-
-        Uses a dict keyed by timestamp to deduplicate — handles old DB rows written
-        per-tick before the candle-close-only write strategy was introduced.
-        Rows are ordered ASC by time from query_ticks, so iterating keeps the last
-        (most complete) row for each candle period.
-        """
-        storage = self._session_service._storage
-        if not storage:
-            return []
-        try:
-            rows = storage.query_ticks(symbol, limit=limit * 20)
-            seen: dict[str, OHLC] = {}
-            for row in rows:
-                t = row["time"]
-                if not t:
-                    continue
-                try:
-                    seen[t] = OHLC(
-                        time=t,
-                        open=float(row["open"] or 0),
-                        high=float(row["high"] or 0),
-                        low=float(row["low"] or 0),
-                        close=float(row["close"] or 0),
-                        volume=float(row["volume"] or 0),
-                        delta=float(row["delta"] or 0),
-                    )
-                except Exception:
-                    continue  # Skip rows with non-numeric fields — legacy data cleanup
-            # Explicit sort — ISO 8601 strings sort lexicographically = chronologically,
-            # but guards against mixed timezone formats in older DB rows.
-            return sorted(seen.values(), key=lambda x: x.time)[-limit:]
-        except Exception:
-            logger.debug(
-                "Engine: failed to load candles from DB for %s", symbol, exc_info=True
-            )
-            return []
+        session = self._session_service.get_or_create_session(symbol)
+        self._state_broadcaster.trigger_immediate_update(
+            symbol=symbol,
+            session=session,
+            session_service=self._session_service,
+            current_depth=self._current_depths.get(symbol, {}),
+            range_builder_dict=self._tick_processor.get_range_builder_dict(symbol),
+        )
 
     # ------------------------------------------------------------------
     # Main tick loop
@@ -574,9 +215,9 @@ class TradingEngine:
 
     async def _tick_loop_forever(self) -> None:
         """Retry _tick_loop on stale/disconnect — keeps engine alive."""
-        while self._running:
+        while self._lifecycle.running:
             await self._tick_loop()
-            if self._running:
+            if self._lifecycle.running:
                 logger.info("Engine: tick loop restarting after disconnect...")
                 await asyncio.sleep(2)
 
@@ -596,7 +237,7 @@ class TradingEngine:
             async for pkt in self._stream_manager.stream_with_reconnect(
                 dhan_connect_state
             ):
-                if not self._running:
+                if not self._lifecycle.running:
                     break
 
                 if pkt.get("_stream_dead"):
@@ -611,9 +252,7 @@ class TradingEngine:
                     "symbol", self._active_symbols[0] if self._active_symbols else ""
                 )
                 if pkt_symbol not in self._candle_aggregator._candle_states:
-                    self._candle_aggregator.initialize_symbol(pkt_symbol)
-                    self._current_depths[pkt_symbol] = {"book": None}
-                    self._last_process_times[pkt_symbol] = 0.0
+                    self._initialize_symbol_state(pkt_symbol)
 
                 if self._circuit_breaker.is_open(pkt_symbol):
                     continue
@@ -639,53 +278,21 @@ class TradingEngine:
                 if vol < 0:
                     continue
 
-                # OI tracking
-                prev_oi = self._prev_oi_values.get(pkt_symbol, 0)
-                oi_change = oi - prev_oi if prev_oi > 0 else 0
-                self._prev_oi_values[pkt_symbol] = oi
-                oi_data = (
-                    {
-                        "oi": oi,
-                        "oi_change": oi_change,
-                        "oi_trend": "RISING"
-                        if oi_change > 0
-                        else ("FALLING" if oi_change < 0 else "FLAT"),
-                    }
-                    if oi > 0
-                    else None
-                )
+                # OI tracking (delegated to TickProcessor)
+                oi_data = self._tick_processor.track_oi(pkt_symbol, oi)
 
                 cum_buy = int(pkt.get("total_buy_qty", 0))
                 cum_sell = int(pkt.get("total_sell_qty", 0))
 
-                # 5-level depth from packet
+                # 5-level depth from packet (delegated to TickProcessor)
                 pkt_bids = pkt.get("depth_bids", [])
                 pkt_asks = pkt.get("depth_asks", [])
-                if pkt_bids or pkt_asks:
-                    current_book = self._current_depths[pkt_symbol].get("book")
-                    is_shallow = (
-                        current_book is None
-                        or len(current_book.bids) < 10
-                        or len(current_book.asks) < 10
-                    )
-
-                    if is_shallow:
-                        self._current_depths[pkt_symbol]["book"] = OrderBook(
-                            bids=tuple(
-                                OrderBookLevel(
-                                    price=float(b.get("price", 0)),
-                                    quantity=float(b.get("qty", 0)),
-                                )
-                                for b in pkt_bids
-                            ),
-                            asks=tuple(
-                                OrderBookLevel(
-                                    price=float(a.get("price", 0)),
-                                    quantity=float(a.get("qty", 0)),
-                                )
-                                for a in pkt_asks
-                            ),
-                        )
+                current_book = self._current_depths.get(pkt_symbol, {}).get("book")
+                updated_book = self._tick_processor.build_depth_from_packet(
+                    pkt_symbol, current_book, pkt_bids, pkt_asks
+                )
+                if updated_book is not None:
+                    self._current_depths[pkt_symbol]["book"] = updated_book
 
                 # Footprint accumulator
                 best_bid = pkt_bids[0].get("price", 0) if pkt_bids else 0.0
@@ -701,7 +308,7 @@ class TradingEngine:
                         candle_t,
                     )
 
-                # Candle aggregation (delegated to CandleAggregator)
+                # Candle aggregation
                 tick = self._candle_aggregator.aggregate(
                     pkt_symbol,
                     now,
@@ -727,7 +334,7 @@ class TradingEngine:
                 if elapsed < 0.5:
                     # Still update latest state with cached analysis for viewers
                     self._update_throttled_state(pkt_symbol, tick, ltp, oi, ohlc_to_dto)
-                    await self._notify_viewers()
+                    await self._state_broadcaster.notify_viewers()
                     continue
 
                 self._last_process_times[pkt_symbol] = now_time
@@ -737,7 +344,6 @@ class TradingEngine:
                 underlying_tick = None
                 if mapping:
                     ut_sym = mapping.underlying_symbol
-                    # Aggregate underlying futures tick
                     underlying_tick = self._underlying_aggregator.aggregate(
                         ut_sym,
                         now,
@@ -780,27 +386,21 @@ class TradingEngine:
                             }
                             state["footprint"] = session.last_footprint
 
-                    # Range bar builder (visualization only — no trading logic)
-                    if pkt_symbol not in self._range_builders:
-                        rb = RangeBarBuilder(
-                            range_size=self._range_default_size,
+                    # Range bar builder (delegated to TickProcessor)
+                    rb = self._tick_processor.get_or_create_range_builder(pkt_symbol)
+                    # Backfill if new
+                    if len(rb._bars) == 0 and session and session.data:
+                        self._tick_processor.backfill_range_bars(
+                            pkt_symbol, session.data
                         )
-                        self._range_builders[pkt_symbol] = rb
-                        # Backfill from historical candles
-                        self._backfill_range_bars(rb, pkt_symbol)
-                    rb = self._range_builders[pkt_symbol]
-                    rb.on_tick(
-                        ltp=float(ltp),
-                        timestamp=str(now),
-                        buy_vol=float(tick.taker_buy_volume),
-                        sell_vol=max(
-                            0.0, float(tick.volume) - float(tick.taker_buy_volume)
-                        ),
+                    range_dict = self._tick_processor.update_range_bar(
+                        pkt_symbol, ltp, str(now), tick
                     )
-                    state["rangeBars"] = rb.to_dict()
+                    if range_dict:
+                        state["rangeBars"] = range_dict
 
-                    self._latest_states[pkt_symbol] = state
-                    await self._notify_viewers()
+                    self._state_broadcaster.set_state(pkt_symbol, state)
+                    await self._state_broadcaster.notify_viewers()
                     self._circuit_breaker.record_success(pkt_symbol)
                 except Exception:
                     self._circuit_breaker.record_failure(pkt_symbol)
@@ -823,113 +423,16 @@ class TradingEngine:
         self, symbol: str, tick: OHLC, ltp: float, oi: int, ohlc_to_dto
     ) -> None:
         """Update latest state with current tick + cached analysis (no process_tick)."""
-        msg: dict = {
-            "tick": ohlc_to_dto(tick),
-            "ltp": ltp,
-            "oi": oi,
-            "_symbol": symbol,
-            "depth": _depth_to_dto(self._current_depths.get(symbol, {}).get("book")),
-        }
-        try:
-            session = self._session_service.get_or_create_session(symbol)
-            if session:
-                if session.last_ai_analysis:
-                    msg["genAIAnalysis"] = self._session_service._camel_case_ai(
-                        session.last_ai_analysis
-                    )
-                if session.last_amt:
-                    msg["amt"] = session.last_amt
-                if hasattr(session, "_agent_decision") and session._agent_decision:
-                    ad = session._agent_decision
-                    msg["agentDecision"] = {
-                        "direction": ad.direction,
-                        "probability": ad.probability,
-                        "regime": ad.regime,
-                        "timing": ad.timing,
-                        "sizeFraction": ad.size_fraction,
-                        "slAdjust": ad.sl_adjust,
-                        "tpAdjust": ad.tp_adjust,
-                        "latencyUs": ad.latency_us,
-                        "rationale": ad.rationale,
-                    }
-        except Exception:
-            logger.debug("Exception handled silently", exc_info=True)
-        # Merge into existing latest state (don't overwrite full process_tick fields)
-        if symbol not in self._latest_states:
-            self._latest_states[symbol] = msg
-        else:
-            lock = self._state_locks.setdefault(symbol, threading.Lock())
-            with lock:
-                prev = self._latest_states.get(symbol, {})
-                prev.update(msg)
-                self._latest_states[symbol] = prev
-
-    # ------------------------------------------------------------------
-    # Viewer notification
-    # ------------------------------------------------------------------
-
-    async def _notify_viewers(self, force: bool = False) -> None:
-        now = asyncio.get_event_loop().time()
-        if not force and now - self._last_notify_time < 0.15:  # 150ms throttle
-            if not self._notify_scheduled:
-                self._notify_scheduled = True
-                self._notify_task = asyncio.create_task(self._delayed_notify())
-            return
-
-        self._last_notify_time = now
-        self._notify_scheduled = False
-        async with self._condition:
-            self._generation += 1
-            self._condition.notify_all()
-
-    async def _delayed_notify(self) -> None:
-        await asyncio.sleep(0.15)
-        await self._notify_viewers(force=True)
-
-    def _backfill_range_bars(self, rb: RangeBarBuilder, symbol: str) -> None:
-        """Backfill range bars from historical candle data.
-
-        Generates synthetic ticks from each historical candle's OHLC
-        so the range bar builder has initial data.
-        """
-        try:
-            session = self._session_service.get_or_create_session(symbol)
-            if not session or not session.data:
-                return
-
-            # Process last 200 candles to seed range bars
-            for candle in session.data[-200:]:
-                # Note: session.data is a list of OHLC dataclasses
-                ts = str(candle.time) if hasattr(candle, "time") else ""
-                o = float(candle.open)
-                h = float(candle.high)
-                l = float(candle.low)
-                c = float(candle.close)
-                v = float(candle.volume)
-                tb = float(getattr(candle, "taker_buy_volume", v / 2))
-
-                if o <= 0 or h <= 0 or l <= 0 or c <= 0:
-                    continue
-
-                # Generate synthetic ticks: open → low → high → close
-                # This ensures the range bar builder sees the full candle range
-                ticks = [o]
-                if l < o:
-                    ticks.append(l)
-                if h > o:
-                    ticks.append(h)
-                ticks.append(c)
-
-                vol_per_tick = v / len(ticks) if ticks else 0
-                buy_per_tick = tb / len(ticks) if ticks else 0
-                sell_per_tick = (v - tb) / len(ticks) if ticks else 0
-
-                for tick_price in ticks:
-                    rb.on_tick(
-                        ltp=tick_price,
-                        timestamp=ts,
-                        buy_vol=buy_per_tick,
-                        sell_vol=sell_per_tick,
-                    )
-        except Exception:
-            pass  # Non-critical depth update — depth book degrades gracefully on parse errors
+        session = self._session_service.get_or_create_session(symbol)
+        msg = self._tick_processor.build_throttled_state(
+            symbol=symbol,
+            tick=tick,
+            ltp=ltp,
+            oi=oi,
+            current_depth=self._current_depths.get(symbol, {}).get("book"),
+            session=session,
+            session_service=self._session_service,
+            ohlc_to_dto=ohlc_to_dto,
+        )
+        # Merge into existing latest state
+        self._state_broadcaster.update_state(symbol, msg)
