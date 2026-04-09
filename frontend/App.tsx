@@ -160,6 +160,7 @@ function App() {
                             config={effectiveConfig}
                             activeSignal={activeInstrument.amtAnalysis?.signal}
                             positions={activeInstrument.portfolio.positions}
+                            managedPositions={activeInstrument.managedPositions}
                             closedTrades={activeInstrument.portfolio.closedTrades}
                             amtAnalysis={activeInstrument.amtAnalysis}
                             mode="STANDARD"
@@ -177,6 +178,7 @@ function App() {
                             config={effectiveConfig}
                             activeSignal={activeInstrument.amtAnalysis?.signal}
                             positions={activeInstrument.portfolio.positions}
+                            managedPositions={activeInstrument.managedPositions}
                             closedTrades={activeInstrument.portfolio.closedTrades}
                             amtAnalysis={activeInstrument.amtAnalysis}
                             mode="FOOTPRINT"
@@ -194,6 +196,7 @@ function App() {
                             config={effectiveConfig}
                             activeSignal={activeInstrument.amtAnalysis?.signal}
                             positions={activeInstrument.portfolio.positions}
+                            managedPositions={activeInstrument.managedPositions}
                             closedTrades={activeInstrument.portfolio.closedTrades}
                             amtAnalysis={activeInstrument.amtAnalysis}
                             mode="RANGE"

@@ -1344,6 +1344,11 @@ class TradingSessionService:
     # ----- state snapshot -----
 
     def _build_state_snapshot(self, session: SessionState) -> dict:
-        return build_state_snapshot(session, self._risk_coordinator, self._rl_handler)
+        return build_state_snapshot(
+            session,
+            self._risk_coordinator,
+            self._rl_handler,
+            self._lifecycle_handler,
+        )
 
     # State snapshot helpers delegated to state_snapshot_builder module

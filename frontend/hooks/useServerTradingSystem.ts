@@ -47,6 +47,7 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
     overseerReason: '',
     stats: null,
     depth20Active: false,
+    managedPositions: [],
     lastUpdate: Date.now(),
 });
 
@@ -358,6 +359,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.overseerReason !== undefined) merged.overseerReason = state.overseerReason;
                     if (state.depth !== undefined) merged.orderBook = state.depth;
                     if (state.depth20Active !== undefined) merged.depth20Active = state.depth20Active;
+                    if (state.managedPositions !== undefined) merged.managedPositions = state.managedPositions;
                     if (state.stats !== undefined) merged.stats = { ...existing.stats, ...state.stats };
                     if (state.ltp !== undefined) merged.ltp = state.ltp;
                     if (state.oi !== undefined) merged.oi = state.oi;

@@ -104,6 +104,23 @@ export interface TradePosition {
   };
 }
 
+/**
+ * ManagedPosition represents a position tracked by TradeManager.
+ * Includes cushion state and other lifecycle information.
+ */
+export interface ManagedPosition {
+  id: string;
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  entryPrice: number;
+  stopLoss: number;
+  takeProfit: number;
+  entryTime: string;
+  cushionState: 'OPEN' | 'CUSHIONED' | 'TRAILING' | 'CLOSED';
+  partialTaken: boolean;
+  runnerActive: boolean;
+}
+
 export interface Portfolio {
   balance: number;
   equity: number;
@@ -138,6 +155,7 @@ export interface InstrumentState {
   ltp?: number;
   oi?: number;
   rangeBars?: RangeBarData;
+  managedPositions: ManagedPosition[];
   lastUpdate: number;
 }
 

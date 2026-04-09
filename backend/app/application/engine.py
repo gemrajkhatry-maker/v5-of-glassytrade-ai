@@ -304,6 +304,7 @@ class TradingEngine:
                     session,
                     self._session_service._risk_coordinator,
                     self._session_service._rl_handler,
+                    self._session_service._lifecycle_handler,
                 )
 
             # Enrich with engine-specific fields (matching full tick pipeline)
