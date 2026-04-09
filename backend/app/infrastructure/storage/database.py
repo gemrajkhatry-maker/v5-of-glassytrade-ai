@@ -767,8 +767,14 @@ class SQLiteStorageAdapter(StoragePort):
     # Key-Value store (crash-safe state persistence)
     # ------------------------------------------------------------------
 
-    def kv_set(self, key: str, value: str) -> None:
+    def kv_set(self, key: str, value: Any) -> None:
         """Persist a key-value pair (upsert)."""
+        if isinstance(value, (dict, list, tuple)):
+            import json
+            value = json.dumps(value)
+        elif not isinstance(value, str):
+            value = str(value)
+            
         with self._lock:
             try:
                 self._conn.execute(

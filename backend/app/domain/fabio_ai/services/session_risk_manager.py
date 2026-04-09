@@ -113,9 +113,9 @@ class SessionRiskManager:
 
         return result
 
-    def record_trade(self, pnl: float) -> None:
+    def record_trade(self, pnl) -> None:
         """Record a completed trade result and check circuit breaker."""
-        self.session_pnl += pnl
+        self.session_pnl += float(pnl)
         self.trade_count += 1
         if pnl > 0:
             self.consecutive_wins += 1

@@ -268,24 +268,11 @@ class TickProcessor:
         ohlc_to_dto,
     ) -> dict:
         """Build partial state update between full process_tick calls.
-
-        Used when process_tick is throttled but we still want to push
-        current tick/depth updates to viewers.
-
-        Args:
-            symbol: Trading symbol
-            tick: Current OHLC tick
-            ltp: Last traded price
-            oi: Open interest
-            current_depth: Current order book depth
-            session: TradingSession instance
-            session_service: TradingSessionService instance
-            ohlc_to_dto: OHLC to DTO converter function
-
-        Returns:
-            Partial state dict for viewer update
+        
+        Uses _camel_case_ai from state_snapshot_builder for consistent DTO formatting.
         """
         from app.application.engine import _depth_to_dto
+        from app.application.services.state_snapshot_builder import _camel_case_ai
 
         msg: dict = {
             "tick": ohlc_to_dto(tick),
@@ -298,7 +285,7 @@ class TickProcessor:
         try:
             if session:
                 if session.last_ai_analysis:
-                    msg["genAIAnalysis"] = session_service._camel_case_ai(
+                    msg["genAIAnalysis"] = _camel_case_ai(
                         session.last_ai_analysis
                     )
                 if session.last_amt:

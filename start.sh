@@ -25,6 +25,7 @@ echo "Backend PID: $BACKEND_PID"
 # Start frontend
 echo "Starting frontend on :5190..."
 cd "$FRONTEND_DIR"
+export PATH="/opt/homebrew/bin:$PATH"
 nohup node node_modules/.bin/vite --host 0.0.0.0 --port 5190 \
   > "$FRONTEND_DIR/frontend.log" 2>&1 &
 FRONTEND_PID=$!

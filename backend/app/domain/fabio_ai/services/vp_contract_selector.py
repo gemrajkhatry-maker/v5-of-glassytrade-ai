@@ -225,10 +225,12 @@ class VPContractSelector:
             from datetime import datetime, timedelta, timezone
 
             from app.shared.timezones import IST as ist
-            now = datetime.now(ist)
-
-            # Build symbol for the index future
-            symbol = f"{index} {now.strftime('%d %b').upper()} FUT"
+            from brokers.broker.types import Exchange
+            
+            # Use raw base symbol mapping. The Broker handles mapping "NIFTY" to spot index 
+            # and "CRUDEOIL" to the nearest active FUTCOM contract automatically.
+            symbol = index
+            exchange_enum = Exchange.MCX if self._exchange == "MCX" else Exchange.NSE
 
             # Run async fetch_history in sync context
             loop = asyncio.new_event_loop()
@@ -236,6 +238,7 @@ class VPContractSelector:
                 data = loop.run_until_complete(
                     self._broker.fetch_history(
                         symbol=symbol,
+                        exchange=exchange_enum,
                         interval="5",
                         limit=200,
                     )
@@ -255,7 +258,8 @@ class VPContractSelector:
         """Fetch current price for an index."""
         try:
             # Try to get from broker's latest quote
-            quote = self._broker.get_quote(index, "NFO")
+            exchange_str = "MCX" if self._exchange == "MCX" else "NSE"
+            quote = self._broker.get_quote(index, exchange_str)
             if quote and hasattr(quote, "last_price"):
                 return float(quote.last_price)
             return 0.0

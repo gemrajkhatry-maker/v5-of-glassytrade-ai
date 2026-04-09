@@ -130,7 +130,8 @@ def classify_regime(
     vol_ratio = latest_vol / ema_vol if ema_vol > 0 else 0
 
     # Hard DEAD check: No price or no volume activity
-    if tick.close <= 0 or vol_ratio < 0.05:
+    # Relaxed from 0.05 to 0.01 for MCX markets where volume can be sparse.
+    if tick.close <= 0 or vol_ratio < 0.01:
         logger.info(
             "Regime: DEAD — ltp=%.2f, vol_ratio=%.3f (latest_vol=%.0f, ema=%.0f)",
             tick.close,

@@ -121,13 +121,12 @@ class LLMOverseerHandler:
             session._last_overseer_time = time.time()
             session._overseer_running = True
 
-        # Gather position state from TradeManager — filter by symbol
+        # Gather position state directly from session portfolio
         with session._lock:
-            open_ids = {p.id for p in session.portfolio.positions if p.status == "OPEN"}
-        managed_position_ids = self._trade_manager.get_managed_position_ids(
-            symbol=symbol,
-            open_ids=open_ids,
-        )
+            managed_position_ids = [
+                p.id for p in session.portfolio.positions 
+                if p.is_open and p.symbol == symbol
+            ]
         if not managed_position_ids:
             with session._lock:
                 session._overseer_running = False
@@ -207,9 +206,25 @@ class LLMOverseerHandler:
                         session._overseer_running = False
                     continue
 
-                pos_state = self._trade_manager.get_position_state(
-                    position_id, tick.close
-                )
+                with session._lock:
+                    position = next((p for p in session.portfolio.positions if p.id == position_id), None)
+                
+                if position is None or not position.is_open:
+                    pos_state = None
+                else:
+                    direction_mult = 1.0 if position.side.value == "LONG" else -1.0
+                    pnl_pct = (float(tick.close) - float(position.entry_price)) / float(position.entry_price) * direction_mult
+                    pos_state = {
+                        "position_id": position.id,
+                        "side": position.side.value,
+                        "entry_price": float(position.entry_price),
+                        "current_price": float(tick.close),
+                        "unrealized_pnl_pct": pnl_pct,
+                        "partial_taken": position.partial_taken,
+                        "market_state": getattr(amt_result, "state", "") if amt_result else "",
+                    }
+                    pos_state.update(self._trade_manager.get_position_metrics(position))
+
                 if pos_state is None:
                     logger.debug(
                         "Overseer: position %s closed before worker started",
