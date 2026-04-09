@@ -180,6 +180,9 @@ DISPLACEMENT_LOOKBACK: int = 15          # Lookback for leg detection in displac
 RECENT_DATA_WINDOW: int = 100            # Window for recent data calculations
 CANDLE_INTERVAL_MINUTES: int = 5         # Candle interval in minutes
 
+# ── Gate Pipeline Configuration ────────────────────────────────────────────
+SOFT_GATE_QUORUM: int = _G.get("soft_gate_quorum", 3)  # Minimum soft gates that must pass (Fabio's 3/4 rule)
+
 # ── ATR Trailing Stop ─────────────────────────────────────────────
 # Activates after cushioning (partial TP taken). Advances SL by tracking
 # peak unrealised profit and trailing at ATR_TRAIL_STEP_PCT behind the peak.
