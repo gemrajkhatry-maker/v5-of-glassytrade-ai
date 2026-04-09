@@ -10,6 +10,8 @@ DESIGN PRINCIPLES:
 4. Ordered: Events include timestamp for ordering
 """
 
+# RESERVED: Event classes preserved for future event sourcing. Currently no subscribers.
+
 from __future__ import annotations
 
 import uuid

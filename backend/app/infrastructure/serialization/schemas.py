@@ -368,6 +368,11 @@ class CommandRequestDTO(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def enum_to_value(val):
+    """Convert enum to its value, pass through non-enums."""
+    return val.value if hasattr(val, "value") else val
+
+
 def ohlc_to_dto(o) -> dict:
     """Convert a domain OHLC to a serialisable dict with camelCase keys."""
     return {
@@ -432,15 +437,15 @@ def position_to_dto(p) -> dict:
     return {
         "id": p.id,
         "symbol": p.symbol,
-        "side": p.side.value if hasattr(p.side, "value") else p.side,
-        "source": p.source.value if hasattr(p.source, "value") else p.source,
+        "side": enum_to_value(p.side),
+        "source": enum_to_value(p.source),
         "entryPrice": float(p.entry_price),
         "size": float(p.size),
         "stopLoss": float(p.stop_loss),
         "takeProfit": float(p.take_profit),
         "pnl": round(float(p.pnl), 2),
         "entryTime": p.entry_time,
-        "status": p.status.value if hasattr(p.status, "value") else p.status,
+        "status": enum_to_value(p.status),
         "exitPrice": float(p.exit_price) if p.exit_price is not None else None,
         "exitTime": p.exit_time,
         "closeReason": p.close_reason,
@@ -497,14 +502,14 @@ def signal_to_dto(s) -> Optional[dict]:
     if s is None:
         return None
     return {
-        "type": s.type.value if hasattr(s.type, "value") else s.type,
+        "type": enum_to_value(s.type),
         "price": s.price,
         "reason": s.reason,
         "stopLoss": s.stop_loss,
         "takeProfit": s.take_profit,
         "timestamp": s.timestamp,
-        "setup": s.setup.value if hasattr(s.setup, "value") else s.setup,
-        "source": s.source.value if hasattr(s.source, "value") else s.source,
+        "setup": enum_to_value(s.setup),
+        "source": enum_to_value(s.source),
         "metadata": s.metadata,
     }
 
