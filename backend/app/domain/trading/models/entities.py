@@ -16,6 +16,7 @@ from app.domain.trading.models.enums import (
     Source,
     SetupType,
     PositionStatus,
+    CushionState,
 )
 from app.domain.services.decimal_utils import to_decimal
 
@@ -89,6 +90,8 @@ class Position:
     All monetary values use Decimal for precision in financial calculations.
     """
 
+    # ----- core fields -----
+
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     symbol: str = ""
     side: Side = Side.LONG
@@ -105,11 +108,54 @@ class Position:
     close_reason: str | None = None
     metadata: dict[str, Any] | None = None
 
-    # ----- behaviour -----
+    # ── Lifecycle State ─────────────────────────────────────
+    cushion_state: CushionState = CushionState.OPEN
+    initial_stop: Decimal = field(default_factory=lambda: Decimal("0"))    # Original SL for R-multiple calc
+    peak_profit: Decimal = field(default_factory=lambda: Decimal("0"))    # Highest unrealized profit (price units)
+    mae: Decimal = field(default_factory=lambda: Decimal("0"))            # Maximum Adverse Excursion
+    mfe: Decimal = field(default_factory=lambda: Decimal("0"))            # Maximum Favorable Excursion
+    tick_count: int = 0                                                    # Ticks since entry
+
+    # ── Cushioning Flags ────────────────────────────────────
+    partial_taken: bool = False         # True after first partial TP
+    runner_active: bool = False         # True when runner portion trailing
+    breakeven_set: bool = False         # True once SL moved to entry
+    atr_trail_active: bool = False      # True once ATR trail armed
+
+    # ── Session Context ─────────────────────────────────────
+    entry_cvd_direction: str = ""       # CVD confirmation direction
+    session_phase: str = ""             # "MORNING" or "AFTERNOON"
+    is_expiry: bool = False             # True on options expiry day
+    applied_time_stop: float = 0.0     # Computed session time stop (monotonic)
+
+    # ── Scale-In (Fabio Rule 4: 40/30/30) ──────────────────
+    scale_step: int = 1                 # 1=initial, 2=confirmation, 3=breakout
+    scale_confirm_price: Decimal = field(default_factory=lambda: Decimal("0"))
+    scale_breakout_price: Decimal = field(default_factory=lambda: Decimal("0"))
 
     @property
     def is_open(self) -> bool:
         return self.status == PositionStatus.OPEN
+
+    def validate_cushion_transition(self, new_state: CushionState) -> bool:
+        """Validate cushion state transitions: OPEN → CUSHIONED → TRAILING → CLOSED."""
+        valid_transitions: dict[CushionState, set[CushionState]] = {
+            CushionState.OPEN: {CushionState.CUSHIONED, CushionState.CLOSED},
+            CushionState.CUSHIONED: {CushionState.TRAILING, CushionState.CLOSED},
+            CushionState.TRAILING: {CushionState.CLOSED},
+            CushionState.CLOSED: set(),
+        }
+        return new_state in valid_transitions.get(self.cushion_state, set())
+
+    def advance_cushion_state(self, new_state: CushionState) -> None:
+        """Advance cushion state with validation. Logs warning on invalid transition."""
+        if not self.validate_cushion_transition(new_state):
+            import logging
+            logging.getLogger(__name__).warning(
+                "Invalid cushion transition %s → %s for position %s",
+                self.cushion_state.value, new_state.value, self.id
+            )
+        self.cushion_state = new_state
 
     def update_pnl(self, current_price) -> Decimal:
         """Recalculate unrealised PnL from *current_price*."""
@@ -151,6 +197,7 @@ class Position:
     @staticmethod
     def from_signal(signal: Signal, symbol: str, size: Decimal) -> "Position":
         """Factory: create a new open position from a signal."""
+        meta = signal.metadata or {}
         return Position(
             id=str(uuid.uuid4()),
             symbol=symbol,
@@ -164,4 +211,7 @@ class Position:
             entry_time=signal.timestamp,
             status=PositionStatus.OPEN,
             metadata=signal.metadata,
+            initial_stop=signal.stop_loss,
+            session_phase=str(meta.get("session_phase", "")),
+            is_expiry=bool(meta.get("is_expiry", False)),
         )

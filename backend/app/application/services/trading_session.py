@@ -384,15 +384,12 @@ class TradingSessionService:
                         "Trade persistence failed: %s", e, exc_info=True
                     )
 
-        # Sync portfolio-closed positions to TradeManager
+        # No sync needed — ExitEngine is stateless, Position entity holds lifecycle state
+        # Record losses for stop-outs (session-level risk tracking)
         if closed_positions:
             for pos in closed_positions:
                 if pos.close_reason and "Stop" in pos.close_reason:
-                    self._lifecycle_handler.trade_manager.record_loss(pos.symbol)
-            self._lifecycle_handler.sync_closed(closed_positions)
-            self._record_position_consistency(
-                session, symbol, context="post_portfolio_close"
-            )
+                    self._lifecycle_handler.exit_engine.record_loss(pos.symbol)
             if self._storage:
                 try:
                     stats = session.portfolio.get_stats(Source.LLM)
@@ -426,43 +423,6 @@ class TradingSessionService:
 
     def create_portfolio(self) -> Portfolio:
         return Portfolio.create_default()
-
-    def _record_position_consistency(
-        self, session: SessionState, symbol: str, *, context: str
-    ) -> None:
-        """Audit and reconcile portfolio/lifecycle consistency for one symbol."""
-        before = self._lifecycle_handler.get_position_consistency(
-            session.portfolio, symbol=symbol
-        )
-        for stale_id in before.stale_managed_ids:
-            self._event_logger.log_position_event(
-                position_id=stale_id,
-                symbol=symbol,
-                event_type="RECONCILED_STALE",
-                context=context,
-            )
-        if before.stale_managed_ids:
-            self._lifecycle_handler.reconcile_portfolio(
-                session.portfolio, symbol=symbol
-            )
-
-        after = self._lifecycle_handler.get_position_consistency(
-            session.portfolio, symbol=symbol
-        )
-        if after.unmanaged_open_ids:
-            log.error(
-                "Position state mismatch after %s for %s: unmanaged_open_ids=%s",
-                context,
-                symbol,
-                ",".join(after.unmanaged_open_ids),
-            )
-            for position_id in after.unmanaged_open_ids:
-                self._event_logger.log_position_event(
-                    position_id=position_id,
-                    symbol=symbol,
-                    event_type="STATE_MISMATCH_UNMANAGED_OPEN",
-                    context=context,
-                )
 
     # ----- event handlers -----
 
@@ -562,9 +522,8 @@ class TradingSessionService:
                             )
                         self._exit_coordinator.on_position_closed(event.symbol, None)
 
-                        self._lifecycle_handler.trade_manager.unregister_position(
-                            pos.id
-                        )
+                        # Clear partition state for the closed position
+                        self._lifecycle_handler.clear_partition_state(pos.id)
                         if self._storage:
                             try:
                                 self._storage.delete_open_position(pos.id)
@@ -1276,7 +1235,6 @@ class TradingSessionService:
     def _execute_signal(self, symbol: str, sig, session: SessionState) -> None:
         """Execute a trade signal — delegates to EntryCoordinator."""
         self._entry_coordinator.execute_signal(symbol, sig, session)
-        self._record_position_consistency(session, symbol, context="post_open")
 
     def _on_partial_exit(
         self,

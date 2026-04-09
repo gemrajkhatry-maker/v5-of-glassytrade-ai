@@ -165,27 +165,12 @@ class ExitCoordinator:
 
         session = self._state_manager.get_or_create_session(symbol)
 
-        # Record consistency
-        try:
-            from app.application.handlers.position_consistency import (
-                record_position_consistency,
-            )
-
-            record_position_consistency(
-                session.portfolio,
-                self._lifecycle_handler.trade_manager,
-                symbol,
-                context="post_close",
-            )
-        except Exception:
-            log.debug("Position consistency check failed", exc_info=True)
-
         # Learning
         session.learning.learn(pos)
         self._overseer_handler.reset_position_state()
 
-        # Metrics from TradeManager
-        mp_metrics = self._lifecycle_handler.trade_manager.get_position_metrics(pos.id)
+        # Metrics from Position entity (ExitEngine is stateless)
+        mp_metrics = self._lifecycle_handler.exit_engine.get_position_metrics(pos)
         time_in_trade = 0.0
         if pos.exit_time and pos.entry_time:
             try:

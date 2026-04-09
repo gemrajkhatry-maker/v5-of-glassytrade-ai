@@ -51,13 +51,9 @@ def build_state_snapshot(
 
     rm = risk_coordinator._get_risk_manager(session.symbol)
 
-    # Include managed positions from TradeManager for entry markers on chart
-    managed_positions = _get_managed_positions_dto(lifecycle_handler, session.symbol)
-
     return {
         "_symbol": session.symbol,
         "portfolio": portfolio_dto,
-        "managedPositions": managed_positions,
         "amt": session.last_amt,
         "prediction": session.last_prediction,
         "footprint": session.last_footprint,
@@ -191,59 +187,3 @@ def _camel_case_ai(data: dict | None) -> dict | None:
     }
 
 
-def _get_managed_positions_dto(
-    lifecycle_handler: "TradeLifecycleHandler | None",
-    symbol: str,
-) -> list[dict]:
-    """Get managed positions from TradeManager for chart entry markers.
-
-    Returns a list of position dicts suitable for frontend chart rendering.
-    Each dict includes: position_id, symbol, side, entry_price, stop_loss,
-    take_profit, entry_time, cushion_state.
-    """
-    if not lifecycle_handler:
-        return []
-
-    trade_manager = getattr(lifecycle_handler, "_trade_manager", None)
-    if not trade_manager:
-        return []
-
-    try:
-        # Get managed position IDs for this symbol
-        managed_ids = trade_manager.get_managed_position_ids(symbol=symbol)
-        positions = []
-
-        for pos_id in managed_ids:
-            # Get the managed position data for entry marker rendering
-            pos_state = trade_manager.get_position_state(pos_id, current_price=0.0)
-            if pos_state:
-                # Convert entry_time from epoch to ISO string if needed
-                from datetime import datetime, timezone
-                entry_time_epoch = trade_manager._positions.get(pos_id)
-                if entry_time_epoch:
-                    entry_time_epoch = entry_time_epoch.entry_time
-                entry_time_str = ""
-                if entry_time_epoch and entry_time_epoch > 0:
-                    try:
-                        entry_time_str = datetime.fromtimestamp(
-                            entry_time_epoch, tz=timezone.utc
-                        ).isoformat()
-                    except Exception:
-                        pass
-
-                positions.append({
-                    "id": pos_id,
-                    "symbol": symbol,
-                    "side": pos_state.get("side", "LONG"),
-                    "entryPrice": pos_state.get("entry_price", 0.0),
-                    "stopLoss": pos_state.get("stop_loss", 0.0),
-                    "takeProfit": pos_state.get("take_profit", 0.0),
-                    "entryTime": entry_time_str,
-                    "cushionState": pos_state.get("cushion_state", "OPEN"),
-                    "partialTaken": pos_state.get("partial_taken", False),
-                    "runnerActive": pos_state.get("runner_active", False),
-                })
-
-        return positions
-    except Exception:
-        return []

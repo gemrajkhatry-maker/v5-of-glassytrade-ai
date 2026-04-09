@@ -9,11 +9,15 @@ Verifies that:
 from __future__ import annotations
 
 import pytest
+from decimal import Decimal
+
 from app.domain.services.tick_utils import (
     round_to_tick,
     round_down_to_tick,
     round_up_to_tick,
 )
+from app.domain.trading.models.entities import Position
+from app.domain.trading.models.enums import Side, Source
 
 
 class TestTickUtilsRounding:
@@ -56,45 +60,62 @@ class TestTickUtilsRounding:
         assert round_up_to_tick(100.0, 0) == 100.0
 
 
-class TestTradeManagerTickSize:
-    """Test TradeManager uses tick_size in adjust_stop_loss."""
+class TestExitEngineTickSize:
+    """Test ExitEngine uses tick_size in adjust_stop_loss."""
 
     def test_adjust_stop_loss_rounds_to_tick(self):
         """adjust_stop_loss should round new SL to tick boundary."""
-        from app.domain.fabio_ai.services.trade_manager import (
-            TradeManager,
+        from app.domain.fabio_ai.services.exit_engine import (
+            ExitEngine,
             TradeManagerConfig,
         )
 
         config = TradeManagerConfig(tick_size=1.0)
-        mgr = TradeManager(config=config)
-        mgr.register_position("t1", "CRUDEOIL", "LONG", 6000.0, 5990.0, 6100.0)
+        engine = ExitEngine(config=config)
+
+        # Create a Position entity
+        pos = Position(
+            id="t1",
+            symbol="CRUDEOIL",
+            side=Side.LONG,
+            source=Source.AMT,
+            entry_price=Decimal("6000.0"),
+            size=Decimal("100"),
+            stop_loss=Decimal("5990.0"),
+            take_profit=Decimal("6100.0"),
+            initial_stop=Decimal("5990.0"),
+        )
 
         # Try to set SL to 6003.7 — should round to 6004.0
-        result = mgr.adjust_stop_loss("t1", 6003.7)
+        result = engine.adjust_stop_loss(pos, 6003.7)
         assert result is True
-
-        mp = mgr._positions.get("t1")
-        assert mp is not None
-        assert mp.stop_loss == pytest.approx(6004.0, abs=1e-9)
+        assert float(pos.stop_loss) == pytest.approx(6004.0, abs=1e-9)
 
     def test_adjust_stop_loss_nse_tick(self):
         """NSE tick size 0.05 — SL should round to nearest 0.05."""
-        from app.domain.fabio_ai.services.trade_manager import (
-            TradeManager,
+        from app.domain.fabio_ai.services.exit_engine import (
+            ExitEngine,
             TradeManagerConfig,
         )
 
         config = TradeManagerConfig(tick_size=0.05)
-        mgr = TradeManager(config=config)
-        mgr.register_position("t2", "NIFTY", "LONG", 22700.0, 22650.0, 22900.0)
+        engine = ExitEngine(config=config)
 
-        result = mgr.adjust_stop_loss("t2", 22750.07)
+        pos = Position(
+            id="t2",
+            symbol="NIFTY",
+            side=Side.LONG,
+            source=Source.AMT,
+            entry_price=Decimal("22700.0"),
+            size=Decimal("75"),
+            stop_loss=Decimal("22650.0"),
+            take_profit=Decimal("22900.0"),
+            initial_stop=Decimal("22650.0"),
+        )
+
+        result = engine.adjust_stop_loss(pos, 22750.07)
         assert result is True
-
-        mp = mgr._positions.get("t2")
-        assert mp is not None
-        assert mp.stop_loss == pytest.approx(22750.05, abs=1e-9)
+        assert float(pos.stop_loss) == pytest.approx(22750.05, abs=1e-9)
 
 
 class TestPartitionBreakeven:

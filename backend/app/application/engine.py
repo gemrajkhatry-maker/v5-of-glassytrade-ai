@@ -491,66 +491,18 @@ class TradingEngine:
                     session = self._session_service.get_or_create_session(symbol)
                     position = session.portfolio.recover_position(pos_data)
                     if position:
-                        # Register with TradeManager so overseer and lifecycle can manage it
-                        from app.domain.trading.models.enums import Side
-                        from app.domain.trading.models.entities import SignalType
-
-                        side_str = (
-                            "LONG"
-                            if str(pos_data.get("side", "")).upper() == "LONG"
-                            else "SHORT"
-                        )
-                        sig_type = (
-                            SignalType.BUY if side_str == "LONG" else SignalType.SELL
-                        )
-
-                        # Build a minimal signal for registration
-                        from app.domain.trading.models.entities import (
-                            Signal as _Sig,
-                            Source as _Src,
-                        )
-                        from decimal import Decimal
-
-                        _ep = Decimal(str(pos_data.get("entry_price", 0)))
-                        _sl = Decimal(str(pos_data.get("stop_loss", 0)))
-                        _tp = Decimal(str(pos_data.get("take_profit", 0)))
-
-                        from app.domain.trading.models.enums import SetupType
-
-                        recovered_signal = _Sig(
-                            type=sig_type,
-                            price=_ep,
-                            reason="recovered_from_db",
-                            source=_Src.LLM,
-                            stop_loss=_sl,
-                            take_profit=_tp,
-                            timestamp=pos_data.get("opened_at", ""),
-                            setup=SetupType.PREDICTION_ENTRY,
-                        )
-
-                        self._session_service._lifecycle_handler.register_position(
-                            symbol, position, recovered_signal
-                        )
+                        # Initialize partition state for exit management
+                        # Position already has lifecycle fields from Position.recover_position()
+                        self._session_service._lifecycle_handler.initialize_partition_state(position.id)
 
                         logger.info(
-                            "Engine: recovered position %s for %s (side=%s, entry=%.2f, SL=%.2f, TP=%.2f) — registered with TradeManager",
+                            "Engine: recovered position %s for %s (side=%s, entry=%.2f, SL=%.2f, TP=%.2f)",
                             pos_data.get("id", "?"),
                             symbol,
                             pos_data.get("side", "?"),
                             pos_data.get("entry_price", 0),
                             pos_data.get("stop_loss", 0),
                             pos_data.get("take_profit", 0),
-                        )
-                        # Audit log: show consistency after registration
-                        portfolio = session.portfolio
-                        open_ids = portfolio.open_position_ids()
-                        consistency = self._session_service._lifecycle_handler.get_position_consistency(portfolio, symbol=symbol)
-                        logger.info(
-                            "Engine: post-registration consistency for %s — portfolio_ids=%s, managed_ids=%s, unmanaged=%s",
-                            symbol,
-                            ",".join(sorted(open_ids)) if open_ids else "(none)",
-                            ",".join(consistency.managed_position_ids) if consistency.managed_position_ids else "(none)",
-                            ",".join(consistency.unmanaged_open_ids) if consistency.unmanaged_open_ids else "(none)",
                         )
                         recovered += 1
                 except Exception as e:

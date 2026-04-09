@@ -25,7 +25,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from app.config import settings
-from app.domain.fabio_ai.services.trade_manager import TradeManager, ExitReason
+from app.domain.fabio_ai.services.exit_engine import ExitEngine, ExitReason
 from app.domain.fabio_ai.services.prompt_builder import (
     OVERSEER_INSTRUCTION,
     OverseerAction,
@@ -60,7 +60,7 @@ class LLMOverseerHandler:
     def __init__(
         self,
         gen_ai_service: GenerativeAIService,
-        trade_manager: TradeManager,
+        trade_manager: ExitEngine,
         storage: StoragePort | None = None,
         probability_engine: ProbabilityInferencePort | None = None,
         session_risk_manager=None,
@@ -455,13 +455,14 @@ class LLMOverseerHandler:
                 if p.status == "OPEN" and p.id == position_id
             ]
             if open_positions:
+                pos = open_positions[0]
                 realized = session.portfolio.partial_close_position(
-                    open_positions[0].id, 0.50, current_price,
+                    pos.id, 0.50, current_price,
                     ExitReason.OVERSEER_PARTIAL)
                 logger.info("Overseer: partial exit for %s, realized=%.2f",
                             position_id, realized)
-                self._trade_manager.adjust_stop_loss(
-                    position_id, pos_state["entry_price"])
+                # Move SL to breakeven on the Position entity
+                self._trade_manager.adjust_stop_loss(pos, pos_state["entry_price"])
 
     def _exec_full_exit(self, position_id, current_price, session) -> None:
         """Execute FULL_EXIT: close entire position."""
@@ -471,9 +472,11 @@ class LLMOverseerHandler:
                 if p.status == "OPEN" and p.id == position_id
             ]
             if open_positions:
+                pos = open_positions[0]
                 session.portfolio.close_position(
                     position_id, current_price, ExitReason.OVERSEER_EXIT)
-                self._trade_manager.unregister_position(position_id)
+                # Record exit time for cooldown tracking (ExitEngine is stateless)
+                self._trade_manager.record_exit_time(pos.symbol)
                 logger.info("Overseer: full exit for %s at %.2f",
                             position_id, current_price)
         self.reset_position_state()

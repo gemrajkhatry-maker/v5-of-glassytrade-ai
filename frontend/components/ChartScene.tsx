@@ -12,7 +12,7 @@ import {
   SeriesMarker,
   Logical
 } from 'lightweight-charts';
-import { OHLCData, ChartConfig, TradeSignal, TradePosition, AIAnalysis, AMTAnalysis, ChartMode, FootprintCandle, AggressivePrint, RangeBarData, ManagedPosition } from '../types';
+import { OHLCData, ChartConfig, TradeSignal, TradePosition, AIAnalysis, AMTAnalysis, ChartMode, FootprintCandle, AggressivePrint, RangeBarData } from '../types';
 import { Brain, Cpu, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 
 interface ChartSceneProps {
@@ -21,7 +21,6 @@ interface ChartSceneProps {
   config: ChartConfig;
   activeSignal?: TradeSignal | null;
   positions: TradePosition[];
-  managedPositions?: ManagedPosition[];
   closedTrades?: TradePosition[];
   aiAnalysis?: AIAnalysis | null;
   amtAnalysis?: AMTAnalysis | null;
@@ -55,7 +54,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   config,
   activeSignal,
   positions,
-  managedPositions = [],
   closedTrades = [],
   aiAnalysis,
   amtAnalysis,
@@ -1298,25 +1296,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       // Entry markers from open positions
       const allPositions = positions.length > 0 ? positions : [];
 
-      // Merge managed positions as entry markers (from TradeManager)
-      // These show even when portfolio.positions might be empty
-      const managedEntries = (managedPositions || [])
-        .filter(mp => mp.cushionState !== 'CLOSED')
-        .filter(mp => !allPositions.some(p => p.entryPrice === mp.entryPrice && p.symbol === mp.symbol));
-
-      managedEntries.forEach(mp => {
-        if (mp.entryTime) {
-          markers.push({
-            time: (new Date(mp.entryTime).getTime() / 1000 + 19800) as UTCTimestamp,
-            position: mp.side === 'LONG' ? 'belowBar' : 'aboveBar',
-            color: mp.side === 'LONG' ? '#10b981' : '#ef4444',
-            shape: mp.side === 'LONG' ? 'arrowUp' : 'arrowDown',
-            text: `${mp.side} @${mp.entryPrice.toFixed(2)} [${mp.cushionState}]`,
-            size: 2,
-          });
-        }
-      });
-
       allPositions.forEach(pos => {
         markers.push({
           time: (new Date(pos.entryTime).getTime() / 1000 + 19800) as UTCTimestamp,
@@ -1415,7 +1394,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       activePriceLinesRef.current.set(pos.id, lines);
     });
 
-  }, [positions, managedPositions, closedTrades, activeSignal, stableAmtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
+  }, [positions, closedTrades, activeSignal, stableAmtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
 
   return (
     <div className="w-full h-full relative bg-[#0f172a] overflow-hidden" style={{ display: isHidden ? 'none' : 'block' }}>
@@ -1524,7 +1503,6 @@ function chartSceneAreEqual(prev: ChartSceneProps, next: ChartSceneProps): boole
     if (prev.config !== next.config) return false;
     if (prev.data.length !== next.data.length) return false;
     if (prev.positions.length !== next.positions.length) return false;
-    if ((prev.managedPositions?.length ?? 0) !== (next.managedPositions?.length ?? 0)) return false;
     if ((prev.closedTrades?.length ?? 0) !== (next.closedTrades?.length ?? 0)) return false;
     if (prev.cumulativeDeltas.length !== next.cumulativeDeltas.length) return false;
     if (prev.amtAnalysis !== next.amtAnalysis) return false;

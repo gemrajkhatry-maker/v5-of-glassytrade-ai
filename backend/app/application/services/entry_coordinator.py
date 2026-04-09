@@ -4,7 +4,7 @@ Extracted from TradingSessionService to separate entry concerns:
 - Signal validation (thesis, risk, duplicate check)
 - Option selection enrichment
 - Broker execution
-- Position registration with TradeManager
+- Initialize partition state for exit management
 - PositionOpened event publishing
 - Persistence
 
@@ -234,7 +234,9 @@ class EntryCoordinator:
                         getattr(session, "_agent_decision", None), "feature_drivers", ()
                     ),
                 )
-            self._lifecycle_handler.register_position(symbol, position, sig)
+            # Initialize partition exit state for P1/P2/P3 management
+            # Position already has lifecycle fields set by Position.from_signal()
+            self._lifecycle_handler.initialize_partition_state(position.id)
             self._event_logger.log_position_event(
                 position_id=position.id,
                 symbol=symbol,
