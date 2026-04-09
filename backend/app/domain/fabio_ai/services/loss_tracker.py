@@ -7,7 +7,7 @@ Key features:
 - Daily loss counting (global and per-symbol)
 - Consecutive loss tracking for circuit breakers
 - ATR-based re-entry distance checks
-- Persistence via callback function
+- Persistence via KeyValueStoragePort (DIP-compliant)
 - Automatic daily reset at IST midnight
 """
 
@@ -18,11 +18,34 @@ import logging
 import threading
 import time
 from datetime import datetime, timedelta
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
+from app.domain.ports.storage import KeyValueStoragePort
 from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
+
+
+def _make_storage_adapter(persist_fn: Callable[[str, str | None], str | None]) -> KeyValueStoragePort:
+    """Create a KeyValueStoragePort adapter from legacy persist_fn callback.
+
+    The legacy persist_fn is dual-purpose:
+    - persist_fn(key, value) stores the value
+    - persist_fn(key, None) returns the stored value
+
+    This adapter provides the cleaner KeyValueStoragePort interface.
+    """
+    class _PersistFnAdapter:
+        def __init__(self, fn: Callable[[str, str | None], str | None]):
+            self._fn = fn
+
+        def persist(self, key: str, value: str | None) -> None:
+            self._fn(key, value)
+
+        def load(self, key: str) -> str | None:
+            return self._fn(key, None)
+
+    return _PersistFnAdapter(persist_fn)
 
 
 class LossTracker:
@@ -36,25 +59,43 @@ class LossTracker:
     - Session realized PnL (for cushion system)
 
     Thread-safe via RLock.
+
+    Dependency Injection:
+        Prefer `storage` parameter (KeyValueStoragePort) for DIP compliance.
+        The `persist_fn` parameter is deprecated but supported for backward compatibility.
     """
 
     MAX_DAILY_LOSSES = 3  # Per Fabio's AMT strategy
 
     def __init__(
         self,
-        persist_fn: Callable[[str, str | None], None] | None = None,
+        storage: KeyValueStoragePort | None = None,
+        persist_fn: Callable[[str, str | None], str | None] | None = None,
         max_daily_losses: int = 3,
     ):
         """Initialize loss tracker.
 
         Args:
-            persist_fn: Optional callback for persistence. Called as:
-                        persist_fn(key: str, value: str | None)
-                        Pass None to delete, pass value to store.
+            storage: KeyValueStoragePort for persistence (preferred, DIP-compliant).
+            persist_fn: Legacy callback for persistence (deprecated). Called as:
+                        persist_fn(key: str, value: str | None) -> str | None
+                        Pass value to store, None to load. Returns stored value on load.
+                        Use `storage` parameter instead for type safety.
             max_daily_losses: Max losses per symbol before blocking.
         """
         self._lock = threading.RLock()
-        self._persist_fn = persist_fn
+
+        # Handle backward compatibility: if persist_fn is provided without storage,
+        # create an adapter
+        if storage is not None:
+            self._storage = storage
+        elif persist_fn is not None:
+            self._storage = _make_storage_adapter(persist_fn)
+            # Keep reference for backward compat with tests that check _persist_fn
+            self._persist_fn = persist_fn
+        else:
+            self._storage = None
+
         self._max_daily_losses = max_daily_losses
 
         # Daily loss tracking
@@ -88,10 +129,10 @@ class LossTracker:
 
     def _load_daily_losses(self) -> None:
         """Load daily losses from persistence."""
-        if not self._persist_fn:
+        if not self._storage:
             return
         try:
-            raw = self._persist_fn("daily_losses_v2", None)
+            raw = self._storage.load("daily_losses_v2")
             if raw:
                 data = json.loads(raw)
                 today = datetime.now(IST).strftime("%Y-%m-%d")
@@ -108,7 +149,7 @@ class LossTracker:
 
     def _save_daily_losses(self) -> None:
         """Persist daily losses to storage."""
-        if not self._persist_fn:
+        if not self._storage:
             return
         try:
             today = datetime.now(IST).strftime("%Y-%m-%d")
@@ -117,7 +158,7 @@ class LossTracker:
                 "global_count": self._global_daily_losses,
                 "symbol_counts": self._symbol_daily_losses,
             }
-            self._persist_fn("daily_losses_v2", json.dumps(payload))
+            self._storage.persist("daily_losses_v2", json.dumps(payload))
         except Exception:
             logger.debug("Failed to persist daily losses", exc_info=True)
 

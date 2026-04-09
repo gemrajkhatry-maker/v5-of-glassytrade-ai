@@ -4,6 +4,20 @@ All constants are defined in YAML (config/base.yaml → globals:).
 This module loads them at import time so existing imports continue to work.
 
 To change any constant: edit config/base.yaml, not this file.
+
+TODO(DIP): Dependency Inversion Violation
+----------------------------------------
+This module directly loads from config/base.yaml via yaml.safe_load(),
+violating dependency inversion. The domain layer should receive configuration
+through injected ports (ConfigPort/GlobalsPort), not load infrastructure files.
+
+Proper fix would require:
+1. Application layer to load YAML and create a GlobalsPort implementation
+2. Domain services to receive GlobalsPort via constructor injection
+3. This file to become a thin wrapper that receives injected config
+
+This refactoring is deferred due to deep coupling across the codebase.
+The ports infrastructure is now in place: app.domain.ports.config_port
 """
 
 import os

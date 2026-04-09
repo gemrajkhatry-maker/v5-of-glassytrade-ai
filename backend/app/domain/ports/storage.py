@@ -3,7 +3,50 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
+
+
+# ---------------------------------------------------------------------------
+# KeyValue Storage Port (Protocol for simple persistence)
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class KeyValueStoragePort(Protocol):
+    """Simple key-value storage port for domain state persistence.
+
+    This Protocol replaces the untyped persist_fn callback pattern.
+    Domain services use this interface; application layer provides
+    concrete implementation (e.g., database-backed storage).
+
+    Example usage in LossTracker:
+        def __init__(self, storage: KeyValueStoragePort | None = None):
+            self._storage = storage
+
+        def save(self):
+            if self._storage:
+                self._storage.persist("daily_losses", json.dumps(data))
+    """
+
+    def persist(self, key: str, value: str | None) -> None:
+        """Persist a key-value pair.
+
+        Args:
+            key: Storage key (e.g., "daily_losses_v2").
+            value: JSON string to store, or None to delete.
+        """
+        ...
+
+    def load(self, key: str) -> str | None:
+        """Load a persisted value by key.
+
+        Args:
+            key: Storage key to retrieve.
+
+        Returns:
+            Stored JSON string, or None if not found.
+        """
+        ...
 
 
 # ---------------------------------------------------------------------------

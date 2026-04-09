@@ -88,14 +88,13 @@ from app.domain.services.signal_generator import (
 from app.domain.fabio_ai.services.opening_classifier import OpeningTypeClassifier
 from app.domain.fabio_ai.services.mtf_analyzer import MultiTimeframeAMTAnalyzer
 
-@runtime_checkable
-class SymbolConfigLike(Protocol):
-    """Domain protocol for symbol configuration — avoids importing config_models into domain."""
-    tick_size: float
-    lot_size: int
-    aggression_persistence_bars: int
-    min_aggression_score: float
-    pyramid_aggression_score: float
+# NOTE: SymbolConfigLike is now defined canonically in app.domain.ports.config_port
+# as SymbolConfigPort. The local definition is kept for backward compatibility.
+# New code should import from the ports module.
+from app.domain.ports.config_port import SymbolConfigPort
+
+# Backward compatibility alias
+SymbolConfigLike = SymbolConfigPort
 
 
 # ---------------------------------------------------------------------------

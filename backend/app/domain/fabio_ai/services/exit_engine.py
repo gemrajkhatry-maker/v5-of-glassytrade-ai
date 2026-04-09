@@ -27,8 +27,9 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
+from app.domain.ports.storage import KeyValueStoragePort
 from app.domain.trading.models.enums import CushionState, MarketStateCodec
 from app.domain.trading.models.entities import Position
 from app.domain.trading.models.enums import Side
@@ -141,12 +142,19 @@ class ExitEngine:
 
     All position-level state is stored directly on Position entities.
     Callers pass Position objects to check_position() and other methods.
+
+    Dependency Injection:
+        Prefer `storage` parameter (KeyValueStoragePort) for DIP compliance.
+        The `persist_fn` parameter is deprecated but supported for backward compatibility.
     """
 
     MAX_DAILY_LOSSES = 3
 
     def __init__(
-        self, config: TradeManagerConfig | None = None, persist_fn=None
+        self,
+        config: TradeManagerConfig | None = None,
+        storage: KeyValueStoragePort | None = None,
+        persist_fn: Callable[[str, str | None], str | None] | None = None,
     ) -> None:
         self._config = config or TradeManagerConfig()
         # Public alias used by tests and callers
@@ -162,6 +170,7 @@ class ExitEngine:
         )
         self._scale_manager = ScaleManager()
         self._loss_tracker = LossTracker(
+            storage=storage,
             persist_fn=persist_fn,
             max_daily_losses=self.MAX_DAILY_LOSSES,
         )
