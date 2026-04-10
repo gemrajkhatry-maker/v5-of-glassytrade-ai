@@ -95,8 +95,19 @@ class AMTHandler:
         prior_val: float = 0.0,
         cushion_tier: str = "Conservative",
         session_pnl: float = 0.0,
+        option_tick: OHLC | None = None,
     ) -> tuple[AMTResult, dict, dict]:
         """Run AMT analysis and footprint generation.
+
+        Args:
+            data: Candle data for AMT analysis (may be underlying futures for options)
+            order_book: Current order book snapshot
+            prior_poc: Previous session POC
+            prior_vah: Previous session VAH
+            prior_val: Previous session VAL
+            cushion_tier: Risk cushion tier
+            session_pnl: Session P&L
+            option_tick: The option contract tick (for per-symbol delta isolation)
 
         Returns:
             (amt_result, amt_dto, footprint_dto)
@@ -159,6 +170,7 @@ class AMTHandler:
             prior_poc=prior_poc, prior_vah=prior_vah, prior_val=prior_val,
             developing_profile=self._dev_profile,
             cushion_tier=cushion_tier, session_pnl=session_pnl,
+            option_tick=option_tick,
         )
 
         amt_dto = amt_result_to_dto(amt_result)

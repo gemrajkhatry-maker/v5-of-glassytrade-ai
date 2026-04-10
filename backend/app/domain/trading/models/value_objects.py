@@ -119,6 +119,7 @@ class AMTResult:
     profile: tuple[VolumeProfileLevel, ...] = ()
     aggressive_prints: tuple[AggressivePrint, ...] = ()
     profile_shape: str = ""
+    profile_type: str = "Session"  # "Session", "Combined", or "Leg"
     cvd_slope: float = 0.0
     cvd_divergence: str = ""  # "BULLISH_DIV", "BEARISH_DIV", or ""
     session_vwap: float = 0.0  # Rolling session VWAP
@@ -126,7 +127,7 @@ class AMTResult:
     vwap_lower_1: float = 0.0  # VWAP - 1σ
     vwap_upper_2: float = 0.0  # VWAP + 2σ
     vwap_lower_2: float = 0.0  # VWAP - 2σ
-    vwap_deviation_sigmas: float = 0.0  # FIX BUG #1: (live_price - vwap) / vwap_std
+    vwap_deviation_sigmas: float | None = None  # None when vwap_std=0 (insufficient data); frontend shows "N/A"
     balance_ratio: float = 0.0  # fraction of recent candles inside VA
     # Displacement leg profile
     leg_profile: tuple[VolumeProfileLevel, ...] = ()
@@ -184,6 +185,9 @@ class AMTResult:
     # NPOC (Naked POC) — secondary targets for P3 trailing
     npoc_above: float = 0.0  # Nearest unfilled NPOC above current price
     npoc_below: float = 0.0  # Nearest unfilled NPOC below current price
+    # Drive state (FR-05) — populated by DriveTracker in AMTAnalyzer
+    drive_number: int = 0          # 0 = no level tested yet, 1 = D1, 2 = D2, 3+ = exhausted
+    drive_entry_valid: bool = False  # True only for D2 with D1 rejected
     # Phase 5: Multi-Timeframe (MTF) Alignment
     mtf_alignment: str = ""  # "ALIGNED_BULLISH" / "ALIGNED_BEARISH" / "DIVERGENT" / ""
     opening_type: str = ""   # "OPEN_DRIVE" / "OPEN_TEST_REJECTION" / "OPEN_REJECTION_REVERSE" / "OPEN_AUCTION"
@@ -194,6 +198,8 @@ class AMTResult:
     hourly_vah: float = 0.0
     hourly_val: float = 0.0
     hourly_poc: float = 0.0
+    # Per-symbol delta (from option tick, not underlying) — ensures isolation across symbols
+    delta_normalized_option: float = 0.0  # Normalized delta from option tick (per-symbol isolation)
 
 
 # ---------------------------------------------------------------------------

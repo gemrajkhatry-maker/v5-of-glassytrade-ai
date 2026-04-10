@@ -220,12 +220,26 @@ class EngineLifecycle:
         Filters by current exchange — only recovers positions belonging to
         the active exchange (NSE or MCX) to prevent cross-exchange contamination.
 
+        If CLEAR_POSITIONS_ON_RESTART is True (default), all stale positions
+        are cleared before recovery to ensure a fresh start.
+
         Args:
             initialize_symbol_state: Callback to initialize per-symbol state
         """
         storage = self._session_service._storage
         if not storage:
             logger.info("Engine: no storage available — skipping position recovery")
+            return
+
+        # Clear stale positions on restart (safety for options — prevents overnight holds)
+        if settings.CLEAR_POSITIONS_ON_RESTART:
+            cleared_count = storage.clear_all_open_positions()
+            if cleared_count > 0:
+                logger.info(
+                    "STARTUP: Cleared %d stale positions (CLEAR_POSITIONS_ON_RESTART=True)",
+                    cleared_count,
+                )
+            # No positions to recover after clearing
             return
 
         try:

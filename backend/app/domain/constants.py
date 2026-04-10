@@ -47,12 +47,19 @@ _G = _load_globals()
 # ============================================================================
 # Volume Profile (FR-02)
 # ============================================================================
-LVN_THRESHOLD = _G.get("lvn_threshold", 0.15)
-HVN_THRESHOLD = _G.get("hvn_threshold", 2.00)
+LVN_THRESHOLD = _G.get("lvn_threshold", 0.15)  # legacy — kept for compatibility
+HVN_THRESHOLD = _G.get("hvn_threshold", 2.00)   # legacy — kept for compatibility
 VALUE_AREA_PCT = _G.get("value_area_pct", 0.70)
 LVN_SMOOTHING = _G.get("lvn_smoothing", 3)
-LVN_MIN_PERSISTENCE_BARS = _G.get("lvn_min_persistence_bars", 3)
-LVN_REMOVAL_THRESHOLD = _G.get("lvn_removal_threshold", 0.30)
+LVN_MIN_PERSISTENCE_BARS = _G.get("lvn_min_persistence_bars", 1)   # was 2
+LVN_REMOVAL_THRESHOLD = _G.get("lvn_removal_threshold", 0.50)
+# Percentile-based detection thresholds (Bug #1 fix)
+LVN_PERCENTILE = _G.get("lvn_percentile", 20.0)   # bottom 20% = LVN candidate (was 15.0 — too strict)
+HVN_PERCENTILE = _G.get("hvn_percentile", 85.0)   # was 75.0 — top 15% = HVN candidate
+# Minimum price separation between distinct nodes — prevents dense clusters (Bug #2 fix)
+# Default = 3 tick steps for crude oil option profiles; callers should pass tick_size * 3 at runtime.
+LVN_MIN_SEPARATION = _G.get("lvn_min_separation", 3.0)   # cluster within 3 points (was 5.0 — over-clustering)
+HVN_MIN_SEPARATION = _G.get("hvn_min_separation", 5.0)   # was 3.0 — cluster within 5 points
 DELTA_BUCKET_SIZE_DEFAULT = _G.get("delta_bucket_size_default", 0.05)
 DELTA_PROFILE_BUCKETS = _G.get("delta_profile_buckets", 200)
 

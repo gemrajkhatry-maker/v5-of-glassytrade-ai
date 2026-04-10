@@ -145,7 +145,7 @@ def weighted_moments(prices: list[float], volumes: list[float]) -> tuple[float, 
     return m3 / s3, (m4 / s4) - 3.0, std_val
 
 
-def count_peaks(volumes: list[float], min_prominence: float = 0.5) -> int:
+def count_peaks(volumes: list[float], min_prominence: float = 0.25) -> int:
     """Count significant local maxima in volume histogram."""
     if len(volumes) < 5:
         return 1

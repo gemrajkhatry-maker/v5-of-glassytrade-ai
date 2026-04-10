@@ -9,13 +9,21 @@ Outputs: list[LVNLevel], list[HVNLevel]
 LVN strength score formula:
     LVN_strength = 1 - H_smooth[i] / mean(H_smooth)
     Range: 0 (weakest — barely qualifies) → 1 (perfect — zero volume in bucket)
+
+Detection strategy (percentile-based):
+    LVN candidates = local minima whose smoothed volume falls in the bottom
+    ``lvn_percentile`` (default 25th) of the distribution.
+    HVN candidates = local maxima whose smoothed volume falls in the top
+    ``hvn_percentile`` (default 75th, i.e. 100 - 25) of the distribution.
+    After detection, nearby nodes within ``min_separation`` price distance are
+    clustered and only the strongest node per cluster is kept.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, TypeVar
 
 from app.domain.trading.models.value_objects import VolumeProfileLevel
 
@@ -53,20 +61,103 @@ def _smooth_array(data: list[float], window: int) -> list[float]:
     return result
 
 
+def _percentile(values: list[float], pct: float) -> float:
+    """Return the ``pct``-th percentile (0–100) of *values* using linear interpolation."""
+    if not values:
+        return 0.0
+    sorted_vals = sorted(values)
+    n = len(sorted_vals)
+    if n == 1:
+        return sorted_vals[0]
+    rank = pct / 100.0 * (n - 1)
+    lo = int(rank)
+    hi = lo + 1
+    if hi >= n:
+        return sorted_vals[-1]
+    frac = rank - lo
+    return sorted_vals[lo] + frac * (sorted_vals[hi] - sorted_vals[lo])
+
+
+_NodeT = TypeVar("_NodeT", LVNLevel, HVNLevel)
+
+
+def _cluster_nodes(
+    nodes: list,
+    min_separation: float,
+    *,
+    keep_highest: bool,
+) -> list:
+    """Merge nodes that are closer than ``min_separation`` in price.
+
+    Within each cluster keep only:
+    - the node with the *highest* volume strength (for HVNs, keep_highest=True)
+    - the node with the *lowest* volume strength  (for LVNs, keep_highest=False)
+
+    Args:
+        nodes: Sorted (by price) list of LVNLevel or HVNLevel.
+        min_separation: Minimum price gap required between distinct nodes.
+        keep_highest: True → keep max-strength node per cluster (HVN).
+                      False → keep min-strength node per cluster (LVN —
+                      lowest strength == lowest volume == best LVN).
+
+    Returns:
+        Filtered list with at most one representative per cluster.
+    """
+    if not nodes:
+        return []
+
+    sorted_nodes = sorted(nodes, key=lambda n: n.price)
+    clusters: list[list] = []
+    current_cluster: list = [sorted_nodes[0]]
+
+    for node in sorted_nodes[1:]:
+        if node.price - current_cluster[-1].price < min_separation:
+            current_cluster.append(node)
+        else:
+            clusters.append(current_cluster)
+            current_cluster = [node]
+    clusters.append(current_cluster)
+
+    result = []
+    for cluster in clusters:
+        if keep_highest:
+            result.append(max(cluster, key=lambda n: n.strength))
+        else:
+            result.append(min(cluster, key=lambda n: n.strength))
+
+    return sorted(result, key=lambda n: n.price)
+
+
 def find_lvns(
     profile: list[VolumeProfileLevel],
-    lvn_threshold: float = 0.15,
+    lvn_threshold: float = 0.15,  # kept for API compatibility (unused)
     smoothing_window: int = 3,
     smooth_fn: Callable | None = None,
+    *,
+    lvn_percentile: float = 25.0,
+    min_separation: float = 0.0,
 ) -> list[LVNLevel]:
-    """Detect Low Volume Nodes using smoothing + mean-threshold method.
+    """Detect Low Volume Nodes using percentile-based thresholds.
 
     Candidate = bucket i where ALL:
-      H_smooth[i] < lvn_threshold × mean(H_smooth)
+      H_smooth[i] <= percentile(lvn_percentile) of the smoothed distribution
       H_smooth[i] < H_smooth[i-1]    (local minimum — lower than neighbor above)
       H_smooth[i] < H_smooth[i+1]    (local minimum — lower than neighbor below)
 
-    Returns LVNLevel with strength score computed per spec.
+    After finding raw candidates, nearby nodes within ``min_separation`` price
+    distance are clustered; only the weakest-volume node per cluster is kept.
+
+    Args:
+        profile: Volume profile buckets sorted by price.
+        lvn_threshold: Legacy parameter — no longer used for filtering.
+        smoothing_window: Width of centered SMA smoothing kernel.
+        smooth_fn: Optional custom smoothing callable (raw, window) -> smoothed.
+        lvn_percentile: Bottom N-th percentile cutoff (default 25).
+        min_separation: Minimum price gap between distinct LVN nodes.  When
+            0.0 (default) no clustering is applied.
+
+    Returns:
+        List of LVNLevel sorted by price.
     """
     if len(profile) < 3:
         return []
@@ -81,11 +172,11 @@ def find_lvns(
     if mean_vol <= 0:
         return []
 
-    threshold = mean_vol * lvn_threshold
+    pct_threshold = _percentile(sm, lvn_percentile)
     lvns: list[LVNLevel] = []
 
     for i in range(1, len(sm) - 1):
-        if sm[i] < sm[i - 1] and sm[i] < sm[i + 1] and sm[i] <= threshold:
+        if sm[i] < sm[i - 1] and sm[i] < sm[i + 1] and sm[i] <= pct_threshold:
             strength = 1.0 - (sm[i] / mean_vol)
             strength = max(0.0, min(1.0, strength))
             lvns.append(
@@ -96,19 +187,40 @@ def find_lvns(
                 )
             )
 
+    if min_separation > 0 and len(lvns) > 1:
+        lvns = _cluster_nodes(lvns, min_separation, keep_highest=False)
+
     return lvns
 
 
 def find_hvns(
     profile: list[VolumeProfileLevel],
-    hvn_threshold: float = 2.00,
+    hvn_threshold: float = 2.00,  # kept for API compatibility (unused)
     smoothing_window: int = 3,
     smooth_fn: Callable | None = None,
+    *,
+    hvn_percentile: float = 75.0,
+    min_separation: float = 0.0,
 ) -> list[HVNLevel]:
-    """Detect High Volume Nodes using smoothing + mean-threshold method.
+    """Detect High Volume Nodes using percentile-based thresholds.
 
-    HVN = bucket i where H_smooth[i] > hvn_threshold × mean(H_smooth)
-    HVN strength = H_smooth[i] / mean(H_smooth) (normalized)
+    HVN = local maximum whose smoothed volume >= percentile(hvn_percentile).
+    HVN strength = H_smooth[i] / mean(H_smooth) (normalized).
+
+    After finding raw candidates, nearby nodes within ``min_separation`` price
+    distance are clustered; only the strongest-volume node per cluster is kept.
+
+    Args:
+        profile: Volume profile buckets sorted by price.
+        hvn_threshold: Legacy parameter — no longer used for filtering.
+        smoothing_window: Width of centered SMA smoothing kernel.
+        smooth_fn: Optional custom smoothing callable (raw, window) -> smoothed.
+        hvn_percentile: Top N-th percentile cutoff (default 75, i.e. top 25%).
+        min_separation: Minimum price gap between distinct HVN nodes.  When
+            0.0 (default) no clustering is applied.
+
+    Returns:
+        List of HVNLevel sorted by price.
     """
     if len(profile) < 3:
         return []
@@ -123,13 +235,14 @@ def find_hvns(
     if mean_vol <= 0:
         return []
 
+    pct_threshold = _percentile(sm, hvn_percentile)
     hvns: list[HVNLevel] = []
 
     for i in range(1, len(sm) - 1):
         if (
             sm[i] > sm[i - 1]
             and sm[i] > sm[i + 1]
-            and sm[i] >= hvn_threshold * mean_vol
+            and sm[i] >= pct_threshold
         ):
             strength = sm[i] / mean_vol
             hvns.append(
@@ -139,6 +252,9 @@ def find_hvns(
                     bucket_index=i,
                 )
             )
+
+    if min_separation > 0 and len(hvns) > 1:
+        hvns = _cluster_nodes(hvns, min_separation, keep_highest=True)
 
     return hvns
 
@@ -158,7 +274,7 @@ class LVNPersistenceTracker:
         self,
         min_bars: int = 3,
         lvn_threshold: float = 0.15,
-        removal_threshold: float = 0.30,
+        removal_threshold: float = 0.50,
         smoothing_window: int = 3,
         smooth_fn: Callable | None = None,
     ) -> None:

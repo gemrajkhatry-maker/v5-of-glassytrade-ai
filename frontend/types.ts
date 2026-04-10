@@ -267,7 +267,8 @@ export interface AMTAnalysis {
   vwapLower1?: number;
   vwapUpper2?: number;
   vwapLower2?: number;
-  vwapDeviationSigmas?: number;
+  vwapDeviationSigmas?: number | null;
+  deltaNormalizedOption?: number;
   // Market structure (5-state classifier)
   marketStructure?: string;
   structureConfidence?: number;

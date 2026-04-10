@@ -71,8 +71,21 @@ class AAAPreconditionEngine:
         delta: float,
         ofi: float,
         direction: str,
+        leg_poc: float = 0.0,
     ) -> PreconditionResult:
-        """Evaluate all 5 preconditions. First failure stops evaluation."""
+        """Evaluate all 5 preconditions. First failure stops evaluation.
+
+        When session_state is PROBING or IMBALANCED and a leg_poc is provided,
+        leg_poc is used in place of the session poc for context-aware proximity
+        checks. In BALANCED state, the session poc is always used.
+        """
+        # MR Location context: use leg POC when probing/imbalanced with active leg
+        _is_probing_or_imbalanced = session_state in ("PROBING", "IMBALANCED")
+        effective_poc = (
+            leg_poc
+            if (_is_probing_or_imbalanced and leg_poc > 0)
+            else poc
+        )
         failed: list[Precondition] = []
         passed: list[Precondition] = []
 
@@ -122,24 +135,36 @@ class AAAPreconditionEngine:
             )
         passed.append(Precondition.PRE3_SHAPE)
 
-        # PRE-4: Price at VAL (longs) or VAH (shorts) ± buffer
+        # PRE-4: Price at structural level ± buffer
+        # In BALANCED state: check price vs VAL (longs) or VAH (shorts)
+        # In PROBING/IMBALANCED state with leg POC: also accept proximity to leg POC
+        # Rationale: when a displacement leg is active, the leg POC is the relevant
+        # reference — price testing the leg POC is the correct entry context.
+        _near_poc = (
+            effective_poc > 0
+            and abs(price - effective_poc) / effective_poc <= self._buffer_pct
+        )
         if direction == "LONG":
-            if val > 0 and abs(price - val) / val > self._buffer_pct:
+            _near_val = val > 0 and abs(price - val) / val <= self._buffer_pct
+            if not _near_val and not _near_poc:
                 failed.append(Precondition.PRE4_PRICE)
+                _poc_label = f" or POC={effective_poc:.2f}" if effective_poc > 0 else ""
                 return PreconditionResult(
                     all_passed=False,
                     failed=failed,
                     passed=passed,
-                    reason=f"PRE-4: price={price:.2f} not within {self._buffer_pct:.1%} of VAL={val:.2f}",
+                    reason=f"PRE-4: price={price:.2f} not within {self._buffer_pct:.1%} of VAL={val:.2f}{_poc_label}",
                 )
         else:  # SHORT
-            if vah > 0 and abs(price - vah) / vah > self._buffer_pct:
+            _near_vah = vah > 0 and abs(price - vah) / vah <= self._buffer_pct
+            if not _near_vah and not _near_poc:
                 failed.append(Precondition.PRE4_PRICE)
+                _poc_label = f" or POC={effective_poc:.2f}" if effective_poc > 0 else ""
                 return PreconditionResult(
                     all_passed=False,
                     failed=failed,
                     passed=passed,
-                    reason=f"PRE-4: price={price:.2f} not within {self._buffer_pct:.1%} of VAH={vah:.2f}",
+                    reason=f"PRE-4: price={price:.2f} not within {self._buffer_pct:.1%} of VAH={vah:.2f}{_poc_label}",
                 )
         passed.append(Precondition.PRE4_PRICE)
 

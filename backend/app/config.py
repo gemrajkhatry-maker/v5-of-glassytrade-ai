@@ -70,6 +70,12 @@ class Settings(SharedSettings):
     REALISTIC_COST_MODEL: bool = Field(default=False)
     SCALP_ENGINE_ENABLED: bool = Field(default=False)
 
+    # Position safety — clear stale positions on restart to prevent overnight holds
+    CLEAR_POSITIONS_ON_RESTART: bool = Field(
+        default=True,
+        description="Clear all open positions from DB on startup. Default True for options safety."
+    )
+
     # Trading settings
     PORT: int = Field(default=9090)
     STREAM_INTERVAL: str = Field(default="5m")

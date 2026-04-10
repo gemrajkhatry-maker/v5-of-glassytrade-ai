@@ -176,11 +176,14 @@ def find_lvns(
     smoothed: list[float] | None = None,
 ) -> list[float]:
     """Thin wrapper — extracts prices from LVNLevel objects."""
+    from app.domain.constants import LVN_PERCENTILE, LVN_MIN_SEPARATION
     cfg = cfg or AMTConfig()
     levels = _find_lvns_extracted(
         profile,
         lvn_threshold=cfg.LVN_THRESHOLD,
         smoothing_window=cfg.LVN_SMOOTHING,
+        lvn_percentile=LVN_PERCENTILE,
+        min_separation=LVN_MIN_SEPARATION,
     )
     return [lvn.price for lvn in levels]
 
@@ -191,11 +194,14 @@ def find_hvns(
     smoothed: list[float] | None = None,
 ) -> list[float]:
     """Thin wrapper — extracts prices from HVNLevel objects."""
+    from app.domain.constants import HVN_PERCENTILE, HVN_MIN_SEPARATION
     cfg = cfg or AMTConfig()
     levels = _find_hvns_extracted(
         profile,
         hvn_threshold=cfg.HVN_THRESHOLD,
         smoothing_window=cfg.LVN_SMOOTHING,
+        hvn_percentile=HVN_PERCENTILE,
+        min_separation=HVN_MIN_SEPARATION,
     )
     return [hvn.price for hvn in levels]
 
@@ -253,7 +259,8 @@ class AMTAnalyzer:
         self._vwap_cum_quote_vol: float = 0.0
         self._vwap_last_time: str = ""
         # VWAP variance accumulator for σ bands
-        self._vwap_cum_sq_vol: float = 0.0  # Σ(price² × volume)
+        self._vwap_cum_sq_vol: float = 0.0  # Σ((TP - shift)² × volume)
+        self._vwap_shift: float = 0.0  # Reference price for numerically stable variance
         # Initial Balance tracker
         self._ib_tracker = InitialBalanceEngine(ib_minutes=IB_MINUTES)
         # Sticky IB break state (survives price re-entry into IB)
@@ -287,7 +294,10 @@ class AMTAnalyzer:
         else:
             self._persistent_agg_scorer = PersistentAggressionScorer()
         # LVN persistence tracker (prevents LVN appearing/disappearing)
-        self._lvn_tracker = LVNPersistenceTracker()
+        self._lvn_tracker = LVNPersistenceTracker(
+            min_bars=LVN_MIN_PERSISTENCE_BARS,
+            removal_threshold=LVN_REMOVAL_THRESHOLD,
+        )
         self._opening_classifier = OpeningTypeClassifier()
         self._mtf_analyzer = MultiTimeframeAMTAnalyzer()
 
@@ -428,6 +438,7 @@ class AMTAnalyzer:
             self._vwap_cum_vol = 0.0
             self._vwap_cum_quote_vol = 0.0
             self._vwap_cum_sq_vol = 0.0
+            self._vwap_shift = 0.0
             self._ib_tracker.reset()
             self._ib_break_direction = ""
             self._ar_engine.reset()
@@ -436,11 +447,12 @@ class AMTAnalyzer:
         _is_new_candle = current.time != self._vwap_last_time
         self._vwap_last_time = current.time
         if _is_new_candle:
+            if self._vwap_shift == 0.0:
+                self._vwap_shift = typical_price  # anchor to first candle's TP
+            shifted = typical_price - self._vwap_shift
             self._vwap_cum_vol += float(current.volume)
             self._vwap_cum_quote_vol += float(quote_vol)
-            self._vwap_cum_sq_vol += float(
-                typical_price * typical_price * current.volume
-            )
+            self._vwap_cum_sq_vol += float(shifted * shifted * current.volume)
         return float(
             self._vwap_cum_quote_vol / self._vwap_cum_vol
             if self._vwap_cum_vol > 0
@@ -647,8 +659,26 @@ class AMTAnalyzer:
         underlying: str = "NIFTY",
         daily_data: list[OHLC] | None = None,
         hourly_data: list[OHLC] | None = None,
+        option_tick: OHLC | None = None,
     ) -> AMTResult:
-        """Run the full AMT analysis pipeline."""
+        """Run the full AMT analysis pipeline.
+
+        Args:
+            data: Candle data for analysis (may be underlying futures for options)
+            order_book: Order book snapshot
+            incremental_profile: Incremental volume profile state
+            prior_poc: Previous session POC
+            prior_vah: Previous session VAH
+            prior_val: Previous session VAL
+            developing_profile: Developing volume profile state
+            cushion_tier: Risk cushion tier
+            session_pnl: Session P&L
+            npoc_tracker: Naked POC tracker
+            underlying: Underlying symbol
+            daily_data: Daily timeframe data
+            hourly_data: Hourly timeframe data
+            option_tick: Option contract tick (for per-symbol delta isolation)
+        """
         empty = AMTResult(
             market_state=MarketState.BALANCED.value,
             poc=0,
@@ -859,12 +889,17 @@ class AMTAnalyzer:
 
         # Profile shape and bimodal override
         shape = classify_shape(profile)
+        # Track the effective profile shape — may be updated when market_state is overridden.
+        effective_profile_shape = shape.shape
 
         # Bimodal override: two-peaked profile = auction market, not trend.
         # A bimodal distribution means price is visiting two distinct value areas
         # with high volume each — signature of Balance, not Trend.
+        # Bug #14: sync effective_profile_shape to "D" (symmetric/balanced) when
+        # we override market_state so the frontend sees consistent state.
         if shape.shape == "B" and market_state == MarketState.IMBALANCED:
             market_state = MarketState.BALANCED
+            effective_profile_shape = "D"
 
         # Session VWAP
         typical_price = (current.high + current.low + current.close) / 3
@@ -873,22 +908,33 @@ class AMTAnalyzer:
         # VWAP standard deviation bands (±1σ, ±2σ)
         vwap_std = 0.0
         if self._vwap_cum_vol > 0:
+            shifted_vwap = session_vwap - self._vwap_shift
             variance = (self._vwap_cum_sq_vol / self._vwap_cum_vol) - (
-                session_vwap * session_vwap
+                shifted_vwap * shifted_vwap
             )
             vwap_std = math.sqrt(max(0.0, variance))
+            
+            # Minimum σ floor to avoid perpetual N/A during low-volatility periods.
+            # Options premiums can have tiny absolute changes (e.g., 150→152) that
+            # produce near-zero variance even after hours of trading.
+            MIN_VWAP_STD = 0.5  # 50 paise floor for NIFTY options
+            if vwap_std < MIN_VWAP_STD and self._vwap_cum_vol > 100:
+                vwap_std = MIN_VWAP_STD
+                
         vwap_upper_1 = session_vwap + vwap_std
         vwap_lower_1 = session_vwap - vwap_std
         vwap_upper_2 = session_vwap + 2 * vwap_std
         vwap_lower_2 = session_vwap - 2 * vwap_std
         # FIX BUG #1 + #5: Use close price for deviation (not max of high/close)
         live_price = float(current.close)
-        vwap_deviation_sigmas = (
-            (live_price - session_vwap) / vwap_std if vwap_std > 0 else 0.0
+        # Bug #4: When vwap_std=0 (early session, flat market) return None so the
+        # frontend can display "N/A" instead of the misleading "0.00σ".
+        vwap_deviation_sigmas: float | None = (
+            (live_price - session_vwap) / vwap_std if vwap_std > 0 else None
         )
         # Guard: extreme deviation suggests data source mismatch (e.g., VWAP from
         # underlying futures but live_price from option premium)
-        if abs(vwap_deviation_sigmas) > 10:
+        if vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) > 10:
             logger.warning(
                 "VWAP deviation extreme: %.2fσ — possible data source mismatch "
                 "(vwap=%.2f, live=%.2f, std=%.2f)",
@@ -921,6 +967,15 @@ class AMTAnalyzer:
         # BALANCE structure. PROBING = testing outside value, BALANCE = rotation
         # inside value. If both fire, override structure to TRANSITION.
         if market_state == MarketState.PROBING and structure.state == "BALANCE":
+            structure = type(structure)(
+                state="TRANSITION",
+                confidence_score=max(structure.confidence_score, 60),
+                features=structure.features,
+            )
+
+        # PROBING is also incompatible with CHOP (oscillation without direction).
+        # PROBING = directional exploration; CHOP = oscillation. Override to TRANSITION.
+        if market_state == MarketState.PROBING and structure.state == "CHOP":
             structure = type(structure)(
                 state="TRANSITION",
                 confidence_score=max(structure.confidence_score, 60),
@@ -1023,8 +1078,54 @@ class AMTAnalyzer:
         # All signal creation goes through the gate pipeline (entry_gate.py / signal_builder.py).
         signal = None
 
+        # Bug #5: Dead-volume override — when volume is dead, reflect it in market_state
+        # so frontend sees consistent state (not "Volume=DEAD but Session=PROBING").
+        # Mirror the logic from classify_regime(): EMA(20) vol ratio < 0.01 → DEAD.
+        # Use a string directly since "DEAD" is not a MarketState enum value.
+        _effective_market_state: str = market_state.value
+        if len(recent_data) >= 20:
+            _alpha = 2.0 / 21
+            _ema_vol = float(recent_data[-20].volume)
+            for _d in recent_data[-19:]:
+                _ema_vol = _alpha * float(_d.volume) + (1 - _alpha) * _ema_vol
+            _latest_vol = float(recent_data[-1].volume)
+            _vol_ratio = _latest_vol / _ema_vol if _ema_vol > 0 else 0.0
+            if float(current.close) <= 0 or _vol_ratio < 0.01:
+                _effective_market_state = "DEAD"
+
+        # FIX BUG #3: Compute per-symbol delta from option tick (not underlying)
+        # This ensures delta_normalized_option reflects the actual option's order flow,
+        # providing per-symbol isolation when underlying data is shared across options.
+        delta_normalized_option = 0.0
+        if option_tick is not None and option_tick.volume > 0:
+            delta_normalized_option = float(option_tick.delta) / float(option_tick.volume)
+
+        # 8. Drive Tracking (FR-05) — classify current price against nearest key level
+        _drive_number: int = 0
+        _drive_entry_valid: bool = False
+        _live_price = live_price if live_price > 0 else float(current.close)
+        _all_levels: list[float] = [poc] + list(lvns) + ([vah, val] if vah > 0 and val > 0 else [])
+        if _all_levels and _live_price > 0:
+            _nearest = min(_all_levels, key=lambda _l: abs(_l - _live_price))
+            _proximity_ticks = abs(_live_price - _nearest) / max(tick_size, 0.001)
+            # Only classify if price is within 5 ticks of the level
+            if _proximity_ticks <= 5:
+                _drive_dir = "LONG" if _live_price >= _nearest else "SHORT"
+                try:
+                    _drive_result = self._drive_tracker.classify_touch(
+                        price=_live_price,
+                        level=_nearest,
+                        candle=current,
+                        direction=_drive_dir,
+                        tick_size=tick_size,
+                    )
+                    _drive_number = _drive_result.drive_number
+                    _drive_entry_valid = _drive_result.entry_valid
+                except Exception:
+                    pass  # Non-critical — drive tracking is best-effort
+
         return AMTResult(
-            market_state=market_state.value,
+            market_state=_effective_market_state,
             poc=poc,
             value_area_high=vah,
             value_area_low=val,
@@ -1035,7 +1136,8 @@ class AMTAnalyzer:
             setup=signal.setup.value if signal else None,
             profile=tuple(profile),
             aggressive_prints=tuple(agg_prints),
-            profile_shape=shape.shape,
+            profile_shape=effective_profile_shape,
+            profile_type="Session",  # Session profile shape (developing_profile not used for shape)
             cvd_slope=cvd_state.slope,
             cvd_divergence=cvd_div,
             session_vwap=session_vwap,
@@ -1125,6 +1227,11 @@ class AMTAnalyzer:
             absorption_side=absorption_side,
             absorption_range_ratio=absorption_range_ratio,
             absorption_vol_ratio=absorption_vol_ratio,
+            # Per-symbol delta (FIX BUG #3: isolated per option contract)
+            delta_normalized_option=delta_normalized_option,
+            # Drive state (FR-05)
+            drive_number=_drive_number,
+            drive_entry_valid=_drive_entry_valid,
         )
 
     # -------------------------------------------------------------------

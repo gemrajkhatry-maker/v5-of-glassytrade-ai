@@ -141,7 +141,7 @@ class TestAAAPreconditionEngine:
             price=100.0,  # far from VAL=94
             val=94.0,
             vah=105.0,
-            poc=100.0,
+            poc=150.0,  # far from price to avoid POC proximity check passing PRE-4
             current_candle=self._make_tick(),
             avg_volume=4000,
             delta=100,

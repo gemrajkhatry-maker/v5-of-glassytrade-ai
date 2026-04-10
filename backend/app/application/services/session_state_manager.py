@@ -85,6 +85,9 @@ class SessionState:
 
     # Track last candle time — LLM only fires on new candle boundaries
     _last_candle_time: str = ""
+    
+    # Monitoring-mode LLM: fires every 5 min in BALANCED/NO_TRADE for context
+    _last_monitoring_llm: float = 0.0
 
     # Live structural guard telemetry for frontend/runtime QA
     _playbook_guard_rejections: dict[str, int] = field(default_factory=dict)

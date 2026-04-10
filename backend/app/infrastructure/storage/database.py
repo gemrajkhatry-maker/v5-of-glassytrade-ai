@@ -668,6 +668,32 @@ class SQLiteStorageAdapter(StoragePort):
                 result.append(d)
             return result
 
+    def clear_all_open_positions(self) -> int:
+        """Clear all open positions from the database.
+
+        Called on startup when CLEAR_POSITIONS_ON_RESTART is True to ensure
+        the system starts fresh without stale positions from previous sessions.
+
+        Returns:
+            Number of positions that were cleared.
+        """
+        with self._lock:
+            try:
+                # Count positions before clearing
+                count_row = self._conn.execute("SELECT COUNT(*) FROM open_positions").fetchone()
+                count = count_row[0] if count_row else 0
+
+                if count > 0:
+                    self._conn.execute("DELETE FROM open_positions")
+                    self._conn.commit()
+                    logger.info("STARTUP: Cleared %d stale positions from database", count)
+
+                return count
+            except sqlite3.Error:
+                self._conn.rollback()
+                logger.error("Failed to clear open positions", exc_info=True)
+                return 0
+
     def get_recent_trades(self, limit: int = 5) -> list[dict[str, Any]]:
         """Retrieve the most recent closed trades, newest first."""
         with self._lock:

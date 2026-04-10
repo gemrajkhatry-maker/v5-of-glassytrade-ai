@@ -634,6 +634,8 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         "absorptionVolRatio": r.absorption_vol_ratio,
         # Displacement
         "swingDelta": r.swing_delta,
+        # Per-symbol delta (FIX BUG #3: isolated per option contract)
+        "deltaNormalizedOption": r.delta_normalized_option,
     }
 
 

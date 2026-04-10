@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Filter, BarChart3, List } from 'lucide-react';
+import { sanitizeRationale } from '../utils/textSanitizer';
 
 interface JournalSummary {
     date: string;
@@ -356,7 +357,7 @@ function EventsTable({ entries }: { entries: JournalEntry[] }) {
                             <td className="py-2 px-2 text-xs text-white/50">{formatDuration(e.time_in_trade_s)}</td>
                             <td className="py-2 px-2 text-xs text-white/40">{e.market_state || '-'}</td>
                             <td className="py-2 px-2 text-xs text-white/50 max-w-xs truncate">
-                                {e.llm_rationale || e.risk_reject_reason || e.exit_reason || '-'}
+                                {sanitizeRationale(e.llm_rationale) || e.risk_reject_reason || e.exit_reason || '-'}
                             </td>
                         </tr>
                     );

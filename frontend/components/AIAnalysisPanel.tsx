@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook } from '../types';
 import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Settings, Zap, AlertTriangle, Clock, BarChart3, Shield, Eye, Layers, ArrowUpDown, Crosshair, Navigation } from 'lucide-react';
 import { EquityPanel, RiskStateDisplay, ModelIOPanel, DecisionHistoryPanel } from './ai';
-import { sanitizeLlmText, sanitizeRationale } from '../utils/textSanitizer';
+import { sanitizeLlmText, sanitizeRationale, extractDecisionText } from '../utils/textSanitizer';
 
 interface AIAnalysisPanelProps {
     analysis: GenAIAnalysis | null;
@@ -69,6 +69,17 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
         const liveAggression = amtResult?.aggression ?? 0;
         return typeof liveAggression === 'number' ? liveAggression : parseFloat(displayAnalysis.aggression?.split(':')[1] || "0.00");
     }, [amtResult?.aggression, displayAnalysis.aggression]);
+
+    // Per-symbol delta score from backend
+    const deltaScore = amtResult?.deltaNormalizedOption ?? 0;
+
+    // Format CVD Slope for display: large raw values use K/M suffix + "lots" unit
+    const formatCVD = (cvd: number): string => {
+        const abs = Math.abs(cvd);
+        if (abs >= 1_000_000) return `${(cvd / 1_000_000).toFixed(2)}M lots`;
+        if (abs >= 1_000) return `${(cvd / 1_000).toFixed(1)}K lots`;
+        return `${cvd.toFixed(1)} lots`;
+    };
 
     // Market state from AMT (real-time) not LLM (stale)
     const liveMarketState = amtResult?.marketState || displayAnalysis.marketState || 'BALANCED';
@@ -195,15 +206,29 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     <div className="flex items-center justify-between ml-2">
                         <span className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Session & Leg</span>
                         <div className="flex items-center gap-2">
-                            <div className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide flex items-center gap-1.5 ${statusBg} ${statusColor}`}>
-                                <span className="text-white/40 font-normal">SESSION</span>
-                                <div className={`w-1.5 h-1.5 rounded-full ${isImbalanced ? 'bg-orange-400' : liveMarketState === 'PROBING' ? 'bg-blue-400' : 'bg-yellow-400'}`} />
-                                {liveMarketState.toUpperCase()}
-                            </div>
+                            {liveMarketState === 'DEAD' ? (
+                                <div className="px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide flex items-center gap-1.5 bg-red-500/20 text-red-400 border border-red-500/30">
+                                    <span className="text-white/40 font-normal">SESSION</span>
+                                    <div className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                                    DEAD MARKET
+                                </div>
+                            ) : (
+                                <div className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide flex items-center gap-1.5 ${statusBg} ${statusColor}`}>
+                                    <span className="text-white/40 font-normal">SESSION</span>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${isImbalanced ? 'bg-orange-400' : liveMarketState === 'PROBING' ? 'bg-blue-400' : 'bg-yellow-400'}`} />
+                                    {liveMarketState.toUpperCase()}
+                                </div>
+                            )}
                             <div className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide flex items-center gap-1.5 ${amtResult?.hasDisplacement ? 'bg-orange-500/20 text-orange-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
                                 <span className="text-white/40 font-normal">LEG</span>
                                 <div className={`w-1.5 h-1.5 rounded-full ${amtResult?.hasDisplacement ? 'bg-orange-400' : 'bg-yellow-400'}`} />
                                 {amtResult?.hasDisplacement ? 'DISPLACEMENT' : 'BALANCED'}
+                                {(amtResult?.legPoc ?? 0) > 0 && (
+                                    <span className="text-[8px] font-mono text-white/50 font-normal">
+                                        POC {amtResult?.legPoc?.toFixed(1)}
+                                        {(amtResult?.legVah ?? 0) > 0 && ` | ${amtResult?.legVal?.toFixed(1)}–${amtResult?.legVah?.toFixed(1)}`}
+                                    </span>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -215,32 +240,57 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                 <div className="p-3 rounded-lg bg-white/5 border border-white/10 relative">
                     <span className="absolute -top-2 left-2 px-1 bg-[#131722] text-[10px] text-white/40 uppercase tracking-widest font-bold">Location</span>
                     
-                    {currentLtp > 0 && (amtResult?.poc !== undefined && amtResult?.poc !== null) && amtResult?.valueAreaLow && amtResult?.valueAreaHigh ? (
-                        <div className="mt-3 relative h-12 flex items-center justify-center">
+                    {currentLtp > 0 && (amtResult?.poc !== undefined && amtResult?.poc !== null) ? (
+                        <>
+                        <div className="mt-3 relative h-16 flex items-center justify-center">
                             {(() => {
-                                const min = Math.min(amtResult.valueAreaLow, currentLtp) * 0.999;
-                                const max = Math.max(amtResult.valueAreaHigh, currentLtp) * 1.001;
-                                const range = max - min;
+                                const min = Math.min(amtResult.valueAreaLow || currentLtp, amtResult.dailyVal || currentLtp, amtResult.legVal || currentLtp, currentLtp) * 0.999;
+                                const max = Math.max(amtResult.valueAreaHigh || currentLtp, amtResult.dailyVah || currentLtp, amtResult.legVah || currentLtp, currentLtp) * 1.001;
+                                const range = max - min || 1;
                                 const getPos = (val: number) => `${Math.max(5, Math.min(95, ((val - min) / range) * 100))}%`;
                                 
                                 return (
                                     <div className="w-full relative h-1">
                                         {/* Base Track */}
                                         <div className="absolute top-0 left-0 w-full h-full bg-white/10 rounded-full"></div>
-                                        {/* VA Fill */}
-                                        <div className="absolute top-0 h-full bg-blue-500/20" style={{ left: getPos(amtResult.valueAreaLow), width: `${((amtResult.valueAreaHigh - amtResult.valueAreaLow) / range) * 100}%` }}></div>
+                                        
+                                        {/* VA Fill (Session) */}
+                                        {amtResult.valueAreaHigh > 0 && (
+                                            <div className="absolute top-0 h-full bg-blue-500/20" style={{ left: getPos(amtResult.valueAreaLow), width: `${((amtResult.valueAreaHigh - amtResult.valueAreaLow) / range) * 100}%` }}></div>
+                                        )}
                                         
                                         {/* VAH Marker */}
-                                        <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: getPos(amtResult.valueAreaHigh) }}>
-                                            <div className="w-0.5 h-3 bg-blue-400"></div>
-                                            <span className="text-[8px] text-blue-400 mt-1 absolute top-3">VAH</span>
-                                        </div>
+                                        {amtResult.valueAreaHigh > 0 && (
+                                            <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: getPos(amtResult.valueAreaHigh) }}>
+                                                <div className="w-0.5 h-3 bg-blue-400"></div>
+                                                <span className="text-[8px] text-blue-400 mt-1 absolute top-3 whitespace-nowrap">VAH {amtResult.valueAreaHigh?.toFixed(1)}</span>
+                                            </div>
+                                        )}
                                         {/* VAL Marker */}
-                                        <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: getPos(amtResult.valueAreaLow) }}>
-                                            <div className="w-0.5 h-3 bg-blue-400"></div>
-                                            <span className="text-[8px] text-blue-400 mt-1 absolute top-3">VAL</span>
-                                        </div>
-                                        {/* POC Marker */}
+                                        {amtResult.valueAreaLow > 0 && (
+                                            <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: getPos(amtResult.valueAreaLow) }}>
+                                                <div className="w-0.5 h-3 bg-blue-400"></div>
+                                                <span className="text-[8px] text-blue-400 mt-1 absolute top-3 whitespace-nowrap">VAL {amtResult.valueAreaLow?.toFixed(1)}</span>
+                                            </div>
+                                        )}
+                                        
+                                        {/* Hourly POC (Blue Dot) */}
+                                        {amtResult.hourlyPoc > 0 && (
+                                            <div className="absolute top-1/2 -translate-y-[150%] flex flex-col items-center z-5" style={{ left: getPos(amtResult.hourlyPoc) }}>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500/60 border border-blue-400"></div>
+                                                <span className="text-[7px] text-blue-400 mb-1 absolute bottom-1 whitespace-nowrap">HPOC</span>
+                                            </div>
+                                        )}
+
+                                        {/* Daily POC (Purple Dot) */}
+                                        {amtResult.dailyPoc > 0 && (
+                                            <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center z-5" style={{ left: getPos(amtResult.dailyPoc) }}>
+                                                <div className="w-2 h-2 rounded-full bg-purple-500/80 border border-purple-400"></div>
+                                                <span className="text-[8px] font-bold text-purple-400 mt-1 absolute top-2 whitespace-nowrap">DPOC</span>
+                                            </div>
+                                        )}
+
+                                        {/* Session POC Marker (Yellow) */}
                                         <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center z-10" style={{ left: getPos(amtResult.poc) }}>
                                             <div className="w-2 h-2 rounded-full bg-yellow-400 shadow-[0_0_8px_rgba(250,204,21,0.5)]"></div>
                                             <span className="text-[9px] font-bold text-yellow-400 mt-1 absolute top-2 flex flex-col items-center">
@@ -248,8 +298,17 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                                 <span className="font-mono">{poc}</span>
                                             </span>
                                         </div>
+
+                                        {/* Leg POC Marker (Orange) */}
+                                        {amtResult.legPoc > 0 && Math.abs(amtResult.legPoc - amtResult.poc) > 0.5 && (
+                                            <div className="absolute top-1/2 translate-y-[50%] flex flex-col items-center z-10" style={{ left: getPos(amtResult.legPoc) }}>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-orange-500 shadow-[0_0_4px_rgba(249,115,22,0.5)]"></div>
+                                                <span className="text-[8px] font-bold text-orange-400 mt-0.5 absolute top-1.5 whitespace-nowrap">LEG {amtResult.legPoc.toFixed(1)}</span>
+                                            </div>
+                                        )}
+
                                         {/* LTP Marker */}
-                                        <div className="absolute top-1/2 -translate-y-[120%] flex flex-col items-center z-20" style={{ left: getPos(currentLtp) }}>
+                                        <div className="absolute top-1/2 -translate-y-[140%] flex flex-col items-center z-20" style={{ left: getPos(currentLtp) }}>
                                             <div className="px-1.5 py-0.5 bg-white text-black text-[9px] font-bold font-mono rounded shadow-lg flex items-center gap-1 mb-1">
                                                 {currentLtp.toFixed(1)} <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
                                             </div>
@@ -259,9 +318,21 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                 );
                             })()}
                         </div>
-                    ) : (
-                        <div className="text-center text-[10px] text-white/30 py-4 font-mono">Building Volume Profile...</div>
-                    )}
+                        {/* Overflow indicators when LTP is outside VA */}
+                        {amtResult.valueAreaHigh > 0 && currentLtp > amtResult.valueAreaHigh && (
+                            <div className="text-[9px] text-amber-400 font-mono mt-2 text-center">
+                                ↑ ABOVE VAH by {(currentLtp - amtResult.valueAreaHigh).toFixed(2)} pts
+                            </div>
+                        )}
+                        {amtResult.valueAreaLow > 0 && currentLtp < amtResult.valueAreaLow && (
+                            <div className="text-[9px] text-amber-400 font-mono mt-2 text-center">
+                                ↓ BELOW VAL by {(amtResult.valueAreaLow - currentLtp).toFixed(2)} pts
+                            </div>
+                        )}
+                    </>
+                ) : (
+                    <div className="text-center text-[10px] text-white/30 py-4 font-mono">Building Volume Profile...</div>
+                )}
                 </div>
             </div>
 
@@ -274,24 +345,56 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                 <div className="p-3 rounded-lg bg-white/5 border border-white/5">
                     <div className="flex justify-between items-end mb-2">
                         <div className="flex flex-col">
-                            <span className="text-[10px] text-white/60 mb-0.5">Delta Score</span>
-                            <span className={`text-[9px] font-bold tracking-wider ${aggScore > 0 ? 'text-green-400' : aggScore < 0 ? 'text-red-400' : 'text-white/40'}`}>
-                                {aggScore > 0 ? '[BULLS IN CONTROL]' : aggScore < 0 ? '[BEARS IN CONTROL]' : '[NEUTRAL]'}
+                            <span className="text-[10px] text-white/60 mb-0.5">Delta Score <span className="text-[8px] text-white/25">(norm)</span></span>
+                            <span className={`text-[9px] font-bold tracking-wider ${deltaScore > 0 ? 'text-green-400' : deltaScore < 0 ? 'text-red-400' : 'text-white/40'}`}>
+                                {deltaScore > 0 ? '[BULLS IN CONTROL]' : deltaScore < 0 ? '[BEARS IN CONTROL]' : '[NEUTRAL]'}
                             </span>
                         </div>
-                        <span className={`text-xs font-mono font-bold ${aggScore > 0 ? 'text-green-400' : aggScore < 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                            {aggScore > 0 ? '+' : ''}{aggScore.toFixed(2)}
-                        </span>
+                        <div className="flex flex-col items-end gap-0.5">
+                            <span className={`text-xs font-mono font-bold ${deltaScore > 0 ? 'text-green-400' : deltaScore < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                                {deltaScore > 0 ? '+' : ''}{deltaScore.toFixed(2)}
+                            </span>
+                            {agentDecision && (() => {
+                                // Delta confidence: strength of delta signal (0-100%)
+                                // When delta is near-zero, show ~50% (neutral/no edge)
+                                const isDeltaNeutral = Math.abs(deltaScore) < 0.05;
+                                const deltaConfidence = isDeltaNeutral 
+                                    ? 50 
+                                    : Math.min(100, Math.abs(deltaScore) * 100);
+                                const confColor = isDeltaNeutral 
+                                    ? 'text-yellow-400' 
+                                    : agentDecision.probability >= 0.6 
+                                        ? 'text-emerald-400' 
+                                        : agentDecision.probability > 0.45 
+                                            ? 'text-yellow-400' 
+                                            : agentDecision.probability > 0 
+                                                ? 'text-red-400' 
+                                                : 'text-white/30';
+                                
+                                return (
+                                    <span className={`text-[9px] font-mono font-bold ${confColor}`}>
+                                        {isDeltaNeutral ? '~50%' : `${deltaConfidence.toFixed(1)}%`}
+                                    </span>
+                                );
+                            })()}
+                        </div>
                     </div>
                     {/* Progress Bar */}
                     <div className="h-1 bg-white/10 rounded-full overflow-hidden flex relative">
                         <div className="absolute top-0 left-1/2 w-px h-full bg-white/20 z-10" />
                         {/* Visual bar moving left or right based on score */}
                         <div className={`h-full absolute transition-all duration-500 rounded-full`} style={{
-                            width: `${Math.min(Math.abs(aggScore) * 50, 50)}%`,
-                            left: aggScore > 0 ? '50%' : `${50 - Math.min(Math.abs(aggScore) * 50, 50)}%`,
-                            backgroundColor: aggScore > 0 ? '#4ade80' : '#f87171'
+                            width: `${Math.min(Math.abs(deltaScore) * 50, 50)}%`,
+                            left: deltaScore > 0 ? '50%' : `${50 - Math.min(Math.abs(deltaScore) * 50, 50)}%`,
+                            backgroundColor: deltaScore > 0 ? '#4ade80' : '#f87171'
                         }}></div>
+                    </div>
+                    {/* Aggression indicator */}
+                    <div className="flex justify-between text-[9px] mt-1.5 pt-1 border-t border-white/5">
+                        <span className="text-white/40">Aggression</span>
+                        <span className={`font-mono font-bold ${aggScore > 0 ? 'text-green-400' : aggScore < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                            {aggScore > 0 ? '+' : ''}{aggScore.toFixed(2)}
+                        </span>
                     </div>
                 </div>
             </div>
@@ -305,7 +408,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     {/* OFI Bar */}
                     <div>
                         <div className="flex justify-between mb-1">
-                            <span className="text-[10px] text-white/40">OFI</span>
+                            <span className="text-[10px] text-white/40">OFI <span className="text-[8px] text-white/25">(norm)</span></span>
                             <div className="flex items-center gap-1.5">
                                 <span className={`text-[10px] ${(amtResult?.ofi ?? 0) > 0 ? 'text-green-400' : (amtResult?.ofi ?? 0) < 0 ? 'text-red-400' : 'text-white/40'}`}>
                                     {(amtResult?.ofi ?? 0) > 0 ? '╱╲↗' : (amtResult?.ofi ?? 0) < 0 ? '╲╱↘' : '—'}
@@ -336,9 +439,9 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     {(amtResult?.cvdSlope ?? 0) > 0 ? '╱╲↗' : (amtResult?.cvdSlope ?? 0) < 0 ? '╲╱↘' : '—'}
                                 </span>
                                 <span className={`text-[10px] font-mono font-bold ${(amtResult?.cvdSlope ?? 0) > 0 ? 'text-green-400' : (amtResult?.cvdSlope ?? 0) < 0 ? 'text-red-400' : 'text-white/40'}`}>
-                                    {(amtResult?.cvdSlope ?? 0) > 0 ? '+' : ''}{(amtResult?.cvdSlope ?? 0).toFixed(1)}
+                                    {(amtResult?.cvdSlope ?? 0) > 0 ? '+' : ''}{formatCVD(amtResult?.cvdSlope ?? 0)}
                                     {amtResult?.cvdDivergence ? ` (${amtResult.cvdDivergence.replace('_DIV', '')})` : ''}
-                                    {Math.abs(amtResult?.cvdSlope ?? 0) > 500 ? ((amtResult?.cvdSlope ?? 0) > 0 ? ' (BULLISH)' : ' (BEARISH)') : ''}
+                                    {(amtResult?.cvdSlope ?? 0) > 0.01 ? ' BULLISH' : (amtResult?.cvdSlope ?? 0) < -0.01 ? ' BEARISH' : ' FLAT'}
                                 </span>
                             </div>
                         </div>
@@ -358,6 +461,22 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             })()}
                         </div>
                     </div>
+                    {/* Aggression Divergence Check */}
+                    {(() => {
+                        const delta = amtResult?.deltaNormalizedOption ?? 0;
+                        const cvd = amtResult?.cvdSlope ?? 0;
+                        const ofi = amtResult?.ofi ?? 0;
+                        const bullCount = (delta > 0.1 ? 1 : 0) + (cvd > 0.01 ? 1 : 0) + (ofi > 0.1 ? 1 : 0);
+                        const bearCount = (delta < -0.1 ? 1 : 0) + (cvd < -0.01 ? 1 : 0) + (ofi < -0.1 ? 1 : 0);
+                        if (bullCount > 0 && bearCount > 0) {
+                            return (
+                                <div className="mt-1.5 px-2 py-1 bg-yellow-500/10 border border-yellow-500/30 rounded text-[9px] font-bold text-yellow-400 text-center">
+                                    CONFLICTED AGGRESSION — Delta/CVD/OFI Divergence
+                                </div>
+                            );
+                        }
+                        return null;
+                    })()}
                     {/* Balance / Price Location */}
                     <div>
                         <div className="flex justify-between mb-1">
@@ -594,76 +713,97 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                         <span>03e. VWAP + Context</span>
                     </div>
                     <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-1.5 text-[9px]">
-                        <div className="flex justify-between">
-                            <span className="text-white/40">Session VWAP</span>
-                            <span className="font-mono text-cyan-400">{amtResult?.sessionVwap?.toFixed(2)}</span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-red-400/80 font-bold">+2σ / +1σ</span>
-                            <span className="font-mono text-red-300">
-                                {amtResult?.vwapUpper2?.toFixed(2)} / {amtResult?.vwapUpper1?.toFixed(2)}
-                            </span>
-                        </div>
-                        <div className="flex justify-between">
-                            <span className="text-emerald-400/80 font-bold">-1σ / -2σ</span>
-                            <span className="font-mono text-emerald-300">
-                                {amtResult?.vwapLower1?.toFixed(2)} / {amtResult?.vwapLower2?.toFixed(2)}
-                            </span>
-                        </div>
-                        
-                        {/* Inline Deviation Meter (-3σ to +3σ) */}
-                        {currentLtp > 0 && amtResult?.sessionVwap && (
-                            <div className="pt-3 pb-1 border-t border-white/5">
-                                <div className="flex justify-between text-[8px] font-mono text-white/30 mb-1">
-                                    <span className="text-emerald-400">-3σ</span>
-                                    <span>VWAP</span>
-                                    <span className="text-red-400">+3σ</span>
-                                </div>
-                                <div className="h-1.5 relative bg-white/5 rounded-full">
-                                    <div className="absolute top-0 left-1/2 w-0.5 h-full bg-cyan-400"></div>
-                                    <div className="absolute top-0 left-[33.3%] w-px h-full bg-emerald-500/30"></div>
-                                    <div className="absolute top-0 left-[16.6%] w-px h-full bg-emerald-500/50"></div>
-                                    <div className="absolute top-0 right-[33.3%] w-px h-full bg-red-500/30"></div>
-                                    <div className="absolute top-0 right-[16.6%] w-px h-full bg-red-500/50"></div>
-                                    
-                                    {(() => {
-                                        const diff = currentLtp - amtResult.sessionVwap;
-                                        const stdDev = amtResult.vwapUpper1 ? (amtResult.vwapUpper1 - amtResult.sessionVwap) : 0;
-                                        if (stdDev > 0) {
-                                            const sigma = diff / stdDev;
-                                            // Map -3 to +3 to 0% to 100%
-                                            const percentage = Math.max(0, Math.min(100, ((sigma + 3) / 6) * 100));
-                                            return (
-                                                <div 
-                                                    className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-white shadow-[0_0_5px_white] z-10"
-                                                    style={{ left: `calc(${percentage}% - 4px)` }}
-                                                />
-                                            );
-                                        }
-                                        return null;
-                                    })()}
-                                </div>
-                                {(() => {
-                                    const diff = currentLtp - amtResult.sessionVwap;
-                                    const stdDev = amtResult.vwapUpper1 ? (amtResult.vwapUpper1 - amtResult.sessionVwap) : 0;
-                                    if (stdDev > 0) {
-                                        const sigma = diff / stdDev;
-                                        const isExtreme = Math.abs(sigma) >= 1.8;
-                                        return (
-                                            <div className={`mt-2 text-center text-[9px] font-mono font-bold flex flex-col items-center gap-1 ${sigma > 1 ? 'text-red-400' : sigma < -1 ? 'text-emerald-400' : 'text-yellow-400'}`}>
-                                                <span>LTP is {sigma > 0 ? '+' : ''}{sigma.toFixed(2)}σ from VWAP</span>
-                                                {isExtreme && (
-                                                    <span className="px-1.5 py-0.5 bg-red-500/20 text-red-400 border border-red-500/30 rounded text-[8px] animate-pulse">
-                                                        EXTREME DEVIATION - FADE ZONES ACTIVE
-                                                    </span>
-                                                )}
+                        {(() => {
+                            const vwapStd = (amtResult.vwapUpper1 ?? 0) - (amtResult.sessionVwap ?? 0);
+                            const isVwapFlat = amtResult.vwapDeviationSigmas === null || amtResult.vwapDeviationSigmas === undefined;
+                            return (
+                                <>
+                                    <div className="flex justify-between">
+                                        <span className="text-white/40">Session VWAP</span>
+                                        <span className="font-mono text-cyan-400">{amtResult?.sessionVwap?.toFixed(2)}</span>
+                                    </div>
+                                    {isVwapFlat ? (
+                                        <div className="text-center py-2 text-[9px] font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded">
+                                            FLAT MARKET — Insufficient Price Variance
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="flex justify-between">
+                                                <span className="text-red-400/80 font-bold">+2σ / +1σ</span>
+                                                <span className="font-mono text-red-300">
+                                                    {amtResult?.vwapUpper2?.toFixed(2)} / {amtResult?.vwapUpper1?.toFixed(2)}
+                                                </span>
                                             </div>
-                                        );
-                                    }
-                                    return <div className="mt-2 text-center text-[9px] text-white/40">Calculating σ...</div>;
-                                })()}
-                            </div>
-                        )}
+                                            <div className="flex justify-between">
+                                                <span className="text-emerald-400/80 font-bold">-1σ / -2σ</span>
+                                                <span className="font-mono text-emerald-300">
+                                                    {amtResult?.vwapLower1?.toFixed(2)} / {amtResult?.vwapLower2?.toFixed(2)}
+                                                </span>
+                                            </div>
+                                        </>
+                                    )}
+                                    
+                                    {/* Inline Deviation Meter (-3σ to +3σ) */}
+                                    {currentLtp > 0 && amtResult?.sessionVwap && (
+                                        <div className="pt-3 pb-1 border-t border-white/5">
+                                            {!isVwapFlat && (
+                                                <>
+                                                    <div className="flex justify-between text-[8px] font-mono text-white/30 mb-1">
+                                                        <span className="text-emerald-400">-3σ</span>
+                                                        <span>VWAP</span>
+                                                        <span className="text-red-400">+3σ</span>
+                                                    </div>
+                                                    <div className="h-1.5 relative bg-white/5 rounded-full">
+                                                        <div className="absolute top-0 left-1/2 w-0.5 h-full bg-cyan-400"></div>
+                                                        <div className="absolute top-0 left-[33.3%] w-px h-full bg-emerald-500/30"></div>
+                                                        <div className="absolute top-0 left-[16.6%] w-px h-full bg-emerald-500/50"></div>
+                                                        <div className="absolute top-0 right-[33.3%] w-px h-full bg-red-500/30"></div>
+                                                        <div className="absolute top-0 right-[16.6%] w-px h-full bg-red-500/50"></div>
+                                                        
+                                                        {(() => {
+                                                            if (isVwapFlat) return null;
+                                                            const sigma = amtResult.vwapDeviationSigmas;
+                                                            if (sigma !== null && sigma !== undefined) {
+                                                                // Map -3 to +3 to 0% to 100%
+                                                                const percentage = Math.max(0, Math.min(100, ((sigma + 3) / 6) * 100));
+                                                                return (
+                                                                    <div 
+                                                                        className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-white shadow-[0_0_5px_white] z-10"
+                                                                        style={{ left: `calc(${percentage}% - 4px)` }}
+                                                                    />
+                                                                );
+                                                            }
+                                                            return null;
+                                                        })()}
+                                                    </div>
+                                                </>
+                                            )}
+                                            {isVwapFlat ? (
+                                                <div className="mt-2 text-center text-[9px] text-amber-400/60 font-mono">σ N/A — Flat Market</div>
+                                            ) : (
+                                                (() => {
+                                                    const sigma = amtResult.vwapDeviationSigmas;
+                                                    if (sigma !== null && sigma !== undefined) {
+                                                        const isExtreme = Math.abs(sigma) >= 1.8;
+                                                        return (
+                                                            <div className={`mt-2 text-center text-[9px] font-mono font-bold flex flex-col items-center gap-1 ${sigma > 1 ? 'text-red-400' : sigma < -1 ? 'text-emerald-400' : 'text-yellow-400'}`}>
+                                                                <span>LTP is {sigma > 0 ? '+' : ''}{sigma.toFixed(2)}σ from VWAP</span>
+                                                                {isExtreme && (
+                                                                    <span className="px-1.5 py-0.5 bg-red-500/20 text-red-400 border border-red-500/30 rounded text-[8px] animate-pulse">
+                                                                        EXTREME DEVIATION - FADE ZONES ACTIVE
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    }
+                                                    return <div className="mt-2 text-center text-[9px] text-white/40">Calculating σ...</div>;
+                                                })()
+                                            )}
+                                        </div>
+                                    )}
+                                </>
+                            );
+                        })()}
                         {(amtResult?.priorPoc ?? 0) > 0 && (
                             <>
                                 <div className="border-t border-white/5 pt-1.5 flex justify-between">
@@ -759,7 +899,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                             }`}>{agentDecision.regime}</span>
                                     </div>
                                     <div className="text-[9px] text-white/30 font-mono mt-1 bg-black/20 p-1.5 rounded">
-                                        {agentDecision.rationale} <span className="text-white/20">({agentDecision.latencyUs}μs)</span>
+                                        {sanitizeRationale(agentDecision.rationale)} <span className="text-white/20">({agentDecision.latencyUs}μs)</span>
                                     </div>
                                 </div>
                             </details>
@@ -936,7 +1076,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     const distThreshold = 5 * ts;
                     if (amtResult?.marketState === 'IMBALANCED' || amtResult?.marketState === 'PROBING') passedCount++;
                     if (currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold) passedCount++;
-                    if (Math.abs(aggScore) > 0.5) passedCount++;
+                    if (amtResult?.marketState !== 'DEAD') passedCount++;
                     if (agentDecision?.timing === 'ENTER_NOW') passedCount++;
                     const totalRules = 4;
                     
@@ -969,11 +1109,11 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     <span className="text-white/40 font-mono text-[9px]">Price near {currentLtp && amtResult?.valueAreaHigh && Math.abs(currentLtp - amtResult.valueAreaHigh) < distThreshold ? 'VAH' : currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - amtResult.valueAreaLow) < distThreshold ? 'VAL' : 'POC/Mid'}</span>
                                 </div>
                                 <div className="flex items-center gap-2 text-[10px]">
-                                    <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${Math.abs(aggScore) > 0.5 ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
-                                        {Math.abs(aggScore) > 0.5 ? '✓' : '✗'}
+                                    <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${amtResult?.marketState !== 'DEAD' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
+                                        {amtResult?.marketState !== 'DEAD' ? '✓' : '✗'}
                                     </div>
                                     <span className="text-white/60 w-24">Volume Alive</span>
-                                    <span className="text-white/40 font-mono text-[9px]">{Math.abs(aggScore) > 0.5 ? 'ACTIVE' : 'DEAD'}</span>
+                                    <span className="text-white/40 font-mono text-[9px]">{amtResult?.marketState !== 'DEAD' ? 'ACTIVE' : 'DEAD'}</span>
                                 </div>
                                 <div className="flex items-center gap-2 text-[10px]">
                                     <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${agentDecision?.timing === 'ENTER_NOW' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-white/10 border-white/20 text-white/60'}`}>
@@ -1006,16 +1146,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             <div className="text-[9px] text-white/40 bg-white/5 px-1.5 py-0.5 rounded">Expand</div>
                         </div>
                         <p className={`p-2 rounded font-mono text-[10px] truncate ${displayAnalysis.direction === 'LONG' ? 'bg-green-500/10 text-green-400 border border-green-500/20' : displayAnalysis.direction === 'SHORT' ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/20'}`}>
-                            {(() => {
-                                let text = sanitizeRationale(displayAnalysis.rationale || displayAnalysis.rawOutput) || "";
-                                try {
-                                    if (text.trim().startsWith('{')) {
-                                        const parsed = JSON.parse(text);
-                                        text = parsed.quant_reason || parsed.rationale || parsed.reason || parsed.direction || "QUANT_FLAT_NO_EDGE";
-                                    }
-                                } catch (e) {}
-                                return text || "QUANT_MONITORING_NO_EDGE";
-                            })()}
+                            {extractDecisionText(displayAnalysis.rationale || displayAnalysis.rawOutput, 'QUANT_MONITORING_NO_EDGE')}
                         </p>
                     </div>
                 </summary>

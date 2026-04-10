@@ -160,78 +160,68 @@ def _build_narrative_market_state(data: Dict[str, Any]) -> list[str]:
 def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
     """#3 Order flow: CVD, delta, aggression, bubbles, quant engine, rules."""
     parts: list[str] = []
-    price = data.get("ltp", 0)
+    
+    # Priority 1: Aggression (CVD, Delta, OFI) - MANDATORY DESCRIPTION
+    parts.append("--- ORDER FLOW & AGGRESSION ---")
+    
+    cvd_raw = data.get("cvd_slope", data.get("cvd", 0))
     delta = data.get("delta", 0)
-    cvd_raw = data.get("cvd", data.get("cvd_slope", 0))
-    try:
-        cvd_val = float(cvd_raw)
-    except (ValueError, TypeError):
-        cvd_val = 0.0
-    if abs(cvd_val) > 100:
-        if cvd_val < -100:
-            parts.append(f"🚨 CVD EXTREME SELLING ({cvd_val:.0f}). DO NOT FADE — heavy institutional pressure.")
-        else:
-            parts.append(f"🚨 CVD EXTREME BUYING (+{cvd_val:.0f}). DO NOT FADE — heavy institutional pressure.")
-    elif cvd_val > 0.5:
-        parts.append(f"CVD: Sustained buying ({cvd_val:+.1f}).")
-    elif cvd_val < -0.5:
-        parts.append(f"CVD: Sustained selling ({cvd_val:+.1f}).")
+    aggression_score = data.get("aggression", 0)
+    
+    # Force explicit description of aggression variables
+    cvd_desc = f"CVD Slope is {cvd_raw:+.1f}. "
+    if abs(cvd_raw) > 500:
+        cvd_desc += "SIGNIFICANT institutional pressure detected. "
+    elif abs(cvd_raw) < 50:
+        cvd_desc += "Weak institutional participation. "
+    parts.append(cvd_desc)
+    
+    delta_desc = f"Current Delta is {delta:+.0f}. "
+    if delta == 0:
+        delta_desc += "Neutral aggression."
+    parts.append(delta_desc)
+    
+    parts.append(f"Aggression Score: {aggression_score:.2f} (0.0 to 2.0 scale).")
+
     cvd_div = data.get("cvd_divergence", "")
     if cvd_div == "BEARISH_DIV":
-        parts.append("⚠️ CVD DIVERGENCE: Bearish. DO NOT GO LONG.")
+        parts.append("⚠️ CVD DIVERGENCE: Bearish setup. Do not go long.")
     elif cvd_div == "BULLISH_DIV":
-        parts.append("⚠️ CVD DIVERGENCE: Bullish. DO NOT GO SHORT.")
-    if delta == 0:
-        parts.append("Delta: +0 (no aggression signal).")
-    else:
-        parts.append(f"Delta: {delta:+.0f}.")
-    aggression = data.get("aggression", "NEUTRAL")
-    if aggression == "AGGRESSIVE":
-        parts.append("AGGRESSION: Confirmed. Entry trigger present.")
-    else:
-        parts.append("AGGRESSION: Weak. Higher risk — wait for confirmation.")
-    aggressive_prints = data.get("aggressive_prints", [])
-    if aggressive_prints:
-        for ap in aggressive_prints[-2:]:
-            if isinstance(ap, dict):
-                parts.append(f"Big order: {ap.get('side', '?')} at {ap.get('price', 0):.0f}.")
+        parts.append("⚠️ CVD DIVERGENCE: Bullish setup. Do not go short.")
+
+    # Priority 2: Quant Probability (Soft Gate Context)
+    quant_ctx = data.get("ml_signal") or data.get("quant_context")
+    if quant_ctx and isinstance(quant_ctx, dict):
+        prob = quant_ctx.get("probability", 0.5)
+        regime = quant_ctx.get("regime", "UNKNOWN")
+        parts.append(f"QUANT ENGINE: P={prob:.3f} in {regime} regime.")
+        if 0.45 <= prob <= 0.55:
+            parts.append("Note: Quant probability is near-neutral. Rely primarily on Structural (Priority 2) and Aggression (Priority 1) data for your bias.")
+
+    # Floating Volume Bubbles & Imbalances
     volume_bubbles = data.get("volume_bubbles", "")
     if volume_bubbles:
         parts.append(f"Volume bubbles: {volume_bubbles}")
-    bubble_retests = data.get("bubble_retests", [])
-    if bubble_retests:
-        for br in bubble_retests:
-            side = getattr(br, "side", br.get("side", "")) if isinstance(br, dict) else getattr(br, "side", "")
-            pv = getattr(br, "price", br.get("price", 0)) if isinstance(br, dict) else getattr(br, "price", 0)
-            if pv > 0:
-                parts.append(f"BUBBLE RE-TEST: High volume {side} area at {pv:.0f} being re-tested.")
-    warnings = []
-    if data.get("aggression_warning"): warnings.append(f"⚠️ {data['aggression_warning']}")
-    if data.get("drive_warning"): warnings.append(f"⚠️ {data['drive_warning']}")
-    if data.get("cvd_warning"): warnings.append(f"⚠️ {data['cvd_warning']}")
-    if warnings:
-        parts.append("CONSIDERATIONS: " + " ".join(warnings))
-    ob_obi = data.get("obi")
-    if ob_obi is not None:
-        if ob_obi > 0.3: parts.append(f"ORDER BOOK: Strong bid support (OBI={ob_obi:.2f})")
-        elif ob_obi < -0.3: parts.append(f"ORDER BOOK: Strong ask pressure (OBI={ob_obi:.2f})")
-        else: parts.append(f"ORDER BOOK: Balanced (OBI={ob_obi:.2f})")
-    if data.get("bid_walls"): parts.append(f"BID WALLS: {data['bid_walls']}")
-    if data.get("ask_walls"): parts.append(f"ASK WALLS: {data['ask_walls']}")
-    if data.get("absorption_side"): parts.append(f"ABSORPTION: {data['absorption_side']}")
-    ml_signal = data.get("ml_signal")
-    if ml_signal and isinstance(ml_signal, dict):
-        d = ml_signal.get("direction", ""); p = ml_signal.get("probability", 0.0); r = ml_signal.get("regime", "")
-        if d and p > 0:
-            parts.append(f"QUANT ENGINE: direction={d} P={p:.3f} regime={r}. "
-                         f"This is the statistical model's estimate — consider it alongside your AMT analysis.")
-    if data.get("strategy_hint"): parts.append(f"STRATEGY GUIDANCE: {data['strategy_hint']}")
-    if data.get("episodic_memory"): parts.append(f"EPISODIC MEMORY: {data['episodic_memory']}")
-    if data.get("gate_context"): parts.append(f"GATE STATUS: {data['gate_context']}")
+    
+    imbalance_desc = data.get("stacked_imbalances", "")
+    if imbalance_desc:
+        parts.append(imbalance_desc)
+
+    # FABIO'S PRIORITY HIERARCHY RULE
     parts.append(
-        "AMT RULES: 1) READ State+Location+Aggression. 2) SECOND DRIVE > First. "
-        "3) Target=POC/VA Boundary. 4) Use 1.5:1 min R:R. 5) No counter-flow (CVD). "
-        "6) Entry MUST be at structural LVN/VA boundary — never mid-VA."
+        "\nDECISION HIERARCHY:\n"
+        "1. AGGRESSION (CVD/OFI/Delta) - What the market IS doing (Decisive)\n"
+        "2. STRUCTURE (Mode/IB/Location) - WHERE it is doing it (Contextual)\n"
+        "3. QUANT (Probability) - Statistical edge (Confirming)\n"
+        "4. TIMING (VWAP/Velocity) - Execution precision\n"
+    )
+    
+    # AMT Rules update
+    parts.append(
+        "AMT RULES: 1) NO counter-flow trades (avoid fading strong CVD). "
+        "2) Entries MUST be at structural boundaries (VAH/VAL/LVN). "
+        "3) Cap confidence at 0.85 (HIGH) if P > 0.7 and Structure aligns. "
+        "4) If P ~ 0.5, cap confidence at MEDIUM even with strong structure."
     )
     return parts
 
@@ -474,31 +464,77 @@ def _normalize_entry_json(obj: Dict[str, Any], raw_text: str) -> Dict[str, Any]:
     confidence = str(obj.get("confidence", "Medium")).capitalize()
     if confidence not in ("High", "Medium", "Low"):
         confidence = "Medium"
+    
+    # FIX: Robustly extract rationale. Fallback to extracting text between symbols
+    # if the rationale key is missing or empty to avoid JSON bleed.
+    rationale = obj.get("rationale", "")
+    if not rationale:
+        # Try to strip common JSON markers and think blocks from the raw text
+        cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL)
+        cleaned = re.sub(r"```(?:json)?\s*\{.*?\}\s*```", "", cleaned, flags=re.DOTALL)
+        cleaned = re.sub(r"\{.*?\}", "", cleaned, flags=re.DOTALL).strip()
+        rationale = cleaned or "No explicit rationale provided."
+
     return {
         "direction": direction,
-        "rationale": obj.get("rationale", raw_text),
+        "rationale": rationale,
         "raw_output": raw_text,
         "confidence": confidence,
     }
 
 
 def _normalize_overseer_json(obj: Dict[str, Any], pos_state: dict) -> OverseerAction:
-    action = str(obj.get("action", "HOLD")).upper().replace(" ", "_")
+    action = str(obj.get("action", "HOLD")).upper().replace(" ", "_").strip()
     if action not in {"HOLD", "TIGHTEN_SL", "PARTIAL_EXIT", "FULL_EXIT", "ADD"}:
         action = "HOLD"
     new_sl = obj.get("new_sl_price")
     if action == "TIGHTEN_SL" and (not isinstance(new_sl, (int, float)) or new_sl <= 0):
         new_sl = compute_tighten_sl(pos_state)
+    
+    reason = str(obj.get("reason", obj.get("rationale", ""))).strip()
     return OverseerAction(
         action=action,
         new_sl_price=float(new_sl)
         if isinstance(new_sl, (int, float)) and new_sl > 0
         else None,
-        reason=str(obj.get("reason", "")),
+        reason=reason or "Conviction unchanged.",
     )
 
 
 def _try_structured_parse(text: str) -> Optional[Dict[str, Any]]:
+    """Parse structured output formats including STATE:/TRADE: format."""
+    # Check for STATE:/TRADE: format (Gemma 4 AMT model)
+    state_match = re.search(r"STATE:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
+    trade_match = re.search(r"TRADE:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
+    
+    if state_match and trade_match:
+        state = state_match.group(1).strip().upper()
+        trade = trade_match.group(1).strip().upper()
+        
+        # Map TRADE to direction
+        if "LONG" in trade:
+            direction = "LONG"
+        elif "SHORT" in trade:
+            direction = "SHORT"
+        else:
+            direction = "FLAT"
+        
+        # Map STATE to confidence
+        if state in ["BREAKOUT", "TREND", "IMBALANCE"]:
+            confidence = "High"
+        elif state in ["REJECTION", "FAILED BREAKOUT", "EXHAUSTION"]:
+            confidence = "Medium"
+        else:
+            confidence = "Low"
+        
+        return {
+            "direction": direction,
+            "rationale": f"AMT State: {state}, Trade: {trade}",
+            "raw_output": text,
+            "confidence": confidence,
+        }
+    
+    # Legacy trigger: format
     trigger_match = re.search(r"trigger:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
     if not trigger_match:
         return None

@@ -645,15 +645,59 @@ def run_agent_pipeline(
 
     # ── DELTA SCORE WIRING ──
     # Delta Score (+/-1.5) represents the net institutional aggression.
-    # We combine Aggression Score (momentum) with Footprint Delta (commitment).
-    aggression = float(getattr(amt_result, "aggression", 1.0) or 1.0)
-    # norm_delta: -1 to +1
+    # FIX BUG #3: Use per-symbol delta_normalized_option for isolation.
+    # Previously, 'aggression' was computed from shared underlying data,
+    # causing identical delta_score values across options on same underlying.
+    # Now we use delta_normalized_option which is computed from option tick.
+    delta_normalized_option = float(
+        getattr(amt_result, "delta_normalized_option", 0.0) or 0.0
+    )
+    # norm_delta: -1 to +1 (from tick, also per-symbol)
     norm_delta = tick.delta / tick.volume if tick.volume > 0 else 0
 
-    # delta_score: positive if bull aggression + bull delta, negative if bear
-    # range: approx -1.5 to +1.5
-    delta_score = (aggression - 1.0) * (1.0 if norm_delta >= 0 else -1.0)
-    # Add a floor/boost from the pure delta ratio
+    # Location penalty: price in tail (outside VA) reduces confidence
+    if amt_result.value_area_high > 0 and amt_result.value_area_low > 0:
+        _price = float(tick.close)
+        if _price < amt_result.value_area_low:
+            # Below VAL — penalize LONG, mild boost SHORT
+            _tail_dist = (amt_result.value_area_low - _price) / max(amt_result.value_area_low, 1)
+            _penalty = min(0.20, _tail_dist * 2)  # up to 20% penalty
+            p_long = max(0.01, signal.p_long - _penalty)
+            p_short = min(0.85, signal.p_short + _penalty * 0.3)
+            signal = DirectionSignal(signal.direction, p_long, p_short, signal.edge)
+        elif _price > amt_result.value_area_high:
+            # Above VAH — penalize SHORT, mild boost LONG
+            _tail_dist = (_price - amt_result.value_area_high) / max(amt_result.value_area_high, 1)
+            _penalty = min(0.20, _tail_dist * 2)
+            p_short = max(0.01, signal.p_short - _penalty)
+            p_long = min(0.85, signal.p_long + _penalty * 0.3)
+            signal = DirectionSignal(signal.direction, p_long, p_short, signal.edge)
+
+    # IB break context: reduce counter-trend probability
+    # A fresh IB break UP should reduce SHORT probability (don't short into upside breakout)
+    # A fresh IB break DOWN should reduce LONG probability (don't go long into downside break)
+    # Uses amt_result.break_direction ("UP" / "DOWN" / "")
+    _ib_break = getattr(amt_result, "ib_break", None) or getattr(amt_result, "break_direction", "") or ""
+    if _ib_break:
+        _ib_break_upper = _ib_break.upper()
+        if "UP" in _ib_break_upper or "HIGH" in _ib_break_upper or "ABOVE" in _ib_break_upper:
+            # Fresh upside IB break — reduce short probability by up to 25%
+            _ib_penalty = 0.25
+            p_short = max(0.05, signal.p_short - _ib_penalty)
+            p_long = min(0.85, signal.p_long + _ib_penalty * 0.3)
+            signal = DirectionSignal(signal.direction, p_long, p_short, signal.edge)
+        elif "DOWN" in _ib_break_upper or "LOW" in _ib_break_upper or "BELOW" in _ib_break_upper:
+            # Fresh downside IB break — reduce long probability by up to 25%
+            _ib_penalty = 0.25
+            p_long = max(0.05, signal.p_long - _ib_penalty)
+            p_short = min(0.85, signal.p_short + _ib_penalty * 0.3)
+            signal = DirectionSignal(signal.direction, p_long, p_short, signal.edge)
+
+    # delta_score: positive if bull delta, negative if bear
+    # Use delta_normalized_option (per-symbol) as primary signal
+    # Scale: delta_normalized_option is -1 to +1, so multiply for impact
+    delta_score = delta_normalized_option * 1.5
+    # Add a floor/boost from the tick delta ratio (also per-symbol)
     delta_score += norm_delta * 0.5
 
     p_long = signal.p_long
@@ -696,6 +740,17 @@ def run_agent_pipeline(
         new_edge = 0.0
 
     signal = DirectionSignal(new_dir, p_long, p_short, new_edge)
+
+    # Global probability cap — no single reading should exceed 85%
+    # Probabilities above this require multi-signal confluence that we can't guarantee
+    _MAX_PROBABILITY = 0.85
+    signal = DirectionSignal(
+        signal.direction,
+        min(_MAX_PROBABILITY, signal.p_long),
+        min(_MAX_PROBABILITY, signal.p_short),
+        signal.edge,
+    )
+
     if signal.direction == "FLAT":
         elapsed_us = (time.perf_counter_ns() - t0) // 1000
         return AgentDecision(

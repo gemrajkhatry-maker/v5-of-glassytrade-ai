@@ -1,7 +1,7 @@
 import React from 'react';
 import { LLMHistoryEntry } from '../../types';
 import { Clock } from 'lucide-react';
-import { sanitizeRationale } from '../../utils/textSanitizer';
+import { sanitizeRationale, extractDecisionText } from '../../utils/textSanitizer';
 
 interface DecisionHistoryPanelProps {
     llmHistory: LLMHistoryEntry[];
@@ -55,17 +55,13 @@ const DecisionHistoryPanel = React.memo<DecisionHistoryPanelProps>(({ llmHistory
                                                 <span className={`font-bold ${dirColor}`}>{entry.direction}</span>
                                                 <span className="text-white/60 text-[9px] truncate max-w-[150px] font-mono bg-white/5 px-1 rounded">
                                                     {(() => {
-                                                        let text = entry.rationale || entry.rawOutput || "";
-                                                        try {
-                                                            const match = text.match(/\{[\s\S]*\}/);
-                                                            if (match) {
-                                                                const p = JSON.parse(match[0]);
-                                                                text = p.quant_reason || p.rationale || p.reason || p.direction || text;
-                                                            }
-                                                        } catch (e) {}
-                                                        // Extract uppercase quant code
-                                                        const match = text.match(/[A-Z_]{5,}/);
-                                                        return match ? match[0] : text.split(' ')[0];
+                                                        const extracted = extractDecisionText(entry.rationale || entry.rawOutput, '');
+                                                        if (extracted) {
+                                                            // Extract uppercase quant code if present
+                                                            const match = extracted.match(/[A-Z_]{5,}/);
+                                                            return match ? match[0] : extracted.split(' ')[0].slice(0, 20);
+                                                        }
+                                                        return 'N/A';
                                                     })()}
                                                 </span>
                                             </>

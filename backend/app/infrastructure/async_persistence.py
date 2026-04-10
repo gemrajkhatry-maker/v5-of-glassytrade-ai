@@ -93,6 +93,16 @@ class AsyncPersistenceBus:
     def load_open_positions(self):
         return self._storage.load_open_positions()
 
+    def clear_all_open_positions(self) -> int:
+        """Clear all open positions from storage (synchronous read-like operation).
+
+        Returns:
+            Number of positions cleared.
+        """
+        if hasattr(self._storage, "clear_all_open_positions"):
+            return self._storage.clear_all_open_positions()
+        return 0
+
     def get_previous_session_profile(self, *args, **kwargs):
         return self._storage.get_previous_session_profile(*args, **kwargs)
 

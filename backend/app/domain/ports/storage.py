@@ -81,6 +81,14 @@ class OpenPositionStoragePort(ABC):
     def delete_open_position(self, position_id: str) -> None: ...
     @abstractmethod
     def load_open_positions(self) -> list[dict[str, Any]]: ...
+    @abstractmethod
+    def clear_all_open_positions(self) -> int:
+        """Clear all open positions from storage.
+
+        Returns:
+            Number of positions cleared.
+        """
+        ...
 
 
 class PositionEventStoragePort(ABC):

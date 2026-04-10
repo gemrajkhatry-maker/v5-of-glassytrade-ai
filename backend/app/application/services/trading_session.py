@@ -575,6 +575,7 @@ class TradingSessionService:
                 prior_val=prior.get("val", 0.0) if prior else 0.0,
                 cushion_tier=srm.risk_tier.name if srm else "NORMAL",
                 session_pnl=srm.session_pnl if srm else 0.0,
+                option_tick=event.tick,
             )
         except Exception:
             log.error(
@@ -883,9 +884,24 @@ class TradingSessionService:
             self._exchange_config, self._allow_short, self._risk_coordinator,
             self._scalp_enabled,
         )
+        
         # 4b. Trigger LLM descriptor for UI
-        if trigger_llm and is_new_candle:
+        # Monitoring-mode LLM: fire every 5 min in BALANCED/NO_TRADE for context
+        import time as _time
+        monitoring_trigger = (
+            amt_result.market_state in ("BALANCED", "NO_TRADE")
+            and (_time.time() - session._last_monitoring_llm) > 300
+        )
+        
+        if (trigger_llm and is_new_candle) or monitoring_trigger:
             self._event_router.trigger_llm_entry(session, event.symbol, event.tick, amt_result)
+            if monitoring_trigger:
+                session._last_monitoring_llm = _time.time()
+                logger.info(
+                    "MONITORING LLM: Triggered context call for %s (state=%s)",
+                    event.symbol,
+                    amt_result.market_state,
+                )
 
         elif not has_position and not ai_running and _in_cooldown:
             cooldown_status = cache.get_ai_analysis() or {}

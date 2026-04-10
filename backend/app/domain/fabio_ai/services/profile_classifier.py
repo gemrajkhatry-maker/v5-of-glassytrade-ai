@@ -48,7 +48,7 @@ class POCMigration:
 SKEW_THRESHOLD = 0.4  # |skewness| > this → asymmetric (P or b)
 
 
-def _count_peaks(volumes: list[float], min_prominence: float = 0.5) -> int:
+def _count_peaks(volumes: list[float], min_prominence: float = 0.25) -> int:
     """Count significant peaks in the volume histogram (MLX-accelerated)."""
     return mc.count_peaks(volumes, min_prominence)
 
@@ -83,6 +83,19 @@ def classify_shape(profile: list[VolumeProfileLevel]) -> ProfileShape:
         shape = "b"  # Positive skew = volume concentrated at lower prices
     else:
         shape = "D"  # Symmetric = balanced bell curve
+
+    # Secondary bimodal check: if shape is D but there's a significant valley
+    # between two volume clusters, it's still bimodal (crash + new balance scenario)
+    if shape == "D" and len(volumes) >= 10:
+        third = len(volumes) // 3
+        if third > 0:
+            mid_section = volumes[third:2 * third]
+            mid_min = min(mid_section) if mid_section else 0
+            outer_total = sum(volumes[:third]) + sum(volumes[2 * third:])
+            outer_count = len(volumes[:third]) + len(volumes[2 * third:])
+            outer_mean = outer_total / outer_count if outer_count > 0 else 0
+            if outer_mean > 0 and mid_min < outer_mean * 0.3:
+                shape = "B"  # Valley between two clusters = bimodal
 
     return ProfileShape(shape=shape, skewness=skewness, kurtosis=kurtosis)
 

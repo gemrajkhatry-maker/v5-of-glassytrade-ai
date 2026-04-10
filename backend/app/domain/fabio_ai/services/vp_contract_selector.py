@@ -238,7 +238,6 @@ class VPContractSelector:
                 data = loop.run_until_complete(
                     self._broker.fetch_history(
                         symbol=symbol,
-                        exchange=exchange_enum,
                         interval="5",
                         limit=200,
                     )
@@ -257,12 +256,8 @@ class VPContractSelector:
     def _fetch_current_price(self, index: str) -> float:
         """Fetch current price for an index."""
         try:
-            # Try to get from broker's latest quote
-            exchange_str = "MCX" if self._exchange == "MCX" else "NSE"
-            quote = self._broker.get_quote(index, exchange_str)
-            if quote and hasattr(quote, "last_price"):
-                return float(quote.last_price)
-            return 0.0
+            # Try to get from broker's latest LTP (handled by adapter)
+            return self._broker.get_ltp(index)
         except Exception:
             return 0.0
 

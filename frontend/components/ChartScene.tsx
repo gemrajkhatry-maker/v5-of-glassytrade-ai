@@ -14,6 +14,7 @@ import {
 } from 'lightweight-charts';
 import { OHLCData, ChartConfig, TradeSignal, TradePosition, AIAnalysis, AMTAnalysis, ChartMode, FootprintCandle, AggressivePrint, RangeBarData } from '../types';
 import { Brain, Cpu, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
+import { sanitizeRationale } from '../utils/textSanitizer';
 
 interface ChartSceneProps {
   data: OHLCData[];
@@ -1457,7 +1458,7 @@ const DecisionCard: React.FC<DecisionCardProps> = ({ direction, setup, pLong, pS
       {/* Body */}
       <div className={`transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-96' : 'max-h-0'} overflow-y-auto custom-scrollbar`}>
         <div className="p-3 text-[11px] leading-relaxed text-slate-300 whitespace-pre-wrap font-mono italic opacity-90 border-b border-white/5 bg-black/20">
-          {rationale}
+          {sanitizeRationale(rationale)}
         </div>
       </div>
 

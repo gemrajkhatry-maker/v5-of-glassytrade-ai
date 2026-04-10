@@ -17,7 +17,7 @@ const EquityPanel = React.memo<EquityPanelProps>(({ portfolio, openPnl }) => {
         <div className="pb-4 border-b border-white/5 space-y-2">
             <div className="grid grid-cols-2 gap-4">
                 <div>
-                    <div className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Equity</div>
+                    <div className="text-[10px] uppercase tracking-widest text-white/40 mb-1">Symbol Equity <span className="normal-case tracking-normal opacity-60">(per symbol)</span></div>
                     <div className="text-sm font-bold font-mono text-white">
                         {'\u20B9'}{portfolio.equity.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>

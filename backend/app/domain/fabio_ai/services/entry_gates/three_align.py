@@ -158,15 +158,41 @@ def three_align_check(
 
     # Near-level check
     near_level = False
-    threshold = max(tick_size * 5, va_range * 0.1) if va_range > 0 else tick_size * 5
+    # Increased threshold for options: 8 ticks (was 5) or 15% of VA range (was 10%)
+    # This allows price 6+ points from POC to still qualify as "near" for NIFTY options
+    threshold = max(tick_size * 8, va_range * 0.15) if va_range > 0 else tick_size * 8
 
-    levels_to_check: list[float] = [
-        amt_result.value_area_high, amt_result.value_area_low, amt_result.poc,
-    ]
+    # MR Location: context-aware POC selection.
+    # PROBING/IMBALANCED + active leg → leg_poc is the structural reference for the
+    # current auction leg and should be checked first.
+    # BALANCED → session POC/VAH/VAL remain the primary reference.
+    _leg_poc = getattr(amt_result, "leg_poc", 0.0)
+    _leg_vah = getattr(amt_result, "leg_vah", 0.0)
+    _leg_val = getattr(amt_result, "leg_val", 0.0)
+    _use_leg_poc_first = (
+        amt_result.market_state in ("PROBING", "IMBALANCED")
+        and _leg_poc > 0
+    )
+
+    if _use_leg_poc_first:
+        # Leg levels first — they represent the active auction structure
+        levels_to_check: list[float] = [_leg_poc, _leg_vah, _leg_val]
+        # Session levels still checked as secondary reference
+        levels_to_check.extend([amt_result.value_area_high, amt_result.value_area_low, amt_result.poc])
+        logger.debug(
+            "Three-Align MR Location: using leg_poc=%.2f as primary (state=%s)",
+            _leg_poc, amt_result.market_state,
+        )
+    else:
+        levels_to_check: list[float] = [
+            amt_result.value_area_high, amt_result.value_area_low, amt_result.poc,
+        ]
+
     if getattr(amt_result, "dev_poc", 0) > 0:
         levels_to_check.extend([amt_result.dev_poc, amt_result.dev_vah, amt_result.dev_val])
-    if getattr(amt_result, "leg_poc", 0) > 0:
-        levels_to_check.extend([amt_result.leg_poc, amt_result.leg_vah, amt_result.leg_val])
+    # When leg_poc is NOT used as primary (BALANCED state), still append it as secondary
+    if not _use_leg_poc_first and _leg_poc > 0:
+        levels_to_check.extend([_leg_poc, _leg_vah, _leg_val])
     if getattr(amt_result, "session_vwap", 0) > 0:
         levels_to_check.append(amt_result.session_vwap)
     levels_to_check.extend((amt_result.hvns or [])[:3])

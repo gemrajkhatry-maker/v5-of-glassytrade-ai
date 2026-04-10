@@ -148,6 +148,71 @@ class LLMEntryHandler:
             session._ai_running = False
         worker_queue.task_done()
 
+    @staticmethod
+    def _sanitize_rationale(raw_rationale: str, direction: str) -> str:
+        """Sanitize LLM rationale output to remove JSON artifacts and clean text.
+        
+        Prevents raw JSON from bleeding into UI and database storage.
+        
+        Args:
+            raw_rationale: Raw rationale text from LLM (may contain JSON artifacts)
+            direction: Trade direction (LONG/SHORT/FLAT)
+            
+        Returns:
+            Clean rationale text suitable for UI display and database storage
+        """
+        import re
+        import json
+        
+        if not raw_rationale:
+            return f"{direction} signal — no rationale provided"
+        
+        text = raw_rationale.strip()
+        
+        # Try to extract from JSON if the entire response is JSON
+        if text.startswith('{') or '"direction"' in text:
+            try:
+                # Try direct JSON parse
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    # Extract rationale field if present
+                    if 'rationale' in parsed:
+                        return str(parsed['rationale']).strip()
+                    # If no rationale but has direction, return direction
+                    if 'direction' in parsed:
+                        return f"{parsed['direction']} signal based on market analysis"
+            except (json.JSONDecodeError, ValueError):
+                pass
+            
+            # Try to extract JSON block from mixed text
+            json_match = re.search(r'\{[^}]*"rationale"[^}]*\}', text, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group(0))
+                    if 'rationale' in parsed:
+                        return str(parsed['rationale']).strip()
+                except (json.JSONDecodeError, ValueError):
+                    pass
+        
+        # Remove JSON-like artifacts at the end (truncated JSON)
+        text = re.sub(r'\{[^}]{0,100}$', '', text)  # Remove unclosed JSON at end
+        text = re.sub(r'^[^{]{0,50\}', '', text)  # Remove orphaned closing brace at start
+        
+        # Remove trailing JSON fragments
+        text = re.sub(r'[\[{}\]"]\s*$', '', text)
+        
+        # Remove escaped characters
+        text = text.replace('\\n', ' ').replace('\\t', ' ').replace('\\"', '"')
+        
+        # Clean up whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        # If text is now empty, return generic message
+        if not text:
+            return f"{direction} signal based on market analysis"
+        
+        return text
+
     def _check_direction_mismatch(self, _ad, direction: str, symbol: str,
                                   session, worker_queue) -> bool:
         """Check if agent decision conflicts with LLM direction. Returns True if mismatch."""
@@ -631,9 +696,10 @@ class LLMEntryHandler:
             except Exception:
                 logger.debug("Failed to load episodic memory", exc_info=True)
 
-        # QUANT ENGINE GATE
-        agent_decision = getattr(session, "_agent_decision", None)
-
+        # SOFT QUANT GATE
+        # Instead of bypassing the LLM entirely when P ~ 0.5, we pass it as "context"
+        # and let the LLM use structural/aggression data to find an edge.
+        quant_context = {}
         if agent_decision:
             agent_regime = getattr(agent_decision, "regime", "")
             if agent_regime == "DEAD":
@@ -657,29 +723,28 @@ class LLMEntryHandler:
                     session.last_ai_analysis = ai_result
                 return
 
-            if agent_decision.direction == "FLAT":
-                agent_prob = getattr(agent_decision, "probability", 0.5)
-                if abs(agent_prob - 0.5) < 0.10:
-                    logger.info(
-                        "QUANT GATE: Engine says FLAT (P=%.3f, no edge) — skipping LLM for %s",
-                        agent_prob,
-                        symbol,
-                    )
-                    # Override timing to SKIP — FLAT with no edge cannot have ENTER_NOW
-                    agent_decision = _replace(agent_decision, timing="SKIP")
-                    ai_result = {
-                        "direction": "FLAT",
-                        "rationale": f"No quant edge: P={agent_prob:.3f} near 50/50. Wait for clearer setup.",
-                        "confidence": "High",
-                        "input_prompt": f"[QUANT GATE: Bypassed LLM] The ML probability engine sees no edge (P={agent_prob:.3f}). The LLM call is skipped to save computation and token costs until a viable setup appears.",
-                        "raw_output": "QUANT_FLAT_NO_EDGE",
-                        "market_state": market_state_str,
-                    }
-                    direction = "FLAT"
-                    confidence = "High"
-                    with session._lock:
-                        session.last_ai_analysis = ai_result
-                    return
+            agent_prob = getattr(agent_decision, "probability", 0.5)
+            quant_context = {
+                "probability": round(agent_prob, 3),
+                "has_edge": abs(agent_prob - 0.5) >= 0.10,
+                "regime": agent_regime,
+                "direction": agent_decision.direction,
+                "note": "If P is near 0.5, structural/aggression context MUST outweigh this quant estimate."
+            }
+
+        # Build prior cycle context (2-cycle cap)
+        prior_context = []
+        with session._lock:
+            memory = getattr(session, "_llm_memory", [])
+            for m in memory[-2:]:
+                prior_context.append(f"[PRIOR CYCLE]: {m}")
+        
+        # Calculate session elapsed time for First Drive rule
+        from app.domain.fabio_ai.services.session_context import _to_ist
+        ist_now = _to_ist(tick.time)
+        # Assuming market open at 09:15 for NSE/MCX
+        market_open = ist_now.replace(hour=9, minute=15, second=0, microsecond=0)
+        elapsed_min = max(0, (ist_now - market_open).total_seconds() / 60)
 
         # Build market data for LLM
         market_data_ai = {
@@ -690,8 +755,11 @@ class LLMEntryHandler:
             "val": amt_result.value_area_low,
             "poc": amt_result.poc,
             "market_state": market_state_str,
-            "aggression": f"Aggression Score: {amt_result.aggression:.2f}",
-            "profile_shape": profile_shape_str,
+            "aggression": amt_result.aggression,
+            "profile_shape": getattr(amt_result, "profile_shape", profile_shape_str),
+            "session_elapsed_minutes": round(elapsed_min, 1),
+            "prior_analysis_context": "\n".join(prior_context),
+            "quant_context": quant_context,
             "strategy_hint": strategy_hint,
             "volume_bubbles": volume_bubble_desc,
             "stacked_imbalances": imbalance_desc,
@@ -912,7 +980,11 @@ class LLMEntryHandler:
 
                 direction = ai_result.get("direction", "FLAT")
                 confidence = ai_result.get("confidence", "Low")
-                rationale = ai_result.get("rationale", "System error: invalid AI return")
+                raw_rationale = ai_result.get("rationale", "System error: invalid AI return")
+                
+                # SANITIZE LLM OUTPUT: Extract clean rationale from JSON artifacts
+                # This prevents raw JSON from bleeding into UI and database
+                rationale = self._sanitize_rationale(raw_rationale, direction)
 
                 # Apply safety nets (buy-only mode, VWAP extreme)
                 direction, confidence, rationale = self._apply_safety_nets(
@@ -980,15 +1052,18 @@ class LLMEntryHandler:
                             )
                         direction = "FLAT"
 
-                # Save LLM decision
+                # Save LLM decision & Update Memory
                 with session._lock:
                     # Include quant engine probability for Monitor panel consistency
                     _agent = getattr(session, "_agent_decision", None)
                     _quant_p = _agent.probability if _agent else 0.0
                     _quant_dir = _agent.direction if _agent else ""
+                    
+                    # Use sanitized rationale (already cleaned by _sanitize_rationale)
+                    cleaned_rationale = rationale
                     session.last_ai_analysis = {
                         "direction": direction,
-                        "rationale": ai_result["rationale"],
+                        "rationale": cleaned_rationale,
                         "confidence": confidence,
                         "input_prompt": ai_result.get("input_prompt", ""),
                         "raw_output": ai_result.get("raw_output", ""),
@@ -997,6 +1072,14 @@ class LLMEntryHandler:
                         "quant_probability": round(_quant_p, 3),
                         "quant_direction": _quant_dir,
                     }
+                    
+                    # Update memory for next cycle (direction + short summary)
+                    summary = f"{direction}: {cleaned_rationale[:100]}..."
+                    if not hasattr(session, "_llm_memory"):
+                        session._llm_memory = []
+                    session._llm_memory.append(summary)
+                    if len(session._llm_memory) > 5:  # Buffer extra but cap strictly in prompt
+                        session._llm_memory = session._llm_memory[-5:]
 
                 # Persist LLM decision
                 if self._storage:
