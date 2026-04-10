@@ -105,6 +105,7 @@ class AMTAnalysisDTO(BaseModel):
     cvd_slope: float = Field(alias="cvdSlope", default=0.0)
     cvd_divergence: str = Field(alias="cvdDivergence", default="")
     profile_shape: str = Field(alias="profileShape", default="")
+    profile_type: str = Field(alias="profileType", default="Session")
     session_vwap: float = Field(alias="sessionVwap", default=0.0)
     vwap_upper_1: float = Field(alias="vwapUpper1", default=0.0)
     vwap_lower_1: float = Field(alias="vwapLower1", default=0.0)
@@ -558,6 +559,7 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         "cvdSlope": r.cvd_slope,
         "cvdDivergence": r.cvd_divergence,
         "profileShape": r.profile_shape,
+        "profileType": r.profile_type,
         "sessionVwap": r.session_vwap,
         "vwapUpper1": r.vwap_upper_1,
         "vwapLower1": r.vwap_lower_1,

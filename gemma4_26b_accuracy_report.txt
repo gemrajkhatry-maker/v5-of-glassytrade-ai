@@ -1,0 +1,129 @@
+🎯 Starting Accuracy Evaluation
+================================================================================
+
+Loading test dataset...
+✓ Loaded 50 test samples
+
+================================================================================
+Loading model: mlx-community/gemma-4-26b-a4b-it-4bit
+Adapter: ./gemma4_26b_amt_adapter
+================================================================================
+Fetching 10 files:   0%|          | 0/10 [00:00<?, ?it/s]Fetching 10 files: 100%|██████████| 10/10 [00:00<00:00, 49991.70it/s]
+You are using a model of type `gemma4` to instantiate a model of type ``. This may be expected if you are loading a checkpoint that shares a subset of the architecture (e.g., loading a `sam2_video` checkpoint into `Sam2Model`), but is otherwise not supported and can yield errors. Please verify that the checkpoint is compatible with the model you are instantiating.
+✓ Model loaded in 3.70s
+
+Evaluating 50 samples...
+
+  Processed 10/50 samples...
+    State Accuracy: 100.0% | Trade Accuracy: 100.0%
+  Processed 20/50 samples...
+    State Accuracy: 100.0% | Trade Accuracy: 100.0%
+  Processed 30/50 samples...
+    State Accuracy: 100.0% | Trade Accuracy: 100.0%
+  Processed 40/50 samples...
+    State Accuracy: 100.0% | Trade Accuracy: 100.0%
+  Processed 50/50 samples...
+    State Accuracy: 100.0% | Trade Accuracy: 100.0%
+
+================================================================================
+ACCURACY EVALUATION REPORT
+================================================================================
+
+📊 Overall Performance:
+  Total Samples: 50
+  Model Load Time: 3.70s
+  Avg Inference Time: 0.97s
+
+🎯 Accuracy Metrics:
+  STATE Accuracy: 100.0% (50/50)
+  TRADE Accuracy: 100.0% (50/50)
+
+📈 Trade Decision Confusion Matrix:
+Expected/Predicted  FLAT           LONG           SHORT          
+--------------------------------------------------------------------------------
+FLAT                11             0              0              
+LONG                0              21             0              
+SHORT               0              0              18             
+
+📝 Sample Predictions (first 10):
+--------------------------------------------------------------------------------
+
+Sample 1:
+  Expected:  STATE=BREAKOUT             TRADE=LONG      
+  Predicted: STATE=BREAKOUT             TRADE=LONG      
+  Accuracy:  STATE ✓  TRADE ✓
+  Output: STATE: BREAKOUT
+TRADE: LONG...
+
+Sample 2:
+  Expected:  STATE=FAILED BREAKOUT      TRADE=SHORT     
+  Predicted: STATE=FAILED BREAKOUT      TRADE=SHORT     
+  Accuracy:  STATE ✓  TRADE ✓
+  Output: STATE: FAILED BREAKOUT
+TRADE: SHORT...
+
+Sample 3:
+  Expected:  STATE=FAILED BREAKOUT      TRADE=SHORT     
+  Predicted: STATE=FAILED BREAKOUT      TRADE=SHORT     
+  Accuracy:  STATE ✓  TRADE ✓
+  Output: STATE: FAILED BREAKOUT
+TRADE: SHORT...
+
+Sample 4:
+  Expected:  STATE=FAILED BREAKOUT      TRADE=LONG      
+  Predicted: STATE=FAILED BREAKOUT      TRADE=LONG      
+  Accuracy:  STATE ✓  TRADE ✓
+  Output: STATE: FAILED BREAKOUT
+TRADE: LONG...
+
+Sample 5:
+  Expected:  STATE=REJECTION            TRADE=LONG      
+  Predicted: STATE=REJECTION            TRADE=LONG      
+  Accuracy:  STATE ✓  TRADE ✓
+  Output: STATE: REJECTION
+TRADE: LONG...
+
+Sample 6:
+  Expected:  STATE=TREND                TRADE=LONG      
+  Predicted: STATE=TREND                TRADE=LONG      
+  Accuracy:  STATE ✓  TRADE ✓
+  Output: STATE: TREND
+TRADE: LONG...
+
+Sample 7:
+  Expected:  STATE=REJECTION            TRADE=LONG      
+  Predicted: STATE=REJECTION            TRADE=LONG      
+  Accuracy:  STATE ✓  TRADE ✓
+  Output: STATE: REJECTION
+TRADE: LONG...
+
+Sample 8:
+  Expected:  STATE=TREND                TRADE=LONG      
+  Predicted: STATE=TREND                TRADE=LONG      
+  Accuracy:  STATE ✓  TRADE ✓
+  Output: STATE: TREND
+TRADE: LONG...
+
+Sample 9:
+  Expected:  STATE=ROTATION             TRADE=FLAT      
+  Predicted: STATE=ROTATION             TRADE=FLAT      
+  Accuracy:  STATE ✓  TRADE ✓
+  Output: STATE: ROTATION
+TRADE: FLAT...
+
+Sample 10:
+  Expected:  STATE=BREAKOUT             TRADE=LONG      
+  Predicted: STATE=BREAKOUT             TRADE=LONG      
+  Accuracy:  STATE ✓  TRADE ✓
+  Output: STATE: BREAKOUT
+TRADE: LONG...
+
+================================================================================
+PERFORMANCE GRADING
+================================================================================
+
+  Grade: A+ (Excellent)
+  Comment: Production-ready accuracy
+  Trade Accuracy: 100.0%
+
+✓ Detailed results saved to accuracy_results.json

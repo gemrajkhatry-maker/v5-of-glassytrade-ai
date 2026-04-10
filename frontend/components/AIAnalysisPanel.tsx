@@ -519,6 +519,9 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                         amtResult?.profileShape === 'b' ? 'b Bottom-heavy' :
                                             amtResult?.profileShape === 'D' ? 'D Balanced' : '—'}
                             </span>
+                            <span className="text-[8px] text-white/30">
+                                ({amtResult?.profileType || 'Session'})
+                            </span>
                         </div>
                         <div className="flex items-center gap-2">
                             {(() => {

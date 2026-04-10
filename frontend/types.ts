@@ -257,6 +257,7 @@ export interface AMTAnalysis {
   hasDisplacement: boolean;
   // Verification metrics
   profileShape?: string;
+  profileType?: string;  // "Session", "Combined", or "Leg"
   balanceRatio?: number;
   ofi?: number;
   cvdSlope?: number;
