@@ -1,0 +1,30 @@
+# Gemma-4-E4B-it LoRA Fine-Tuning Config
+# mlx_lm lora config format
+# Memory-optimised for Apple Silicon (MoE model — MoE experts spike RAM)
+
+model: "mlx-community/gemma-4-e4b-it-nvfp4"
+train: true
+data: "poc_gemma4_e4b/data"
+adapter_path: "poc_gemma4_e4b/adapters"
+
+# Training — keep batch=1, use grad accumulation for effective batch of 4
+iters: 800
+batch_size: 1
+grad_accumulation_steps: 4     # Effective batch = 4, GPU sees 1 at a time
+learning_rate: 2.0e-5
+optimizer: "adamw"
+mask_prompt: true              # Train on assistant response only (think + JSON)
+max_seq_length: 768            # Trimmed from 1024 — reduces peak activation memory
+
+# LoRA config — fewer layers + smaller rank to stay within Metal limits
+fine_tune_type: "lora"
+num_layers: 8                  # Top 8 layers (was 16 — halved to avoid OOM)
+
+# Eval + checkpointing
+val_batches: 4                 # Fewer val batches = less memory spike on eval
+steps_per_eval: 100
+steps_per_report: 10
+save_every: 200
+
+# Reproducibility
+seed: 42
