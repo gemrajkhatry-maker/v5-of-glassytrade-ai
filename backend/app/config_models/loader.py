@@ -160,7 +160,7 @@ def load_config(
       STEP 7: Log startup summary → human-readable at boot
     """
     if config_dir is None:
-        config_dir = str(Path(__file__).resolve().parent.parent.parent / "config")
+        config_dir = str(Path(__file__).resolve().parent.parent / "config")
     config_path = Path(config_dir)
 
     # STEP 1: Load base.yaml

@@ -31,8 +31,8 @@ Quick Start:
 # This maintains 100% backward compatibility - all existing imports work
 from app.config_models.settings_adapter import settings
 
-# ConsolidatedConfig for ServiceGraph — use ``Configuration.from_unified()`` in main
-# (YAML strategy + env secrets); ``from_env()`` remains for env-only scripts/tests.
+# Keep Configuration class for ServiceGraph (transitional)
+# This is used by ServiceGraph for dependency injection
 from config.consolidated import ConsolidatedConfig as Configuration
 
 __all__ = ["settings", "Configuration"]
