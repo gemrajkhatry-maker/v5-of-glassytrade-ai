@@ -26,6 +26,7 @@ class ProfileShape:
     )
     skewness: float  # Negative = P-shape, Positive = b-shape, ~0 = D-shape
     kurtosis: float  # High = narrow peak, Low = flat
+    active_pole: str = ""  # For B-bimodal: "UPPER" or "LOWER" — which peak has more recent volume
 
 
 @dataclass(frozen=True)
@@ -97,7 +98,27 @@ def classify_shape(profile: list[VolumeProfileLevel]) -> ProfileShape:
             if outer_mean > 0 and mid_min < outer_mean * 0.3:
                 shape = "B"  # Valley between two clusters = bimodal
 
-    return ProfileShape(shape=shape, skewness=skewness, kurtosis=kurtosis)
+    # Detect active pole for bimodal profiles
+    active_pole = ""
+    if shape == "B" and len(volumes) >= 5:
+        mid_idx = len(volumes) // 2
+        lower_vol = sum(volumes[:mid_idx])
+        upper_vol = sum(volumes[mid_idx:])
+        # Active pole = the side with more volume in the recent portion
+        # (last 1/3 of profile levels near each pole)
+        if lower_vol > 0 or upper_vol > 0:
+            # Weight recent levels more: check volume in the last 3 levels of each half
+            recent_lower = sum(volumes[max(0, mid_idx - 3):mid_idx])
+            recent_upper = sum(volumes[mid_idx:min(len(volumes), mid_idx + 3)])
+            if recent_upper > recent_lower:
+                active_pole = "UPPER"
+            elif recent_lower > recent_upper:
+                active_pole = "LOWER"
+            else:
+                # Tie-break: use overall volume split
+                active_pole = "UPPER" if upper_vol >= lower_vol else "LOWER"
+
+    return ProfileShape(shape=shape, skewness=skewness, kurtosis=kurtosis, active_pole=active_pole)
 
 
 def extract_bimodal_lvn(profile: list[VolumeProfileLevel]) -> list[float]:

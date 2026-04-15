@@ -103,3 +103,34 @@ class PositionSizer:
             valid=True,
             reason=f"{lots} lots, risk {actual_risk:.0f} ({actual_risk_pct:.2%})",
         )
+
+    @staticmethod
+    def apply_velocity_scaling(lots: int, price_velocity: float) -> tuple[int, str]:
+        """Scale position size based on price velocity.
+
+        High velocity (>0.1/s) means price is moving fast — reduce size by 30%
+        to avoid whipsaw entries. Low velocity (<0.02/s) means calm — full size.
+
+        Args:
+            lots: Calculated lots before velocity adjustment.
+            price_velocity: Price velocity in points/second.
+
+        Returns:
+            (adjusted_lots, reason) tuple.
+        """
+        if lots <= 0 or price_velocity <= 0:
+            return lots, ""
+
+        if price_velocity > 0.1:
+            # High velocity — reduce size by 30%
+            adjusted = max(1, int(lots * 0.7))
+            reason = f"Velocity {price_velocity:.3f}/s > 0.1 — reduced {lots} → {adjusted} lots (70% scale)"
+            logger.info(reason)
+            return adjusted, reason
+        elif price_velocity < 0.02:
+            # Low velocity — full size, no adjustment
+            return lots, f"Velocity {price_velocity:.3f}/s < 0.02 — full size ({lots} lots)"
+        else:
+            # Moderate velocity — slight reduction (85%)
+            adjusted = max(1, int(lots * 0.85))
+            return adjusted, f"Velocity {price_velocity:.3f}/s moderate — {lots} → {adjusted} lots (85% scale)"

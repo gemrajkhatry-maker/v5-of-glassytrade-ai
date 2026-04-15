@@ -26,11 +26,11 @@ async def main():
         print(f"❌ Gateway creation FAILED: {e}")
         return
 
-    symbol = "NIFTY"
+    symbol = "CRUDEOIL"
     print(f"\nChecking quote for {symbol} via Gateway...")
     try:
         # get_quote is sync in the gateway (delegates to broker._run_async)
-        quote = gateway.get_quote(symbol, Exchange.NSE)
+        quote = gateway.get_quote(symbol, Exchange.MCX)
         if quote and quote.ltp > 0:
             print(f"✅ SUCCESS: {symbol} Quote LTP is {quote.ltp}")
             print(f"   Details: SID={getattr(quote.instrument, 'security_id', '?')}, High={quote.high}, Low={quote.low}")
@@ -47,9 +47,9 @@ async def main():
         import pandas as pd
         history = gateway.get_historical(
             symbol, 
-            Exchange.NSE, 
-            from_date=datetime(2026, 4, 9), 
-            to_date=datetime(2026, 4, 10),
+            Exchange.MCX, 
+            from_date=datetime(2026, 4, 14), 
+            to_date=datetime(2026, 4, 15),
             interval="5"
         )
         if hasattr(history, "empty") and not history.empty:

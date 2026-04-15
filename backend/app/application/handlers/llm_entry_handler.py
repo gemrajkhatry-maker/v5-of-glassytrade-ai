@@ -53,7 +53,7 @@ from shared.error_handling import (
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    from app.domain.ports.storage import StoragePort
+    from app.domain.ports.storage import IStorage
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class LLMEntryHandler:
     def __init__(
         self,
         gen_ai_service: GenerativeAIService,
-        storage: StoragePort | None = None,
+        storage: IStorage | None = None,
         trade_manager: TradeManager | None = None,
         journal=None,
         exchange: str = "MCX",
@@ -699,6 +699,7 @@ class LLMEntryHandler:
         # SOFT QUANT GATE
         # Instead of bypassing the LLM entirely when P ~ 0.5, we pass it as "context"
         # and let the LLM use structural/aggression data to find an edge.
+        agent_decision = getattr(session, "_agent_decision", None)
         quant_context = {}
         if agent_decision:
             agent_regime = getattr(agent_decision, "regime", "")
@@ -904,6 +905,24 @@ class LLMEntryHandler:
 
                 # Add context flags to market_data_ai
                 self._enrich_market_context(market_data_ai, amt_result)
+
+                # Refresh volatile fields from latest AMT result on session.
+                # The LLM worker runs asynchronously — by the time it processes,
+                # the aggression/cvd_slope/ofi/delta values from enqueue-time may
+                # be stale (e.g., "neutral aggression" vs live display showing +1.50).
+                # This mirrors the existing LTP refresh pattern below.
+                try:
+                    _latest_amt = session.last_amt
+                    if _latest_amt:
+                        market_data_ai["aggression"] = _latest_amt.get("aggression", market_data_ai.get("aggression", 0))
+                        market_data_ai["cvd_slope"] = _latest_amt.get("cvdSlope", market_data_ai.get("cvd_slope", 0))
+                        market_data_ai["ofi"] = _latest_amt.get("ofi", market_data_ai.get("ofi", 0))
+                        market_data_ai["delta"] = _latest_amt.get("deltaNormalizedOption", _latest_amt.get("delta", market_data_ai.get("delta", 0)))
+                        _new_ms = _latest_amt.get("marketState", "")
+                        if _new_ms:
+                            market_data_ai["market_state"] = _new_ms
+                except Exception:
+                    pass  # Non-critical — stale values are acceptable during active inference
 
                 # Update LTP to use the absolute latest tick to avoid stale context during inference delay
                 try:

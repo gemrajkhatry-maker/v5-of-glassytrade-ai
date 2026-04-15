@@ -27,8 +27,8 @@ if TYPE_CHECKING:
     from app.application.services.session_cache import SessionCache
     from app.application.services.entry_coordinator import EntryCoordinator
     from app.application.services.exit_coordinator import ExitCoordinator
-    from app.domain.ports.broker import BrokerPort
-    from app.domain.ports.storage import StoragePort
+    from app.domain.ports.broker import IBroker
+    from app.domain.ports.storage import IStorage
     from app.application.services.session_risk_coordinator import SessionRiskCoordinator
 
 log = logging.getLogger(__name__)
@@ -52,8 +52,8 @@ class SessionEventRouter:
         overseer_handler: LLMOverseerHandler,
         entry_coordinator: EntryCoordinator,
         exit_coordinator: ExitCoordinator,
-        broker: BrokerPort,
-        storage: StoragePort | None,
+        broker: IBroker,
+        storage: IStorage | None,
         risk_coordinator: SessionRiskCoordinator,
         probability_engine: Any,
         exchange_config: Any,

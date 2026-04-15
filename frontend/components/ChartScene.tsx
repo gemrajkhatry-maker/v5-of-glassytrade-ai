@@ -1406,7 +1406,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
             kelly={amtAnalysis.agentKelly || 0}
             rationale={amtAnalysis.agentRationale || amtAnalysis.llmThinking || ''}
             marketState={amtAnalysis.marketState}
-            aggression={amtAnalysis.aggression}
+            aggression={String(amtAnalysis.aggression ?? '')}
           />
         </div>
       )}
@@ -1467,7 +1467,7 @@ const DecisionCard: React.FC<DecisionCardProps> = ({ direction, setup, pLong, pS
         <div className="flex flex-col">
           <span className="text-[9px] text-white/30 uppercase font-bold tracking-tighter italic">Decision</span>
           <span className={`text-xs font-black uppercase tracking-wider ${directionColor}`}>
-            {directionIcon} {direction}
+            {directionIcon} {direction}{regime && direction !== 'FLAT' ? ` (${regime === 'TRENDING' ? 'Trend' : regime === 'BALANCED' ? 'Reversion' : regime})` : ''}
           </span>
         </div>
         <div className="flex flex-col items-end">

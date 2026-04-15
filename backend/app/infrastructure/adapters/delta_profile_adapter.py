@@ -1,6 +1,6 @@
 """DeltaProfileAdapter — Infrastructure adapter for delta volume profile.
 
-Implements DeltaProfilePort with O(1) per tick incremental updates.
+Implements IDeltaProfile with O(1) per tick incremental updates.
 Maintains per-bucket buy/sell delta accumulators and computes high delta zones.
 
 Per Fabio methodology:
@@ -11,13 +11,13 @@ Per Fabio methodology:
 from __future__ import annotations
 
 import logging
-from app.domain.ports.delta_profile import DeltaProfilePort, DeltaBucket, DeltaProfile
+from app.domain.ports.delta_profile import IDeltaProfile, DeltaBucket, DeltaProfile
 from app.domain.constants import DELTA_ZONE_SIGMA_MULT, DELTA_BUCKET_SIZE_DEFAULT
 
 logger = logging.getLogger(__name__)
 
 
-class DeltaProfileAdapter(DeltaProfilePort):
+class DeltaProfileAdapter(IDeltaProfile):
     """Delta-colored volume profile with O(1) per tick updates.
 
     DI pattern: Port (ABC) → Adapter (this class) → ServiceGraph injection.

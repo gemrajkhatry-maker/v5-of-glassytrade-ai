@@ -1,25 +1,49 @@
-# GlassyTrade AI — Live Environment
-# All symbols, live broker, WARNING logs, tight risk
+# GlassyTrade AI — Live/Production Environment
+# Production-ready settings, conservative risk, WARNING logs
 
 environment: "live"
 broker_mode: "live"
 log_level: "WARNING"
 
+# Enable both exchanges (controlled by strategy)
 exchanges:
   NSE:
     enabled: true
   MCX:
     enabled: true
 
-# Tight risk for live
+# Conservative production risk
 risk:
-  risk_per_trade_pct: 0.005
-  max_daily_loss_pct: 0.02
-  max_consecutive_losses: 3
-  max_concurrent_positions: 3  # tighter than paper
+  risk_per_trade_pct: 0.002  # 0.2% per trade (very conservative)
+  max_daily_loss_pct: 0.01   # 1% daily max loss
+  max_consecutive_losses: 2   # Halt after 2 consecutive losses
+  max_concurrent_positions: 3
+  max_drawdown_pct: 0.03     # 3% max drawdown
 
-# LLM restrictions for live
+# Production cost model (full realistic)
+cost_model:
+  enabled: true
+  base_slippage_bps: 20  # Higher slippage for live trading
+
+# Scanner settings (conservative)
+scanner:
+  mode: "mcx_options"
+  top_n: 2  # Fewer contracts in production
+  top_per_underlying: 1
+  strikes_around_atm: 1  # Only closest to ATM
+  expiry_index: 0
+
+# LLM settings (production)
 llm:
-  # llm_entry_gate is HARDCODED false — never enabled in live
-  temperature_entry: 0.4
-  temperature_overseer: 0.3
+  timeout_seconds: 45
+  temperature_entry: 0.3  # More deterministic
+  overseer_temperature: 0.2
+
+# Production feature flags
+feature_flags:
+  risk_tier_engine: true
+  short_signals_enabled: true
+  llm_pre_candle_advisory: true
+  scalp_engine_enabled: false  # Disable scalping in production initially
+  realistic_cost_model: true
+  correlation_guard: true

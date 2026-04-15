@@ -11,7 +11,7 @@ from functools import lru_cache
 
 
 ENTRY_CONTRACT_VERSION = "entry-json-v1"
-CANONICAL_RUNTIME_MODEL_FAMILY = "qwen-mlx"
+CANONICAL_RUNTIME_MODEL_FAMILY = "gemma-mlx"
 
 ENTRY_RESPONSE_KEYS: tuple[str, ...] = (
     "direction",

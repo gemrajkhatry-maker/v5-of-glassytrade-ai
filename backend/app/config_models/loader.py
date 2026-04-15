@@ -136,33 +136,60 @@ def _parse_exchange(name: str, data: dict) -> ExchangeConfig:
     )
 
 
-def load_config(config_dir: str | None = None) -> SystemConfig:
+def load_config(
+    config_dir: str | None = None,
+    strategy: str | None = None  # NEW: strategy name
+) -> SystemConfig:
     """Load SystemConfig from YAML hierarchy.
 
     Args:
         config_dir: Path to config/ directory. Defaults to backend/config/
+        strategy: Strategy name (e.g., "mcx_options", "nse_options").
+                  If None, reads from GLASSYTRADE_STRATEGY env var.
 
     Returns:
         Frozen SystemConfig object
+    
+    Merge sequence (strictly enforced):
+      STEP 1: Load base.yaml → establishes ALL defaults
+      STEP 2: Load environments/{GLASSYTRADE_ENV}.yaml → deep-merge overrides base
+      STEP 3: Load strategies/{strategy}.yaml → deep-merge overrides result
+      STEP 4: Read ENV vars for SECRETS ONLY → API keys, tokens
+      STEP 5: Build typed SystemConfig → immutable, frozen
+      STEP 6: Run ConfigValidator → fail fast if invalid
+      STEP 7: Log startup summary → human-readable at boot
     """
     if config_dir is None:
-        config_dir = str(Path(__file__).resolve().parent.parent / "config")
+        config_dir = str(Path(__file__).resolve().parent.parent.parent / "config")
     config_path = Path(config_dir)
 
     # STEP 1: Load base.yaml
     base_data = _load_yaml(config_path / "base.yaml")
 
     # STEP 2: Load environment override
-    env_name = os.environ.get("GLASSYTRADE_ENV", "development")
+    env_name = os.environ.get("GLASSYTRADE_ENV", "paper")
     env_data = _load_yaml(config_path / "environments" / f"{env_name}.yaml")
     merged = _deep_merge(base_data, env_data)
 
-    # STEP 3: Load strategy overrides
-    strategies_dir = config_path / "strategies"
-    if strategies_dir.exists():
-        for f in sorted(strategies_dir.glob("*.yaml")):
-            strat_data = _load_yaml(f)
+    # STEP 3: Load strategy overrides (NEW)
+    if strategy is None:
+        strategy = os.environ.get("GLASSYTRADE_STRATEGY")
+    
+    if strategy:
+        strat_path = config_path / "strategies" / f"{strategy}.yaml"
+        strat_data = _load_yaml(strat_path)
+        if strat_data:
             merged = _deep_merge(merged, strat_data)
+            logger.info("Loaded strategy: %s", strategy)
+        else:
+            logger.warning("Strategy file not found: %s", strat_path)
+    else:
+        # Load any existing strategy files for backward compatibility
+        strategies_dir = config_path / "strategies"
+        if strategies_dir.exists():
+            for f in sorted(strategies_dir.glob("*.yaml")):
+                strat_data = _load_yaml(f)
+                merged = _deep_merge(merged, strat_data)
 
     # STEP 4: Load feature flags
     flags_data = _load_yaml(config_path / "feature_flags.yaml")

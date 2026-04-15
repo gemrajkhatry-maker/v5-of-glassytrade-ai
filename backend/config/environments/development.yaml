@@ -1,5 +1,5 @@
 # GlassyTrade AI — Development Environment
-# 1 symbol (NIFTY), paper broker, DEBUG logs
+# Single symbol (NIFTY), paper broker, DEBUG logs, relaxed risk
 
 environment: "development"
 broker_mode: "paper"
@@ -30,3 +30,16 @@ risk:
 cost_model:
   enabled: true
   base_slippage_bps: 15
+
+# Scanner settings for development
+scanner:
+  mode: "nse_options"
+  top_n: 1
+  top_per_underlying: 1
+  strikes_around_atm: 2
+  expiry_index: 0
+
+# LLM settings for development (faster timeout)
+llm:
+  timeout_seconds: 30
+  temperature_entry: 0.5  # More creative for testing

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from app.domain.ports.npoc import NPOCPort, NPOCRecord, NPOCResult
+from app.domain.ports.npoc import INPOC as NPOCPort, NPOCRecord, NPOCResult
 
 logger = logging.getLogger(__name__)
 

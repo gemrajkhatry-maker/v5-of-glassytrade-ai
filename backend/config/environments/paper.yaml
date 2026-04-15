@@ -1,10 +1,11 @@
 # GlassyTrade AI — Paper Environment
-# All symbols, paper broker, INFO logs, realistic costs
+# All symbols enabled, paper trading, INFO logs, realistic costs
 
 environment: "paper"
 broker_mode: "paper"
 log_level: "INFO"
 
+# Enable both exchanges (default to MCX via strategy file)
 exchanges:
   NSE:
     enabled: true
@@ -22,3 +23,16 @@ risk:
 cost_model:
   enabled: true
   base_slippage_bps: 15
+
+# Scanner settings (will be overridden by strategy)
+scanner:
+  mode: "mcx_options"
+  top_n: 4
+  top_per_underlying: 2
+  strikes_around_atm: 2
+  expiry_index: 0
+
+# LLM settings
+llm:
+  timeout_seconds: 60
+  temperature_entry: 0.4

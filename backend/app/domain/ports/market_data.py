@@ -16,7 +16,7 @@ from typing import Any, AsyncIterator
 from app.domain.trading.models.value_objects import OHLC, OrderBook
 
 
-class MarketDataPort(ABC):
+class IMarketData(ABC):
     """Abstract market data provider (Dhan, simulation, etc.)."""
 
     # ------------------------------------------------------------------

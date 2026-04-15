@@ -13,8 +13,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from app.domain.ports.storage import StoragePort
-from app.domain.ports.broker import BrokerPort
+from app.domain.ports.storage import IStorage
+from app.domain.ports.broker import IBroker
 from app.domain.trading.events import PositionClosed
 from app.application.handlers.post_trade_analyst import PostTradeAnalyst
 from app.shared.timezones import IST
@@ -41,12 +41,12 @@ class ExitCoordinator:
 
     def __init__(
         self,
-        broker: BrokerPort,
+        broker: IBroker,
         lifecycle_handler: TradeLifecycleHandler,
         event_logger: SessionEventLogger,
         overseer_handler: LLMOverseerHandler,
         state_manager: SessionStateManager,
-        storage: StoragePort | None,
+        storage: IStorage | None,
         llm_handler: LLMEntryHandler,
         risk_coordinator: SessionRiskCoordinator,
         post_trade_analyst: PostTradeAnalyst | None = None,

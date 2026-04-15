@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.dependencies import get_storage, get_trading_session
 from app.application.services.trading_session import TradingSessionService
-from app.domain.ports.storage import StoragePort
+from app.domain.ports.storage import IStorage
 from app.domain.trading.models.enums import Source
 from app.infrastructure.serialization.schemas import (
     StatsRequestDTO, portfolio_to_dto, position_event_to_dto, stats_to_dto,
@@ -77,7 +77,7 @@ async def compute_stats(req: StatsRequestDTO):
 async def get_position_events(
     position_id: str | None = Query(default=None, alias="positionId"),
     symbol: str | None = Query(default=None),
-    storage: StoragePort = Depends(get_storage),
+    storage: IStorage = Depends(get_storage),
 ):
     """Return append-only lifecycle events for operator inspection and replay."""
     events = storage.query_position_events(position_id=position_id, symbol=symbol)
@@ -90,7 +90,7 @@ async def get_position_events(
 @router.get("/positions/{position_id}/lifecycle")
 async def get_position_lifecycle(
     position_id: str,
-    storage: StoragePort = Depends(get_storage),
+    storage: IStorage = Depends(get_storage),
 ):
     """Return the replay-friendly lifecycle view for a single position."""
     events = storage.query_position_events(position_id=position_id)

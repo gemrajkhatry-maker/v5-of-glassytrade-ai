@@ -10,7 +10,7 @@ from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
-class SymbolConfigPort(Protocol):
+class ISymbolConfig(Protocol):
     """Port for symbol-specific trading configuration.
 
     This is the canonical location for the SymbolConfigLike protocol.
@@ -45,7 +45,7 @@ class SymbolConfigPort(Protocol):
 
 
 @runtime_checkable
-class GlobalsPort(Protocol):
+class IGlobals(Protocol):
     """Port for accessing global trading constants.
 
     These values are loaded from config/base.yaml globals section.
@@ -94,21 +94,21 @@ class GlobalsPort(Protocol):
 
 
 @runtime_checkable
-class ConfigPort(Protocol):
+class IConfig(Protocol):
     """Main port for accessing trading configuration.
 
     Provides access to symbol configs, global constants, and settings.
     Application layer implements this with concrete config loader.
     """
 
-    def get_symbol_config(self, symbol: str) -> SymbolConfigPort | None:
+    def get_symbol_config(self, symbol: str) -> ISymbolConfig | None:
         """Get configuration for a specific trading symbol.
 
         Args:
             symbol: Trading symbol (e.g., "NIFTY", "BANKNIFTY").
 
         Returns:
-            SymbolConfigPort if found, None otherwise.
+            SymbolIConfig if found, None otherwise.
         """
         ...
 
@@ -129,6 +129,6 @@ class ConfigPort(Protocol):
         ...
 
     @property
-    def globals(self) -> GlobalsPort:
+    def globals(self) -> IGlobals:
         """Access to global constants."""
         ...

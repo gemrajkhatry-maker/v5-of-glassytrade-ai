@@ -14,7 +14,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from app.domain.ports.market_data import MarketDataPort
+    from app.domain.ports.market_data import IMarketData
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +58,11 @@ SURROUNDING_OFFSETS = [-200, -100, 100, 200]
 class OIAnalyzer:
     """Calculates OI pressure at option strikes.
 
-    Injects MarketDataPort to fetch option chain data.
+    Injects IMarketData to fetch option chain data.
     Pure domain logic — no I/O side effects beyond the injected port.
     """
 
-    def __init__(self, market_data: "MarketDataPort | None" = None) -> None:
+    def __init__(self, market_data: "IMarketData | None" = None) -> None:
         self._market_data = market_data
 
     def check_oi_pressure(

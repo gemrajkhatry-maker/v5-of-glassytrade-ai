@@ -638,6 +638,10 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         "swingDelta": r.swing_delta,
         # Per-symbol delta (FIX BUG #3: isolated per option contract)
         "deltaNormalizedOption": r.delta_normalized_option,
+        # CVD data source indicator
+        "cvdSource": r.cvd_source,
+        # Bimodal active pole
+        "bimodalActivePole": r.bimodal_active_pole,
     }
 
 

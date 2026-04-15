@@ -1,226 +1,259 @@
-"""GlassyTrade AI Backend — FastAPI application entry point.
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 
-Production-grade DDD / Event-Driven architecture.
-Service graph is created once at startup via the DI factory.
-LLM model is loaded and validated before the server accepts connections.
+"""
+Main application entry point.
+
+This module sets up the dependency injection graph and starts the FastAPI application.
 """
 
-from __future__ import annotations
-
+import asyncio
 import logging
-import json
-import sys
 import os
-
-# Ensure shared/ and brokers/ are importable — they live outside backend/
-import sys as _sys
-import os as _os
-_project_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), '..', '..'))
-for _sub in ('shared', 'brokers'):
-    _p = _os.path.join(_project_root, _sub)
-    if _p not in _sys.path:
-        _sys.path.insert(0, _p)
-del _sys, _os, _project_root, _sub, _p
-
-# Fix OpenMP multiple initialization crash (LightGBM + MLX) on macOS
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-
-import time as _time
-import tracemalloc
-from collections import defaultdict
-
-if os.getenv("DEBUG_MEMORY", "").lower() == "true":
-    tracemalloc.start()
+import sys
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from pathlib import Path
+from typing import AsyncGenerator
 
-from fastapi import FastAPI
+
+def _apply_repo_dotenv_fill_blanks() -> None:
+    """Fill unset or blank os.environ keys from repo-root .env (shell `export VAR=` cannot block)."""
+    try:
+        from dotenv import dotenv_values
+    except ImportError:
+        return
+    repo = Path(__file__).resolve().parent.parent.parent
+    env_path = repo / ".env"
+    if not env_path.is_file():
+        return
+    for key, val in dotenv_values(env_path).items():
+        if val is None:
+            continue
+        sval = str(val).strip()
+        if not sval:
+            continue
+        cur = os.environ.get(key)
+        if cur is None or (isinstance(cur, str) and not cur.strip()):
+            os.environ[key] = sval
+
+
+_apply_repo_dotenv_fill_blanks()
+
+# Avoid OpenMP/runtime clashes when MLX and LightGBM both load in one process (macOS).
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+
+from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import settings
-
-
-class JSONFormatter(logging.Formatter):
-    """Structured JSON log formatter for production."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        log_data = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "level": record.levelname,
-            "component": record.name,
-            "message": record.getMessage(),
-        }
-        if record.exc_info and record.exc_info[0]:
-            log_data["exception"] = self.formatException(record.exc_info)
-        return json.dumps(log_data)
-
-
-def _setup_logging() -> None:
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JSONFormatter())
-    root = logging.getLogger()
-    root.handlers.clear()
-    root.addHandler(handler)
-    # DEBUG for enhanced audit logging
-    root.setLevel(logging.DEBUG)
-
-
-_setup_logging()
-
-log = logging.getLogger(__name__)
-
-# API routers
-from app.api.routers.health import router as health_router
-from app.api.routers.market import router as market_router
-from app.api.routers.analysis import router as analysis_router
-from app.api.routers.trading import router as trading_router
-from app.api.routers.ai import router as ai_router
-from app.api.routers.rl import router as rl_router
-from app.api.routers.metrics import router as metrics_router
+from app.api.dependencies import set_service_graph
+from app.api.routers import (
+    health_router,
+    market_router,
+    trading_router,
+    ai_router,
+    rl_router,
+    metrics_router,
+)
 from app.api.websocket.gameloop import router as gameloop_router
+from app.application.service_graph import ServiceGraph
+from config.config import Configuration
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+    ],
+)
+logger = logging.getLogger(__name__)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Startup: eagerly create service graph and wait for LLM model readiness."""
-    from app.api.dependencies import get_service_graph
-
-    log.info("Creating service graph and loading LLM model...")
-    graph = get_service_graph()
-    llm = graph.llm_inference
-
-    # Block until model is loaded (up to 120s)
-    log.info("Waiting for LLM model to be ready (up to 120s)...")
-    ready = llm.wait_until_ready(timeout=120.0)
-    if not ready:
-        log.error(
-            "LLM model failed to load within timeout! Backend will start but LLM calls will fail."
-        )
-    else:
-        # Validate with a test inference
-        log.info("Running LLM validation inference...")
-        valid = llm.validate()
-        if valid:
-            log.info("LLM model loaded and validated — backend ready for trading.")
-        else:
-            log.error("LLM validation inference failed! Model may produce bad outputs.")
-
-    # Start the standalone trading engine (trades independently of frontend)
-    from app.application.engine import TradingEngine
-
-    engine = TradingEngine(graph)
-    graph.engine = engine
-
-    # Inject engine reference into overseer handler for immediate UI updates
-    try:
-        graph.trading_session._overseer_handler._engine = engine
-        log.info("Injected engine reference into overseer handler (engine_id=%s)", id(engine))
-    except Exception:
-        log.warning("Failed to inject engine reference into overseer handler", exc_info=True)
-
-    try:
-        await engine.start()
-        log.info("Trading engine started — backend trades independently of frontend.")
-    except Exception:
-        log.error("Trading engine failed to start!", exc_info=True)
-
-    yield  # Server is running
-
-    # Graceful shutdown
-    log.info("Shutting down GlassyTrade AI backend...")
-
-    # Stop trading engine first
-    if graph.engine:
+def create_application() -> FastAPI:
+    """Create and configure the FastAPI application."""
+    
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncGenerator:
+        """Application lifespan: startup and shutdown."""
+        # Startup
+        logger.info("Starting GlassyTrade AI application...")
+        
+        # Get service graph from app state
+        graph = app.state.service_graph
+        
+        # Run option scanner to select MCX/NSE contracts
+        logger.info("Running option scanner to select contracts...")
         try:
-            await graph.engine.stop()
+            from app.domain.fabio_ai.services.option_scanner import OptionScannerService
+            from app.config import settings
+
+            scanner = OptionScannerService(graph.market_data)
+
+            # Run synchronous scanner off the event loop (avoid Future.result() blocking the loop)
+            results = await asyncio.wait_for(
+                asyncio.to_thread(
+                    scanner.scan_top_n,
+                    n=settings.SCANNER_TOP_N,
+                    underlyings=settings.SCANNER_UNDERLYINGS,
+                    preferred_option_type=settings.SCANNER_OPTION_TYPE or None,
+                    exchange=settings.DEFAULT_EXCHANGE,
+                    expiry_index=settings.SCANNER_EXPIRY_INDEX,
+                    strikes_around_atm=settings.STRIKES_AROUND_ATM,
+                ),
+                timeout=120.0,
+            )
+            
+            if results:
+                # Filter to valid contracts with LTP > 0
+                final = [r for r in results if r.ltp > 0] or results
+                selected_symbols = [r.symbol for r in final[:settings.SCANNER_TOP_N]]
+                
+                if selected_symbols:
+                    graph.active_symbols = selected_symbols
+                    logger.info(
+                        "Option scanner selected %d contracts: %s",
+                        len(selected_symbols),
+                        selected_symbols
+                    )
+                else:
+                    logger.warning("Option scanner found contracts but none with LTP > 0")
+            else:
+                logger.warning(
+                    "Option scanner found no contracts — using default underlyings: %s",
+                    graph.active_symbols
+                )
+        except Exception as e:
+            logger.error("Option scanner failed: %s — using default underlyings", e, exc_info=True)
+        
+        # Start the trading engine
+        from app.application.engine import TradingEngine
+        engine = TradingEngine(graph)
+        graph.engine = engine
+        
+        try:
+            await engine.start()
+            logger.info("Trading engine started — backend trades independently of frontend.")
         except Exception:
-            log.debug("Engine stop failed", exc_info=True)
-
-    # Flush pending database ticks
-    try:
-        storage = graph.storage
-        if hasattr(storage, "_flush_ticks"):
+            logger.error("Trading engine failed to start!", exc_info=True)
+        
+        logger.info("Application started successfully")
+        
+        yield  # Server is running
+        
+        # Shutdown
+        logger.info("Shutting down GlassyTrade AI application...")
+        
+        # Stop trading engine
+        if graph.engine:
             try:
-                storage._flush_ticks()
+                await graph.engine.stop()
+                logger.info("Trading engine stopped")
             except Exception:
-                pass  # Storage may be closed or empty — shutdown in progress
-    except Exception:
-        log.debug("Tick flush on shutdown failed", exc_info=True)
+                logger.debug("Engine stop failed", exc_info=True)
+        
+        logger.info("Shutdown complete")
+    
+    app = FastAPI(
+        title="GlassyTrade AI",
+        description="Algorithmic trading system with AI-driven decision making",
+        version="1.0.0",
+        lifespan=lifespan,
+    )
 
-    # Shutdown handler thread pools via cleanup()
+    # Add CORS middleware
+    # NOTE: For WebSocket connections, we need to use allow_origin_regex instead of
+    # allow_origins=["*"] when allow_credentials=True, otherwise WS connections get 403
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allow all origins for development
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Add WebSocket logging middleware to debug 403 issues
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request
+    from starlette.responses import Response
+
+    class WebSocketLogMiddleware(BaseHTTPMiddleware):
+        """Log WebSocket connection attempts for debugging."""
+        async def dispatch(self, request: Request, call_next):
+            if request.url.path == "/api/trading/ws/gameloop":
+                logger.info(
+                    "WebSocket request: method=%s, path=%s, headers=%s",
+                    request.method,
+                    request.url.path,
+                    dict(request.headers)
+                )
+            response = await call_next(request)
+            return response
+
+    app.add_middleware(WebSocketLogMiddleware)
+
+    # Load configuration
+    config = Configuration.from_env()
+    logger.info(f"Loaded configuration: {config}")
+
+    # Create service graph
+    service_graph = ServiceGraph(config)
+
+    # Store service graph in application state
+    app.state.service_graph = service_graph
+    app.state.engine = None  # Will be set by lifespan
+    set_service_graph(service_graph)
+
+    # Register routers
+    app.include_router(health_router, prefix="", tags=["health"])
+    app.include_router(health_router, prefix="/api", tags=["health"])
+    app.include_router(market_router, prefix="/market", tags=["market"])
+    app.include_router(trading_router, prefix="/trading", tags=["trading"])
+    app.include_router(gameloop_router, prefix="/api", tags=["websocket"])
+    app.include_router(ai_router, prefix="/api", tags=["ai"])
+    app.include_router(rl_router, prefix="/rl", tags=["rl"])
+    app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
+
+    return app
+
+
+async def startup_event(service_graph: ServiceGraph):
+    """Application startup event."""
+    logger.info("Starting GlassyTrade AI application...")
+
+    # Initialize services that need setup
+    # Example: market_data_adapter = service_graph.get(IMarketData)
+    # market_data_adapter.ensure_initialized_sync()
+
+    logger.info("Application started successfully")
+
+
+async def shutdown_event(service_graph: ServiceGraph):
+    """Application shutdown event."""
+    logger.info("Shutting down GlassyTrade AI application...")
+
+    # Cleanup resources
+    # Example: market_data_adapter = service_graph.get(IMarketData)
+    # market_data_adapter.close_sync()
+
+    logger.info("Shutdown complete")
+
+
+def main() -> None:
+    """Main entry point."""
     try:
-        ts = graph.trading_session
-        for attr in ("_llm_handler", "_overseer_handler"):
-            handler = getattr(ts, attr, None)
-            if handler and hasattr(handler, "cleanup"):
-                handler.cleanup()
-        log.info("Thread pools shut down.")
-    except AttributeError:
-        log.debug("Thread pool cleanup failed", exc_info=True)
-
-    # Disconnect market data feed (WebSocket)
-    try:
-        md = graph.market_data
-        if md and hasattr(md, "close_sync"):
-            md.close_sync()
-            log.info("Market data feed disconnected.")
-    except Exception:
-        log.debug("Market data disconnect failed", exc_info=True)
+        logger.info("Created FastAPI application")
+    except Exception as e:
+        logger.error(f"Failed to create application: {e}")
+        sys.exit(1)
 
 
-app = FastAPI(
-    title="GlassyTrade AI",
-    description="Production-grade quant trading backend — DDD / Event-Driven",
-    version="2.0.0",
-    lifespan=lifespan,
-)
-
-# CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ---------------------------------------------------------------------------
-# Simple in-memory rate limiter (100 req/min per client IP)
-# ---------------------------------------------------------------------------
-_request_counts: dict[str, list[float]] = defaultdict(list)
-_RATE_LIMIT = 100  # max requests per window
-_RATE_WINDOW = 60  # window in seconds
-
-
-@app.middleware("http")
-async def rate_limit_middleware(request, call_next):
-    """Reject requests exceeding _RATE_LIMIT per _RATE_WINDOW seconds."""
-    client_ip = request.client.host if request.client else "unknown"
-    now = _time.time()
-    # Evict timestamps outside the current window
-    _request_counts[client_ip] = [
-        t for t in _request_counts[client_ip] if now - t < _RATE_WINDOW
-    ]
-    if len(_request_counts[client_ip]) >= _RATE_LIMIT:
-        from starlette.responses import JSONResponse
-
-        return JSONResponse({"error": "Rate limit exceeded"}, status_code=429)
-    _request_counts[client_ip].append(now)
-    return await call_next(request)
-
-
-# Mount routers
-app.include_router(health_router, prefix="/api")
-app.include_router(market_router, prefix="/api")
-app.include_router(analysis_router, prefix="/api")
-app.include_router(trading_router, prefix="/api")
-app.include_router(ai_router, prefix="/api")
-app.include_router(rl_router, prefix="/api")
-app.include_router(metrics_router, prefix="/api")
-app.include_router(gameloop_router, prefix="/api")
+# Create the FastAPI app at module level for Uvicorn
+app = create_application()
 
 
 if __name__ == "__main__":
-    import uvicorn
-
-    uvicorn.run(app, host="0.0.0.0", port=9090)
+    main()

@@ -1,12 +1,12 @@
 """No-op notification adapter — default when no credentials configured."""
 from __future__ import annotations
 import logging
-from app.domain.ports.notifications import NotificationPort
+from app.domain.ports.notifications import INotification
 
 logger = logging.getLogger(__name__)
 
 
-class NullNotificationAdapter(NotificationPort):
+class NullNotificationAdapter(INotification):
     """Discards all notifications. Used in development and testing."""
 
     async def send(self, message: str, level: str = "INFO") -> None:

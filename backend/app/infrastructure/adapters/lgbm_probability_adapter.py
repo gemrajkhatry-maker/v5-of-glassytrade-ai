@@ -10,7 +10,7 @@ import numpy as np
 
 from app.domain.ports.probability_inference import (
     ProbabilityEstimate,
-    ProbabilityInferencePort,
+    IProbabilityInference,
 )
 from app.domain.probability.features import (
     FEATURE_NAMES,
@@ -21,7 +21,7 @@ from app.domain.probability.features import (
 logger = logging.getLogger(__name__)
 
 
-class LGBMProbabilityAdapter(ProbabilityInferencePort):
+class LGBMProbabilityAdapter(IProbabilityInference):
     """Loads pre-trained LightGBM models and predicts first-passage probabilities."""
 
     def __init__(self, model_dir: str) -> None:

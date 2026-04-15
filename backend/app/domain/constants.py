@@ -9,11 +9,11 @@ TODO(DIP): Dependency Inversion Violation
 ----------------------------------------
 This module directly loads from config/base.yaml via yaml.safe_load(),
 violating dependency inversion. The domain layer should receive configuration
-through injected ports (ConfigPort/GlobalsPort), not load infrastructure files.
+through injected ports (IConfig/IGlobals), not load infrastructure files.
 
 Proper fix would require:
-1. Application layer to load YAML and create a GlobalsPort implementation
-2. Domain services to receive GlobalsPort via constructor injection
+1. Application layer to load YAML and create a IGlobals implementation
+2. Domain services to receive IGlobals via constructor injection
 3. This file to become a thin wrapper that receives injected config
 
 This refactoring is deferred due to deep coupling across the codebase.

@@ -3,7 +3,7 @@ import logging
 from collections import OrderedDict
 from typing import Dict, Any
 
-from app.domain.ports.llm_inference import LLMInferencePort
+from app.domain.ports.llm_inference import ILLMInference
 from app.domain.fabio_ai.services.prompt_builder import (
     build_entry_prompt,
     parse_entry_response,
@@ -37,7 +37,7 @@ class GenerativeAIService:
 
     _CACHE_SIZE = 8
 
-    def __init__(self, llm_adapter: LLMInferencePort, instruction: str = ""):
+    def __init__(self, llm_adapter: ILLMInference, instruction: str = ""):
         self.llm_adapter = llm_adapter
         self._instruction = instruction or _DEFAULT_INSTRUCTION
         self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()

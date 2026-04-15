@@ -26,7 +26,7 @@ class NPOCResult:
     all_active: tuple[NPOCRecord, ...]
 
 
-class NPOCPort(ABC):
+class INPOC(ABC):
     """Interface for tracking naked (unfilled) previous session POCs.
 
     Per Fabio methodology, previous session POCs that haven't been revisited

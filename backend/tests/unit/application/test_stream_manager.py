@@ -1,13 +1,13 @@
 import pytest
 import asyncio
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch, MagicMock, PropertyMock
 
 from app.application.stream_manager import StreamManager
-from app.domain.ports.market_data import MarketDataPort
+from app.domain.ports.market_data import IMarketData
 
 @pytest.fixture
 def mock_market_data():
-    mock = MagicMock(spec=MarketDataPort)
+    mock = MagicMock(spec=IMarketData)
     return mock
 
 @pytest.fixture
@@ -35,11 +35,14 @@ async def test_stream_with_reconnect_mcx_mode(stream_manager, mock_market_data):
 
     mock_market_data.stream_full = MagicMock(side_effect=mock_stream_full)
 
-    from app.config import settings
-    orig_ex = settings.DEFAULT_EXCHANGE
-    settings.DEFAULT_EXCHANGE = "MCX"
-    
-    try:
+    from app.application import stream_manager as stream_manager_module
+
+    with patch.object(
+        type(stream_manager_module.settings),
+        "DEFAULT_EXCHANGE",
+        new_callable=PropertyMock,
+        return_value="MCX",
+    ):
         pkts = []
         connect_state = [0.0]
         
@@ -51,8 +54,6 @@ async def test_stream_with_reconnect_mcx_mode(stream_manager, mock_market_data):
         # Assert stream_depth_20 was never called because it's MCX
         if hasattr(mock_market_data, "stream_depth_20"):
              mock_market_data.stream_depth_20.assert_not_called()
-    finally:
-        settings.DEFAULT_EXCHANGE = orig_ex
 
 
 @pytest.mark.asyncio
@@ -107,11 +108,14 @@ async def test_stream_with_reconnect_nse_mode_dual_stream(stream_manager, mock_m
 
     mock_market_data.stream_full = MagicMock(side_effect=mock_stream_full)
 
-    from app.config import settings
-    orig_ex = settings.DEFAULT_EXCHANGE
-    settings.DEFAULT_EXCHANGE = "NSE"
-    
-    try:
+    from app.application import stream_manager as stream_manager_module
+
+    with patch.object(
+        type(stream_manager_module.settings),
+        "DEFAULT_EXCHANGE",
+        new_callable=PropertyMock,
+        return_value="NSE",
+    ):
         pkts = []
         connect_state = [0.0]
         
@@ -127,8 +131,6 @@ async def test_stream_with_reconnect_nse_mode_dual_stream(stream_manager, mock_m
         
         assert len(pkts[0]["depth_asks"]) == 20
         assert pkts[0]["depth_asks"][0]["price"] == 22010.0
-    finally:
-        settings.DEFAULT_EXCHANGE = orig_ex
 
 
 @pytest.mark.asyncio
@@ -156,3 +158,19 @@ async def test_stream_with_reconnect_polling_fallback(stream_manager, mock_marke
     assert pkts[0]["ltp"] == 23000.0
     # No regular WS logic invoked
     mock_market_data.stream_full.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_poll_worker_accepts_coroutine_worker(stream_manager):
+    """
+    Test the unresolved-symbol poll worker path does not expect an async iterator.
+    """
+    queue = asyncio.Queue()
+
+    async def worker(q):
+        await q.put({"symbol": "NIFTY", "ltp": 123.0})
+
+    await stream_manager._run_poll_worker(worker, queue)
+
+    pkt = await queue.get()
+    assert pkt["ltp"] == 123.0

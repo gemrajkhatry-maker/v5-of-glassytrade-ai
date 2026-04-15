@@ -1,4 +1,4 @@
-"""Dhan market data adapter — implements MarketDataPort using the brokers/ library.
+"""Dhan market data adapter — implements IMarketData using the brokers/ library.
 
 Provides historical candle data, quote snapshots, and live streaming for
 NSE/NFO/MCX instruments via DhanBroker from the brokers/ package.
@@ -27,7 +27,7 @@ for _ancestor in _here.parents:
         break
 
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
-from app.domain.ports.market_data import MarketDataPort
+from app.domain.ports.market_data import IMarketData
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def _exchange_enum(exchange_str: str | None):
     return result
 
 
-class DhanMarketDataAdapter(MarketDataPort):
+class DhanMarketDataAdapter(IMarketData):
     """Dhan market data adapter using the brokers/ DhanBroker library.
 
     Initialization is guarded by a threading lock so that exactly one

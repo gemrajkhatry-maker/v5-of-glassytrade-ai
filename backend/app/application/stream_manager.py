@@ -19,7 +19,7 @@ from app.config import settings
 from app.application.utils import is_market_open
 
 if TYPE_CHECKING:
-    from app.domain.ports.market_data import MarketDataPort
+    from app.domain.ports.market_data import IMarketData
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ class StreamManager:
     source of truth for market data streaming across the codebase.
     """
 
-    def __init__(self, market_data: MarketDataPort):
+    def __init__(self, market_data: IMarketData):
         self._market_data = market_data
         self._polling_mode: bool = False
         self._last_any_tick_time: float = time.time()
@@ -295,8 +295,7 @@ class StreamManager:
     async def _run_poll_worker(self, worker_fn, queue: asyncio.Queue):
         """Run the polling worker and put results into the queue."""
         try:
-            async for pkt in worker_fn(queue):
-                await queue.put(pkt)
+            await worker_fn(queue)
         except asyncio.CancelledError:
             pass
         except Exception as e:

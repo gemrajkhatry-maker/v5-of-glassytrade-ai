@@ -6,7 +6,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api.dependencies import get_gen_ai_service, get_storage
+from app.api.dependencies import get_active_symbols, get_gen_ai_service, get_storage
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 from app.infrastructure.storage.database import SQLiteStorageAdapter
 
@@ -150,11 +150,9 @@ async def get_decision_history(
     end: Optional[str] = Query(None),
     limit: int = Query(1000),
     storage: SQLiteStorageAdapter = Depends(get_storage),
+    active_symbols: list[str] = Depends(get_active_symbols),
 ):
     """Returns persisted decision history from SQLite — LLM decisions + signal decisions."""
-    from app.api.dependencies import get_active_symbols
-
-    active_symbols = get_active_symbols()
     # Cap limit to prevent massive responses
     safe_limit = min(limit, 200)
     llm_rows = storage.query_llm_decisions(

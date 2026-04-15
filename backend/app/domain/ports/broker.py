@@ -8,7 +8,7 @@ from app.domain.trading.models.entities import Position, Signal
 from app.domain.trading.models.aggregates import Portfolio
 
 
-class BrokerPort(ABC):
+class IBroker(ABC):
     """Abstract broker for executing trade orders (paper or live)."""
 
     @abstractmethod

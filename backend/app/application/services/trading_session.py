@@ -35,11 +35,11 @@ from app.domain.trading.events import (
     PositionOpened,
     PositionClosed,
 )
-from app.domain.ports.broker import BrokerPort
-from app.domain.ports.storage import StoragePort
+from app.domain.ports.broker import IBroker
+from app.domain.ports.storage import IStorage
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 from app.domain.ports.probability_inference import (
-    ProbabilityInferencePort,
+    IProbabilityInference,
     NoOpProbabilityAdapter,
 )
 
@@ -97,11 +97,11 @@ class TradingSessionService:
 
     def __init__(
         self,
-        broker: BrokerPort,
+        broker: IBroker,
         gen_ai_service: GenerativeAIService,
-        storage: StoragePort | None = None,
+        storage: IStorage | None = None,
         amt_handler: AMTHandler | None = None,
-        probability_engine: ProbabilityInferencePort | None = None,
+        probability_engine: IProbabilityInference | None = None,
         exchange_config=None,  # ExchangeConfig — injected from ServiceGraph
         allow_short: bool = False,
         gate_tracker=None,  # GateRejectionTracker — observability
@@ -257,6 +257,12 @@ class TradingSessionService:
 
         # Per-session caches (created on demand)
         self._session_caches: dict[str, SessionCache] = {}
+
+        # Per-underlying market state cache — ensures CE/PE on the same underlying
+        # share the same market state instead of computing independently.
+        # Key: underlying name (e.g., "NIFTY"), Value: (timestamp, market_state_str)
+        self._underlying_state_cache: dict[str, tuple[float, str]] = {}
+        self._underlying_state_ttl = 60.0  # seconds
 
     def get_or_create_session(self, symbol: str) -> SessionState:
         """Get or create a session for the symbol."""
@@ -556,12 +562,18 @@ class TradingSessionService:
     def _run_amt_analysis(self, event: TickReceived, session, prior, cache: SessionCache) -> object:
         """Run AMT analysis with data source selection and prior profile injection."""
         # Dual feed: use underlying futures data for AMT analysis (only if we have enough data)
+        # Lowered threshold from 20 to 5 candles — CVD on option data produces sign-flipping noise
+        # because option delta is driven by MM hedging, not actual market direction.
+        _underlying_min_candles = 5
         amt_data = list(event.data)
-        if cache.has_underlying_data(20):
+        cvd_source = "option"  # default: option premium data
+        if cache.has_underlying_data(_underlying_min_candles):
             amt_data = cache.get_underlying_data()
+            cvd_source = "underlying"
         elif amt_data:
-            log.debug(
-                "AMT: using option premium data for %s (no underlying futures available) — VAH/VAL will be in premium units",
+            log.warning(
+                "AMT: using option premium data for %s (no underlying futures available) "
+                "— CVD/OFI will be from option ticks, not NIFTY FUT. Interpret with caution.",
                 event.symbol,
             )
 
@@ -576,6 +588,7 @@ class TradingSessionService:
                 cushion_tier=srm.risk_tier.name if srm else "NORMAL",
                 session_pnl=srm.session_pnl if srm else 0.0,
                 option_tick=event.tick,
+                cvd_source=cvd_source,
             )
         except Exception:
             log.error(
@@ -587,6 +600,33 @@ class TradingSessionService:
 
         # Update cache with AMT results
         cache.update_amt(amt_result, amt_dto, fp_dto)
+
+        # Bug #4 fix: Share market state across options on the same underlying.
+        # CE and PE on the same underlying MUST show the same market state.
+        # Store this option's market state keyed by underlying, and override
+        # if a sibling option already produced a fresher state.
+        import time as _time
+        _underlying = event.symbol.split(" ")[0].split("-")[0].upper()
+        _current_ms = amt_result.market_state
+        _now = _time.time()
+        _cached = self._underlying_state_cache.get(_underlying)
+        if _cached:
+            _cached_ts, _cached_ms = _cached
+            if (_now - _cached_ts) < self._underlying_state_ttl:
+                # There's a fresh cached state from a sibling option —
+                # override this option's state to ensure consistency.
+                if _cached_ms != _current_ms:
+                    log.info(
+                        "Underlying state sync: %s overriding %s → %s (from sibling option)",
+                        _underlying, _current_ms, _cached_ms,
+                    )
+                    _current_ms = _cached_ms
+                    # Override the market state on the frozen AMTResult
+                    from dataclasses import replace as _dc_replace
+                    amt_result = _dc_replace(amt_result, market_state=_cached_ms)
+                    amt_dto["marketState"] = _cached_ms
+        # Always update the cache with this option's state
+        self._underlying_state_cache[_underlying] = (_now, _current_ms)
 
         log.info(
             "AMT analysis done for %s: poc=%.2f vah=%.2f val=%.2f agg=%.2f ofi=%.3f cvd=%.1f state=%s ibH=%.2f ibL=%.2f",

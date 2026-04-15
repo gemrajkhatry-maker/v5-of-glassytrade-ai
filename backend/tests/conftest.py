@@ -13,6 +13,13 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+# Before any LightGBM/MLX imports: avoid OpenMP runtime aborts in mixed native stacks.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+
 # ---------------------------------------------------------------------------
 # Path setup — add project root to sys.path so packages like 'shared' and
 # 'config' (which live at the monorepo root, not inside backend/) resolve.

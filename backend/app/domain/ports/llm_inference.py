@@ -7,7 +7,7 @@ class LLMNotReadyError(RuntimeError):
     """Raised when inference is attempted before the model is loaded."""
 
 
-class LLMInferencePort(ABC):
+class ILLMInference(ABC):
     """Abstraction for LLM inference (fine-tuned model)."""
 
     @abstractmethod

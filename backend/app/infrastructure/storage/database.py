@@ -16,7 +16,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from app.domain.ports.storage import StoragePort
+from app.domain.ports.storage import IStorage
 from shared.conversion import to_float
 
 logger = logging.getLogger(__name__)
@@ -180,7 +180,7 @@ _TICK_BATCH_SIZE = 50
 _TICK_FLUSH_INTERVAL = 5.0  # seconds
 
 
-class SQLiteStorageAdapter(StoragePort):
+class SQLiteStorageAdapter(IStorage):
     """SQLite-backed persistent storage with WAL mode and tick batching."""
 
     def __init__(self, db_path: str = "glassytrade.db") -> None:

@@ -18,8 +18,8 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from app.domain.ports.storage import StoragePort
-from app.domain.ports.broker import BrokerPort
+from app.domain.ports.storage import IStorage
+from app.domain.ports.broker import IBroker
 
 if TYPE_CHECKING:
     from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
@@ -47,10 +47,10 @@ class EntryCoordinator:
 
     def __init__(
         self,
-        broker: BrokerPort,
+        broker: IBroker,
         lifecycle_handler: TradeLifecycleHandler,
         event_logger: EventLogger,
-        storage: StoragePort | None,
+        storage: IStorage | None,
         risk_coordinator,
         option_selector,
         state_manager: SessionStateManager,

@@ -18,7 +18,7 @@ from app.domain.models.exchange_config import ExchangeConfig
 from app.domain.services.symbol_registry import SymbolRegistry
 
 
-class ExchangeStrategy(ABC):
+class IExchangeStrategy(ABC):
     """Encapsulates exchange-specific trading rules and thresholds.
 
     Domain services receive this via constructor injection.

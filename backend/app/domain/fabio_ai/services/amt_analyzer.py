@@ -81,20 +81,17 @@ from app.domain.services.displacement_detector import (
     detect_displacement,
     detect_acceptance,
 )
-from app.domain.services.signal_generator import (
-    generate_signal,
-    MarketState as SignalMarketState,
-)
+from app.domain.services.signal_generator import SignalGenerator
 from app.domain.fabio_ai.services.opening_classifier import OpeningTypeClassifier
 from app.domain.fabio_ai.services.mtf_analyzer import MultiTimeframeAMTAnalyzer
 
 # NOTE: SymbolConfigLike is now defined canonically in app.domain.ports.config_port
-# as SymbolConfigPort. The local definition is kept for backward compatibility.
+# as SymbolIConfig. The local definition is kept for backward compatibility.
 # New code should import from the ports module.
-from app.domain.ports.config_port import SymbolConfigPort
+from app.domain.ports.config_port import ISymbolConfig
 
 # Backward compatibility alias
-SymbolConfigLike = SymbolConfigPort
+SymbolConfigLike = ISymbolConfig
 
 
 # ---------------------------------------------------------------------------
@@ -660,6 +657,7 @@ class AMTAnalyzer:
         daily_data: list[OHLC] | None = None,
         hourly_data: list[OHLC] | None = None,
         option_tick: OHLC | None = None,
+        cvd_source: str = "",
     ) -> AMTResult:
         """Run the full AMT analysis pipeline.
 
@@ -678,6 +676,7 @@ class AMTAnalyzer:
             daily_data: Daily timeframe data
             hourly_data: Hourly timeframe data
             option_tick: Option contract tick (for per-symbol delta isolation)
+            cvd_source: "underlying" if data comes from futures, "option" if from option premium
         """
         empty = AMTResult(
             market_state=MarketState.BALANCED.value,
@@ -837,6 +836,8 @@ class AMTAnalyzer:
         )
 
         # Detect market state using 4-state model
+        # Pass leg POC/VAH/VAL so the NO_TRADE dead zone checks against
+        # the active leg's POC (not the stale session POC) when a leg is active.
         state_result = detect_market_state(
             price=float(current.close),
             poc=poc,
@@ -846,6 +847,9 @@ class AMTAnalyzer:
             has_displacement=has_displacement,
             has_acceptance=has_acceptance,
             balance_ratio=balance_ratio,
+            leg_poc=leg_data.get("poc", 0.0),
+            leg_vah=leg_data.get("vah", 0.0),
+            leg_val=leg_data.get("val", 0.0),
         )
         market_state = state_result.state
         zone = state_result.zone
@@ -891,6 +895,8 @@ class AMTAnalyzer:
         shape = classify_shape(profile)
         # Track the effective profile shape — may be updated when market_state is overridden.
         effective_profile_shape = shape.shape
+        # Track bimodal active pole for frontend display
+        _bimodal_active_pole = shape.active_pole
 
         # Bimodal override: two-peaked profile = auction market, not trend.
         # A bimodal distribution means price is visiting two distinct value areas
@@ -1232,6 +1238,10 @@ class AMTAnalyzer:
             # Drive state (FR-05)
             drive_number=_drive_number,
             drive_entry_valid=_drive_entry_valid,
+            # CVD data source indicator
+            cvd_source=cvd_source,
+            # Bimodal active pole
+            bimodal_active_pole=_bimodal_active_pole,
         )
 
     # -------------------------------------------------------------------

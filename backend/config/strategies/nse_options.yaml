@@ -1,0 +1,76 @@
+# NSE Index Options Trading Strategy
+# Activate: GLASSYTRADE_STRATEGY=nse_options
+# 
+# This strategy configures the system for NSE index options trading
+# with NIFTY, BANKNIFTY, and FINNIFTY as the primary underlyings.
+
+strategy:
+  name: "nse_options"
+  description: "NSE index options trading with AMT methodology"
+
+# Scanner Configuration
+scanner:
+  mode: "nse_options"
+  underlyings: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+  top_n: 3
+  top_per_underlying: 1
+  strikes_around_atm: 2
+  expiry_index: 0
+  option_type: ""  # Auto-select based on momentum
+
+# Exchange Configuration
+exchange:
+  default: "NFO"
+  symbols: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+  segment: "NFO"
+
+# AMT Thresholds (optimized for NSE index options)
+amt_thresholds:
+  aggression_sigma: 2.5
+  displacement_multiplier: 1.5
+  balance_ratio_threshold: 0.55
+  cvd_block_threshold: 5000
+  warm_up_minutes: 15
+
+# Feature Flags
+feature_flags:
+  risk_tier_engine: true
+  short_signals_enabled: true
+  llm_pre_candle_advisory: true
+  scalp_engine_enabled: false
+  scalp_ib_breakout: false
+  realistic_cost_model: true
+  allow_short: true
+
+# LLM Configuration
+llm:
+  timeout_seconds: 30
+  entry_temperature: 0.4
+  overseer_temperature: 0.3
+  max_tokens: 120
+  instruction: |
+    You are an expert market analyst using Fabio Valentini's AMT methodology.
+    Analyze the auction context to identify high-probability entries.
+    
+    DECISION HIERARCHY:
+    1. AGGRESSION (CVD/Delta/OFI): What the market IS doing. (Decisive Priority)
+    2. STRUCTURE (Mode/IB/Location): WHERE it is doing it. (VA boundaries, POC, LVNs)
+    3. QUANT (Probability): Statistical edge (Confirming factor)
+    4. TIMING (VWAP/Velocity): Execution precision.
+    
+    RULES:
+    - CVD ANALYSIS: Explicitly describe CVD magnitude. If CVD is strongly directional (-5000+), never fade the move.
+    - QUANT CONTEXT: If Probability (P) is near 0.5 (±0.05), confidence must never be HIGH.
+    - SESSION PHASE: 'First Drive' applies ONLY in first 60m of session.
+    - CONFIDENCE CEILING: Cap conviction at 0.85 for AAA setups. Never output 0.99+ probabilities.
+    - NO OVERNIGHTS: Options must be DAY TRADES only.
+    - NO BOILERPLATE: Every analysis must be unique to the symbol's specific values.
+    
+    Respond ONLY with a JSON object: {"direction": "LONG/SHORT/FLAT", "rationale": "...", "confidence": "Low/Medium/High"}
+
+# Risk Configuration (NSE-specific)
+risk:
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.02
+  max_consecutive_losses: 3
+  max_concurrent_positions: 3

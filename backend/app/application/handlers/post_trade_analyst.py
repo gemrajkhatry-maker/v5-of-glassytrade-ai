@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    from app.domain.ports.storage import StoragePort
+    from app.domain.ports.storage import IStorage
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +125,7 @@ class PostTradeAnalyst:
     def __init__(
         self,
         gen_ai_service: GenerativeAIService,
-        storage: StoragePort | None = None,
+        storage: IStorage | None = None,
         enabled: bool = True,
     ) -> None:
         self._gen_ai_service = gen_ai_service

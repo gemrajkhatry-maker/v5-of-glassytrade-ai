@@ -1,6 +1,6 @@
 """Async Persistence Bus — offloads storage writes to a background thread.
 
-Wraps any StoragePort and queues all write operations for asynchronous execution,
+Wraps any IStorage and queues all write operations for asynchronous execution,
 removing SQLite I/O latency from the real-time trading hot path.
 
 Usage:
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class AsyncPersistenceBus:
-    """Background thread that drains a write queue and flushes to StoragePort."""
+    """Background thread that drains a write queue and flushes to IStorage."""
 
     def __init__(self, storage: Any, max_queue_size: int = 5000) -> None:
         self._storage = storage
@@ -88,7 +88,9 @@ class AsyncPersistenceBus:
         return self._storage.query_llm_decisions(*args, **kwargs)
 
     def query_signal_decisions(self, *args, **kwargs):
-        return self._storage.query_signal_decisions(*args, **kwargs)
+        if hasattr(self._storage, "query_signal_decisions"):
+            return self._storage.query_signal_decisions(*args, **kwargs)
+        return []
 
     def load_open_positions(self):
         return self._storage.load_open_positions()

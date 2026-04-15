@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 
-class NotificationPort(ABC):
+class INotification(ABC):
     """Send operational alerts (circuit breakers, feed gaps, daily PnL)."""
 
     @abstractmethod

@@ -319,16 +319,26 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             })()}
                         </div>
                         {/* Overflow indicators when LTP is outside VA */}
-                        {amtResult.valueAreaHigh > 0 && currentLtp > amtResult.valueAreaHigh && (
-                            <div className="text-[9px] text-amber-400 font-mono mt-2 text-center">
-                                ↑ ABOVE VAH by {(currentLtp - amtResult.valueAreaHigh).toFixed(2)} pts
-                            </div>
-                        )}
-                        {amtResult.valueAreaLow > 0 && currentLtp < amtResult.valueAreaLow && (
-                            <div className="text-[9px] text-amber-400 font-mono mt-2 text-center">
-                                ↓ BELOW VAL by {(amtResult.valueAreaLow - currentLtp).toFixed(2)} pts
-                            </div>
-                        )}
+                        {(() => {
+                            // Use leg VAH/VAL when PROBING/IMBALANCED for relevant distance display
+                            const isLegActive = amtResult.legPoc > 0 && (amtResult.marketState === 'PROBING' || amtResult.marketState === 'IMBALANCED');
+                            const refVah = isLegActive && amtResult.legVah > 0 ? amtResult.legVah : amtResult.valueAreaHigh;
+                            const refVal = isLegActive && amtResult.legVal > 0 ? amtResult.legVal : amtResult.valueAreaLow;
+                            const vahLabel = isLegActive && amtResult.legVah > 0 ? 'Leg VAH' : 'Session VAH';
+                            const valLabel = isLegActive && amtResult.legVal > 0 ? 'Leg VAL' : 'Session VAL';
+                            return <>
+                                {refVah > 0 && currentLtp > refVah && (
+                                    <div className="text-[9px] text-amber-400 font-mono mt-2 text-center">
+                                        ↑ ABOVE {vahLabel} by {(currentLtp - refVah).toFixed(2)} pts
+                                    </div>
+                                )}
+                                {refVal > 0 && currentLtp < refVal && (
+                                    <div className="text-[9px] text-amber-400 font-mono mt-2 text-center">
+                                        ↓ BELOW {valLabel} by {(refVal - currentLtp).toFixed(2)} pts
+                                    </div>
+                                )}
+                            </>;
+                        })()}
                     </>
                 ) : (
                     <div className="text-center text-[10px] text-white/30 py-4 font-mono">Building Volume Profile...</div>
@@ -393,7 +403,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     <div className="flex justify-between text-[9px] mt-1.5 pt-1 border-t border-white/5">
                         <span className="text-white/40">Aggression</span>
                         <span className={`font-mono font-bold ${aggScore > 0 ? 'text-green-400' : aggScore < 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                            {aggScore > 0 ? '+' : ''}{aggScore.toFixed(2)}
+                            {aggScore.toFixed(2)}{deltaScore < -0.05 ? ' (Bearish)' : deltaScore > 0.05 ? ' (Bullish)' : ''}
                         </span>
                     </div>
                 </div>
@@ -860,7 +870,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             <div className="flex justify-between items-center pl-2">
                                 <span className="text-[10px] text-white/40">Direction</span>
                                 <span className={`text-xs font-bold ${agentDecision.direction === 'LONG' ? 'text-emerald-400' : agentDecision.direction === 'SHORT' ? 'text-red-400' : 'text-blue-300'}`}>
-                                    {agentDecision.direction}
+                                    {agentDecision.direction}{agentDecision.regime && agentDecision.direction !== 'FLAT' ? ` (${agentDecision.regime === 'TRENDING' ? 'Trend' : agentDecision.regime === 'BALANCED' ? 'Reversion' : agentDecision.regime})` : ''}
                                 </span>
                             </div>
                             <div className="flex justify-between items-center pl-2">

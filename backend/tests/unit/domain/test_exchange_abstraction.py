@@ -419,19 +419,24 @@ class TestAbstractionLayerConsistency:
         It is skipped if the full import chain fails.
         """
         try:
-            from app.api.dependencies import get_service_graph
+            from app.api.dependencies import get_service_graph, set_service_graph
+            from app.application.service_graph import ServiceGraph
+            from config.config import Configuration
         except Exception:
             pytest.skip("Full service graph import chain not available in test env")
             return
 
+        set_service_graph(ServiceGraph(Configuration.from_env()))
         graph = get_service_graph()
-        assert graph.exchange_config is not None
-        assert graph.symbol_registry is not None
-        assert graph.exchange_strategy is not None
-        assert graph.session_factory is not None
+        from app.domain.ports import IExchangeStrategy
 
-        # Strategy should match config
-        assert graph.exchange_strategy.name == graph.exchange_config.exchange
+        strat = graph.get(IExchangeStrategy)
+        assert strat is not None
+        assert graph.market_data is not None
+        assert graph.trading_session is not None
+        ex_cfg = getattr(graph.trading_session, "_exchange_config", None)
+        assert ex_cfg is not None
+        assert strat.name == ex_cfg.exchange
 
     def test_no_domain_imports_config(self):
         """Verify the main session context factory path no longer imports app.config at module level.

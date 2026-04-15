@@ -100,12 +100,32 @@ def calculate_position_size(
     entry_price: float,
     stop_loss: float,
     point_value: float = 10.0,
+    price_velocity: float = 0.0,
 ) -> tuple[int, float, bool]:
     """Calculate position size using PositionSizer.
 
-    Returns (lots, risk_amount, valid).
+    Bug #10 fix: Applies velocity-based size scaling after base calculation.
+
+    Args:
+        equity: Account equity.
+        entry_price: Entry price.
+        stop_loss: Stop loss price.
+        point_value: INR value per price point (lot_size × multiplier).
+        price_velocity: Price velocity in points/second for size adjustment.
+
+    Returns:
+        (lots, risk_amount, valid).
     """
     from app.domain.fabio_ai.services.position_sizer import PositionSizer
 
     ps = PositionSizer.calculate(equity, entry_price, stop_loss, point_value)
+    if not ps.valid or ps.lots <= 0:
+        return ps.lots, ps.risk_amount, ps.valid
+
+    # Apply velocity scaling (Bug #10)
+    if price_velocity > 0:
+        adjusted_lots, _ = PositionSizer.apply_velocity_scaling(ps.lots, price_velocity)
+        if adjusted_lots != ps.lots:
+            return adjusted_lots, ps.risk_amount * (adjusted_lots / max(ps.lots, 1)), True
+
     return ps.lots, ps.risk_amount, ps.valid

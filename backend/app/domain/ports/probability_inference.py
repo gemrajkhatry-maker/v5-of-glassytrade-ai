@@ -16,7 +16,7 @@ class ProbabilityEstimate:
     calibrated: bool = False   # Whether online calibration is active
 
 
-class ProbabilityInferencePort(ABC):
+class IProbabilityInference(ABC):
     """Abstraction for first-passage probability inference (LightGBM or similar)."""
 
     @abstractmethod
@@ -28,7 +28,7 @@ class ProbabilityInferencePort(ABC):
         """Check if model is loaded and ready."""
 
 
-class NoOpProbabilityAdapter(ProbabilityInferencePort):
+class NoOpProbabilityAdapter(IProbabilityInference):
     """Dummy adapter that returns neutral estimates — used when model is not trained."""
 
     def estimate(self, features: dict[str, float]) -> ProbabilityEstimate:

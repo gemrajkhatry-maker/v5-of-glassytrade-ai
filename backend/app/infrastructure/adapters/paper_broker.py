@@ -1,4 +1,4 @@
-"""Paper broker adapter — implements BrokerPort for simulated order execution.
+"""Paper broker adapter — implements IBroker for simulated order execution.
 
 Realistic cost model per spec Phase 0, Component 4:
   Slippage: notional × slippage_bps / 10000 (directional: added on buy, subtracted on sell)
@@ -31,7 +31,7 @@ from dataclasses import dataclass
 
 from app.domain.trading.models.entities import Position, Signal
 from app.domain.trading.models.aggregates import Portfolio
-from app.domain.ports.broker import BrokerPort
+from app.domain.ports.broker import IBroker
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,7 @@ def compute_trade_costs(
     )
 
 
-class PaperBrokerAdapter(BrokerPort):
+class PaperBrokerAdapter(IBroker):
     """Paper trading broker with realistic cost model."""
 
     def __init__(

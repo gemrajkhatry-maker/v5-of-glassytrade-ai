@@ -1,4 +1,5 @@
 """Phase 1 bug fix tests — LLMNotReadyError + flush locking."""
+import os
 import threading
 import time
 import pytest
@@ -36,6 +37,14 @@ class TestLLMNotReadyError:
         text = '{"direction":"LONG","rationale":"test"} trailing text'
 
         assert MLXInferenceAdapter._extract_json_candidate(text) == '{"direction":"LONG","rationale":"test"}'
+
+    def test_resolve_local_path_supports_repo_root_relative_adapter_paths(self):
+        from app.infrastructure.adapters.mlx_inference_adapter import MLXInferenceAdapter
+
+        resolved = MLXInferenceAdapter._resolve_local_path("gemma4_26b_clean_adapter")
+
+        assert resolved.endswith("gemma4_26b_clean_adapter")
+        assert os.path.isdir(resolved)
 
 
 class TestFlushTicksSingleLock:

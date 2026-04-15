@@ -36,8 +36,8 @@ from app.domain.fabio_ai.services.prompt_builder import (
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    from app.domain.ports.storage import StoragePort
-    from app.domain.ports.probability_inference import ProbabilityInferencePort
+    from app.domain.ports.storage import IStorage
+    from app.domain.ports.probability_inference import IProbabilityInference
 
 from app.shared.parsing import is_mcx_symbol
 
@@ -61,8 +61,8 @@ class LLMOverseerHandler:
         self,
         gen_ai_service: GenerativeAIService,
         trade_manager: ExitEngine,
-        storage: StoragePort | None = None,
-        probability_engine: ProbabilityInferencePort | None = None,
+        storage: IStorage | None = None,
+        probability_engine: IProbabilityInference | None = None,
         session_risk_manager=None,
         engine=None,  # TradingEngine reference for immediate UI updates
     ) -> None:

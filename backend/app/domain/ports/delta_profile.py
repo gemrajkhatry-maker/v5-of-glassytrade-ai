@@ -34,7 +34,7 @@ class DeltaProfile:
     high_buy_delta_zones: tuple[float, ...]  # Trapped buyers = SHORT entry zones
 
 
-class DeltaProfilePort(ABC):
+class IDeltaProfile(ABC):
     """Interface for delta-colored volume profile computation.
 
     Per Fabio methodology, delta profiles show the net buying/selling pressure

@@ -51,15 +51,23 @@ def _build_narrative_session_context(data: Dict[str, Any]) -> list[str]:
     if session_name:
         parts.append(f"SESSION: {session_name}.")
     if favor_strategy and favor_strategy != "NEUTRAL":
-        active_model = "TREND CONTINUATION" if favor_strategy == "TREND_CONTINUATION" else "MEAN REVERSION"
+        active_model = (
+            "TREND CONTINUATION"
+            if favor_strategy == "TREND_CONTINUATION"
+            else "MEAN REVERSION"
+        )
         parts.append(f"Session favors: {active_model}.")
     prior_poc = data.get("prior_poc", 0)
     prior_vah = data.get("prior_vah", 0)
     prior_val = data.get("prior_val", 0)
     if prior_poc > 0 and prior_vah > 0 and prior_val > 0:
-        parts.append(f"PRIOR SESSION: POC {prior_poc:.0f}, VAH {prior_vah:.0f}, VAL {prior_val:.0f}.")
+        parts.append(
+            f"PRIOR SESSION: POC {prior_poc:.0f}, VAH {prior_vah:.0f}, VAL {prior_val:.0f}."
+        )
     else:
-        parts.append("PRIOR SESSION: No historical data — using current session VA only.")
+        parts.append(
+            "PRIOR SESSION: No historical data — using current session VA only."
+        )
     gap_type = data.get("gap_type", "")
     opening_bias = data.get("opening_bias", "")
     if gap_type:
@@ -72,7 +80,9 @@ def _build_narrative_session_context(data: Dict[str, Any]) -> list[str]:
     if ib_high > 0 and ib_low > 0 and ib_high != ib_low:
         status = "complete" if ib_complete else "forming"
         ib_range = ib_high - ib_low
-        parts.append(f"IB ({status}): {ib_low:.2f}-{ib_high:.2f} (range: {ib_range:.2f}).")
+        parts.append(
+            f"IB ({status}): {ib_low:.2f}-{ib_high:.2f} (range: {ib_range:.2f})."
+        )
     elif ib_high > 0 and ib_low > 0:
         parts.append(f"IB (forming): {ib_low:.2f}-{ib_high:.2f} — range expanding")
     return parts
@@ -97,59 +107,85 @@ def _build_narrative_market_state(data: Dict[str, Any]) -> list[str]:
         if va_width > 0:
             if price > vah:
                 pct = ((price - vah) / va_width) * 100
-                parts.append(f"⚠️ Price +{price - vah:.2f} ABOVE VAH (+{pct:.0f}% of VA width) — breakout zone")
+                parts.append(
+                    f"⚠️ Price +{price - vah:.2f} ABOVE VAH (+{pct:.0f}% of VA width) — breakout zone"
+                )
             elif price < val:
                 pct = ((val - price) / va_width) * 100
-                parts.append(f"⚠️ Price {price - val:.2f} BELOW VAL (-{pct:.0f}% of VA width) — breakdown zone")
+                parts.append(
+                    f"⚠️ Price {price - val:.2f} BELOW VAL (-{pct:.0f}% of VA width) — breakdown zone"
+                )
             else:
                 pos = ((price - val) / va_width) * 100
                 parts.append(f"Price inside VA ({pos:.0f}% from VAL to VAH)")
-    for flag, msg in [("acceptance_above", "ACCEPTANCE above VAH."), ("acceptance_below", "ACCEPTANCE below VAL."),
-                      ("rejection_at_high", "REJECTION at VAH."), ("rejection_at_low", "REJECTION at VAL.")]:
+    for flag, msg in [
+        ("acceptance_above", "ACCEPTANCE above VAH."),
+        ("acceptance_below", "ACCEPTANCE below VAL."),
+        ("rejection_at_high", "REJECTION at VAH."),
+        ("rejection_at_low", "REJECTION at VAL."),
+    ]:
         if data.get(flag):
             parts.append(msg)
     mkt_struct = data.get("market_structure", "")
     if mkt_struct and mkt_struct != "BALANCE":
         parts.append(f"Structure: {mkt_struct}.")
     _ps = ProfileShapeCodec.normalize(data.get("profile_shape", "D"))
-    shapes = {"P": "⚠️ P-SHAPE: Sellers distributing. DO NOT GO LONG.",
-              "b": "⚠️ b-SHAPE: Buyers absorbing. DO NOT GO SHORT.",
-              "B": "B-shape: bimodal — both sides active, potential breakout.",
-              "D": "D-shape: balanced rotation."}
+    shapes = {
+        "P": "⚠️ P-SHAPE: Sellers distributing. DO NOT GO LONG.",
+        "b": "⚠️ b-SHAPE: Buyers absorbing. DO NOT GO SHORT.",
+        "B": "B-shape: bimodal — both sides active, potential breakout.",
+        "D": "D-shape: balanced rotation.",
+    }
     if _ps in shapes:
         parts.append(shapes[_ps])
     if val > 0 and price > 0:
         if price <= val * 1.002:
             parts.append(f"LOCATION: Price at VAL ({val:.0f}). Entry zone for LONG.")
         elif poc > 0 and abs(price - poc) / poc < 0.003:
-            parts.append(f"LOCATION: Price at POC ({poc:.0f}). Fair value — WAIT for bias.")
+            parts.append(
+                f"LOCATION: Price at POC ({poc:.0f}). Fair value — WAIT for bias."
+            )
         else:
-            parts.append(f"LOCATION: Price {price:.0f}. POC={poc:.0f}, VAH={vah:.0f}, VAL={val:.0f}.")
+            parts.append(
+                f"LOCATION: Price {price:.0f}. POC={poc:.0f}, VAH={vah:.0f}, VAL={val:.0f}."
+            )
     lvns = data.get("lvns", [])
     if lvns:
-        parts.append(f"LVNs: {', '.join(f'{l:.0f}' for l in lvns[:3])}. Reaction zones on pullback.")
+        parts.append(
+            f"LVNs: {', '.join(f'{l:.0f}' for l in lvns[:3])}. Reaction zones on pullback."
+        )
     stacked = data.get("stacked_imbalances", "")
     if stacked:
         parts.append(f"Stacked imbalances: {stacked}.")
     dev_poc = data.get("dev_poc", 0)
     if dev_poc > 0 and (dev_poc != poc or data.get("dev_vah", 0) != vah):
-        parts.append(f"Developing VA: POC {dev_poc:.0f}, VAH {data.get('dev_vah', 0):.0f}, VAL {data.get('dev_val', 0):.0f}.")
+        parts.append(
+            f"Developing VA: POC {dev_poc:.0f}, VAH {data.get('dev_vah', 0):.0f}, VAL {data.get('dev_val', 0):.0f}."
+        )
     leg_poc = data.get("leg_poc", 0)
     if leg_poc > 0:
-        parts.append(f"Impulse leg: POC {leg_poc:.0f}, VAH {data.get('leg_vah', 0):.0f}, VAL {data.get('leg_val', 0):.0f}.")
+        parts.append(
+            f"Impulse leg: POC {leg_poc:.0f}, VAH {data.get('leg_vah', 0):.0f}, VAL {data.get('leg_val', 0):.0f}."
+        )
     if data.get("is_second_drive"):
-        parts.append("✅ SECOND DRIVE: High probability re-test setup. CONFIDENCE HIGH.")
+        parts.append(
+            "✅ SECOND DRIVE: High probability re-test setup. CONFIDENCE HIGH."
+        )
     else:
         parts.append("⚠️ FIRST DRIVE: Lower probability. Wait for re-test if possible.")
     lvn_play = data.get("lvn_play")
     if lvn_play:
         if isinstance(lvn_play, dict):
-            parts.append(f"🎯 LVN PLAY: {lvn_play.get('direction', '')} at {lvn_play.get('level', 0):.0f} ({lvn_play.get('confluence', '')}). HIGH CONVICTION.")
+            parts.append(
+                f"🎯 LVN PLAY: {lvn_play.get('direction', '')} at {lvn_play.get('level', 0):.0f} ({lvn_play.get('confluence', '')}). HIGH CONVICTION."
+            )
         else:
             parts.append(f"🎯 LVN PLAY: {lvn_play}.")
     session_vwap = data.get("session_vwap", 0)
     if session_vwap > 0 and price > 0:
-        parts.append(f"VWAP: Price {'above' if price > session_vwap else 'below'} VWAP ({session_vwap:.0f}). {'Bullish' if price > session_vwap else 'Bearish'} bias.")
+        parts.append(
+            f"VWAP: Price {'above' if price > session_vwap else 'below'} VWAP ({session_vwap:.0f}). {'Bullish' if price > session_vwap else 'Bearish'} bias."
+        )
         if data.get("vwap_upper_2", 0) > 0 and price >= data["vwap_upper_2"]:
             parts.append("⚠️ At VWAP +2σ: Overextended.")
         elif data.get("vwap_lower_2", 0) > 0 and price <= data["vwap_lower_2"]:
@@ -160,14 +196,16 @@ def _build_narrative_market_state(data: Dict[str, Any]) -> list[str]:
 def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
     """#3 Order flow: CVD, delta, aggression, bubbles, quant engine, rules."""
     parts: list[str] = []
-    
+
     # Priority 1: Aggression (CVD, Delta, OFI) - MANDATORY DESCRIPTION
     parts.append("--- ORDER FLOW & AGGRESSION ---")
-    
+
     cvd_raw = data.get("cvd_slope", data.get("cvd", 0))
     delta = data.get("delta", 0)
     aggression_score = data.get("aggression", 0)
-    
+    if aggression_score is None:
+        aggression_score = 0.0
+
     # Force explicit description of aggression variables
     cvd_desc = f"CVD Slope is {cvd_raw:+.1f}. "
     if abs(cvd_raw) > 500:
@@ -175,12 +213,12 @@ def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
     elif abs(cvd_raw) < 50:
         cvd_desc += "Weak institutional participation. "
     parts.append(cvd_desc)
-    
+
     delta_desc = f"Current Delta is {delta:+.0f}. "
     if delta == 0:
         delta_desc += "Neutral aggression."
     parts.append(delta_desc)
-    
+
     parts.append(f"Aggression Score: {aggression_score:.2f} (0.0 to 2.0 scale).")
 
     cvd_div = data.get("cvd_divergence", "")
@@ -196,13 +234,15 @@ def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
         regime = quant_ctx.get("regime", "UNKNOWN")
         parts.append(f"QUANT ENGINE: P={prob:.3f} in {regime} regime.")
         if 0.45 <= prob <= 0.55:
-            parts.append("Note: Quant probability is near-neutral. Rely primarily on Structural (Priority 2) and Aggression (Priority 1) data for your bias.")
+            parts.append(
+                "Note: Quant probability is near-neutral. Rely primarily on Structural (Priority 2) and Aggression (Priority 1) data for your bias."
+            )
 
     # Floating Volume Bubbles & Imbalances
     volume_bubbles = data.get("volume_bubbles", "")
     if volume_bubbles:
         parts.append(f"Volume bubbles: {volume_bubbles}")
-    
+
     imbalance_desc = data.get("stacked_imbalances", "")
     if imbalance_desc:
         parts.append(imbalance_desc)
@@ -215,7 +255,7 @@ def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
         "3. QUANT (Probability) - Statistical edge (Confirming)\n"
         "4. TIMING (VWAP/Velocity) - Execution precision\n"
     )
-    
+
     # AMT Rules update
     parts.append(
         "AMT RULES: 1) NO counter-flow trades (avoid fading strong CVD). "
@@ -464,7 +504,7 @@ def _normalize_entry_json(obj: Dict[str, Any], raw_text: str) -> Dict[str, Any]:
     confidence = str(obj.get("confidence", "Medium")).capitalize()
     if confidence not in ("High", "Medium", "Low"):
         confidence = "Medium"
-    
+
     # FIX: Robustly extract rationale. Fallback to extracting text between symbols
     # if the rationale key is missing or empty to avoid JSON bleed.
     rationale = obj.get("rationale", "")
@@ -490,7 +530,7 @@ def _normalize_overseer_json(obj: Dict[str, Any], pos_state: dict) -> OverseerAc
     new_sl = obj.get("new_sl_price")
     if action == "TIGHTEN_SL" and (not isinstance(new_sl, (int, float)) or new_sl <= 0):
         new_sl = compute_tighten_sl(pos_state)
-    
+
     reason = str(obj.get("reason", obj.get("rationale", ""))).strip()
     return OverseerAction(
         action=action,
@@ -506,11 +546,11 @@ def _try_structured_parse(text: str) -> Optional[Dict[str, Any]]:
     # Check for STATE:/TRADE: format (Gemma 4 AMT model)
     state_match = re.search(r"STATE:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
     trade_match = re.search(r"TRADE:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
-    
+
     if state_match and trade_match:
         state = state_match.group(1).strip().upper()
         trade = trade_match.group(1).strip().upper()
-        
+
         # Map TRADE to direction
         if "LONG" in trade:
             direction = "LONG"
@@ -518,7 +558,7 @@ def _try_structured_parse(text: str) -> Optional[Dict[str, Any]]:
             direction = "SHORT"
         else:
             direction = "FLAT"
-        
+
         # Map STATE to confidence
         if state in ["BREAKOUT", "TREND", "IMBALANCE"]:
             confidence = "High"
@@ -526,14 +566,14 @@ def _try_structured_parse(text: str) -> Optional[Dict[str, Any]]:
             confidence = "Medium"
         else:
             confidence = "Low"
-        
+
         return {
             "direction": direction,
             "rationale": f"AMT State: {state}, Trade: {trade}",
             "raw_output": text,
             "confidence": confidence,
         }
-    
+
     # Legacy trigger: format
     trigger_match = re.search(r"trigger:\s*(.+?)(?:\n|$)", text, re.IGNORECASE)
     if not trigger_match:

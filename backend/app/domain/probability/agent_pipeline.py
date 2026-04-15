@@ -55,7 +55,7 @@ from app.domain.constants import (
 
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook
-    from app.domain.ports.probability_inference import ProbabilityInferencePort
+    from app.domain.ports.probability_inference import IProbabilityInference
 
 from app.domain.fabio_ai.services.entry_gate import three_align_check
 
@@ -95,6 +95,85 @@ class RegimeState:
     allowed_long: bool
     allowed_short: bool
     risk_scale: float  # 0.0 = no risk, 1.0 = full risk
+
+
+class RegimeHysteresis:
+    """Adds hysteresis to regime classification to prevent rapid flipping.
+
+    Requires the new regime to persist for `min_persistence` consecutive
+    evaluations before switching. This prevents the model from oscillating
+    between BALANCED and TRENDING every minute on edge cases.
+    """
+
+    def __init__(self, min_persistence: int = 3) -> None:
+        self._min_persistence = min_persistence
+        self._current_regime: str = ""
+        self._candidate_regime: str = ""
+        self._candidate_count: int = 0
+
+    def apply(self, raw_regime: RegimeState) -> RegimeState:
+        """Apply hysteresis filter to the raw regime result.
+
+        If the raw regime matches the current stable regime, confirm immediately.
+        If different, count consecutive occurrences before switching.
+        DEAD regime always passes through immediately (safety).
+        """
+        # DEAD and VOLATILE always pass through immediately (safety)
+        if raw_regime.regime in ("DEAD", "VOLATILE"):
+            self._current_regime = raw_regime.regime
+            self._candidate_regime = ""
+            self._candidate_count = 0
+            return raw_regime
+
+        # First evaluation — accept immediately
+        if not self._current_regime:
+            self._current_regime = raw_regime.regime
+            self._candidate_regime = ""
+            self._candidate_count = 0
+            return raw_regime
+
+        # Same as current stable regime — confirm immediately
+        if raw_regime.regime == self._current_regime:
+            self._candidate_regime = ""
+            self._candidate_count = 0
+            return raw_regime
+
+        # Different from current — track persistence
+        if raw_regime.regime == self._candidate_regime:
+            self._candidate_count += 1
+        else:
+            self._candidate_regime = raw_regime.regime
+            self._candidate_count = 1
+
+        if self._candidate_count >= self._min_persistence:
+            # Candidate has persisted long enough — switch
+            logger.info(
+                "Regime hysteresis: %s → %s (persisted %d evaluations)",
+                self._current_regime, self._candidate_regime, self._candidate_count,
+            )
+            self._current_regime = self._candidate_regime
+            self._candidate_regime = ""
+            self._candidate_count = 0
+            return raw_regime
+
+        # Not yet stable — return current stable regime
+        return RegimeState(
+            regime=self._current_regime,
+            allowed_long=raw_regime.allowed_long if self._current_regime == raw_regime.regime else True,
+            allowed_short=raw_regime.allowed_short if self._current_regime == raw_regime.regime else True,
+            risk_scale=raw_regime.risk_scale,
+        )
+
+
+# Per-symbol hysteresis state (keyed by symbol)
+_regime_hysteresis: dict[str, RegimeHysteresis] = {}
+
+
+def get_regime_hysteresis(symbol: str) -> RegimeHysteresis:
+    """Get or create a RegimeHysteresis instance for a symbol."""
+    if symbol not in _regime_hysteresis:
+        _regime_hysteresis[symbol] = RegimeHysteresis(min_persistence=3)
+    return _regime_hysteresis[symbol]
 
 
 def classify_regime(
@@ -179,7 +258,7 @@ class DirectionSignal:
 
 def pick_direction(
     features: dict[str, float],
-    probability_engine: ProbabilityInferencePort,
+    probability_engine: IProbabilityInference,
     regime: RegimeState,
     playbook: str,
     p_threshold_long: float = 0.52,  # positive edge at 2:1 R/R
@@ -588,7 +667,7 @@ def run_agent_pipeline(
     data: list[OHLC],
     amt_result: AMTResult,
     tick: OHLC,
-    probability_engine: ProbabilityInferencePort,
+    probability_engine: IProbabilityInference,
     features: dict[str, float],
     order_book: "OrderBook | None" = None,
     tick_size: float = 0.05,
@@ -598,8 +677,9 @@ def run_agent_pipeline(
     """Run the full 4-agent pipeline. Target: <1ms total."""
     t0 = time.perf_counter_ns()
 
-    # Agent 1: Regime
-    regime = classify_regime(data, amt_result, tick)
+    # Agent 1: Regime (with hysteresis to prevent rapid flipping)
+    raw_regime = classify_regime(data, amt_result, tick)
+    regime = get_regime_hysteresis(symbol).apply(raw_regime) if symbol else raw_regime
     if regime.regime == "DEAD":
         elapsed_us = (time.perf_counter_ns() - t0) // 1000
         return AgentDecision(

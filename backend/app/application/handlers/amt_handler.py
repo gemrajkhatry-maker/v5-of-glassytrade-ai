@@ -96,6 +96,7 @@ class AMTHandler:
         cushion_tier: str = "Conservative",
         session_pnl: float = 0.0,
         option_tick: OHLC | None = None,
+        cvd_source: str = "",
     ) -> tuple[AMTResult, dict, dict]:
         """Run AMT analysis and footprint generation.
 
@@ -108,6 +109,7 @@ class AMTHandler:
             cushion_tier: Risk cushion tier
             session_pnl: Session P&L
             option_tick: The option contract tick (for per-symbol delta isolation)
+            cvd_source: "underlying" if data from futures, "option" if from option premium
 
         Returns:
             (amt_result, amt_dto, footprint_dto)
@@ -171,6 +173,7 @@ class AMTHandler:
             developing_profile=self._dev_profile,
             cushion_tier=cushion_tier, session_pnl=session_pnl,
             option_tick=option_tick,
+            cvd_source=cvd_source,
         )
 
         amt_dto = amt_result_to_dto(amt_result)

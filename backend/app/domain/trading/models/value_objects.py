@@ -200,6 +200,10 @@ class AMTResult:
     hourly_poc: float = 0.0
     # Per-symbol delta (from option tick, not underlying) — ensures isolation across symbols
     delta_normalized_option: float = 0.0  # Normalized delta from option tick (per-symbol isolation)
+    # CVD data source indicator — "underlying" when computed from futures, "option" when from option premium
+    cvd_source: str = ""
+    # Bimodal active pole — "UPPER" or "LOWER" when profile shape is B-bimodal
+    bimodal_active_pole: str = ""
 
 
 # ---------------------------------------------------------------------------

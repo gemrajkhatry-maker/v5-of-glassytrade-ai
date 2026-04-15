@@ -10,12 +10,17 @@ FRONTEND_DIR="$PROJECT_DIR/frontend"
 lsof -ti:9090 -ti:5190 2>/dev/null | xargs kill -9 2>/dev/null || true
 sleep 1
 
+# Unset DEBUG to prevent config validation errors
+unset DEBUG
+
 # Start backend
 echo "Starting backend on :9090..."
 cd "$BACKEND_DIR"
 KMP_DUPLICATE_LIB_OK=TRUE \
-MLX_DISABLE_METAL=1 \
+GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}" \
+GLASSYTRADE_STRATEGY="${GLASSYTRADE_STRATEGY:-mcx_options}" \
 PYTHONPATH="$PROJECT_DIR:$BACKEND_DIR" \
+DEBUG=false \
 nohup "$BACKEND_DIR/venv/bin/python" -u -m uvicorn app.main:app \
   --host 0.0.0.0 --port 9090 \
   > "$BACKEND_DIR/backend.log" 2>&1 &

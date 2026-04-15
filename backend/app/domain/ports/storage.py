@@ -12,7 +12,7 @@ from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
-class KeyValueStoragePort(Protocol):
+class IKeyValueStorage(Protocol):
     """Simple key-value storage port for domain state persistence.
 
     This Protocol replaces the untyped persist_fn callback pattern.
@@ -20,7 +20,7 @@ class KeyValueStoragePort(Protocol):
     concrete implementation (e.g., database-backed storage).
 
     Example usage in LossTracker:
-        def __init__(self, storage: KeyValueStoragePort | None = None):
+        def __init__(self, storage: IKeyValueStorage | None = None):
             self._storage = storage
 
         def save(self):
@@ -53,28 +53,28 @@ class KeyValueStoragePort(Protocol):
 # Sub-ports (Interface Segregation)
 # ---------------------------------------------------------------------------
 
-class TickStoragePort(ABC):
+class ITickStorage(ABC):
     @abstractmethod
     def save_tick(self, symbol: str, tick_data: dict[str, Any]) -> None: ...
     @abstractmethod
     def query_ticks(self, symbol: str, start: str | None = None, end: str | None = None, limit: int = 1000) -> list[dict[str, Any]]: ...
 
 
-class TradeStoragePort(ABC):
+class ITradeStorage(ABC):
     @abstractmethod
     def save_trade(self, trade_data: dict[str, Any]) -> None: ...
     @abstractmethod
     def query_trades(self, start: str | None = None, end: str | None = None) -> list[dict[str, Any]]: ...
 
 
-class DecisionStoragePort(ABC):
+class IDecisionStorage(ABC):
     @abstractmethod
     def save_llm_decision(self, decision_data: dict[str, Any]) -> None: ...
     @abstractmethod
     def query_llm_decisions(self, start: str | None = None, end: str | None = None) -> list[dict[str, Any]]: ...
 
 
-class OpenPositionStoragePort(ABC):
+class IOpenPositionStorage(ABC):
     @abstractmethod
     def save_open_position(self, position: dict[str, Any]) -> None: ...
     @abstractmethod
@@ -91,7 +91,7 @@ class OpenPositionStoragePort(ABC):
         ...
 
 
-class PositionEventStoragePort(ABC):
+class IPositionEventStorage(ABC):
     @abstractmethod
     def save_position_event(self, event: dict[str, Any]) -> None: ...
     @abstractmethod
@@ -102,12 +102,12 @@ class PositionEventStoragePort(ABC):
 
 # ---------------------------------------------------------------------------
 
-class StoragePort(
-    TickStoragePort,
-    TradeStoragePort,
-    DecisionStoragePort,
-    OpenPositionStoragePort,
-    PositionEventStoragePort,
+class IStorage(
+    ITickStorage,
+    ITradeStorage,
+    IDecisionStorage,
+    IOpenPositionStorage,
+    IPositionEventStorage,
 ):
     """Abstraction for persisting ticks, trades, and LLM decisions."""
 

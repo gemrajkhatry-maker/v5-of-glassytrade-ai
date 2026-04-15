@@ -1,0 +1,76 @@
+# MCX Options Trading Strategy
+# Activate: GLASSYTRADE_STRATEGY=mcx_options
+# 
+# This strategy configures the system for MCX commodity options trading
+# with CRUDEOIL and NATURALGAS as the primary underlyings.
+
+strategy:
+  name: "mcx_options"
+  description: "MCX commodity options trading with AMT methodology"
+
+# Scanner Configuration
+scanner:
+  mode: "mcx_options"
+  underlyings: ["CRUDEOIL", "NATURALGAS"]
+  top_n: 4
+  top_per_underlying: 2
+  strikes_around_atm: 2
+  expiry_index: 0
+  option_type: ""  # Auto-select based on momentum
+
+# Exchange Configuration
+exchange:
+  default: "MCX"
+  symbols: ["CRUDEOIL", "NATURALGAS"]
+  segment: "MCX_COMM"
+
+# AMT Thresholds (optimized for MCX commodities)
+amt_thresholds:
+  aggression_sigma: 2.0
+  displacement_multiplier: 1.2
+  balance_ratio_threshold: 0.55
+  cvd_block_threshold: 50
+  warm_up_minutes: 15
+
+# Feature Flags
+feature_flags:
+  risk_tier_engine: true
+  short_signals_enabled: true
+  llm_pre_candle_advisory: true
+  scalp_engine_enabled: true
+  scalp_ib_breakout: true
+  realistic_cost_model: true
+  allow_short: true
+
+# LLM Configuration
+llm:
+  timeout_seconds: 60
+  entry_temperature: 0.4
+  overseer_temperature: 0.3
+  max_tokens: 120
+  instruction: |
+    You are an expert market analyst using Fabio Valentini's AMT methodology.
+    Analyze the auction context to identify high-probability entries.
+    
+    DECISION HIERARCHY:
+    1. AGGRESSION (CVD/Delta/OFI): What the market IS doing. (Decisive Priority)
+    2. STRUCTURE (Mode/IB/Location): WHERE it is doing it. (VA boundaries, POC, LVNs)
+    3. QUANT (Probability): Statistical edge (Confirming factor)
+    4. TIMING (VWAP/Velocity): Execution precision.
+    
+    RULES:
+    - CVD ANALYSIS: Explicitly describe CVD magnitude. If CVD is strongly directional, never fade the move.
+    - QUANT CONTEXT: If Probability (P) is near 0.5 (±0.05), confidence must never be HIGH.
+    - SESSION PHASE: 'First Drive' applies ONLY in first 60m of session.
+    - CONFIDENCE CEILING: Cap conviction at 0.85 for AAA setups. Never output 0.99+ probabilities.
+    - NO OVERNIGHTS: Options must be DAY TRADES only.
+    - NO BOILERPLATE: Every analysis must be unique to the symbol's specific values.
+    
+    Respond ONLY with a JSON object: {"direction": "LONG/SHORT/FLAT", "rationale": "...", "confidence": "Low/Medium/High"}
+
+# Risk Configuration (MCX-specific)
+risk:
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.02
+  max_consecutive_losses: 3
+  max_concurrent_positions: 4

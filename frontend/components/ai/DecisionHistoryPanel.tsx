@@ -11,17 +11,8 @@ interface DecisionHistoryPanelProps {
 const DecisionHistoryPanel = React.memo<DecisionHistoryPanelProps>(({ llmHistory }) => {
     if (llmHistory.length === 0) return null;
 
-    // Check for 3+ consecutive errors in the most recent history
-    const recentErrorsCount = [...llmHistory].filter(h => h.rationale?.includes('404') || h.rationale?.includes('Error') || h.confidence === 'Error').length;
-    const isErrorState = recentErrorsCount >= 3;
-
     return (
         <div className="flex flex-col gap-2 pt-2 border-t border-white/5 relative">
-            {isErrorState && (
-                <div className="absolute -top-10 left-0 right-0 bg-red-500/20 border border-red-500/50 text-red-200 text-[10px] font-bold py-1 px-2 rounded-lg text-center backdrop-blur-md z-10 animate-pulse">
-                    ⚠️ AI Engine fallback failing — decisions may be stale
-                </div>
-            )}
             <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest mt-2">
                 <div className="flex items-center gap-2">
                     <span>06. Decision History</span>

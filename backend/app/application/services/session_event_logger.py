@@ -18,7 +18,7 @@ from app.application.services.experiment_context import build_experiment_context
 
 if TYPE_CHECKING:
     from app.domain.trading.models.entities import Position, Signal
-    from app.domain.ports.storage import StoragePort
+    from app.domain.ports.storage import IStorage
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ class SessionEventLogger:
     source of truth for event logging across the codebase.
     """
 
-    def __init__(self, storage: StoragePort | None = None):
+    def __init__(self, storage: IStorage | None = None):
         self._storage = storage
         self._experiment = build_experiment_context()
         self._journal = TradeJournal(experiment=self._experiment)

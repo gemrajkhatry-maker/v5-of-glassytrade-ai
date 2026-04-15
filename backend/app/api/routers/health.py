@@ -1,5 +1,6 @@
 """Health check, metrics, and system info router."""
 
+import asyncio
 import gc
 import logging
 import resource
@@ -8,7 +9,7 @@ import tracemalloc
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from app.infrastructure.metrics import MetricsCollector
 from app.config import settings
 from app.domain.fabio_ai.services.llm_contract import (
@@ -136,6 +137,12 @@ async def system_config():
     graph = get_service_graph()
     llm_ready = graph.llm_inference.is_ready() if hasattr(graph.llm_inference, 'is_ready') else False
     prob_ready = graph.probability_engine.is_ready() if hasattr(graph.probability_engine, 'is_ready') else False
+    llm_device = getattr(graph.llm_inference, "_runtime_device", None)
+    _inf = graph.llm_inference
+    llm_model_loaded = (
+        getattr(_inf, "model", None) is not None
+        or getattr(_inf, "llm", None) is not None
+    )
 
     return {
         "dataSource": "DHAN",
@@ -151,6 +158,7 @@ async def system_config():
         "explainabilityMinCoverageRate": settings.EXPLAINABILITY_MIN_DRIVER_COVERAGE_PCT,
         "explainabilityMinAggressionRate": settings.EXPLAINABILITY_MIN_AGGRESSION_DRIVER_PCT,
         "llmReady": llm_ready,
+        "llmModelLoaded": llm_model_loaded,
         "probabilityReady": prob_ready,
         "probabilityFeatureSchemaVersion": PROBABILITY_FEATURE_SCHEMA_VERSION,
         "probabilityFeatureCount": len(FEATURE_NAMES),
@@ -158,6 +166,7 @@ async def system_config():
         "llmEntryContractVersion": ENTRY_CONTRACT_VERSION,
         "llmEntryOutputFormat": "json",
         "llmModelPath": settings.MLX_MODEL_PATH,
+        "llmDevice": llm_device,
         "runId": getattr(graph.trading_session, "_experiment", None).run_id if getattr(graph.trading_session, "_experiment", None) else "",
         "configFingerprint": getattr(graph.trading_session, "_experiment", None).config_fingerprint if getattr(graph.trading_session, "_experiment", None) else "",
         "serverDriven": bool(settings.DHAN_CLIENT_ID),
@@ -166,18 +175,15 @@ async def system_config():
 
 
 @router.post("/scanner/rescan")
-async def scanner_rescan():
+async def scanner_rescan(request: Request):
     """Trigger a fresh option scan and update active symbols."""
-    from app.api.dependencies import get_service_graph
     from app.domain.fabio_ai.services.option_scanner import OptionScannerService
-    import concurrent.futures as _cf
 
-    graph = get_service_graph()
+    graph = request.app.state.service_graph
     scanner = OptionScannerService(graph.market_data)
 
-    pool = _cf.ThreadPoolExecutor(max_workers=1)
-    try:
-        results = pool.submit(
+    results = await asyncio.wait_for(
+        asyncio.to_thread(
             scanner.scan_top_n,
             n=settings.SCANNER_TOP_N,
             underlyings=settings.SCANNER_UNDERLYINGS,
@@ -185,9 +191,9 @@ async def scanner_rescan():
             exchange=settings.DEFAULT_EXCHANGE,
             expiry_index=settings.SCANNER_EXPIRY_INDEX,
             strikes_around_atm=settings.STRIKES_AROUND_ATM,
-        ).result(timeout=60)
-    finally:
-        pool.shutdown(wait=False)
+        ),
+        timeout=60.0,
+    )
 
     if results:
         final = [r for r in results if r.ltp > 0] or results

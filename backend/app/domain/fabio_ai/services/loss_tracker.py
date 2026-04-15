@@ -7,7 +7,7 @@ Key features:
 - Daily loss counting (global and per-symbol)
 - Consecutive loss tracking for circuit breakers
 - ATR-based re-entry distance checks
-- Persistence via KeyValueStoragePort (DIP-compliant)
+- Persistence via IKeyValueStorage (DIP-compliant)
 - Automatic daily reset at IST midnight
 """
 
@@ -20,20 +20,20 @@ import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Callable
 
-from app.domain.ports.storage import KeyValueStoragePort
+from app.domain.ports.storage import IKeyValueStorage
 from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
 
-def _make_storage_adapter(persist_fn: Callable[[str, str | None], str | None]) -> KeyValueStoragePort:
-    """Create a KeyValueStoragePort adapter from legacy persist_fn callback.
+def _make_storage_adapter(persist_fn: Callable[[str, str | None], str | None]) -> IKeyValueStorage:
+    """Create a IKeyValueStorage adapter from legacy persist_fn callback.
 
     The legacy persist_fn is dual-purpose:
     - persist_fn(key, value) stores the value
     - persist_fn(key, None) returns the stored value
 
-    This adapter provides the cleaner KeyValueStoragePort interface.
+    This adapter provides the cleaner IKeyValueStorage interface.
     """
     class _PersistFnAdapter:
         def __init__(self, fn: Callable[[str, str | None], str | None]):
@@ -61,7 +61,7 @@ class LossTracker:
     Thread-safe via RLock.
 
     Dependency Injection:
-        Prefer `storage` parameter (KeyValueStoragePort) for DIP compliance.
+        Prefer `storage` parameter (IKeyValueStorage) for DIP compliance.
         The `persist_fn` parameter is deprecated but supported for backward compatibility.
     """
 
@@ -69,14 +69,14 @@ class LossTracker:
 
     def __init__(
         self,
-        storage: KeyValueStoragePort | None = None,
+        storage: IKeyValueStorage | None = None,
         persist_fn: Callable[[str, str | None], str | None] | None = None,
         max_daily_losses: int = 3,
     ):
         """Initialize loss tracker.
 
         Args:
-            storage: KeyValueStoragePort for persistence (preferred, DIP-compliant).
+            storage: IKeyValueStorage for persistence (preferred, DIP-compliant).
             persist_fn: Legacy callback for persistence (deprecated). Called as:
                         persist_fn(key: str, value: str | None) -> str | None
                         Pass value to store, None to load. Returns stored value on load.

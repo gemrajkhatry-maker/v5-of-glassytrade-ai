@@ -128,6 +128,11 @@ def three_align_check(
     2. Location (price near structural level)
     3. Aggression/Confirmation (volume impulse + delta + spread)
 
+    Bug #10 fix: Price velocity acts as a timing qualifier.
+    - Extremely high velocity (>0.5 pts/s) → block (whipsaw risk)
+    - High velocity (>0.1 pts/s) → pass with reduced confidence
+    - Normal/low velocity → no impact
+
     Returns (gate_passed, confirmation_strong[, is_second_drive]).
     """
     from app.domain.constants import CVD_SLOPE_EXTREME, D2_CVD_SLOPE_MAX
@@ -155,6 +160,20 @@ def three_align_check(
     if cvd_slope > CVD_SLOPE_EXTREME and amt_result.market_state == "BALANCED":
         logger.info("Three-Align: BLOCKED — CVD extreme buying (+%.0f) in balance", cvd_slope)
         return (False, False, False) if return_is_second_drive else (False, False)
+
+    # Price Velocity Timing Qualifier (Bug #10)
+    price_velocity = abs(getattr(amt_result, "price_velocity", 0.0) or 0.0)
+    if price_velocity > 0.5:
+        logger.info(
+            "Three-Align: BLOCKED — price velocity too high (%.3f pts/s), whipsaw risk",
+            price_velocity,
+        )
+        return (False, False, False) if return_is_second_drive else (False, False)
+    elif price_velocity > 0.1:
+        logger.debug(
+            "Three-Align: velocity elevated (%.3f pts/s), gate proceeds with reduced confidence",
+            price_velocity,
+        )
 
     # Near-level check
     near_level = False

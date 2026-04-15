@@ -111,11 +111,23 @@ def _validate_tick(tick: OHLC) -> str | None:
 
 @router.websocket("/ws/gameloop")
 async def gameloop_ws(ws: WebSocket):
-    await ws.accept()
+    logger.info("WebSocket connection attempt from %s", ws.client)
+    try:
+        await ws.accept()
+        logger.info("WebSocket connection accepted")
+    except Exception as e:
+        logger.error("Failed to accept WebSocket connection: %s", e, exc_info=True)
+        raise
 
-    from app.api.dependencies import get_service_graph
-
-    graph = get_service_graph()
+    # Service graph must come from app state (same instance as lifespan-started engine).
+    app = ws.scope.get("app")
+    if not app or not hasattr(app.state, "service_graph"):
+        logger.error("WebSocket: no service_graph on app.state")
+        await ws.close(code=1011)
+        return
+    graph = app.state.service_graph
+    logger.info("Using service graph from app.state")
+    
     session_service = graph.trading_session
 
     try:
@@ -203,13 +215,16 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
     engine = getattr(graph, "engine", None)
     if engine is None:
         # Fallback: engine not yet started — tell frontend to retry
+        logger.warning("Trading engine not available, sending error to frontend")
         await _safe_send(ws, {"error": "Trading engine not started yet"})
         return
 
+    logger.info("Viewer loop: engine available, getting active symbols")
     active_symbols = engine.get_active_symbols()
     if not active_symbols:
         active_symbols = [symbol]
     primary_symbol = active_symbols[0]
+    logger.info("Viewer loop: active_symbols=%s, primary=%s", active_symbols, primary_symbol)
 
     # 1. Send config
     if not await _safe_send(
