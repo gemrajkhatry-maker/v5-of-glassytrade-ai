@@ -142,8 +142,17 @@ class OptionScannerService:
             strike, atm, interval, oi, vol,
             opt, ltp, bid, ask, u.upper(), bias,
         )
-        logger.info("SCORED: %s %s %d: ltp=%.2f oi=%d vol=%d score=%.0f sym=%s",
-                    u, opt_type, strike, ltp, oi, vol, score, opt.symbol)
+        logger.debug(
+            "SCORED: %s %s %d: ltp=%.2f oi=%d vol=%d score=%.0f sym=%s",
+            u,
+            opt_type,
+            strike,
+            ltp,
+            oi,
+            vol,
+            score,
+            opt.symbol,
+        )
 
         return ScanResult(
             symbol=opt.symbol, underlying=u, strike=strike,

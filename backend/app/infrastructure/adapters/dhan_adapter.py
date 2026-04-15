@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import pathlib
 import sys
 import threading
+import time
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
@@ -86,6 +88,10 @@ class DhanMarketDataAdapter(IMarketData):
         # Single init guard — thread-safe for both sync and async callers
         self._init_lock = threading.Lock()
         self._initialized = False
+        # Short-TTL cache for option chains (reduces duplicate API load on rescans / expiry probes)
+        self._chain_cache: dict[tuple[str, str, int], tuple[object, float]] = {}
+        self._chain_cache_lock = threading.Lock()
+        self._chain_cache_ttl = float(os.environ.get("OPTION_CHAIN_CACHE_TTL_SEC", "8.0"))
 
     def get_broker(self):
         """Return DhanBroker instance (lazy-created, cached)."""
@@ -194,12 +200,23 @@ class DhanMarketDataAdapter(IMarketData):
         """Fetch option chain, converting string exchange to broker enum.
 
         Returns None if chain is unavailable (e.g., MCX commodity without options).
+        Identical requests within ``OPTION_CHAIN_CACHE_TTL_SEC`` (default 8s) reuse
+        the last chain to avoid hammering the broker on startup + rescan.
         """
+        ex_key = (underlying.upper(), (exchange or "NFO").upper(), int(expiry_index))
+        now = time.monotonic()
+        if self._chain_cache_ttl > 0:
+            with self._chain_cache_lock:
+                hit = self._chain_cache.get(ex_key)
+                if hit is not None:
+                    chain_obj, ts = hit
+                    if now - ts <= self._chain_cache_ttl:
+                        return chain_obj
         try:
             self.ensure_initialized_sync()
             broker = self.get_broker()
             ex = _exchange_enum(exchange)
-            return broker.get_option_chain(
+            chain = broker.get_option_chain(
                 underlying=underlying,
                 exchange=ex,
                 expiry_index=expiry_index,
@@ -207,6 +224,16 @@ class DhanMarketDataAdapter(IMarketData):
         except Exception as e:
             logger.debug("get_option_chain(%s, %s) failed: %s", underlying, exchange, e)
             return None
+        if chain is not None and self._chain_cache_ttl > 0:
+            with self._chain_cache_lock:
+                self._chain_cache[ex_key] = (chain, time.monotonic())
+                if len(self._chain_cache) > 64:
+                    # Drop stale entries (keep memory bounded on long runs)
+                    cutoff = time.monotonic() - self._chain_cache_ttl
+                    for k, (_, t) in list(self._chain_cache.items()):
+                        if t < cutoff:
+                            self._chain_cache.pop(k, None)
+        return chain
 
     async def scan_candidates(self, limit: int = 6) -> list[str]:
         return self._symbols[:limit]
