@@ -233,7 +233,7 @@ class EngineLifecycle:
 
         # Clear stale positions on restart (safety for options — prevents overnight holds)
         if settings.CLEAR_POSITIONS_ON_RESTART:
-            cleared_count = storage.clear_all_open_positions()
+            cleared_count = await asyncio.to_thread(storage.clear_all_open_positions)
             if cleared_count > 0:
                 logger.info(
                     "STARTUP: Cleared %d stale positions (CLEAR_POSITIONS_ON_RESTART=True)",
@@ -243,13 +243,14 @@ class EngineLifecycle:
             return
 
         try:
-            open_positions = storage.load_open_positions()
+            open_positions = await asyncio.to_thread(storage.load_open_positions)
             if not open_positions:
                 logger.info("Engine: no open positions to recover")
                 return
 
-            # Exchange-aware filtering
-            current_exchange = getattr(self._graph.exchange_config, "exchange", "MCX")
+            # Exchange-aware filtering (session holds the domain ExchangeConfig)
+            _ex = getattr(self._session_service, "_exchange_config", None)
+            current_exchange = _ex.exchange if _ex else "MCX"
 
             recovered = 0
             skipped = 0
@@ -339,7 +340,9 @@ class EngineLifecycle:
 
                 # Fallback for MCX options: broker API returns empty, load from DB
                 if not history:
-                    history = self._load_candles_from_db(sym, limit=500)
+                    history = await asyncio.to_thread(
+                        self._load_candles_from_db, sym, 500
+                    )
                     if history:
                         logger.info(
                             "Engine: seeded %d candles for %s from local DB",
