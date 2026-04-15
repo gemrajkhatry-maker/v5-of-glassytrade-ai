@@ -49,6 +49,9 @@ class ModeConfig:
     scanner_config: Dict[str, Any] = field(default_factory=dict)
     exchange_config: Dict[str, Any] = field(default_factory=dict)
     secrets: Dict[str, str] = field(default_factory=dict)
+    # Strategy-root keys (strategies/*.yaml), not nested under scanner:
+    amt_thresholds: Dict[str, Any] = field(default_factory=dict)
+    feature_flags: Dict[str, Any] = field(default_factory=dict)
     
     @property
     def default_exchange(self) -> str:
@@ -170,6 +173,8 @@ class ModeConfigLoader:
             scanner_config=scanner_config,
             exchange_config=exchange_config,
             secrets=secrets,
+            amt_thresholds=dict(strat_data.get("amt_thresholds") or {}),
+            feature_flags=dict(strat_data.get("feature_flags") or {}),
         )
         
         # Log configuration summary

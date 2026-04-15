@@ -195,8 +195,8 @@ def create_application() -> FastAPI:
 
     app.add_middleware(WebSocketLogMiddleware)
 
-    # Load configuration
-    config = Configuration.from_env()
+    # Load configuration (YAML strategy + env secrets — same basis as app.config.settings)
+    config = Configuration.from_unified()
     logger.info(f"Loaded configuration: {config}")
 
     # Create service graph

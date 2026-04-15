@@ -104,11 +104,19 @@ class SettingsAdapter:
             "LLM_INSTRUCTION",
             "You are an expert market analyst using Fabio Valentini's AMT methodology..."
         )
-    
+
+    def _merged_feature_flags(self) -> dict:
+        """Strategy ``feature_flags`` live at YAML root; optional legacy nest under ``scanner``."""
+        if not self._mode_config:
+            return {}
+        if self._mode_config.feature_flags:
+            return dict(self._mode_config.feature_flags)
+        return dict(self._mode_config.scanner_config.get("feature_flags") or {})
+
     # =========================================================================
     # Property accessors that read from YAML config
     # =========================================================================
-    
+
     @property
     def SCANNER_MODE(self) -> str:
         """Get scanner mode from YAML config."""
@@ -178,26 +186,35 @@ class SettingsAdapter:
     def AGGRESSION_SIGMA(self) -> float:
         """Get aggression sigma from YAML config."""
         if self._mode_config:
-            return float(self._mode_config.system_config.risk.risk_per_trade_pct)
+            amt = self._mode_config.amt_thresholds
+            if amt.get("aggression_sigma") is not None:
+                return float(amt["aggression_sigma"])
         return float(os.getenv("AGGRESSION_SIGMA", "2.0"))
     
     @property
     def DISPLACEMENT_MULTIPLIER(self) -> float:
         """Get displacement multiplier from YAML config."""
         if self._mode_config:
+            amt = self._mode_config.amt_thresholds
+            if amt.get("displacement_multiplier") is not None:
+                return float(amt["displacement_multiplier"])
             return 1.2 if self._mode_config.strategy == "mcx_options" else 1.5
         return float(os.getenv("DISPLACEMENT_MULTIPLIER", "1.2"))
     
     @property
     def BALANCE_RATIO_THRESHOLD(self) -> float:
         """Get balance ratio threshold from YAML config."""
+        if self._mode_config:
+            amt = self._mode_config.amt_thresholds
+            if amt.get("balance_ratio_threshold") is not None:
+                return float(amt["balance_ratio_threshold"])
         return float(os.getenv("BALANCE_RATIO_THRESHOLD", "0.55"))
     
     @property
     def ALLOW_SHORT(self) -> bool:
         """Get allow short from YAML config."""
         if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
+            flags = self._merged_feature_flags()
             return flags.get("allow_short", True)
         return os.getenv("ALLOW_SHORT", "true").lower() == "true"
     
@@ -205,7 +222,7 @@ class SettingsAdapter:
     def RISK_TIER_ENGINE(self) -> bool:
         """Get risk tier engine flag from YAML config."""
         if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
+            flags = self._merged_feature_flags()
             return flags.get("risk_tier_engine", True)
         return os.getenv("RISK_TIER_ENGINE", "true").lower() == "true"
     
@@ -213,7 +230,7 @@ class SettingsAdapter:
     def SHORT_SIGNALS_ENABLED(self) -> bool:
         """Get short signals flag from YAML config."""
         if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
+            flags = self._merged_feature_flags()
             return flags.get("short_signals_enabled", True)
         return os.getenv("SHORT_SIGNALS_ENABLED", "true").lower() == "true"
     
@@ -221,7 +238,7 @@ class SettingsAdapter:
     def LLM_PRE_CANDLE_ADVISORY(self) -> bool:
         """Get LLM pre-candle advisory flag from YAML config."""
         if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
+            flags = self._merged_feature_flags()
             return flags.get("llm_pre_candle_advisory", True)
         return os.getenv("LLM_PRE_CANDLE_ADVISORY", "true").lower() == "true"
     
@@ -229,7 +246,7 @@ class SettingsAdapter:
     def SCALP_ENGINE_ENABLED(self) -> bool:
         """Get scalp engine flag from YAML config."""
         if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
+            flags = self._merged_feature_flags()
             return flags.get("scalp_engine_enabled", False)
         return os.getenv("SCALP_ENGINE_ENABLED", "false").lower() == "true"
     
@@ -237,7 +254,7 @@ class SettingsAdapter:
     def SCALP_IB_BREAKOUT(self) -> bool:
         """Get scalp IB breakout flag from YAML config."""
         if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
+            flags = self._merged_feature_flags()
             return flags.get("scalp_ib_breakout", False)
         return os.getenv("SCALP_IB_BREAKOUT", "false").lower() == "true"
     
@@ -245,7 +262,7 @@ class SettingsAdapter:
     def REALISTIC_COST_MODEL(self) -> bool:
         """Get realistic cost model flag from YAML config."""
         if self._mode_config:
-            flags = self._mode_config.scanner_config.get("feature_flags", {})
+            flags = self._merged_feature_flags()
             return flags.get("realistic_cost_model", True)
         return os.getenv("REALISTIC_COST_MODEL", "true").lower() == "true"
     
@@ -253,7 +270,7 @@ class SettingsAdapter:
     def LLM_TIMEOUT_SECONDS(self) -> float:
         """Get LLM timeout from YAML config."""
         if self._mode_config:
-            return float(self._mode_config.scanner_config.get("llm", {}).get("timeout_seconds", 60))
+            return float(self._mode_config.system_config.llm.timeout_seconds)
         return float(os.getenv("LLM_TIMEOUT_SECONDS", "60"))
     
     @property

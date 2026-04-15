@@ -314,6 +314,120 @@ class ConsolidatedConfig(BaseModel):
         )
 
     @classmethod
+    def from_unified(cls) -> ConsolidatedConfig:
+        """Load env + secrets (``from_env``), then overlay YAML strategy via ``ModeConfigLoader``.
+
+        Keeps API keys, MLX paths, PORT, and other env-only fields from ``from_env`` while
+        aligning scanner, exchange, LLM timeouts/temperatures, risk, and AMT with
+        ``strategies/{GLASSYTRADE_STRATEGY}.yaml`` — the same source as ``app.config.settings``.
+        """
+        import logging
+
+        log = logging.getLogger(__name__)
+        base = cls.from_env()
+        try:
+            from config.mode_config import ModeConfigLoader
+
+            mode = ModeConfigLoader.load_from_env()
+        except Exception as exc:
+            log.warning(
+                "Unified config unavailable, using env-only: %s", exc, exc_info=True
+            )
+            return base
+
+        sc = mode.scanner_config
+        feat = dict(mode.feature_flags or {})
+        if not feat:
+            feat = dict(sc.get("feature_flags") or {})
+        amt_src = dict(mode.amt_thresholds or {})
+
+        trading = base.trading.model_copy(
+            update={
+                "scanner_mode": sc.get("mode", base.trading.scanner_mode),
+                "scanner_top_n": int(sc.get("top_n", base.trading.scanner_top_n)),
+                "scanner_top_per_underlying": int(
+                    sc.get("top_per_underlying", base.trading.scanner_top_per_underlying)
+                ),
+                "strikes_around_atm": int(
+                    sc.get("strikes_around_atm", base.trading.strikes_around_atm)
+                ),
+                "allow_short": bool(feat.get("allow_short", base.trading.allow_short)),
+                "stream_interval": f"{mode.system_config.candle_timeframe_minutes}m",
+                "max_risk_per_trade": float(mode.system_config.risk.risk_per_trade_pct),
+            }
+        )
+
+        sys_llm = mode.system_config.llm
+        llm_temp_raw = os.getenv("LLM_TEMPERATURE")
+        default_mid = (
+            float(sys_llm.temperature_entry) + float(sys_llm.temperature_overseer)
+        ) / 2.0
+        llm = base.llm.model_copy(
+            update={
+                "temperature": float(llm_temp_raw)
+                if llm_temp_raw is not None and llm_temp_raw.strip() != ""
+                else default_mid,
+                "entry_temperature": float(sys_llm.temperature_entry),
+                "overseer_temperature": float(sys_llm.temperature_overseer),
+                "max_new_tokens": int(sys_llm.max_tokens),
+                "timeout_seconds": float(sys_llm.timeout_seconds),
+            }
+        )
+
+        sr = mode.system_config.risk
+        risk = base.risk.model_copy(
+            update={
+                "max_daily_drawdown": float(sr.max_daily_loss_pct),
+                "max_consecutive_losses": int(sr.max_consecutive_losses),
+            }
+        )
+
+        amt = base.amt.model_copy(
+            update={
+                "aggression_sigma": float(
+                    amt_src.get("aggression_sigma", base.amt.aggression_sigma)
+                ),
+                "displacement_multiplier": float(
+                    amt_src.get("displacement_multiplier", base.amt.displacement_multiplier)
+                ),
+                "balance_ratio_threshold": float(
+                    amt_src.get("balance_ratio_threshold", base.amt.balance_ratio_threshold)
+                ),
+            }
+        )
+
+        scanner = base.scanner.model_copy(
+            update={
+                "mode": sc.get("mode", base.scanner.mode),
+                "top_n": int(sc.get("top_n", base.scanner.top_n)),
+                "strikes_around_atm": int(
+                    sc.get("strikes_around_atm", base.scanner.strikes_around_atm)
+                ),
+                "expiry_index": int(sc.get("expiry_index", base.scanner.expiry_index)),
+            }
+        )
+
+        sym = list(mode.active_symbols) if mode.active_symbols else base.dhan_symbols
+        und = (
+            list(mode.scanner_underlyings)
+            if mode.scanner_underlyings
+            else base.scanner_underlyings
+        )
+
+        return base.model_copy(
+            update={
+                "trading": trading,
+                "llm": llm,
+                "risk": risk,
+                "amt": amt,
+                "scanner": scanner,
+                "default_exchange": mode.default_exchange,
+                "dhan_symbols": sym,
+                "scanner_underlyings": und,
+            }
+        )
+
+    @classmethod
     def from_yaml(
         cls,
         path: str = "market_config.yaml",
