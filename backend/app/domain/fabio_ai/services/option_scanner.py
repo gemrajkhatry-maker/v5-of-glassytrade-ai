@@ -11,6 +11,8 @@ No complex scoring — just follow the momentum with liquid contracts.
 from __future__ import annotations
 
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
 
@@ -37,6 +39,9 @@ class ScanResult:
 
 class OptionScannerService:
     """Simple momentum-based contract selection for MCX/NSE."""
+
+    _SCAN_NSE_UNDERLYINGS = frozenset({"NIFTY", "BANKNIFTY", "FINNIFTY"})
+    _SCAN_MCX_UNDERLYINGS = frozenset({"CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"})
 
     _STRIKE_INTERVALS = {
         "NIFTY": 50,
@@ -163,6 +168,110 @@ class OptionScannerService:
             delta=delta_val, iv=float(opt.iv or 0) if hasattr(opt, "iv") else 0,
         )
 
+    def _scan_underlying_for_contracts(
+        self,
+        u: str,
+        exchange: str | None,
+        expiry_index: int,
+        strikes_around_atm: int,
+        bullish_only: bool,
+    ) -> list[ScanResult]:
+        """Fetch chain for one underlying and return scored contracts (CE+PE near ATM)."""
+        out: list[ScanResult] = []
+        u_upper = u.upper()
+        if u_upper in self._SCAN_MCX_UNDERLYINGS:
+            _exchange = "MCX"
+        elif u_upper in self._SCAN_NSE_UNDERLYINGS:
+            _exchange = "NFO"
+        else:
+            _exchange = exchange or "MCX"
+
+        effective_expiry_index = expiry_index
+        chain = self._broker.get_option_chain(
+            underlying=u,
+            exchange=_exchange,
+            expiry_index=effective_expiry_index,
+        )
+        while chain is not None and effective_expiry_index < 3:
+            expiry_date = (
+                chain.expiry.date()
+                if hasattr(chain.expiry, "date")
+                else chain.expiry
+            )
+            if expiry_date <= date.today():
+                effective_expiry_index += 1
+                logger.info(
+                    "%s: exp %s is today/past — advancing to index %d",
+                    u,
+                    expiry_date,
+                    effective_expiry_index,
+                )
+                chain = self._broker.get_option_chain(
+                    underlying=u,
+                    exchange=_exchange,
+                    expiry_index=effective_expiry_index,
+                )
+            else:
+                break
+
+        if chain is None:
+            logger.info("%s: option chain returned None — skipping", u)
+            return out
+
+        atm = chain.atm_strike
+        interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
+
+        all_strikes = sorted(chain.calls.keys())
+        near_atm = [s for s in all_strikes if abs(s - atm) <= interval * 3]
+        logger.info(
+            "%s: chain OK — spot=%.0f atm=%.0f step=%.0f strikes_near_atm=%s",
+            u,
+            chain.spot_price,
+            atm,
+            interval,
+            near_atm[:10],
+        )
+
+        bias, bias_strength, bias_reason = self._detect_momentum(chain, atm, interval)
+        logger.info(
+            "MOMENTUM: %s — %s (strength=%d) [calls=%d puts=%d atm=%.0f]",
+            u,
+            bias,
+            bias_strength,
+            len(chain.calls),
+            len(chain.puts),
+            atm,
+        )
+        strikes = [
+            atm + i * interval
+            for i in range(-strikes_around_atm, strikes_around_atm + 1)
+        ]
+        is_mcx = u.upper() in (
+            "CRUDEOIL",
+            "GOLD",
+            "SILVER",
+            "NATURALGAS",
+            "COPPER",
+        )
+        for opt_type, option_map in [("CE", chain.calls), ("PE", chain.puts)]:
+            for strike in strikes:
+                result = self._process_contract(
+                    u,
+                    opt_type,
+                    int(strike),
+                    atm,
+                    interval,
+                    option_map,
+                    bullish_only,
+                    bias,
+                    bias_reason,
+                    chain,
+                    is_mcx=is_mcx,
+                )
+                if result:
+                    out.append(result)
+        return out
+
     def scan_top_n(
         self,
         n: int = 3,
@@ -182,11 +291,7 @@ class OptionScannerService:
                 - PE: ATM or ITM (strike >= ATM) — high-delta put, bullish if underlying rallies
         """
 
-        # Exchange mapping per underlying
-        _NSE_UNDERLYINGS = {"NIFTY", "BANKNIFTY", "FINNIFTY"}
-        _MCX_UNDERLYINGS = {"CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"}
-
-        results = []
+        results: list[ScanResult] = []
 
         # Use injected default underlyings if not specified
         if underlyings is None:
@@ -198,94 +303,56 @@ class OptionScannerService:
             else:
                 underlyings = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
 
-        for u in underlyings:
-            try:
-                # Auto-detect exchange from underlying
-                u_upper = u.upper()
-                if u_upper in _MCX_UNDERLYINGS:
-                    _exchange = "MCX"
-                elif u_upper in _NSE_UNDERLYINGS:
-                    _exchange = "NFO"
-                else:
-                    _exchange = exchange or "MCX"
+        parallel = os.environ.get("OPTION_SCANNER_PARALLEL_UNDERLYINGS", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        max_workers = max(
+            1,
+            min(
+                len(underlyings),
+                int(os.environ.get("OPTION_SCANNER_MAX_WORKERS", "4")),
+            ),
+        )
 
-                # Auto-advance expiry if the requested one is today or in the past.
-                # On expiry day, Dhan may return stale LTP from the option chain,
-                # but the WebSocket feed is silently killed for delisted contracts.
-                effective_expiry_index = expiry_index
-                chain = self._broker.get_option_chain(
-                    underlying=u,
-                    exchange=_exchange,
-                    expiry_index=effective_expiry_index,
-                )
-                while chain is not None and effective_expiry_index < 3:
-                    expiry_date = chain.expiry.date() if hasattr(chain.expiry, "date") else chain.expiry
-                    if expiry_date <= date.today():
-                        effective_expiry_index += 1
-                        logger.info(
-                            "%s: exp %s is today/past — advancing to index %d",
-                            u, expiry_date, effective_expiry_index,
+        if parallel and len(underlyings) > 1:
+            merged: list[ScanResult] = []
+            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = {
+                    pool.submit(
+                        self._scan_underlying_for_contracts,
+                        u,
+                        exchange,
+                        expiry_index,
+                        strikes_around_atm,
+                        bullish_only,
+                    ): u
+                    for u in underlyings
+                }
+                for fut in as_completed(futures):
+                    sym = futures[fut]
+                    try:
+                        merged.extend(fut.result())
+                    except Exception as e:
+                        logger.error(
+                            "scan_top_n failed for %s: %s", sym, e, exc_info=True
                         )
-                        chain = self._broker.get_option_chain(
-                            underlying=u,
-                            exchange=_exchange,
-                            expiry_index=effective_expiry_index,
+            results = merged
+        else:
+            for u in underlyings:
+                try:
+                    results.extend(
+                        self._scan_underlying_for_contracts(
+                            u,
+                            exchange,
+                            expiry_index,
+                            strikes_around_atm,
+                            bullish_only,
                         )
-                    else:
-                        break
-
-                if chain is None:
-                    logger.info("%s: option chain returned None — skipping", u)
-                    continue
-
-                atm = chain.atm_strike
-                interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
-
-                # Log available strikes near ATM for debugging
-                all_strikes = sorted(chain.calls.keys())
-                near_atm = [s for s in all_strikes if abs(s - atm) <= interval * 3]
-                logger.info(
-                    "%s: chain OK — spot=%.0f atm=%.0f step=%.0f strikes_near_atm=%s",
-                    u,
-                    chain.spot_price,
-                    atm,
-                    interval,
-                    near_atm[:10],
-                )
-
-                # Detect momentum (for logging/sorting, not filtering)
-                bias, bias_strength, bias_reason = self._detect_momentum(
-                    chain, atm, interval
-                )
-                logger.info(
-                    "MOMENTUM: %s — %s (strength=%d) [calls=%d puts=%d atm=%.0f]",
-                    u,
-                    bias,
-                    bias_strength,
-                    len(chain.calls),
-                    len(chain.puts),
-                    atm,
-                )
-                # Scan BOTH CE and PE contracts near ATM
-                # LLM decides direction based on full market context
-                strikes = [
-                    atm + i * interval
-                    for i in range(-strikes_around_atm, strikes_around_atm + 1)
-                ]
-
-                # Process both CE and PE
-                for opt_type, option_map in [("CE", chain.calls), ("PE", chain.puts)]:
-                    for strike in strikes:
-                        result = self._process_contract(
-                            u, opt_type, int(strike), atm, interval,
-                            option_map, bullish_only, bias, bias_reason,
-                            chain, is_mcx=u.upper() in ("CRUDEOIL", "GOLD", "SILVER", "NATURALGAS", "COPPER"),
-                        )
-                        if result:
-                            results.append(result)
-
-            except Exception as e:
-                logger.error("scan_top_n failed for %s: %s", u, e)
+                    )
+                except Exception as e:
+                    logger.error("scan_top_n failed for %s: %s", u, e)
 
         # Group by underlying and take top N per underlying first
         from collections import defaultdict
@@ -314,7 +381,12 @@ class OptionScannerService:
             # Use provided underlyings or detect from exchange
             if not underlyings:
                 if _fb_exchange == "MCX":
-                    _fb_underlyings = ["CRUDEOIL", "NATURALGAS"]
+                    _fb_underlyings = [
+                        "CRUDEOIL",
+                        "NATURALGAS",
+                        "GOLD",
+                        "SILVER",
+                    ]
                 else:
                     _fb_underlyings = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
             else:
@@ -325,9 +397,9 @@ class OptionScannerService:
                     # Auto-detect exchange for this underlying
                     u_upper = u.upper()
                     _u_exchange = _fb_exchange
-                    if u_upper in _MCX_UNDERLYINGS:
+                    if u_upper in self._SCAN_MCX_UNDERLYINGS:
                         _u_exchange = "MCX"
-                    elif u_upper in _NSE_UNDERLYINGS:
+                    elif u_upper in self._SCAN_NSE_UNDERLYINGS:
                         _u_exchange = "NFO"
 
                     chain = self._broker.get_option_chain(

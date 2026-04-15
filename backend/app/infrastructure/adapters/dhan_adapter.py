@@ -92,6 +92,11 @@ class DhanMarketDataAdapter(IMarketData):
         self._chain_cache: dict[tuple[str, str, int], tuple[object, float]] = {}
         self._chain_cache_lock = threading.Lock()
         self._chain_cache_ttl = float(os.environ.get("OPTION_CHAIN_CACHE_TTL_SEC", "8.0"))
+        # Optional: serialize broker option-chain calls (set when broker is not thread-safe).
+        self._serialize_option_chain_fetch = os.environ.get(
+            "DHAN_SERIALIZE_OPTION_CHAIN", ""
+        ).lower() in ("1", "true", "yes")
+        self._option_chain_broker_lock = threading.Lock()
 
     def get_broker(self):
         """Return DhanBroker instance (lazy-created, cached)."""
@@ -216,11 +221,19 @@ class DhanMarketDataAdapter(IMarketData):
             self.ensure_initialized_sync()
             broker = self.get_broker()
             ex = _exchange_enum(exchange)
-            chain = broker.get_option_chain(
-                underlying=underlying,
-                exchange=ex,
-                expiry_index=expiry_index,
-            )
+            if self._serialize_option_chain_fetch:
+                with self._option_chain_broker_lock:
+                    chain = broker.get_option_chain(
+                        underlying=underlying,
+                        exchange=ex,
+                        expiry_index=expiry_index,
+                    )
+            else:
+                chain = broker.get_option_chain(
+                    underlying=underlying,
+                    exchange=ex,
+                    expiry_index=expiry_index,
+                )
         except Exception as e:
             logger.debug("get_option_chain(%s, %s) failed: %s", underlying, exchange, e)
             return None
