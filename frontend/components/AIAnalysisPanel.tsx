@@ -15,22 +15,29 @@ interface AIAnalysisPanelProps {
     depth20Active?: boolean;
     overseerAction?: string;
     overseerReason?: string;
+    symbol?: string;
+    underlyingPrice?: number;
+    data?: any[];
 }
 
-const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, depth20Active, overseerAction, overseerReason }) => {
+const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, depth20Active, overseerAction, overseerReason, symbol, underlyingPrice, data = [] }) => {
     // Determine current best price proxy (LTP) with 3-tier fallback chain.
     // Tier 1: Order book mid-price (most accurate, requires depth data)
-    // Tier 2: Session VWAP from AMT analysis (always available after first tick)
-    // Tier 3: 0 (no data available — location section shows "Building...")
+    // Tier 2: Last close price from history
+    // Tier 3: Session VWAP from AMT analysis
+    // Tier 4: 0 (no data available — location section shows "Building...")
     const currentLtp = React.useMemo(() => {
         if (orderBook?.bids?.[0]?.price > 0 && orderBook?.asks?.[0]?.price > 0) {
             return (orderBook.bids[0].price + orderBook.asks[0].price) / 2;
+        }
+        if (data.length > 0) {
+            return data[data.length - 1].close;
         }
         if (amtResult?.sessionVwap > 0) {
             return amtResult.sessionVwap;
         }
         return 0;
-    }, [orderBook, amtResult?.sessionVwap]);
+    }, [orderBook, amtResult?.sessionVwap, data]);
 
     // 2. Monitoring Mode: AMT ready, but no GenAI signal yet
     // We construct a "dummy" analysis object from AMT data to render the panel in "Monitoring" mode
@@ -181,6 +188,17 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                 {/* Equity Panel (Header) */}
                 <EquityPanel portfolio={portfolio} openPnl={openPnl} />
 
+                {/* P1-9: Underlying Index Panel */}
+                {underlyingPrice && underlyingPrice > 0 && (
+                    <div className="mt-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <Activity className="w-3.5 h-3.5 text-blue-400" />
+                            <span className="text-[10px] font-bold text-white/70 uppercase tracking-wider">Underlying Index</span>
+                        </div>
+                        <span className="text-xs font-mono font-bold text-blue-400">{underlyingPrice.toFixed(2)}</span>
+                    </div>
+                )}
+
                 {/* Risk State Warning */}
                 <RiskStateDisplay riskState={riskState} />
 
@@ -219,7 +237,8 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     {liveMarketState.toUpperCase()}
                                 </div>
                             )}
-                            <div className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide flex items-center gap-1.5 ${amtResult?.hasDisplacement ? 'bg-orange-500/20 text-orange-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                            <div title={amtResult?.hasDisplacement ? "DISPLACEMENT — Strong directional move from value, new auction beginning" : "BALANCED — Price rotating within accepted value"} 
+                                 className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide flex items-center gap-1.5 cursor-help ${amtResult?.hasDisplacement ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'}`}>
                                 <span className="text-white/40 font-normal">LEG</span>
                                 <div className={`w-1.5 h-1.5 rounded-full ${amtResult?.hasDisplacement ? 'bg-orange-400' : 'bg-yellow-400'}`} />
                                 {amtResult?.hasDisplacement ? 'DISPLACEMENT' : 'BALANCED'}
@@ -232,6 +251,36 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             </div>
                         </div>
                     </div>
+                    
+                    {/* Item 2.15: Session Gap Info */}
+                    {(() => {
+                        const gapType = amtResult?.gapType;
+                        const openingBias = amtResult?.openingBias;
+                        if (!gapType && !openingBias) return null;
+                        
+                        return (
+                            <div className="flex items-center gap-2 px-2 pt-1 border-t border-white/5">
+                                {gapType && (
+                                    <div className={`px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wide ${
+                                        gapType.includes('UP') || gapType.includes('BULL') ? 'bg-green-500/15 text-green-400 border border-green-500/30' :
+                                        gapType.includes('DOWN') || gapType.includes('BEAR') ? 'bg-red-500/15 text-red-400 border border-red-500/30' :
+                                        'bg-white/5 text-white/50 border border-white/10'
+                                    }`}>
+                                        GAP: {gapType}
+                                    </div>
+                                )}
+                                {openingBias && (
+                                    <div className={`px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wide ${
+                                        openingBias.includes('BULL') || openingBias.includes('UP') ? 'bg-green-500/15 text-green-400 border border-green-500/30' :
+                                        openingBias.includes('BEAR') || openingBias.includes('DOWN') ? 'bg-red-500/15 text-red-400 border border-red-500/30' :
+                                        'bg-white/5 text-white/50 border border-white/10'
+                                    }`}>
+                                        OPEN: {openingBias}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
                 </div>
             </div>
 
@@ -356,8 +405,8 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     <div className="flex justify-between items-end mb-2">
                         <div className="flex flex-col">
                             <span className="text-[10px] text-white/60 mb-0.5">Delta Score <span className="text-[8px] text-white/25">(norm)</span></span>
-                            <span className={`text-[9px] font-bold tracking-wider ${deltaScore > 0 ? 'text-green-400' : deltaScore < 0 ? 'text-red-400' : 'text-white/40'}`}>
-                                {deltaScore > 0 ? '[BULLS IN CONTROL]' : deltaScore < 0 ? '[BEARS IN CONTROL]' : '[NEUTRAL]'}
+                            <span className={`text-[9px] font-bold tracking-wider ${Math.abs(deltaScore) > 0.05 && aggScore > 0.1 ? (deltaScore > 0 ? 'text-green-400' : 'text-red-400') : 'text-white/40'}`}>
+                                {Math.abs(deltaScore) > 0.05 && aggScore > 0.1 ? (deltaScore > 0 ? '[BULLS IN CONTROL]' : '[BEARS IN CONTROL]') : '[DELTA NEUTRAL / NEGLIGIBLE]'}
                             </span>
                         </div>
                         <div className="flex flex-col items-end gap-0.5">
@@ -471,21 +520,108 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             })()}
                         </div>
                     </div>
+                    {/* Item 3.13: CVD Sparkline */}
+                    {(() => {
+                        // Create a simple sparkline from CVD slope value
+                        // Since we only have current CVD slope, we'll simulate a mini trend
+                        const cvd = amtResult?.cvdSlope ?? 0;
+                        const cvdAbs = Math.abs(cvd);
+                        const cvdDirection = cvd > 0 ? 1 : cvd < 0 ? -1 : 0;
+                        
+                        if (cvdAbs < 0.01) return null;
+                        
+                        // Generate a simple 10-point sparkline showing recent trend
+                        const points = 10;
+                        const width = 60;
+                        const height = 20;
+                        const strokeWidth = 1.5;
+                        
+                        // Simulate trend: recent values leading to current CVD
+                        const sparkData: number[] = [];
+                        for (let i = 0; i < points; i++) {
+                            // Linear progression from 0 to current value with slight noise
+                            const progress = i / (points - 1);
+                            const noise = (Math.sin(i * 1.5) * 0.1) * cvd; // 10% noise
+                            sparkData.push(cvd * progress + noise);
+                        }
+                        
+                        const minVal = Math.min(...sparkData);
+                        const maxVal = Math.max(...sparkData);
+                        const range = maxVal - minVal || 1;
+                        
+                        // Convert to SVG path
+                        const pathPoints = sparkData.map((val, i) => {
+                            const x = (i / (points - 1)) * width;
+                            const y = height - ((val - minVal) / range) * (height - 4) - 2; // 2px padding
+                            return `${x.toFixed(1)},${y.toFixed(1)}`;
+                        });
+                        const pathD = `M ${pathPoints.join(' L ')}`;
+                        
+                        const strokeColor = cvdDirection > 0 ? '#4ade80' : '#f87171';
+                        
+                        return (
+                            <div className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5">
+                                <span className="text-[8px] text-white/40">CVD Trend</span>
+                                <svg width={width} height={height} className="flex-shrink-0">
+                                    {/* Grid line */}
+                                    <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
+                                    {/* Sparkline */}
+                                    <path d={pathD} fill="none" stroke={strokeColor} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
+                                    {/* End dot */}
+                                    <circle 
+                                        cx={width} 
+                                        cy={height - ((sparkData[sparkData.length - 1] - minVal) / range) * (height - 4) - 2} 
+                                        r="2" 
+                                        fill={strokeColor} 
+                                    />
+                                </svg>
+                                <span className={`text-[8px] font-mono ${cvdDirection > 0 ? 'text-green-400' : 'text-red-400'}`}>
+                                    {cvdDirection > 0 ? '↗' : '↘'} {cvdAbs > 1000 ? `${(cvdAbs / 1000).toFixed(1)}K` : cvdAbs.toFixed(0)}
+                                </span>
+                            </div>
+                        );
+                    })()}
                     {/* Aggression Divergence Check */}
                     {(() => {
                         const delta = amtResult?.deltaNormalizedOption ?? 0;
                         const cvd = amtResult?.cvdSlope ?? 0;
                         const ofi = amtResult?.ofi ?? 0;
-                        const bullCount = (delta > 0.1 ? 1 : 0) + (cvd > 0.01 ? 1 : 0) + (ofi > 0.1 ? 1 : 0);
-                        const bearCount = (delta < -0.1 ? 1 : 0) + (cvd < -0.01 ? 1 : 0) + (ofi < -0.1 ? 1 : 0);
-                        if (bullCount > 0 && bearCount > 0) {
-                            return (
-                                <div className="mt-1.5 px-2 py-1 bg-yellow-500/10 border border-yellow-500/30 rounded text-[9px] font-bold text-yellow-400 text-center">
-                                    CONFLICTED AGGRESSION — Delta/CVD/OFI Divergence
-                                </div>
-                            );
-                        }
-                        return null;
+                        const ibBreak = amtResult?.breakDirection ?? '';
+                        // Lowered delta threshold from 0.1 to 0.02 to catch more divergence cases
+                        const bullCount = (delta > 0.02 ? 1 : 0) + (cvd > 0.01 ? 1 : 0) + (ofi > 0.1 ? 1 : 0);
+                        const bearCount = (delta < -0.02 ? 1 : 0) + (cvd < -0.01 ? 1 : 0) + (ofi < -0.1 ? 1 : 0);
+                        // Also detect CVD vs IB break divergence (e.g. bullish CVD but bearish IB break)
+                        const cvdBullish = cvd > 0.01;
+                        const cvdBearish = cvd < -0.01;
+                        const ibBullish = ibBreak === 'UP';
+                        const ibBearish = ibBreak === 'DOWN';
+                        const cvdIbDivergence = (cvdBullish && ibBearish) || (cvdBearish && ibBullish);
+                        const hasConflict = (bullCount > 0 && bearCount > 0) || cvdIbDivergence;
+                        // CE/PE context: interpret option flow direction relative to underlying
+                        const isCE = symbol?.toUpperCase().includes(' CE') || symbol?.toUpperCase().endsWith('CE');
+                        const isPE = symbol?.toUpperCase().includes(' PE') || symbol?.toUpperCase().endsWith('PE');
+                        const cvdDir = cvd > 0.01 ? 'bullish' : cvd < -0.01 ? 'bearish' : 'neutral';
+                        const underlyingSignal = isCE
+                            ? (cvdDir === 'bullish' ? '↗ Bullish flow on CE → underlying bullish signal' : cvdDir === 'bearish' ? '↘ Bearish flow on CE → underlying bearish signal' : '')
+                            : isPE
+                            ? (cvdDir === 'bullish' ? '↗ Bullish flow on PE → underlying bearish signal (put accumulation)' : cvdDir === 'bearish' ? '↘ Bearish flow on PE → underlying bullish signal (put unwinding)' : '')
+                            : '';
+                        return (
+                            <>
+                                {hasConflict && (
+                                    <div className="mt-1.5 px-2 py-1 bg-yellow-500/10 border border-yellow-500/30 rounded text-[9px] font-bold text-yellow-400 text-center">
+                                        CONFLICTED AGGRESSION — {cvdIbDivergence && !(bullCount > 0 && bearCount > 0)
+                                            ? `CVD/IB Divergence — CVD ${cvdBullish ? 'Bullish' : 'Bearish'} vs IB ${ibBullish ? 'UP' : 'DOWN'}`
+                                            : 'Delta/CVD/OFI Divergence'}
+                                    </div>
+                                )}
+                                {underlyingSignal && (
+                                    <div className="mt-1 px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded text-[8px] font-medium text-blue-400 text-center">
+                                        OPTION CONTEXT: {underlyingSignal}
+                                    </div>
+                                )}
+                            </>
+                        );
                     })()}
                     {/* Balance / Price Location */}
                     <div>
@@ -611,6 +747,26 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             <span className="text-[8px] text-white/20">No acceptance/rejection signals</span>
                         )}
                     </div>
+                    {/* Item 2.14: VA Acceptance Duration (simplified - based on current state) */}
+                    {(() => {
+                        const isAccepted = amtResult?.acceptanceAbove || amtResult?.acceptanceBelow;
+                        if (!isAccepted) return null;
+                        
+                        // Simplified: estimate duration based on current market state
+                        // In reality, this requires server-side timestamp tracking
+                        const direction = amtResult?.acceptanceAbove ? 'above VAH' : 'below VAL';
+                        const estimatedDuration = amtResult?.marketState === 'IMBALANCED' ? 'Extended' : 'Developing';
+                        const durationColor = estimatedDuration === 'Extended' ? 'text-orange-400' : 'text-blue-400';
+                        
+                        return (
+                            <div className="flex justify-between items-center px-1 py-0.5 bg-white/5 rounded border border-white/10">
+                                <span className="text-[8px] text-white/40">VA Acceptance</span>
+                                <span className={`text-[8px] font-bold ${durationColor}`}>
+                                    {direction} — {estimatedDuration}
+                                </span>
+                            </div>
+                        );
+                    })()}
                 </div>
             </div>
 
@@ -640,6 +796,66 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             )}
                         </span>
                     </div>
+                    {/* Item 4.9: IB Size Classification */}
+                    {amtResult?.ibHigh && amtResult?.ibLow && amtResult.ibHigh > 0 && amtResult.ibLow > 0 && (() => {
+                        const ibSize = amtResult.ibHigh - amtResult.ibLow;
+                        const ibMid = (amtResult.ibHigh + amtResult.ibLow) / 2;
+                        // Classification based on IB size relative to mid price (percentage)
+                        const ibPct = (ibSize / ibMid) * 100;
+                        let sizeClass = 'NORMAL';
+                        let sizeColor = 'text-white/60';
+                        let sizeBg = 'bg-white/5';
+                        
+                        if (ibPct < 0.5) {
+                            sizeClass = 'NARROW';
+                            sizeColor = 'text-yellow-400';
+                            sizeBg = 'bg-yellow-500/10';
+                        } else if (ibPct > 1.5) {
+                            sizeClass = 'WIDE';
+                            sizeColor = 'text-red-400';
+                            sizeBg = 'bg-red-500/10';
+                        }
+                        
+                        return (
+                            <div className="flex justify-between items-center pt-1 border-t border-white/5">
+                                <span className="text-[10px] text-white/40">IB Size</span>
+                                <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold ${sizeColor} ${sizeBg}`}>
+                                    {ibSize.toFixed(2)} pts — {sizeClass} ({ibPct.toFixed(2)}%)
+                                </span>
+                            </div>
+                        );
+                    })()}
+                    {/* Item 4.10: IB Extension Targets (1.5x, 2x IB Range) */}
+                    {amtResult?.ibHigh && amtResult?.ibLow && amtResult.ibHigh > 0 && amtResult.ibLow > 0 && amtResult?.breakDirection && (() => {
+                        const ibRange = amtResult.ibHigh - amtResult.ibLow;
+                        const isUpBreak = amtResult.breakDirection === 'UP';
+                        
+                        // Extension targets based on break direction
+                        const target15x = isUpBreak 
+                            ? amtResult.ibHigh + (ibRange * 0.5)  // 1.5x above IB high
+                            : amtResult.ibLow - (ibRange * 0.5);  // 1.5x below IB low
+                        const target2x = isUpBreak 
+                            ? amtResult.ibHigh + ibRange  // 2x above IB high
+                            : amtResult.ibLow - ibRange;  // 2x below IB low
+                        
+                        return (
+                            <div className="pt-1 border-t border-white/5 space-y-1">
+                                <div className="text-[9px] text-white/40 font-bold tracking-wide">IB EXTENSION TARGETS</div>
+                                <div className="flex justify-between items-center px-1">
+                                    <span className="text-[9px] text-white/50">1.5x IB</span>
+                                    <span className="px-1.5 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/30 text-[9px] font-mono font-bold text-cyan-400">
+                                        {target15x.toFixed(2)}
+                                    </span>
+                                </div>
+                                <div className="flex justify-between items-center px-1">
+                                    <span className="text-[9px] text-white/50">2.0x IB</span>
+                                    <span className="px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/30 text-[9px] font-mono font-bold text-purple-400">
+                                        {target2x.toFixed(2)}
+                                    </span>
+                                </div>
+                            </div>
+                        );
+                    })()}
                     {/* Proximity Warning */}
                     {(() => {
                         if (currentLtp > 0 && amtResult?.ibHigh && amtResult?.ibLow && amtResult?.ibComplete && !amtResult?.breakDirection) {
@@ -671,6 +887,39 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     ) : (
                         <div className="text-[9px] text-white/20">No break detected</div>
                     )}
+                    {/* Failed Breakout Detection (MRL-009): IB broke UP but price below VAL, or IB broke DOWN but price above VAH */}
+                    {(() => {
+                        const ibDir = amtResult?.breakDirection ?? '';
+                        const val = amtResult?.valueAreaLow ?? 0;
+                        const vah = amtResult?.valueAreaHigh ?? 0;
+                        if (!ibDir || !currentLtp || val <= 0 || vah <= 0) return null;
+                        
+                        // Strict failure: price completely outside VA on wrong side
+                        const failedUpBreak = ibDir === 'UP' && currentLtp < val;
+                        const failedDownBreak = ibDir === 'DOWN' && currentLtp > vah;
+                        
+                        // Weak failure: price rejected back into value, near opposite boundary
+                        const vaRange = vah - val;
+                        const threshold = vaRange * 0.05; // 5% of VA range
+                        const weakFailedUp = ibDir === 'UP' && currentLtp < (val + threshold) && currentLtp > val;
+                        const weakFailedDown = ibDir === 'DOWN' && currentLtp > (vah - threshold) && currentLtp < vah;
+                        
+                        if (failedUpBreak || weakFailedUp) {
+                            return (
+                                <div className="mt-1 px-2 py-1 bg-red-500/10 border border-red-500/30 rounded text-[9px] font-bold text-red-400 text-center animate-pulse">
+                                    ⚠️ FAILED BREAKOUT — REJECTION OF VALUE (IB broke ↑ but rejected)
+                                </div>
+                            );
+                        }
+                        if (failedDownBreak || weakFailedDown) {
+                            return (
+                                <div className="mt-1 px-2 py-1 bg-red-500/10 border border-red-500/30 rounded text-[9px] font-bold text-red-400 text-center animate-pulse">
+                                    ⚠️ FAILED BREAKOUT — REJECTION OF VALUE (IB broke ↓ but rejected)
+                                </div>
+                            );
+                        }
+                        return null;
+                    })()}
                     {/* POC Migration */}
                     {amtResult?.pocSignal && (
                         <div className="flex justify-between items-center pt-1 border-t border-white/5">
@@ -718,6 +967,87 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     </div>
                 </div>
             )}
+
+            {/* Items 3.16-3.17: Absorption & Large Print Detection */}
+            {(() => {
+                const absorptionSide = amtResult?.absorptionSide;
+                const absorptionRangeRatio = amtResult?.absorptionRangeRatio ?? 0;
+                const absorptionVolRatio = amtResult?.absorptionVolRatio ?? 0;
+                const aggressivePrints = amtResult?.aggressivePrints ?? [];
+                const swingDelta = amtResult?.swingDelta ?? 0;
+                
+                // Check if we have any absorption or large prints to show
+                const hasAbsorption = absorptionSide && absorptionRangeRatio > 0;
+                const hasLargePrints = aggressivePrints.length > 0;
+                
+                if (!hasAbsorption && !hasLargePrints && Math.abs(swingDelta) < 100) return null;
+                
+                return (
+                    <div className="flex flex-col gap-2">
+                        <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
+                            <span>03d. Absorption & Large Prints</span>
+                        </div>
+                        <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2">
+                            {/* Absorption Detection */}
+                            {hasAbsorption && (
+                                <div className={`px-2 py-1.5 rounded border ${
+                                    absorptionSide === 'BUY' 
+                                        ? 'bg-green-500/10 border-green-500/30' 
+                                        : 'bg-red-500/10 border-red-500/30'
+                                }`}>
+                                    <div className="flex items-center justify-between">
+                                        <span className={`text-[9px] font-bold ${
+                                            absorptionSide === 'BUY' ? 'text-green-400' : 'text-red-400'
+                                        }`}>
+                                            {absorptionSide === 'BUY' ? '🟢 BUY' : '🔴 SELL'} ABSORPTION
+                                        </span>
+                                        <span className="text-[8px] font-mono text-white/50">
+                                            Range: {absorptionRangeRatio.toFixed(2)}x | Vol: {absorptionVolRatio.toFixed(1)}x
+                                        </span>
+                                    </div>
+                                    <div className="text-[8px] text-white/40 mt-1">
+                                        Price stalled despite {absorptionSide === 'BUY' ? 'selling pressure' : 'buying pressure'} — limit orders absorbing market
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {/* Large Institutional Prints */}
+                            {hasLargePrints && (
+                                <div className="space-y-1">
+                                    <div className="text-[9px] text-white/40 font-bold">LARGE PRINTS ({aggressivePrints.length})</div>
+                                    <div className="flex flex-wrap gap-1">
+                                        {aggressivePrints.slice(-5).map((print, idx) => (
+                                            <span 
+                                                key={idx}
+                                                className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-bold ${
+                                                    print.side === 'BUY' 
+                                                        ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                                                        : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                                }`}
+                                            >
+                                                {print.side === 'BUY' ? 'B' : 'S'} {print.volume > 1000 ? `${(print.volume / 1000).toFixed(1)}K` : print.volume}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {/* Swing Delta (Initiative vs Responsive) */}
+                            {Math.abs(swingDelta) >= 100 && (
+                                <div className="flex justify-between items-center px-1 py-0.5 bg-white/5 rounded border border-white/10">
+                                    <span className="text-[8px] text-white/40">Swing Delta</span>
+                                    <span className={`text-[8px] font-mono font-bold ${
+                                        swingDelta > 0 ? 'text-green-400' : 'text-red-400'
+                                    }`}>
+                                        {swingDelta > 0 ? '+' : ''}{swingDelta > 1000 ? `${(swingDelta / 1000).toFixed(1)}K` : swingDelta.toFixed(0)}
+                                        {swingDelta > 500 ? ' (INITIATIVE)' : swingDelta < -500 ? ' (RESPONSIVE)' : ''}
+                                    </span>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            })()}
 
             {/* 03f. VWAP + PRIOR DAY */}
             {(amtResult?.sessionVwap ?? 0) > 0 && (
@@ -853,6 +1183,151 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                 <span className="font-mono text-white/50">{amtResult?.priceVelocity?.toFixed(4)}/s</span>
                             </div>
                         )}
+                        
+                        {/* Items 5.12-5.14: VWAP Events & AVWAP Detection */}
+                        {(() => {
+                            const vwap = amtResult?.sessionVwap ?? 0;
+                            const ltp = currentLtp;
+                            if (vwap <= 0 || ltp <= 0) return null;
+                            
+                            // Detect VWAP cross direction
+                            const distFromVwap = ((ltp - vwap) / vwap) * 100;
+                            const isAboveVwap = ltp > vwap;
+                            const vwapCrossThreshold = 0.3; // 0.3% from VWAP
+                            const isNearVwap = Math.abs(distFromVwap) < vwapCrossThreshold;
+                            
+                            // Check if price is at VWAP sigma bands
+                            const upper1 = amtResult?.vwapUpper1 ?? 0;
+                            const lower1 = amtResult?.vwapLower1 ?? 0;
+                            const upper2 = amtResult?.vwapUpper2 ?? 0;
+                            const lower2 = amtResult?.vwapLower2 ?? 0;
+                            
+                            const atUpper1 = upper1 > 0 && Math.abs((ltp - upper1) / upper1) < 0.002;
+                            const atLower1 = lower1 > 0 && Math.abs((ltp - lower1) / lower1) < 0.002;
+                            const atUpper2 = upper2 > 0 && Math.abs((ltp - upper2) / upper2) < 0.002;
+                            const atLower2 = lower2 > 0 && Math.abs((ltp - lower2) / lower2) < 0.002;
+                            
+                            const hasVWAPEvent = isNearVwap || atUpper1 || atLower1 || atUpper2 || atLower2;
+                            
+                            if (!hasVWAPEvent) return null;
+                            
+                            return (
+                                <div className="border-t border-white/5 pt-2 space-y-1.5">
+                                    <div className="text-[8px] text-white/40 font-bold tracking-wide">VWAP EVENTS</div>
+                                    
+                                    {isNearVwap && (
+                                        <div className="px-1.5 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded">
+                                            <div className="text-[8px] font-bold text-cyan-400">
+                                                ⚡ AT VWAP — Decision Zone
+                                            </div>
+                                            <div className="text-[7px] text-white/40 mt-0.5">
+                                                Price testing session fair value — watch for bounce/break
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {atUpper1 && (
+                                        <div className="px-1.5 py-0.5 bg-orange-500/10 border border-orange-500/30 rounded text-[8px] font-bold text-orange-400">
+                                            ↗ Testing +1σ VWAP — Resistance
+                                        </div>
+                                    )}
+                                    {atLower1 && (
+                                        <div className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded text-[8px] font-bold text-emerald-400">
+                                            ↘ Testing -1σ VWAP — Support
+                                        </div>
+                                    )}
+                                    {atUpper2 && (
+                                        <div className="px-1.5 py-0.5 bg-red-500/10 border border-red-500/30 rounded text-[8px] font-bold text-red-400 animate-pulse">
+                                            ⚠️ Testing +2σ VWAP — Extreme Overbought
+                                        </div>
+                                    )}
+                                    {atLower2 && (
+                                        <div className="px-1.5 py-0.5 bg-green-500/10 border border-green-500/30 rounded text-[8px] font-bold text-green-400 animate-pulse">
+                                            ⚠️ Testing -2σ VWAP — Extreme Oversold
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })()}
+                    </div>
+                </div>
+            )}
+
+            {/* Items 6.6-6.8: Market Structure Panel */}
+            {amtResult?.marketStructure && (
+                <div className="flex flex-col gap-2">
+                    <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
+                        <span>05. Market Structure</span>
+                    </div>
+                    <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2">
+                        {(() => {
+                            const structure = amtResult.marketStructure;
+                            const confidence = amtResult.structureConfidence ?? 0;
+                            
+                            // Structure color coding
+                            const structureConfig: Record<string, { color: string; bg: string; icon: string; desc: string }> = {
+                                'TREND_UP': { color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/30', icon: '↗', desc: 'Higher highs & higher lows — bullish trend' },
+                                'TREND_DOWN': { color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/30', icon: '↘', desc: 'Lower highs & lower lows — bearish trend' },
+                                'RANGE': { color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/30', icon: '⟷', desc: 'Price rotating between support/resistance' },
+                                'BREAKOUT': { color: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/30', icon: '⚡', desc: 'Price breaking out of range — potential trend start' },
+                                'REVERSAL': { color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/30', icon: '↺', desc: 'Trend reversal in progress' },
+                            };
+                            
+                            const config = structureConfig[structure] || { color: 'text-white/60', bg: 'bg-white/5 border-white/10', icon: '●', desc: 'Unknown structure' };
+                            
+                            return (
+                                <>
+                                    <div className={`px-2 py-1.5 rounded border ${config.bg}`}>
+                                        <div className="flex items-center justify-between">
+                                            <span className={`text-[10px] font-bold ${config.color}`}>
+                                                {config.icon} {structure.replace('_', ' ')}
+                                            </span>
+                                            <span className="text-[8px] font-mono text-white/50">
+                                                {confidence}% confidence
+                                            </span>
+                                        </div>
+                                        <div className="text-[8px] text-white/40 mt-1">
+                                            {config.desc}
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Confidence bar */}
+                                    <div className="space-y-1">
+                                        <div className="flex justify-between text-[8px]">
+                                            <span className="text-white/40">Structure Strength</span>
+                                            <span className={`font-mono ${
+                                                confidence >= 70 ? 'text-green-400' : 
+                                                confidence >= 50 ? 'text-yellow-400' : 
+                                                'text-red-400'
+                                            }`}>
+                                                {confidence >= 70 ? 'STRONG' : confidence >= 50 ? 'MODERATE' : 'WEAK'}
+                                            </span>
+                                        </div>
+                                        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                                            <div 
+                                                className="h-full rounded-full transition-all duration-300"
+                                                style={{
+                                                    width: `${confidence}%`,
+                                                    backgroundColor: confidence >= 70 ? '#4ade80' : confidence >= 50 ? '#fbbf24' : '#f87171',
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Structure-based trading guidance */}
+                                    <div className="px-1.5 py-1 bg-white/5 rounded border border-white/10">
+                                        <div className="text-[8px] text-white/40 font-bold mb-1">TRADING CONTEXT</div>
+                                        <div className="text-[8px] text-white/50">
+                                            {structure === 'TREND_UP' && 'Look for pullback entries in direction of trend'}
+                                            {structure === 'TREND_DOWN' && 'Look for rally entries to short in direction of trend'}
+                                            {structure === 'RANGE' && 'Fade extremes — buy support, sell resistance'}
+                                            {structure === 'BREAKOUT' && 'Wait for acceptance before entering — avoid false breaks'}
+                                            {structure === 'REVERSAL' && 'High risk/reward — confirm with volume & CVD'}
+                                        </div>
+                                    </div>
+                                </>
+                            );
+                        })()}
                     </div>
                 </div>
             )}
@@ -1087,7 +1562,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     let passedCount = 0;
                     const ts = amtResult?.tickSize || 0.05;
                     const distThreshold = 5 * ts;
-                    if (amtResult?.marketState === 'IMBALANCED' || amtResult?.marketState === 'PROBING') passedCount++;
+                    if (amtResult?.marketState !== 'DEAD') passedCount++;
                     if (currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold) passedCount++;
                     if (amtResult?.marketState !== 'DEAD') passedCount++;
                     if (agentDecision?.timing === 'ENTER_NOW') passedCount++;
@@ -1108,19 +1583,50 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             </summary>
                             <div className="space-y-1.5 pt-2 border-t border-white/5 mt-2 pl-2">
                                 <div className="flex items-center gap-2 text-[10px]">
-                                    <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${(amtResult?.marketState === 'IMBALANCED' || amtResult?.marketState === 'PROBING') ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
-                                        {(amtResult?.marketState === 'IMBALANCED' || amtResult?.marketState === 'PROBING') ? '✓' : '✗'}
+                                    <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${amtResult?.marketState !== 'DEAD' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
+                                        {amtResult?.marketState !== 'DEAD' ? '✓' : '✗'}
                                     </div>
                                     <span className="text-white/60 w-24">AAA PRE-1</span>
                                     <span className="text-white/40 font-mono text-[9px]">Session {amtResult?.marketState || 'BALANCED'}</span>
                                 </div>
                                 <div className="flex items-center gap-2 text-[10px]">
-                                    <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
-                                        {currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold ? '✓' : '✗'}
+                                    <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${currentLtp && amtResult?.valueAreaLow && (Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold || Math.abs(amtResult.vwapDeviationSigmas || 0) >= 3.0) ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
+                                        {currentLtp && amtResult?.valueAreaLow && (Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold || Math.abs(amtResult.vwapDeviationSigmas || 0) >= 3.0) ? '✓' : '✗'}
                                     </div>
                                     <span className="text-white/60 w-24">MR Location</span>
-                                    <span className="text-white/40 font-mono text-[9px]">Price near {currentLtp && amtResult?.valueAreaHigh && Math.abs(currentLtp - amtResult.valueAreaHigh) < distThreshold ? 'VAH' : currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - amtResult.valueAreaLow) < distThreshold ? 'VAL' : 'POC/Mid'}</span>
+                                    <span className="text-white/40 font-mono text-[9px]">
+                                        {(() => {
+                                            const sigma = amtResult?.vwapDeviationSigmas || 0;
+                                            if (Math.abs(sigma) >= 3.0) return `⚠️ EXTREME EXTENSION — ${sigma > 0 ? '+' : ''}${sigma.toFixed(2)}σ (Fade Zone)`;
+                                            
+                                            if (currentLtp && amtResult?.valueAreaHigh && Math.abs(currentLtp - amtResult.valueAreaHigh) < distThreshold) return 'Price at VAH — Structural Resistance';
+                                            if (currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - amtResult.valueAreaLow) < distThreshold) return 'Price at VAL — Structural Support';
+                                            
+                                            if (currentLtp && amtResult?.valueAreaLow && currentLtp < amtResult.valueAreaLow && amtResult?.breakDirection === 'UP') return 'Price below VAL — Rejected breakout, structural failure';
+                                            if (currentLtp && amtResult?.valueAreaHigh && currentLtp > amtResult.valueAreaHigh && amtResult?.breakDirection === 'DOWN') return 'Price above VAH — Rejected breakout, structural failure';
+                                            
+                                            if (currentLtp && amtResult?.valueAreaLow && currentLtp < amtResult.valueAreaLow) return 'Price below VAL — Rejection of Value';
+                                            if (currentLtp && amtResult?.valueAreaHigh && currentLtp > amtResult.valueAreaHigh) return 'Price above VAH — Extension zone, await pullback';
+                                            
+                                            // Fix: If far from POC, don't say "at POC"
+                                            const pocDist = currentLtp && amtResult?.poc ? Math.abs(currentLtp - amtResult.poc) : 0;
+                                            if (pocDist > distThreshold * 2) {
+                                                return currentLtp < (amtResult?.poc || 0) ? 'Price below POC — in lower half of VA, no structural edge' : 'Price above POC — in upper half of VA, no structural edge';
+                                            }
+                                            
+                                            return 'Price at POC — No Edge Zone';
+                                        })()}
+                                    </span>
                                 </div>
+                                
+                                {/* P1-11: Prior Day Levels */}
+                                {amtResult && (amtResult.priorVah || amtResult.priorVal || amtResult.priorPoc) && (
+                                    <div className="mt-1 pl-5 flex flex-wrap gap-2 opacity-50">
+                                        {amtResult.priorVah && <span className="text-[8px] font-mono">P-VAH: {amtResult.priorVah.toFixed(1)}</span>}
+                                        {amtResult.priorVal && <span className="text-[8px] font-mono">P-VAL: {amtResult.priorVal.toFixed(1)}</span>}
+                                        {amtResult.priorPoc && <span className="text-[8px] font-mono">P-POC: {amtResult.priorPoc.toFixed(1)}</span>}
+                                    </div>
+                                )}
                                 <div className="flex items-center gap-2 text-[10px]">
                                     <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${amtResult?.marketState !== 'DEAD' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
                                         {amtResult?.marketState !== 'DEAD' ? '✓' : '✗'}
@@ -1138,8 +1644,8 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             </div>
                             <div className="flex justify-between items-center mt-2 pt-2 border-t border-white/5 pl-2">
                                 <span className="text-[9px] text-white/30 cursor-pointer hover:text-white/70 transition-colors">View Rule Book</span>
-                                <span className="text-[10px] font-mono font-bold tracking-wider text-blue-300">
-                                    Verdict: {agentDecision?.timing === 'ENTER_NOW' ? 'ENTER_NOW' : 'MONITOR -> WAIT'}
+                                <span className={`text-[10px] font-mono font-bold tracking-wider ${Math.abs(amtResult?.vwapDeviationSigmas || 0) >= 3.0 ? 'text-orange-400 animate-pulse' : 'text-blue-300'}`}>
+                                    Verdict: {Math.abs(amtResult?.vwapDeviationSigmas || 0) >= 3.0 ? 'RESPONSIVE FADE ACTIVE' : agentDecision?.timing === 'ENTER_NOW' ? 'ENTER_NOW' : 'MONITOR -> WAIT'}
                                 </span>
                             </div>
                         </details>

@@ -392,6 +392,18 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           drawRangeBars(ctx, canvas, chart, series, rangeBarData, config);
         } else {
           if (stableAmtAnalysis) {
+            // P1-1: VA shaded box (VAH-VAL fill) — draw FIRST as background layer
+            if (stableAmtAnalysis.valueAreaHigh > 0 && stableAmtAnalysis.valueAreaLow > 0) {
+              drawVAShadedBox(ctx, canvas, chart, series, stableAmtAnalysis);
+            }
+            // P1-6: Session Open + IB Close vertical markers — also background layer
+            if (stableData.length > 0) {
+              drawTimeMarkers(ctx, canvas, chart, series, stableData, stableAmtAnalysis);
+            }
+            // P2: IB Break Retest Zone Box — forward-looking box after IB break
+            if (stableAmtAnalysis.breakDirection && stableAmtAnalysis.breakLevel > 0 && stableData.length > 0) {
+              drawIBRetestZone(ctx, canvas, chart, series, stableData, stableAmtAnalysis);
+            }
             if (config.showVolumeProfile) {
               drawVolumeProfile(ctx, canvas, series, stableAmtAnalysis, config);
             }
@@ -474,12 +486,240 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       // Only draw text if bubble is large enough
       if (radius > 8) {
         ctx.fillStyle = '#ffffff';
-        ctx.font = '9px monospace';
+        ctx.font = 'bold 9px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(formatK(print.volume), x, y);
+        
+        // Show side (B/S) + volume
+        ctx.fillText(`${print.side === 'BUY' ? 'B' : 'S'} ${formatK(print.volume)}`, x, y);
+        
+        // Context label for very large prints
+        if (radius > 15) {
+          ctx.font = '7px sans-serif';
+          ctx.fillText(`INSTITUTIONAL`, x, y + 8);
+        }
       }
     });
+  };
+
+  // P1-1: Draw VA shaded box (semi-transparent fill between VAH and VAL)
+  const drawVAShadedBox = (
+    ctx: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    chart: IChartApi,
+    series: ISeriesApi<"Candlestick">,
+    amt: AMTAnalysis,
+  ) => {
+    const vah = amt.valueAreaHigh;
+    const val = amt.valueAreaLow;
+    if (vah <= 0 || val <= 0) return;
+
+    const vahY = series.priceToCoordinate(vah);
+    const valY = series.priceToCoordinate(val);
+    if (vahY === null || valY === null) return;
+
+    const leftEdge = 0;
+    const rightEdge = canvas.width;
+
+    // Semi-transparent blue fill for Value Area
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.10)'; // 10% opacity blue
+    ctx.fillRect(leftEdge, Math.min(vahY, valY), rightEdge - leftEdge, Math.abs(valY - vahY));
+
+    // VAH and VAL border lines on the fill
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(leftEdge, vahY);
+    ctx.lineTo(rightEdge, vahY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(leftEdge, valY);
+    ctx.lineTo(rightEdge, valY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  };
+
+  // P1-6: Draw Session Open (9:15) and IB Close (10:15) vertical time markers
+  const drawTimeMarkers = (
+    ctx: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    chart: IChartApi,
+    series: ISeriesApi<"Candlestick">,
+    data: OHLCData[],
+    amt: AMTAnalysis,
+  ) => {
+    if (data.length < 2) return;
+
+    // Convert OHLCData time string to chart timestamp (same as toIST)
+    const toChartTs = (timeStr: string) => {
+      const unix = new Date(timeStr).getTime() / 1000;
+      return unix + 19800; // IST offset
+    };
+
+    // Find the X coordinate for a specific IST hour:minute
+    const findTimeX = (targetHour: number, targetMinute: number): number | null => {
+      for (const candle of data) {
+        const chartTs = toChartTs(candle.time as string);
+        // The chart timestamp is UTC+IST_offset, so getUTCHours gives IST hours
+        const d = new Date(chartTs * 1000);
+        const istHour = d.getUTCHours();
+        const istMinute = d.getUTCMinutes();
+        if (istHour === targetHour && istMinute === targetMinute) {
+          const coord = chart.timeScale().timeToCoordinate(chartTs as UTCTimestamp);
+          return coord;
+        }
+      }
+      return null;
+    };
+
+    // Find X coordinate for a time, or use canvas edge if not found
+    const findTimeXOrEdge = (targetHour: number, targetMinute: number, defaultX: number): number => {
+      return findTimeX(targetHour, targetMinute) ?? defaultX;
+    };
+
+    const drawVerticalLine = (x: number | null, label: string, color: string) => {
+      if (x === null || x < 0 || x > canvas.width) return;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Label at top
+      ctx.fillStyle = color;
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(label, x, 4);
+    };
+
+    const drawShadedZone = (startX: number | null, endX: number | null, color: string, label: string, labelY: number = 16) => {
+      if (startX === null || endX === null || endX <= startX) return;
+      ctx.fillStyle = color;
+      ctx.fillRect(startX, 0, endX - startX, canvas.height);
+      // Label
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillText(label, (startX + endX) / 2, labelY);
+    };
+
+    // Session Open: 9:15 AM IST
+    const openX = findTimeX(9, 15);
+    drawVerticalLine(openX, 'SESSION OPEN 9:15', 'rgba(255,255,255,0.3)');
+
+    // IB Close: 10:15 AM IST
+    const ibCloseX = findTimeX(10, 15);
+    drawVerticalLine(ibCloseX, 'IB CLOSE 10:15', 'rgba(251,146,60,0.5)');
+
+    // === P2: Session Phase Background Shading ===
+    
+    // 1. IB Formation Period (9:15-10:15) - amber tint
+    if (openX !== null && ibCloseX !== null) {
+      drawShadedZone(openX, ibCloseX, 'rgba(251,191,36,0.03)', 'IB FORMATION', 28);
+    }
+
+    // 2. Lunch Dead Zone (12:00-14:00) - grey tint
+    const lunchStartX = findTimeX(12, 0);
+    const lunchEndX = findTimeX(14, 0);
+    if (lunchStartX !== null && lunchEndX !== null) {
+      drawShadedZone(lunchStartX, lunchEndX, 'rgba(100,100,100,0.04)', 'LUNCH ZONE', 16);
+    }
+
+    // 3. Closing Risk Zone (14:45-15:30) - light red tint
+    const closeStartX = findTimeX(14, 45);
+    const closeEndX = findTimeX(15, 30);
+    if (closeStartX !== null && closeEndX !== null) {
+      drawShadedZone(closeStartX, closeEndX, 'rgba(239,68,68,0.04)', 'CLOSING RISK', 40);
+    }
+  };
+
+  // P2: Draw IB Break Retest Zone Box
+  const drawIBRetestZone = (
+    ctx: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    chart: IChartApi,
+    series: ISeriesApi<"Candlestick">,
+    data: OHLCData[],
+    amt: AMTAnalysis,
+  ) => {
+    const breakDir = amt.breakDirection;
+    const breakLevel = amt.breakLevel;
+    if (!breakDir || breakLevel <= 0 || data.length < 2) return;
+
+    // Find the break candle
+    let breakCandleIndex = -1;
+    for (let i = 1; i < data.length; i++) {
+      const prev = data[i - 1];
+      const curr = data[i];
+      const crossedUp = breakDir === 'UP' && prev.close <= breakLevel && curr.close > breakLevel;
+      const crossedDown = breakDir === 'DOWN' && prev.close >= breakLevel && curr.close < breakLevel;
+      if (crossedUp || crossedDown) {
+        breakCandleIndex = i;
+        break;
+      }
+    }
+
+    if (breakCandleIndex < 0) return;
+
+    // Convert break candle time to chart coordinate
+    const breakCandle = data[breakCandleIndex];
+    const toChartTs = (timeStr: string) => new Date(timeStr).getTime() / 1000 + 19800;
+    const breakTs = toChartTs(breakCandle.time as string) as UTCTimestamp;
+    const breakX = chart.timeScale().timeToCoordinate(breakTs);
+    if (breakX === null) return;
+
+    // Current price (last candle)
+    const currentPrice = data[data.length - 1].close;
+    const currentY = series.priceToCoordinate(currentPrice);
+    if (currentY === null) return;
+
+    // Retest zone: break level ± 0.3%
+    const zoneSize = breakLevel * 0.003;
+    const zoneTop = breakLevel + zoneSize;
+    const zoneBottom = breakLevel - zoneSize;
+    const zoneTopY = series.priceToCoordinate(zoneTop);
+    const zoneBottomY = series.priceToCoordinate(zoneBottom);
+    if (zoneTopY === null || zoneBottomY === null) return;
+
+    // Zone extends from break candle to right edge
+    const rightEdge = canvas.width;
+    const zoneLeft = breakX;
+    const zoneWidth = rightEdge - zoneLeft;
+
+    // Check if current price is in the retest zone
+    const inRetestZone = currentPrice >= zoneBottom && currentPrice <= zoneTop;
+
+    // Draw zone box
+    ctx.fillStyle = inRetestZone ? 'rgba(251,191,36,0.08)' : 'rgba(251,191,36,0.04)';
+    ctx.fillRect(zoneLeft, Math.min(zoneTopY, zoneBottomY), zoneWidth, Math.abs(zoneBottomY - zoneTopY));
+
+    // Zone border
+    ctx.strokeStyle = inRetestZone ? 'rgba(251,191,36,0.5)' : 'rgba(251,191,36,0.2)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(zoneLeft, zoneTopY);
+    ctx.lineTo(rightEdge, zoneTopY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(zoneLeft, zoneBottomY);
+    ctx.lineTo(rightEdge, zoneBottomY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label
+    ctx.fillStyle = inRetestZone ? 'rgba(251,191,36,0.8)' : 'rgba(251,191,36,0.4)';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    const label = inRetestZone ? '⏳ RETEST ZONE ACTIVE' : 'RETEST WATCH';
+    ctx.fillText(label, zoneLeft + 4, Math.min(zoneTopY, zoneBottomY) + 4);
   };
 
 
@@ -1112,7 +1352,11 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     const formatVolume = (d: OHLCData) => ({
       time: toIST(d.time),
       value: d.volume,
-      color: d.close >= d.open ? `${config.bullColor}80` : `${config.bearColor}80`,
+      // P2: Colour volume bars by delta sign (who won the candle), not candle direction
+      // Green delta = buyers won, Red delta = sellers won, Grey = neutral
+      color: Math.abs(d.delta || 0) / Math.max(d.volume || 1, 1) > 0.02
+        ? (d.delta > 0 ? `${config.bullColor}80` : `${config.bearColor}80`)
+        : 'rgba(156,163,175,0.4)', // Grey for neutral delta
     });
 
     if (data.length > 0) {
@@ -1161,7 +1405,10 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       volumeSeriesRef.current.setData(bars.map(b => ({
         time: b.time as any,
         value: b.volume,
-        color: b.close >= b.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+        // P2: Colour volume bars by delta sign for range bars too
+        color: Math.abs(b.delta || 0) / Math.max(b.volume || 1, 1) > 0.02
+          ? (b.delta > 0 ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)')
+          : 'rgba(156,163,175,0.3)',
       })));
     } else if (barCount > 0) {
       // Same bar count: only the forming bar changed — update() the last entry.
@@ -1241,6 +1488,131 @@ const ChartScene: React.FC<ChartSceneProps> = ({
             title: 'HVN',
           }));
         });
+
+        // === P1-3: IB High / IB Low lines ===
+        if (stableAmtAnalysis.ibHigh && stableAmtAnalysis.ibHigh > 0) {
+          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+            price: stableAmtAnalysis.ibHigh,
+            color: '#fb923c',
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: stableAmtAnalysis.breakDirection === 'UP' ? 'IB HIGH [BROKEN ↑]' : 'IB HIGH',
+          }));
+        }
+        if (stableAmtAnalysis.ibLow && stableAmtAnalysis.ibLow > 0) {
+          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+            price: stableAmtAnalysis.ibLow,
+            color: '#fb923c',
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: stableAmtAnalysis.breakDirection === 'DOWN' ? 'IB LOW [BROKEN ↓]' : 'IB LOW',
+          }));
+        }
+
+        // === P1-2: VWAP line + ±1σ/±2σ bands ===
+        if (stableAmtAnalysis.sessionVwap && stableAmtAnalysis.sessionVwap > 0) {
+          // P2: Compute VWAP slope from recent candles to determine directional colour
+          let vwapColour = '#06b6d4'; // Default cyan
+          const recentVwaps = stableData.slice(-10).map(d => d.vwap).filter(v => v > 0);
+          if (recentVwaps.length >= 3) {
+            const firstHalf = recentVwaps.slice(0, Math.floor(recentVwaps.length / 2));
+            const secondHalf = recentVwaps.slice(Math.floor(recentVwaps.length / 2));
+            const avgFirst = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
+            const avgSecond = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
+            const slope = avgSecond - avgFirst;
+            const threshold = avgFirst * 0.001; // 0.1% change threshold
+            if (slope > threshold) {
+              vwapColour = '#22c55e'; // Green: rising VWAP (bullish institutional drift)
+            } else if (slope < -threshold) {
+              vwapColour = '#ef4444'; // Red: declining VWAP (bearish institutional drift)
+            }
+          }
+          
+          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+            price: stableAmtAnalysis.sessionVwap,
+            color: vwapColour,
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: vwapColour === '#22c55e' ? 'VWAP ↑' : vwapColour === '#ef4444' ? 'VWAP ↓' : 'VWAP',
+          }));
+          // ±1σ bands
+          if (stableAmtAnalysis.vwapUpper1 && stableAmtAnalysis.vwapUpper1 > 0) {
+            amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+              price: stableAmtAnalysis.vwapUpper1,
+              color: '#06b6d4',
+              lineWidth: 1,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: '+1σ',
+            }));
+          }
+          if (stableAmtAnalysis.vwapLower1 && stableAmtAnalysis.vwapLower1 > 0) {
+            amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+              price: stableAmtAnalysis.vwapLower1,
+              color: '#06b6d4',
+              lineWidth: 1,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: '-1σ',
+            }));
+          }
+          // ±2σ bands (extreme fade zones)
+          if (stableAmtAnalysis.vwapUpper2 && stableAmtAnalysis.vwapUpper2 > 0) {
+            amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+              price: stableAmtAnalysis.vwapUpper2,
+              color: '#0891b2',
+              lineWidth: 1,
+              lineStyle: LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: '+2σ FADE',
+            }));
+          }
+          if (stableAmtAnalysis.vwapLower2 && stableAmtAnalysis.vwapLower2 > 0) {
+            amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+              price: stableAmtAnalysis.vwapLower2,
+              color: '#0891b2',
+              lineWidth: 1,
+              lineStyle: LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: '-2σ FADE',
+            }));
+          }
+        }
+
+        // === P1-5: Prior Day VAH/VAL/POC dashed lines ===
+        if (stableAmtAnalysis.priorVah && stableAmtAnalysis.priorVah > 0) {
+          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+            price: stableAmtAnalysis.priorVah,
+            color: '#6b7280',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: 'Prior VAH',
+          }));
+        }
+        if (stableAmtAnalysis.priorVal && stableAmtAnalysis.priorVal > 0) {
+          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+            price: stableAmtAnalysis.priorVal,
+            color: '#6b7280',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: 'Prior VAL',
+          }));
+        }
+        if (stableAmtAnalysis.priorPoc && stableAmtAnalysis.priorPoc > 0) {
+          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
+            price: stableAmtAnalysis.priorPoc,
+            color: '#9ca3af',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: 'Prior POC',
+          }));
+        }
       }
 
       // Leg levels (shown in leg + combined modes when leg profile exists)
@@ -1329,6 +1701,96 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           });
         }
       });
+
+      // P1-4: IB Break marker on the breaking candle
+      if (stableAmtAnalysis?.breakDirection && stableAmtAnalysis.breakLevel && stableAmtAnalysis.breakLevel > 0) {
+        // Find the candle that first broke IB — scan from start for the candle that crossed the break level
+        const breakDir = stableAmtAnalysis.breakDirection;
+        const breakLevel = stableAmtAnalysis.breakLevel;
+        for (let i = 1; i < stableData.length; i++) {
+          const prev = stableData[i - 1];
+          const curr = stableData[i];
+          const crossedUp = breakDir === 'UP' && prev.close <= breakLevel && curr.close > breakLevel;
+          const crossedDown = breakDir === 'DOWN' && prev.close >= breakLevel && curr.close < breakLevel;
+          if (crossedUp || crossedDown) {
+            markers.push({
+              time: (new Date(curr.time).getTime() / 1000 + 19800) as UTCTimestamp,
+              position: breakDir === 'UP' ? 'belowBar' : 'aboveBar',
+              color: breakDir === 'UP' ? '#10b981' : '#ef4444',
+              shape: breakDir === 'UP' ? 'arrowUp' : 'arrowDown',
+              text: `IB BREAK ${breakDir} @${breakLevel.toFixed(2)}`,
+              size: 2,
+            });
+            break; // Only mark the first break
+          }
+        }
+      }
+
+      // P2: CVD Divergence markers on recent candles
+      if (stableAmtAnalysis?.cvdDivergence && stableData.length > 0) {
+        // Add marker on the last 3 candles to indicate active divergence zone
+        const recentCount = Math.min(3, stableData.length);
+        for (let i = stableData.length - recentCount; i < stableData.length; i++) {
+          const candle = stableData[i];
+          const isBearishDiv = stableAmtAnalysis.cvdDivergence.includes('BEARISH');
+          const isInitial = i === (stableData.length - recentCount);
+          
+          markers.push({
+            time: (new Date(candle.time).getTime() / 1000 + 19800) as UTCTimestamp,
+            position: isBearishDiv ? 'aboveBar' : 'belowBar',
+            color: isInitial ? '#f97316' : 'rgba(249, 115, 22, 0.4)', // Filled vs faint
+            shape: 'circle',
+            text: isInitial ? '⚡CVD DIV' : 'div',
+            size: 1,
+          });
+        }
+      }
+
+      // P2: Acceptance/Rejection annotations at key levels
+      if (stableData.length > 0) {
+        const lastCandle = stableData[stableData.length - 1];
+        
+        if (stableAmtAnalysis.acceptanceAbove) {
+          markers.push({
+            time: (new Date(lastCandle.time).getTime() / 1000 + 19800) as UTCTimestamp,
+            position: 'aboveBar',
+            color: '#10b981',
+            shape: 'arrowUp',
+            text: '✅ ACC ↑',
+            size: 1,
+          });
+        }
+        if (stableAmtAnalysis.acceptanceBelow) {
+          markers.push({
+            time: (new Date(lastCandle.time).getTime() / 1000 + 19800) as UTCTimestamp,
+            position: 'belowBar',
+            color: '#ef4444',
+            shape: 'arrowDown',
+            text: '✅ ACC ↓',
+            size: 1,
+          });
+        }
+        if (stableAmtAnalysis.rejectionAtHigh) {
+          markers.push({
+            time: (new Date(lastCandle.time).getTime() / 1000 + 19800) as UTCTimestamp,
+            position: 'aboveBar',
+            color: '#f59e0b',
+            shape: 'arrowDown',
+            text: '↓ REJ',
+            size: 1,
+          });
+        }
+        if (stableAmtAnalysis.rejectionAtLow) {
+          markers.push({
+            time: (new Date(lastCandle.time).getTime() / 1000 + 19800) as UTCTimestamp,
+            position: 'belowBar',
+            color: '#f59e0b',
+            shape: 'arrowUp',
+            text: '↑ REJ',
+            size: 1,
+          });
+        }
+      }
 
       // Sort markers by time (required by lightweight-charts)
       markers.sort((a, b) => (a.time as number) - (b.time as number));

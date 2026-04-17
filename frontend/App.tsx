@@ -108,9 +108,12 @@ function App() {
         return (
             <div className="w-screen h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4">
                 <Loader2 className="w-12 h-12 animate-spin text-purple-500" />
-                <div className="text-center">
+                <div className="text-center max-w-md px-4">
                     <h2 className="text-xl font-bold">Connecting to Backend</h2>
-                    <p className="text-sm text-white/50">Waiting for market data stream...</p>
+                    <p className="text-sm text-white/50 mt-2">
+                        {connectionStatus ||
+                            'Loading server config and symbols. Ensure the API is running (see Vite proxy / PORT).'}
+                    </p>
                 </div>
             </div>
         );
@@ -379,6 +382,9 @@ function App() {
                             depth20Active={activeInstrument.depth20Active}
                             overseerAction={activeInstrument.overseerAction}
                             overseerReason={activeInstrument.overseerReason}
+                            symbol={activeSymbol}
+                            underlyingPrice={activeInstrument.amtAnalysis?.underlyingPrice}
+                            data={activeInstrument.data}
                         />
                     </ErrorBoundary>
                 </div>

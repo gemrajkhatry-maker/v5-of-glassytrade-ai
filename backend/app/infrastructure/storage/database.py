@@ -217,6 +217,21 @@ class SQLiteStorageAdapter(IStorage):
             self._conn.commit()
             logger.info("SQLite database initialized at %s (WAL mode)", self._db_path)
 
+    def _execute_write(self, query: str, params: tuple = (), *, auto_commit: bool = True) -> None:
+        """Execute a write query with lock, commit, and rollback on error.
+
+        This eliminates the duplicated try/except/rollback pattern across
+        save_trade, save_llm_decision, save_open_position, etc.
+        """
+        with self._lock:
+            try:
+                self._conn.execute(query, params)
+                if auto_commit:
+                    self._conn.commit()
+            except sqlite3.Error:
+                self._conn.rollback()
+                raise
+
     def _schedule_flush(self) -> None:
         """Schedule a background flush if not already scheduled."""
         if self._flush_timer is None or not self._flush_timer.is_alive():
@@ -280,51 +295,46 @@ class SQLiteStorageAdapter(IStorage):
     def save_trade(
         self, trade_data: dict[str, Any], *, auto_commit: bool = True
     ) -> None:
-        with self._lock:
-            try:
-                self._conn.execute(
-                    "INSERT INTO trades (position_id, symbol, side, entry_price, exit_price, "
-                    "size, pnl, source, reason, opened_at, closed_at, extra) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        str(trade_data.get("position_id", "")),
-                        str(trade_data.get("symbol", "")),
-                        str(trade_data.get("side", "")),
-                        to_float(trade_data.get("entry_price")),
-                        to_float(trade_data.get("exit_price")),
-                        to_float(trade_data.get("size")),
-                        to_float(trade_data.get("pnl")),
-                        str(trade_data.get("source", "")),
-                        str(trade_data.get("reason", "")),
-                        str(trade_data.get("opened_at", "")),
-                        str(trade_data.get("closed_at", "")),
-                        json.dumps(
-                            {
-                                k: v
-                                for k, v in trade_data.items()
-                                if k
-                                not in (
-                                    "position_id",
-                                    "symbol",
-                                    "side",
-                                    "entry_price",
-                                    "exit_price",
-                                    "size",
-                                    "pnl",
-                                    "source",
-                                    "reason",
-                                    "opened_at",
-                                    "closed_at",
-                                )
-                            }
-                        ),
-                    ),
-                )
-                if auto_commit:
-                    self._conn.commit()
-            except sqlite3.Error:
-                self._conn.rollback()  # Exception already caught at call site or handled above
-                raise
+        params = (
+            str(trade_data.get("position_id", "")),
+            str(trade_data.get("symbol", "")),
+            str(trade_data.get("side", "")),
+            to_float(trade_data.get("entry_price")),
+            to_float(trade_data.get("exit_price")),
+            to_float(trade_data.get("size")),
+            to_float(trade_data.get("pnl")),
+            str(trade_data.get("source", "")),
+            str(trade_data.get("reason", "")),
+            str(trade_data.get("opened_at", "")),
+            str(trade_data.get("closed_at", "")),
+            json.dumps(
+                {
+                    k: v
+                    for k, v in trade_data.items()
+                    if k
+                    not in (
+                        "position_id",
+                        "symbol",
+                        "side",
+                        "entry_price",
+                        "exit_price",
+                        "size",
+                        "pnl",
+                        "source",
+                        "reason",
+                        "opened_at",
+                        "closed_at",
+                    )
+                }
+            ),
+        )
+        self._execute_write(
+            "INSERT INTO trades (position_id, symbol, side, entry_price, exit_price, "
+            "size, pnl, source, reason, opened_at, closed_at, extra) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+            auto_commit=auto_commit,
+        )
 
     def save_llm_decision(
         self, decision_data: dict[str, Any], *, auto_commit: bool = True
@@ -346,43 +356,38 @@ class SQLiteStorageAdapter(IStorage):
             "volume",
             "profile_shape",
         }
-        with self._lock:
-            try:
-                self._conn.execute(
-                    "INSERT INTO llm_decisions (symbol, direction, confidence, rationale, "
-                    "input_prompt, raw_output, market_state, aggression, "
-                    "price, vah, val, poc, delta, volume, profile_shape, extra) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        decision_data.get("symbol", ""),
-                        decision_data.get("direction", ""),
-                        decision_data.get("confidence", ""),
-                        decision_data.get("rationale", ""),
-                        decision_data.get("input_prompt", ""),
-                        decision_data.get("raw_output", ""),
-                        decision_data.get("market_state", ""),
-                        decision_data.get("aggression", ""),
-                        decision_data.get("price", 0),
-                        decision_data.get("vah", 0),
-                        decision_data.get("val", 0),
-                        decision_data.get("poc", 0),
-                        decision_data.get("delta", 0),
-                        decision_data.get("volume", 0),
-                        decision_data.get("profile_shape", ""),
-                        json.dumps(
-                            {
-                                k: v
-                                for k, v in decision_data.items()
-                                if k not in _KNOWN_KEYS
-                            }
-                        ),
-                    ),
-                )
-                if auto_commit:
-                    self._conn.commit()
-            except sqlite3.Error:
-                self._conn.rollback()  # Exception already caught at call site or handled above
-                raise
+        params = (
+            decision_data.get("symbol", ""),
+            decision_data.get("direction", ""),
+            decision_data.get("confidence", ""),
+            decision_data.get("rationale", ""),
+            decision_data.get("input_prompt", ""),
+            decision_data.get("raw_output", ""),
+            decision_data.get("market_state", ""),
+            decision_data.get("aggression", ""),
+            decision_data.get("price", 0),
+            decision_data.get("vah", 0),
+            decision_data.get("val", 0),
+            decision_data.get("poc", 0),
+            decision_data.get("delta", 0),
+            decision_data.get("volume", 0),
+            decision_data.get("profile_shape", ""),
+            json.dumps(
+                {
+                    k: v
+                    for k, v in decision_data.items()
+                    if k not in _KNOWN_KEYS
+                }
+            ),
+        )
+        self._execute_write(
+            "INSERT INTO llm_decisions (symbol, direction, confidence, rationale, "
+            "input_prompt, raw_output, market_state, aggression, "
+            "price, vah, val, poc, delta, volume, profile_shape, extra) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params,
+            auto_commit=auto_commit,
+        )
 
     def flush(self) -> None:
         """Explicit commit -- called by persistence bus after processing a batch."""
@@ -593,12 +598,56 @@ class SQLiteStorageAdapter(IStorage):
         market: str = "NSE",
     ) -> dict[str, Any] | None:
         with self._lock:
+            # First try exact symbol match
             row = self._conn.execute(
                 "SELECT * FROM session_profiles WHERE symbol = ? AND market = ? "
                 "ORDER BY session_date DESC LIMIT 1",
                 (symbol, market),
             ).fetchone()
-            return dict(row) if row else None
+            if row:
+                return dict(row)
+            
+            # Fallback: try to find by underlying extraction
+            # For options: "NIFTY 26APR 24000 CALL" -> "NIFTY"
+            # For MCX: "CRUDEOIL26APR 5600 CALL" -> "CRUDEOIL"
+            import re
+            
+            # Pattern 1: NSE style - first word before space
+            underlying_match = re.match(r'^([A-Z]+)', symbol)
+            if underlying_match:
+                underlying = underlying_match.group(1)
+                row = self._conn.execute(
+                    "SELECT * FROM session_profiles WHERE symbol = ? AND market = ? "
+                    "ORDER BY session_date DESC LIMIT 1",
+                    (underlying, market),
+                ).fetchone()
+                if row:
+                    return dict(row)
+            
+            # Pattern 2: MCX style - extract commodity name before expiry digits
+            # e.g., "CRUDEOIL26APR" -> "CRUDEOIL", "GOLD26MAY" -> "GOLD"
+            mcx_match = re.match(r'^([A-Z]+?)(?=\d{2}[A-Z]{3})', symbol)
+            if mcx_match:
+                commodity = mcx_match.group(1)
+                row = self._conn.execute(
+                    "SELECT * FROM session_profiles WHERE symbol = ? AND market = ? "
+                    "ORDER BY session_date DESC LIMIT 1",
+                    (commodity, market),
+                ).fetchone()
+                if row:
+                    return dict(row)
+            
+            # Pattern 3: Try any profile for this market (most recent)
+            # This is a last resort - better than nothing
+            row = self._conn.execute(
+                "SELECT * FROM session_profiles WHERE market = ? "
+                "ORDER BY session_date DESC LIMIT 1",
+                (market,),
+            ).fetchone()
+            if row:
+                return dict(row)
+            
+            return None
 
     # ------------------------------------------------------------------
     # Open position persistence (survive restarts)
@@ -890,3 +939,15 @@ class SQLiteStorageAdapter(IStorage):
                 d.update(extra)
                 result.append(d)
             return result
+
+    def close(self) -> None:
+        """Close the database connection and cancel any pending flush timer."""
+        if self._flush_timer is not None and self._flush_timer.is_alive():
+            self._flush_timer.cancel()
+            self._flush_timer = None
+        with self._lock:
+            try:
+                self._conn.close()
+            except sqlite3.Error:
+                logger.debug("Error closing database connection", exc_info=True)
+            logger.info("SQLite database connection closed")

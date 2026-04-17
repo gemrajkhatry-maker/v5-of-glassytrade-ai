@@ -318,6 +318,16 @@ export interface AMTAnalysis {
   // Session identity and freshness (Phase 1, Task 1.6)
   sessionId?: string;
   computedAt?: string;
+  // Multi-timeframe levels (used by location bar)
+  dailyVal?: number;
+  dailyVah?: number;
+  dailyPoc?: number;
+  hourlyPoc?: number;
+  // Absorption detection (Items 3.16-3.17)
+  absorptionSide?: string;
+  absorptionRangeRatio?: number;
+  absorptionVolRatio?: number;
+  swingDelta?: number;
 }
 
 export interface TradeSignal {
