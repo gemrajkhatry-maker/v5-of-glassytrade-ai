@@ -15,8 +15,11 @@ import logging
 import threading
 from typing import TYPE_CHECKING, Any
 
+from app.application.services.state_snapshot_builder import build_state_snapshot
+from app.infrastructure.serialization.schemas import ohlc_to_dto
+
 if TYPE_CHECKING:
-    from app.application.services.state_snapshot_builder import build_state_snapshot
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -251,23 +254,14 @@ class StateBroadcaster:
                 return
 
             # Build fresh snapshot using state_snapshot_builder
-            try:
-                from app.application.services.state_snapshot_builder import (
-                    build_state_snapshot,
-                )
-            except ImportError as e:
-                logger.error("state_snapshot_builder import failed: %s", e)
-                return
-            else:
-                state = build_state_snapshot(
-                    session,
-                    session_service._risk_coordinator,
-                    session_service._rl_handler,
-                    session_service._lifecycle_handler,
-                )
+            state = build_state_snapshot(
+                session,
+                session_service._risk_coordinator,
+                session_service._rl_handler,
+                session_service._lifecycle_handler,
+            )
 
             # Enrich with engine-specific fields
-            from app.application.engine import _depth_to_dto
 
             # Get latest tick from session data
             try:
@@ -278,8 +272,6 @@ class StateBroadcaster:
 
             if last_tick:
                 try:
-                    from app.infrastructure.serialization.schemas import ohlc_to_dto
-
                     state["tick"] = ohlc_to_dto(last_tick)
                 except (KeyError, AttributeError, TypeError) as e:
                     logger.debug("OHLC serialization failed: %s", e)
@@ -291,6 +283,8 @@ class StateBroadcaster:
 
             state["oi"] = getattr(session, "_last_oi", 0)
             state["_symbol"] = symbol
+            # Lazy import to avoid circular dependency
+            from app.application.engine import _depth_to_dto
             state["depth"] = _depth_to_dto(current_depth.get("book") if current_depth else None)
 
             # Range bars (visualization)

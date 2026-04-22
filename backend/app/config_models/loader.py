@@ -3,7 +3,8 @@
 Merge sequence (strictly enforced):
   STEP 1: Load base.yaml → establishes ALL defaults
   STEP 2: Load environments/{GLASSYTRADE_ENV}.yaml → deep-merge overrides base
-  STEP 3: Load strategies/*.yaml → deep-merge overrides result
+  STEP 3: Load strategies/{GLASSYTRADE_STRATEGY}.yaml → deep-merge overrides result
+           (default strategy mcx_options; never merge every *.yaml — order was NSE overwriting MCX)
   STEP 4: Read ENV vars for SECRETS ONLY → API keys, tokens
   STEP 5: Build typed SystemConfig → immutable, frozen
   STEP 6: Run ConfigValidator → fail fast if invalid
@@ -18,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+from config.strategy_resolve import resolved_strategy_for_filesystem
 
 from app.config_models import (
     CostProfile,
@@ -160,7 +163,7 @@ def load_config(
       STEP 7: Log startup summary → human-readable at boot
     """
     if config_dir is None:
-        config_dir = str(Path(__file__).resolve().parent.parent / "config")
+        config_dir = str(Path(__file__).resolve().parent.parent.parent / "config")
     config_path = Path(config_dir)
 
     # STEP 1: Load base.yaml
@@ -171,25 +174,19 @@ def load_config(
     env_data = _load_yaml(config_path / "environments" / f"{env_name}.yaml")
     merged = _deep_merge(base_data, env_data)
 
-    # STEP 3: Load strategy overrides (NEW)
+    # STEP 3: Load exactly one strategy file (align with ModeConfigLoader / MCX default)
     if strategy is None:
-        strategy = os.environ.get("GLASSYTRADE_STRATEGY")
-    
-    if strategy:
-        strat_path = config_path / "strategies" / f"{strategy}.yaml"
-        strat_data = _load_yaml(strat_path)
-        if strat_data:
-            merged = _deep_merge(merged, strat_data)
-            logger.info("Loaded strategy: %s", strategy)
-        else:
-            logger.warning("Strategy file not found: %s", strat_path)
+        strategy = os.environ.get("GLASSYTRADE_STRATEGY", "mcx_options")
+    strategy = resolved_strategy_for_filesystem(config_path, strategy)
+    os.environ["GLASSYTRADE_STRATEGY"] = strategy
+
+    strat_path = config_path / "strategies" / f"{strategy}.yaml"
+    strat_data = _load_yaml(strat_path)
+    if strat_data:
+        merged = _deep_merge(merged, strat_data)
+        logger.info("Loaded strategy: %s", strategy)
     else:
-        # Load any existing strategy files for backward compatibility
-        strategies_dir = config_path / "strategies"
-        if strategies_dir.exists():
-            for f in sorted(strategies_dir.glob("*.yaml")):
-                strat_data = _load_yaml(f)
-                merged = _deep_merge(merged, strat_data)
+        logger.warning("Strategy file not found: %s", strat_path)
 
     # STEP 4: Load feature flags
     flags_data = _load_yaml(config_path / "feature_flags.yaml")

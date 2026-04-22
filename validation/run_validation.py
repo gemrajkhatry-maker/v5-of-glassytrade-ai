@@ -168,11 +168,8 @@ def run_test(test_name: str, scenario: dict) -> dict:
     }
     
     try:
-        from app.domain.fabio_ai.services.entry_gate import (
-            three_align_check,
-            check_momentum_fade,
-            build_entry_signal,
-        )
+        from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
+        from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
         from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager
         from app.domain.fabio_ai.services.session_context import get_session_info
         from app.domain.probability.agent_pipeline import kelly_size

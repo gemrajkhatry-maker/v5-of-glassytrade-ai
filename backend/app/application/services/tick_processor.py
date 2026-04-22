@@ -15,10 +15,11 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
+from app.application.range_bar_builder import RangeBarBuilder
+from app.application.services.state_snapshot_builder import _camel_case_ai
 
 if TYPE_CHECKING:
     from app.application.candle_aggregator import CandleAggregator
-    from app.application.range_bar_builder import RangeBarBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -152,8 +153,6 @@ class TickProcessor:
             RangeBarBuilder instance
         """
         if symbol not in self._range_builders:
-            from app.application.range_bar_builder import RangeBarBuilder
-
             size = range_size or self._range_default_size
             self._range_builders[symbol] = RangeBarBuilder(range_size=size)
         return self._range_builders[symbol]
@@ -272,7 +271,6 @@ class TickProcessor:
         Uses _camel_case_ai from state_snapshot_builder for consistent DTO formatting.
         """
         from app.application.engine import _depth_to_dto
-        from app.application.services.state_snapshot_builder import _camel_case_ai
 
         msg: dict = {
             "tick": ohlc_to_dto(tick),

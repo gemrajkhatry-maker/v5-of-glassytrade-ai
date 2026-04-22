@@ -1,7 +1,7 @@
 """Trading model utilities — DRY helpers for common operations.
 
 Eliminates duplicated patterns across the codebase:
-- Side normalization (5 locations)
+- Side normalization (already has Side.normalize)
 - Decimal-to-float conversion (4 locations)
 - Market state mapping (3 locations)
 """
@@ -12,11 +12,23 @@ from enum import Enum
 from typing import Any
 
 
+def safe_side(value: Any) -> str:
+    """Normalize side value to string.
+
+    Replaces the pattern: pos.side.value if hasattr(pos.side, 'value') else str(pos.side)
+    """
+    if value is None:
+        return "FLAT"
+    if hasattr(value, "value"):
+        return value.value
+    return str(value)
+
+
 class Side:
     """Utility class for trade side normalization.
 
     Handles the common pattern of converting between enum and string representations:
-        pos.side.value if hasattr(pos.side, 'value') else str(pos.side)
+        Side.normalize(pos.side)  # Returns "LONG" or "SHORT"
 
     Usage:
         Side.normalize(pos.side)  # Returns "LONG" or "SHORT"

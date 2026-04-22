@@ -118,6 +118,9 @@ class GateContext:
     # Weekly bias (Gap #4 — Composite Profile)
     weekly_bias: str = "NEUTRAL"
     weekly_bias_aligned: bool = True
+    
+    # New: Extreme deviation escalation (> 3.0 sigma)
+    is_extreme_deviation: bool = False
 
     # Configurable gate thresholds (exchange-specific)
     max_distance_to_level_ticks: float = 3.0  # Gate 6: max ticks from nearest level
@@ -207,9 +210,14 @@ class GatePipeline:
 
         # HARD GATE 3: NO_TRADE state
         if ctx.market_state == MarketState.NO_TRADE:
-            return self._hard_fail(
-                3, GateReason.FLAT, "Price at POC dead zone (state=NO_TRADE)"
-            )
+            # EXCEPTION: If it's an extreme deviation, we override NO_TRADE
+            # because we want to fade the extreme even if it's near POC of a leg.
+            if not ctx.is_extreme_deviation:
+                return self._hard_fail(
+                    3, GateReason.FLAT, "Price at POC dead zone (state=NO_TRADE)"
+                )
+            else:
+                logger.info("Responsive Fade: Overriding NO_TRADE due to extreme σ deviation")
 
         # HARD GATE 4: PROBING state — allow with aggression confirmation
         # PROBING can trade when: aggression >= threshold AND at a key level
@@ -321,9 +329,14 @@ class GatePipeline:
                     "MET" if quorum_met else "NOT MET",
                 )
             else:
+                # ENHANCED LOGGING: Print exact threshold vs actual for debugging
+                actual_value = _extract_actual_value(ctx, sg.gate)
+                threshold_value = _extract_threshold(sg.gate, ctx)
                 logger.info(
-                    "SOFT GATE FAILED: %s (gate %d) — %s (%d/%d quorum: %s)",
-                    sg.name, sg.gate, sg.detail, passed_count, total,
+                    "SOFT GATE FAILED: %s (gate %d) — ACTUAL: %.2f, THRESHOLD: %.2f, DETAIL: %s (%d/%d quorum: %s)",
+                    sg.name, sg.gate,
+                    actual_value, threshold_value,
+                    sg.detail, passed_count, total,
                     "MET" if quorum_met else "NOT MET",
                 )
 
@@ -353,11 +366,22 @@ class GatePipeline:
             "ALL GATES PASSED: hard gates OK, soft quorum met (%d/%d)",
             passed_count, total,
         )
+
+        # ── ESCALATION (3 PM Fix) ──────────────────────────────────────────
+        # If extreme deviation is present, upgrade the result to TRADE
+        # and explicitly mark it as an EXTREME FADE setup.
+        final_reason = GateReason.TRADE
+        final_detail = f"All gates passed (hard: OK, soft: {passed_count}/{total} >= quorum {quorum})"
+
+        if ctx.is_extreme_deviation:
+            final_detail = "⚠️ EXTREME FADE SETUP — Overriding gates due to extreme σ deviation"
+            logger.warning("ESCALATION: Extreme deviation detected — forcing trade signal")
+
         return GateResult(
             passed=True,
             gate=12,
-            reason=GateReason.TRADE,
-            detail=f"All gates passed (hard: OK, soft: {passed_count}/{total} >= quorum {quorum})",
+            reason=final_reason,
+            detail=final_detail,
             setup_type=ctx.setup_type,
             r_r_ratio=ctx.r_r_ratio,
             hard_gates_passed=True,
@@ -379,3 +403,29 @@ class GatePipeline:
             soft_gates_passed=0,
             quorum_met=False,
         )
+
+
+def _extract_actual_value(ctx: GateContext, gate: int) -> float:
+    """Extract the actual value for a soft gate (for logging)."""
+    if gate == 6:
+        return ctx.distance_to_level_ticks
+    if gate == 8:
+        return ctx.aggression_score
+    if gate == 9:
+        return ctx.cushion_ticks
+    if gate == 10:
+        return ctx.r_r_ratio
+    return 0.0
+
+
+def _extract_threshold(gate: int, ctx: GateContext) -> float:
+    """Extract the threshold value for a soft gate (for logging)."""
+    if gate == 6:
+        return ctx.max_distance_to_level_ticks
+    if gate == 8:
+        return ctx.min_aggression_score
+    if gate == 9:
+        return ctx.max_cushion_ticks
+    if gate == 10:
+        return ctx.min_rr_ratio
+    return 0.0

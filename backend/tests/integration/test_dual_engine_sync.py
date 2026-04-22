@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
-from app.domain.fabio_ai.services.trade_manager import TradeManager
+from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
 from app.domain.fabio_ai.services.amt_analyzer import AMTConfig
 from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook
 from app.domain.fabio_ai.services.session_context import SessionInfo

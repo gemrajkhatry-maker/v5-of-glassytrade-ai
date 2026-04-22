@@ -474,14 +474,12 @@ class Portfolio:
 
         for i, pos in enumerate(self.positions):
             if pos.id == position_id and pos.is_open:
-                logger.error(
+                logger.debug(
                     "Portfolio.close_position: CLOSING %s reason=%s price=%.2f",
                     position_id,
                     reason,
                     float(price) if hasattr(price, "__float__") else price,
                 )
-                import traceback
-                logger.error("close_position stack:\n%s", "".join(traceback.format_stack()))
                 # Apply slippage to exit fill
                 fill_price = self._apply_slippage(price, pos.side, is_entry=False)
                 pos.close(

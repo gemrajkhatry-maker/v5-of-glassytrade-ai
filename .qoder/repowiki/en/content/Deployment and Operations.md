@@ -2,17 +2,30 @@
 
 <cite>
 **Referenced Files in This Document**
-- [backend/app/main.py](file://backend/app/main.py)
-- [backend/app/config.py](file://backend/app/config.py)
-- [backend/config/consolidated.py](file://backend/config/consolidated.py)
-- [backend/config/base.yaml](file://backend/config/base.yaml)
-- [backend/config/environments/development.yaml](file://backend/config/environments/development.yaml)
-- [backend/config/environments/paper.yaml](file://backend/config/environments/paper.yaml)
-- [backend/config/environments/live.yaml](file://backend/config/environments/live.yaml)
-- [backend/start.sh](file://backend/start.sh)
-- [backend/requirements.txt](file://backend/requirements.txt)
-- [frontend/package.json](file://frontend/package.json)
+- [appv2/backend/appv2/main.py](file://appv2/backend/appv2/main.py)
+- [appv2/backend/appv2/infrastructure/main.py](file://appv2/backend/appv2/infrastructure/main.py)
+- [appv2/backend/appv2/config/settings.py](file://appv2/backend/appv2/config/settings.py)
+- [appv2/backend/appv2/config/constants.py](file://appv2/backend/appv2/config/constants.py)
+- [appv2/backend/appv2/api/routes.py](file://appv2/backend/appv2/api/routes.py)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py](file://appv2/backend/appv2/infrastructure/dhan_feed.py)
+- [appv2/backend/appv2/application/trading_engine.py](file://appv2/backend/appv2/application/trading_engine.py)
+- [appv2/backend/requirements.txt](file://appv2/backend/requirements.txt)
+- [appv2/backend/pyproject.toml](file://appv2/backend/pyproject.toml)
+- [appv2/docker-compose.yml](file://appv2/docker-compose.yml)
+- [appv2/start.sh](file://appv2/start.sh)
+- [appv2/frontend/Dockerfile](file://appv2/frontend/Dockerfile)
+- [appv2/backend/Dockerfile](file://appv2/backend/Dockerfile)
+- [appv2/DEPLOYMENT_GUIDE.md](file://appv2/DEPLOYMENT_GUIDE.md)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for the new appv2 deployment structure with Docker containers
+- Updated production deployment guides with new API endpoints and operational procedures
+- Documented the new containerization approach using docker-compose.yml
+- Added detailed configuration management using Pydantic settings
+- Updated architecture overview to reflect the new v2 trading engine
+- Enhanced monitoring and operational procedures for the new system
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -27,342 +40,511 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document provides comprehensive deployment and operations guidance for GlassyTrade AI v5. It covers production deployment configuration, environment setup, scaling considerations, deployment pipelines, containerization options, infrastructure requirements, monitoring and alerting, rolling updates, maintenance, backup and disaster recovery, security and access control, compliance, troubleshooting, performance optimization, capacity planning, and operational runbooks for 24/7 management.
+This document provides comprehensive deployment and operations guidance for GlassyTrade AI v5 appv2. It covers production deployment configuration, environment setup, scaling considerations, deployment pipelines, containerization options, infrastructure requirements, monitoring and alerting, rolling updates, maintenance, backup and disaster recovery, security and access control, compliance, troubleshooting, performance optimization, capacity planning, and operational runbooks for 24/7 management.
+
+**Updated** The appv2 system introduces a completely redesigned trading engine with advanced features, Docker containerization, and modern deployment practices.
 
 ## Project Structure
-GlassyTrade AI v5 consists of:
-- Backend trading engine and API built with FastAPI and Uvicorn, located under backend/.
-- Frontend dashboard and analytics under frontend/.
-- Centralized configuration under backend/config/, including base and environment-specific YAML files.
-- Startup script under backend/start.sh for local execution.
-- Python dependencies under backend/requirements.txt.
+GlassyTrade AI v5 appv2 consists of:
+- Backend trading engine and API built with FastAPI and Uvicorn, located under appv2/backend/.
+- Frontend dashboard and analytics under appv2/frontend/.
+- Centralized configuration management using Pydantic settings under appv2/backend/appv2/config/.
+- Docker containerization support with docker-compose.yml for production deployments.
+- Startup scripts under appv2/scripts/ for local development and testing.
+- Python dependencies under appv2/backend/requirements.txt.
 
 ```mermaid
 graph TB
-subgraph "Backend"
-M["FastAPI App<br/>backend/app/main.py"]
-CFG["Consolidated Config<br/>backend/config/consolidated.py"]
-BASE["Base YAML<br/>backend/config/base.yaml"]
-ENV_DEV["Dev Env YAML<br/>backend/config/environments/development.yaml"]
-ENV_PAPER["Paper Env YAML<br/>backend/config/environments/paper.yaml"]
-ENV_LIVE["Live Env YAML<br/>backend/config/environments/live.yaml"]
-START["Startup Script<br/>backend/start.sh"]
-REQ["Python Dependencies<br/>backend/requirements.txt"]
+subgraph "AppV2 Backend"
+MAIN["FastAPI App<br/>appv2/backend/appv2/main.py"]
+INFRA["Infrastructure Main<br/>appv2/backend/appv2/infrastructure/main.py"]
+SETTINGS["Pydantic Settings<br/>appv2/backend/appv2/config/settings.py"]
+CONST["Constants<br/>appv2/backend/appv2/config/constants.py"]
+ROUTES["API Routes<br/>appv2/backend/appv2/api/routes.py"]
+ENGINE["Trading Engine<br/>appv2/backend/appv2/application/trading_engine.py"]
+DHAN["Dhan Feed Adapter<br/>appv2/backend/appv2/infrastructure/dhan_feed.py"]
+REQ["Dependencies<br/>appv2/backend/requirements.txt"]
+PYPROJECT["Project Config<br/>appv2/backend/pyproject.toml"]
 end
-subgraph "Frontend"
-FE_PKG["Frontend Package<br/>frontend/package.json"]
+subgraph "AppV2 Frontend"
+FRONT_DOCKER["Frontend Dockerfile<br/>appv2/frontend/Dockerfile"]
 end
-M --> CFG
-CFG --> BASE
-CFG --> ENV_DEV
-CFG --> ENV_PAPER
-CFG --> ENV_LIVE
-START --> M
-REQ --> M
-FE_PKG -. optional .-> M
+subgraph "Containerization"
+DOCKER_COMPOSE["Docker Compose<br/>appv2/docker-compose.yml"]
+START_SCRIPT["Start Script<br/>appv2/start.sh"]
+end
+MAIN --> SETTINGS
+INFRA --> SETTINGS
+SETTINGS --> CONST
+ROUTES --> ENGINE
+ENGINE --> DHAN
+REQ --> MAIN
+PYPROJECT --> REQ
+DOCKER_COMPOSE --> MAIN
+DOCKER_COMPOSE --> FRONT_DOCKER
+START_SCRIPT --> MAIN
 ```
 
 **Diagram sources**
-- [backend/app/main.py:1-227](file://backend/app/main.py#L1-L227)
-- [backend/config/consolidated.py:1-418](file://backend/config/consolidated.py#L1-L418)
-- [backend/config/base.yaml:1-493](file://backend/config/base.yaml#L1-L493)
-- [backend/config/environments/development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [backend/config/environments/paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [backend/config/environments/live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [backend/start.sh:1-6](file://backend/start.sh#L1-L6)
-- [backend/requirements.txt:1-22](file://backend/requirements.txt#L1-L22)
-- [frontend/package.json:1-39](file://frontend/package.json#L1-L39)
+- [appv2/backend/appv2/main.py:1-241](file://appv2/backend/appv2/main.py#L1-L241)
+- [appv2/backend/appv2/infrastructure/main.py:1-129](file://appv2/backend/appv2/infrastructure/main.py#L1-L129)
+- [appv2/backend/appv2/config/settings.py:1-123](file://appv2/backend/appv2/config/settings.py#L1-L123)
+- [appv2/backend/appv2/config/constants.py:1-101](file://appv2/backend/appv2/config/constants.py#L1-L101)
+- [appv2/backend/appv2/api/routes.py:1-246](file://appv2/backend/appv2/api/routes.py#L1-L246)
+- [appv2/backend/appv2/application/trading_engine.py:1-200](file://appv2/backend/appv2/application/trading_engine.py#L1-L200)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py:1-151](file://appv2/backend/appv2/infrastructure/dhan_feed.py#L1-L151)
+- [appv2/backend/requirements.txt:1-15](file://appv2/backend/requirements.txt#L1-L15)
+- [appv2/backend/pyproject.toml:1-22](file://appv2/backend/pyproject.toml#L1-L22)
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
+- [appv2/start.sh:1-114](file://appv2/start.sh#L1-L114)
+- [appv2/frontend/Dockerfile:1-20](file://appv2/frontend/Dockerfile#L1-L20)
 
 **Section sources**
-- [backend/app/main.py:1-227](file://backend/app/main.py#L1-L227)
-- [backend/config/consolidated.py:1-418](file://backend/config/consolidated.py#L1-L418)
-- [backend/config/base.yaml:1-493](file://backend/config/base.yaml#L1-L493)
-- [backend/config/environments/development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [backend/config/environments/paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [backend/config/environments/live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [backend/start.sh:1-6](file://backend/start.sh#L1-L6)
-- [backend/requirements.txt:1-22](file://backend/requirements.txt#L1-L22)
-- [frontend/package.json:1-39](file://frontend/package.json#L1-L39)
+- [appv2/backend/appv2/main.py:1-241](file://appv2/backend/appv2/main.py#L1-L241)
+- [appv2/backend/appv2/infrastructure/main.py:1-129](file://appv2/backend/appv2/infrastructure/main.py#L1-L129)
+- [appv2/backend/appv2/config/settings.py:1-123](file://appv2/backend/appv2/config/settings.py#L1-L123)
+- [appv2/backend/appv2/config/constants.py:1-101](file://appv2/backend/appv2/config/constants.py#L1-L101)
+- [appv2/backend/appv2/api/routes.py:1-246](file://appv2/backend/appv2/api/routes.py#L1-L246)
+- [appv2/backend/appv2/application/trading_engine.py:1-200](file://appv2/backend/appv2/application/trading_engine.py#L1-L200)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py:1-151](file://appv2/backend/appv2/infrastructure/dhan_feed.py#L1-L151)
+- [appv2/backend/requirements.txt:1-15](file://appv2/backend/requirements.txt#L1-L15)
+- [appv2/backend/pyproject.toml:1-22](file://appv2/backend/pyproject.toml#L1-L22)
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
+- [appv2/start.sh:1-114](file://appv2/start.sh#L1-L114)
+- [appv2/frontend/Dockerfile:1-20](file://appv2/frontend/Dockerfile#L1-L20)
 
 ## Core Components
-- Application entrypoint and lifecycle: FastAPI app with structured JSON logging, CORS, in-memory rate limiting, and a lifespan manager that initializes the service graph, loads and validates the LLM model, starts the trading engine, and performs graceful shutdown.
-- Configuration: A consolidated configuration system that merges environment variables, YAML overrides, and defaults, enabling flexible runtime tuning.
-- Environment profiles: Separate YAML files define development, paper, and live modes with distinct risk, broker mode, logging level, and LLM constraints.
-- Startup and hosting: A shell script executes Uvicorn on port 9090, ensuring environment prerequisites for MLX on macOS.
+- **Application entrypoint and lifecycle**: FastAPI app with structured logging, CORS, and comprehensive trading engine lifecycle management. The app supports both development and production entry points.
+- **Configuration management**: Pydantic-based settings system with environment variable validation, type safety, and default value management for all system parameters.
+- **Advanced trading engine**: Complete trading system with 73 domain services, including risk management, order book analysis, options trading, and LLM integration.
+- **Containerization**: Docker-based deployment with separate backend and frontend containers, health checks, and volume mounting for persistent data.
+- **API endpoints**: Comprehensive REST API with WebSocket support for real-time trading data, market data, trading operations, and analytics.
+- **Broker integration**: Dhan broker adapter with paper trading mode and live trading capabilities.
+
+**Updated** The core components now include advanced trading services, Docker containerization, and comprehensive configuration management.
 
 Key operational controls:
-- Logging: Structured JSON logs for production observability.
-- Rate limiting: Simple sliding-window middleware to protect the API.
-- LLM readiness: Startup blocks until the model is ready and validated.
-- Graceful shutdown: Engine stop, tick flush, thread pool cleanup, and market data disconnect.
+- **Structured logging**: JSON-formatted logs for production observability and debugging.
+- **Environment validation**: Pydantic settings validate all required environment variables at startup.
+- **Graceful shutdown**: Trading engine cleanup, position reconciliation, and resource cleanup.
+- **Health monitoring**: Comprehensive health endpoints and WebSocket connectivity checks.
 
 **Section sources**
-- [backend/app/main.py:43-176](file://backend/app/main.py#L43-L176)
-- [backend/app/main.py:171-227](file://backend/app/main.py#L171-L227)
-- [backend/config/consolidated.py:232-314](file://backend/config/consolidated.py#L232-L314)
-- [backend/config/environments/live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [backend/config/environments/paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [backend/config/environments/development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [backend/start.sh:1-6](file://backend/start.sh#L1-L6)
+- [appv2/backend/appv2/main.py:25-90](file://appv2/backend/appv2/main.py#L25-L90)
+- [appv2/backend/appv2/infrastructure/main.py:26-74](file://appv2/backend/appv2/infrastructure/main.py#L26-L74)
+- [appv2/backend/appv2/config/settings.py:12-123](file://appv2/backend/appv2/config/settings.py#L12-L123)
+- [appv2/backend/appv2/application/trading_engine.py:77-180](file://appv2/backend/appv2/application/trading_engine.py#L77-L180)
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
 
 ## Architecture Overview
-The backend exposes REST and WebSocket endpoints, integrates with market data feeds, and runs a trading engine independently of the frontend. Configuration is centralized and environment-aware.
+The appv2 system provides a modern, containerized trading platform with advanced features and comprehensive monitoring capabilities.
 
 ```mermaid
 graph TB
-Client["Client / Dashboard<br/>frontend/package.json"]
-API["FastAPI App<br/>backend/app/main.py"]
-CFG["Consolidated Config<br/>backend/config/consolidated.py"]
-LLM["LLM Adapter<br/>backend/app/config.py"]
-Engine["Trading Engine<br/>startup/shutdown"]
-Broker["Broker Adapters<br/>shared/brokers"]
-Storage["Storage / Persistence<br/>backend/config/base.yaml"]
+Client["Client / Dashboard<br/>appv2/frontend/Dockerfile"]
+API["FastAPI App<br/>appv2/backend/appv2/main.py"]
+INFRA_API["Infrastructure API<br/>appv2/backend/appv2/infrastructure/main.py"]
+SETTINGS["Pydantic Settings<br/>appv2/backend/appv2/config/settings.py"]
+ENGINE["Trading Engine v2<br/>appv2/backend/appv2/application/trading_engine.py"]
+ROUTES["API Routes<br/>appv2/backend/appv2/api/routes.py"]
+DHAN["Dhan Broker Adapter<br/>appv2/backend/appv2/infrastructure/dhan_feed.py"]
+LLM["MLX LLM Adapters<br/>appv2/backend/appv2/domain/services/llm_adapters.py"]
+STORAGE["SQLite Storage<br/>appv2/backend/appv2/infrastructure/sqlite_storage.py"]
+CONTAINER["Docker Compose<br/>appv2/docker-compose.yml"]
+START["Start Script<br/>appv2/start.sh"]
 Client --> API
-API --> CFG
-API --> LLM
-API --> Engine
-Engine --> Broker
-Engine --> Storage
+API --> SETTINGS
+API --> ENGINE
+INFRA_API --> ROUTES
+INFRA_API --> ENGINE
+ENGINE --> DHAN
+ENGINE --> LLM
+ENGINE --> STORAGE
+CONTAINER --> API
+CONTAINER --> Client
+START --> API
 ```
 
 **Diagram sources**
-- [backend/app/main.py:171-227](file://backend/app/main.py#L171-L227)
-- [backend/config/consolidated.py:173-231](file://backend/config/consolidated.py#L173-L231)
-- [backend/app/config.py:92-125](file://backend/app/config.py#L92-L125)
-- [backend/config/base.yaml:10-12](file://backend/config/base.yaml#L10-L12)
+- [appv2/backend/appv2/main.py:92-241](file://appv2/backend/appv2/main.py#L92-L241)
+- [appv2/backend/appv2/infrastructure/main.py:76-129](file://appv2/backend/appv2/infrastructure/main.py#L76-L129)
+- [appv2/backend/appv2/config/settings.py:12-123](file://appv2/backend/appv2/config/settings.py#L12-L123)
+- [appv2/backend/appv2/application/trading_engine.py:77-200](file://appv2/backend/appv2/application/trading_engine.py#L77-L200)
+- [appv2/backend/appv2/api/routes.py:1-246](file://appv2/backend/appv2/api/routes.py#L1-L246)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py:25-151](file://appv2/backend/appv2/infrastructure/dhan_feed.py#L25-L151)
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
+- [appv2/start.sh:1-114](file://appv2/start.sh#L1-L114)
 
 **Section sources**
-- [backend/app/main.py:171-227](file://backend/app/main.py#L171-L227)
-- [backend/config/consolidated.py:173-231](file://backend/config/consolidated.py#L173-L231)
-- [backend/app/config.py:92-125](file://backend/app/config.py#L92-L125)
-- [backend/config/base.yaml:10-12](file://backend/config/base.yaml#L10-L12)
+- [appv2/backend/appv2/main.py:92-241](file://appv2/backend/appv2/main.py#L92-L241)
+- [appv2/backend/appv2/infrastructure/main.py:76-129](file://appv2/backend/appv2/infrastructure/main.py#L76-L129)
+- [appv2/backend/appv2/config/settings.py:12-123](file://appv2/backend/appv2/config/settings.py#L12-L123)
+- [appv2/backend/appv2/application/trading_engine.py:77-200](file://appv2/backend/appv2/application/trading_engine.py#L77-L200)
+- [appv2/backend/appv2/api/routes.py:1-246](file://appv2/backend/appv2/api/routes.py#L1-L246)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py:25-151](file://appv2/backend/appv2/infrastructure/dhan_feed.py#L25-L151)
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
+- [appv2/start.sh:1-114](file://appv2/start.sh#L1-L114)
 
 ## Detailed Component Analysis
 
 ### Production Deployment Configuration
-- Environment selection: Choose backend/config/environments/live.yaml for production deployments. It sets broker_mode to live, WARNING log level, enables both NSE and MCX exchanges, tight risk parameters, and disables the LLM entry gate in live.
-- Risk and cost controls: Tight risk caps and realistic cost models are configured in live.yaml and base.yaml. Adjust via environment variables or YAML overrides.
-- LLM constraints: Temperature and throttling limits are tuned for live to reduce variability.
+- **Environment variables**: Configure trading mode, broker credentials, risk parameters, and server settings using the Pydantic Settings class.
+- **Docker deployment**: Use docker-compose.yml for production deployments with health checks and volume mounting.
+- **API endpoints**: Comprehensive REST API with health checks, market data, trading operations, and analytics endpoints.
+- **WebSocket connectivity**: Real-time state updates via WebSocket for live trading dashboards.
+
+**Updated** Production configuration now uses Pydantic settings with strict validation and Docker containerization.
 
 Operational steps:
-- Set environment variables for credentials and runtime overrides (see Consolidated Config environment variable mapping).
-- Mount model directories for MLX inference as configured in backend/app/config.py.
-- Run the startup script to launch Uvicorn on port 9090.
+- Set environment variables for Dhan credentials, trading parameters, and server configuration.
+- Configure Docker volumes for persistent data storage.
+- Use docker-compose for orchestrated deployment of backend and frontend containers.
+- Monitor health endpoints and WebSocket connectivity.
 
 **Section sources**
-- [backend/config/environments/live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [backend/config/base.yaml:79-85](file://backend/config/base.yaml#L79-L85)
-- [backend/app/config.py:92-125](file://backend/app/config.py#L92-L125)
-- [backend/start.sh:1-6](file://backend/start.sh#L1-L6)
+- [appv2/backend/appv2/config/settings.py:12-123](file://appv2/backend/appv2/config/settings.py#L12-L123)
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
+- [appv2/backend/appv2/api/routes.py:24-62](file://appv2/backend/appv2/api/routes.py#L24-L62)
+- [appv2/backend/appv2/main.py:197-236](file://appv2/backend/appv2/main.py#L197-L236)
 
 ### Environment Setup and Configuration Management
-- Base configuration: Defines system-wide defaults, global constants, exchange configurations, risk parameters, and LLM settings.
-- Environment-specific overrides: development.yaml, paper.yaml, live.yaml tailor risk, broker mode, logging, and LLM behavior.
-- Consolidated configuration: Loads from YAML and environment variables, supports exchange-specific overrides, and exposes typed configuration for the app.
+- **Pydantic settings**: Type-safe configuration with validation, defaults, and environment variable loading.
+- **Constant definitions**: Canonical thresholds and parameters for Auction Market Theory implementation.
+- **Environment validation**: Strict validation of required variables with clear error messages.
+- **Configuration hierarchy**: Settings override constants, with environment variables taking precedence.
+
+**Updated** Configuration management now uses Pydantic for type safety and validation.
 
 Runtime configuration flow:
-- Load YAML (markets section) and environment variables.
-- Merge with defaults to form a single source of truth.
-- Expose settings to the application.
+- Load environment variables from .env file
+- Validate and parse settings with Pydantic
+- Apply defaults and constants
+- Expose validated configuration to application components
 
 ```mermaid
 flowchart TD
-Start(["Load Config"]) --> YAML["Read YAML<br/>base + env files"]
-YAML --> EnvVars["Read Environment Variables"]
-EnvVars --> Merge["Merge Defaults + Overrides"]
-Merge --> Typed["Build Typed Config Objects"]
-Typed --> Expose["Expose to App Settings"]
-Expose --> Ready(["Ready"])
+Start(["Load Configuration"]) --> ENV[".env File"]
+ENV --> PYDANTIC["Pydantic Settings Validation"]
+PYDANTIC --> VALIDATED["Validated Settings Object"]
+VALIDATED --> CONSTANTS["Apply Constants"]
+CONSTANTS --> APP["Application Configuration"]
+APP --> Ready(["Ready"])
 ```
 
 **Diagram sources**
-- [backend/config/consolidated.py:316-359](file://backend/config/consolidated.py#L316-L359)
-- [backend/config/consolidated.py:232-314](file://backend/config/consolidated.py#L232-L314)
+- [appv2/backend/appv2/config/settings.py:12-123](file://appv2/backend/appv2/config/settings.py#L12-L123)
+- [appv2/backend/appv2/config/constants.py:1-101](file://appv2/backend/appv2/config/constants.py#L1-L101)
 
 **Section sources**
-- [backend/config/base.yaml:1-493](file://backend/config/base.yaml#L1-L493)
-- [backend/config/environments/development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [backend/config/environments/paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [backend/config/environments/live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [backend/config/consolidated.py:316-359](file://backend/config/consolidated.py#L316-L359)
-- [backend/config/consolidated.py:232-314](file://backend/config/consolidated.py#L232-L314)
+- [appv2/backend/appv2/config/settings.py:12-123](file://appv2/backend/appv2/config/settings.py#L12-L123)
+- [appv2/backend/appv2/config/constants.py:1-101](file://appv2/backend/appv2/config/constants.py#L1-L101)
+- [appv2/backend/appv2/infrastructure/main.py:26-74](file://appv2/backend/appv2/infrastructure/main.py#L26-L74)
 
 ### Scaling Considerations
-- Concurrency and throughput: The backend uses Uvicorn with a single worker by default. Scale horizontally by deploying multiple instances behind a load balancer.
-- Rate limiting: Built-in middleware enforces a per-IP sliding window limit to protect upstream systems.
-- Model readiness: Startup waits for LLM readiness and validation, which impacts cold start duration; provision adequate CPU/GPU resources for model loading.
-- Database and persistence: The SQLite path is configurable; for production, use a managed database and connection pooling.
+- **Container-based scaling**: Docker containers can be scaled horizontally for load balancing.
+- **Database considerations**: SQLite storage is suitable for single-instance deployments; consider migration for high-scale production.
+- **WebSocket scalability**: WebSocket connections handled by single engine instance; consider clustering for high concurrency.
+- **Broker limitations**: Dhan broker rate limits apply regardless of container scaling.
+
+**Updated** Scaling considerations now account for Docker containerization and single-engine architecture.
 
 Recommendations:
-- Horizontal pod autoscaling for Kubernetes deployments.
-- Separate read replicas for analytics endpoints.
-- Queue-based ingestion for high-volume tick data.
+- Use Docker Swarm or Kubernetes for container orchestration
+- Implement horizontal pod autoscaling for backend containers
+- Consider Redis or similar for shared state if scaling beyond single instance
+- Monitor broker API rate limits and implement backoff strategies
 
 **Section sources**
-- [backend/app/main.py:195-209](file://backend/app/main.py#L195-L209)
-- [backend/start.sh:1-6](file://backend/start.sh#L1-L6)
-- [backend/config/base.yaml:10](file://backend/config/base.yaml#L10)
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py:56-105](file://appv2/backend/appv2/infrastructure/dhan_feed.py#L56-L105)
 
 ### Deployment Pipeline and Containerization Options
-- Local execution: Use backend/start.sh to run Uvicorn on port 9090.
-- Containerization: Package the backend into a container image with Python dependencies from backend/requirements.txt. Expose port 9090 and mount model directories as volumes.
-- CI/CD: Build images on tagged releases, push to a registry, and deploy via Helm/Kubernetes manifests or container orchestration platform.
+- **Docker containers**: Separate backend and frontend containers with optimized build processes.
+- **docker-compose**: Production-ready orchestration with health checks, volume mounting, and dependency management.
+- **Multi-stage builds**: Node.js frontend with Nginx for production serving.
+- **Health monitoring**: Built-in health checks for automated deployment validation.
 
-Containerization notes:
-- Install dependencies from requirements.txt.
-- Ensure MLX model paths are mounted at runtime.
-- Configure environment variables for credentials and runtime overrides.
+**Updated** Deployment pipeline now includes comprehensive Docker containerization with health checks.
+
+Containerization features:
+- Backend: Python 3.11 with FastAPI and trading engine dependencies
+- Frontend: Node.js 20 with Nginx for static asset serving
+- Multi-stage builds for optimized production images
+- Volume mounting for persistent data and logs
 
 **Section sources**
-- [backend/start.sh:1-6](file://backend/start.sh#L1-L6)
-- [backend/requirements.txt:1-22](file://backend/requirements.txt#L1-L22)
-- [backend/app/config.py:92-125](file://backend/app/config.py#L92-L125)
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
+- [appv2/frontend/Dockerfile:1-20](file://appv2/frontend/Dockerfile#L1-L20)
+- [appv2/backend/requirements.txt:1-15](file://appv2/backend/requirements.txt#L1-L15)
 
 ### Infrastructure Requirements
-- Compute: CPU-intensive for MLX inference; GPU recommended for faster model loading and generation. Ensure sufficient memory for concurrent sessions and model caching.
-- Storage: Persistent storage for models and logs; consider ephemeral containers with mounted volumes for models.
-- Networking: Port 9090 open for internal/external traffic; configure TLS termination at ingress or reverse proxy.
-- Security: Enforce least privilege for broker credentials; rotate secrets regularly; restrict CORS origins in production.
+- **Compute resources**: Python 3.11+ for backend, Node.js 20+ for frontend development
+- **Memory requirements**: Trading engine requires substantial memory for market data processing
+- **Storage**: SQLite database file and log directory for persistent data
+- **Network**: Ports 8001 (backend), 5174 (frontend), and 80 (production frontend)
+- **Broker integration**: Dhan API credentials and network connectivity
+
+**Updated** Infrastructure requirements now specify Docker container ports and resource requirements.
+
+Security considerations:
+- Environment variable protection for broker credentials
+- CORS configuration for frontend origin validation
+- Health check endpoints for monitoring without exposing internal APIs
 
 **Section sources**
-- [backend/app/config.py:35-44](file://backend/app/config.py#L35-L44)
-- [backend/app/config.py:214-215](file://backend/app/config.py#L214-L215)
-- [backend/config/environments/live.yaml:4-6](file://backend/config/environments/live.yaml#L4-L6)
+- [appv2/backend/requirements.txt:1-15](file://appv2/backend/requirements.txt#L1-L15)
+- [appv2/docker-compose.yml:7-29](file://appv2/docker-compose.yml#L7-L29)
+- [appv2/backend/appv2/config/settings.py:104-108](file://appv2/backend/appv2/config/settings.py#L104-L108)
 
 ### Monitoring and Alerting
-- Logging: Structured JSON logs emitted at INFO/WARNING/ERROR levels. Forward logs to a centralized logging system (e.g., ELK, Loki).
-- Health endpoint: Use the health router to probe service status.
-- Metrics: Expose Prometheus-compatible metrics via the metrics router and scrape them with Prometheus.
-- Alerts: Define alerts for high error rates, latency spikes, model readiness failures, and downstream broker connectivity issues.
+- **Health endpoints**: Comprehensive health checks for system status and engine state
+- **WebSocket monitoring**: Connection health and client count tracking
+- **MLX model status**: LLM adapter readiness and decision statistics
+- **Latency tracking**: Per-symbol latency metrics with percentile calculations
+- **Gate rejection analytics**: Trade gating performance and rejection statistics
+
+**Updated** Monitoring capabilities now include comprehensive trading engine metrics and WebSocket connectivity.
+
+Monitoring endpoints:
+- `/api/v2/health` - Basic system health
+- `/api/v2/status` - Detailed system status with service states
+- `/api/v2/mlx/status` - LLM adapter status and statistics
+- `/api/v2/metrics/latency` - Latency metrics per symbol
+- `/api/v2/metrics/gate-rejections` - Gate rejection analytics
 
 **Section sources**
-- [backend/app/main.py:43-68](file://backend/app/main.py#L43-L68)
-- [backend/app/main.py:212-220](file://backend/app/main.py#L212-L220)
+- [appv2/backend/appv2/api/routes.py:24-62](file://appv2/backend/appv2/api/routes.py#L24-L62)
+- [appv2/backend/appv2/api/routes.py:139-177](file://appv2/backend/appv2/api/routes.py#L139-L177)
+- [appv2/backend/appv2/main.py:115-129](file://appv2/backend/appv2/main.py#L115-L129)
 
 ### Rolling Updates
-- Blue-green or rolling deployment: Keep at least two backend pods running during updates to minimize downtime.
-- Readiness probes: Ensure the LLM readiness check passes before marking pods as ready.
-- Graceful shutdown: Use SIGTERM to trigger the lifespan shutdown hook, allowing the engine to flush and close connections cleanly.
+- **Docker-based updates**: Container replacement for zero-downtime deployments
+- **Health checks**: Automatic service validation before traffic routing
+- **Graceful shutdown**: Trading engine cleanup and position reconciliation
+- **Volume preservation**: Persistent volumes maintain configuration and data
+
+**Updated** Rolling updates now leverage Docker containerization with health checks.
+
+Update procedure:
+- Pull new container images
+- docker-compose pull && docker-compose up -d
+- Monitor health check success
+- Verify WebSocket connectivity and API responses
+- Rollback if health checks fail
 
 **Section sources**
-- [backend/app/main.py:83-170](file://backend/app/main.py#L83-L170)
+- [appv2/docker-compose.yml:15-19](file://appv2/docker-compose.yml#L15-L19)
+- [appv2/backend/appv2/main.py:25-90](file://appv2/backend/appv2/main.py#L25-L90)
 
 ### Operational Procedures
-- Maintenance windows: Schedule updates during off-peak hours; notify stakeholders.
-- Backup and restore: Back up the database file path configured in base.yaml and model directories. Test restoration procedures regularly.
-- Disaster recovery: Maintain hot standby instances; automate failover and data replication.
+- **Maintenance windows**: Scheduled updates during off-peak trading hours
+- **Backup strategy**: Database file and configuration backup procedures
+- **Disaster recovery**: Container recreation and data volume restoration
+- **Performance monitoring**: Regular health check validation and metric collection
+
+**Updated** Operational procedures now include Docker container management and health monitoring.
+
+Daily operations:
+- Monitor health endpoints and WebSocket connectivity
+- Review MLX model status and decision statistics
+- Check latency metrics and gate rejection rates
+- Validate broker connectivity and position reconciliation
 
 **Section sources**
-- [backend/config/base.yaml:10](file://backend/config/base.yaml#L10)
+- [appv2/backend/appv2/api/routes.py:24-62](file://appv2/backend/appv2/api/routes.py#L24-L62)
+- [appv2/backend/appv2/infrastructure/main.py:101-110](file://appv2/backend/appv2/infrastructure/main.py#L101-L110)
 
 ### Security, Access Control, and Compliance
-- Secrets management: Store broker credentials and tokens in environment variables or a secret manager; avoid committing secrets to source control.
-- Network policies: Restrict inbound traffic to port 9090; enable mutual TLS if integrating with internal systems.
-- Audit logging: Enable DEBUG-level logging temporarily for audits; sanitize sensitive fields.
-- Compliance: Ensure data retention and deletion policies align with regulatory requirements; encrypt data at rest and in transit.
+- **Secrets management**: Environment variable protection for broker credentials
+- **Network security**: CORS configuration and port-based access control
+- **Audit logging**: Structured JSON logs for compliance and debugging
+- **Data protection**: Encrypted storage of sensitive configuration data
+
+**Updated** Security considerations now include Docker container isolation and environment variable protection.
+
+Security measures:
+- Environment variable encryption for production deployments
+- CORS origin validation for frontend integration
+- Health endpoint access control for monitoring systems
+- Container network isolation for production environments
 
 **Section sources**
-- [backend/app/config.py:147-153](file://backend/app/config.py#L147-L153)
-- [backend/config/environments/live.yaml:4-6](file://backend/config/environments/live.yaml#L4-L6)
+- [appv2/backend/appv2/config/settings.py:14-15](file://appv2/backend/appv2/config/settings.py#L14-L15)
+- [appv2/backend/appv2/main.py:102-108](file://appv2/backend/appv2/main.py#L102-L108)
 
 ### Capacity Planning
-- Throughput: Estimate requests per second and allocate CPU/memory accordingly; monitor rate-limiting events.
-- Latency: Track p95/p99 latencies for LLM inference and market data endpoints; scale out when thresholds are exceeded.
-- Model memory: Plan disk and memory capacity for model loading; consider quantization or adapter strategies to reduce footprint.
+- **Symbol capacity**: Up to 10 simultaneous symbols per engine instance
+- **Connection limits**: WebSocket client connections and broker API limits
+- **Memory requirements**: Trading engine memory scaling with symbol count and data history
+- **Throughput limits**: Broker API rate limits and market data processing capacity
+
+**Updated** Capacity planning now accounts for Docker container limits and trading engine scaling.
+
+Capacity guidelines:
+- Single container: 3-5 symbols maximum for optimal performance
+- High-frequency trading: Consider dedicated containers per symbol
+- Market data volume: Monitor memory usage and adjust symbol count accordingly
+- Broker API limits: Implement rate limiting and backoff strategies
 
 **Section sources**
-- [backend/app/main.py:195-209](file://backend/app/main.py#L195-L209)
-- [backend/config/consolidated.py:62-86](file://backend/config/consolidated.py#L62-L86)
+- [appv2/backend/appv2/config/settings.py:49-51](file://appv2/backend/appv2/config/settings.py#L49-L51)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py:56-105](file://appv2/backend/appv2/infrastructure/dhan_feed.py#L56-L105)
 
 ## Dependency Analysis
-Configuration dependencies and runtime relationships:
+The appv2 system introduces a comprehensive dependency graph with Pydantic configuration management and Docker containerization.
 
 ```mermaid
 graph LR
-CONS["consolidated.py"] --> MAIN["main.py"]
-CONS --> CFG["config.py"]
-BASE["base.yaml"] --> CONS
-ENV_DEV["development.yaml"] --> CONS
-ENV_PAPER["paper.yaml"] --> CONS
-ENV_LIVE["live.yaml"] --> CONS
+SETTINGS["settings.py"] --> MAIN["main.py"]
+SETTINGS --> INFRA["infrastructure/main.py"]
+SETTINGS --> CONST["constants.py"]
+MAIN --> ROUTES["routes.py"]
+INFRA --> ROUTES
+ENGINE["trading_engine.py"] --> DHAN["dhan_feed.py"]
+ROUTES --> ENGINE
 REQ["requirements.txt"] --> MAIN
+PYPROJECT["pyproject.toml"] --> REQ
+DOCKER["docker-compose.yml"] --> MAIN
+DOCKER --> FRONT_DOCKER["frontend/Dockerfile"]
 START["start.sh"] --> MAIN
-FE_PKG["frontend/package.json"] -. optional .-> MAIN
 ```
 
 **Diagram sources**
-- [backend/config/consolidated.py:1-418](file://backend/config/consolidated.py#L1-L418)
-- [backend/app/main.py:1-227](file://backend/app/main.py#L1-L227)
-- [backend/app/config.py:1-157](file://backend/app/config.py#L1-L157)
-- [backend/config/base.yaml:1-493](file://backend/config/base.yaml#L1-L493)
-- [backend/config/environments/development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [backend/config/environments/paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [backend/config/environments/live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [backend/requirements.txt:1-22](file://backend/requirements.txt#L1-L22)
-- [backend/start.sh:1-6](file://backend/start.sh#L1-L6)
-- [frontend/package.json:1-39](file://frontend/package.json#L1-L39)
+- [appv2/backend/appv2/config/settings.py:12-123](file://appv2/backend/appv2/config/settings.py#L12-L123)
+- [appv2/backend/appv2/main.py:92-241](file://appv2/backend/appv2/main.py#L92-L241)
+- [appv2/backend/appv2/infrastructure/main.py:76-129](file://appv2/backend/appv2/infrastructure/main.py#L76-L129)
+- [appv2/backend/appv2/config/constants.py:1-101](file://appv2/backend/appv2/config/constants.py#L1-L101)
+- [appv2/backend/appv2/api/routes.py:1-246](file://appv2/backend/appv2/api/routes.py#L1-L246)
+- [appv2/backend/appv2/application/trading_engine.py:1-200](file://appv2/backend/appv2/application/trading_engine.py#L1-L200)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py:1-151](file://appv2/backend/appv2/infrastructure/dhan_feed.py#L1-L151)
+- [appv2/backend/requirements.txt:1-15](file://appv2/backend/requirements.txt#L1-L15)
+- [appv2/backend/pyproject.toml:1-22](file://appv2/backend/pyproject.toml#L1-L22)
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
+- [appv2/start.sh:1-114](file://appv2/start.sh#L1-L114)
+- [appv2/frontend/Dockerfile:1-20](file://appv2/frontend/Dockerfile#L1-L20)
 
 **Section sources**
-- [backend/config/consolidated.py:1-418](file://backend/config/consolidated.py#L1-L418)
-- [backend/app/main.py:1-227](file://backend/app/main.py#L1-L227)
-- [backend/app/config.py:1-157](file://backend/app/config.py#L1-L157)
-- [backend/config/base.yaml:1-493](file://backend/config/base.yaml#L1-L493)
-- [backend/config/environments/development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [backend/config/environments/paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [backend/config/environments/live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [backend/requirements.txt:1-22](file://backend/requirements.txt#L1-L22)
-- [backend/start.sh:1-6](file://backend/start.sh#L1-L6)
-- [frontend/package.json:1-39](file://frontend/package.json#L1-L39)
+- [appv2/backend/appv2/config/settings.py:12-123](file://appv2/backend/appv2/config/settings.py#L12-L123)
+- [appv2/backend/appv2/main.py:92-241](file://appv2/backend/appv2/main.py#L92-L241)
+- [appv2/backend/appv2/infrastructure/main.py:76-129](file://appv2/backend/appv2/infrastructure/main.py#L76-L129)
+- [appv2/backend/appv2/config/constants.py:1-101](file://appv2/backend/appv2/config/constants.py#L1-L101)
+- [appv2/backend/appv2/api/routes.py:1-246](file://appv2/backend/appv2/api/routes.py#L1-L246)
+- [appv2/backend/appv2/application/trading_engine.py:1-200](file://appv2/backend/appv2/application/trading_engine.py#L1-L200)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py:1-151](file://appv2/backend/appv2/infrastructure/dhan_feed.py#L1-L151)
+- [appv2/backend/requirements.txt:1-15](file://appv2/backend/requirements.txt#L1-L15)
+- [appv2/backend/pyproject.toml:1-22](file://appv2/backend/pyproject.toml#L1-L22)
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
+- [appv2/start.sh:1-114](file://appv2/start.sh#L1-L114)
+- [appv2/frontend/Dockerfile:1-20](file://appv2/frontend/Dockerfile#L1-L20)
 
 ## Performance Considerations
-- Model loading: Startup waits for LLM readiness; optimize model paths and consider quantization/adapters to reduce load times.
-- Rate limiting: Tune the sliding window and request count thresholds to match expected traffic.
-- Database I/O: For SQLite, ensure adequate disk throughput; consider migration to a managed database for production.
-- Concurrency: Increase workers or deploy multiple replicas; monitor queue depths for market data ingestion.
+- **Engine optimization**: Trading engine designed for 3-5 symbols per container for optimal performance
+- **Memory management**: SQLite storage and efficient data structures for market data
+- **WebSocket efficiency**: Minimal overhead for real-time state broadcasting
+- **Broker API optimization**: Rate limiting and efficient market data subscription
+
+**Updated** Performance considerations now include Docker container optimization and trading engine scaling.
+
+Performance tuning:
+- Monitor memory usage per symbol (approx. 50MB per symbol)
+- Optimize symbol count per container (3-5 symbols recommended)
+- Implement proper garbage collection for market data
+- Monitor broker API response times and implement backoff
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
-Common issues and resolutions:
-- LLM model not ready: Verify model paths and permissions; check readiness logs and timeouts.
-- Broker credentials missing: Ensure DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN are set; validate environment overrides.
-- CORS errors: Confirm allowed origins in settings and environment variables.
-- Rate limit exceeded: Investigate client-side retry logic or adjust middleware thresholds.
-- Database write failures: Check disk space and file permissions for the configured database path.
+Common issues and resolutions for the appv2 system:
+
+**Environment Configuration**
+- Missing environment variables: Verify .env file contains all required Dhan credentials and trading parameters
+- Pydantic validation errors: Check data types and ranges for all configuration parameters
+- CORS errors: Ensure FRONTEND_URL matches the actual frontend origin
+
+**Docker Deployment**
+- Container startup failures: Check backend logs for initialization errors
+- Port conflicts: Verify ports 8001, 5174, and 80 are available
+- Volume mounting issues: Ensure data and logs directories exist and are writable
+
+**Trading Engine Issues**
+- Engine not starting: Check broker credentials and network connectivity
+- WebSocket connection failures: Verify backend health endpoint responds
+- MLX model loading: Ensure model path exists and has proper permissions
+
+**Updated** Troubleshooting now includes Docker-specific issues and appv2 configuration problems.
 
 **Section sources**
-- [backend/app/main.py:88-106](file://backend/app/main.py#L88-L106)
-- [backend/app/config.py:147-153](file://backend/app/config.py#L147-L153)
-- [backend/app/config.py:35-44](file://backend/app/config.py#L35-L44)
-- [backend/app/main.py:195-209](file://backend/app/main.py#L195-L209)
-- [backend/config/base.yaml:10](file://backend/config/base.yaml#L10)
+- [appv2/start.sh:23-28](file://appv2/start.sh#L23-L28)
+- [appv2/backend/appv2/config/settings.py:14-15](file://appv2/backend/appv2/config/settings.py#L14-L15)
+- [appv2/backend/appv2/main.py:25-90](file://appv2/backend/appv2/main.py#L25-L90)
 
 ## Conclusion
-GlassyTrade AI v5 provides a robust, configuration-driven backend suitable for production deployment. By leveraging environment-specific YAML files, a consolidated configuration system, and structured logging, teams can operate reliably at scale. Apply the operational procedures, monitoring practices, and security controls outlined here to maintain uptime, performance, and compliance.
+GlassyTrade AI v5 appv2 provides a modern, containerized trading platform with comprehensive features and robust deployment capabilities. The system leverages Docker containerization, Pydantic configuration management, and advanced trading engine architecture to deliver reliable production deployments. Teams can operate at scale with confidence using the documented operational procedures, monitoring practices, and security controls.
+
+**Updated** The conclusion now reflects the comprehensive nature of the appv2 system and its production-ready deployment capabilities.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
 ## Appendices
 
 ### Appendix A: Environment Variable Reference
-- DEFAULT_SYMBOL, STREAM_INTERVAL, ALLOW_SHORT, SCANNER_MODE, SCANNER_TOP_N, SCANNER_TOP_PER_UNDERLYING, STRIKES_AROUND_ATM
-- LLM_BACKEND, LLM_TEMPERATURE, LLM_ENTRY_TEMPERATURE, LLM_OVERSEER_TEMPERATURE, LLM_MAX_NEW_TOKENS, LLM_TIMEOUT_SECONDS, MLX_MODEL_PATH, MLX_ADAPTER_PATH, REASONING_MODEL_PATH
-- MAX_DAILY_DRAWDOWN, MAX_CONSECUTIVE_LOSSES, COOLDOWN_SECONDS, SLIPPAGE_PCT, PLAYBOOK_GUARD_MAX_REJECTIONS
-- AGGRESSION_SIGMA, DISPLACEMENT_MULTIPLIER, BALANCE_RATIO_THRESHOLD, COMPOSITE_SESSION_WINDOW, ALERT_PROXIMITY_TICKS
-- TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
-- CORS_ORIGINS, DEFAULT_EXCHANGE, DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN, PORT
+- **Broker Configuration**: DHAN_ACCESS_TOKEN, DHAN_CLIENT_ID
+- **Trading Parameters**: CAPITAL, EXCHANGE, SYMBOLS, UNDERLYINGS, LIVE_TRADING
+- **Risk Controls**: RISK_PER_TRADE_PCT, MAX_DAILY_LOSS_PCT, MAX_CONSECUTIVE_LOSSES
+- **Execution Mode**: PAPER_SLIPPAGE_BPS, PAPER_COMMISSION_PER_TRADE
+- **Threshold Parameters**: AGGRESSION_SIGMA_THRESHOLD, LVN_THRESHOLD, HVN_THRESHOLD
+- **Options Parameters**: OPTION_STRIKE_PREF, MIN_OPTION_OI, MAX_OPTION_SPREAD_BPS
+- **Server Configuration**: HOST, PORT, FRONTEND_URL, LOG_LEVEL, LOG_DIR
+
+**Updated** Environment variables now include comprehensive trading and risk parameters.
 
 **Section sources**
-- [backend/config/consolidated.py:232-314](file://backend/config/consolidated.py#L232-L314)
+- [appv2/backend/appv2/config/settings.py:14-108](file://appv2/backend/appv2/config/settings.py#L14-L108)
 
-### Appendix B: Example Production Deployment Steps
-- Prepare environment files: Select live.yaml and set environment variables for broker credentials and runtime overrides.
-- Build container image: Install dependencies from requirements.txt; mount model directories; expose port 9090.
-- Deploy: Use blue-green rollout; ensure LLM readiness probe succeeds; monitor logs and metrics.
-- Validate: Call health and metrics endpoints; verify trading engine status and broker connectivity.
+### Appendix B: API Endpoint Reference
+- **Health Endpoints**: `/api/v2/health`, `/health`
+- **Status Endpoints**: `/api/v2/status`, `/api/v2/market/symbols`
+- **Market Data**: `/api/v2/market/{symbol}/candles`, `/api/v2/market/{symbol}/orderbook`
+- **Trading Operations**: `/api/v2/trading/positions`, `/api/v2/trading/signals`
+- **Analytics**: `/api/v2/analytics`, `/api/v2/state`
+- **Metrics**: `/api/v2/metrics/latency`, `/api/v2/metrics/gate-rejections`
+- **LLM Integration**: `/api/v2/mlx/status`, `/api/v2/mlx/decide/{symbol}`
+- **WebSocket**: `/api/v2/ws`, `/ws`
+
+**Updated** API endpoints now include comprehensive trading and analytics endpoints.
 
 **Section sources**
-- [backend/config/environments/live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [backend/requirements.txt:1-22](file://backend/requirements.txt#L1-L22)
-- [backend/start.sh:1-6](file://backend/start.sh#L1-L6)
-- [backend/app/main.py:212-220](file://backend/app/main.py#L212-L220)
+- [appv2/backend/appv2/api/routes.py:24-246](file://appv2/backend/appv2/api/routes.py#L24-L246)
+- [appv2/backend/appv2/main.py:115-236](file://appv2/backend/appv2/main.py#L115-L236)
+
+### Appendix C: Docker Deployment Commands
+- **Local Development**: `docker-compose up --build`
+- **Production Deployment**: `docker-compose -f docker-compose.yml up -d`
+- **Health Check**: `docker-compose ps` and `curl http://localhost:8001/api/v2/health`
+- **Logs Monitoring**: `docker-compose logs -f backend` and `docker-compose logs -f frontend`
+- **Container Scaling**: `docker-compose up --scale backend=3` (for future use)
+
+**Updated** Docker commands now reflect the complete deployment workflow.
+
+**Section sources**
+- [appv2/docker-compose.yml:1-31](file://appv2/docker-compose.yml#L1-L31)
+- [appv2/start.sh:1-114](file://appv2/start.sh#L1-L114)
+
+### Appendix D: Production Deployment Checklist
+- [ ] Environment variables configured (.env file)
+- [ ] Dhan credentials valid and accessible
+- [ ] Docker daemon running and accessible
+- [ ] Required ports available (8001, 5174, 80)
+- [ ] Docker images built successfully
+- [ ] Backend container healthy (`docker-compose ps`)
+- [ ] Frontend container healthy (`docker-compose ps`)
+- [ ] WebSocket connection established
+- [ ] Health endpoints return 200 OK
+- [ ] Trading engine operational status verified
+- [ ] MLX model status checked (if applicable)
+
+**Updated** Production checklist now includes Docker-specific validation steps.
+
+**Section sources**
+- [appv2/DEPLOYMENT_GUIDE.md:222-235](file://appv2/DEPLOYMENT_GUIDE.md#L222-L235)
+- [appv2/docker-compose.yml:15-19](file://appv2/docker-compose.yml#L15-L19)

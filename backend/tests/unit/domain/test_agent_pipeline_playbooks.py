@@ -137,3 +137,43 @@ def test_run_agent_pipeline_skips_without_canonical_playbook():
     assert decision.direction == "FLAT"
     assert decision.playbook == ""
     assert decision.timing == "SKIP"
+
+
+def test_select_playbook_no_trade_session_balanced_leg():
+    """When session=NO_TRADE but leg=BALANCED, should return return_to_value."""
+    from app.domain.trading.models.value_objects import AMTResult
+    
+    # Session regime is NO_TRADE, but leg regime is BALANCED
+    regime = SimpleNamespace(regime="NO_TRADE")
+    amt = AMTResult(
+        market_state="NO_TRADE",
+        poc=100.0,
+        value_area_high=105.0,
+        value_area_low=95.0,
+        aggression=1.0,
+        cvd_slope=0.0,
+        leg_regime="BALANCED",  # Leg regime
+    )
+    
+    playbook = select_playbook(regime, amt)
+    assert playbook == "return_to_value", f"Expected return_to_value, got '{playbook}'"
+    assert playbook != "", "Playbook should not be empty for NO_TRADE session + BALANCED leg"
+
+
+def test_select_playbook_no_trade_session_trending_leg():
+    """When session=NO_TRADE but leg=TRENDING, should return imbalance_continuation."""
+    from app.domain.trading.models.value_objects import AMTResult
+    
+    regime = SimpleNamespace(regime="NO_TRADE")
+    amt = AMTResult(
+        market_state="NO_TRADE",
+        poc=100.0,
+        value_area_high=105.0,
+        value_area_low=95.0,
+        aggression=2.5,
+        cvd_slope=0.8,
+        leg_regime="TRENDING",
+    )
+    
+    playbook = select_playbook(regime, amt)
+    assert playbook == "imbalance_continuation", f"Expected imbalance_continuation, got '{playbook}'"

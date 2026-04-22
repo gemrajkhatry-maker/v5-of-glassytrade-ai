@@ -17,6 +17,7 @@ from decimal import Decimal
 
 from app.domain.trading.models.entities import Signal
 from app.domain.trading.models.aggregates import Portfolio
+from app.domain.trading.services.kill_switch import KillSwitch
 from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
@@ -58,11 +59,9 @@ class RiskManager:
     MAX_PORTFOLIO_NOTIONAL_PCT: Decimal = Decimal("0.60")  # 60% of equity total
     MAX_PER_SYMBOL_NOTIONAL_PCT: Decimal = Decimal("0.20")  # 20% of equity per symbol
 
-    # Emergency kill switch shared across all per-symbol instances
-    _global_halt: bool = False
-
-    def __init__(self) -> None:
+    def __init__(self, kill_switch: KillSwitch | None = None) -> None:
         self._daily = DailyRiskState()
+        self._kill_switch = kill_switch
 
         # Drift detection — rolling win rate vs historical baseline
         self._recent_outcomes: list[bool] = []  # True=win, False=loss (last 50 trades)
@@ -72,11 +71,11 @@ class RiskManager:
 
     @property
     def is_halted(self) -> bool:
-        return RiskManager._global_halt or self._daily.halted
+        return (self._kill_switch is not None and self._kill_switch.is_halted) or self._daily.halted
 
     @property
     def halt_reason(self) -> str:
-        if RiskManager._global_halt:
+        if self._kill_switch is not None and self._kill_switch.is_halted:
             return "Emergency kill switch active"
         return self._daily.halt_reason
 
@@ -85,20 +84,18 @@ class RiskManager:
         return self._daily
 
     # ------------------------------------------------------------------
-    # Emergency kill switch
+    # Emergency kill switch (delegates to shared KillSwitch)
     # ------------------------------------------------------------------
 
-    @classmethod
-    def halt_trading(cls) -> None:
-        """Immediately halt all trading until manually resumed."""
-        cls._global_halt = True
-        logger.warning("Trading FORCE HALTED via emergency kill switch")
+    @staticmethod
+    def halt_trading() -> None:
+        """Deprecated: use KillSwitch.halt() directly."""
+        logger.warning("RiskManager.halt_trading() is deprecated — use KillSwitch.halt()")
 
-    @classmethod
-    def resume_trading(cls) -> None:
-        """Clear the emergency kill switch (does NOT clear daily halts)."""
-        cls._global_halt = False
-        logger.info("Emergency kill switch cleared")
+    @staticmethod
+    def resume_trading() -> None:
+        """Deprecated: use KillSwitch.resume() directly."""
+        logger.warning("RiskManager.resume_trading() is deprecated — use KillSwitch.resume()")
 
     # ------------------------------------------------------------------
     # Core validation
@@ -107,7 +104,7 @@ class RiskManager:
     def validate(self, signal: Signal, portfolio: Portfolio) -> bool:
         """Return True if *signal* passes all risk checks."""
         # Emergency kill switch — always checked first
-        if RiskManager._global_halt:
+        if self._kill_switch is not None and self._kill_switch.is_halted:
             logger.warning("Trade rejected: emergency kill switch active")
             return False
 

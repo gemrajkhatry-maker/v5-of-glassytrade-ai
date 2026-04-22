@@ -206,7 +206,7 @@ class TestGateLogic:
         scenario = get_scenario_no_trade_choppy()
         
         try:
-            from app.domain.fabio_ai.services.entry_gate import three_align_check
+            from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
             from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
             
             analyzer = AMTAnalyzer()

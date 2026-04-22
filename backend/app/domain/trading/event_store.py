@@ -281,9 +281,6 @@ _event_store_context: ContextVar[Optional[EventStore]] = ContextVar(
     "event_store", default=None
 )
 
-# Lock for global singleton initialization
-_global_lock = threading.Lock()
-
 
 class EventSystem:
     """Session-scoped event system with dependency injection.
@@ -334,98 +331,6 @@ class EventSystem:
         """Clear this system from the context."""
         _event_bus_context.set(None)
         _event_store_context.set(None)
-
-
-# ---------------------------------------------------------------------------
-# Global Event Bus Instance (Backward Compatibility)
-# ---------------------------------------------------------------------------
-
-_event_bus_global: EventBus | None = None
-_event_store_global: EventStore | None = None
-
-
-def get_event_bus() -> EventBus:
-    """Get the global event bus instance.
-
-    DEPRECATED: Use EventSystem() for new code.
-    This function is kept for backward compatibility.
-    """
-    global _event_bus_global
-    if _event_bus_global is None:
-        with _global_lock:
-            if _event_bus_global is None:
-                _event_bus_global = EventBus()
-    return _event_bus_global
-
-
-def get_event_store() -> EventStore:
-    """Get the global event store instance.
-
-    DEPRECATED: Use EventSystem() for new code.
-    This function is kept for backward compatibility.
-    """
-    global _event_store_global
-    if _event_store_global is None:
-        with _global_lock:
-            if _event_store_global is None:
-                _event_store_global = InMemoryEventStore()
-    return _event_store_global
-
-
-def get_event_system() -> EventSystem:
-    """Get event system from context or create new one.
-
-    Returns the current context-scoped system if available,
-    otherwise returns a new EventSystem.
-    """
-    bus = _event_bus_context.get()
-    store = _event_store_context.get()
-
-    if bus is not None and store is not None:
-        system = EventSystem()
-        system._event_bus = bus
-        system._event_store = store
-        return system
-
-    return EventSystem()
-
-
-def initialize_event_system(
-    store_type: str = "memory", **kwargs
-) -> tuple[EventBus, EventStore]:
-    """Initialize the event system with the specified store.
-
-    Args:
-        store_type: "memory" or "sqlite"
-        **kwargs: Additional arguments for the store
-
-    Returns:
-        Tuple of (event_bus, event_store)
-    """
-    global _event_bus_global, _event_store_global
-
-    with _global_lock:
-        if store_type == "memory":
-            _event_store_global = InMemoryEventStore()
-        else:
-            raise ValueError(f"Unknown store type: {store_type}")
-
-        _event_bus_global = EventBus()
-        _event_bus_global.set_event_store(_event_store_global)
-
-    logger.info(f"Event system initialized with {store_type} store")
-    return _event_bus_global, _event_store_global
-
-
-def reset_event_system() -> None:
-    """Reset the global event system (for testing).
-
-    WARNING: This should only be used in tests.
-    """
-    global _event_bus_global, _event_store_global
-    with _global_lock:
-        _event_bus_global = None
-        _event_store_global = None
 
 
 # ---------------------------------------------------------------------------

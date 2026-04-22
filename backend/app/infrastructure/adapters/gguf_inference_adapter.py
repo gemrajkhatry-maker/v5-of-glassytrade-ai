@@ -16,11 +16,15 @@ class GGUFInferenceAdapter(ILLMInference):
     """Llama.cpp based GGUF inference adapter for high-capacity models like Gemopus-26B."""
 
     _instance = None
+    _init_lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._init_lock:
+                if cls._instance is None:  # Double-check after acquiring lock
+                    instance = super().__new__(cls)
+                    instance._initialized = False
+                    cls._instance = instance
         return cls._instance
 
     def __init__(self, model_path: str = "", n_gpu_layers: int = -1, n_ctx: int = 4096):
@@ -30,43 +34,55 @@ class GGUFInferenceAdapter(ILLMInference):
         self._is_loading = False
         self._load_error: Optional[str] = None
         self._model_path = model_path
-        self._n_gpu_layers = n_gpu_layers
+        # Read n_gpu_layers from env to allow memory-safe configuration
+        env_gpu_layers = os.environ.get("GGUF_N_GPU_LAYERS", "")
+        if env_gpu_layers:
+            self._n_gpu_layers = int(env_gpu_layers)
+        elif n_gpu_layers != -1:
+            self._n_gpu_layers = n_gpu_layers
+        else:
+            # Default: offload 40 layers (~60% for 26B models) to avoid Metal OOM
+            self._n_gpu_layers = 40
         self._n_ctx = n_ctx
+        # Load synchronously on main thread to avoid llama-cpp-python Metal segfaults.
+        # llama.cpp's Metal backend must be initialized on the main thread.
         self._start_background_loading()
         self._initialized = True
 
     def _start_background_loading(self):
-        """Kick off GGUF loading on a daemon thread."""
-        if not self._is_loading and self.llm is None:
-            model_path = self._model_path or os.environ.get("GGUF_MODEL_PATH", "")
-            if not model_path:
-                logger.info("GGUF: No model path configured.")
-                return
-            
-            self._is_loading = True
-            logger.info(f"Starting GGUF model loading in background from {model_path}...")
-            thread = threading.Thread(target=self._load_model, args=(model_path,), daemon=True)
-            thread.start()
+        """Load GGUF model synchronously on main thread to avoid Metal/llama.cpp segfaults.
+
+        llama-cpp-python's Metal backend is not thread-safe during initialization.
+        Loading on a background thread causes segmentation faults on macOS.
+        See: https://github.com/ggerganov/llama.cpp/issues/5983
+        """
+        model_path = self._model_path or os.environ.get("GGUF_MODEL_PATH", "")
+        if not model_path:
+            logger.info("GGUF: No model path configured.")
+            return
+
+        self._is_loading = True
+        logger.info("Loading GGUF model synchronously (main thread) to avoid Metal segfaults...")
+        try:
+            self._load_model(model_path)
+        except Exception as e:
+            logger.error(f"Failed to load GGUF model: {e}", exc_info=True)
+            self._load_error = str(e)
+            self._is_loading = False
 
     def _load_model(self, model_path: str):
         """Load the GGUF model using llama-cpp-python with Metal support."""
-        try:
-            from llama_cpp import Llama
-            
-            with GGUF_GPU_LOCK:
-                self.llm = Llama(
-                    model_path=model_path,
-                    n_gpu_layers=self._n_gpu_layers,
-                    n_ctx=self._n_ctx,
-                    verbose=False
-                )
-            
-            self._is_loading = False
-            logger.info("GGUF model loaded successfully with Metal acceleration!")
-        except Exception as e:
-            logger.error(f"Failed to load GGUF model: {e}")
-            self._load_error = str(e)
-            self._is_loading = False
+        from llama_cpp import Llama
+
+        with GGUF_GPU_LOCK:
+            self.llm = Llama(
+                model_path=model_path,
+                n_gpu_layers=self._n_gpu_layers,
+                n_ctx=self._n_ctx,
+                verbose=False
+            )
+
+        logger.info("GGUF model loaded successfully with Metal acceleration!")
 
     def predict(
         self,

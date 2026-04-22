@@ -21,6 +21,7 @@ def run_gate_pipeline(
     max_cushion_ticks: float = 10.0,
     min_rr_ratio: float = 1.5,
     tick_size: float = 0.05,
+    is_extreme_deviation: bool = False,
 ) -> tuple[bool, str, str]:
     """Run the 12-gate pipeline for additional validation.
 
@@ -81,6 +82,7 @@ def run_gate_pipeline(
         is_risk_halted=is_risk_halted,
         halt_reason=halt_reason,
         eia_window_active=eia_suppressed,
+        is_extreme_deviation=is_extreme_deviation,
         setup_type=amt_result.setup or "NONE",
         r_r_ratio=rr,
         cushion_ticks=dist_ticks,

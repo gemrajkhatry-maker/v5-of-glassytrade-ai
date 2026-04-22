@@ -51,6 +51,92 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
 });
 
 /**
+ * Merge historical candles into existing candle data.
+ * 
+ * Combines two sorted candle arrays, removes duplicates (same timestamp),
+ * and prefers real-time candles over historical if there's a conflict.
+ * 
+ * @param existing Existing candle data (real-time stream)
+ * @param historical Historical candles to merge (gap fill)
+ * @returns Merged and sorted candle array
+ */
+const mergeCandleData = (existing: OHLCData[], historical: OHLCData[]): OHLCData[] => {
+    if (historical.length === 0) return existing;
+    if (existing.length === 0) return historical;
+
+    // Create a map of existing candles by timestamp for fast lookup
+    const existingMap = new Map<string, OHLCData>();
+    existing.forEach(candle => {
+        existingMap.set(candle.time, candle);
+    });
+
+    // Add historical candles that don't exist
+    const merged = [...existing];
+    let added = 0;
+    let skipped = 0;
+
+    historical.forEach(histCandle => {
+        if (existingMap.has(histCandle.time)) {
+            // Skip duplicates (prefer real-time data)
+            skipped++;
+            return;
+        }
+        merged.push(histCandle);
+        added++;
+    });
+
+    // Sort by timestamp
+    merged.sort((a, b) => 
+        new Date(a.time).getTime() - new Date(b.time).getTime()
+    );
+
+    // FORWARD-FILL: Fill gaps between candles to prevent visual blank space
+    const intervalMs = 60000; // 1-minute candles
+    const filled: OHLCData[] = merged.length > 0 ? [merged[0]] : [];
+    let gapFilled = 0;
+    
+    for (let i = 1; i < merged.length; i++) {
+        const prevTime = new Date(merged[i - 1].time).getTime();
+        const currTime = new Date(merged[i].time).getTime();
+        const gap = currTime - prevTime;
+        
+        // If gap > 1.5x interval, forward-fill missing candles
+        if (gap > intervalMs * 1.5) {
+            let fillTime = prevTime + intervalMs;
+            while (fillTime < currTime) {
+                const fillCandle: OHLCData = {
+                    time: new Date(fillTime).toISOString(),
+                    open: merged[i - 1].close,  // Forward-fill close
+                    high: merged[i - 1].close,
+                    low: merged[i - 1].close,
+                    close: merged[i - 1].close,
+                    volume: 0,  // Zero volume for filled candles
+                    vwap: merged[i - 1].close,  // VWAP = close for filled candles
+                    takerBuyVolume: 0,  // No taker buy volume
+                    delta: 0,  // No delta for filled candles
+                };
+                filled.push(fillCandle);
+                gapFilled++;
+                fillTime += intervalMs;
+            }
+        }
+        filled.push(merged[i]);
+    }
+
+    if (gapFilled > 0) {
+        console.log(`[Gap Fill] Forward-filled ${gapFilled} missing candles`);
+    }
+
+    // Cap at 2000 candles to prevent memory bloat
+    if (filled.length > 2000) {
+        return filled.slice(-2000);
+    }
+
+    console.log(`[Gap Fill] Merged ${added} candles, skipped ${skipped} duplicates`);
+    return filled;
+};
+
+/**
  * Server-driven trading system hook.
  *
  * Backend streams ticks from Dhan, processes them, and pushes state.
@@ -100,10 +186,39 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         [],
     );
 
-    // Helper: build URL directly to backend, bypassing Vite proxy.
-    // Vite proxy (/api path) re-uses connections and can return 500 when overwhelmed.
-    const backendUrl = (path: string) =>
-        `${window.location.protocol}//${window.location.hostname}:9090${path}`;
+    // REST/WS targets:
+    // - VITE_BACKEND_URL: full origin (e.g. http://127.0.0.1:9090) for prod / custom setups
+    // - Dev: same-origin `/api/...` so Vite's proxy (vite.config) reaches the backend
+    // - Else: direct host:PORT (default9090)
+    const explicitBackend = (import.meta.env.VITE_BACKEND_URL as string | undefined)?.trim();
+    const defaultPort = Number(import.meta.env.VITE_BACKEND_PORT) || 9090;
+    const backendPortRef = useRef<number>(defaultPort);
+    const backendUrl = (path: string) => {
+        if (explicitBackend) {
+            return `${explicitBackend.replace(/\/$/, '')}${path}`;
+        }
+        if (import.meta.env.DEV) {
+            return path;
+        }
+        return `${window.location.protocol}//${window.location.hostname}:${backendPortRef.current}${path}`;
+    };
+    const websocketUrl = (path: string) => {
+        const isSecure = window.location.protocol === 'https:';
+        const wsScheme = isSecure ? 'wss' : 'ws';
+        if (explicitBackend) {
+            const base = explicitBackend.replace(/\/$/, '');
+            const origin = base.startsWith('https://')
+                ? 'wss://' + base.slice('https://'.length)
+                : base.startsWith('http://')
+                  ? 'ws://' + base.slice('http://'.length)
+                  : base;
+            return `${origin}${path}`;
+        }
+        if (import.meta.env.DEV) {
+            return `${wsScheme}://${window.location.host}${path}`;
+        }
+        return `${wsScheme}://${window.location.hostname}:${backendPortRef.current}${path}`;
+    };
 
     // ----------------------------------------------------------------
     // 0.  Fetch backend config on mount (retries if backend not ready)
@@ -112,38 +227,96 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         let cancelled = false;
         let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-        const fetchConfig = (attempt: number) => {
-            fetch(backendUrl('/api/system/config'))
-                .then(res => {
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    return res.json();
-                })
-                .then(cfg => {
-                    if (cancelled) return;
-                    console.log('[TradingSystem] Backend config:', cfg);
-                    if (cfg.backendPort) backendPortRef.current = cfg.backendPort;
-                    const symbols: string[] = cfg.activeSymbols || (cfg.defaultSymbol ? [cfg.defaultSymbol] : []);
-                    if (symbols.length > 0) {
-                        setInstruments(prev => {
-                            const next = { ...prev };
-                            for (const sym of symbols) {
-                                if (!next[sym]) next[sym] = createInstrumentState(sym);
-                            }
-                            return next;
-                        });
-                        setActiveSymbol(symbols[0]);
-                    }
-                })
-                .catch(() => {
-                    if (cancelled) return;
-                    const delay = Math.min(2000 * Math.pow(1.5, attempt), 10000);
-                    console.warn(`[TradingSystem] Backend not available, retrying in ${Math.round(delay / 1000)}s (attempt ${attempt + 1})`);
-                    setConnectionStatus('Waiting for backend...');
-                    retryTimer = setTimeout(() => fetchConfig(attempt + 1), delay);
-                });
+        // Lifespan option scan can block HTTP for minutes — avoid aborting too early.
+        const configTimeoutMs = 180_000;
+        const fetchOpts: RequestInit =
+            typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
+                ? { signal: AbortSignal.timeout(configTimeoutMs) }
+                : {};
+
+        const configUrls = (): string[] => {
+            if (explicitBackend) {
+                return [`${explicitBackend.replace(/\/$/, '')}/api/system/config`];
+            }
+            if (import.meta.env.DEV) {
+                return [
+                    '/api/system/config',
+                    `http://127.0.0.1:${defaultPort}/api/system/config`,
+                ];
+            }
+            return [`${window.location.protocol}//${window.location.hostname}:${backendPortRef.current}/api/system/config`];
         };
 
-        fetchConfig(0);
+        const applyConfig = (cfg: Record<string, unknown>) => {
+            if (cancelled) return;
+            console.log('[TradingSystem] Backend config:', cfg);
+            const bp = cfg.backendPort;
+            if (typeof bp === 'number' && bp > 0) backendPortRef.current = bp;
+            let symbols: string[] =
+                (cfg.activeSymbols as string[]) ||
+                (cfg.defaultSymbol ? [String(cfg.defaultSymbol)] : []);
+            symbols = symbols.map((s) => String(s).trim()).filter(Boolean);
+            if (symbols.length === 0) {
+                symbols = ['CRUDEOIL', 'NATURALGAS'];
+                console.warn('[TradingSystem] API returned no symbols; using MCX defaults');
+            }
+            setConnectionStatus('');
+            setInstruments(prev => {
+                const next = { ...prev };
+                for (const sym of symbols) {
+                    if (!next[sym]) next[sym] = createInstrumentState(sym);
+                }
+                return next;
+            });
+            setActiveSymbol(symbols[0]);
+        };
+
+        const fetchConfig = async (attempt: number) => {
+            if (cancelled) return;
+            setConnectionStatus(
+                attempt === 0
+                    ? 'Loading server config (first start can take 1–2 min while the API scans contracts)…'
+                    : `Retrying server config (attempt ${attempt + 1})…`,
+            );
+
+            let lastHttp = 0;
+            let sawNetworkError = false;
+            for (const url of configUrls()) {
+                if (cancelled) return;
+                try {
+                    const res = await fetch(url, fetchOpts);
+                    lastHttp = res.status;
+                    if (res.status === 503) {
+                        setConnectionStatus('API is starting (trading session not ready yet). Retrying…');
+                        break;
+                    }
+                    if (!res.ok) continue;
+                    const cfg = await res.json();
+                    applyConfig(cfg);
+                    return;
+                } catch {
+                    sawNetworkError = true;
+                }
+            }
+
+            if (cancelled) return;
+            const delay = Math.min(2000 * Math.pow(1.5, attempt), 10000);
+            const hint =
+                import.meta.env.DEV && !explicitBackend
+                    ? ` No response from proxy or http://127.0.0.1:${defaultPort}. Run: cd backend && python -m uvicorn app.main:app --host 0.0.0.0 --port ${defaultPort}`
+                    : '';
+            console.warn(
+                `[TradingSystem] Config fetch failed (last HTTP ${lastHttp || 'n/a'}, networkError=${sawNetworkError}). Retry in ${Math.round(delay / 1000)}s.${hint}`,
+            );
+            setConnectionStatus(
+                lastHttp === 503
+                    ? 'Backend still starting… will retry.'
+                    : `Cannot load /api/system/config (HTTP ${lastHttp || 'error'}). Is uvicorn on port ${defaultPort}?`,
+            );
+            retryTimer = setTimeout(() => void fetchConfig(attempt + 1), delay);
+        };
+
+        void fetchConfig(0);
 
         return () => {
             cancelled = true;
@@ -255,17 +428,39 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             if (state.status === 'history_loaded') {
                 if (state.history && state.symbol) {
                     const sym = state.symbol;
-                    // CRITICAL: Ensure history is sorted by time to prevent Lightweight Charts crash
-                    const sortedHistory = [...state.history].sort((a, b) => 
-                        new Date(a.time).getTime() - new Date(b.time).getTime()
-                    );
-                    setInstruments(prev => {
-                        const inst = prev[sym] || createInstrumentState(sym);
-                        return {
-                            ...prev,
-                            [sym]: { ...inst, data: sortedHistory },
-                        };
-                    });
+                    
+                    // Check if this is a gap fill or initial history load
+                    if (state._type === 'gap_fill') {
+                        // Gap fill: merge into existing data
+                        setInstruments(prev => {
+                            const inst = prev[sym] || createInstrumentState(sym);
+                            const merged = mergeCandleData(inst.data, state.history);
+                            return {
+                                ...prev,
+                                [sym]: { ...inst, data: merged },
+                            };
+                        });
+                        
+                        // Dispatch event to update chart without full re-render
+                        tickBusRef.current.dispatchEvent(new CustomEvent('gap_fill', {
+                            detail: { symbol: sym, candles: state.history }
+                        }));
+                        
+                        console.log(`[TradingSystem] Gap fill: ${state.history.length} candles merged for ${sym}`);
+                    } else {
+                        // Initial history load: replace data
+                        // CRITICAL: Ensure history is sorted by time to prevent Lightweight Charts crash
+                        const sortedHistory = [...state.history].sort((a, b) => 
+                            new Date(a.time).getTime() - new Date(b.time).getTime()
+                        );
+                        setInstruments(prev => {
+                            const inst = prev[sym] || createInstrumentState(sym);
+                            return {
+                                ...prev,
+                                [sym]: { ...inst, data: sortedHistory },
+                            };
+                        });
+                    }
                 }
                 console.log(`[TradingSystem] History loaded: ${state.count} candles`);
                 return;
@@ -501,25 +696,26 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // 3.  WebSocket connection
     // ----------------------------------------------------------------
     const retryCountRef = useRef(0);
-    // Default port from env var (VITE_BACKEND_PORT) or fallback to 9090.
-    // WS connects directly to backend — never routes through Vite proxy.
-    const defaultPort = Number(import.meta.env.VITE_BACKEND_PORT) || 9090;
-    const backendPortRef = useRef<number>(defaultPort);
+    
+    // Tick buffer for reconnect (Block 4.2)
+    const tickBufferRef = useRef<OHLCData[]>([]);
+    const lastSequenceRef = useRef<number>(0);
+    const maxBufferSize = 1000;
+    const isConnectedRef = useRef(false);  // Track connection state for buffering
 
     const connect = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-        // Always connect directly to backend port (default: 9090) — never route through Vite proxy.
-        const wsHost = `${window.location.hostname}:${backendPortRef.current}`;
-        const ws = new WebSocket(`${protocol}://${wsHost}/api/trading/ws/gameloop`);
+        const ws = new WebSocket(websocketUrl('/api/trading/ws/gameloop'));
 
         ws.onopen = () => {
             console.log('[TradingSystem] WS connected');
             retryCountRef.current = 0;
+            isConnectedRef.current = true;
             setConnected(true);
             setConnectionStatus('');
             lastPongRef.current = Date.now();
+            
             // Send initial subscribe for current activeSymbol
             if (activeSymbolRef.current) {
                 if (pendingSubscribeRef.current) {
@@ -549,13 +745,15 @@ export const useServerTradingSystem = (config: ChartConfig) => {
 
         ws.onclose = (e) => {
             setConnected(false);
+            isConnectedRef.current = false;
             if (heartbeatTimer.current) {
                 clearInterval(heartbeatTimer.current);
                 heartbeatTimer.current = null;
             }
             if (e.code !== 1000 && wsRef.current) {
                 retryCountRef.current += 1;
-                const delay = Math.min(500 * Math.pow(2, retryCountRef.current), 5000);
+                // Backoff: 1s → 2s → 5s (max)
+                const delay = Math.min(1000 * Math.pow(2, retryCountRef.current - 1), 5000);
                 setConnectionStatus(`Disconnected — reconnecting in ${Math.round(delay / 1000)}s...`);
                 console.warn(`[TradingSystem] WS disconnected, reconnecting in ${delay}ms…`);
                 reconnectTimer.current = setTimeout(() => {

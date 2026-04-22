@@ -119,14 +119,13 @@ async def gameloop_ws(ws: WebSocket):
         logger.error("Failed to accept WebSocket connection: %s", e, exc_info=True)
         raise
 
-    # Service graph must come from app state (same instance as lifespan-started engine).
+    # Use the service graph from app state (the one with the started engine)
     app = ws.scope.get("app")
-    if not app or not hasattr(app.state, "service_graph"):
-        logger.error("WebSocket: no service_graph on app.state")
-        await ws.close(code=1011)
-        return
-    graph = app.state.service_graph
-    logger.info("Using service graph from app.state")
+    if app and hasattr(app.state, "service_graph"):
+        graph = app.state.service_graph
+        logger.info("Using service graph from app.state")
+    else:
+        raise RuntimeError("Service graph not available from app.state")
     
     session_service = graph.trading_session
 

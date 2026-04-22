@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Literal, Optional
 
 from pydantic import BaseModel
@@ -298,6 +299,33 @@ def build_entry_prompt(data: Dict[str, Any], allow_short: bool = False) -> str:
     theta = data.get("theta", 0)
     if iv > 0:
         opt_parts.append(f"IV: {iv:.1%}. Theta: {theta:.1f}/day.")
+    
+    # Fix 1: Option type direction mapping instruction
+    option_type = data.get("option_type", "UNKNOWN")
+    if option_type in ("CALL", "PUT"):
+        opt_parts.append(
+            f"\n\nIMPORTANT: You are analyzing a {option_type} OPTION contract."
+        )
+        if option_type == "CALL":
+            opt_parts.append(
+                "- LONG = Buy Call (bullish bet on underlying)"
+            )
+            opt_parts.append(
+                "- SHORT = Sell Call (bearish bet on underlying)"
+            )
+        else:  # PUT
+            opt_parts.append(
+                "- LONG = Buy Put (bearish bet on underlying)"
+            )
+            opt_parts.append(
+                "- SHORT = Sell Put (bullish bet on underlying)"
+            )
+        opt_parts.append(
+            "- Direction refers to the OPTION position direction, not the underlying"
+        )
+        opt_parts.append(
+            "- Output direction as LONG/SHORT/FLAT for the option contract itself"
+        )
 
     final_prompt = narrative
     if opt_parts:
@@ -694,7 +722,6 @@ def build_advisory_prompt(
     Section 4: Aggression + CVD direction
     Section 5: Instruction (scenario narrative only)
     """
-    from datetime import datetime
 
     bar_time = tick.time
     try:
@@ -747,12 +774,10 @@ def parse_advisory_response(raw_response: str) -> Dict[str, str]:
     Falls back to extracting from raw text.
     """
     try:
-        import json as _json
-
         # Try JSON parse
         match = re.search(r"\{[^{}]+\}", raw_response, re.DOTALL)
         if match:
-            parsed = _json.loads(match.group())
+            parsed = json.loads(match.group())
             return {
                 "scenario": parsed.get("scenario", ""),
                 "expected_setup": parsed.get("expected_setup", ""),

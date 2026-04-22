@@ -10,11 +10,11 @@ from unittest.mock import patch
 
 import pytest
 
-from app.domain.fabio_ai.services.trade_manager import (
+from app.domain.fabio_ai.services.exit_engine import (
     CushionState,
     ExitReason,
     ExitSignal,
-    TradeManager,
+    ExitEngine as TradeManager,
     TradeManagerConfig,
 )
 from app.domain.services.circuit_breakers import BreakerReason, BreakerResult, CircuitBreakers

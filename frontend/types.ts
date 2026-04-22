@@ -315,6 +315,8 @@ export interface AMTAnalysis {
   agentTiming?: string;
   agentKelly?: number;
   agentRationale?: string;
+  // Fabio playbook: Second drive detection (reclaim leg confirmation)
+  isSecondDrive?: boolean;
   // Session identity and freshness (Phase 1, Task 1.6)
   sessionId?: string;
   computedAt?: string;
@@ -328,6 +330,26 @@ export interface AMTAnalysis {
   absorptionRangeRatio?: number;
   absorptionVolRatio?: number;
   swingDelta?: number;
+  // Fix 1: Option type for direction labeling
+  optionType?: string;
+  // Fix 4: AMT time window for timing transparency
+  amtTimeWindow?: {
+    window: string;
+    label: string;
+    rule: string;
+    allowEntries: boolean;
+  };
+  // Fix 6: AMT structure label
+  amtStructureLabel?: string;
+  // Fix 7: Kelly breakdown
+  kellyBreakdown?: {
+    fullKelly: number;
+    appliedKelly: number;
+    fraction: string;
+    capReason: string;
+  };
+  // Fix 5: CVD divergence playbook
+  cvdDivPlaybook?: string;
 }
 
 export interface TradeSignal {

@@ -34,8 +34,6 @@ from app.application.stream_manager import StreamManager
 from app.application.candle_aggregator import CandleAggregator
 from app.application.range_bar_builder import RangeBarBuilder
 from app.application.watchdog_manager import WatchdogManager
-from app.domain.services.underlying_futures_provider import UnderlyingFuturesProvider
-
 # New decomposed services
 from app.application.services.tick_processor import TickProcessor
 from app.application.services.state_broadcaster import StateBroadcaster
@@ -84,6 +82,12 @@ class TradingEngine:
         self._market_data = graph.market_data
         self._session_service = graph.trading_session
         self._active_symbols: list[str] = graph.active_symbols
+        self._stream_symbols: list[str] = list(
+            getattr(graph, "stream_symbols", None) or graph.active_symbols
+        )
+        self._active_option_symbols: frozenset[str] = frozenset(self._active_symbols)
+        _fut_map = getattr(graph, "futures_option_map", None) or {}
+        self._futures_symbol_set: frozenset[str] = frozenset(_fut_map.keys())
 
         # Circuit breaker for tick processing
         self._circuit_breaker = PerEntityCircuitBreaker(
@@ -95,13 +99,79 @@ class TradingEngine:
         self._current_depths: dict[str, dict] = {}
         self._last_process_times: dict[str, float] = {}
 
-        # Underlying futures provider — maps option symbols → futures for AMT analysis
-        self._underlying_provider = UnderlyingFuturesProvider()
-        self._underlying_aggregator = CandleAggregator(interval="5m")
-        self._underlying_ticks: dict[str, OHLC] = {}
+        # Real futures roots use their own aggregator (correct cumulative volume)
+        self._futures_aggregator = CandleAggregator(interval=settings.STREAM_INTERVAL)
+
+        # Create historical fetch callback for gap detection
+        async def fetch_historical_callback(
+            symbol: str,
+            from_time,
+            to_time,
+        ):
+            """Fetch historical candles for gap filling."""
+            try:
+                from app.domain.trading.models.value_objects import OHLC
+                from datetime import datetime
+
+                # Get broker from market data adapter
+                broker = self._market_data.get_broker()
+                if not broker:
+                    logger.warning("Broker not available for historical fetch")
+                    return []
+
+                # Resolve symbol to instrument
+                instrument = self._market_data._make_instrument(symbol)
+
+                # Fetch historical data
+                df = await broker.get_historical_async(
+                    instrument=instrument,
+                    from_date=from_time,
+                    to_date=to_time,
+                    interval="1m",  # 1-minute candles
+                    include_oi=False,
+                )
+
+                if df is None or df.empty:
+                    logger.debug("No historical data for %s (%s to %s)", symbol, from_time, to_time)
+                    return []
+
+                # Convert DataFrame to OHLC list
+                candles = []
+                for timestamp, row in df.iterrows():
+                    # Ensure timestamp is timezone-aware
+                    if timestamp.tzinfo is None:
+                        from app.shared.timezones import IST
+                        timestamp = timestamp.replace(tzinfo=IST)
+
+                    candle = OHLC(
+                        time=timestamp.isoformat(),
+                        open=float(row.get("open", 0)),
+                        high=float(row.get("high", 0)),
+                        low=float(row.get("low", 0)),
+                        close=float(row.get("close", 0)),
+                        volume=int(row.get("volume", 0)),
+                    )
+                    candles.append(candle)
+
+                logger.info(
+                    "Historical fetch: %s returned %d candles (%s to %s)",
+                    symbol,
+                    len(candles),
+                    from_time.strftime("%H:%M:%S"),
+                    to_time.strftime("%H:%M:%S"),
+                )
+                return candles
+
+            except Exception as e:
+                logger.error("Failed to fetch historical data for %s: %s", symbol, e, exc_info=True)
+                return []
 
         # Delegated modules (existing)
-        self._stream_manager = StreamManager(market_data=self._market_data)
+        self._stream_manager = StreamManager(
+            market_data=self._market_data,
+            session_service=self._session_service,
+            fetch_historical_callback=fetch_historical_callback,
+        )
         self._candle_aggregator = CandleAggregator(interval=settings.STREAM_INTERVAL)
         self._watchdog_manager = WatchdogManager(
             session_service=self._session_service,
@@ -151,9 +221,12 @@ class TradingEngine:
         """Initialize per-symbol state for a new symbol."""
         self._current_depths[symbol] = {"book": None}
         self._last_process_times[symbol] = 0.0
-        self._candle_aggregator.initialize_symbol(symbol)
-        self._tick_processor.initialize_symbol(symbol)
-        self._state_broadcaster.initialize_symbol(symbol)
+        if symbol in self._active_option_symbols:
+            self._candle_aggregator.initialize_symbol(symbol)
+            self._tick_processor.initialize_symbol(symbol)
+            self._state_broadcaster.initialize_symbol(symbol)
+        if symbol in self._futures_symbol_set:
+            self._futures_aggregator.initialize_symbol(symbol)
 
     def get_latest_state(self, symbol: str) -> dict | None:
         """Read-only access for WS viewers."""
@@ -232,7 +305,9 @@ class TradingEngine:
 
         try:
             logger.info(
-                "Engine: streaming live ticks for %d symbols", len(self._active_symbols)
+                "Engine: streaming live ticks for %d symbols (feed: %d incl. futures roots)",
+                len(self._active_symbols),
+                len(self._stream_symbols),
             )
             async for pkt in self._stream_manager.stream_with_reconnect(
                 dhan_connect_state
@@ -251,18 +326,6 @@ class TradingEngine:
                 pkt_symbol = pkt.get(
                     "symbol", self._active_symbols[0] if self._active_symbols else ""
                 )
-                if pkt_symbol not in self._candle_aggregator._candle_states:
-                    self._initialize_symbol_state(pkt_symbol)
-
-                if self._circuit_breaker.is_open(pkt_symbol):
-                    continue
-
-                self._stream_manager.update_tick_time(pkt_symbol)
-
-                ltp = float(pkt.get("ltp", 0))
-                if ltp <= 0:
-                    continue
-
                 ts = pkt.get("timestamp")
                 if isinstance(ts, str):
                     now = datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(
@@ -271,6 +334,10 @@ class TradingEngine:
                 else:
                     now = datetime.now(IST)
 
+                ltp = float(pkt.get("ltp", 0))
+                if ltp <= 0:
+                    continue
+
                 vol = int(pkt.get("volume", 0))
                 ltq = int(pkt.get("ltq", 0))
                 oi = int(pkt.get("oi", 0))
@@ -278,15 +345,54 @@ class TradingEngine:
                 if vol < 0:
                     continue
 
+                cum_buy = int(pkt.get("total_buy_qty", 0))
+                cum_sell = int(pkt.get("total_sell_qty", 0))
+                pkt_bids = pkt.get("depth_bids", [])
+                pkt_asks = pkt.get("depth_asks", [])
+                best_bid = pkt_bids[0].get("price", 0) if pkt_bids else 0.0
+                best_ask = pkt_asks[0].get("price", 0) if pkt_asks else 0.0
+
+                # Underlying futures roots: feed session buffers only (no option process_tick)
+                if pkt_symbol in self._futures_symbol_set:
+                    if pkt_symbol not in self._futures_aggregator._candle_states:
+                        self._initialize_symbol_state(pkt_symbol)
+                    if self._circuit_breaker.is_open(pkt_symbol):
+                        continue
+                    self._stream_manager.update_tick_time(pkt_symbol)
+                    fut_ohlc = self._futures_aggregator.aggregate(
+                        pkt_symbol,
+                        now,
+                        ltp,
+                        vol,
+                        cum_buy,
+                        cum_sell,
+                        oi,
+                        best_bid=float(best_bid),
+                        best_ask=float(best_ask),
+                    )
+                    if fut_ohlc:
+                        ferr = self._futures_aggregator.validate_tick(fut_ohlc)
+                        if not ferr:
+                            self._session_service.on_underlying_futures_candle(
+                                pkt_symbol, fut_ohlc
+                            )
+                            self._circuit_breaker.record_success(pkt_symbol)
+                        else:
+                            self._circuit_breaker.record_failure(pkt_symbol)
+                    continue
+
+                if pkt_symbol not in self._candle_aggregator._candle_states:
+                    self._initialize_symbol_state(pkt_symbol)
+
+                if self._circuit_breaker.is_open(pkt_symbol):
+                    continue
+
+                self._stream_manager.update_tick_time(pkt_symbol)
+
                 # OI tracking (delegated to TickProcessor)
                 oi_data = self._tick_processor.track_oi(pkt_symbol, oi)
 
-                cum_buy = int(pkt.get("total_buy_qty", 0))
-                cum_sell = int(pkt.get("total_sell_qty", 0))
-
                 # 5-level depth from packet (delegated to TickProcessor)
-                pkt_bids = pkt.get("depth_bids", [])
-                pkt_asks = pkt.get("depth_asks", [])
                 current_book = self._current_depths.get(pkt_symbol, {}).get("book")
                 updated_book = self._tick_processor.build_depth_from_packet(
                     pkt_symbol, current_book, pkt_bids, pkt_asks
@@ -295,8 +401,6 @@ class TradingEngine:
                     self._current_depths[pkt_symbol]["book"] = updated_book
 
                 # Footprint accumulator
-                best_bid = pkt_bids[0].get("price", 0) if pkt_bids else 0.0
-                best_ask = pkt_asks[0].get("price", 0) if pkt_asks else 0.0
                 if ltq > 0:
                     candle_t = self._candle_aggregator._candle_start(now)
                     self._candle_aggregator.update_footprint(
@@ -339,26 +443,7 @@ class TradingEngine:
 
                 self._last_process_times[pkt_symbol] = now_time
 
-                # Dual feed: aggregate underlying futures for AMT analysis
-                mapping = self._underlying_provider.get_mapping(pkt_symbol)
-                underlying_tick = None
-                if mapping:
-                    ut_sym = mapping.underlying_symbol
-                    underlying_tick = self._underlying_aggregator.aggregate(
-                        ut_sym,
-                        now,
-                        ltp,
-                        vol,
-                        cum_buy,
-                        cum_sell,
-                        oi,
-                        best_bid=float(best_bid),
-                        best_ask=float(best_ask),
-                    )
-                    if underlying_tick:
-                        self._underlying_ticks[ut_sym] = underlying_tick
-
-                # Full process_tick — pass underlying futures for AMT
+                # Underlying buffers are updated from subscribed futures roots (see above)
                 try:
                     state = await asyncio.to_thread(
                         self._session_service.process_tick,
@@ -366,7 +451,7 @@ class TradingEngine:
                         tick,
                         self._current_depths[pkt_symbol]["book"],
                         oi_data=oi_data,
-                        underlying_tick=underlying_tick,
+                        underlying_tick=None,
                     )
                     state["tick"] = ohlc_to_dto(tick)
                     state["ltp"] = ltp

@@ -2,6 +2,13 @@
 
 <cite>
 **Referenced Files in This Document**
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [paper_executor.py](file://appv2/backend/appv2/infrastructure/paper_executor.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)
+- [main.py](file://appv2/backend/appv2/infrastructure/main.py)
 - [adapters/__init__.py](file://backend/app/infrastructure/adapters/__init__.py)
 - [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
 - [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
@@ -16,6 +23,16 @@
 - [development.yaml](file://backend/config/environments/development.yaml)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for new appv2 infrastructure adapters
+- Documented Dhan executor adapter with live trading safety controls
+- Added historical fetcher component for Dhan API integration
+- Documented option chain fetcher for NFO options data
+- Enhanced SQLite storage adapter with async background persistence
+- Updated broker adapter architecture to include both appv2 and legacy adapters
+- Expanded infrastructure layer to cover both trading engines
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -29,50 +46,65 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document describes the Infrastructure Layer responsible for external system integrations and concrete implementations. It covers:
-- Broker adapters: Dhan (live) and Paper (simulated)
+This document describes the Infrastructure Layer responsible for external system integrations and concrete implementations across both the legacy backend and the new appv2 trading system. It covers:
+- Broker adapters: Dhan (live) and Paper (simulated) for both trading engines
 - Machine Learning inference adapters: MLX (Apple Silicon) and LightGBM
-- Storage implementation: SQLite
-- Notifications: Telegram-like integration via a generic NotificationPort with a null/no-op adapter
-- Async persistence bus for decoupled I/O
-- Serialization schemas for API DTOs
-- Metrics collection and observability
+- Storage implementation: SQLite with async persistence for both engines
+- Event bus system for decoupled communication
+- Historical data fetching and option chain integration
+- Notifications: Telegram-like integration via a generic NotificationPort
 - Configuration management and environment-specific settings
 
-The layer follows the Ports and Adapters pattern, mapping domain ports to concrete adapters and ensuring clean separation between business logic and external concerns.
+The layer follows the Ports and Adapters pattern, mapping domain ports to concrete adapters and ensuring clean separation between business logic and external concerns across both trading systems.
 
 ## Project Structure
-The Infrastructure Layer is organized by concern:
-- adapters: concrete implementations of domain ports
-- storage: persistence adapter and schema
+The Infrastructure Layer is organized by concern with dual trading engine support:
+- appv2/infrastructure: New trading engine adapters and components
+- backend/app/infrastructure/adapters: Legacy trading engine adapters
+- storage: persistence adapters for both engines
 - serialization: Pydantic DTOs for API boundary
 - metrics: singleton metrics collector
 - async_persistence: background I/O offloading
-- mlx_gpu_lock: process-wide GPU serialization lock
+- event_bus: central event distribution system
 
 ```mermaid
 graph TB
-subgraph "Infrastructure Layer"
-A["adapters/"]
-S["storage/"]
-SER["serialization/"]
-M["metrics.py"]
-AP["async_persistence.py"]
-L["mlx_gpu_lock.py"]
+subgraph "Legacy Backend Infrastructure"
+A1["adapters/"]
+S1["storage/"]
+SER1["serialization/"]
+M1["metrics.py"]
+AP1["async_persistence.py"]
+L1["mlx_gpu_lock.py"]
 end
-A --> |"DhanMarketDataAdapter"| A1["dhan_adapter.py"]
-A --> |"PaperBrokerAdapter"| A2["paper_broker.py"]
-A --> |"MLXInferenceAdapter"| A3["mlx_inference_adapter.py"]
-A --> |"LGBMProbabilityAdapter"| A4["lgbm_probability_adapter.py"]
-A --> |"NullNotificationAdapter"| A5["null_notification_adapter.py"]
-S --> |"SQLiteStorageAdapter"| S1["database.py"]
-SER --> |"Pydantic DTOs"| SER1["schemas.py"]
-AP --> |"AsyncPersistenceBus"| AP1["async_persistence.py"]
-A3 --> |"GPU lock"| L
-M --> |"MetricsCollector"| M1["metrics.py"]
+subgraph "AppV2 Infrastructure"
+A2["dhan_executor.py"]
+A3["historical_fetcher.py"]
+A4["option_chain_fetcher.py"]
+A5["sqlite_storage.py"]
+A6["paper_executor.py"]
+A7["event_bus.py"]
+end
+A1 --> |"DhanMarketDataAdapter"| A11["dhan_adapter.py"]
+A1 --> |"PaperBrokerAdapter"| A12["paper_broker.py"]
+A1 --> |"MLXInferenceAdapter"| A13["mlx_inference_adapter.py"]
+A1 --> |"LGBMProbabilityAdapter"| A14["lgbm_probability_adapter.py"]
+A1 --> |"NullNotificationAdapter"| A15["null_notification_adapter.py"]
+S1 --> |"SQLiteStorageAdapter"| S11["database.py"]
+A2 --> |"Live Order Execution"| A21["DhanBroker"]
+A3 --> |"Historical Data"| A31["BrokerGateway"]
+A4 --> |"Options Chain"| A41["BrokerGateway"]
+A5 --> |"Async Persistence"| A51["Background Writer"]
+A7 --> |"Event Distribution"| A71["Event Handlers"]
 ```
 
 **Diagram sources**
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [paper_executor.py](file://appv2/backend/appv2/infrastructure/paper_executor.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)
 - [adapters/__init__.py](file://backend/app/infrastructure/adapters/__init__.py)
 - [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
 - [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
@@ -80,520 +112,395 @@ M --> |"MetricsCollector"| M1["metrics.py"]
 - [lgbm_probability_adapter.py](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py)
 - [null_notification_adapter.py](file://backend/app/infrastructure/adapters/null_notification_adapter.py)
 - [database.py](file://backend/app/infrastructure/storage/database.py)
+- [async_persistence.py](file://backend/app/infrastructure/async_persistence.py)
 - [schemas.py](file://backend/app/infrastructure/serialization/schemas.py)
 - [metrics.py](file://backend/app/infrastructure/metrics.py)
-- [async_persistence.py](file://backend/app/infrastructure/async_persistence.py)
 - [mlx_gpu_lock.py](file://backend/app/infrastructure/mlx_gpu_lock.py)
 
 **Section sources**
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [paper_executor.py](file://appv2/backend/appv2/infrastructure/paper_executor.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)
 - [adapters/__init__.py](file://backend/app/infrastructure/adapters/__init__.py)
 
 ## Core Components
-- Broker adapters
-  - DhanMarketDataAdapter: Implements MarketDataPort using the brokers/ library for live market data and streaming
-  - PaperBrokerAdapter: Implements BrokerPort for simulated order execution with a realistic cost model
-- ML inference adapters
-  - MLXInferenceAdapter: Implements LLMInferencePort using Apple Silicon MLX runtime with optional cloud fallback
-  - LGBMProbabilityAdapter: Implements ProbabilityInferencePort using LightGBM models for first-passage probabilities
-- Storage
-  - SQLiteStorageAdapter: Implements StoragePort with WAL mode, indexing, and tick batching
-- Notifications
-  - NullNotificationAdapter: Implements NotificationPort as a no-op adapter for development/testing
-- Async persistence
-  - AsyncPersistenceBus: Offloads storage writes to a background thread, prioritizing critical writes
-- Serialization
-  - Pydantic DTOs in schemas.py: Define API-bound DTOs with camelCase aliasing and converters
-- Observability
-  - MetricsCollector: Singleton metrics collector exposing latency, signals, PnL, cache stats, and regime changes
-  - MLX_GPU_LOCK: Process-wide lock for Metal GPU serialization
+- **Broker adapters (Legacy)**: DhanMarketDataAdapter for live market data and PaperBrokerAdapter for simulated execution
+- **Broker adapters (AppV2)**: DhanExecutorAdapter for live order execution with safety controls and PaperBrokerAdapter for simulated execution
+- **Historical data**: HistoricalFetcher for Dhan API integration with configurable intervals and date ranges
+- **Options chain**: OptionChainFetcher for NFO options data with ATM strike calculation and PCR ratio computation
+- **Storage (AppV2)**: SQLiteStorageAdapter with async background persistence and comprehensive CRUD operations
+- **Event system**: Central EventBus for decoupled communication between system components
+- **ML inference adapters**: MLXInferenceAdapter and LGBMProbabilityAdapter for machine learning inference
+- **Notifications**: NullNotificationAdapter for development and production-ready notification integration
+- **Observability**: MetricsCollector for system monitoring and performance tracking
 
 **Section sources**
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [paper_executor.py](file://appv2/backend/appv2/infrastructure/paper_executor.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)
 - [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
 - [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
 - [mlx_inference_adapter.py](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py)
 - [lgbm_probability_adapter.py](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py)
-- [database.py](file://backend/app/infrastructure/storage/database.py)
 - [null_notification_adapter.py](file://backend/app/infrastructure/adapters/null_notification_adapter.py)
 - [async_persistence.py](file://backend/app/infrastructure/async_persistence.py)
-- [schemas.py](file://backend/app/infrastructure/serialization/schemas.py)
+- [database.py](file://backend/app/infrastructure/storage/database.py)
 - [metrics.py](file://backend/app/infrastructure/metrics.py)
-- [mlx_gpu_lock.py](file://backend/app/infrastructure/mlx_gpu_lock.py)
 
 ## Architecture Overview
-The Infrastructure Layer adheres to Ports and Adapters:
-- Domain defines ports (MarketDataPort, BrokerPort, LLMInferencePort, ProbabilityInferencePort, StoragePort, NotificationPort)
-- Infrastructure provides concrete adapters implementing those ports
-- Application orchestrates adapters and coordinates flows
-- AsyncPersistenceBus wraps StoragePort to decouple I/O from the hot path
-- MetricsCollector and DTOs support observability and API boundary
+The Infrastructure Layer supports two concurrent trading engines with unified external integrations:
+- **Legacy Engine**: Uses MarketDataPort, BrokerPort, and StoragePort interfaces
+- **AppV2 Engine**: Uses enhanced BrokerPort with live trading safety and comprehensive storage operations
+- **Shared Services**: Event bus, historical data fetching, and options chain integration
+- **Cross-Engine Compatibility**: Both engines share common adapters for consistency
 
 ```mermaid
 graph TB
-subgraph "Domain Ports"
+subgraph "Legacy Engine Ports"
 P1["MarketDataPort"]
 P2["BrokerPort"]
-P3["LLMInferencePort"]
-P4["ProbabilityInferencePort"]
 P5["StoragePort"]
-P6["NotificationPort"]
 end
-subgraph "Infrastructure Adapters"
+subgraph "AppV2 Engine Ports"
+P2A["BrokerPort (Enhanced)"]
+P5A["StoragePort (Enhanced)"]
+end
+subgraph "Shared Infrastructure"
+E1["EventBus"]
+HF["HistoricalFetcher"]
+OCF["OptionChainFetcher"]
+end
+subgraph "Legacy Adapters"
 A1["DhanMarketDataAdapter"]
 A2["PaperBrokerAdapter"]
-A3["MLXInferenceAdapter"]
-A4["LGBMProbabilityAdapter"]
 A5["SQLiteStorageAdapter"]
-A6["NullNotificationAdapter"]
 end
-subgraph "Support"
-B1["AsyncPersistenceBus"]
-C1["MetricsCollector"]
-D1["Pydantic DTOs"]
-E1["MLX_GPU_LOCK"]
+subgraph "AppV2 Adapters"
+A2A["DhanExecutorAdapter"]
+A2B["PaperBrokerAdapter"]
+A5A["SQLiteStorageAdapter"]
 end
 P1 --> A1
 P2 --> A2
-P3 --> A3
-P4 --> A4
 P5 --> A5
-P6 --> A6
-A5 -.wraps.-> B1
-A3 --> E1
-A1 --> D1
-A2 --> D1
-A3 --> D1
-A4 --> D1
-A5 --> D1
-A6 --> D1
-C1 --> D1
+P2A --> A2A
+P2A --> A2B
+P5A --> A5A
+A1 --> HF
+A2A --> OCF
+A2B --> OCF
+E1 --> A1
+E1 --> A2A
+E1 --> A2B
 ```
 
 **Diagram sources**
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [paper_executor.py](file://appv2/backend/appv2/infrastructure/paper_executor.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)
 - [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
 - [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
-- [mlx_inference_adapter.py](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py)
-- [lgbm_probability_adapter.py](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py)
 - [database.py](file://backend/app/infrastructure/storage/database.py)
-- [null_notification_adapter.py](file://backend/app/infrastructure/adapters/null_notification_adapter.py)
-- [async_persistence.py](file://backend/app/infrastructure/async_persistence.py)
-- [metrics.py](file://backend/app/infrastructure/metrics.py)
-- [schemas.py](file://backend/app/infrastructure/serialization/schemas.py)
-- [mlx_gpu_lock.py](file://backend/app/infrastructure/mlx_gpu_lock.py)
 
 ## Detailed Component Analysis
 
 ### Broker Adapters
 
-#### DhanMarketDataAdapter
-- Implements MarketDataPort using the brokers/ DhanBroker
-- Lazy-initializes DhanBroker with thread-safe guards
-- Provides:
-  - Historical OHLC candles with delta proxy approximation
-  - Order book retrieval
-  - LTP lookup
-  - Full packet streaming and REST fallback polling for specific exchanges
-- Exchange and option detection logic for symbol routing
-- IST timezone handling and robust timestamp normalization
+#### DhanExecutorAdapter (AppV2)
+- **Live Trading Safety**: Requires explicit LIVE_TRADING environment variable for real order placement
+- **Dual Mode Operation**: Delegates to PaperBrokerAdapter when live trading is disabled
+- **Order Type Mapping**: Converts OrderType enum to Dhan-specific order type strings
+- **Real-time Execution**: Integrates with DhanBroker for live order placement, cancellation, and status tracking
+- **Comprehensive Operations**: Supports order placement, cancellation, position management, and portfolio queries
 
 ```mermaid
 classDiagram
-class MarketDataPort
-class DhanMarketDataAdapter {
--_symbols : list[str]
--_exchange_str : str
--_client_id : str
+class BrokerPort {
+<<interface>>
++place_order()
++cancel_order()
++get_order_status()
++get_positions()
++get_open_orders()
++get_portfolio()
++square_off_position()
++get_available_balance()
+}
+class DhanExecutorAdapter {
 -_access_token : str
+-_client_id : str
+-_live : bool
 -_broker
--_init_lock
--_initialized : bool
-+ensure_initialized_sync(timeout)
-+get_option_chain(underlying, exchange, expiry_index)
-+fetch_history(symbol, interval, limit)
-+fetch_order_book(symbol)
-+get_ltp(symbol)
-+stream_full(symbols)
-+stream_poll(symbols, poll_interval)
-+stream_depth_20(symbols)
-+close_sync()
+-_paper
++place_order()
++cancel_order()
++get_order_status()
++get_positions()
++get_open_orders()
++get_portfolio()
++square_off_position()
++get_available_balance()
++_ensure_broker()
++_map_order_type()
 }
-DhanMarketDataAdapter ..|> MarketDataPort
+DhanExecutorAdapter ..|> BrokerPort
 ```
 
 **Diagram sources**
-- [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
 
 **Section sources**
-- [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
 
-#### PaperBrokerAdapter
-- Implements BrokerPort for simulated order execution
-- Realistic cost model with configurable parameters
-- Supports scale-in behavior and cost breakdown logging
-- Computes exit costs separately for accurate PnL tracking
+#### HistoricalFetcher
+- **Dhan API Integration**: Wraps BrokerGateway for historical data retrieval with simplified interface
+- **Flexible Intervals**: Supports 1m, 5m, 15m, 1h, and 1d intervals with automatic conversion
+- **Date Range Control**: Configurable day ranges for historical data requests
+- **Exchange Support**: Handles INDEX, NSE, NFO, and MCX exchanges with proper enum mapping
+- **Error Handling**: Robust exception handling with detailed logging for debugging
 
 ```mermaid
 classDiagram
-class BrokerPort
-class PaperBrokerAdapter {
--_slippage_bps : float
--_stt_pct : float
--_exchange_fee_pct : float
--_brokerage : float
--_gst_pct : float
--_sebi_pct : float
--_cost_model_enabled : bool
-+execute_order(signal, portfolio, symbol)
-+cancel_order(order_id)
-+compute_exit_costs(entry_price, exit_price, size)
+class HistoricalFetcher {
+-_gateway
+-_Exchange
+-_Instrument
++fetch_candles()
++_ensure_gateway()
++close()
 }
-PaperBrokerAdapter ..|> BrokerPort
 ```
 
 **Diagram sources**
-- [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
 
 **Section sources**
-- [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
 
-### ML Inference Adapters
-
-#### MLXInferenceAdapter
-- Implements LLMInferencePort using MLX runtime on Apple Silicon
-- Background model loading with error handling and readiness checks
-- Cloud fallback to OpenRouter with exponential backoff on rate limits
-- Process-wide GPU lock to prevent Metal concurrency crashes
-- Predict method supports JSON-prefill and overseer/entry targeting
+#### OptionChainFetcher
+- **Options Chain Integration**: Provides comprehensive NFO options data with strike-by-strike analysis
+- **ATM Strike Detection**: Automatically identifies At-The-Money strikes for options trading
+- **PCR Calculation**: Computes Put-Call Ratio from options chain data for market sentiment analysis
+- **Rich Metadata**: Returns comprehensive options data including greeks (delta, gamma, theta, vega, iv)
+- **Unified Interface**: Returns structured data compatible with trading algorithms
 
 ```mermaid
 classDiagram
-class LLMInferencePort
-class MLXInferenceAdapter {
--model
--processor
--_is_loading : bool
--_load_error : str
--_model_path : str
--_temperature : float
--_max_new_tokens : int
-+predict(instruction, input_text, temperature, max_tokens, prefill)
-+is_ready()
-+wait_until_ready(timeout)
-+validate()
+class OptionChainFetcher {
+-_gateway
+-_Exchange
++fetch_chain()
++get_atm_strikes()
++get_pcr()
++_ensure_gateway()
++close()
 }
-MLXInferenceAdapter ..|> LLMInferencePort
 ```
 
 **Diagram sources**
-- [mlx_inference_adapter.py](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
 
 **Section sources**
-- [mlx_inference_adapter.py](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py)
-- [mlx_gpu_lock.py](file://backend/app/infrastructure/mlx_gpu_lock.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
 
-#### LGBMProbabilityAdapter
-- Implements ProbabilityInferencePort using LightGBM models
-- Loads long/short models and optional Platt scaling calibrators
-- Optional MFE quantile models for dynamic TP
-- Feature schema validation and calibration pipeline
+#### SQLiteStorageAdapter (AppV2)
+- **Async Background Persistence**: Uses dedicated writer thread with queue-based operation
+- **Comprehensive CRUD Operations**: Supports trades, signals, key-value store, and daily PnL tracking
+- **Thread Safety**: Implements proper locking mechanisms for concurrent access
+- **JSON Serialization**: Automatic JSON encoding/decoding for complex data structures
+- **Background Processing**: Efficient batch processing with configurable flush intervals
 
 ```mermaid
 classDiagram
-class ProbabilityInferencePort
-class LGBMProbabilityAdapter {
--_model_dir : str
--_model_long
--_model_short
--_mfe_long
--_mfe_short
--_calibrators : dict
--_ready : bool
--_feature_names : tuple[str,...]
--_schema_version : str
-+estimate(features)
-+is_ready()
-+train_calibrator(y_true, y_pred_proba, output_path)
-}
-LGBMProbabilityAdapter ..|> ProbabilityInferencePort
-```
-
-**Diagram sources**
-- [lgbm_probability_adapter.py](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py)
-
-**Section sources**
-- [lgbm_probability_adapter.py](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py)
-
-### Storage Implementation
-
-#### SQLiteStorageAdapter
-- Implements StoragePort with WAL mode and indexing
-- Tick batching with background flush timer
-- Thread-safe via a single persistent connection and lock
-- Comprehensive CRUD for ticks, trades, LLM decisions, positions, events, profiles, and KV store
-- Unique index on (symbol, time) for deduplication
-
-```mermaid
-classDiagram
-class StoragePort
 class SQLiteStorageAdapter {
 -_db_path : str
+-_write_queue : list
 -_lock
+-_stop_event
 -_conn
--_tick_buffer : list[tuple]
--_last_flush_time : float
--_flush_timer
-+save_tick(symbol, tick_data)
-+save_trade(trade_data)
-+save_llm_decision(decision_data)
-+save_open_position(position)
-+delete_open_position(position_id)
-+save_position_event(event)
-+save_session_profile(profile_data)
-+save_performance_snapshot(snapshot)
-+save_fine_tuning_features(features)
-+query_ticks(symbol, start, end, limit)
-+query_trades(start, end)
-+query_llm_decisions(start, end, symbols, limit)
-+load_open_positions()
-+get_previous_session_profile(symbol, market)
-+query_position_events(position_id, symbol)
-+kv_set(key, value)
-+save_npoc(underlying, session_date, poc_price)
-+flush()
+-_writer_thread
++save_trade()
++update_trade()
++get_trade()
++get_open_trades()
++get_trades_by_date()
++save_signal()
++kv_set()
++kv_get()
++kv_delete()
++save_daily_pnl()
++get_daily_pnl()
++_init_db()
++_writer_loop()
++_queue_write()
++close()
 }
-SQLiteStorageAdapter ..|> StoragePort
 ```
 
 **Diagram sources**
-- [database.py](file://backend/app/infrastructure/storage/database.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
 
 **Section sources**
-- [database.py](file://backend/app/infrastructure/storage/database.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
 
-### Notifications
-- NullNotificationAdapter implements NotificationPort as a no-op adapter suitable for development and testing
-- In production, a Telegram adapter would be wired similarly by implementing NotificationPort
-
-```mermaid
-classDiagram
-class NotificationPort
-class NullNotificationAdapter {
-+send(message, level)
-+send_sync(message, level)
-}
-NullNotificationAdapter ..|> NotificationPort
-```
-
-**Diagram sources**
-- [null_notification_adapter.py](file://backend/app/infrastructure/adapters/null_notification_adapter.py)
-
-**Section sources**
-- [null_notification_adapter.py](file://backend/app/infrastructure/adapters/null_notification_adapter.py)
-
-### Async Persistence Layer
-- AsyncPersistenceBus wraps any StoragePort and queues write operations
-- Two queues: main queue for general writes, priority critical queue for trade/position persistence
-- Worker thread drains queues, executes batches, and logs dropped writes
-- Stop gracefully flushes remaining writes and logs diagnostics
+### Event Bus System
+- **Centralized Communication**: EventBus serves as single point of access for all system events
+- **Event Types**: Supports TickEvent, CandleEvent, OrderBookEvent, TradeEvent, SignalEvent, RiskEvent, and SystemEvent
+- **Asynchronous Processing**: Full async/await support with proper error handling
+- **Subscriber Management**: Dynamic subscription/unsubscription with decorator support
+- **Statistics Tracking**: Built-in event counting and subscriber statistics
 
 ```mermaid
 sequenceDiagram
-participant App as "Application"
-participant Bus as "AsyncPersistenceBus"
-participant Store as "StoragePort"
-participant Worker as "Worker Thread"
-App->>Bus : save_* calls (non-blocking)
-Bus->>Worker : enqueue(write)
-Worker->>Worker : drain critical queue first
-Worker->>Worker : wait for main queue items
-Worker->>Store : execute batch
-Store-->>Worker : success/failure
-App->>Bus : stop(timeout)
-Bus->>Worker : sentinel + join
-Worker->>Store : flush remaining critical writes
+participant Producer as "Event Producer"
+participant Bus as "EventBus"
+participant Handler1 as "Handler 1"
+participant Handler2 as "Handler 2"
+Producer->>Bus : publish(TickEvent)
+Bus->>Handler1 : async handler(event)
+Bus->>Handler2 : async handler(event)
+Handler1-->>Bus : completion
+Handler2-->>Bus : completion
+Bus-->>Producer : publish complete
 ```
 
 **Diagram sources**
-- [async_persistence.py](file://backend/app/infrastructure/async_persistence.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)
 
 **Section sources**
-- [async_persistence.py](file://backend/app/infrastructure/async_persistence.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)
 
-### Serialization Schemas
-- Pydantic DTOs define API-bound contracts with camelCase aliasing
-- Converters bridge domain objects to DTOs and vice versa
-- Covers market data, order book, AMT analysis, AI analysis, trading positions, and events
-
-```mermaid
-flowchart TD
-Start(["Domain Object"]) --> Conv["Converter Function"]
-Conv --> DTO["Pydantic DTO"]
-DTO --> Serialize["JSON Serialization"]
-Serialize --> API["API Response"]
-API --> Deserialize["JSON Deserialization"]
-Deserialize --> DTO
-DTO --> Conv
-Conv --> DomainObj["Domain Object"]
-```
-
-**Diagram sources**
-- [schemas.py](file://backend/app/infrastructure/serialization/schemas.py)
+### Legacy Infrastructure Components
+- **DhanMarketDataAdapter**: Implements MarketDataPort using brokers/ library for live market data
+- **PaperBrokerAdapter**: Implements BrokerPort for simulated order execution with realistic cost model
+- **MLXInferenceAdapter**: Implements LLMInferencePort using Apple Silicon MLX runtime
+- **LGBMProbabilityAdapter**: Implements ProbabilityInferencePort using LightGBM models
+- **SQLiteStorageAdapter**: Implements StoragePort with WAL mode and comprehensive CRUD operations
 
 **Section sources**
-- [schemas.py](file://backend/app/infrastructure/serialization/schemas.py)
-
-### Metrics Collection and Observability
-- MetricsCollector is a singleton tracking inference latency, signal counts, PnL, cache hits/misses, regime changes, and ticks processed
-- Snapshot exposes uptime, counts, percentiles, and ratios for the /api/v1/metrics endpoint
-
-```mermaid
-flowchart TD
-A["Pipeline Event"] --> B["MetricsCollector.record_*"]
-B --> C["Thread-safe counters"]
-D["/api/v1/metrics"] --> E["MetricsCollector.snapshot()"]
-E --> F["Dict with latency percentiles,<br/>signal counts, PnL, cache hit rate,<br/>regime changes, uptime"]
-```
-
-**Diagram sources**
-- [metrics.py](file://backend/app/infrastructure/metrics.py)
-
-**Section sources**
-- [metrics.py](file://backend/app/infrastructure/metrics.py)
+- [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
+- [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
+- [mlx_inference_adapter.py](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py)
+- [lgbm_probability_adapter.py](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py)
+- [database.py](file://backend/app/infrastructure/storage/database.py)
 
 ## Dependency Analysis
-- Adapter pattern mapping
-  - MarketDataPort → DhanMarketDataAdapter
-  - BrokerPort → PaperBrokerAdapter
-  - LLMInferencePort → MLXInferenceAdapter
-  - ProbabilityInferencePort → LGBMProbabilityAdapter
-  - StoragePort → SQLiteStorageAdapter
-  - NotificationPort → NullNotificationAdapter
-- Coupling and cohesion
-  - Adapters are cohesive around a single responsibility and loosely coupled to domain ports
-  - AsyncPersistenceBus composes StoragePort without modifying its interface
-  - DTOs isolate API concerns from domain models
-- External dependencies
-  - MLXInferenceAdapter depends on mlx_vlm and environment variables for cloud fallback
-  - LGBMProbabilityAdapter depends on LightGBM and optional scikit-learn for calibration
-  - DhanMarketDataAdapter depends on brokers/ library and Exchange enums
+- **Adapter Pattern Mapping**: Both engines use the same Ports and Adapters pattern with enhanced AppV2 support
+- **Shared Dependencies**: HistoricalFetcher and OptionChainFetcher depend on BrokerGateway for authentication
+- **Cross-Engine Compatibility**: AppV2 adapters designed to work alongside legacy adapters
+- **External Dependencies**: 
+  - DhanExecutorAdapter depends on DhanBroker library
+  - HistoricalFetcher depends on BrokerGateway and shared entities
+  - SQLiteStorageAdapter uses Python's sqlite3 module
+  - Event system uses asyncio for asynchronous processing
 
 ```mermaid
 graph LR
-Port1["MarketDataPort"] --> Impl1["DhanMarketDataAdapter"]
-Port2["BrokerPort"] --> Impl2["PaperBrokerAdapter"]
-Port3["LLMInferencePort"] --> Impl3["MLXInferenceAdapter"]
-Port4["ProbabilityInferencePort"] --> Impl4["LGBMProbabilityAdapter"]
-Port5["StoragePort"] --> Impl5["SQLiteStorageAdapter"]
-Port6["NotificationPort"] --> Impl6["NullNotificationAdapter"]
-Impl5 -.wraps.-> Bus["AsyncPersistenceBus"]
-Impl3 --> Lock["MLX_GPU_LOCK"]
+subgraph "AppV2 Dependencies"
+DhanExec["DhanExecutorAdapter"] --> DhanBroker["DhanBroker"]
+HistFetch["HistoricalFetcher"] --> BrokerGateway["BrokerGateway"]
+OptChain["OptionChainFetcher"] --> BrokerGateway
+SQLStore["SQLiteStorageAdapter"] --> SQLite3["sqlite3"]
+EventBus["EventBus"] --> AsyncIO["asyncio"]
+end
+subgraph "Legacy Dependencies"
+LegacyDhan["DhanMarketDataAdapter"] --> BrokersLib["brokers/ library"]
+LegacyPaper["PaperBrokerAdapter"] --> Settings["Settings"]
+end
 ```
 
 **Diagram sources**
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)
 - [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
 - [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
-- [mlx_inference_adapter.py](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py)
-- [lgbm_probability_adapter.py](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py)
-- [database.py](file://backend/app/infrastructure/storage/database.py)
-- [null_notification_adapter.py](file://backend/app/infrastructure/adapters/null_notification_adapter.py)
-- [async_persistence.py](file://backend/app/infrastructure/async_persistence.py)
-- [mlx_gpu_lock.py](file://backend/app/infrastructure/mlx_gpu_lock.py)
 
 **Section sources**
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)
 - [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
 - [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
-- [mlx_inference_adapter.py](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py)
-- [lgbm_probability_adapter.py](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py)
-- [database.py](file://backend/app/infrastructure/storage/database.py)
-- [null_notification_adapter.py](file://backend/app/infrastructure/adapters/null_notification_adapter.py)
-- [async_persistence.py](file://backend/app/infrastructure/async_persistence.py)
-- [mlx_gpu_lock.py](file://backend/app/infrastructure/mlx_gpu_lock.py)
 
 ## Performance Considerations
-- AsyncPersistenceBus
-  - Non-blocking write API from the hot path
-  - Priority critical queue prevents starvation during high tick volume
-  - Batch execution reduces SQLite transaction overhead
-  - Drop-and-log behavior for overflow with warnings
-- SQLiteStorageAdapter
-  - WAL mode improves concurrency and durability
-  - Tick batching and flush timers reduce I/O frequency
-  - Unique index on (symbol, time) ensures deduplication
-- MLXInferenceAdapter
-  - Background loading avoids cold-start latency
-  - GPU lock prevents Metal crashes under concurrency
-  - Cloud fallback mitigates local resource limitations
-- MetricsCollector
-  - Thread-safe snapshots with capped latency history
-  - Percentile calculations for latency SLI
-
-[No sources needed since this section provides general guidance]
+- **Async Background Processing**: AppV2 SQLiteStorageAdapter uses dedicated writer thread to avoid blocking
+- **Queue-Based Operations**: HistoricalFetcher and OptionChainFetcher implement efficient request queuing
+- **Event Bus Optimization**: EventBus uses async handlers for non-blocking event processing
+- **Memory Management**: Proper resource cleanup with context managers and graceful shutdown
+- **Connection Pooling**: Shared BrokerGateway instances reduce connection overhead
 
 ## Troubleshooting Guide
-- DhanMarketDataAdapter
-  - Initialization failures: check credentials and network connectivity; initialization is guarded by a lock and logs errors
-  - Option chain availability: returns None for unsupported exchanges (e.g., MCX commodities without options)
-  - Streaming fallback: REST polling is used for MCX OPTFUT when WebSocket yields no data
-- PaperBrokerAdapter
-  - Cost model disabled: set cost_model.enabled to enable realistic slippage and fees
-  - Scale-in behavior: controlled by signal metadata; verify metadata presence
-- MLXInferenceAdapter
-  - Model not ready: wait_until_ready or is_ready indicates loading state; use cloud fallback when configured
-  - GPU concurrency: ensure MLX_GPU_LOCK is held during load/generate calls
-  - Cloud fallback: configure OPENROUTER_API_KEY and MODEL_ID; monitor rate-limit backoff
-- LGBMProbabilityAdapter
-  - Models missing: adapter returns neutral estimates; ensure model files exist in model_dir
-  - Feature schema mismatch: logs warning when runtime features differ from model
-  - Calibration: optional Platt scaling; train_calibrator builds calibrators from historical predictions
-- SQLiteStorageAdapter
-  - WAL mode and checkpoint tuning: PRAGMA settings configured at init
-  - Tick deduplication: unique index creation with cleanup of duplicates
-  - Concurrency: single connection with lock; avoid same-thread checks disabled for adapter usage
-- AsyncPersistenceBus
-  - Queue drops: monitor dropped_count and logs; adjust max_queue_size or increase worker throughput
-  - Stop behavior: sentinel-based graceful shutdown with critical write flush
-- MetricsCollector
-  - Latency percentiles: moving window of 1000 samples with tail trimming for stability
-  - Thread-safety: internal lock protects counters; snapshot copies arrays to avoid race conditions
+- **DhanExecutorAdapter**
+  - Live trading disabled: Check LIVE_TRADING environment variable
+  - Order mapping issues: Verify OrderType enum to Dhan type conversion
+  - Authentication failures: Validate access_token and client_id configuration
+- **HistoricalFetcher**
+  - Exchange mapping errors: Verify exchange string to enum conversion
+  - Date range issues: Check interval formatting (1m, 5m, etc.)
+  - Data empty responses: BrokerGateway may have rate limiting restrictions
+- **OptionChainFetcher**
+  - ATM strike detection: Ensure options chain contains valid strike prices
+  - PCR calculation: Handle division by zero for empty options chains
+  - Data structure changes: Monitor BrokerGateway API updates
+- **SQLiteStorageAdapter**
+  - Write queue overflow: Monitor queue size and adjust processing rate
+  - JSON serialization errors: Validate data structure before storage
+  - Database corruption: Implement proper backup and recovery procedures
+- **EventBus**
+  - Handler exceptions: Check individual handler error logs
+  - Memory leaks: Monitor subscriber count and cleanup unused handlers
+  - Performance degradation: Optimize handler complexity and event frequency
 
 **Section sources**
-- [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
-- [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
-- [mlx_inference_adapter.py](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py)
-- [lgbm_probability_adapter.py](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py)
-- [database.py](file://backend/app/infrastructure/storage/database.py)
-- [async_persistence.py](file://backend/app/infrastructure/async_persistence.py)
-- [metrics.py](file://backend/app/infrastructure/metrics.py)
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)
 
 ## Conclusion
-The Infrastructure Layer cleanly separates domain logic from external systems through well-defined ports and concrete adapters. It provides robust integrations for market data, simulated trading, ML inference, storage, notifications, and observability. The async persistence bus removes I/O latency from the hot path, while metrics and DTOs support operational visibility and API consistency. Configuration is environment-driven, enabling safe development and production deployments.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The Infrastructure Layer successfully supports both legacy and modern trading engines through a unified adapter pattern. The addition of DhanExecutorAdapter, HistoricalFetcher, OptionChainFetcher, and enhanced SQLiteStorageAdapter provides comprehensive market data, options chain, and storage capabilities. The centralized EventBus enables scalable event-driven architecture, while the dual-mode broker system ensures safe transition between paper and live trading modes.
 
 ## Appendices
 
 ### Configuration Management
-- Environment-specific settings (development.yaml) control:
-  - broker_mode (paper)
-  - log_level (DEBUG)
-  - exchange enablement and symbol filtering
-  - risk parameters
-  - cost model configuration
+- **Environment Variables**: LIVE_TRADING, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+- **Database Paths**: Configurable SQLite database locations for both engines
+- **Symbol Registration**: Dynamic symbol registration during application startup
+- **Trading Modes**: Support for paper and live trading modes with safety controls
 
 **Section sources**
-- [development.yaml](file://backend/config/environments/development.yaml)
+- [main.py](file://appv2/backend/appv2/infrastructure/main.py)
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
 
 ### Port-to-Adapter Mapping
-- MarketDataPort → DhanMarketDataAdapter
-- BrokerPort → PaperBrokerAdapter
-- LLMInferencePort → MLXInferenceAdapter
-- ProbabilityInferencePort → LGBMProbabilityAdapter
-- StoragePort → SQLiteStorageAdapter
-- NotificationPort → NullNotificationAdapter
+- **BrokerPort**: DhanExecutorAdapter (AppV2), DhanMarketDataAdapter (Legacy), PaperBrokerAdapter (Both)
+- **StoragePort**: SQLiteStorageAdapter (AppV2), SQLiteStorageAdapter (Legacy)
+- **MarketDataPort**: DhanMarketDataAdapter (Legacy)
+- **EventBus**: Central event distribution system
 
 **Section sources**
+- [dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [historical_fetcher.py](file://appv2/backend/appv2/infrastructure/historical_fetcher.py)
+- [option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+- [sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [paper_executor.py](file://appv2/backend/appv2/infrastructure/paper_executor.py)
 - [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
 - [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
-- [mlx_inference_adapter.py](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py)
-- [lgbm_probability_adapter.py](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py)
 - [database.py](file://backend/app/infrastructure/storage/database.py)
-- [null_notification_adapter.py](file://backend/app/infrastructure/adapters/null_notification_adapter.py)
+- [event_bus.py](file://appv2/backend/appv2/infrastructure/event_bus.py)

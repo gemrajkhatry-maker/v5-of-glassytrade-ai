@@ -1192,7 +1192,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             
                             // Detect VWAP cross direction
                             const distFromVwap = ((ltp - vwap) / vwap) * 100;
-                            const isAboveVwap = ltp > vwap;
                             const vwapCrossThreshold = 0.3; // 0.3% from VWAP
                             const isNearVwap = Math.abs(distFromVwap) < vwapCrossThreshold;
                             
@@ -1208,42 +1207,75 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             const atLower2 = lower2 > 0 && Math.abs((ltp - lower2) / lower2) < 0.002;
                             
                             const hasVWAPEvent = isNearVwap || atUpper1 || atLower1 || atUpper2 || atLower2;
-                            
+
                             if (!hasVWAPEvent) return null;
-                            
+
+                            const sig = amtResult?.vwapDeviationSigmas;
+                            let primary: 'u2' | 'l2' | 'u1' | 'l1' | 'near' | null = null;
+                            if (typeof sig === 'number' && Number.isFinite(sig)) {
+                                if (sig >= 1.65 && atUpper2) primary = 'u2';
+                                else if (sig <= -1.65 && atLower2) primary = 'l2';
+                                else if (sig >= 0.8 && atUpper1) primary = 'u1';
+                                else if (sig <= -0.8 && atLower1) primary = 'l1';
+                                else if (Math.abs(sig) < 0.5 && isNearVwap) primary = 'near';
+                            }
+                            if (!primary) {
+                                if (atUpper2) primary = 'u2';
+                                else if (atLower2) primary = 'l2';
+                                else if (atUpper1) primary = 'u1';
+                                else if (atLower1) primary = 'l1';
+                                else if (isNearVwap) primary = 'near';
+                            }
+
+                            const activeCount = [isNearVwap, atUpper1, atLower1, atUpper2, atLower2].filter(Boolean).length;
+                            const ambiguous = activeCount > 2 && primary === 'near';
+                            if (ambiguous) {
+                                return (
+                                    <div className="border-t border-white/5 pt-2 space-y-1.5">
+                                        <div className="text-[8px] text-white/40 font-bold tracking-wide">VWAP EVENTS</div>
+                                        <div className="px-1.5 py-1 bg-white/5 border border-white/10 rounded text-[8px] text-white/55 font-mono">
+                                            Between VWAP bands — no single active touch (see sigma meter above)
+                                        </div>
+                                    </div>
+                                );
+                            }
+
+                            const rowCls = (id: NonNullable<typeof primary>) =>
+                                id === primary ? 'opacity-100' : 'opacity-35 saturate-50 pointer-events-none';
+
                             return (
                                 <div className="border-t border-white/5 pt-2 space-y-1.5">
                                     <div className="text-[8px] text-white/40 font-bold tracking-wide">VWAP EVENTS</div>
-                                    
+
                                     {isNearVwap && (
-                                        <div className="px-1.5 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded">
+                                        <div className={`px-1.5 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded transition-opacity ${rowCls('near')}`}>
                                             <div className="text-[8px] font-bold text-cyan-400">
-                                                ⚡ AT VWAP — Decision Zone
+                                                AT VWAP — Decision Zone
                                             </div>
                                             <div className="text-[7px] text-white/40 mt-0.5">
                                                 Price testing session fair value — watch for bounce/break
                                             </div>
                                         </div>
                                     )}
-                                    
+
                                     {atUpper1 && (
-                                        <div className="px-1.5 py-0.5 bg-orange-500/10 border border-orange-500/30 rounded text-[8px] font-bold text-orange-400">
-                                            ↗ Testing +1σ VWAP — Resistance
+                                        <div className={`px-1.5 py-0.5 bg-orange-500/10 border border-orange-500/30 rounded text-[8px] font-bold text-orange-400 transition-opacity ${rowCls('u1')}`}>
+                                            Testing +1σ VWAP — Resistance
                                         </div>
                                     )}
                                     {atLower1 && (
-                                        <div className="px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded text-[8px] font-bold text-emerald-400">
-                                            ↘ Testing -1σ VWAP — Support
+                                        <div className={`px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded text-[8px] font-bold text-emerald-400 transition-opacity ${rowCls('l1')}`}>
+                                            Testing -1σ VWAP — Support
                                         </div>
                                     )}
                                     {atUpper2 && (
-                                        <div className="px-1.5 py-0.5 bg-red-500/10 border border-red-500/30 rounded text-[8px] font-bold text-red-400 animate-pulse">
-                                            ⚠️ Testing +2σ VWAP — Extreme Overbought
+                                        <div className={`px-1.5 py-0.5 bg-red-500/10 border border-red-500/30 rounded text-[8px] font-bold text-red-400 transition-opacity ${rowCls('u2')} ${primary === 'u2' ? 'animate-pulse' : ''}`}>
+                                            Testing +2σ VWAP — Extreme Overbought
                                         </div>
                                     )}
                                     {atLower2 && (
-                                        <div className="px-1.5 py-0.5 bg-green-500/10 border border-green-500/30 rounded text-[8px] font-bold text-green-400 animate-pulse">
-                                            ⚠️ Testing -2σ VWAP — Extreme Oversold
+                                        <div className={`px-1.5 py-0.5 bg-green-500/10 border border-green-500/30 rounded text-[8px] font-bold text-green-400 transition-opacity ${rowCls('l2')} ${primary === 'l2' ? 'animate-pulse' : ''}`}>
+                                            Testing -2σ VWAP — Extreme Oversold
                                         </div>
                                     )}
                                 </div>
@@ -1345,7 +1377,25 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             <div className="flex justify-between items-center pl-2">
                                 <span className="text-[10px] text-white/40">Direction</span>
                                 <span className={`text-xs font-bold ${agentDecision.direction === 'LONG' ? 'text-emerald-400' : agentDecision.direction === 'SHORT' ? 'text-red-400' : 'text-blue-300'}`}>
-                                    {agentDecision.direction}{agentDecision.regime && agentDecision.direction !== 'FLAT' ? ` (${agentDecision.regime === 'TRENDING' ? 'Trend' : agentDecision.regime === 'BALANCED' ? 'Reversion' : agentDecision.regime})` : ''}
+                                    {(() => {
+                                        const dir = agentDecision?.direction || 'FLAT';
+                                        const regime = agentDecision?.regime || '';
+                                        const optionType = amtResult?.optionType || '';
+                                        
+                                        if (dir === 'FLAT') return 'FLAT';
+                                        
+                                        // Map direction to option action
+                                        const action = dir === 'LONG' ? 'BUY' : 'SELL';
+                                        const optionLabel = optionType ? ` ${optionType}` : '';
+                                        
+                                        // AMT playbook terminology
+                                        const playbookLabel = regime === 'TRENDING' ? 'Initiative Trend' : 
+                                                              regime === 'BALANCED' ? 'Responsive Fade' : 
+                                                              regime === 'PROBING' ? 'Breakout Test' : 
+                                                              regime === 'DEAD' ? 'Failed Auction' : regime;
+                                        
+                                        return `${action}${optionLabel} (${playbookLabel})`;
+                                    })()}
                                 </span>
                             </div>
                             <div className="flex justify-between items-center pl-2">
@@ -1370,6 +1420,38 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     <span className="text-[10px] font-mono font-bold text-white/80">{(agentDecision.sizeFraction * 100).toFixed(1)}%</span>
                                 </div>
                             </div>
+                            
+                            {/* Fabio Playbook: Second Drive Indicator */}
+                            {amtResult?.isSecondDrive !== undefined && (
+                                <div className="flex justify-between items-center pl-2 pt-1">
+                                    <span className="text-[10px] text-white/40">Drive Cycle</span>
+                                    {amtResult.isSecondDrive ? (
+                                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                            <span>✅ SECOND DRIVE</span>
+                                            <span className="text-[8px] font-normal text-white/50">High probability re-test</span>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                                            <span>⚠️ FIRST DRIVE</span>
+                                            <span className="text-[8px] font-normal text-white/50">Wait for re-test if possible</span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            
+                            {/* Fabio Playbook: LVN Play Indicator */}
+                            {amtResult?.lvnPlay && (
+                                <div className="flex justify-between items-center pl-2 pt-1">
+                                    <span className="text-[10px] text-white/40">LVN Entry</span>
+                                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30">
+                                        <span>🎯 LVN PLAY</span>
+                                        <span className="text-[8px] font-mono font-normal text-white/50">@ {amtResult.lvnPlay.lvn_price.toFixed(1)}</span>
+                                        <span className={`text-[8px] font-bold ${amtResult.lvnPlay.direction === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                            {amtResult.lvnPlay.direction}
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
                             
                             <details className="group mt-2 pt-2 border-t border-white/5 pl-2 cursor-pointer">
                                 <summary className="list-none flex justify-between items-center text-[9px] text-white/40 uppercase tracking-widest font-bold">
@@ -1556,7 +1638,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
             )}
 
             {/* 05. RULE CHECKLIST */}
-            {/* 05. RULE CHECKLIST */}
             <div className="flex flex-col gap-2 mt-2">
                 {(() => {
                     let passedCount = 0;
@@ -1567,19 +1648,35 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     if (amtResult?.marketState !== 'DEAD') passedCount++;
                     if (agentDecision?.timing === 'ENTER_NOW') passedCount++;
                     const totalRules = 4;
-                    
+                    const sigmaV = amtResult?.vwapDeviationSigmas || 0;
+                    const verdictText =
+                        Math.abs(sigmaV) >= 3.0
+                            ? 'RESPONSIVE FADE ACTIVE'
+                            : agentDecision?.timing === 'ENTER_NOW'
+                              ? 'ENTER_NOW'
+                              : 'MONITOR -> WAIT';
+                    const verdictClass =
+                        Math.abs(sigmaV) >= 3.0
+                            ? 'text-orange-400 border-orange-500/40 bg-orange-500/10'
+                            : 'text-blue-300 border-blue-500/30 bg-blue-500/10';
+
                     return (
-                        <details open className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2 group cursor-pointer relative overflow-hidden">
+                        <details className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2 group cursor-pointer relative overflow-hidden">
                             <div className={`absolute top-0 left-0 w-1 h-full ${passedCount === totalRules ? 'bg-emerald-500' : passedCount > 0 ? 'bg-yellow-500' : 'bg-white/10'}`} />
-                            <summary className="list-none flex justify-between items-center pl-2 text-[10px] text-white/40 uppercase tracking-widest font-bold">
-                                <div className="flex items-center gap-2">
-                                    <span>05. Rule Checklist</span>
-                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${passedCount === totalRules ? 'bg-emerald-500/20 text-emerald-400' : passedCount > 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/10 text-white/40'}`}>
-                                        {passedCount === totalRules ? '✅ ' : ''}{passedCount}/{totalRules} Passed
-                                    </span>
+                            <summary className="list-none flex flex-col gap-2 pl-2 text-[10px] text-white/40 uppercase tracking-widest font-bold">
+                                <div className="flex justify-between items-center w-full">
+                                    <div className="flex items-center gap-2">
+                                        <span>05. Rule Checklist</span>
+                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${passedCount === totalRules ? 'bg-emerald-500/20 text-emerald-400' : passedCount > 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/10 text-white/40'}`}>
+                                            {passedCount === totalRules ? '\u2713 ' : ''}{passedCount}/{totalRules} Passed
+                                        </span>
+                                    </div>
+                                    <span className="group-open:hidden">Show</span>
+                                    <span className="hidden group-open:block hover:text-white/80 transition-colors">Hide</span>
                                 </div>
-                                <span className="group-open:hidden">Show</span>
-                                <span className="hidden group-open:block hover:text-white/80 transition-colors">Hide</span>
+                                <div className={`text-[10px] font-mono font-bold tracking-wider normal-case px-2 py-1.5 rounded border w-full ${verdictClass}`}>
+                                    Verdict: {verdictText}
+                                </div>
                             </summary>
                             <div className="space-y-1.5 pt-2 border-t border-white/5 mt-2 pl-2">
                                 <div className="flex items-center gap-2 text-[10px]">
@@ -1599,22 +1696,39 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                             const sigma = amtResult?.vwapDeviationSigmas || 0;
                                             if (Math.abs(sigma) >= 3.0) return `⚠️ EXTREME EXTENSION — ${sigma > 0 ? '+' : ''}${sigma.toFixed(2)}σ (Fade Zone)`;
                                             
-                                            if (currentLtp && amtResult?.valueAreaHigh && Math.abs(currentLtp - amtResult.valueAreaHigh) < distThreshold) return 'Price at VAH — Structural Resistance';
-                                            if (currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - amtResult.valueAreaLow) < distThreshold) return 'Price at VAL — Structural Support';
+                                            const ltp = currentLtp;
+                                            const vah = amtResult?.valueAreaHigh;
+                                            const val = amtResult?.valueAreaLow;
+                                            const poc = amtResult?.poc;
+                                            const ibH = amtResult?.ibHigh;
+                                            const ibL = amtResult?.ibLow;
+                                            const breakDir = amtResult?.breakDirection;
                                             
-                                            if (currentLtp && amtResult?.valueAreaLow && currentLtp < amtResult.valueAreaLow && amtResult?.breakDirection === 'UP') return 'Price below VAL — Rejected breakout, structural failure';
-                                            if (currentLtp && amtResult?.valueAreaHigh && currentLtp > amtResult.valueAreaHigh && amtResult?.breakDirection === 'DOWN') return 'Price above VAH — Rejected breakout, structural failure';
-                                            
-                                            if (currentLtp && amtResult?.valueAreaLow && currentLtp < amtResult.valueAreaLow) return 'Price below VAL — Rejection of Value';
-                                            if (currentLtp && amtResult?.valueAreaHigh && currentLtp > amtResult.valueAreaHigh) return 'Price above VAH — Extension zone, await pullback';
-                                            
-                                            // Fix: If far from POC, don't say "at POC"
-                                            const pocDist = currentLtp && amtResult?.poc ? Math.abs(currentLtp - amtResult.poc) : 0;
-                                            if (pocDist > distThreshold * 2) {
-                                                return currentLtp < (amtResult?.poc || 0) ? 'Price below POC — in lower half of VA, no structural edge' : 'Price above POC — in upper half of VA, no structural edge';
+                                            // IB break context (Fix 2: Initiative breakdown/breakout)
+                                            if (ltp && ibL && ltp < ibL && breakDir === 'DOWN') {
+                                                return `Price below IB Low (${ibL.toFixed(1)}) — Initiative breakdown, targets at 1.5x/2.0x IB extension`;
+                                            }
+                                            if (ltp && ibH && ltp > ibH && breakDir === 'UP') {
+                                                return `Price above IB High (${ibH.toFixed(1)}) — Initiative breakout, targets at 1.5x/2.0x IB extension`;
                                             }
                                             
-                                            return 'Price at POC — No Edge Zone';
+                                            // VA context (Fix 2: Clarify this is OPTION value area)
+                                            if (ltp && val && ltp < val) {
+                                                return `Price below option VAL (${val.toFixed(1)}) — Bearish auction, option premium discounted`;
+                                            }
+                                            if (ltp && vah && ltp > vah) {
+                                                return `Price above option VAH (${vah.toFixed(1)}) — Bullish auction, option premium extended`;
+                                            }
+                                            
+                                            // POC context
+                                            if (ltp && poc) {
+                                                const pocDist = Math.abs(ltp - poc);
+                                                const threshold = distThreshold * 2;
+                                                if (pocDist < threshold) return `Price at option POC (${poc.toFixed(1)}) — Fair value, no edge`;
+                                                return ltp < poc ? `Price below option POC — Lower value area, seek support` : `Price above option POC — Upper value area, seek resistance`;
+                                            }
+                                            
+                                            return 'Price in mid-range — No structural reference';
                                         })()}
                                     </span>
                                 </div>
@@ -1639,14 +1753,26 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                         {agentDecision?.timing === 'ENTER_NOW' ? '✓' : '⏸'}
                                     </div>
                                     <span className="text-white/60 w-24">Timing</span>
-                                    <span className="text-white/40 font-mono text-[9px]">{agentDecision?.timing || 'SKIP'}</span>
+                                    {(() => {
+                                        const timing = agentDecision?.timing || 'SKIP';
+                                        const timeWindow = amtResult?.amtTimeWindow;
+                                        
+                                        if (!timeWindow) return <span className="text-white/40 font-mono text-[9px]">{timing}</span>;
+                                        
+                                        const timingColor = timing === 'ENTER_NOW' ? 'text-emerald-400' : 
+                                                            timing === 'WAIT' ? 'text-yellow-400' : 'text-white/40';
+                                        
+                                        return (
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className={`font-mono text-[9px] font-bold ${timingColor}`}>{timing}</span>
+                                                <span className="text-[8px] text-white/30">{timeWindow.label}</span>
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
                             </div>
-                            <div className="flex justify-between items-center mt-2 pt-2 border-t border-white/5 pl-2">
+                            <div className="mt-2 pt-2 border-t border-white/5 pl-2">
                                 <span className="text-[9px] text-white/30 cursor-pointer hover:text-white/70 transition-colors">View Rule Book</span>
-                                <span className={`text-[10px] font-mono font-bold tracking-wider ${Math.abs(amtResult?.vwapDeviationSigmas || 0) >= 3.0 ? 'text-orange-400 animate-pulse' : 'text-blue-300'}`}>
-                                    Verdict: {Math.abs(amtResult?.vwapDeviationSigmas || 0) >= 3.0 ? 'RESPONSIVE FADE ACTIVE' : agentDecision?.timing === 'ENTER_NOW' ? 'ENTER_NOW' : 'MONITOR -> WAIT'}
-                                </span>
                             </div>
                         </details>
                     );

@@ -8,48 +8,20 @@ This module sets up the dependency injection graph and starts the FastAPI applic
 """
 
 import asyncio
+import faulthandler
 import logging
-import os
+import signal
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
 
-
-def _apply_repo_dotenv_fill_blanks() -> None:
-    """Fill unset or blank os.environ keys from repo-root .env (shell `export VAR=` cannot block)."""
-    try:
-        from dotenv import dotenv_values
-    except ImportError:
-        return
-    repo = Path(__file__).resolve().parent.parent.parent
-    env_path = repo / ".env"
-    if not env_path.is_file():
-        return
-    for key, val in dotenv_values(env_path).items():
-        if val is None:
-            continue
-        sval = str(val).strip()
-        if not sval:
-            continue
-        cur = os.environ.get(key)
-        if cur is None or (isinstance(cur, str) and not cur.strip()):
-            os.environ[key] = sval
-
-
-_apply_repo_dotenv_fill_blanks()
-
-# Avoid OpenMP/runtime clashes when MLX and LightGBM both load in one process (macOS).
-os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+# Enable faulthandler to print Python traceback on segfault
+faulthandler.enable()
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.dependencies import set_service_graph
 from app.api.routers import (
     health_router,
     market_router,
@@ -73,6 +45,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class WebSocketLogMiddleware:
+    """Log WebSocket connection attempts for debugging."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("path") == "/api/trading/ws/gameloop":
+            logger.info(
+                "WebSocket request: method=%s, path=%s",
+                scope.get("method", ""),
+                scope.get("path", ""),
+            )
+        await self.app(scope, receive, send)
+
+
 def create_application() -> FastAPI:
     """Create and configure the FastAPI application."""
     
@@ -90,12 +78,13 @@ def create_application() -> FastAPI:
         try:
             from app.domain.fabio_ai.services.option_scanner import OptionScannerService
             from app.config import settings
-
+            import concurrent.futures
+            
             scanner = OptionScannerService(graph.market_data)
-
-            # Run synchronous scanner off the event loop (avoid Future.result() blocking the loop)
-            results = await asyncio.wait_for(
-                asyncio.to_thread(
+            
+            # Run scanner in thread pool (it's synchronous)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                results = pool.submit(
                     scanner.scan_top_n,
                     n=settings.SCANNER_TOP_N,
                     underlyings=settings.SCANNER_UNDERLYINGS,
@@ -103,9 +92,7 @@ def create_application() -> FastAPI:
                     exchange=settings.DEFAULT_EXCHANGE,
                     expiry_index=settings.SCANNER_EXPIRY_INDEX,
                     strikes_around_atm=settings.STRIKES_AROUND_ATM,
-                ),
-                timeout=120.0,
-            )
+                ).result(timeout=120)
             
             if results:
                 # Filter to valid contracts with LTP > 0
@@ -153,7 +140,7 @@ def create_application() -> FastAPI:
                 await graph.engine.stop()
                 logger.info("Trading engine stopped")
             except Exception:
-                logger.debug("Engine stop failed", exc_info=True)
+                logger.error("Engine stop failed — resources may not be cleaned up", exc_info=True)
         
         logger.info("Shutdown complete")
     
@@ -175,29 +162,11 @@ def create_application() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Add WebSocket logging middleware to debug 403 issues
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.requests import Request
-    from starlette.responses import Response
-
-    class WebSocketLogMiddleware(BaseHTTPMiddleware):
-        """Log WebSocket connection attempts for debugging."""
-        async def dispatch(self, request: Request, call_next):
-            if request.url.path == "/api/trading/ws/gameloop":
-                logger.info(
-                    "WebSocket request: method=%s, path=%s, headers=%s",
-                    request.method,
-                    request.url.path,
-                    dict(request.headers)
-                )
-            response = await call_next(request)
-            return response
-
     app.add_middleware(WebSocketLogMiddleware)
 
-    # Load configuration (YAML strategy + env secrets — same basis as app.config.settings)
+    # Load configuration — must match app.config.settings (YAML strategy + MCX/NSE), not env-only.
     config = Configuration.from_unified()
-    logger.info(f"Loaded configuration: {config}")
+    logger.info(f"Loaded configuration (unified): {config}")
 
     # Create service graph
     service_graph = ServiceGraph(config)
@@ -205,7 +174,6 @@ def create_application() -> FastAPI:
     # Store service graph in application state
     app.state.service_graph = service_graph
     app.state.engine = None  # Will be set by lifespan
-    set_service_graph(service_graph)
 
     # Register routers
     app.include_router(health_router, prefix="", tags=["health"])
@@ -218,28 +186,6 @@ def create_application() -> FastAPI:
     app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
 
     return app
-
-
-async def startup_event(service_graph: ServiceGraph):
-    """Application startup event."""
-    logger.info("Starting GlassyTrade AI application...")
-
-    # Initialize services that need setup
-    # Example: market_data_adapter = service_graph.get(IMarketData)
-    # market_data_adapter.ensure_initialized_sync()
-
-    logger.info("Application started successfully")
-
-
-async def shutdown_event(service_graph: ServiceGraph):
-    """Application shutdown event."""
-    logger.info("Shutting down GlassyTrade AI application...")
-
-    # Cleanup resources
-    # Example: market_data_adapter = service_graph.get(IMarketData)
-    # market_data_adapter.close_sync()
-
-    logger.info("Shutdown complete")
 
 
 def main() -> None:

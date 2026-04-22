@@ -146,6 +146,28 @@ class TestAMTResultSerialization:
         assert d["valueAreaHigh"] == 105
         assert d["lvns"] == [97.0]
 
+    def test_is_second_drive_serialization(self):
+        """Task 3.3: isSecondDrive must be serialized for Fabio Playbook display."""
+        # Test with second drive (D2)
+        result_d2 = AMTResult(
+            market_state="TRENDING_UP", poc=100,
+            value_area_high=105, value_area_low=95,
+            aggression=0.6,
+            drive_entry_valid=True,  # D2 with D1 rejected
+        )
+        d = amt_result_to_dto(result_d2)
+        assert d["isSecondDrive"] is True
+
+        # Test with first drive (D1)
+        result_d1 = AMTResult(
+            market_state="TRENDING_UP", poc=100,
+            value_area_high=105, value_area_low=95,
+            aggression=0.6,
+            drive_entry_valid=False,  # D1 or no drive
+        )
+        d = amt_result_to_dto(result_d1)
+        assert d["isSecondDrive"] is False
+
 
 class TestStatsSerialization:
     def test_basic(self):

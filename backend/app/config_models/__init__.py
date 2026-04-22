@@ -160,6 +160,17 @@ class FeatureFlags:
 
 
 @dataclass(frozen=True)
+class GapFillConfig:
+    """Configuration for gap detection and filling in streaming data."""
+    
+    enabled: bool = True
+    interval_seconds: int = 300  # Check every 5 minutes
+    min_gap_seconds: int = 60  # Only fill gaps > 60 seconds
+    max_lookback_seconds: int = 600  # Look back 10 minutes
+    max_fill_age_seconds: int = 120  # Don't fill gaps newer than 2 minutes
+
+
+@dataclass(frozen=True)
 class SystemConfig:
     """Top-level system configuration — frozen, immutable, single source of truth.
 
@@ -179,6 +190,7 @@ class SystemConfig:
     risk: RiskConfig = field(default_factory=RiskConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     flags: FeatureFlags = field(default_factory=FeatureFlags)
+    gap_fill: GapFillConfig = field(default_factory=GapFillConfig)
 
     def symbol_config(self, symbol_name: str) -> SymbolConfig | None:
         """Find SymbolConfig by name across all exchanges."""

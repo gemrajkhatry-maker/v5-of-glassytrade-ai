@@ -9,8 +9,19 @@
 - [RiskStateDisplay.tsx](file://frontend/components/ai/RiskStateDisplay.tsx)
 - [ModelIOPanel.tsx](file://frontend/components/ai/ModelIOPanel.tsx)
 - [DecisionHistoryPanel.tsx](file://frontend/components/ai/DecisionHistoryPanel.tsx)
+- [LiveOpportunityCard.tsx](file://frontend/components/ai/LiveOpportunityCard.tsx)
 - [App.tsx](file://frontend/App.tsx)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive P1-9 underlying index price panel integration
+- Enhanced session gap information displays with gapType and openingBias
+- Integrated CVD sparkline visualization for trend analysis
+- Implemented advanced conflict detection capabilities between market signals
+- Added CE/PE context interpretation for options trading scenarios
+- Expanded AMT analysis data integration with new field support
+- Updated component architecture to accommodate new market metrics and visualization features
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -26,10 +37,12 @@
 ## Introduction
 The AI Analysis Panel is the central orchestrator of the AI-driven decision-making interface. It synthesizes multiple data streams—GenAI analysis, AMT (Auction Market Theory) results, portfolio state, risk conditions, agent decisions, and LLM history—into a cohesive, real-time dashboard. The panel manages state transitions, coordinates child components, and provides sticky header functionality with engine status indicators. It renders AI-generated insights, manages fallback mechanisms, and integrates with the equity panel and other specialized panels for structured display of market metrics, probability decisions, and historical reasoning.
 
+**Updated** The panel now features comprehensive AMT analysis data integration, underlying index price panel (P1-9), enhanced session gap information displays, CVD sparkline visualization, advanced conflict detection capabilities, and CE/PE context interpretation for options trading.
+
 ## Project Structure
 The AI Analysis Panel resides in the frontend components directory and integrates with several child panels and utilities:
 - Parent container: App.tsx passes instrument state to AIAnalysisPanel
-- Child panels: EquityPanel, RiskStateDisplay, ModelIOPanel, DecisionHistoryPanel
+- Child panels: EquityPanel, RiskStateDisplay, ModelIOPanel, DecisionHistoryPanel, LiveOpportunityCard
 - Utilities: textSanitizer for LLM output sanitization
 - Types: strongly typed interfaces for all data props
 
@@ -40,6 +53,12 @@ AI --> EP["EquityPanel.tsx<br/>Displays equity and PnL"]
 AI --> RSD["RiskStateDisplay.tsx<br/>Shows risk warnings"]
 AI --> MIO["ModelIOPanel.tsx<br/>Debug I/O"]
 AI --> DHP["DecisionHistoryPanel.tsx<br/>Decision timeline"]
+AI --> LOC["Location Panel<br/>VAH/VAL/POC visualization"]
+AI --> MET["Market Metrics<br/>CVD, OFI, Delta"]
+AI --> STR["Structure Analysis<br/>Market structure & confidence"]
+AI --> IB["IB + Breaks<br/>Initial balance & breakouts"]
+AI --> VWAP["VWAP + Context<br/>Session bands & prior levels"]
+AI --> PROB["Probability Engine<br/>Agent decisions"]
 AI --> TS["textSanitizer.ts<br/>Sanitizes LLM text"]
 AI --> T["types.ts<br/>Prop interfaces"]
 ```
@@ -51,6 +70,7 @@ AI --> T["types.ts<br/>Prop interfaces"]
 - [RiskStateDisplay.tsx:1-37](file://frontend/components/ai/RiskStateDisplay.tsx#L1-L37)
 - [ModelIOPanel.tsx:1-36](file://frontend/components/ai/ModelIOPanel.tsx#L1-L36)
 - [DecisionHistoryPanel.tsx:1-98](file://frontend/components/ai/DecisionHistoryPanel.tsx#L1-L98)
+- [LiveOpportunityCard.tsx:1-120](file://frontend/components/ai/LiveOpportunityCard.tsx#L1-L120)
 - [textSanitizer.ts:1-51](file://frontend/utils/textSanitizer.ts#L1-L51)
 - [types.ts:40-301](file://frontend/types.ts#L40-L301)
 
@@ -64,6 +84,7 @@ AI --> T["types.ts<br/>Prop interfaces"]
 - RiskStateDisplay: Renders trading halts and consecutive loss indicators
 - ModelIOPanel: Shows raw LLM prompt and model output for debugging
 - DecisionHistoryPanel: Timeline of LLM decisions with confidence and rationale
+- LiveOpportunityCard: Displays real-time trading opportunities and market conditions
 - textSanitizer: Cleans escaped characters and JSON artifacts from LLM outputs
 
 Key props interface:
@@ -77,20 +98,23 @@ Key props interface:
 - depth20Active?: boolean
 - overseerAction?: string
 - overseerReason?: string
+- symbol?: string
+- underlyingPrice?: number
+- data?: any[]
 
 **Section sources**
-- [AIAnalysisPanel.tsx:7-18](file://frontend/components/AIAnalysisPanel.tsx#L7-L18)
+- [AIAnalysisPanel.tsx:7-21](file://frontend/components/AIAnalysisPanel.tsx#L7-L21)
 - [types.ts:40-301](file://frontend/types.ts#L40-L301)
 
 ## Architecture Overview
-The panel follows a layered rendering strategy:
-- Sticky header: Engine status bar, equity panel, risk state warning, and LLM timeout banner
-- Market state and location: Session/leg status, value area markers, and LTP indicator
-- Aggression and market metrics: Delta score, OFI/CVD slope, balance ratio, shape/spread/depth
+The panel follows a layered rendering strategy with enhanced market analysis capabilities:
+- Sticky header: Engine status bar, equity panel, risk state warning, underlying index panel, and LLM timeout banner
+- Market state and location: Session/leg status, value area markers, and LTP indicator with enhanced POC visualization
+- Aggression and market metrics: Delta score, OFI/CVD slope, balance ratio, shape/spread/depth with CVD sparkline
 - Market structure: Confidence donut and acceptance/rejection signals
-- IB + breaks: Initial balance range, break detection, POC migration
-- LVN velocity play: Optional velocity play suggestion
-- VWAP + context: Session VWAP bands and prior-day levels
+- IB + breaks: Initial balance range, break detection, POC migration with enhanced conflict detection
+- LVN velocity play: Optional velocity play suggestion with absorption detection
+- VWAP + context: Session VWAP bands and prior-day levels with gap information
 - Probability engine: Agent decision with direction, probability, timing, size fraction
 - Overseer: Supervisory actions and reasons
 - Trade plan: Open positions with SL/TP/unrealized PnL and durations
@@ -104,20 +128,21 @@ graph TB
 subgraph "Sticky Header"
 EH["Engine Bar"]
 EQ["EquityPanel"]
+UIP["Underlying Index Panel"]
 RS["RiskStateDisplay"]
 QT["Quant Only Banner"]
 end
 subgraph "Market State"
 SS["Session/Leg"]
-LOC["Location VAH/VAL/POC/LTP"]
+LOC["Enhanced Location VAH/VAL/POC/LTP"]
 end
 subgraph "Metrics"
 AGG["Aggression"]
-MET["OFI/CVD/Balance/Shape/Sprd/Depth"]
+MET["OFI/CVD/Balance/Shape/Sprd/Depth<br/>CVD Sparkline Visualization"]
 STR["Structure"]
-IB["IB + Breaks"]
-LVN["LVN Play"]
-VW["VWAP + Context"]
+IB["IB + Breaks<br/>Conflict Detection"]
+LVN["LVN Play<br/>Absorption Detection"]
+VW["VWAP + Context<br/>Gap Information"]
 end
 subgraph "Decision Layer"
 PROB["Probability Engine"]
@@ -129,8 +154,9 @@ MIO["Model I/O Footer"]
 DH["Decision History"]
 end
 EH --> EQ
-EH --> RS
-EH --> QT
+EQ --> UIP
+UIP --> RS
+RS --> QT
 EQ --> PROB
 RS --> PROB
 PROB --> OS
@@ -161,7 +187,7 @@ Responsibilities:
 - Constructs effective analysis for monitoring mode when GenAI is unavailable
 - Prefers AMT-derived market state and aggression over stale LLM values
 - Computes open PnL memoization for reuse across sections
-- Renders sticky header with engine status, equity, risk warnings, and quant-only banner
+- Renders sticky header with engine status, equity, underlying index, risk warnings, and quant-only banner
 - Displays market state, location, aggression, metrics, structure, IB/breaks, LVN play, VWAP context
 - Renders probability engine, overseer, trade plan, recent exits, rule checklist, model I/O footer, and decision history
 
@@ -169,13 +195,14 @@ Rendering logic highlights:
 - Sticky header uses z-index and backdrop blur for persistent visibility during scroll
 - Engine bar shows target/circuit progress with normalized PnL
 - Equity panel shows daily target/circuit progress and partial TP booking
+- Underlying index panel displays P1-9 index prices for correlation analysis
 - Risk state warning appears when halted or consecutive losses exceed thresholds
 - Location section shows VAH/VAL/POC markers and LTP indicator with dynamic positioning
 - Aggression and metrics sections use progress bars and color-coded indicators
 - Structure section shows confidence donut and acceptance/rejection badges
-- IB/breaks section shows IB range, break status, proximity warnings, and POC signals
-- LVN play section shows direction, price, target, velocity ratio, and flags
-- VWAP section shows session bands and sigma deviation meter
+- IB/breaks section shows IB range, break status, proximity warnings, POC signals, and conflict detection
+- LVN play section shows direction, price, target, velocity ratio, and absorption detection
+- VWAP section shows session bands and sigma deviation meter with gap information
 - Probability engine shows direction/probability/timing/size with rationale
 - Overseer shows action and reason when present
 - Trade plan lists open positions with SL/TP/unrealized PnL and durations
@@ -187,9 +214,10 @@ Rendering logic highlights:
 Conditional displays and fallbacks:
 - If neither GenAI nor AMT data is available, shows initializing state with pulsing text
 - If GenAI is absent but AMT is present, shows quant-only banner
-- Location section falls back to “Building…” when VAH/VAL/POC are unavailable
+- Location section falls back to "Building..." when VAH/VAL/POC are unavailable
 - Probability section shows waiting message when no agent decision is available
 - Rule checklist shows pass/fail counts and verdict based on gating rules
+- Underlying index panel only displays when price data is available
 
 Real-time update coordination:
 - Uses React.useMemo for derived values (LTP, effective analysis, display analysis, open PnL, aggression score)
@@ -210,21 +238,24 @@ Real-time update coordination:
 - depth20Active?: boolean
 - overseerAction?: string
 - overseerReason?: string
+- symbol?: string
+- underlyingPrice?: number
+- data?: any[]
 
 **Section sources**
-- [AIAnalysisPanel.tsx:7-18](file://frontend/components/AIAnalysisPanel.tsx#L7-L18)
+- [AIAnalysisPanel.tsx:7-21](file://frontend/components/AIAnalysisPanel.tsx#L7-L21)
 - [types.ts:40-301](file://frontend/types.ts#L40-L301)
 
 #### Rendering Logic and Conditional Displays
-- Sticky header: Engine bar, equity panel, risk state display, quant-only banner
-- Market state: Session/leg badges with live market state
+- Sticky header: Engine bar, equity panel, underlying index panel, risk state display, quant-only banner
+- Market state: Session/leg badges with live market state and enhanced gap information
 - Location: VAH/VAL/POC markers and LTP indicator with fallback
 - Aggression: Delta score with progress bar
-- Metrics: OFI/CVD/balance/shape/spread/depth
+- Metrics: OFI/CVD/balance/shape/spread/depth with CVD sparkline visualization
 - Structure: Confidence donut and acceptance/rejection signals
-- IB/breaks: IB range, break detection, proximity warnings, POC signals
-- LVN play: Optional velocity play suggestion
-- VWAP: Session bands and sigma deviation
+- IB/breaks: IB range, break detection, proximity warnings, POC signals with conflict detection
+- LVN play: Optional velocity play suggestion with absorption detection
+- VWAP: Session bands and sigma deviation with gap information
 - Probability: Direction/probability/timing/size with rationale
 - Overseer: Action and reason
 - Trade plan: Open positions with SL/TP/unrealized PnL/durations
@@ -239,9 +270,10 @@ Real-time update coordination:
 #### Fallback Mechanisms
 - LTP fallback chain: order book mid-price → AMT session VWAP → zero
 - Effective analysis fallback: monitoring mode using AMT data when GenAI is absent
-- Location section fallback: “Building…” when VAH/VAL/POC unavailable
+- Location section fallback: "Building..." when VAH/VAL/POC unavailable
 - Probability section fallback: waiting message when no agent decision
 - Quant-only banner: appears when GenAI is absent but AMT is present
+- Underlying index panel fallback: hidden when no price data available
 
 **Section sources**
 - [AIAnalysisPanel.tsx:21-104](file://frontend/components/AIAnalysisPanel.tsx#L21-L104)
@@ -283,7 +315,7 @@ Real-time update coordination:
 **Section sources**
 - [RiskStateDisplay.tsx:10-31](file://frontend/components/ai/RiskStateDisplay.tsx#L10-L31)
 
-#### Model I/O Panel
+#### Model IOPanel
 - Displays raw LLM prompt and sanitized model output
 - Used for debugging and transparency
 
@@ -298,8 +330,16 @@ Real-time update coordination:
 **Section sources**
 - [DecisionHistoryPanel.tsx:11-92](file://frontend/components/ai/DecisionHistoryPanel.tsx#L11-L92)
 
+#### Live Opportunity Card
+- Displays real-time trading opportunities and market conditions
+- Provides contextual analysis for market entry/exit decisions
+- Integrates with AMT analysis for enhanced opportunity identification
+
+**Section sources**
+- [LiveOpportunityCard.tsx:1-120](file://frontend/components/ai/LiveOpportunityCard.tsx#L1-L120)
+
 ### Integration with App
-- App.tsx passes instrument state to AIAnalysisPanel, including GenAI analysis, AMT results, portfolio, risk state, agent decision, LLM history, order book, depth20Active flag, overseer action, and reason
+- App.tsx passes instrument state to AIAnalysisPanel, including GenAI analysis, AMT results, portfolio, risk state, agent decision, LLM history, order book, depth20Active flag, overseer action, reason, symbol, underlyingPrice, and data
 - Wrapped in ErrorBoundary for robustness
 
 **Section sources**
@@ -319,6 +359,12 @@ AI --> EP["EquityPanel.tsx"]
 AI --> RSD["RiskStateDisplay.tsx"]
 AI --> MIO["ModelIOPanel.tsx"]
 AI --> DHP["DecisionHistoryPanel.tsx"]
+AI --> LOC["Location Panel"]
+AI --> MET["Market Metrics"]
+AI --> STR["Structure Analysis"]
+AI --> IB["IB + Breaks"]
+AI --> VWAP["VWAP + Context"]
+AI --> PROB["Probability Engine"]
 APP["App.tsx"] --> AI
 ```
 
@@ -342,17 +388,19 @@ APP["App.tsx"] --> AI
 - Conditional rendering: Sections only render when relevant data is available, reducing DOM overhead
 - Sanitization: Efficient regex-based cleaning avoids expensive parsing for raw output display
 - Scroll performance: Sticky header uses z-index and backdrop blur without heavy animations
-
-[No sources needed since this section provides general guidance]
+- CVD sparkline optimization: SVG path generation is computed efficiently with minimal re-renders
 
 ## Troubleshooting Guide
 Common issues and resolutions:
 - No GenAI or AMT data: Panel shows initializing state; verify backend feed connectivity and AMT pipeline readiness
 - LLM Timeout banner: Indicates GenAI unavailability; panel continues with quant-only mode using AMT data
-- Missing VAH/VAL/POC: Location section shows “Building…” until AMT volume profile is established
+- Missing VAH/VAL/POC: Location section shows "Building..." until AMT volume profile is established
 - No agent decision: Probability section shows waiting message; ensure probability engine is active
 - Risk halt: RiskStateDisplay shows trading halt with reason; address underlying risk triggers
 - Error state in decision history: Panel detects 3+ recent errors and shows warning banner; investigate LLM API availability
+- Missing underlying index: Underlying index panel is hidden when no price data is available; check AMT pipeline for index data
+- CVD sparkline not showing: Appears only when CVD slope has sufficient magnitude; check market liquidity and volume
+- Conflict detection alerts: Indicate divergent signals between different market metrics; verify data integrity and market conditions
 
 **Section sources**
 - [AIAnalysisPanel.tsx:86-104](file://frontend/components/AIAnalysisPanel.tsx#L86-L104)
@@ -364,3 +412,5 @@ Common issues and resolutions:
 
 ## Conclusion
 The AI Analysis Panel serves as the central hub for AI-driven trading insights, integrating GenAI analysis, AMT market metrics, portfolio state, and supervisory oversight into a cohesive, real-time interface. Its architecture emphasizes performance (memoization, conditional rendering), reliability (fallback mechanisms), and transparency (sanitized LLM outputs, decision history). The sticky header, engine status indicators, and equity panel integration provide traders with immediate context and actionable signals, while the modular child components enable scalable extension and maintenance.
+
+**Updated** The panel now features comprehensive market analysis capabilities including underlying index correlation, enhanced gap information, CVD trend visualization, conflict detection between market signals, and options trading context interpretation, making it a more powerful tool for sophisticated trading decisions.

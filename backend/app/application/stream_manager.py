@@ -5,6 +5,7 @@ Responsibilities:
 - WebSocket reconnection logic
 - Polling fallback for MCX options
 - Stream health monitoring
+- Gap detection and filling (periodic)
 """
 
 from __future__ import annotations
@@ -13,13 +14,14 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timezone, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from app.config import settings
 from app.application.utils import is_market_open
 
 if TYPE_CHECKING:
     from app.domain.ports.market_data import IMarketData
+    from app.application.services.trading_session import TradingSessionService
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +38,29 @@ class StreamManager:
     source of truth for market data streaming across the codebase.
     """
 
-    def __init__(self, market_data: IMarketData):
+    def __init__(
+        self,
+        market_data: IMarketData,
+        session_service: TradingSessionService | None = None,
+        fetch_historical_callback: Callable | None = None,
+    ):
+        """Initialize stream manager.
+
+        Args:
+            market_data: Market data interface
+            session_service: Trading session service (for gap detection)
+            fetch_historical_callback: Callback to fetch historical data (for gap filling)
+        """
         self._market_data = market_data
+        self._session_service = session_service
+        self._fetch_historical_callback = fetch_historical_callback
         self._polling_mode: bool = False
         self._last_any_tick_time: float = time.time()
         self._engine_start_time: float = time.time()
         self._tick_counts: dict[str, int] = {}
         self._active_symbols: list[str] = []
         self._running: bool = False
+        self._gap_detector_task: asyncio.Task | None = None
 
     def set_active_symbols(self, symbols: list[str]) -> None:
         """Set active symbols for streaming.
@@ -145,6 +162,13 @@ class StreamManager:
         from app.config import settings
 
         _latest_depth = {}
+
+        # Start gap detector if configured
+        if self._session_service and self._fetch_historical_callback and settings.GAP_FILL_ENABLED:
+            logger.info("Gap detector enabled (interval=%ds)", settings.GAP_FILL_INTERVAL)
+            self._gap_detector_task = asyncio.create_task(
+                self._run_gap_detector()
+            )
 
         async def _depth_worker():
             try:
@@ -291,6 +315,9 @@ class StreamManager:
                 depth_task.cancel()
             if poll_task:
                 poll_task.cancel()
+            if self._gap_detector_task:
+                self._gap_detector_task.cancel()
+                logger.info("Gap detector task cancelled")
 
     async def _run_poll_worker(self, worker_fn, queue: asyncio.Queue):
         """Run the polling worker and put results into the queue."""
@@ -300,3 +327,54 @@ class StreamManager:
             pass
         except Exception as e:
             logger.debug("Poll worker ended: %s", e)
+
+    async def _run_gap_detector(self):
+        """Periodically detect and fill gaps in streaming data."""
+        try:
+            from app.application.services.gap_detector import GapDetector
+
+            detector = GapDetector(
+                session_service=self._session_service,
+                fetch_historical_callback=self._fetch_historical_callback,
+            )
+
+            logger.info("Gap detector started (interval=%ds)", settings.GAP_FILL_INTERVAL)
+
+            while self._running:
+                try:
+                    # Wait for next interval
+                    await asyncio.sleep(settings.GAP_FILL_INTERVAL)
+
+                    if not self._running:
+                        break
+
+                    # Skip if market is closed (use configured exchange)
+                    market_open = is_market_open(exchange=settings.DEFAULT_EXCHANGE)
+                    logger.info("Gap detection cycle: market_open=%s for exchange=%s", market_open, settings.DEFAULT_EXCHANGE)
+                    if not market_open:
+                        logger.info("Market closed, skipping gap detection")
+                        continue
+
+                    # Run gap detection
+                    if self._active_symbols:
+                        results = await detector.detect_and_fill_gaps(self._active_symbols)
+                        total_filled = sum(results.values())
+                        if total_filled > 0:
+                            logger.info(
+                                "Gap fill cycle complete: filled %d candles across %d symbols",
+                                total_filled,
+                                len([s for s, c in results.items() if c > 0]),
+                            )
+
+                except asyncio.CancelledError:
+                    logger.info("Gap detector cancelled")
+                    break
+                except Exception as e:
+                    logger.error("Gap detector cycle failed: %s", e, exc_info=True)
+                    # Continue running, don't crash
+                    await asyncio.sleep(10)  # Wait before retry
+
+        except asyncio.CancelledError:
+            logger.info("Gap detector task cancelled")
+        except Exception as e:
+            logger.error("Gap detector crashed: %s", e, exc_info=True)

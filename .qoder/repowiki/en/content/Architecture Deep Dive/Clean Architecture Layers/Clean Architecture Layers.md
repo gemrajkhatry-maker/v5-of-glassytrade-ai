@@ -2,21 +2,32 @@
 
 <cite>
 **Referenced Files in This Document**
-- [backend/app/main.py](file://backend/app/main.py)
-- [backend/app/config.py](file://backend/app/config.py)
-- [backend/app/domain/ports/__init__.py](file://backend/app/domain/ports/__init__.py)
-- [backend/app/domain/ports/broker.py](file://backend/app/domain/ports/broker.py)
-- [backend/app/domain/ports/market_data.py](file://backend/app/domain/ports/market_data.py)
-- [backend/app/domain/ports/storage.py](file://backend/app/domain/ports/storage.py)
-- [backend/app/domain/ports/notifications.py](file://backend/app/domain/ports/notifications.py)
-- [backend/app/domain/ports/delta_profile.py](file://backend/app/domain/ports/delta_profile.py)
-- [backend/app/domain/ports/exchange_strategy.py](file://backend/app/domain/ports/exchange_strategy.py)
-- [backend/app/domain/ports/llm_inference.py](file://backend/app/domain/ports/llm_inference.py)
-- [backend/app/domain/ports/npoc.py](file://backend/app/domain/ports/npoc.py)
-- [backend/app/domain/ports/probability_inference.py](file://backend/app/domain/ports/probability_inference.py)
-- [backend/app/infrastructure/adapters/__init__.py](file://backend/app/infrastructure/adapters/__init__.py)
-- [backend/app/application/services/__init__.py](file://backend/app/application/services/__init__.py)
+- [appv2/backend/appv2/main.py](file://appv2/backend/appv2/main.py)
+- [appv2/backend/appv2/domain/ports/broker.py](file://appv2/backend/appv2/domain/ports/broker.py)
+- [appv2/backend/appv2/domain/ports/market_data.py](file://appv2/backend/appv2/domain/ports/market_data.py)
+- [appv2/backend/appv2/domain/ports/storage.py](file://appv2/backend/appv2/domain/ports/storage.py)
+- [appv2/backend/appv2/application/trading_engine.py](file://appv2/backend/appv2/application/trading_engine.py)
+- [appv2/backend/appv2/application/data_pipeline.py](file://appv2/backend/appv2/application/data_pipeline.py)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py](file://appv2/backend/appv2/infrastructure/dhan_feed.py)
+- [appv2/backend/appv2/infrastructure/dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [appv2/backend/appv2/infrastructure/sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [appv2/backend/appv2/infrastructure/option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+- [appv2/backend/appv2/infrastructure/stream_manager.py](file://appv2/backend/appv2/infrastructure/stream_manager.py)
+- [appv2/backend/appv2/infrastructure/tick_processor.py](file://appv2/backend/appv2/infrastructure/tick_processor.py)
+- [appv2/backend/appv2/api/state_broadcaster.py](file://appv2/backend/appv2/api/state_broadcaster.py)
+- [appv2/backend/appv2/domain/enums/signal_type.py](file://appv2/backend/appv2/domain/enums/signal_type.py)
+- [appv2/backend/appv2/domain/models/tick.py](file://appv2/backend/appv2/domain/models/tick.py)
+- [appv2/backend/appv2/domain/models/ohlc.py](file://appv2/backend/appv2/domain/models/ohlc.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated architecture to reflect appv2 implementation with enhanced domain services
+- Added comprehensive coverage of 11 new domain services from the original backend
+- Expanded application layer services with advanced trading orchestration
+- Enhanced infrastructure adapters with Dhan integration and WebSocket streaming
+- Updated domain ports to include comprehensive order management and market data interfaces
+- Added detailed analysis of the TradingEngine v2 with all advanced features
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -24,398 +35,507 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+6. [Enhanced Domain Services](#enhanced-domain-services)
+7. [Advanced Application Layer](#advanced-application-layer)
+8. [Comprehensive Infrastructure Layer](#comprehensive-infrastructure-layer)
+9. [Dependency Analysis](#dependency-analysis)
+10. [Performance Considerations](#performance-considerations)
+11. [Troubleshooting Guide](#troubleshooting-guide)
+12. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the three-layer clean architecture implemented in the backend. It focuses on:
-- Layer 1 (Domain): Pure business logic with entities, value objects, aggregates, and error hierarchies.
-- Layer 2 (Application): Orchestration of use cases without domain rules, including handlers and services.
-- Layer 3 (Infrastructure): Implementations of external integrations via adapters.
+This document explains the three-layer clean architecture implemented in the appv2 backend system. The architecture has been significantly enhanced with advanced domain services, comprehensive application layer orchestration, and robust infrastructure adapters. It focuses on:
+- Layer 1 (Domain): Pure business logic with entities, value objects, aggregates, and 11 enhanced domain services
+- Layer 2 (Application): Advanced orchestration of use cases with sophisticated trading engines and coordinators
+- Layer 3 (Infrastructure): Comprehensive external system integrations via specialized adapters
 
-It also documents the dependency inversion principle (infrastructure depends on application, which depends on domain), the service graph dependency injection pattern, port/adapter architecture, and how each layer maintains separation of concerns. Finally, it enumerates the 11 domain ports/interfaces and their responsibilities.
+The architecture maintains the dependency inversion principle where infrastructure depends on application, which depends on domain, while introducing the service graph dependency injection pattern, port/adapter architecture, and enhanced separation of concerns.
 
 ## Project Structure
-The backend follows a layered structure:
-- Domain: Ports (interfaces), entities/value objects/aggregates, and domain services.
-- Application: Handlers and services that orchestrate use cases.
-- Infrastructure: Adapters implementing domain ports and integrating with external systems.
+The appv2 backend follows a sophisticated layered structure with enhanced capabilities:
+- Domain: 11 comprehensive ports/interfaces, entities/value objects/aggregates, and advanced domain services
+- Application: Sophisticated trading engines, coordinators, and handlers that orchestrate complex trading workflows
+- Infrastructure: Specialized adapters implementing domain ports and integrating with external systems including Dhan broker, WebSocket streaming, and SQLite storage
 
 ```mermaid
 graph TB
 subgraph "Domain Layer"
-D_PORTS["Domain Ports<br/>broker.py, market_data.py,<br/>storage.py, notifications.py,<br/>delta_profile.py, exchange_strategy.py,<br/>llm_inference.py, npoc.py,<br/>probability_inference.py"]
-D_ENT["Entities/Value Objects/Aggregates"]
-D_SVC["Domain Services"]
+D_PORTS["Domain Ports<br/>broker.py, market_data.py,<br/>storage.py"]
+D_ENMS["Enums<br/>signal_type.py"]
+D_MODELS["Models<br/>tick.py, ohlc.py"]
+D_SVC["Enhanced Domain Services<br/>11 advanced services:<br/>• TickThrottle<br/>• FootprintAccumulator<br/>• OpeningClassifier<br/>• RegimeDetector<br/>• MarketStructureClassifier<br/>• StructuralStopEngine<br/>• PartitionExitManager<br/>• DriveDecayTracker<br/>• LatencyTracker<br/>• GateRejectionTracker<br/>• PlaybookGuard"]
 end
 subgraph "Application Layer"
-APP_HANDLERS["Handlers"]
-APP_SERVICES["Application Services"]
+APP_ENGINE["TradingEngine v2<br/>• Complete trading orchestration<br/>• 15+ integrated services<br/>• Real-time processing"]
+APP_COORD["Coordinators<br/>• EntryCoordinator<br/>• ExitCoordinator<br/>• RiskOrchestrator<br/>• StrategyOrchestrator"]
+APP_HANDLERS["Handlers<br/>• TradeLifecycleHandler<br/>• SessionStateManager<br/>• PostTradeAnalytics"]
+APP_PIPE["Data Pipeline<br/>• Multi-symbol processing<br/>• Candle aggregation<br/>• Volume profile analysis"]
 end
 subgraph "Infrastructure Layer"
-INF_ADAPT["Adapters"]
-INF_EXT["External Systems<br/>(Market Data, Broker, Storage, LLM)"]
+INF_ADAPTERS["Specialized Adapters<br/>• DhanFeed (WebSocket)<br/>• DhanExecutor (Order Management)<br/>• OptionChainFetcher<br/>• SQLiteStorage"]
+INF_STREAM["Streaming & Processing<br/>• StreamManager<br/>• TickProcessor<br/>• GameStateBroadcaster"]
+INF_EXT["External Systems<br/>• Dhan Broker API<br/>• Market Data Feeds<br/>• WebSocket Streams<br/>• SQLite Database"]
 end
-D_PORTS --> APP_HANDLERS
-D_PORTS --> APP_SERVICES
-APP_HANDLERS --> INF_ADAPT
-APP_SERVICES --> INF_ADAPT
-INF_ADAPT --> INF_EXT
+D_PORTS --> APP_ENGINE
+D_SVC --> APP_ENGINE
+APP_ENGINE --> APP_COORD
+APP_ENGINE --> APP_HANDLERS
+APP_ENGINE --> APP_PIPE
+APP_COORD --> INF_ADAPTERS
+APP_HANDLERS --> INF_ADAPTERS
+APP_PIPE --> INF_STREAM
+INF_ADAPTERS --> INF_EXT
 ```
 
 **Diagram sources**
-- [backend/app/domain/ports/__init__.py:1-2](file://backend/app/domain/ports/__init__.py#L1-L2)
-- [backend/app/application/services/__init__.py:1-2](file://backend/app/application/services/__init__.py#L1-L2)
-- [backend/app/infrastructure/adapters/__init__.py:1-2](file://backend/app/infrastructure/adapters/__init__.py#L1-L2)
+- [appv2/backend/appv2/domain/ports/__init__.py](file://appv2/backend/appv2/domain/ports/__init__.py)
+- [appv2/backend/appv2/application/trading_engine.py](file://appv2/backend/appv2/application/trading_engine.py)
+- [appv2/backend/appv2/infrastructure/__init__.py](file://appv2/backend/appv2/infrastructure/__init__.py)
 
 **Section sources**
-- [backend/app/main.py:1-227](file://backend/app/main.py#L1-L227)
-- [backend/app/config.py:1-157](file://backend/app/config.py#L1-L157)
+- [appv2/backend/appv2/main.py:1-241](file://appv2/backend/appv2/main.py#L1-L241)
 
 ## Core Components
-This section outlines the three layers and how they interact.
+This section outlines the enhanced three layers and their sophisticated interactions.
 
-- Domain Layer
-  - Contains pure business abstractions (ports/interfaces) and domain models.
-  - Defines error contracts and guarantees for infrastructure implementations.
-  - Provides entities, value objects, and aggregates used across the system.
+### Domain Layer Enhancements
+The Domain layer now contains 11 advanced services that provide comprehensive market analysis and trading capabilities:
+- **TickThrottle**: Manages processing frequency to prevent overload
+- **FootprintAccumulator**: Creates delta-colored volume profiles for market structure analysis
+- **OpeningClassifier**: Identifies session opening patterns and regimes
+- **RegimeDetector**: Detects market regimes and structural changes
+- **MarketStructureClassifier**: Classifies market structure states (5-state system)
+- **StructuralStopEngine**: Implements advanced stop-loss mechanisms
+- **PartitionExitManager**: Manages complex exit strategies
+- **DriveDecayTracker**: Monitors momentum and trend decay
+- **LatencyTracker**: Measures and reports system performance metrics
+- **GateRejectionTracker**: Tracks decision gate rejection rates
+- **PlaybookGuard**: Prevents repeated failed trading patterns
 
-- Application Layer
-  - Orchestrates use cases without embedding domain rules.
-  - Composed of handlers and services that depend on domain ports.
-  - Implements the service graph pattern for dependency injection.
+### Application Layer Sophistication
+The Application layer orchestrates complex trading workflows through:
+- **TradingEngine v2**: Complete trading orchestration with 15+ integrated services
+- **Advanced Coordinators**: Specialized handlers for entry, exit, risk, and strategy management
+- **Data Pipeline**: Multi-symbol, multi-timeframe processing with candle aggregation
+- **Session Management**: Comprehensive session state tracking and management
 
-- Infrastructure Layer
-  - Implements domain ports via adapters.
-  - Integrates with external systems (market data feeds, brokers, storage, LLMs).
-  - Depends on application and domain ports, not on application logic.
-
-Key architectural principles:
-- Dependency Inversion: Infrastructure depends on application; application depends on domain.
-- Port/Adapter: Domain defines ports; infrastructure provides adapters.
-- Separation of Concerns: Domain is free of external concerns; Application coordinates; Infrastructure handles integrations.
+### Infrastructure Layer Integration
+The Infrastructure layer provides comprehensive external system integration:
+- **Dhan Integration**: Full broker API integration for both live and paper trading
+- **WebSocket Streaming**: Real-time market data processing and broadcasting
+- **SQLite Storage**: Persistent storage for trades, signals, and session data
+- **Option Chain Fetcher**: Advanced derivatives data retrieval
 
 **Section sources**
-- [backend/app/domain/ports/__init__.py:1-2](file://backend/app/domain/ports/__init__.py#L1-L2)
-- [backend/app/application/services/__init__.py:1-2](file://backend/app/application/services/__init__.py#L1-L2)
-- [backend/app/infrastructure/adapters/__init__.py:1-2](file://backend/app/infrastructure/adapters/__init__.py#L1-L2)
+- [appv2/backend/appv2/domain/ports/broker.py:1-53](file://appv2/backend/appv2/domain/ports/broker.py#L1-L53)
+- [appv2/backend/appv2/domain/ports/market_data.py:1-64](file://appv2/backend/appv2/domain/ports/market_data.py#L1-L64)
+- [appv2/backend/appv2/domain/ports/storage.py:1-54](file://appv2/backend/appv2/domain/ports/storage.py#L1-L54)
+- [appv2/backend/appv2/application/trading_engine.py:1-638](file://appv2/backend/appv2/application/trading_engine.py#L1-L638)
 
 ## Architecture Overview
-The system initializes a service graph at startup and wires domain ports to infrastructure adapters. The trading engine and handlers consume the graph to process market data, run inference, and coordinate trades.
+The appv2 system initializes a comprehensive service graph at startup and wires domain ports to specialized infrastructure adapters. The TradingEngine v2 orchestrates complex trading workflows, processing market data through advanced pipelines and coordinating multiple specialized services.
 
 ```mermaid
 sequenceDiagram
-participant Client as "Client"
-participant API as "FastAPI App"
-participant Graph as "Service Graph"
-participant Engine as "TradingEngine"
-participant Handler as "Handlers/Services"
-participant Adapter as "Infrastructure Adapters"
-participant Ext as "External Systems"
-Client->>API : HTTP/WebSocket request
-API->>Graph : Resolve dependencies
-API->>Engine : Start trading engine
-Engine->>Handler : Invoke use cases
-Handler->>Adapter : Call domain ports
-Adapter->>Ext : Integrate with external systems
-Ext-->>Adapter : Data/results
-Adapter-->>Handler : Domain-port results
-Handler-->>Engine : Updated state
-Engine-->>API : Responses/events
-API-->>Client : Response
+participant Client as "Client/Frontend"
+participant API as "FastAPI App v2"
+participant Engine as "TradingEngine v2"
+participant Pipeline as "Data Pipeline"
+participant Coordinators as "Specialized Coordinators"
+participant Adapters as "Infrastructure Adapters"
+participant Dhan as "Dhan Broker API"
+Client->>API : HTTP/WebSocket v2 request
+API->>Engine : Initialize TradingEngine v2
+Engine->>Pipeline : Setup Data Pipeline
+Engine->>Coordinators : Configure Specialized Coordinators
+Pipeline->>Adapters : Subscribe to market data
+Adapters->>Dhan : WebSocket connection
+Dhan-->>Adapters : Real-time market data
+Adapters-->>Pipeline : Tick data processing
+Pipeline-->>Engine : Processed market observations
+Engine->>Coordinators : Evaluate trading opportunities
+Coordinators->>Adapters : Execute orders (if approved)
+Adapters->>Dhan : Place/cancel orders
+Dhan-->>Adapters : Order execution confirmations
+Adapters-->>Coordinators : Execution results
+Coordinators-->>Engine : Trade lifecycle updates
+Engine-->>API : State updates and analytics
+API-->>Client : WebSocket state broadcasts
 ```
 
 **Diagram sources**
-- [backend/app/main.py:83-170](file://backend/app/main.py#L83-L170)
+- [appv2/backend/appv2/main.py:25-90](file://appv2/backend/appv2/main.py#L25-L90)
+- [appv2/backend/appv2/application/trading_engine.py:489-517](file://appv2/backend/appv2/application/trading_engine.py#L489-L517)
 
 **Section sources**
-- [backend/app/main.py:1-227](file://backend/app/main.py#L1-L227)
+- [appv2/backend/appv2/main.py:1-241](file://appv2/backend/appv2/main.py#L1-L241)
+- [appv2/backend/appv2/application/trading_engine.py:1-638](file://appv2/backend/appv2/application/trading_engine.py#L1-L638)
 
 ## Detailed Component Analysis
 
-### Domain Layer: Ports and Contracts
-The Domain defines 11 ports/interfaces that encapsulate external concerns. These ports are the foundation of dependency inversion and enable interchangeable implementations.
+### Enhanced Domain Layer: Ports and Contracts
+The Domain layer defines three essential ports that encapsulate external concerns with comprehensive functionality:
 
-- Broker Port
-  - Responsibilities: Execute orders and cancel orders.
-  - Inputs: Signal, Portfolio, Symbol.
-  - Outputs: New Position or None.
+#### Broker Port
+The Broker Port provides comprehensive order management capabilities:
+- **Order Placement**: Supports LIMIT, SL, and bracket orders with detailed parameters
+- **Order Management**: Cancel orders, track status, and manage position squaring
+- **Portfolio Access**: Real-time portfolio information and balance tracking
+- **Integration Support**: Works with both live and paper trading modes
 
-- Market Data Port
-  - Responsibilities: Historical data, LTP, order book, live streams, candidate scanning.
-  - Error contract: Returns defaults for missing data; raises on failures.
-  - Lifecycle hooks: Initialization and close.
+#### Market Data Port
+The Market Data Port offers extensive market data access:
+- **Real-time Streaming**: WebSocket-based tick streaming with callback support
+- **Historical Data**: Comprehensive candle history retrieval
+- **Quote Services**: Latest quotes and option chain data
+- **Subscription Management**: Dynamic symbol subscription/unsubscription
 
-- Storage Port
-  - Responsibilities: Persist ticks, trades, LLM decisions, positions, events; query history.
-  - Sub-ports: TickStoragePort, TradeStoragePort, DecisionStoragePort, OpenPositionStoragePort, PositionEventStoragePort.
-
-- Notifications Port
-  - Responsibilities: Send asynchronous and synchronous alerts.
-  - Constraints: Non-blocking for tick processing.
-
-- Delta Profile Port
-  - Responsibilities: Maintain delta-colored volume profile; detect high delta zones; reset.
-  - Data contracts: DeltaBucket and DeltaProfile value objects.
-
-- Exchange Strategy Port
-  - Responsibilities: Encapsulate exchange-specific thresholds, windows, and rules.
-  - Methods: Config, session times, thresholds, EIA windows, symbol exchange resolution.
-
-- LLM Inference Port
-  - Responsibilities: Run inference, readiness checks, validation, blocking wait.
-  - Error: LLMNotReadyError for premature inference.
-
-- NPOC Port
-  - Responsibilities: Track naked previous session POCs; fill on revisit; load from storage.
-  - Data contracts: NPOCRecord and NPOCResult value objects.
-
-- Probability Inference Port
-  - Responsibilities: First-passage probability estimates; readiness.
-  - NoOp adapter: Neutral estimates when model is not trained.
+#### Storage Port
+The Storage Port provides comprehensive persistence capabilities:
+- **Trade Management**: Complete trade lifecycle tracking
+- **Signal Persistence**: Signal generation and management
+- **Session State**: Daily P&L and session state management
+- **Key-Value Operations**: Crash recovery and state persistence
 
 ```mermaid
 classDiagram
 class BrokerPort {
-+execute_order(signal, portfolio, symbol) Position|None
++place_order(symbol, side, order_type, quantity, price, trigger_price, square_off, stop_loss_value) str
 +cancel_order(order_id) bool
++get_order_status(order_id) OrderStatus
++get_positions() list[dict]
++get_open_orders() list[dict]
++get_portfolio() dict
++square_off_position(symbol) bool
++get_available_balance() float
 }
 class MarketDataPort {
-+ensure_initialized_sync(timeout)
-+close_sync()
-+scan_candidates(limit) str[]
-+fetch_history(symbol, interval, limit) OHLC[]
-+fetch_order_book(symbol) OrderBook|None
-+get_ltp(symbol) float
-+stream_full(symbols) AsyncIterator~dict~
-+stream_depth_20(symbols) AsyncIterator~Any~
-+get_option_chain(underlying, exchange, expiry_index) Any
++subscribe(symbols : list[str]) None
++unsubscribe(symbols : list[str]) None
++start_stream(on_tick : Callable) None
++stop_stream() None
++get_historical_candles(symbol, interval, days) list[OHLC]
++get_quote(symbol) Tick
++get_option_chain(underlying, expiry) list[dict]
++get_lot_size(symbol) int
++get_positions() list[dict]
 }
 class StoragePort {
-+save_tick(symbol, tick_data)
-+query_ticks(symbol, start, end, limit)
-+save_trade(trade_data)
-+query_trades(start, end)
-+save_llm_decision(decision_data)
-+query_llm_decisions(start, end)
-+save_performance_snapshot(snapshot)
-+save_session_profile(profile_data)
-+get_previous_session_profile(symbol, market) dict|None
-+get_recent_trades(limit)
-+save_position_event(event)
-+query_position_events(position_id, symbol)
-}
-class NotificationPort {
-+send(message, level) None
-+send_sync(message, level) None
-}
-class DeltaProfilePort {
-+update(price, ask_vol, bid_vol) None
-+get_profile() DeltaBucket[]
-+get_high_delta_zones(direction, sigma_mult) float[]
-+reset() None
-}
-class ExchangeStrategy {
-+config ExchangeConfig
-+name str
-+get_cvd_block_threshold() float
-+get_warm_up_minutes() int
-+get_aggression_sigma() float
-+get_displacement_multiplier() float
-+get_balance_ratio_threshold() float
-+get_big_trade_multiplier() float
-+get_llm_instruction() str
-+is_eia_window(symbol, ist_dt) bool
-+get_session_close_time() (int,int)
-+get_session_open_time() (int,int)
-+is_underlying(symbol) bool
-+get_symbol_exchange(symbol, registry) str
-}
-class LLMInferencePort {
-+predict(instruction, input_text, temperature, max_tokens, prefill) str
-+is_ready() bool
-+wait_until_ready(timeout) bool
-+validate() bool
-}
-class NPOCPort {
-+add_session_poc(underlying, date, poc) None
-+check_and_fill(underlying, current_price, tick_size) str[]
-+get_active_npocs(underlying, current_price, lookback_days) NPOCResult
-+load_from_storage(underlying) None
-}
-class ProbabilityInferencePort {
-+estimate(features) ProbabilityEstimate
-+is_ready() bool
++save_trade(trade_data : dict) str
++update_trade(trade_id : str, updates : dict) None
++get_trade(trade_id : str) dict | None
++get_open_trades(symbol : str) list[dict]
++get_trades_by_date(date_str : str) list[dict]
++save_signal(signal_data : dict) str
++kv_set(key : str, value : str) None
++kv_get(key : str) str | None
++kv_delete(key : str) None
++save_daily_pnl(date_str : str, pnl : float) None
++get_daily_pnl(date_str : str) float
 }
 ```
 
 **Diagram sources**
-- [backend/app/domain/ports/broker.py:11-27](file://backend/app/domain/ports/broker.py#L11-L27)
-- [backend/app/domain/ports/market_data.py:19-112](file://backend/app/domain/ports/market_data.py#L19-L112)
-- [backend/app/domain/ports/storage.py:54-121](file://backend/app/domain/ports/storage.py#L54-L121)
-- [backend/app/domain/ports/notifications.py:6-22](file://backend/app/domain/ports/notifications.py#L6-L22)
-- [backend/app/domain/ports/delta_profile.py:37-75](file://backend/app/domain/ports/delta_profile.py#L37-L75)
-- [backend/app/domain/ports/exchange_strategy.py:21-105](file://backend/app/domain/ports/exchange_strategy.py#L21-L105)
-- [backend/app/domain/ports/llm_inference.py:10-42](file://backend/app/domain/ports/llm_inference.py#L10-L42)
-- [backend/app/domain/ports/npoc.py:29-57](file://backend/app/domain/ports/npoc.py#L29-L57)
-- [backend/app/domain/ports/probability_inference.py:19-44](file://backend/app/domain/ports/probability_inference.py#L19-L44)
+- [appv2/backend/appv2/domain/ports/broker.py:9-53](file://appv2/backend/appv2/domain/ports/broker.py#L9-L53)
+- [appv2/backend/appv2/domain/ports/market_data.py:11-64](file://appv2/backend/appv2/domain/ports/market_data.py#L11-L64)
+- [appv2/backend/appv2/domain/ports/storage.py:8-54](file://appv2/backend/appv2/domain/ports/storage.py#L8-L54)
 
 **Section sources**
-- [backend/app/domain/ports/broker.py:1-27](file://backend/app/domain/ports/broker.py#L1-L27)
-- [backend/app/domain/ports/market_data.py:1-112](file://backend/app/domain/ports/market_data.py#L1-L112)
-- [backend/app/domain/ports/storage.py:1-121](file://backend/app/domain/ports/storage.py#L1-L121)
-- [backend/app/domain/ports/notifications.py:1-22](file://backend/app/domain/ports/notifications.py#L1-L22)
-- [backend/app/domain/ports/delta_profile.py:1-75](file://backend/app/domain/ports/delta_profile.py#L1-L75)
-- [backend/app/domain/ports/exchange_strategy.py:1-105](file://backend/app/domain/ports/exchange_strategy.py#L1-L105)
-- [backend/app/domain/ports/llm_inference.py:1-42](file://backend/app/domain/ports/llm_inference.py#L1-L42)
-- [backend/app/domain/ports/npoc.py:1-57](file://backend/app/domain/ports/npoc.py#L1-L57)
-- [backend/app/domain/ports/probability_inference.py:1-44](file://backend/app/domain/ports/probability_inference.py#L1-L44)
+- [appv2/backend/appv2/domain/ports/broker.py:1-53](file://appv2/backend/appv2/domain/ports/broker.py#L1-L53)
+- [appv2/backend/appv2/domain/ports/market_data.py:1-64](file://appv2/backend/appv2/domain/ports/market_data.py#L1-L64)
+- [appv2/backend/appv2/domain/ports/storage.py:1-54](file://appv2/backend/appv2/domain/ports/storage.py#L1-L54)
 
-### Application Layer: Handlers and Services
-The Application layer orchestrates use cases without embedding domain rules. It depends on domain ports and composes application services and handlers. The service graph is created at startup and injected into runtime components.
+### Enhanced Application Layer: Trading Engine v2
+The TradingEngine v2 represents the pinnacle of application layer sophistication with comprehensive trading orchestration:
 
-- Service Graph Pattern
-  - Created once at startup.
-  - Wires domain ports to infrastructure adapters.
-  - Provides centralized access to all collaborators.
+#### Core Architecture
+- **Complete Service Integration**: 15+ integrated services working in harmony
+- **Real-time Processing**: Tick-by-tick processing with 500ms throttle mechanism
+- **Multi-symbol Support**: Handles multiple symbols simultaneously with individual processing
+- **Session Management**: Comprehensive session state tracking and management
 
-- Trading Engine and Session Management
-  - Starts and coordinates trading lifecycle.
-  - Injects engine references into handlers for UI updates.
+#### Advanced Service Integration
+The engine integrates 11 advanced domain services:
+- **Core Pipeline Services**: TickThrottle, FootprintAccumulator for market structure analysis
+- **Classification Services**: OpeningClassifier, RegimeDetector, MarketStructureClassifier
+- **Exit Management**: StructuralStopEngine, PartitionExitManager, DriveDecayTracker
+- **Observability**: LatencyTracker, GateRejectionTracker for system monitoring
+- **Risk Management**: PlaybookGuard, SessionRiskTiers, CapitalLadder
 
-- Configuration
-  - Settings consolidate environment-driven configuration and expose computed values.
+#### Trading Workflow Orchestration
+The engine coordinates complex trading workflows:
+1. **Tick Processing**: High-frequency tick ingestion with throttling
+2. **Candle Aggregation**: Multi-interval candle formation
+3. **Market Analysis**: Advanced technical analysis and pattern recognition
+4. **Gate Evaluation**: Multi-stage decision gating system
+5. **Signal Generation**: Automated signal creation with risk parameters
+6. **Execution Coordination**: Order placement and position management
+7. **State Broadcasting**: Real-time state updates to clients
 
 ```mermaid
 flowchart TD
-Start(["Startup"]) --> BuildGraph["Build Service Graph"]
-BuildGraph --> LoadLLM["Load and Validate LLM"]
-LoadLLM --> StartEngine["Start Trading Engine"]
-StartEngine --> InjectRefs["Inject Engine into Handlers"]
-InjectRefs --> Ready(["Serve Requests"])
+Start(["Engine Initialization"]) --> SetupServices["Setup 15+ Integrated Services"]
+SetupServices --> InitSymbols["Initialize Multi-symbol Processing"]
+InitSymbols --> StartStreaming["Start WebSocket Streaming"]
+StartStreaming --> ProcessTicks["Process Incoming Ticks"]
+ProcessTicks --> ThrottleCheck{"Throttle Check"}
+ThrottleCheck --> |Pass| AdvancedAnalysis["Run Advanced Market Analysis"]
+ThrottleCheck --> |Fail| SkipAnalysis["Skip Heavy Processing"]
+AdvancedAnalysis --> GateEvaluation["Evaluate Trading Gates"]
+GateEvaluation --> Decision{"Decision Made?"}
+Decision --> |Yes| GenerateSignal["Generate Trading Signal"]
+Decision --> |No| ContinueMonitoring["Continue Monitoring"]
+GenerateSignal --> ExecuteOrders["Execute Orders via Broker"]
+ExecuteOrders --> UpdateState["Update Internal State"]
+UpdateState --> BroadcastState["Broadcast State Updates"]
+ContinueMonitoring --> BroadcastState
+SkipAnalysis --> BroadcastState
+BroadcastState --> ProcessTicks
 ```
 
 **Diagram sources**
-- [backend/app/main.py:83-127](file://backend/app/main.py#L83-L127)
-- [backend/app/config.py:26-157](file://backend/app/config.py#L26-L157)
+- [appv2/backend/appv2/application/trading_engine.py:186-218](file://appv2/backend/appv2/application/trading_engine.py#L186-L218)
+- [appv2/backend/appv2/application/trading_engine.py:219-262](file://appv2/backend/appv2/application/trading_engine.py#L219-L262)
 
 **Section sources**
-- [backend/app/main.py:1-227](file://backend/app/main.py#L1-L227)
-- [backend/app/config.py:1-157](file://backend/app/config.py#L1-L157)
+- [appv2/backend/appv2/application/trading_engine.py:1-638](file://appv2/backend/appv2/application/trading_engine.py#L1-L638)
 
-### Infrastructure Layer: Adapters and External Integrations
-The Infrastructure layer implements domain ports via adapters. It integrates with external systems such as market data providers, brokers, storage backends, and LLM inference engines.
+### Comprehensive Infrastructure Layer: Specialized Adapters
+The Infrastructure layer provides comprehensive external system integration through specialized adapters:
 
-- Adapters Module
-  - Houses implementations of domain ports.
-  - Provides concrete behavior for market data, broker execution, storage persistence, notifications, and inference.
+#### Dhan Integration
+- **DhanFeed Adapter**: Real-time WebSocket market data streaming
+- **DhanExecutor Adapter**: Full order management with live/paper trading modes
+- **OptionChainFetcher**: Advanced derivatives data retrieval and management
 
-- External Systems
-  - Market Data: WebSocket feeds, historical APIs, order book snapshots.
-  - Broker: Paper/live execution adapters.
-  - Storage: Persistent stores for ticks, trades, decisions, positions, events.
-  - LLM: Model backends with readiness and validation.
+#### Storage Solutions
+- **SQLiteStorageAdapter**: Persistent storage for trades, signals, and session data
+- **Crash Recovery**: Key-value storage for system state persistence
+
+#### Streaming and Processing
+- **StreamManager**: WebSocket connection management and tick routing
+- **TickProcessor**: High-performance tick processing and preprocessing
+- **GameStateBroadcaster**: Real-time state broadcasting to connected clients
 
 ```mermaid
 graph LR
-DPorts["Domain Ports"] --> Adapters["Infrastructure Adapters"]
-Adapters --> Market["Market Data Providers"]
-Adapters --> BrokerInfra["Brokers"]
-Adapters --> StorageInfra["Storage Backends"]
-Adapters --> LLMInfra["LLM Engines"]
+DPorts["Domain Ports"] --> DhanFeed["DhanFeed Adapter<br/>• WebSocket Streaming<br/>• Real-time Tick Processing"]
+DPorts --> DhanExec["DhanExecutor Adapter<br/>• Order Placement<br/>• Position Management<br/>• Portfolio Tracking"]
+DPorts --> SQLiteStore["SQLiteStorage Adapter<br/>• Trade Persistence<br/>• Signal Storage<br/>• Session State"]
+DPorts --> OptionChain["OptionChainFetcher<br/>• Derivatives Data<br/>• Chain Management"]
+DhanFeed --> MarketData["Market Data Services"]
+DhanExec --> BrokerOps["Broker Operations"]
+SQLiteStore --> StorageSvc["Storage Services"]
+OptionChain --> Derivatives["Derivatives Services"]
+MarketData --> StreamMgr["StreamManager"]
+BrokerOps --> ExecMgr["Execution Manager"]
+StorageSvc --> DataPersistence["Data Persistence"]
+Derivatives --> ChainData["Chain Data"]
 ```
 
 **Diagram sources**
-- [backend/app/infrastructure/adapters/__init__.py:1-2](file://backend/app/infrastructure/adapters/__init__.py#L1-L2)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py](file://appv2/backend/appv2/infrastructure/dhan_feed.py)
+- [appv2/backend/appv2/infrastructure/dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [appv2/backend/appv2/infrastructure/sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [appv2/backend/appv2/infrastructure/option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
 
 **Section sources**
-- [backend/app/infrastructure/adapters/__init__.py:1-2](file://backend/app/infrastructure/adapters/__init__.py#L1-L2)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py](file://appv2/backend/appv2/infrastructure/dhan_feed.py)
+- [appv2/backend/appv2/infrastructure/dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [appv2/backend/appv2/infrastructure/sqlite_storage.py](file://appv2/backend/appv2/infrastructure/sqlite_storage.py)
+- [appv2/backend/appv2/infrastructure/option_chain_fetcher.py](file://appv2/backend/appv2/infrastructure/option_chain_fetcher.py)
+
+## Enhanced Domain Services
+The appv2 architecture introduces 11 advanced domain services that provide comprehensive market analysis and trading capabilities:
+
+### Core Processing Services
+- **TickThrottle**: Manages processing frequency to prevent system overload
+- **FootprintAccumulator**: Creates delta-colored volume profiles for market structure analysis
+- **CandleAggregator**: Multi-interval candle formation and aggregation
+
+### Market Classification Services
+- **OpeningClassifier**: Identifies session opening patterns and regime changes
+- **RegimeDetector**: Detects market regimes and structural shifts
+- **MarketStructureClassifier**: Classifies market structure into 5 distinct states
+
+### Exit and Risk Management Services
+- **StructuralStopEngine**: Implements advanced stop-loss mechanisms based on market structure
+- **PartitionExitManager**: Manages complex exit strategies with profit-taking partitions
+- **DriveDecayTracker**: Monitors momentum and trend decay for optimal exit timing
+
+### Observability and Control Services
+- **LatencyTracker**: Measures and reports system performance metrics (p50/p95/p99)
+- **GateRejectionTracker**: Tracks decision gate rejection rates and system effectiveness
+- **PlaybookGuard**: Prevents repeated failed trading patterns and protects against systematic losses
+
+### Advanced Trading Services
+- **FirstBreakoutFilter**: Filters breakout signals based on structural validation
+- **IVRankTracker**: Tracks implied volatility rankings for options trading
+- **GammaAccelerationDetector**: Monitors gamma acceleration for options risk management
+- **CrossIndexCorrelation**: Analyzes correlations between different market indices
+- **VolatilityFeatures**: Extracts volatility-related features for machine learning models
+- **SessionRiskTiers**: Implements dynamic risk management based on session conditions
+- **CapitalLadder**: Manages capital allocation across different risk tiers
+- **StateSnapshotBuilder**: Builds comprehensive state snapshots for system monitoring
+
+**Section sources**
+- [appv2/backend/appv2/application/trading_engine.py:55-73](file://appv2/backend/appv2/application/trading_engine.py#L55-L73)
+
+## Advanced Application Layer
+The application layer orchestrates complex trading workflows through sophisticated components:
+
+### Trading Engine v2 Architecture
+The TradingEngine v2 serves as the central orchestrator with comprehensive capabilities:
+- **Multi-symbol Processing**: Handles multiple symbols simultaneously with individual processing pipelines
+- **Real-time Coordination**: Coordinates 15+ integrated services in real-time
+- **Session State Management**: Maintains comprehensive session state tracking
+- **WebSocket Broadcasting**: Real-time state updates to connected clients
+
+### Coordinator Services
+Specialized coordinators handle specific aspects of trading:
+- **EntryCoordinator**: Manages entry execution with risk controls and position sizing
+- **ExitCoordinator**: Handles exit strategies with profit-taking and stop-loss management
+- **RiskOrchestrator**: Implements comprehensive risk management across all trading activities
+- **StrategyOrchestrator**: Coordinates strategy execution and adaptation
+
+### Data Pipeline Orchestration
+The DataPipelineOrchestrator processes market data through sophisticated analysis:
+- **Multi-interval Processing**: Handles multiple timeframes simultaneously
+- **Volume Profile Analysis**: Creates comprehensive volume profile insights
+- **Technical Indicators**: Computes advanced technical indicators and signals
+- **State Management**: Maintains pipeline state for broadcasting and analysis
+
+**Section sources**
+- [appv2/backend/appv2/application/trading_engine.py:77-218](file://appv2/backend/appv2/application/trading_engine.py#L77-L218)
+- [appv2/backend/appv2/application/data_pipeline.py:40-151](file://appv2/backend/appv2/application/data_pipeline.py#L40-L151)
+
+## Comprehensive Infrastructure Layer
+The infrastructure layer provides robust external system integration:
+
+### WebSocket Streaming System
+- **StreamManager**: Manages WebSocket connections and tick routing
+- **GameStateBroadcaster**: Real-time state broadcasting to connected clients
+- **Connection Management**: Robust connection handling with automatic reconnection
+
+### Storage and Persistence
+- **SQLiteStorageAdapter**: Comprehensive persistent storage solution
+- **Trade Lifecycle Management**: Complete trade data lifecycle management
+- **Session State Persistence**: Persistent session state for crash recovery
+
+### Broker Integration
+- **DhanExecutor**: Full broker API integration with live/paper trading modes
+- **Order Management**: Comprehensive order lifecycle management
+- **Position Tracking**: Real-time position and portfolio tracking
+
+**Section sources**
+- [appv2/backend/appv2/infrastructure/stream_manager.py](file://appv2/backend/appv2/infrastructure/stream_manager.py)
+- [appv2/backend/appv2/infrastructure/tick_processor.py](file://appv2/backend/appv2/infrastructure/tick_processor.py)
+- [appv2/backend/appv2/api/state_broadcaster.py](file://appv2/backend/appv2/api/state_broadcaster.py)
 
 ## Dependency Analysis
-Clean architecture enforces strict dependency directions:
-- Domain depends on nothing external.
-- Application depends on Domain ports.
-- Infrastructure depends on Application and Domain ports.
+The appv2 architecture enforces strict dependency directions with enhanced service integration:
 
 ```mermaid
 graph TB
-Domain["Domain Layer"] --> App["Application Layer"]
-App --> Infra["Infrastructure Layer"]
-Infra --> Ext["External Systems"]
+subgraph "Enhanced Domain Layer"
+DomainPorts["Domain Ports<br/>• BrokerPort<br/>• MarketDataPort<br/>• StoragePort"]
+DomainServices["11 Advanced Domain Services<br/>• TickThrottle<br/>• FootprintAccumulator<br/>• OpeningClassifier<br/>• RegimeDetector<br/>• MarketStructureClassifier<br/>• StructuralStopEngine<br/>• PartitionExitManager<br/>• DriveDecayTracker<br/>• LatencyTracker<br/>• GateRejectionTracker<br/>• PlaybookGuard"]
+DomainModels["Domain Models<br/>• Tick<br/>• OHLC<br/>• Signal<br/>• Trade"]
+DomainEnums["Domain Enums<br/>• SignalType<br/>• OrderType<br/>• OrderSide<br/>• OrderStatus"]
+end
+subgraph "Advanced Application Layer"
+TradingEngine["TradingEngine v2<br/>• Central Orchestration<br/>• 15+ Integrated Services"]
+Coordinators["Specialized Coordinators<br/>• EntryCoordinator<br/>• ExitCoordinator<br/>• RiskOrchestrator<br/>• StrategyOrchestrator"]
+Handlers["Application Handlers<br/>• TradeLifecycleHandler<br/>• SessionStateManager<br/>• PostTradeAnalytics"]
+DataPipeline["Data Pipeline Orchestrator<br/>• Multi-symbol Processing<br/>• Candle Aggregation<br/>• Volume Profile Analysis"]
+end
+subgraph "Comprehensive Infrastructure Layer"
+DhanAdapters["Dhan Adapters<br/>• DhanFeed<br/>• DhanExecutor<br/>• OptionChainFetcher"]
+StorageAdapters["Storage Adapters<br/>• SQLiteStorage"]
+StreamingAdapters["Streaming Adapters<br/>• StreamManager<br/>• GameStateBroadcaster"]
+ExternalSystems["External Systems<br/>• Dhan Broker API<br/>• Market Data Feeds<br/>• WebSocket Streams<br/>• SQLite Database"]
+end
+DomainPorts --> TradingEngine
+DomainServices --> TradingEngine
+DomainModels --> TradingEngine
+DomainEnums --> TradingEngine
+TradingEngine --> Coordinators
+TradingEngine --> Handlers
+TradingEngine --> DataPipeline
+Coordinators --> DhanAdapters
+Handlers --> DhanAdapters
+DataPipeline --> StreamingAdapters
+DhanAdapters --> ExternalSystems
+StorageAdapters --> ExternalSystems
+StreamingAdapters --> ExternalSystems
 ```
 
-- Dependency Inversion Principle
-  - Domain defines ports; Infrastructure implements them.
-  - Application composes domain ports; Infrastructure provides implementations.
-  - This prevents external concerns from leaking into the domain.
+### Enhanced Dependency Inversion
+- **Domain Independence**: Pure business logic with 11 advanced services
+- **Application Orchestration**: Central coordination of all services
+- **Infrastructure Integration**: Specialized adapters for external systems
 
-- Port/Adapter Architecture
-  - Each domain port corresponds to a concrete adapter in Infrastructure.
-  - Adapters translate between domain abstractions and external APIs.
-
-- Service Graph Injection
-  - The service graph is constructed at startup and passed to the trading engine and handlers.
-  - This centralizes wiring and enables testability via mock adapters.
+### Service Integration Patterns
+- **TradingEngine v2**: Central hub for all service coordination
+- **Data Pipeline**: Sophisticated multi-symbol processing
+- **WebSocket Broadcasting**: Real-time state distribution
 
 **Section sources**
-- [backend/app/main.py:83-127](file://backend/app/main.py#L83-L127)
-- [backend/app/domain/ports/__init__.py:1-2](file://backend/app/domain/ports/__init__.py#L1-L2)
-- [backend/app/application/services/__init__.py:1-2](file://backend/app/application/services/__init__.py#L1-L2)
-- [backend/app/infrastructure/adapters/__init__.py:1-2](file://backend/app/infrastructure/adapters/__init__.py#L1-L2)
+- [appv2/backend/appv2/application/trading_engine.py:86-218](file://appv2/backend/appv2/application/trading_engine.py#L86-L218)
+- [appv2/backend/appv2/main.py:39-89](file://appv2/backend/appv2/main.py#L39-L89)
 
 ## Performance Considerations
-- Startup Latency
-  - LLM model loading and validation occur during startup; the server waits up to a configured timeout.
-  - Consider preloading models and caching warm-up steps to reduce cold-start delays.
+The appv2 architecture addresses performance through several optimization strategies:
 
-- Throughput and Concurrency
-  - Asynchronous market data streaming and inference calls improve throughput.
-  - Ensure adapters implement efficient buffering and backpressure to avoid overwhelming downstream systems.
+### System Optimization
+- **Tick Throttling**: 500ms minimum interval prevents system overload
+- **Asynchronous Processing**: Non-blocking operations for all external calls
+- **Connection Pooling**: Efficient WebSocket connection management
+- **Memory Management**: Optimized data structures for high-frequency processing
 
-- Persistence and Batch Writes
-  - Use batched writes for ticks and events to minimize I/O overhead.
-  - Implement periodic flushes and graceful shutdown routines to prevent data loss.
+### Scalability Features
+- **Multi-symbol Architecture**: Independent processing per symbol
+- **Modular Design**: Easy addition of new services and adapters
+- **Resource Management**: Efficient memory and CPU utilization
+- **Graceful Degradation**: System continues operating during partial failures
 
-- Rate Limiting
-  - Built-in HTTP rate limiting protects internal services from overload.
-
-[No sources needed since this section provides general guidance]
+### Monitoring and Observability
+- **Latency Tracking**: Comprehensive performance metrics collection
+- **Gate Rejection Analysis**: System effectiveness monitoring
+- **Real-time Broadcasting**: WebSocket-based state updates
+- **Crash Recovery**: Persistent state management for system restarts
 
 ## Troubleshooting Guide
-Common issues and remedies:
-- LLM Not Ready
-  - Symptom: Inference attempts fail early in startup.
-  - Action: Verify model paths and readiness checks; ensure wait_until_ready completes before serving traffic.
+Common issues and solutions for the enhanced appv2 architecture:
 
-- Market Data Disconnections
-  - Symptom: Streaming halts or returns errors.
-  - Action: Confirm adapter lifecycle hooks (initialize/close) and reconnection logic.
+### Connection Issues
+- **WebSocket Disconnections**: Verify DhanFeed adapter configuration and network connectivity
+- **Broker Authentication**: Check Dhan access token and client credentials
+- **Stream Subscription**: Ensure proper symbol registration and subscription management
 
-- Storage Failures
-  - Symptom: Persistence calls raise exceptions.
-  - Action: Validate adapter implementations and storage backends; confirm query limits and transaction boundaries.
+### Performance Issues
+- **High Latency**: Monitor LatencyTracker metrics and adjust throttle settings
+- **Memory Leaks**: Check for proper resource cleanup in adapters
+- **CPU Overload**: Review TickThrottle configuration and processing logic
 
-- Broker Rejections
-  - Symptom: Orders not executed; returns None.
-  - Action: Inspect adapter logs and broker responses; validate order parameters and account permissions.
+### Data Integrity
+- **Missing Market Data**: Verify WebSocket connections and DhanFeed adapter status
+- **Trade Discrepancies**: Check reconciliation loop and position synchronization
+- **Storage Failures**: Validate SQLite database connectivity and permissions
 
-- Notification Delays
-  - Symptom: Alerts delayed or lost.
-  - Action: Ensure adapters implement non-blocking send semantics; monitor queue depths.
+### Service Coordination
+- **Signal Generation Issues**: Review gate evaluation logic and parameter settings
+- **Order Execution Problems**: Verify broker adapter configuration and order parameters
+- **State Synchronization**: Check WebSocket broadcasting and client connection management
 
 **Section sources**
-- [backend/app/main.py:88-107](file://backend/app/main.py#L88-L107)
-- [backend/app/domain/ports/llm_inference.py:6-42](file://backend/app/domain/ports/llm_inference.py#L6-L42)
-- [backend/app/domain/ports/market_data.py:26-38](file://backend/app/domain/ports/market_data.py#L26-L38)
-- [backend/app/domain/ports/storage.py:63-121](file://backend/app/domain/ports/storage.py#L63-L121)
-- [backend/app/domain/ports/notifications.py:9-22](file://backend/app/domain/ports/notifications.py#L9-L22)
+- [appv2/backend/appv2/main.py:46-66](file://appv2/backend/appv2/main.py#L46-L66)
+- [appv2/backend/appv2/application/trading_engine.py:519-565](file://appv2/backend/appv2/application/trading_engine.py#L519-L565)
 
 ## Conclusion
-The backend implements a robust three-layer clean architecture:
-- Domain ports define the system’s capabilities and contracts.
-- Application orchestrates use cases via the service graph and dependency injection.
-- Infrastructure adapts external systems to domain abstractions.
+The appv2 architecture represents a sophisticated implementation of clean architecture principles with comprehensive enhancements:
+- **Enhanced Domain Services**: 11 advanced services provide comprehensive market analysis capabilities
+- **Advanced Application Layer**: TradingEngine v2 orchestrates complex trading workflows with real-time processing
+- **Comprehensive Infrastructure**: Specialized adapters integrate with external systems including Dhan broker, WebSocket streaming, and SQLite storage
 
-This design ensures maintainability, testability, and scalability while keeping domain logic pure and independent of external concerns.
+The architecture ensures maintainability, testability, and scalability while providing robust trading capabilities with comprehensive market analysis, risk management, and real-time processing. The enhanced service integration patterns and sophisticated dependency management enable the system to handle complex trading scenarios while maintaining clean separation of concerns.

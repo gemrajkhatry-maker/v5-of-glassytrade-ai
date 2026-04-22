@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from app.config import settings
 from app.application.utils import is_market_open
+from app.domain.trading.models.utils import safe_side as _safe_side
 
 if TYPE_CHECKING:
     from app.application.stream_manager import StreamManager
@@ -109,7 +110,7 @@ class WatchdogManager:
                                             self._session_service._storage.save_trade({
                                                 "position_id": pos.id,
                                                 "symbol": sym,
-                                                "side": pos.side.value if hasattr(pos.side, 'value') else str(pos.side),
+                                                "side": _safe_side(pos.side),
                                                 "entry_price": pos.entry_price,
                                                 "exit_price": ltp,
                                                 "size": pos.size,

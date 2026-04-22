@@ -16,6 +16,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from app.domain.constants import CVD_SLOPE_HARD_BLOCK
+from app.domain.trading.models.enums import SetupType
+
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
 
@@ -84,8 +87,6 @@ def compute_grade_score(
     footprint_candle=None,
 ) -> int:
     """Compute A/B/C setup grade score from market confluence."""
-    from app.domain.constants import CVD_SLOPE_HARD_BLOCK
-    from app.domain.trading.models.enums import SetupType
 
     score = 0
 

@@ -41,7 +41,18 @@ class OptionScannerService:
     """Simple momentum-based contract selection for MCX/NSE."""
 
     _SCAN_NSE_UNDERLYINGS = frozenset({"NIFTY", "BANKNIFTY", "FINNIFTY"})
-    _SCAN_MCX_UNDERLYINGS = frozenset({"CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"})
+    _SCAN_MCX_UNDERLYINGS = frozenset(
+        {
+            "CRUDEOIL",
+            "NATURALGAS",
+            "GOLD",
+            "SILVER",
+            # MCX mini / alternate roots (Dhan chain is per root; SILVER ≠ SILVERM)
+            "GOLDM",
+            "SILVERM",
+            "CRUDEOILM",
+        }
+    )
 
     _STRIKE_INTERVALS = {
         "NIFTY": 50,
@@ -50,17 +61,23 @@ class OptionScannerService:
         "CRUDEOIL": 50,
         "NATURALGAS": 5,
         "GOLD": 100,
+        "GOLDM": 100,
         "SILVER": 500,
+        "SILVERM": 500,
+        "CRUDEOILM": 50,
     }
 
     _MIN_OI = {
-        "NIFTY": 100_000,
-        "BANKNIFTY": 300_000,
-        "FINNIFTY": 50_000,
+        "NIFTY": 50_000,
+        "BANKNIFTY": 150_000,
+        "FINNIFTY": 30_000,
         "CRUDEOIL": 10,
         "NATURALGAS": 500,
         "GOLD": 0,
+        "GOLDM": 0,
         "SILVER": 0,
+        "SILVERM": 0,
+        "CRUDEOILM": 10,
     }
 
     def __init__(self, broker, default_underlyings: list[str] | None = None) -> None:
@@ -139,7 +156,7 @@ class OptionScannerService:
         ask = float(opt.ask or 0)
         if bid > 0 and ask > 0 and ltp > 0:
             spread_pct = (ask - bid) / ltp * 100
-            if spread_pct > 2.5:
+            if spread_pct > 4.0:
                 return None
 
         # Score
@@ -248,8 +265,11 @@ class OptionScannerService:
         ]
         is_mcx = u.upper() in (
             "CRUDEOIL",
+            "CRUDEOILM",
             "GOLD",
+            "GOLDM",
             "SILVER",
+            "SILVERM",
             "NATURALGAS",
             "COPPER",
         )
@@ -361,15 +381,42 @@ class OptionScannerService:
         for r in results:
             grouped[r.underlying].append(r)
 
-        diverse_results = []
+        # Per-underlying shortlists (best contracts first within each root).
+        per_u: dict[str, list[ScanResult]] = {}
         for u_name, u_results in grouped.items():
-            u_results.sort(key=lambda r: -r.score)
-            # Take top 2 from each index to ensure diversity (e.g. 2 Nifty, 2 BankNifty, 2 FinNifty)
-            diverse_results.extend(u_results[:top_per_underlying])
+            ranked = sorted(u_results, key=lambda r: -r.score)
+            cap = max(1, int(top_per_underlying))
+            per_u[u_name] = ranked[:cap]
 
-        # Sort the combined diverse list and take the final N (5-6)
-        diverse_results.sort(key=lambda r: -r.score)
-        final = diverse_results[:n]
+        # Round-robin across roots ordered by *best* score on that root.
+        # Pure global sort by score used to drop entire underlyings (e.g. GOLDM) when
+        # CRUDEOIL/NATURALGAS dominated the top-N — mini metals never got a slot even
+        # with a healthy chain.
+        u_ranked = sorted(
+            per_u.keys(),
+            key=lambda u: per_u[u][0].score if per_u[u] else -1.0,
+            reverse=True,
+        )
+        final: list[ScanResult] = []
+        round_idx = 0
+        while len(final) < n and per_u:
+            took_any = False
+            for u in u_ranked:
+                if len(final) >= n:
+                    break
+                lst = per_u.get(u, [])
+                if round_idx < len(lst):
+                    final.append(lst[round_idx])
+                    took_any = True
+            if not took_any:
+                break
+            round_idx += 1
+
+        logger.info(
+            "scan_top_n balanced: roots_with_chain=%s picked_roots=%s",
+            sorted(grouped.keys()),
+            [r.underlying for r in final],
+        )
 
         # If no contracts found (no momentum), return ATM contracts for monitoring
         if not final:
@@ -385,7 +432,9 @@ class OptionScannerService:
                         "CRUDEOIL",
                         "NATURALGAS",
                         "GOLD",
+                        "GOLDM",
                         "SILVER",
+                        "SILVERM",
                     ]
                 else:
                     _fb_underlyings = ["NIFTY", "BANKNIFTY", "FINNIFTY"]

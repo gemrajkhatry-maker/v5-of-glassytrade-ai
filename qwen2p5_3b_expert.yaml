@@ -1,0 +1,38 @@
+# Qwen2.5-3B Training on expert_amt_dataset
+# Smaller model to avoid Metal watchdog crashes
+# 29,459 examples available
+
+# Model settings
+model: mlx-community/Qwen2.5-3B-Instruct-4bit
+train: true
+data: expert_amt_dataset
+adapter_path: ./qwen2p5_3b_expert_adapter
+fine_tune_type: lora
+
+# LoRA parameters
+num_layers: 16
+lora_parameters:
+  rank: 32
+  dropout: 0.05
+  scale: 2.0
+
+# Training settings
+batch_size: 2
+iters: 2000
+learning_rate: 1e-4
+grad_checkpoint: true
+max_seq_length: 512
+
+# Validation - minimize runs
+steps_per_eval: 99999
+val_batches: 1
+
+# Checkpointing - save more frequently for crash recovery
+save_every: 50
+
+# Optimizer
+optimizer: adamw
+seed: 42
+
+# Report settings - frequent for monitoring
+steps_per_report: 25

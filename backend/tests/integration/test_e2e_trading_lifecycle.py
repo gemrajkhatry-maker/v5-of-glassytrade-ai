@@ -192,20 +192,19 @@ class TestFullTradingLifecycle:
 @pytest.fixture
 def mock_app():
     """Create a FastAPI TestClient with mocked service graph."""
-    with patch("app.api.dependencies.get_service_graph") as mock_graph:
-        mock = MagicMock()
-        mock.trading_session = MagicMock()
-        mock.llm_inference = MagicMock()
-        mock.llm_inference.is_ready.return_value = True
-        mock.probability_engine = MagicMock()
-        mock.probability_engine.is_ready.return_value = True
-        mock.active_symbols = ["NIFTY 24 FEB 25750 CALL"]
-        mock.market_data = MagicMock()
-        mock._raw_storage = MagicMock()
-        mock_graph.return_value = mock
+    from app.main import app as fastapi_app
+    mock = MagicMock()
+    mock.trading_session = MagicMock()
+    mock.llm_inference = MagicMock()
+    mock.llm_inference.is_ready.return_value = True
+    mock.probability_engine = MagicMock()
+    mock.probability_engine.is_ready.return_value = True
+    mock.active_symbols = ["NIFTY 24 FEB 25750 CALL"]
+    mock.market_data = MagicMock()
+    mock._raw_storage = MagicMock()
+    fastapi_app.state.service_graph = mock
 
-        from app.main import app as fastapi_app
-        yield TestClient(fastapi_app), mock
+    yield TestClient(fastapi_app), mock
 
 
 class TestWebSocketServerDrivenMode:

@@ -216,7 +216,7 @@ class EntryCoordinator:
                 selected_strike,
             )
         except Exception:
-            log.debug("Option selection skipped", exc_info=True)
+            log.warning("Option selection failed — falling back to default strike", exc_info=True)
 
         # Execute order (network I/O — outside lock to avoid blocking all readers)
         position = self._broker.execute_order(sig, session.portfolio, symbol)
@@ -284,4 +284,4 @@ class EntryCoordinator:
                         }
                     )
                 except Exception:
-                    log.debug("Failed to persist open position", exc_info=True)
+                    log.warning("Failed to persist open position — position may be lost on restart", exc_info=True)

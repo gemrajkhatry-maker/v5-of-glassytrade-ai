@@ -83,7 +83,14 @@ class VPContractSelector:
 
     # Index/underlying configuration — exchange-aware
     NSE_INDICES: tuple[str, ...] = ("NIFTY", "BANKNIFTY", "FINNIFTY")
-    MCX_UNDERLYINGS: tuple[str, ...] = ("CRUDEOIL", "NATURALGAS", "GOLD", "SILVER")
+    MCX_UNDERLYINGS: tuple[str, ...] = (
+        "CRUDEOIL",
+        "NATURALGAS",
+        "GOLD",
+        "GOLDM",
+        "SILVER",
+        "SILVERM",
+    )
 
     STRIKE_INTERVALS: dict[str, int] = {
         "NIFTY": 50,
@@ -92,7 +99,9 @@ class VPContractSelector:
         "CRUDEOIL": 50,
         "NATURALGAS": 5,
         "GOLD": 100,
+        "GOLDM": 100,
         "SILVER": 500,
+        "SILVERM": 500,
     }
 
     # VP bucket size (in price units)
@@ -103,7 +112,9 @@ class VPContractSelector:
         "CRUDEOIL": 10.0,
         "NATURALGAS": 1.0,
         "GOLD": 10.0,
+        "GOLDM": 10.0,
         "SILVER": 25.0,
+        "SILVERM": 25.0,
     }
 
     # Imbalance threshold (points beyond VA for BULLISH/BEARISH)
@@ -114,7 +125,9 @@ class VPContractSelector:
         "CRUDEOIL": 20.0,
         "NATURALGAS": 5.0,
         "GOLD": 50.0,
+        "GOLDM": 50.0,
         "SILVER": 100.0,
+        "SILVERM": 100.0,
     }
 
     # Minimum R:R to keep a contract

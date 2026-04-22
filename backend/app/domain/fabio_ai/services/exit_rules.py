@@ -13,10 +13,12 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app.domain.trading.models.enums import CushionState, MarketStateCodec, Side
+from app.domain.constants import MIN_RR_RATIO
 
 if TYPE_CHECKING:
-    from app.domain.fabio_ai.services.exit_engine import ExitSignal
     from app.domain.trading.models.entities import Position
+
+from app.domain.fabio_ai.services.exit_signal import ExitSignal
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +75,6 @@ def check_stop_loss(
     Returns:
         ExitSignal if stop loss hit, None otherwise.
     """
-    from app.domain.fabio_ai.services.exit_engine import ExitSignal
-
     is_long = position.side == Side.LONG or position.side.value == "LONG"
     sl = float(position.stop_loss)
     sl_check = stop_price if stop_price is not None else current_price
@@ -115,8 +115,6 @@ def check_time_stop(
     Returns:
         ExitSignal if time stop or scratch triggered, None otherwise.
     """
-    from app.domain.fabio_ai.services.exit_engine import ExitSignal
-
     # Resolve entry_time: Position stores it as ISO string
     entry_time_epoch: float
     if position.entry_time:
@@ -205,8 +203,6 @@ def check_time_stop_with_price(
     Returns:
         ExitSignal if time stop or scratch triggered, None otherwise.
     """
-    from app.domain.fabio_ai.services.exit_engine import ExitSignal
-
     # Resolve entry_time: Position stores it as ISO string
     entry_time_epoch: float
     if position.entry_time:
@@ -290,8 +286,6 @@ def check_scratch(
     Returns:
         ExitSignal if scratch triggered, None otherwise.
     """
-    from app.domain.fabio_ai.services.exit_engine import ExitSignal
-
     # Resolve entry_time: Position stores it as ISO string
     entry_time_epoch: float
     if position.entry_time:
@@ -399,7 +393,6 @@ def check_spread_blowout(
     Returns:
         ExitSignal if spread blowout detected, None otherwise.
     """
-    from app.domain.fabio_ai.services.exit_engine import ExitSignal
 
     if best_bid <= 0 or best_ask <= 0 or premium <= 0:
         return None
@@ -470,7 +463,6 @@ def is_valid_rr(
     Returns:
         True if RR ratio meets minimum threshold.
     """
-    from app.domain.constants import MIN_RR_RATIO
 
     threshold = min_rr if min_rr is not None else MIN_RR_RATIO
     if entry <= 0:

@@ -36,8 +36,20 @@ from app.domain.constants import (
     DISPLACEMENT_LOOKBACK,
     IB_MINUTES,
     VALUE_AREA_PCT,
+    LVN_THRESHOLD,
+    HVN_THRESHOLD,
+    LVN_PERCENTILE,
+    LVN_MIN_SEPARATION,
+    HVN_PERCENTILE,
+    HVN_MIN_SEPARATION,
 )
 from app.domain.fabio_ai.services.cvd_tracker import CVDTracker
+from app.domain.fabio_ai.services.orderflow_detectors import (
+    BigTradeDetector,
+    BubbleDetector,
+    OFICalculator,
+    AbsorptionDetector,
+)
 from app.domain.fabio_ai.services.profile_classifier import (
     classify_shape,
     POCMigrationTracker,
@@ -101,9 +113,7 @@ SymbolConfigLike = ISymbolConfig
 
 class AMTConfig:
     # LVN/HVN thresholds from constants.py (Fabio spec-compliant)
-    from app.domain import constants
-
-    LVN_THRESHOLD: float = constants.LVN_THRESHOLD  # < 15% of mean (Fabio spec)
+    LVN_THRESHOLD: float = LVN_THRESHOLD  # < 15% of mean (Fabio spec)
     LVN_SMOOTHING: int = 3  # Smooth histogram before LVN/HVN detection
     OBI_THRESHOLD: float = 0.25
     DELTA_THRESHOLD: float = 0.3
@@ -112,7 +122,7 @@ class AMTConfig:
     BUBBLE_VOL_MULTIPLIER: float = 1.5
     AGGRESSION_EMA_PERIOD: int = 20  # EMA period for dynamic volume threshold
     DELTA_DIRECTIONALITY_THRESHOLD: float = 0.40  # Professional: 40-50% delta ratio
-    HVN_THRESHOLD: float = constants.HVN_THRESHOLD  # > 200% of mean (Fabio spec)
+    HVN_THRESHOLD: float = HVN_THRESHOLD  # > 200% of mean (Fabio spec)
 
     # FIX #9: Balance ratio threshold for Indian markets
     # Indian options have wider ranges due to gamma/theta
@@ -173,7 +183,6 @@ def find_lvns(
     smoothed: list[float] | None = None,
 ) -> list[float]:
     """Thin wrapper — extracts prices from LVNLevel objects."""
-    from app.domain.constants import LVN_PERCENTILE, LVN_MIN_SEPARATION
     cfg = cfg or AMTConfig()
     levels = _find_lvns_extracted(
         profile,
@@ -191,7 +200,6 @@ def find_hvns(
     smoothed: list[float] | None = None,
 ) -> list[float]:
     """Thin wrapper — extracts prices from HVNLevel objects."""
-    from app.domain.constants import HVN_PERCENTILE, HVN_MIN_SEPARATION
     cfg = cfg or AMTConfig()
     levels = _find_hvns_extracted(
         profile,
@@ -258,6 +266,8 @@ class AMTAnalyzer:
         # VWAP variance accumulator for σ bands
         self._vwap_cum_sq_vol: float = 0.0  # Σ((TP - shift)² × volume)
         self._vwap_shift: float = 0.0  # Reference price for numerically stable variance
+        # Price deviations for proper VWAP std calculation (Task 2.1)
+        self._vwap_price_deviations: list[float] = []
         # Initial Balance tracker
         self._ib_tracker = InitialBalanceEngine(ib_minutes=IB_MINUTES)
         # Sticky IB break state (survives price re-entry into IB)
@@ -270,33 +280,36 @@ class AMTAnalyzer:
         self._previous_state: MarketState | None = None
         # New modules (Phases 3-5)
         self._drive_tracker = DriveTracker()
-        from app.domain.fabio_ai.services.orderflow_detectors import (
-            BigTradeDetector,
-            BubbleDetector,
-            OFICalculator,
-            AbsorptionDetector,
-        )
-
-        self._big_trade_detector = BigTradeDetector()
-        self._bubble_detector = BubbleDetector()
-        self._ofi_calculator = OFICalculator()
-        self._absorption_detector = AbsorptionDetector()
-        # Persistent aggression scorer (per-symbol config when available)
-        if symbol_config:
-            self._persistent_agg_scorer = PersistentAggressionScorer(
-                persistence_bars=symbol_config.aggression_persistence_bars,
-                min_score=symbol_config.min_aggression_score,
-                pyramid_score=symbol_config.pyramid_aggression_score,
-            )
-        else:
-            self._persistent_agg_scorer = PersistentAggressionScorer()
-        # LVN persistence tracker (prevents LVN appearing/disappearing)
+        self._opening_classifier = OpeningTypeClassifier()
+        # MTFAnalyzer removed - uses MultiTimeframeAMTAnalyzer in configure() instead
+        # self._mtf_analyzer = MTFAnalyzer()  # This class doesn't exist, causes NameError
+        # Initialize LVN tracker here to avoid AttributeError if configure() not called
+        from app.domain.constants import LVN_MIN_PERSISTENCE_BARS, LVN_REMOVAL_THRESHOLD
         self._lvn_tracker = LVNPersistenceTracker(
             min_bars=LVN_MIN_PERSISTENCE_BARS,
             removal_threshold=LVN_REMOVAL_THRESHOLD,
         )
-        self._opening_classifier = OpeningTypeClassifier()
-        self._mtf_analyzer = MultiTimeframeAMTAnalyzer()
+        # Initialize other trackers that configure() would create
+        self._big_trade_detector = BigTradeDetector()
+        self._bubble_detector = BubbleDetector()
+        self._ofi_calculator = OFICalculator()
+        self._absorption_detector = AbsorptionDetector()
+        self._persistent_agg_scorer = PersistentAggressionScorer()
+
+    @staticmethod
+    def _detect_option_type(symbol: str) -> str:
+        """Detect whether symbol is CALL, PUT, or UNKNOWN.
+        
+        Fix 1: Used for direction labeling in frontend.
+        """
+        if not symbol:
+            return "UNKNOWN"
+        symbol_upper = symbol.upper()
+        if "CALL" in symbol_upper or "CE" in symbol_upper:
+            return "CALL"
+        if "PUT" in symbol_upper or "PE" in symbol_upper:
+            return "PUT"
+        return "UNKNOWN"
 
     def detect_displacement_leg(self, data: list[OHLC]) -> dict:
         """Detect displacement and return leg profile data.
@@ -436,6 +449,7 @@ class AMTAnalyzer:
             self._vwap_cum_quote_vol = 0.0
             self._vwap_cum_sq_vol = 0.0
             self._vwap_shift = 0.0
+            self._vwap_price_deviations = []  # Reset deviations on new session
             self._ib_tracker.reset()
             self._ib_break_direction = ""
             self._ar_engine.reset()
@@ -443,13 +457,22 @@ class AMTAnalyzer:
             self._lvn_tracker.reset()
         _is_new_candle = current.time != self._vwap_last_time
         self._vwap_last_time = current.time
-        if _is_new_candle:
-            if self._vwap_shift == 0.0:
-                self._vwap_shift = typical_price  # anchor to first candle's TP
-            shifted = typical_price - self._vwap_shift
-            self._vwap_cum_vol += float(current.volume)
-            self._vwap_cum_quote_vol += float(quote_vol)
-            self._vwap_cum_sq_vol += float(shifted * shifted * current.volume)
+        
+        # Accumulate volume and quote volume (typical_price * volume)
+        # MUST happen on every tick for accuracy, not just new candles
+        self._vwap_cum_vol += float(current.volume)
+        self._vwap_cum_quote_vol += float(quote_vol)
+        
+        # Shifted variance calculation for better numerical stability
+        if self._vwap_shift == 0.0:
+            self._vwap_shift = typical_price  # anchor to first tick
+        
+        shifted = typical_price - self._vwap_shift
+        self._vwap_cum_sq_vol += float(shifted * shifted * current.volume)
+        
+        # Track price deviations for proper VWAP std calculation (Task 2.1)
+        self._vwap_price_deviations.append(shifted)
+        
         return float(
             self._vwap_cum_quote_vol / self._vwap_cum_vol
             if self._vwap_cum_vol > 0
@@ -641,6 +664,179 @@ class AMTAnalyzer:
             return "TREND"
         return "NORMAL_VARIATION"
 
+    def _build_vwap_bands(self, session_vwap: float, current) -> tuple[float, float, float, float, float, float | None]:
+        """Compute VWAP standard deviation bands (±1σ, ±2σ)."""
+        vwap_std = 0.0
+        if self._vwap_cum_vol > 0 and len(self._vwap_price_deviations) > 1:
+            # Calculate std from actual price deviations (Task 2.1 fix)
+            mean_deviation = sum(self._vwap_price_deviations) / len(self._vwap_price_deviations)
+            variance = sum((d - mean_deviation) ** 2 for d in self._vwap_price_deviations) / len(self._vwap_price_deviations)
+            vwap_std = math.sqrt(max(0.0, variance))
+
+            # Enforce minimum std to prevent extreme sigma values
+            MIN_VWAP_STD = 1.0  # Increased from 0.5 for MCX options
+            if vwap_std < MIN_VWAP_STD:
+                vwap_std = MIN_VWAP_STD
+            
+            # Enforce maximum std (4σ is extreme, anything higher is calculation error)
+            MAX_VWAP_STD = session_vwap * 0.10  # Max 10% of VWAP
+            if vwap_std > MAX_VWAP_STD:
+                logger.warning(
+                    "VWAP std clamped from %.2f to %.2f (max 10%% of VWAP=%.2f)",
+                    vwap_std, MAX_VWAP_STD, session_vwap
+                )
+                vwap_std = MAX_VWAP_STD
+
+        vwap_upper_1 = session_vwap + vwap_std
+        vwap_lower_1 = session_vwap - vwap_std
+        vwap_upper_2 = session_vwap + 2 * vwap_std
+        vwap_lower_2 = session_vwap - 2 * vwap_std
+
+        live_price = float(current.close)
+        vwap_deviation_sigmas: float | None = (
+            (live_price - session_vwap) / vwap_std if vwap_std > 0 else None
+        )
+        
+        # Sanity check: sigma should never exceed ±4 in normal markets (Task 2.1)
+        if vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) > 4.0:
+            logger.warning(
+                "VWAP deviation clamped: %.2fσ → ±4.0σ (vwap=%.2f, live=%.2f, std=%.2f)",
+                vwap_deviation_sigmas, session_vwap, live_price, vwap_std
+            )
+            vwap_deviation_sigmas = 4.0 if vwap_deviation_sigmas > 0 else -4.0
+        elif vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) > 10:
+            logger.warning(
+                "VWAP deviation extreme: %.2fσ — possible data source mismatch "
+                "(vwap=%.2f, live=%.2f, std=%.2f)",
+                vwap_deviation_sigmas,
+                session_vwap,
+                live_price,
+                vwap_std,
+            )
+        return vwap_upper_1, vwap_lower_1, vwap_upper_2, vwap_lower_2, vwap_std, vwap_deviation_sigmas
+
+    def _classify_market_structure(self, data, session_vwap, market_state) -> tuple:
+        """Classify market structure and cross-validate against market state."""
+        if self._structure_classifier is None:
+            self._structure_classifier = MarketStructureClassifier()
+        if session_vwap > 0:
+            self._vwap_history.append(session_vwap)
+            if len(self._vwap_history) > 30:
+                self._vwap_history = self._vwap_history[-30:]
+        structure = self._structure_classifier.classify(
+            data,
+            self._poc_tracker._poc_history,
+            self._vwap_history,
+        )
+
+        # Cross-validation: PROBING is incompatible with BALANCE or CHOP
+        if market_state == MarketState.PROBING and structure.state in ("BALANCE", "CHOP"):
+            structure = type(structure)(
+                state="TRANSITION",
+                confidence_score=max(structure.confidence_score, 60),
+                features=structure.features,
+            )
+        return structure
+
+    def _detect_breaks(self, recent_data, vah, val, ib_high, ib_low, baseline_vol,
+                       live_price, ib_complete, current_break_direction) -> dict:
+        """Detect initiative/responsive breaks and IB breaks."""
+        break_state = detect_break(recent_data, vah, val, ib_high, ib_low, baseline_vol)
+        if break_state is None:
+            break_state = {
+                "break_direction": "",
+                "break_type": "",
+                "break_level": 0.0,
+                "volume_ratio": 0.0,
+            }
+
+        ib_tick_break = check_ib_break_tick(
+            live_price=live_price,
+            ib_high=ib_high,
+            ib_low=ib_low,
+            ib_complete=ib_complete,
+            current_break_direction=current_break_direction,
+        )
+        if ib_tick_break["break_direction"]:
+            self._ib_break_direction = ib_tick_break["break_direction"]
+            break_state = {
+                "break_direction": ib_tick_break["break_direction"],
+                "break_type": ib_tick_break["break_type"],
+                "break_level": ib_tick_break["break_level"],
+                "volume_ratio": 1.0,
+            }
+        return break_state
+
+    def _compute_noc_targets(self, npoc_tracker, underlying, current, tick_size) -> tuple[float, float]:
+        """Check NPOC fills and return nearest targets above/below."""
+        npoc_above = 0.0
+        npoc_below = 0.0
+        if npoc_tracker is not None:
+            npoc_tracker.check_and_fill(
+                underlying=underlying,
+                current_price=float(current.close),
+                tick_size=tick_size,
+            )
+            npoc_result = npoc_tracker.get_active_npocs(
+                underlying=underlying,
+                current_price=float(current.close),
+            )
+            if npoc_result.nearest_above:
+                npoc_above = npoc_result.nearest_above.price
+            if npoc_result.nearest_below:
+                npoc_below = npoc_result.nearest_below.price
+        return npoc_above, npoc_below
+
+    def _compute_effective_market_state(
+        self, market_state, recent_data, current, cvd_source: str = ""
+    ) -> str:
+        """Override market state to DEAD when volume is dead."""
+        _effective_market_state: str = market_state.value
+        # Option-premium candles are the wrong scale for futures volume EMA — never
+        # force DEAD from this gate when AMT is still on option ticks only.
+        if cvd_source == "option":
+            return _effective_market_state
+        if len(recent_data) >= 20:
+            _alpha = 2.0 / 21
+            _ema_vol = float(recent_data[-20].volume)
+            for _d in recent_data[-19:]:
+                _ema_vol = _alpha * float(_d.volume) + (1 - _alpha) * _ema_vol
+            _latest_vol = float(recent_data[-1].volume)
+            _vol_ratio = _latest_vol / _ema_vol if _ema_vol > 0 else 0.0
+            if float(current.close) <= 0 or _vol_ratio < 0.01:
+                _effective_market_state = "DEAD"
+        return _effective_market_state
+
+    def _compute_per_symbol_delta(self, option_tick) -> float:
+        """Compute per-symbol delta from option tick (not underlying)."""
+        if option_tick is not None and option_tick.volume > 0:
+            return float(option_tick.delta) / float(option_tick.volume)
+        return 0.0
+
+    def _track_drives(self, live_price, poc, lvns, hvns, vah, val, tick_size, current) -> tuple[int, bool]:
+        """Classify current price against nearest key level for drive tracking."""
+        _drive_number: int = 0
+        _drive_entry_valid: bool = False
+        _all_levels: list[float] = [poc] + list(lvns) + ([vah, val] if vah > 0 and val > 0 else [])
+        if _all_levels and live_price > 0:
+            _nearest = min(_all_levels, key=lambda _l: abs(_l - live_price))
+            _proximity_ticks = abs(live_price - _nearest) / max(tick_size, 0.001)
+            if _proximity_ticks <= 5:
+                _drive_dir = "LONG" if live_price >= _nearest else "SHORT"
+                try:
+                    _drive_result = self._drive_tracker.classify_touch(
+                        price=live_price,
+                        level=_nearest,
+                        candle=current,
+                        direction=_drive_dir,
+                        tick_size=tick_size,
+                    )
+                    _drive_number = _drive_result.drive_number
+                    _drive_entry_valid = _drive_result.entry_valid
+                except Exception:
+                    logger.debug("Drive detection failed — drive number will be unset", exc_info=True)
+        return _drive_number, _drive_entry_valid
+
     def analyze(
         self,
         data: list[OHLC],
@@ -658,6 +854,7 @@ class AMTAnalyzer:
         hourly_data: list[OHLC] | None = None,
         option_tick: OHLC | None = None,
         cvd_source: str = "",
+        symbol: str = "",  # Fix 1: Full symbol name for option type detection
     ) -> AMTResult:
         """Run the full AMT analysis pipeline.
 
@@ -729,14 +926,12 @@ class AMTAnalyzer:
         up_idx, down_idx = poc_index, poc_index
 
         while current_volume < target_volume:
-            # Sum the next TWO rows above (CME standard)
             up_pair = 0.0
             up_count = 0
             for k in range(1, 3):
                 if up_idx + k < len(profile):
                     up_pair += profile[up_idx + k].volume
                     up_count += 1
-            # Sum the next TWO rows below
             down_pair = 0.0
             down_count = 0
             for k in range(1, 3):
@@ -751,34 +946,27 @@ class AMTAnalyzer:
                 break
 
             if can_go_up and (not can_go_down or up_pair >= down_pair):
-                # Expand upward by up to 2 rows (tie: upward first per convention)
                 for k in range(1, up_count + 1):
                     if up_idx + k < len(profile):
-                        up_idx += 1  # Move index up
+                        up_idx += 1
                         current_volume += profile[up_idx].volume
             elif can_go_down:
-                # Expand downward by up to 2 rows
                 for k in range(1, down_count + 1):
                     if down_idx - k >= 0:
-                        down_idx -= 1  # Move index down
+                        down_idx -= 1
                         current_volume += profile[down_idx].volume
 
-        # VAH = upper edge of top VA bin, VAL = lower edge of bottom VA bin
         step = profile[1].price - profile[0].price if len(profile) > 1 else 0
         half_step = step / 2
-        vah = profile[up_idx].price + half_step  # upper edge
-        val = profile[down_idx].price - half_step  # lower edge
+        vah = profile[up_idx].price + half_step
+        val = profile[down_idx].price - half_step
 
-        # Note: we no longer artificially expand VA width. A very tight VA
-        # is valid market information (low volatility). Synthetic expansion was
-        # creating false "near level" triggers in the Three-Align Gate.
-
-        # LVN detection with persistence filter — prevents appearing/disappearing
+        # LVN detection with persistence filter
         raw_lvns = find_lvns(profile, self.config)
         lvns = self._lvn_tracker.update(raw_lvns, profile)
         hvns = find_hvns(profile, self.config)
-        # LVN/HVN detection complete
-        # Incremental aggressive prints — only compute last candle if data grew by 1
+
+        # Incremental aggressive prints
         agg_prints = find_aggressive_prints(
             recent_data,
             AggressivePrintConfig(
@@ -797,7 +985,7 @@ class AMTAnalyzer:
         self._bubble_registry.register(agg_prints)
         bubble_retests = self._bubble_registry.get_retests(current.close)
 
-        # Baseline volume for acceptance/rejection (mean of last 20 candles)
+        # Baseline volume for acceptance/rejection
         baseline_vol = (
             sum(d.volume for d in recent_data[-20:]) / min(20, len(recent_data))
             if recent_data
@@ -807,24 +995,45 @@ class AMTAnalyzer:
         # Acceptance/Rejection engine
         ar_state = self._ar_engine.update(current, vah, val, baseline_vol)
 
-        # 2. Market State (4-state model: NO_TRADE / BALANCED / IMBALANCED / PROBING)
-        # Uses standalone detect_market_state() per FR-04
+        # VWAP bands (moved up to provide sigma to market state detection)
+        typical_price = (current.high + current.low + current.close) / 3
+        session_vwap = self._update_session_vwap(current, typical_price)
+        vwap_upper_1, vwap_lower_1, vwap_upper_2, vwap_lower_2, vwap_std, vwap_deviation_sigmas = \
+            self._build_vwap_bands(session_vwap, current)
+
+        # 2. Market State (4-state model)
         leg_data = self.detect_displacement_leg(recent_data)
         has_displacement = leg_data["has_displacement"]
         has_acceptance = detect_acceptance(recent_data, vah, val)
 
-        # Merge with AR engine state
+        # Task 2.3: Validate session VA encompasses leg VA bounds
+        # Session profile uses all session data, leg profile uses only displacement leg
+        # So session VA should be >= leg VA (session encompasses leg)
+        leg_vah_temp = leg_data.get("vah", 0.0)
+        leg_val_temp = leg_data.get("val", 0.0)
+        if vah > 0 and leg_vah_temp > 0 and vah < leg_vah_temp:
+            logger.warning(
+                "Session VAH (%.2f) < Leg VAH (%.2f) — clamping to leg VAH (Task 2.3)",
+                vah, leg_vah_temp
+            )
+            vah = leg_vah_temp
+            
+        if val > 0 and leg_val_temp > 0 and val > leg_val_temp:
+            logger.warning(
+                "Session VAL (%.2f) > Leg VAL (%.2f) — clamping to leg VAL (Task 2.3)",
+                val, leg_val_temp
+            )
+            val = leg_val_temp
+
         if ar_state["acceptance_above"] or ar_state["acceptance_below"]:
             has_acceptance = True
 
-        # Balance ratio: fraction of recent candles inside VA
         balance_window = min(len(recent_data), 20)
         inside_count = sum(
             1 for d in recent_data[-balance_window:] if val <= d.close <= vah
         )
         balance_ratio = inside_count / balance_window if balance_window > 0 else 0.0
 
-        # Compute tick_size from data (minimum price increment)
         prices = sorted(set(float(d.close) for d in recent_data[-50:]))
         tick_size = min(
             (
@@ -835,9 +1044,6 @@ class AMTAnalyzer:
             default=0.05,
         )
 
-        # Detect market state using 4-state model
-        # Pass leg POC/VAH/VAL so the NO_TRADE dead zone checks against
-        # the active leg's POC (not the stale session POC) when a leg is active.
         state_result = detect_market_state(
             price=float(current.close),
             poc=poc,
@@ -850,15 +1056,15 @@ class AMTAnalyzer:
             leg_poc=leg_data.get("poc", 0.0),
             leg_vah=leg_data.get("vah", 0.0),
             leg_val=leg_data.get("val", 0.0),
+            vwap_deviation_sigmas=vwap_deviation_sigmas,
         )
         market_state = state_result.state
         zone = state_result.zone
 
-        # Log state transitions for audit trail (FR-04-07)
         log_state_transition(self._previous_state, market_state, state_result)
         self._previous_state = market_state
 
-        # 3. Order Flow Detectors + Aggression Scoring (FR-03/06)
+        # 3. Order Flow Detectors + Aggression Scoring
         flow = self._compute_order_flow_metrics(
             recent_data,
             order_book,
@@ -893,16 +1099,9 @@ class AMTAnalyzer:
 
         # Profile shape and bimodal override
         shape = classify_shape(profile)
-        # Track the effective profile shape — may be updated when market_state is overridden.
         effective_profile_shape = shape.shape
-        # Track bimodal active pole for frontend display
         _bimodal_active_pole = shape.active_pole
 
-        # Bimodal override: two-peaked profile = auction market, not trend.
-        # A bimodal distribution means price is visiting two distinct value areas
-        # with high volume each — signature of Balance, not Trend.
-        # Bug #14: sync effective_profile_shape to "D" (symmetric/balanced) when
-        # we override market_state so the frontend sees consistent state.
         if shape.shape == "B" and market_state == MarketState.IMBALANCED:
             market_state = MarketState.BALANCED
             effective_profile_shape = "D"
@@ -911,82 +1110,18 @@ class AMTAnalyzer:
         typical_price = (current.high + current.low + current.close) / 3
         session_vwap = self._update_session_vwap(current, typical_price)
 
-        # VWAP standard deviation bands (±1σ, ±2σ)
-        vwap_std = 0.0
-        if self._vwap_cum_vol > 0:
-            shifted_vwap = session_vwap - self._vwap_shift
-            variance = (self._vwap_cum_sq_vol / self._vwap_cum_vol) - (
-                shifted_vwap * shifted_vwap
-            )
-            vwap_std = math.sqrt(max(0.0, variance))
-            
-            # Minimum σ floor to avoid perpetual N/A during low-volatility periods.
-            # Options premiums can have tiny absolute changes (e.g., 150→152) that
-            # produce near-zero variance even after hours of trading.
-            MIN_VWAP_STD = 0.5  # 50 paise floor for NIFTY options
-            if vwap_std < MIN_VWAP_STD and self._vwap_cum_vol > 100:
-                vwap_std = MIN_VWAP_STD
-                
-        vwap_upper_1 = session_vwap + vwap_std
-        vwap_lower_1 = session_vwap - vwap_std
-        vwap_upper_2 = session_vwap + 2 * vwap_std
-        vwap_lower_2 = session_vwap - 2 * vwap_std
-        # FIX BUG #1 + #5: Use close price for deviation (not max of high/close)
-        live_price = float(current.close)
-        # Bug #4: When vwap_std=0 (early session, flat market) return None so the
-        # frontend can display "N/A" instead of the misleading "0.00σ".
-        vwap_deviation_sigmas: float | None = (
-            (live_price - session_vwap) / vwap_std if vwap_std > 0 else None
-        )
-        # Guard: extreme deviation suggests data source mismatch (e.g., VWAP from
-        # underlying futures but live_price from option premium)
-        if vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) > 10:
-            logger.warning(
-                "VWAP deviation extreme: %.2fσ — possible data source mismatch "
-                "(vwap=%.2f, live=%.2f, std=%.2f)",
-                vwap_deviation_sigmas,
-                session_vwap,
-                live_price,
-                vwap_std,
-            )
+        # VWAP bands
+        vwap_upper_1, vwap_lower_1, vwap_upper_2, vwap_lower_2, vwap_std, vwap_deviation_sigmas = \
+            self._build_vwap_bands(session_vwap, current)
 
-        # CVD — wire to live path for entry/exit decisions
+        # CVD
         cvd_state = self._cvd_tracker.update(current)
         cvd_div = ""
         if cvd_state.has_divergence:
             cvd_div = cvd_state.divergence_type or ""
 
-        # Market structure classification (5-state with hysteresis)
-        if self._structure_classifier is None:
-            self._structure_classifier = MarketStructureClassifier()
-        if session_vwap > 0:
-            self._vwap_history.append(session_vwap)
-            if len(self._vwap_history) > 30:
-                self._vwap_history = self._vwap_history[-30:]
-        structure = self._structure_classifier.classify(
-            data,
-            self._poc_tracker._poc_history,
-            self._vwap_history,
-        )
-
-        # Cross-validation: PROBING market state is logically incompatible with
-        # BALANCE structure. PROBING = testing outside value, BALANCE = rotation
-        # inside value. If both fire, override structure to TRANSITION.
-        if market_state == MarketState.PROBING and structure.state == "BALANCE":
-            structure = type(structure)(
-                state="TRANSITION",
-                confidence_score=max(structure.confidence_score, 60),
-                features=structure.features,
-            )
-
-        # PROBING is also incompatible with CHOP (oscillation without direction).
-        # PROBING = directional exploration; CHOP = oscillation. Override to TRANSITION.
-        if market_state == MarketState.PROBING and structure.state == "CHOP":
-            structure = type(structure)(
-                state="TRANSITION",
-                confidence_score=max(structure.confidence_score, 60),
-                features=structure.features,
-            )
+        # Market structure classification
+        structure = self._classify_market_structure(data, session_vwap, market_state)
 
         # Initial Balance tracking
         ib_state = self._ib_tracker.update(current)
@@ -1007,34 +1142,13 @@ class AMTAnalyzer:
         )
         self._prev_cvd_slope = cvd_state.slope
 
-        # Break detection — initiative vs responsive at key levels
-        break_state = detect_break(recent_data, vah, val, ib_high, ib_low, baseline_vol)
-        if break_state is None:
-            break_state = {
-                "break_direction": "",
-                "break_type": "",
-                "break_level": 0.0,
-                "volume_ratio": 0.0,
-            }
-
-        # FIX BUG #2: Live-tick IB break detection (sticky)
-        ib_tick_break = check_ib_break_tick(
-            live_price=live_price,
-            ib_high=ib_high,
-            ib_low=ib_low,
-            ib_complete=ib_complete,
-            current_break_direction=self._ib_break_direction,
+        # Break detection
+        break_state = self._detect_breaks(
+            recent_data, vah, val, ib_high, ib_low, baseline_vol,
+            float(current.close), ib_complete, self._ib_break_direction,
         )
-        if ib_tick_break["break_direction"]:
-            self._ib_break_direction = ib_tick_break["break_direction"]
-            break_state = {
-                "break_direction": ib_tick_break["break_direction"],
-                "break_type": ib_tick_break["break_type"],
-                "break_level": ib_tick_break["break_level"],
-                "volume_ratio": 1.0,
-            }
 
-        # 5. Opening Type Classification (Valentini methodology)
+        # Opening Type Classification
         opening_result = self._opening_classifier.classify(
             data=recent_data,
             prior_vah=prior_vah,
@@ -1042,93 +1156,51 @@ class AMTAnalyzer:
             prior_poc=prior_poc,
         )
 
-        # 6. Multi-Timeframe (MTF) Alignment
+        # Multi-Timeframe Alignment
         mtf_result = None
         if daily_data and hourly_data:
             mtf_result = self._mtf_analyzer.compute_alignment(
-                current_price=live_price,
+                current_price=float(current.close),
                 daily_ohlc=daily_data,
                 hourly_ohlc=hourly_data,
             )
 
-        # 7. Acceptance vs Rejection (AR) Logic
+        # Acceptance vs Rejection (re-check after all updates)
         ar_state = self._ar_engine.update(current, vah, val, baseline_vol)
 
-        # Developing VA, session open, and day type
+        # Developing VA, session open, day type
         dev_poc, dev_vah, dev_val = self._compute_developing_va(developing_profile)
         session_open_price = self._extract_session_open(data, current)
         day_type = self._classify_day_type(data, ib_complete, ib_high, ib_low)
 
-        # NPOC (Naked POC) — check fills and get nearest targets
-        npoc_above = 0.0
-        npoc_below = 0.0
-        if npoc_tracker is not None:
-            # Check and fill NPOCs within 2 ticks of current price
-            npoc_tracker.check_and_fill(
-                underlying=underlying,
-                current_price=float(current.close),
-                tick_size=tick_size,
-            )
-            # Get nearest active NPOCs for secondary target calculation
-            npoc_result = npoc_tracker.get_active_npocs(
-                underlying=underlying,
-                current_price=float(current.close),
-            )
-            if npoc_result.nearest_above:
-                npoc_above = npoc_result.nearest_above.price
-            if npoc_result.nearest_below:
-                npoc_below = npoc_result.nearest_below.price
+        # NPOC targets
+        npoc_above, npoc_below = self._compute_noc_targets(
+            npoc_tracker, underlying, current, tick_size,
+        )
 
-        # 4. Signal Generation — DEPRECATED: signals now generated exclusively by SignalPipeline
-        # The signal field is kept for backward compatibility but always returns None.
-        # All signal creation goes through the gate pipeline (entry_gate.py / signal_builder.py).
+        # Signal Generation — DEPRECATED (backward compat)
         signal = None
 
-        # Bug #5: Dead-volume override — when volume is dead, reflect it in market_state
-        # so frontend sees consistent state (not "Volume=DEAD but Session=PROBING").
-        # Mirror the logic from classify_regime(): EMA(20) vol ratio < 0.01 → DEAD.
-        # Use a string directly since "DEAD" is not a MarketState enum value.
-        _effective_market_state: str = market_state.value
-        if len(recent_data) >= 20:
-            _alpha = 2.0 / 21
-            _ema_vol = float(recent_data[-20].volume)
-            for _d in recent_data[-19:]:
-                _ema_vol = _alpha * float(_d.volume) + (1 - _alpha) * _ema_vol
-            _latest_vol = float(recent_data[-1].volume)
-            _vol_ratio = _latest_vol / _ema_vol if _ema_vol > 0 else 0.0
-            if float(current.close) <= 0 or _vol_ratio < 0.01:
-                _effective_market_state = "DEAD"
+        # Dead-volume override
+        _effective_market_state = self._compute_effective_market_state(
+            market_state, recent_data, current, cvd_source=cvd_source,
+        )
 
-        # FIX BUG #3: Compute per-symbol delta from option tick (not underlying)
-        # This ensures delta_normalized_option reflects the actual option's order flow,
-        # providing per-symbol isolation when underlying data is shared across options.
-        delta_normalized_option = 0.0
-        if option_tick is not None and option_tick.volume > 0:
-            delta_normalized_option = float(option_tick.delta) / float(option_tick.volume)
+        # Per-symbol delta
+        delta_normalized_option = self._compute_per_symbol_delta(option_tick)
 
-        # 8. Drive Tracking (FR-05) — classify current price against nearest key level
-        _drive_number: int = 0
-        _drive_entry_valid: bool = False
-        _live_price = live_price if live_price > 0 else float(current.close)
-        _all_levels: list[float] = [poc] + list(lvns) + ([vah, val] if vah > 0 and val > 0 else [])
-        if _all_levels and _live_price > 0:
-            _nearest = min(_all_levels, key=lambda _l: abs(_l - _live_price))
-            _proximity_ticks = abs(_live_price - _nearest) / max(tick_size, 0.001)
-            # Only classify if price is within 5 ticks of the level
-            if _proximity_ticks <= 5:
-                _drive_dir = "LONG" if _live_price >= _nearest else "SHORT"
-                try:
-                    _drive_result = self._drive_tracker.classify_touch(
-                        price=_live_price,
-                        level=_nearest,
-                        candle=current,
-                        direction=_drive_dir,
-                        tick_size=tick_size,
-                    )
-                    _drive_number = _drive_result.drive_number
-                    _drive_entry_valid = _drive_result.entry_valid
-                except Exception:
-                    pass  # Non-critical — drive tracking is best-effort
+        # Drive Tracking
+        _live_price = float(current.close)
+        _drive_number, _drive_entry_valid = self._track_drives(
+            _live_price, poc, lvns, hvns, vah, val, tick_size, current,
+        )
+
+        # ── SETUP IDENTIFICATION (3 PM Fix) ──────────────────────────
+        _setup = SetupType.MEAN_REVERSION
+        if state_result.is_extreme_deviation:
+            _setup = SetupType.RESPONSIVE_FADE
+        elif market_state == MarketState.IMBALANCED:
+            _setup = SetupType.TREND_MODEL
 
         return AMTResult(
             market_state=_effective_market_state,
@@ -1139,11 +1211,11 @@ class AMTAnalyzer:
             hvns=tuple(hvns),
             aggression=aggression_score,
             signal=signal,
-            setup=signal.setup.value if signal else None,
+            setup=_setup.value,
             profile=tuple(profile),
             aggressive_prints=tuple(agg_prints),
             profile_shape=effective_profile_shape,
-            profile_type="Session",  # Session profile shape (developing_profile not used for shape)
+            profile_type="Session",
             cvd_slope=cvd_state.slope,
             cvd_divergence=cvd_div,
             session_vwap=session_vwap,
@@ -1175,7 +1247,7 @@ class AMTAnalyzer:
             gap_type=(
                 classify_gap(
                     open_price=session_open_price,
-                    prior_close=prior_poc,  # Use POC as proxy for prior close
+                    prior_close=prior_poc,
                     prior_range=(
                         prior_vah - prior_val
                         if prior_vah > 0 and prior_val > 0
@@ -1215,7 +1287,6 @@ class AMTAnalyzer:
             bubble_retests=bubble_retests,
             npoc_above=npoc_above,
             npoc_below=npoc_below,
-            # Phase 5: MTF & Opening Type
             opening_type=opening_result.type,
             mtf_alignment=mtf_result.alignment if mtf_result else "",
             daily_vah=mtf_result.daily.vah if mtf_result else 0.0,
@@ -1224,24 +1295,21 @@ class AMTAnalyzer:
             hourly_vah=mtf_result.hourly.vah if mtf_result else 0.0,
             hourly_val=mtf_result.hourly.val if mtf_result else 0.0,
             hourly_poc=mtf_result.hourly.poc if mtf_result else 0.0,
-            # Market structure classification (5-state)
             market_structure=structure.state,
             structure_confidence=structure.confidence_score,
-            # Day type classification
             day_type=day_type,
-            # Absorption context
             absorption_side=absorption_side,
             absorption_range_ratio=absorption_range_ratio,
             absorption_vol_ratio=absorption_vol_ratio,
-            # Per-symbol delta (FIX BUG #3: isolated per option contract)
             delta_normalized_option=delta_normalized_option,
-            # Drive state (FR-05)
             drive_number=_drive_number,
             drive_entry_valid=_drive_entry_valid,
-            # CVD data source indicator
             cvd_source=cvd_source,
-            # Bimodal active pole
             bimodal_active_pole=_bimodal_active_pole,
+            is_extreme_deviation=state_result.is_extreme_deviation,
+            underlying_price=float(data[-1].close) if data else 0.0,
+            # Fix 1: Option type for direction labeling
+            option_type=self._detect_option_type(symbol),
         )
 
     # -------------------------------------------------------------------

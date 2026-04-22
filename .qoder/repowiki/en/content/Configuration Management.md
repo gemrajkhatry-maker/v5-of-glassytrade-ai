@@ -2,19 +2,28 @@
 
 <cite>
 **Referenced Files in This Document**
+- [settings_adapter.py](file://backend/app/config_models/settings_adapter.py)
+- [mode_config.py](file://backend/config/mode_config.py)
+- [consolidated.py](file://backend/config/consolidated.py)
+- [select_mode.py](file://backend/scripts/select_mode.py)
 - [base.yaml](file://backend/config/base.yaml)
 - [development.yaml](file://backend/config/environments/development.yaml)
 - [paper.yaml](file://backend/config/environments/paper.yaml)
 - [live.yaml](file://backend/config/environments/live.yaml)
+- [mcx_options.yaml](file://backend/config/strategies/mcx_options.yaml)
+- [nse_options.yaml](file://backend/config/strategies/nse_options.yaml)
 - [feature_flags.yaml](file://backend/config/feature_flags.yaml)
-- [instruments.json](file://backend/config/instruments.json)
-- [loader.py](file://backend/app/config_models/loader.py)
-- [validator.py](file://backend/app/config_models/validator.py)
-- [consolidated.py](file://backend/config/consolidated.py)
-- [market_config.yaml](file://backend/app/market_config.yaml)
-- [config.py](file://backend/app/config.py)
-- [main.py](file://backend/app/main.py)
+- [config.py](file://backend/config/config.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated to reflect comprehensive YAML-based configuration system with multi-layered hierarchy
+- Added new CLI tools for mode selection and configuration management
+- Enhanced SettingsAdapter documentation with backward compatibility layer
+- Updated ModeConfigLoader documentation with dependency injection pattern
+- Added new configuration files and strategies documentation
+- Removed references to legacy environment path resolution and transitional debugging utilities
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -22,363 +31,358 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Security and Versioning](#security-and-versioning)
-9. [Troubleshooting Guide](#troubleshooting-guide)
-10. [Conclusion](#conclusion)
+6. [CLI Tools and Mode Selection](#cli-tools-and-mode-selection)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Security and Versioning](#security-and-versioning)
+10. [Troubleshooting Guide](#troubleshooting-guide)
+11. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the hierarchical configuration system used by GlassyTrade AI v5. It covers how YAML files define base defaults, environment-specific overrides, and feature flags; how configuration is loaded, validated, and applied at startup; and how to safely manage secrets and runtime parameters. Practical examples show how to configure development, paper, and live environments, customize risk controls, and toggle features.
+This document explains the comprehensive YAML-based configuration system used by GlassyTrade AI v5. The system introduces a multi-layered hierarchy with SettingsAdapter for backward compatibility, ModeConfigLoader for professional configuration management, and new CLI tools for mode selection. It covers how YAML files define base defaults, environment-specific overrides, strategy configurations, and feature flags; how configuration is loaded, validated, and applied at startup; and how to safely manage secrets and runtime parameters through the unified architecture.
 
 ## Project Structure
-GlassyTrade AI separates configuration into:
-- Base defaults and global settings in YAML
-- Environment-specific overrides
-- Feature flags
-- Exchange and instrument metadata
-- A consolidated Python configuration model for runtime access and validation
+GlassyTrade AI v5 introduces a comprehensive configuration system with clear separation of concerns:
+
+- **SettingsAdapter**: Backward compatibility layer maintaining existing import interfaces
+- **ModeConfigLoader**: Professional configuration loader with dependency injection pattern
+- **YAML-based Hierarchy**: Multi-layered configuration merging from base, environment, and strategy files
+- **ConsolidatedConfig**: Unified runtime configuration with type safety and validation
+- **CLI Tools**: New command-line interface for mode selection and configuration management
+- **Secret Management**: Environment variables for sensitive data only
 
 ```mermaid
 graph TB
-A["base.yaml<br/>Base defaults"] --> B["environments/*.yaml<br/>Environment overrides"]
-B --> C["feature_flags.yaml<br/>Feature flags"]
-B --> D["market_config.yaml<br/>Per-exchange runtime overrides"]
-C --> E["SystemConfig<br/>Typed configuration"]
-D --> E
-A --> E
-E --> F["ConfigValidator<br/>Boot-time validation"]
-F --> G["Startup Summary Logs"]
+A["SettingsAdapter<br/>Backward Compatibility"] --> B["ModeConfigLoader<br/>Dependency Injection"]
+B --> C["SystemConfig<br/>Enhanced Loader"]
+C --> D["YAML Hierarchy<br/>base.yaml + env + strategy"]
+D --> E["ConsolidatedConfig<br/>Unified Runtime"]
+F["CLI Tools<br/>select_mode.py"] --> D
+G["Legacy Settings Interface<br/>Existing Code"] --> A
+H[".env Secrets<br/>API Keys Only"] --> D
 ```
 
 **Diagram sources**
-- [base.yaml:1-493](file://backend/config/base.yaml#L1-L493)
-- [development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [feature_flags.yaml:1-37](file://backend/config/feature_flags.yaml#L1-L37)
-- [market_config.yaml:1-60](file://backend/app/market_config.yaml#L1-L60)
-- [loader.py:139-245](file://backend/app/config_models/loader.py#L139-L245)
-- [validator.py:22-177](file://backend/app/config_models/validator.py#L22-L177)
+- [settings_adapter.py:28-75](file://backend/app/config_models/settings_adapter.py#L28-L75)
+- [mode_config.py:69-178](file://backend/config/mode_config.py#L69-L178)
+- [consolidated.py:173-428](file://backend/config/consolidated.py#L173-L428)
+- [select_mode.py:1-153](file://backend/scripts/select_mode.py#L1-L153)
 
 **Section sources**
-- [base.yaml:1-493](file://backend/config/base.yaml#L1-L493)
-- [development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [feature_flags.yaml:1-37](file://backend/config/feature_flags.yaml#L1-L37)
-- [market_config.yaml:1-60](file://backend/app/market_config.yaml#L1-L60)
+- [settings_adapter.py:1-314](file://backend/app/config_models/settings_adapter.py#L1-L314)
+- [mode_config.py:1-264](file://backend/config/mode_config.py#L1-L264)
+- [consolidated.py:1-532](file://backend/config/consolidated.py#L1-L532)
+- [select_mode.py:1-153](file://backend/scripts/select_mode.py#L1-L153)
 
 ## Core Components
-- Base configuration: global constants, exchange and symbol defaults, risk, and LLM settings.
-- Environment files: development, paper, and live with broker modes, logging levels, and risk envelopes.
-- Feature flags: granular feature toggles across phases and roles.
-- Instrument catalog: exchange-specific instrument metadata for scanners and sessions.
-- Loader and validator: merge YAML, parse into typed objects, validate, and log startup summary.
-- Consolidated runtime config: typed settings for application modules with environment variable overrides.
+The new unified configuration system consists of several key components:
+
+- **SettingsAdapter**: Maintains 100% backward compatibility while loading configuration from YAML files
+- **ModeConfigLoader**: Professional configuration loader with dependency injection pattern
+- **ModeConfig**: Complete configuration object containing system, scanner, and exchange configurations
+- **ConsolidatedConfig**: Unified runtime configuration with type safety and validation
+- **YAML Hierarchy**: Multi-layered configuration merging from base, environment, and strategy files
+- **CLI Tools**: Command-line interface for mode selection and configuration management
+- **Secret Management**: Environment variables for sensitive data only
 
 **Section sources**
-- [base.yaml:1-493](file://backend/config/base.yaml#L1-L493)
-- [loader.py:139-245](file://backend/app/config_models/loader.py#L139-L245)
-- [validator.py:22-177](file://backend/app/config_models/validator.py#L22-L177)
-- [consolidated.py:173-418](file://backend/config/consolidated.py#L173-L418)
-- [config.py:26-157](file://backend/app/config.py#L26-L157)
+- [settings_adapter.py:28-314](file://backend/app/config_models/settings_adapter.py#L28-L314)
+- [mode_config.py:35-178](file://backend/config/mode_config.py#L35-L178)
+- [consolidated.py:173-428](file://backend/config/consolidated.py#L173-L428)
+- [select_mode.py:60-111](file://backend/scripts/select_mode.py#L60-L111)
 
 ## Architecture Overview
-The configuration pipeline enforces a strict merge order and validates at boot. It supports environment-specific tuning and feature gating while keeping secrets out of committed YAML.
+The new configuration pipeline enforces a strict multi-layered YAML hierarchy with backward compatibility. It supports environment-specific tuning, strategy configurations, and feature gating while maintaining secrets in environment variables.
 
 ```mermaid
 sequenceDiagram
 participant Boot as "App Startup"
-participant Loader as "ConfigLoader.load_config"
-participant FS as "Filesystem"
-participant Types as "Typed Models"
-participant Validator as "ConfigValidator"
-participant Logger as "Logging"
-Boot->>Loader : Request SystemConfig
-Loader->>FS : Load base.yaml
-Loader->>FS : Load environments/{GLASSYTRADE_ENV}.yaml
-Loader->>FS : Load strategies/*.yaml (optional)
-Loader->>FS : Load feature_flags.yaml
-Loader->>Types : Parse into SystemConfig
-Loader->>Validator : validate_config(SystemConfig)
-Validator-->>Loader : OK or raise ConfigValidationError
-Loader->>Logger : Log startup summary
-Loader-->>Boot : Frozen SystemConfig
+participant CLI as "select_mode.py"
+participant Adapter as "SettingsAdapter"
+participant ModeLoader as "ModeConfigLoader"
+participant YAML as "YAML Files"
+participant Consolidated as "ConsolidatedConfig"
+participant Legacy as "Legacy Code"
+Boot->>CLI : Configure Mode
+CLI->>YAML : Update .env variables
+Boot->>Adapter : Initialize SettingsAdapter
+Adapter->>ModeLoader : Load from environment
+ModeLoader->>YAML : Load base.yaml
+ModeLoader->>YAML : Load environments/{env}.yaml
+ModeLoader->>YAML : Load strategies/{strategy}.yaml
+ModeLoader->>YAML : Load .env (secrets only)
+ModeLoader->>Consolidated : Create unified config
+Consolidated->>Adapter : Provide configuration
+Adapter->>Legacy : Maintain backward compatibility
 ```
 
 **Diagram sources**
-- [loader.py:139-245](file://backend/app/config_models/loader.py#L139-L245)
-- [validator.py:22-177](file://backend/app/config_models/validator.py#L22-L177)
+- [settings_adapter.py:48-75](file://backend/app/config_models/settings_adapter.py#L48-L75)
+- [mode_config.py:180-198](file://backend/config/mode_config.py#L180-L198)
+- [consolidated.py:317-428](file://backend/config/consolidated.py#L317-L428)
+- [select_mode.py:60-111](file://backend/scripts/select_mode.py#L60-L111)
 
 ## Detailed Component Analysis
 
-### Hierarchical Merge and Overrides
-- Merge order:
-  1) base.yaml
-  2) environments/{GLASSYTRADE_ENV}.yaml
-  3) strategies/*.yaml (optional)
-  4) feature_flags.yaml
-  5) Typed SystemConfig
-  6) Validation
-  7) Startup summary
-- Environment selection: GLASSYTRADE_ENV determines which environment file is loaded.
-- Strategy overrides: optional YAML files in strategies/ are deep-merged after environment overrides.
-- Feature flags: loaded from feature_flags.yaml with explicit defaults and environment-specific overrides.
+### SettingsAdapter: Backward Compatibility Layer
+SettingsAdapter serves as the critical bridge between the old environment-variable-only system and the new YAML-based hierarchy. It maintains 100% backward compatibility while loading configuration from YAML files.
 
-Practical example: To enable paper trading with relaxed risk and realistic costs:
-- Set GLASSYTRADE_ENV to paper.
-- Keep exchanges enabled for both NSE and MCX.
-- risk and cost_model are set in the environment file.
+Key features:
+- **Configuration Hierarchy**: base.yaml → environments/{GLASSYTRADE_ENV}.yaml → strategies/{GLASSYTRADE_STRATEGY}.yaml → .env (secrets only)
+- **Property Delegation**: All configuration properties are delegated to underlying ModeConfig and SystemConfig objects
+- **Secret Management**: API keys and tokens loaded exclusively from .env file
+- **Fallback Mechanism**: Graceful degradation if YAML configuration fails
 
 **Section sources**
-- [loader.py:139-245](file://backend/app/config_models/loader.py#L139-L245)
-- [development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [feature_flags.yaml:1-37](file://backend/config/feature_flags.yaml#L1-L37)
+- [settings_adapter.py:28-107](file://backend/app/config_models/settings_adapter.py#L28-L107)
+- [settings_adapter.py:287-300](file://backend/app/config_models/settings_adapter.py#L287-L300)
 
-### Base Configuration (Global Settings, Exchanges, Risk, LLM)
-- Global constants: volume profile, order flow, market state, aggression scoring, structure, trade setup, risk thresholds, time, LLM throttling, grade, and data limits.
-- Exchange configurations: NSE and MCX with segments, sessions, warm-up minutes, timezone, and symbol-specific defaults.
-- Risk configuration: per-trade risk, daily loss, drawdown, ceilings, position caps, Kelly parameters, and bootstrap count.
-- LLM configuration: model IDs, temperatures, token limits, timeouts, and instruction prompts.
+### ModeConfigLoader: Professional Configuration Loader
+ModeConfigLoader implements the professional configuration hierarchy with dependency injection pattern. It loads configuration based on environment and strategy combinations.
 
-Example highlights:
-- Global risk per trade capped at 0.005 in base; environment files can relax or tighten.
-- Exchange symbol defaults include lot sizes, tick sizes, value area percentiles, thresholds, and cost profiles.
-- LLM settings include entry and overseer temperatures and reasoning model ID.
+Configuration loading process:
+1. Set GLASSYTRADE_ENV and GLASSYTRADE_STRATEGY environment variables
+2. Load SystemConfig using enhanced loader with strategy support
+3. Load raw YAML files for scanner and exchange configurations
+4. Extract configuration from all sources and create ModeConfig object
+5. Log human-readable configuration summary
 
 **Section sources**
-- [base.yaml:14-493](file://backend/config/base.yaml#L14-L493)
+- [mode_config.py:69-178](file://backend/config/mode_config.py#L69-L178)
+- [mode_config.py:180-264](file://backend/config/mode_config.py#L180-L264)
 
-### Environment-Specific Configurations
-- Development:
-  - Broker mode: paper
-  - Log level: DEBUG
-  - Restrict to one symbol (NIFTY) and disable others
-  - Relaxed risk and realistic cost model
-- Paper:
-  - Broker mode: paper
-  - Log level: INFO
-  - Enable both exchanges
-  - Realistic risk and cost model
-- Live:
-  - Broker mode: live
-  - Log level: WARNING
-  - Enable both exchanges
-  - Tight risk envelope and LLM restrictions
+### ConsolidatedConfig: Unified Runtime Configuration
+ConsolidatedConfig provides a single source of truth for all configuration with comprehensive type safety and validation. It bridges between environment variables and YAML configurations.
 
-Runtime behavior:
-- Environment selection is controlled by GLASSYTRADE_ENV.
-- Broker mode must be live in live environment; otherwise, startup validation fails.
+Key capabilities:
+- **Unified Loading**: from_env() + from_unified() methods for flexible configuration loading
+- **Type Safety**: Pydantic models for all configuration sections
+- **Environment Integration**: Environment variables override YAML where appropriate
+- **Exchange Configuration**: Dynamic exchange-specific configuration from YAML
 
 **Section sources**
-- [development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [validator.py:32-44](file://backend/app/config_models/validator.py#L32-L44)
+- [consolidated.py:173-428](file://backend/config/consolidated.py#L173-L428)
+- [consolidated.py:489-532](file://backend/config/consolidated.py#L489-L532)
+
+### YAML-Based Configuration Hierarchy
+The new system uses a comprehensive multi-layered configuration hierarchy that replaces the previous environment-variable-only approach:
+
+**Configuration Merge Order**:
+1. **base.yaml**: All defaults and global settings
+2. **environments/{environment}.yaml**: Environment-specific overrides
+3. **strategies/{strategy}.yaml**: Strategy-specific configurations
+4. **.env file**: Secrets only (API keys, tokens)
+
+**Section sources**
+- [base.yaml:1-493](file://backend/config/base.yaml#L1-L493)
+- [development.yaml:1-46](file://backend/config/environments/development.yaml#L1-L46)
+- [paper.yaml:1-39](file://backend/config/environments/paper.yaml#L1-L39)
+- [live.yaml:1-50](file://backend/config/environments/live.yaml#L1-L50)
+
+### Strategy Configuration System
+The new system supports multiple trading strategies through dedicated YAML files:
+
+**Available Strategies**:
+- **mcx_options.yaml**: MCX commodity options trading with CRUDEOIL and NATURALGAS
+- **nse_options.yaml**: NSE index options trading with NIFTY, BANKNIFTY, and FINNIFTY
+
+Each strategy file contains:
+- Scanner configuration optimized for the specific market
+- Exchange configuration with default symbols and segments
+- AMT thresholds tuned for the strategy
+- Feature flags specific to the strategy
+- LLM configuration with strategy-specific instructions
+
+**Section sources**
+- [mcx_options.yaml:1-77](file://backend/config/strategies/mcx_options.yaml#L1-L77)
+- [nse_options.yaml:1-77](file://backend/config/strategies/nse_options.yaml#L1-L77)
+
+### Environment Configuration Management
+The system supports three distinct environments with specific configurations:
+
+**Development Environment**:
+- Single symbol (NIFTY) for focused testing
+- Paper broker mode with DEBUG logging
+- Relaxed risk parameters for development
+- Minimal scanner scope for faster testing
+
+**Paper Environment**:
+- All symbols enabled for comprehensive testing
+- Realistic cost models and risk parameters
+- Balanced scanner configuration
+- Production-like settings for validation
+
+**Live Environment**:
+- Conservative risk parameters and production settings
+- Full feature flags enabled
+- Optimized scanner and LLM configurations
+- Production-grade security and monitoring
+
+**Section sources**
+- [development.yaml:1-46](file://backend/config/environments/development.yaml#L1-L46)
+- [paper.yaml:1-39](file://backend/config/environments/paper.yaml#L1-L39)
+- [live.yaml:1-50](file://backend/config/environments/live.yaml#L1-L50)
 
 ### Feature Flag Management
-- Feature flags are grouped by phase and role.
-- Some flags are hardcoded in the loader for safety (e.g., llm_entry_gate is forced false).
-- Environment files can override flag defaults.
-- Examples:
-  - realistic_cost_model enabled in paper.
-  - short_signals_enabled enabled by default; requires walk_forward_validation for safe operation.
-  - risk_tier_engine and bootstrap_trade_count thresholds are validated.
+The new system provides comprehensive feature flag management through YAML files:
+
+**Feature Categories**:
+- **Phase 0**: Basic functionality flags
+- **Phase 1**: Infrastructure improvements
+- **Phase 2**: Advanced trading features
+- **Phase 3**: Machine learning enhancements
+- **Phase 4**: Scalping and advanced features
+- **Infrastructure**: System-level configuration
+
+**Hardcoded Security Features**:
+- `llm_entry_gate`: Always false for safety
+- `llm_execution_enabled`: Controlled via environment variable only
 
 **Section sources**
 - [feature_flags.yaml:1-37](file://backend/config/feature_flags.yaml#L1-L37)
-- [loader.py:167-189](file://backend/app/config_models/loader.py#L167-L189)
-- [validator.py:121-131](file://backend/app/config_models/validator.py#L121-L131)
+- [settings_adapter.py:260-262](file://backend/app/config_models/settings_adapter.py#L260-L262)
 
-### Runtime Configuration Bridge (ConsolidatedConfig)
-- Provides a single source of truth for application modules.
-- Loads from environment variables and optionally merges with YAML market_config.yaml.
-- Exposes helpers to get exchange-specific overrides and a singleton accessor.
-- Supports environment variable overrides for trading, LLM, risk, AMT thresholds, notifications, and server settings.
+### Secret Management and Security
+The new system implements proper separation of configuration and secrets:
 
-Practical usage:
-- Use get_config() to obtain the singleton configuration.
-- Use get_exchange_config(exchange) to bridge to domain ExchangeConfig with YAML overrides.
+**Configuration vs Secrets Separation**:
+- **Configuration**: Loaded from YAML files (version-controlled)
+- **Secrets**: Loaded exclusively from .env file (not version-controlled)
+- **Security Principle**: 12-factor app compliance with environment variables for secrets only
 
-**Section sources**
-- [consolidated.py:173-418](file://backend/config/consolidated.py#L173-L418)
-- [market_config.yaml:1-60](file://backend/app/market_config.yaml#L1-L60)
-
-### Configuration Loading Mechanism
-- Loader loads base, environment, strategies, and flags; deep-merges dictionaries; parses into typed models; validates; logs summary.
-- The loader also logs a human-readable snapshot of effective configuration at startup.
-
-```mermaid
-flowchart TD
-Start(["load_config"]) --> Base["Load base.yaml"]
-Base --> Env["Load environments/{GLASSYTRADE_ENV}.yaml"]
-Env --> Strat["Load strategies/*.yaml (optional)"]
-Strat --> Flags["Load feature_flags.yaml"]
-Flags --> Parse["Parse into typed SystemConfig"]
-Parse --> Validate["validate_config()"]
-Validate --> Summary["Log startup summary"]
-Summary --> Done(["Return SystemConfig"])
-```
-
-**Diagram sources**
-- [loader.py:139-245](file://backend/app/config_models/loader.py#L139-L245)
-- [validator.py:22-177](file://backend/app/config_models/validator.py#L22-L177)
+**Supported Secrets**:
+- DHAN API credentials (client ID, access token, API key, API secret)
+- OpenRouter API key
+- Telegram bot configuration
+- LLM model paths and adapters
 
 **Section sources**
-- [loader.py:139-245](file://backend/app/config_models/loader.py#L139-L245)
+- [mode_config.py:201-237](file://backend/config/mode_config.py#L201-L237)
+- [settings_adapter.py:76-106](file://backend/app/config_models/settings_adapter.py#L76-L106)
 
-### Validation Processes
-Validation runs at boot and includes:
-- Hard errors (block boot): active symbols present, live environment constraints (broker_mode, llm_entry_gate, capital), risk caps, symbol-level constraints (value_area_pct, min_rr_ratio), notional caps, CVD thresholds, LVN thresholds, ML model availability.
-- Warnings (allow boot): unusually high paper capital, short signals without walk-forward validation, risk tier bootstrap count, min_rr_ratio below recommended floor, LLM advisory without model, MCX futures-only symbols.
+## CLI Tools and Mode Selection
+The new system includes comprehensive CLI tools for configuration management:
 
-```mermaid
-flowchart TD
-VStart(["validate_config"]) --> R1{"Any active symbols?"}
-R1 --> |No| E1["Hard error: RULE-1"]
-R1 --> |Yes| R2{"Live mode?"}
-R2 --> |Yes| R2a{"broker_mode == live?"}
-R2a --> |No| E2["Hard error: RULE-2"]
-R2a --> |Yes| R2b{"llm_entry_gate == false?"}
-R2b --> |No| E3["Hard error: RULE-3"]
-R2b --> |Yes| R2c{"capital >= ₹10L?"}
-R2c --> |No| E4["Hard error: RULE-4"]
-R2c --> |Yes| Next1["Continue"]
-R2 --> |No| Next1
-Next1 --> R5{"risk_per_trade_pct <= 2%?"}
-R5 --> |No| E5["Hard error: RULE-5"]
-R5 --> |Yes| Next2["Continue"]
-Next2 --> R6{"portfolio_notional_cap <= 0.80?"}
-R6 --> |No| E6["Hard error: RULE-6"]
-R6 --> |Yes| Next3["Continue"]
-Next3 --> R7["Check symbol-level constraints"]
-R7 --> R8["Check notional cap sum"]
-R8 --> R9["Check CVD ordering"]
-R9 --> R10["Check LVN thresholds"]
-R10 --> R11["Check ML model files"]
-R11 --> Warns["Compute warnings"]
-Warns --> DoneV(["Pass or raise"])
-```
+### select_mode.py: Interactive Mode Selection
+The select_mode.py script provides an intuitive interface for choosing trading modes:
 
-**Diagram sources**
-- [validator.py:22-177](file://backend/app/config_models/validator.py#L22-L177)
+**Features**:
+- Interactive mode selection with validation
+- Automatic .env file updates
+- Configuration hierarchy visualization
+- Usage examples and restart instructions
+
+**Usage Patterns**:
+- `python scripts/select_mode.py --list`: Show available modes
+- `python scripts/select_mode.py --env paper --strategy mcx_options`: Set specific mode
+- Automatic backup and validation of .env file
 
 **Section sources**
-- [validator.py:22-177](file://backend/app/config_models/validator.py#L22-L177)
-
-### Practical Configuration Examples
-
-- Development environment:
-  - Set GLASSYTRADE_ENV=development.
-  - Keep broker_mode=paper and log_level=DEBUG.
-  - Only NIFTY enabled; BANKNIFTY and FINNIFTY disabled.
-  - Relaxed risk and realistic cost model enabled.
-
-- Paper environment:
-  - Set GLASSYTRADE_ENV=paper.
-  - Enable both NSE and MCX.
-  - Realistic risk and cost model enabled.
-
-- Live environment:
-  - Set GLASSYTRADE_ENV=live.
-  - broker_mode must be live; llm_entry_gate is forced false.
-  - Tight risk envelope and reduced max_concurrent_positions.
-
-- Customizing risk controls:
-  - Adjust risk.* parameters in environment files or base.yaml.
-  - Example: increase max_daily_loss_pct in development for testing.
-
-- Enabling/disabling features:
-  - Toggle flags in feature_flags.yaml or environment files.
-  - Example: enable short_signals_enabled and ensure walk_forward_validation is true.
-
-- Exchange and symbol tuning:
-  - Use market_config.yaml to override per-exchange settings (e.g., scanner underlyings, big trade thresholds).
-  - Use ConsolidatedConfig to read environment variable overrides for trading, LLM, and risk.
-
-**Section sources**
-- [development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
-- [paper.yaml:1-25](file://backend/config/environments/paper.yaml#L1-L25)
-- [live.yaml:1-26](file://backend/config/environments/live.yaml#L1-L26)
-- [market_config.yaml:1-60](file://backend/app/market_config.yaml#L1-L60)
-- [consolidated.py:232-314](file://backend/config/consolidated.py#L232-L314)
+- [select_mode.py:1-153](file://backend/scripts/select_mode.py#L1-L153)
 
 ## Dependency Analysis
-The configuration system depends on:
-- YAML files for declarative configuration
-- Loader to merge and type-check
-- Validator to enforce safety rules
-- Runtime configuration bridge for application modules
+The new unified configuration system creates clear dependencies between components:
 
 ```mermaid
 graph LR
-Y1["base.yaml"] --> L["ConfigLoader"]
-Y2["environments/*.yaml"] --> L
-Y3["strategies/*.yaml"] --> L
-Y4["feature_flags.yaml"] --> L
-L --> T["SystemConfig"]
-T --> V["ConfigValidator"]
-V --> S["Startup Summary"]
-T --> RC["ConsolidatedConfig"]
-RC --> APP["Application Modules"]
+SettingsAdapter --> ModeConfigLoader
+ModeConfigLoader --> SystemConfig
+SystemConfig --> YAMLFiles
+YAMLFiles --> BaseYAML
+YAMLFiles --> EnvYAML
+YAMLFiles --> StrategyYAML
+ModeConfigLoader --> ConsolidatedConfig
+ConsolidatedConfig --> ExchangeConfigs
+ConsolidatedConfig --> EnvironmentVars
+SettingsAdapter --> LegacyCode
+select_mode.py --> YAMLFiles
+select_mode.py --> EnvFile
 ```
 
 **Diagram sources**
-- [loader.py:139-245](file://backend/app/config_models/loader.py#L139-L245)
-- [validator.py:22-177](file://backend/app/config_models/validator.py#L22-L177)
-- [consolidated.py:173-418](file://backend/config/consolidated.py#L173-L418)
+- [settings_adapter.py:54-65](file://backend/app/config_models/settings_adapter.py#L54-L65)
+- [mode_config.py:112-115](file://backend/config/mode_config.py#L112-L115)
+- [consolidated.py:329-331](file://backend/config/consolidated.py#L329-L331)
+- [select_mode.py:60-111](file://backend/scripts/select_mode.py#L60-L111)
 
 **Section sources**
-- [loader.py:139-245](file://backend/app/config_models/loader.py#L139-L245)
-- [validator.py:22-177](file://backend/app/config_models/validator.py#L22-L177)
-- [consolidated.py:173-418](file://backend/config/consolidated.py#L173-L418)
+- [settings_adapter.py:54-65](file://backend/app/config_models/settings_adapter.py#L54-L65)
+- [mode_config.py:112-115](file://backend/config/mode_config.py#L112-L115)
+- [consolidated.py:329-331](file://backend/config/consolidated.py#L329-L331)
+- [select_mode.py:60-111](file://backend/scripts/select_mode.py#L60-L111)
 
 ## Performance Considerations
-- Keep YAML files minimal and focused; avoid deep nesting to ease merges.
-- Prefer environment variables for frequently changing values (e.g., ports, tokens).
-- Limit strategy overrides to essential changes to reduce merge complexity.
-- Use feature flags to gate experimental features during development to avoid runtime overhead.
+The new unified configuration system offers several performance benefits:
+
+- **Lazy Loading**: Configuration is loaded only when needed
+- **Singleton Pattern**: ConsolidatedConfig instances are cached globally
+- **Efficient Merging**: YAML files are processed once during initialization
+- **Memory Optimization**: Type-safe models minimize memory overhead
+- **Environment Variable Caching**: Frequently accessed environment variables are cached
+- **CLI Optimization**: select_mode.py provides batch operations for configuration updates
+
+Best practices:
+- Keep YAML files minimal and focused
+- Use environment variables for frequently changing values
+- Leverage strategy-specific configurations to reduce merge complexity
+- Monitor configuration loading performance in production
+- Use CLI tools for bulk configuration changes
 
 ## Security and Versioning
-- Secrets:
-  - Store API keys and tokens in environment variables; do not commit them to YAML.
-  - The loader reads environment variables for secrets only.
-- Versioning:
-  - Track configuration changes alongside code changes.
-  - Use environment files to isolate environment-specific values.
-- Auditing:
-  - Startup summary logs effective configuration; review for unexpected overrides.
+The new system implements comprehensive security and versioning practices:
 
-[No sources needed since this section provides general guidance]
+**Security Measures**:
+- **Secret Isolation**: API keys and tokens stored separately from configuration
+- **Environment Variable Protection**: Sensitive data never committed to version control
+- **Hardcoded Security**: Critical security flags are hardcoded for protection
+- **Access Control**: Limited access to configuration loading mechanisms
+- **CLI Security**: select_mode.py validates inputs and prevents invalid configurations
 
-## Troubleshooting Guide
-Common issues and resolutions:
-- No active symbols:
-  - Ensure at least one symbol is enabled per exchange.
-- Live environment misconfiguration:
-  - Set broker_mode to live and keep llm_entry_gate false.
-- Capital too low for live:
-  - Increase capital to at least ₹10,00,000.
-- Risk parameters out of bounds:
-  - Ensure risk_per_trade_pct ≤ 2%, portfolio_notional_cap ≤ 0.80.
-  - Verify symbol-level constraints (value_area_pct, min_rr_ratio).
-- Notional cap exceeded:
-  - Sum of max_notional_pct across enabled symbols must not exceed 1.50.
-- CVD/LVN thresholds invalid:
-  - Ensure cvd_slope_warning < cvd_slope_hard_block < cvd_slope_extreme and lvn_threshold < lvn_removal_threshold.
-- Missing ML models:
-  - Ensure model files exist for all active symbols under ML_MODEL_DIR.
-- Warnings:
-  - Short signals without walk-forward validation: enable walk_forward_validation.
-  - Low min_rr_ratio: consider raising to at least 1.5.
-  - LLM advisory without model: provide model_id or disable llm_pre_candle_advisory.
-  - MCX futures-only symbols: confirm intended use or switch to options.
+**Versioning Strategy**:
+- **YAML Files**: Version-controlled in Git for configuration history
+- **Environment Variables**: Managed externally for deployment-specific values
+- **Migration Support**: Backward compatibility maintained during transitions
+- **Audit Trail**: Configuration loading logs provide traceability
+- **Backup Strategy**: CLI tools automatically backup .env files before modifications
 
 **Section sources**
-- [validator.py:22-177](file://backend/app/config_models/validator.py#L22-L177)
+- [mode_config.py:201-237](file://backend/config/mode_config.py#L201-L237)
+- [settings_adapter.py:67-74](file://backend/app/config_models/settings_adapter.py#L67-L74)
+- [select_mode.py:60-111](file://backend/scripts/select_mode.py#L60-L111)
+
+## Troubleshooting Guide
+Common issues and resolutions for the new unified configuration system:
+
+**Configuration Loading Issues**:
+- **YAML Syntax Errors**: Check YAML files for proper indentation and syntax
+- **Missing Environment Variables**: Ensure GLASSYTRADE_ENV and GLASSYTRADE_STRATEGY are set
+- **Strategy File Not Found**: Verify strategy filename matches GLASSYTRADE_STRATEGY value
+- **Secret Loading Failures**: Check .env file existence and format
+
+**Backward Compatibility Issues**:
+- **Settings Import Failures**: Verify SettingsAdapter initialization
+- **Property Access Errors**: Check if property exists in new configuration hierarchy
+- **Legacy Code Breaking**: Review SettingsAdapter fallback mechanisms
+
+**Configuration Validation Issues**:
+- **Invalid Risk Parameters**: Ensure values fall within configured bounds
+- **Missing Required Fields**: Verify all mandatory configuration fields are present
+- **Environment Mismatch**: Check that environment-specific settings are valid
+
+**CLI Tool Issues**:
+- **Mode Selection Failures**: Verify select_mode.py has write permissions to .env
+- **Invalid Arguments**: Check CLI arguments match available modes
+- **File Permission Errors**: Ensure .env file is writable by current user
+
+**Section sources**
+- [settings_adapter.py:67-74](file://backend/app/config_models/settings_adapter.py#L67-L74)
+- [mode_config.py:143-144](file://backend/config/mode_config.py#L143-L144)
+- [consolidated.py:332-336](file://backend/config/consolidated.py#L332-L336)
+- [select_mode.py:60-111](file://backend/scripts/select_mode.py#L60-L111)
 
 ## Conclusion
-GlassyTrade AI’s configuration system combines YAML-based defaults, environment-specific overrides, and feature flags with robust validation and logging. By following the merge order, using environment variables for secrets, and leveraging the consolidated runtime configuration, teams can safely tailor trading behavior across development, paper, and live environments while maintaining strong safety checks and operational visibility.
+GlassyTrade AI's new unified configuration system represents a significant architectural improvement that maintains backward compatibility while introducing powerful new capabilities. The SettingsAdapter and ModeConfig components provide seamless migration from the previous environment-variable-only approach to a comprehensive multi-layered YAML hierarchy. This system offers improved maintainability, security, and flexibility while ensuring zero downtime during the transition period.
+
+The professional configuration architecture supports complex trading strategies, environment-specific configurations, and comprehensive feature flag management while maintaining strict separation between configuration and secrets. The addition of CLI tools like select_mode.py provides intuitive mode selection and configuration management capabilities.
+
+Teams can now safely tailor trading behavior across development, paper, and live environments using the comprehensive YAML hierarchy while benefiting from type safety, validation, and comprehensive logging. The system's modular design ensures easy maintenance and future extensibility while providing robust security and performance characteristics essential for production trading systems.

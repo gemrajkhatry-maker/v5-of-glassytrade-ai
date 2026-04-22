@@ -515,7 +515,7 @@ class TradeJournal:
                 with open(fname, "a") as f:
                     f.write(line + "\n")
             except Exception:
-                logger.debug("Failed to write journal entry", exc_info=True)
+                logger.warning("Failed to write journal entry — audit trail gap", exc_info=True)
 
     def _iter_target_dates(self, start_date: str | None, end_date: str | None) -> list[str]:
         """Expand an inclusive date range into YYYY-MM-DD strings."""

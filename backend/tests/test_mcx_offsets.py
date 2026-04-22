@@ -1,7 +1,7 @@
 
 import pytest
 from types import SimpleNamespace
-from app.domain.fabio_ai.services.entry_gate import three_align_check
+from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
 from app.domain.models.exchange_config import ExchangeConfig
 
 def test_mcx_tick_size_proximity():

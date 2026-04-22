@@ -18,6 +18,14 @@ from app.domain.constants import (
     AGENT_DECISION_THRESHOLD,
     CONFIDENCE_HIGH_THRESHOLD,
 )
+from app.shared.parsing import is_mcx_symbol
+from app.domain.probability.features import extract_features
+from app.domain.probability.agent_pipeline import run_agent_pipeline
+from app.domain.probability.regime_hysteresis_store import RegimeHysteresisStore
+from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
+from app.domain.fabio_ai.services.entry_gates.gate_runner import run_gate_pipeline
+from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
+from app.domain.services.short_signal_gates import evaluate_short_gates
 
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, OrderBook, AMTResult
@@ -97,6 +105,7 @@ class SessionEventRouter:
         self._gate_tracker = gate_tracker
         self._signal_tracker = signal_tracker
         self._scalp_enabled = scalp_enabled
+        self._regime_hysteresis_store = RegimeHysteresisStore()
 
     # ----- Agent Pipeline Routing -----
 
@@ -116,21 +125,24 @@ class SessionEventRouter:
         Returns:
             AgentDecision or None
         """
-        from app.shared.parsing import is_mcx_symbol
-
-        if not self._probability_engine.is_ready() or len(list(event.data)) < 20:
+        _series = (
+            list(event.agent_series)
+            if len(getattr(event, "agent_series", ())) >= 20
+            else list(event.data)
+        )
+        _use_underlying_series = len(getattr(event, "agent_series", ())) >= 20
+        if not self._probability_engine.is_ready() or len(_series) < 20:
             return None
         try:
-            from app.domain.probability.features import extract_features
-            from app.domain.probability.agent_pipeline import run_agent_pipeline
-
             is_mcx = is_mcx_symbol(event.symbol)
+            _regime_tick = _series[-1] if _use_underlying_series else event.tick
             features = extract_features(
-                list(event.data),
+                _series,
                 amt_result,
                 event.tick,
                 event.order_book,
                 is_mcx=is_mcx,
+                align_volume_with_data=_use_underlying_series,
             )
             tick_size = (
                 exchange_config.get_tick_size(event.symbol)
@@ -138,15 +150,16 @@ class SessionEventRouter:
                 else 0.05
             )
             agent_decision = run_agent_pipeline(
-                data=list(event.data),
+                data=_series,
                 amt_result=amt_result,
-                tick=event.tick,
+                tick=_regime_tick,
                 probability_engine=self._probability_engine,
                 features=features,
                 order_book=event.order_book,
                 tick_size=tick_size,
                 symbol=event.symbol,
                 tick_age_seconds=1.0,
+                hysteresis_store=self._regime_hysteresis_store,
             )
             log.info(
                 "Agent pipeline [%s]: dir=%s P=%.3f regime=%s timing=%s kelly=%.1f%% (%dus) — %s",
@@ -192,10 +205,6 @@ class SessionEventRouter:
         _mkt = exchange
         if _mkt in ("NFO", "BSE"):
             _mkt = "NSE"
-        from app.domain.fabio_ai.services.session_context import (
-            get_session_info as _get_si,
-        )
-
         _si = _get_si(timestamp=event.tick.time, market=_mkt)
         _fp_candle = None
         _fp_domain = getattr(session, "_last_fp_domain", None)
@@ -208,7 +217,7 @@ class SessionEventRouter:
                 )
                 _fp_candle = _fp_vals[-1] if _fp_vals else None
             except Exception:
-                log.debug("Silent exception handled", exc_info=True)
+                log.debug("Footprint candle extraction failed for overseer", exc_info=True)
         self._overseer_handler.run_overseer(
             session,
             event.symbol,
@@ -319,8 +328,6 @@ class SessionEventRouter:
                 )
                 return
 
-            from app.domain.fabio_ai.services.entry_gate import run_gate_pipeline
-
             tick_size = (
                 exchange_config.get_tick_size(event.symbol)
                 if exchange_config
@@ -354,10 +361,6 @@ class SessionEventRouter:
                     self._gate_tracker.record(event.symbol, "gate_pipeline", True)
 
                 if exec_dir == "SHORT":
-                    from app.domain.services.short_signal_gates import (
-                        evaluate_short_gates,
-                    )
-
                     short_ok, short_results = evaluate_short_gates(
                         short_enabled=getattr(settings, "SHORT_SIGNALS_ENABLED", False),
                         market_state=amt_result.market_state,
@@ -476,8 +479,6 @@ class SessionEventRouter:
         Returns:
             Signal or None
         """
-        from app.domain.fabio_ai.services.entry_gate import build_entry_signal
-
         return build_entry_signal(
             direction=exec_dir,
             tick=tick,

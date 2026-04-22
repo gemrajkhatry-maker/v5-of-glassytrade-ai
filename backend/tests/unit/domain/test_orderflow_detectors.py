@@ -130,6 +130,37 @@ class TestOFICalculator:
             result = calc.update(_candle(volume=100, delta=100, time=f"t{i}"))
         assert -1.0 <= result.ofi <= 1.0
 
+    def test_ofi_clamps_extreme_delta(self):
+        """OFI clamped when delta exceeds volume (Task 2.4)."""
+        calc = OFICalculator(window=10)
+        # Feed extreme delta values (delta > volume)
+        for i in range(10):
+            result = calc.update(_candle(volume=100, delta=500, time=f"t{i}"))
+        # Should be clamped to +1.0
+        assert -1.0 <= result.ofi <= 1.0
+        assert result.ofi == 1.0  # All positive extreme deltas
+
+    def test_ofi_varies_with_data(self):
+        """OFI produces different values across varying ticks (Task 2.4)."""
+        calc = OFICalculator(window=5)
+        ofi_values = []
+        
+        # Feed varying delta patterns
+        for i in range(10):
+            delta = 50 if i % 3 == 0 else (-30 if i % 3 == 1 else 10)
+            result = calc.update(_candle(volume=100, delta=delta, time=f"t{i}"))
+            ofi_values.append(result.ofi)
+        
+        # Should have some variation (not all same value)
+        unique_values = set(round(v, 3) for v in ofi_values)
+        assert len(unique_values) > 1, f"OFI should vary, got {len(unique_values)} unique values"
+
+    def test_ofi_zero_volume_returns_zero(self):
+        """OFI returns 0.0 when volume is zero (Task 2.4)."""
+        calc = OFICalculator(window=10)
+        result = calc.update(_candle(volume=0, delta=100, time="t0"))
+        assert result.ofi == 0.0
+
 
 class TestAbsorptionDetector:
     """FR-03-09/10: Absorption candle detection with displacement validation."""

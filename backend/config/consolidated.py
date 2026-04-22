@@ -306,7 +306,7 @@ class ConsolidatedConfig(BaseModel):
             default_exchange=os.getenv("DEFAULT_EXCHANGE", "MCX"),
             dhan_symbols=os.getenv("DHAN_SYMBOLS", "CRUDEOIL,NATURALGAS").split(","),
             scanner_underlyings=os.getenv(
-                "SCANNER_UNDERLYINGS", "CRUDEOIL,NATURALGAS"
+                "SCANNER_UNDERLYINGS", "CRUDEOIL,NATURALGAS,GOLDM,SILVERM"
             ).split(","),
             dhan_client_id=os.getenv("DHAN_CLIENT_ID", ""),
             dhan_access_token=os.getenv("DHAN_ACCESS_TOKEN", ""),
@@ -336,10 +336,8 @@ class ConsolidatedConfig(BaseModel):
             return base
 
         sc = mode.scanner_config
-        feat = dict(mode.feature_flags or {})
-        if not feat:
-            feat = dict(sc.get("feature_flags") or {})
-        amt_src = dict(mode.amt_thresholds or {})
+        feat = dict(sc.get("feature_flags") or {})
+        amt_src = dict(sc.get("amt_thresholds") or {})
 
         trading = base.trading.model_copy(
             update={

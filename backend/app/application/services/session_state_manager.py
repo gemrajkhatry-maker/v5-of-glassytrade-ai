@@ -146,20 +146,52 @@ class SessionStateManager:
                                 symbol, _market
                             )
                             if prior:
-                                new_session._prior_profile = prior
-                                # Extract prior session print levels for cross-session
-                                # structural level persistence (Gap #10)
-                                new_session._prior_print_levels = [
-                                    p["price"] for p in prior.get("print_levels", [])
-                                ]
-                                logger.info(
-                                    "Loaded prior session profile for %s: POC=%.1f VAH=%.1f VAL=%.1f print_levels=%d",
-                                    symbol,
-                                    prior.get("poc", 0),
-                                    prior.get("vah", 0),
-                                    prior.get("val", 0),
-                                    len(new_session._prior_print_levels),
-                                )
+                                # Task 2.2: Validate prior POC is in reasonable price range
+                                prior_poc = prior.get("poc", 0)
+                                if prior_poc > 0:
+                                    # Heuristic: MCX instruments have distinct price ranges
+                                    # CRUDEOIL: 500-900, GOLDM: 70000-90000, SILVERM: 70000-100000
+                                    # NIFTY: 15000-25000 (should never appear in MCX)
+                                    # Reject prior POC if it's in NIFTY range for crude symbols
+                                    if "CRUDE" in symbol.upper():
+                                        if prior_poc > 5000 or prior_poc < 100:
+                                            logger.warning(
+                                                "Prior POC contamination detected for %s: %.2f (out of CRUDE range). Clearing.",
+                                                symbol, prior_poc
+                                            )
+                                            prior = None  # Discard contaminated data
+                                    # GOLDM/SILVERM are in 70k-100k range
+                                    elif "GOLD" in symbol.upper() or "SILVER" in symbol.upper():
+                                        if prior_poc < 10000 or prior_poc > 200000:
+                                            logger.warning(
+                                                "Prior POC contamination detected for %s: %.2f (out of precious metals range). Clearing.",
+                                                symbol, prior_poc
+                                            )
+                                            prior = None
+                                    # For NSE symbols, reject if POC is in MCX crude range
+                                    elif "NIFTY" in symbol.upper() or "BANKNIFTY" in symbol.upper():
+                                        if prior_poc < 5000:
+                                            logger.warning(
+                                                "Prior POC contamination detected for %s: %.2f (likely MCX crude data). Clearing.",
+                                                symbol, prior_poc
+                                            )
+                                            prior = None
+                                
+                                if prior:
+                                    new_session._prior_profile = prior
+                                    # Extract prior session print levels for cross-session
+                                    # structural level persistence (Gap #10)
+                                    new_session._prior_print_levels = [
+                                        p["price"] for p in prior.get("print_levels", [])
+                                    ]
+                                    logger.info(
+                                        "Loaded prior session profile for %s: POC=%.1f VAH=%.1f VAL=%.1f print_levels=%d",
+                                        symbol,
+                                        prior.get("poc", 0),
+                                        prior.get("vah", 0),
+                                        prior.get("val", 0),
+                                        len(new_session._prior_print_levels),
+                                    )
                         except (KeyError, TypeError):
                             logger.debug(
                                 "Failed to load prior session profile", exc_info=True

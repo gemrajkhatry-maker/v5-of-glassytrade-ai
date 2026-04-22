@@ -591,30 +591,6 @@ class Trade:
             close_reason=new_close_reason,
         )
 
-        new_event = TradeEvent(
-            trade_id=self.trade_id,
-            event_type="FILL_RECEIVED",
-            timestamp=fill.timestamp,
-            data={
-                "fill_id": fill.fill_id,
-                "fill_type": fill.fill_type.value,
-                "price": str(fill.price),
-                "quantity": str(fill.quantity),
-            },
-        )
-
-        # Check if this fill closes the position
-        new_fills = self.fills + (fill,)
-        new_position = Position.from_fills(new_fills)
-
-        new_status = self.status
-        new_close_time = self.close_time
-        new_close_reason = self.close_reason
-
-        if not new_position.is_open and self.status == TradeStatus.OPEN:
-            new_status = TradeStatus.CLOSED
-            new_close_time = fill.timestamp
-
     def close(self, reason: CloseReason, timestamp: str) -> Trade:
         """Close the trade."""
         if self.status != TradeStatus.OPEN:

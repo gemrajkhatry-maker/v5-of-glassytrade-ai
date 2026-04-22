@@ -30,6 +30,7 @@ from app.domain.services.market_state_classifier import MarketStateClassifier
 from app.domain.services.aggression_scorer import AggressionScorer
 from app.domain.services.signal_generator import SignalGenerator
 from app.domain.services.gate_pipeline import GatePipeline
+from app.domain.services.underlying_futures_provider import UnderlyingFuturesProvider
 
 # Stable port token for `is` checks inside `_create_service` (avoids UnboundLocalError
 # if nested imports make the compiler treat `ILLMInference` as a local name).
@@ -119,8 +120,57 @@ class ServiceGraph:
             except Exception:
                 self._active_symbols = []
 
+        self._underlying_futures_provider = UnderlyingFuturesProvider()
+        self._fut_to_options: dict[str, list[str]] = {}
+        self._stream_symbols: list[str] = []
+        self._refresh_stream_routing()
+
         # Eagerly create TradingSession so it's available for route handlers
         self._services["trading_session"] = self._create_trading_session()
+        if self._services["trading_session"] is None:
+            raise RuntimeError(
+                "TradingSessionService failed to initialize; refusing startup."
+            )
+        _ts = self._services["trading_session"]
+        if hasattr(_ts, "set_futures_option_map"):
+            _ts.set_futures_option_map(self._fut_to_options)
+
+    @staticmethod
+    def _is_live_mode() -> bool:
+        env_mode = (os.getenv("GLASSYTRADE_ENV", "") or "").strip().lower()
+        trading_mode = (os.getenv("TRADING_MODE", "") or "").strip().lower()
+        return env_mode == "live" or trading_mode == "live"
+
+    def _resolve_probability_engine(self):
+        from app.domain.ports import IProbabilityInference
+        from app.domain.ports.probability_inference import NoOpProbabilityAdapter
+
+        # Check for explicit disable via env
+        if os.getenv("DISABLE_LGBM", "0") == "1":
+            logger.info("Probability engine disabled via DISABLE_LGBM=1")
+            return NoOpProbabilityAdapter()
+
+        try:
+            # We wrap the entire resolution in a secondary try/except
+            # because even the registration/get can trigger the LightGBM import
+            # which might segfault on some systems.
+            return self.get(IProbabilityInference)
+        except (Exception, ImportError, RuntimeError) as exc:
+            if self._is_live_mode():
+                # In live mode we still might want it, but if it segfaults, 
+                # we have no choice but to fallback or fail.
+                logger.error("CRITICAL: Probability engine failed in live mode: %s", exc)
+                if isinstance(exc, (ImportError, RuntimeError)):
+                    return NoOpProbabilityAdapter()
+                raise RuntimeError(
+                    "Probability engine failed in live mode; startup blocked."
+                ) from exc
+            
+            logger.warning(
+                "Probability engine unavailable; using NoOp adapter (non-live only): %s",
+                exc,
+            )
+            return NoOpProbabilityAdapter()
 
     # ------------------------------------------------------------------
     # Property accessors — delegate to self.get() for lazy resolution
@@ -159,10 +209,33 @@ class ServiceGraph:
         """
         return getattr(self, "_active_symbols", [])
 
+    @property
+    def stream_symbols(self) -> list[str]:
+        """Symbols to subscribe on the market-data feed (options + underlying futures)."""
+        return list(getattr(self, "_stream_symbols", []) or [])
+
+    @property
+    def underlying_futures_provider(self) -> UnderlyingFuturesProvider:
+        return self._underlying_futures_provider
+
+    @property
+    def futures_option_map(self) -> dict[str, list[str]]:
+        return dict(self._fut_to_options)
+
+    def _refresh_stream_routing(self) -> None:
+        self._fut_to_options, futs = self._underlying_futures_provider.build_futures_routing(
+            self._active_symbols
+        )
+        self._stream_symbols = sorted(set(self._active_symbols) | set(futs))
+
     @active_symbols.setter
     def active_symbols(self, value: list) -> None:
         """Set active symbols list (used by scanner rescan endpoint)."""
         self._active_symbols = list(value) if value is not None else []
+        self._refresh_stream_routing()
+        _ts = self._services.get("trading_session")
+        if _ts is not None and hasattr(_ts, "set_futures_option_map"):
+            _ts.set_futures_option_map(self._fut_to_options)
 
     def _initialize_services(self) -> None:
         """Initialize services. Services are lazily created on demand via get()."""
@@ -179,7 +252,6 @@ class ServiceGraph:
             from app.domain.fabio_ai.services.generative_ai_service import (
                 GenerativeAIService,
             )
-            from app.domain.ports.probability_inference import NoOpProbabilityAdapter
             from app.config import settings as _settings
 
             logger.info("Getting broker adapter...")
@@ -201,22 +273,17 @@ class ServiceGraph:
             # Exchange config
             try:
                 from app.domain.models.exchange_config import ExchangeConfig
+                from app.domain.models.exchange import Exchange
 
-                exchange_name = getattr(self._config, "default_exchange", "MCX") or "MCX"
-                ex = str(exchange_name).upper()
-                if ex == "NFO":
-                    ex = "NSE"
-                exchange_config = ExchangeConfig.for_exchange(ex)
+                exchange = Exchange.normalize(
+                    getattr(self._config, "default_exchange", "MCX") or "MCX"
+                )
+                exchange_config = ExchangeConfig.for_exchange(exchange.value)
             except Exception:
                 exchange_config = None
 
-            # Probability engine
-            try:
-                from app.domain.ports import IProbabilityInference
-
-                probability_engine = self.get(IProbabilityInference)
-            except Exception:
-                probability_engine = NoOpProbabilityAdapter()
+            # Probability engine (NoOp fallback disallowed in live mode)
+            probability_engine = self._resolve_probability_engine()
 
             allow_short = bool(getattr(_settings, "ALLOW_SHORT", False))
 
@@ -236,6 +303,10 @@ class ServiceGraph:
                 e,
                 exc_info=True,
             )
+            if self._is_live_mode():
+                raise RuntimeError(
+                    "TradingSessionService creation failed in live mode."
+                ) from e
             return None
 
     def register_adapter(self, port: Type[T], implementation: Type[T]) -> None:
@@ -250,12 +321,6 @@ class ServiceGraph:
 
     def _create_service(self, service_type: Type) -> object:
         """Create a service instance with its dependencies."""
-        # Scanner Service — dead code branch (ScannerService and its dependencies
-        # IOptionChainFetcher, PremiumFilter, OIFilter, SpreadFilter, MomentumScorer,
-        # TopNSelector are not implemented; kept here as a placeholder).
-        # if service_type == ScannerService:
-        #     return ScannerService(...)
-
         # Registered adapters (IMarketData, IBroker, IStorage, etc.) — checked FIRST
         # so adapter lookups are never blocked by optional service branches.
         if service_type in self._adapters:
@@ -265,12 +330,12 @@ class ServiceGraph:
             # full ConsolidatedConfig. Build the correct ExchangeConfig here.
             if service_type is IExchangeStrategy:
                 from app.domain.models.exchange_config import ExchangeConfig
+                from app.domain.models.exchange import Exchange
 
-                exchange_name = getattr(self._config, "default_exchange", "MCX") or "MCX"
-                ex = str(exchange_name).upper()
-                if ex == "NFO":
-                    ex = "NSE"
-                exc_config = ExchangeConfig.for_exchange(ex)
+                exchange = Exchange.normalize(
+                    getattr(self._config, "default_exchange", "MCX") or "MCX"
+                )
+                exc_config = ExchangeConfig.for_exchange(exchange.value)
                 return impl(exc_config)
 
             # IProbabilityInference requires a model directory path
@@ -281,12 +346,20 @@ class ServiceGraph:
                 model_dir = os.path.normpath(model_dir)
                 try:
                     return impl(model_dir)
-                except Exception:
+                except Exception as exc:
+                    if self._is_live_mode():
+                        raise RuntimeError(
+                            "LGBM probability model initialization failed in live mode."
+                        ) from exc
                     # Fall back to NoOp if model files not found
                     from app.domain.ports.probability_inference import (
                         NoOpProbabilityAdapter,
                     )
 
+                    logger.warning(
+                        "LGBM model unavailable; using NoOp adapter (non-live only): %s",
+                        exc,
+                    )
                     return NoOpProbabilityAdapter()
 
             if service_type is _LLM_INFERENCE_PORT:
@@ -304,6 +377,11 @@ class ServiceGraph:
                         or os.environ.get("GGUF_MODEL_PATH", "")
                     ).strip()
                     return impl(model_path=gp)
+
+            # IMarketData (DhanMarketDataAdapter) needs exchange config
+            if service_type is IMarketData:
+                exchange_str = getattr(self._config, "default_exchange", "MCX") or "MCX"
+                return impl(exchange=exchange_str)
 
             try:
                 return impl()
@@ -353,6 +431,3 @@ class ServiceGraph:
         # Other services...
 
         raise ValueError(f"Unknown service type: {service_type}")
-
-    # _create_scanner_filters removed — IContractFilter, PremiumFilter, OIFilter,
-    # SpreadFilter are not yet implemented in this codebase.

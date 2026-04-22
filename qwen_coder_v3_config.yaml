@@ -1,0 +1,25 @@
+# Qwen 2.5 Coder 7B FAST Expert Config
+model: "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit"
+data: "expert_amt_dataset"
+train: true
+iters: 1500
+batch_size: 1
+learning_rate: 1e-5
+adapter_path: "./qwen_coder_v3_expert"
+num_layers: 16
+max_seq_length: 512
+grad_checkpoint: true
+mask_prompt: true
+clear_cache_threshold: 100
+
+lora_parameters:
+  rank: 64
+  alpha: 128
+  dropout: 0.05
+  scale: 2.0
+
+save_every: 100
+steps_per_report: 10
+steps_per_eval: 200
+val_batches: 5
+seed: 42

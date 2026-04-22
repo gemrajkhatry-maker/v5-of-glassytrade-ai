@@ -319,7 +319,7 @@ class TradeLifecycleHandler:
         """
         # Partition states track positions we're managing
         return any(
-            pid.startswith(symbol) or True  # Simplified: just check if any exist
+            pid.startswith(symbol)
             for pid in self._partition_states.keys()
         )
 

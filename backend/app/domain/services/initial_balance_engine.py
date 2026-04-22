@@ -93,6 +93,11 @@ class InitialBalanceEngine:
         if not self._session_open_time:
             self._session_open_time = candle.time
 
+        # Update IB high/low (BEFORE marking complete, so the last candle of the window is included)
+        if not self._complete:
+            self._ib_high = max(self._ib_high, float(candle.high))
+            self._ib_low = min(self._ib_low, float(candle.low))
+
         # Check if IB window has elapsed
         if not self._complete:
             try:
@@ -109,11 +114,6 @@ class InitialBalanceEngine:
                     )
             except (ValueError, TypeError):
                 pass
-
-        # Update IB high/low
-        if not self._complete:
-            self._ib_high = max(self._ib_high, float(candle.high))
-            self._ib_low = min(self._ib_low, float(candle.low))
 
         # Classify price location
         c_price = float(candle.close)

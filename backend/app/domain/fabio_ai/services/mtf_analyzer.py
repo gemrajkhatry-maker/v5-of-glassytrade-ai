@@ -17,6 +17,9 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from app.domain.services.volume_profile import create_profile
+from app.domain.fabio_ai.services.market_state_engine import detect_market_state
+
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
 
@@ -54,8 +57,6 @@ class MultiTimeframeAMTAnalyzer:
         hourly_ohlc: list[OHLC],
     ) -> MTFAlignmentResult:
         """Compute the MTF alignment based on provided OHLC data."""
-        from app.domain.services.volume_profile import create_profile
-        from app.domain.fabio_ai.services.market_state_engine import detect_market_state
 
         # 1. Daily Level (Structural)
         d_profile = create_profile(daily_ohlc, buckets=100)

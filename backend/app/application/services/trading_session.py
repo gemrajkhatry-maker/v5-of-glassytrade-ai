@@ -12,9 +12,11 @@ Manages per-symbol state, wires event subscriptions, and delegates:
 
 from __future__ import annotations
 
+from dataclasses import replace as _dc_replace
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 import logging
+import os
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -26,15 +28,16 @@ from app.domain.constants import (
     RECENT_DATA_WINDOW,
     CANDLE_INTERVAL_MINUTES,
 )
-from app.domain.trading.models.value_objects import OHLC, OrderBook
+from app.domain.trading.models.value_objects import OHLC, OrderBook, AMTResult
 from app.domain.trading.models.aggregates import Portfolio
-from app.domain.trading.models.enums import MarketStateCodec, Source
+from app.domain.trading.models.enums import MarketStateCodec, Source, MarketState
 from app.domain.trading.events import (
     TickReceived,
     SignalGenerated,
     PositionOpened,
     PositionClosed,
 )
+from app.domain.trading.event_store import EventBus
 from app.domain.ports.broker import IBroker
 from app.domain.ports.storage import IStorage
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
@@ -42,6 +45,12 @@ from app.domain.ports.probability_inference import (
     IProbabilityInference,
     NoOpProbabilityAdapter,
 )
+from app.domain.services.initial_balance_engine import InitialBalanceEngine
+from app.domain.services.ib_breakout_scalp import IBBreakoutScalpEngine
+from app.domain.services.one_min_bar_engine import OneMinBarEngine
+from app.domain.services.mobile_alerts import MobileAlertSystem
+from app.domain.services.self_healing import OrderRejectionHandler, DBFallbackBuffer
+from app.application.handlers.post_trade_analyst import PostTradeAnalyst
 
 from app.application.handlers.amt_handler import AMTHandler
 from app.application.handlers.llm_entry_handler import LLMEntryHandler
@@ -51,7 +60,9 @@ from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
 from app.application.handlers.pre_candle_advisor import PreCandleAdvisor
 from app.domain.fabio_ai.services.option_selector import OptionSelector
 from app.domain.fabio_ai.services.trade_thesis import validate_trade_thesis
-from app.domain.fabio_ai.services.entry_gate import build_entry_signal
+from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
+from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints
+from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
 from app.application.services.entry_coordinator import EntryCoordinator
 from app.application.services.exit_coordinator import ExitCoordinator
 
@@ -82,7 +93,8 @@ from shared.error_handling import (
 )
 
 # Import safe parsing utilities
-from app.shared.parsing import is_mcx_symbol, extract_bar_minute
+from app.shared.parsing import is_mcx_symbol, extract_bar_minute, resolve_session_market
+from app.shared.timezones import IST
 
 from app.infrastructure.serialization.schemas import portfolio_to_dto, stats_to_dto
 
@@ -107,10 +119,24 @@ class TradingSessionService:
         gate_tracker=None,  # GateRejectionTracker — observability
         latency_tracker=None,  # LatencyTracker — observability
         signal_tracker=None,  # SignalTracker (from app.api) — gate rejection history
+        event_bus: EventBus | None = None,  # Event bus for pub/sub pipeline
     ) -> None:
+        env_mode = (os.getenv("GLASSYTRADE_ENV", "") or "").strip().lower()
+        trading_mode = (os.getenv("TRADING_MODE", "") or "").strip().lower()
+        live_mode = env_mode == "live" or trading_mode == "live"
+
+        if probability_engine is None and live_mode:
+            raise ValueError(
+                "Probability engine is required in live mode; NoOp fallback blocked."
+            )
+
         self._broker = broker
         self._storage = storage
         self._probability_engine = probability_engine or NoOpProbabilityAdapter()
+        if isinstance(self._probability_engine, NoOpProbabilityAdapter) and live_mode:
+            raise ValueError(
+                "NoOp probability adapter is not allowed in live mode."
+            )
         self._gate_tracker = gate_tracker
         self._latency_tracker = latency_tracker
         self._signal_tracker = signal_tracker
@@ -175,8 +201,6 @@ class TradingSessionService:
         self._option_selector = OptionSelector()
 
         # Post-Trade Analyst (Phase 3) — must be created before ExitCoordinator
-        from app.application.handlers.post_trade_analyst import PostTradeAnalyst
-
         self._post_trade_analyst = PostTradeAnalyst(
             gen_ai_service=gen_ai_service,
             storage=storage,
@@ -220,19 +244,12 @@ class TradingSessionService:
         self._ib_scalp_engines: dict = {}
 
         # Mobile alerts (Phase 5)
-        from app.domain.services.mobile_alerts import MobileAlertSystem
-
         self._alerts = MobileAlertSystem(
             bot_token=getattr(settings, "TELEGRAM_BOT_TOKEN", ""),
             chat_id=getattr(settings, "TELEGRAM_CHAT_ID", ""),
         )
 
         # Self-healing (Phase 5)
-        from app.domain.services.self_healing import (
-            OrderRejectionHandler,
-            DBFallbackBuffer,
-        )
-
         self._order_rejection = OrderRejectionHandler()
         self._db_fallback = DBFallbackBuffer()
 
@@ -263,6 +280,13 @@ class TradingSessionService:
         # Key: underlying name (e.g., "NIFTY"), Value: (timestamp, market_state_str)
         self._underlying_state_cache: dict[str, tuple[float, str]] = {}
         self._underlying_state_ttl = 60.0  # seconds
+        self._fut_to_options: dict[str, list[str]] = {}
+
+        # Event bus integration — when provided, pipeline events flow through pub/sub
+        self._event_bus = event_bus
+        if event_bus is not None:
+            event_bus.subscribe("TickReceived", self._on_tick)
+            log.info("Event bus activated: TickReceived → _on_tick subscribed")
 
     def get_or_create_session(self, symbol: str) -> SessionState:
         """Get or create a session for the symbol."""
@@ -278,6 +302,26 @@ class TradingSessionService:
             session = self._state_manager.get_or_create_session(symbol)
             self._session_caches[symbol] = SessionCache(session)
         return self._session_caches[symbol]
+
+    def set_futures_option_map(self, fut_to_options: dict[str, list[str]]) -> None:
+        """Which option legs share each subscribed futures root (for dual feed)."""
+        self._fut_to_options = dict(fut_to_options)
+
+    def on_underlying_futures_candle(self, futures_symbol: str, ohlc: OHLC) -> None:
+        """Apply one futures OHLC update to every mapped option session."""
+        for opt in self._fut_to_options.get(futures_symbol, ()):
+            cache = self._get_cache(opt)
+            cache.update_underlying_data(ohlc)
+
+    def seed_underlying_from_history(self, futures_symbol: str, history: list) -> None:
+        """Warm underlying buffers from historical futures when live feed is still ramping."""
+        if not history:
+            return
+        from app.application.services.session_cache import MAX_CANDLES_PER_SYMBOL
+
+        for opt in self._fut_to_options.get(futures_symbol, ()):
+            self.get_or_create_session(opt)
+            self._get_cache(opt).seed_underlying_if_sparse(history, MAX_CANDLES_PER_SYMBOL)
 
     def process_tick(
         self,
@@ -307,8 +351,6 @@ class TradingSessionService:
             pending_symbol, pending_signal = pending
 
             # Audit Fix: Signal TTL — ignore stale signals older than 10 minutes
-            from datetime import datetime
-
             try:
                 sig_time = datetime.fromisoformat(
                     pending_signal.timestamp.replace("Z", "+00:00")
@@ -404,17 +446,27 @@ class TradingSessionService:
                 except (ValueError, KeyError) as e:
                     log.debug("Performance snapshot error: %s", e, exc_info=True)
 
-        # Call entry logic directly (avoids event bus overhead)
+        # Event dispatch: publish TickReceived via event bus (when active)
+        # or fall back to direct method call (backward compatibility)
         try:
+            _agent_series: tuple = ()
+            if cache.has_underlying_data(20):
+                _ud = cache.get_underlying_data()
+                if _ud:
+                    _agent_series = tuple(_ud)
             tick_event = TickReceived(
                 symbol=symbol,
                 tick=tick,
                 order_book=order_book,
                 data=tuple(session.data),
+                agent_series=_agent_series,
             )
-            self._on_tick(tick_event)
+            if self._event_bus is not None:
+                self._event_bus.publish(tick_event)
+            else:
+                self._on_tick(tick_event)
         except (ValueError, RuntimeError) as e:
-            log.warning("Entry logic error for %s: %s", symbol, e, exc_info=True)
+            log.warning("Tick processing error for %s: %s", symbol, e, exc_info=True)
 
         return self._build_state_snapshot(session)
 
@@ -425,17 +477,8 @@ class TradingSessionService:
 
     def _session_phase_check(self, event: TickReceived, session, cache: SessionCache) -> None:
         """Check session phase and force-exit positions if Phase 5 (15:15-15:30 IST)."""
-        from datetime import datetime
-        from app.domain.fabio_ai.services.session_context import (
-            get_session_info as _get_si,
-        )
-        from app.shared.timezones import IST
-        from app.domain.fabio_ai.services.entry_gate import cluster_aggressive_prints
-
         try:
-            _market = self._exchange
-            if _market in ("NFO", "BSE"):
-                _market = "NSE"
+            _market = resolve_session_market(self._exchange, event.symbol)
             session_phase = _get_si(timestamp=event.tick.time, market=_market)
             cache.set_last_session_info(session_phase)
             if session_phase.force_exit:
@@ -605,10 +648,9 @@ class TradingSessionService:
         # CE and PE on the same underlying MUST show the same market state.
         # Store this option's market state keyed by underlying, and override
         # if a sibling option already produced a fresher state.
-        import time as _time
         _underlying = event.symbol.split(" ")[0].split("-")[0].upper()
         _current_ms = amt_result.market_state
-        _now = _time.time()
+        _now = time.time()
         _cached = self._underlying_state_cache.get(_underlying)
         if _cached:
             _cached_ts, _cached_ms = _cached
@@ -622,7 +664,6 @@ class TradingSessionService:
                     )
                     _current_ms = _cached_ms
                     # Override the market state on the frozen AMTResult
-                    from dataclasses import replace as _dc_replace
                     amt_result = _dc_replace(amt_result, market_state=_cached_ms)
                     amt_dto["marketState"] = _cached_ms
         # Always update the cache with this option's state
@@ -697,9 +738,7 @@ class TradingSessionService:
         return _exec_decision, _exec_amt, _exec_tick, _exec_dir, _exec_prob, run_entry
 
     def _on_tick(self, event: TickReceived) -> None:
-        import time as _tick_time
-
-        _tick_start = _tick_time.monotonic()
+        _tick_start = time.monotonic()
         session = self.get_or_create_session(event.symbol)
         cache = self._get_cache(event.symbol)
 
@@ -707,8 +746,6 @@ class TradingSessionService:
         if not hasattr(self, "_ib_engines"):
             self._ib_engines = {}
         if event.symbol not in self._ib_engines:
-            from app.domain.services.initial_balance_engine import InitialBalanceEngine
-
             self._ib_engines[event.symbol] = InitialBalanceEngine(
                 ib_minutes=30 if self._exchange == "NSE" else 30,
             )
@@ -730,9 +767,6 @@ class TradingSessionService:
                 "AMT analysis failed for %s — continuing with exits/overseer only",
                 event.symbol,
             )
-            from app.domain.trading.models.value_objects import AMTResult
-            from app.domain.trading.models.enums import MarketState
-
             amt_result = AMTResult(
                 market_state=MarketState.BALANCED.value,
                 poc=0.0,
@@ -753,10 +787,6 @@ class TradingSessionService:
             # IB Breakout Scalp evaluation (Phase 4)
             if self._scalp_enabled and ib_state.is_complete:
                 if event.symbol not in self._ib_scalp_engines:
-                    from app.domain.services.ib_breakout_scalp import (
-                        IBBreakoutScalpEngine,
-                    )
-
                     self._ib_scalp_engines[event.symbol] = IBBreakoutScalpEngine()
                 scalp_sig = self._ib_scalp_engines[event.symbol].evaluate_setup_a(
                     ib_state=ib_state,
@@ -787,8 +817,6 @@ class TradingSessionService:
         # Update 1-min bar engine (Phase 4)
         if self._scalp_enabled:
             if event.symbol not in self._one_min_engines:
-                from app.domain.services.one_min_bar_engine import OneMinBarEngine
-
                 self._one_min_engines[event.symbol] = OneMinBarEngine()
             self._one_min_engines[event.symbol].update(
                 symbol=event.symbol,
@@ -839,7 +867,7 @@ class TradingSessionService:
                         lv for lv in _latest_fp.levels if getattr(lv, "stacked", False)
                     ]
             except Exception:
-                log.debug("Silent exception handled", exc_info=True)
+                log.debug("Stacked imbalance extraction failed", exc_info=True)
 
         # 2. Trade Lifecycle + Overseer + Entry decisions
         with session._lock:
@@ -927,17 +955,18 @@ class TradingSessionService:
         
         # 4b. Trigger LLM descriptor for UI
         # Monitoring-mode LLM: fire every 5 min in BALANCED/NO_TRADE for context
-        import time as _time
+        # In DEAD state: fire every 15 min only (no trade expected, just context update)
+        _monitoring_interval = 900 if amt_result.market_state == "DEAD" else 300
         monitoring_trigger = (
-            amt_result.market_state in ("BALANCED", "NO_TRADE")
-            and (_time.time() - session._last_monitoring_llm) > 300
+            amt_result.market_state in ("BALANCED", "NO_TRADE", "DEAD")
+            and (time.time() - session._last_monitoring_llm) > _monitoring_interval
         )
         
         if (trigger_llm and is_new_candle) or monitoring_trigger:
             self._event_router.trigger_llm_entry(session, event.symbol, event.tick, amt_result)
             if monitoring_trigger:
-                session._last_monitoring_llm = _time.time()
-                logger.info(
+                session._last_monitoring_llm = time.time()
+                log.info(
                     "MONITORING LLM: Triggered context call for %s (state=%s)",
                     event.symbol,
                     amt_result.market_state,

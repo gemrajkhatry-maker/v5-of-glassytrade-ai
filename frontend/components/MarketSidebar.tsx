@@ -10,6 +10,14 @@ interface MarketSidebarProps {
     onSelect: (symbol: string) => void;
 }
 
+/** Sort key: higher = more urgent for entries */
+function timingRank(timing: string | undefined): number {
+    if (timing === 'ENTER_NOW') return 3;
+    if (timing === 'MONITOR' || timing === 'WAIT') return 2;
+    if (timing === 'SKIP') return 1;
+    return 0;
+}
+
 /** Extract a short display name from Dhan symbol like "NIFTY 27 FEB 25500 CALL" -> "NIFTY 25500 CE" */
 function shortSymbol(sym: string): { name: string; tag: string } {
     const parts = sym.split(' ');
@@ -53,8 +61,10 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const isDead = inst.genAIAnalysis?.rationale?.includes('DEAD') || inst.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
     const prob = inst.agentDecision?.probability || 0;
     const timing = inst.agentDecision?.timing || 'SKIP';
-    const direction = inst.agentDecision?.direction || 'FLAT';
     const mode = inst.amtAnalysis?.marketState || 'BALANCED';
+    const modeAbbr = (mode || 'BAL').substring(0, 3).toUpperCase();
+    const actionLabel =
+        timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing === 'SKIP' ? 'SKIP' : (timing || '—').slice(0, 6);
 
     return (
         <button
@@ -72,47 +82,54 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 border-b border-white/[0.03]
             `}
         >
-            {/* Symbol & Tag (25%) */}
-            <div className="flex flex-col w-[25%] overflow-hidden pr-2">
-                <div className="flex items-center gap-1.5">
+            {/* Symbol & Tag (24%) */}
+            <div className="flex flex-col w-[24%] overflow-hidden pr-2">
+                <div className="flex items-center gap-1.5 min-h-[14px]">
                     {hasOpenPosition ? (
                         <span className="text-[9px] font-bold text-emerald-400 animate-pulse">●</span>
+                    ) : hasData ? (
+                        <Radio size={8} className="text-emerald-400" />
                     ) : (
-                        <Radio size={8} className={hasData ? 'text-emerald-400' : 'text-white/20'} />
+                        <span className="w-2 h-2 rounded-full bg-white/15 animate-pulse shrink-0" />
                     )}
-                    <span className="font-bold text-[10px] text-white/90 truncate">
-                        {name}
-                    </span>
-                </div>
-                <span className="text-[8px] text-white/30 font-mono ml-3">{tag}</span>
-            </div>
-
-            {/* Mode (15%) */}
-            <div className="w-[15%]">
-                <span className={`text-[8px] font-mono px-1 py-0.5 rounded ${
-                    mode === 'BALANCED' ? 'text-amber-500 bg-amber-500/10' :
-                    mode === 'PROBING' ? 'text-blue-400 bg-blue-500/10' :
-                    mode === 'TRENDING' ? 'text-emerald-400 bg-emerald-500/10' :
-                    mode === 'BREAKING' ? 'text-red-400 bg-red-500/10' :
-                    'text-white/40 bg-white/5'
-                }`}>
-                    {mode?.substring(0, 4)}
-                </span>
-            </div>
-
-            {/* Action (15%) */}
-            <div className="w-[15%] flex items-center gap-1">
-                {hasOpenPosition ? (
-                    <span className="text-[9px] font-bold text-emerald-400">
-                        {totalSize.toFixed(0)}L
-                    </span>
-                ) : (
-                    <>
-                        <div className={`w-1 h-1 rounded-full ${timing === 'ENTER_NOW' ? 'bg-emerald-400 animate-pulse' : timing === 'SKIP' ? 'bg-red-400' : 'bg-yellow-400'}`} />
-                        <span className={`text-[9px] font-mono font-bold ${timing === 'ENTER_NOW' ? 'text-emerald-400' : timing === 'SKIP' ? 'text-red-400' : 'text-yellow-400'}`}>
-                            {timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing}
+                    {!hasData && !hasOpenPosition ? (
+                        <span className="h-2.5 flex-1 max-w-[80%] rounded bg-white/10 animate-pulse" />
+                    ) : (
+                        <span className="font-bold text-[10px] text-white/90 truncate">
+                            {name}
                         </span>
-                    </>
+                    )}
+                </div>
+                <span className="text-[8px] text-white/30 font-mono ml-3">{hasData || hasOpenPosition ? tag : '\u00A0'}</span>
+            </div>
+
+            {/* Mode + action merged (28%) */}
+            <div className="w-[28%] min-w-0 flex items-center">
+                {hasOpenPosition ? (
+                    <span className="text-[9px] font-bold text-emerald-400 font-mono truncate">
+                        OPEN · {totalSize.toFixed(0)}L
+                    </span>
+                ) : !hasData ? (
+                    <span className="h-4 w-full max-w-[5.5rem] rounded bg-white/10 animate-pulse" />
+                ) : (
+                    <span
+                        className={`inline-flex items-center gap-1 text-[8px] font-mono px-1 py-0.5 rounded border max-w-full ${
+                            mode === 'BALANCED' ? 'text-amber-500 bg-amber-500/10 border-amber-500/20' :
+                            mode === 'PROBING' ? 'text-blue-400 bg-blue-500/10 border-blue-500/20' :
+                            mode === 'TRENDING' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+                            mode === 'BREAKING' ? 'text-red-400 bg-red-500/10 border-red-500/20' :
+                            'text-white/40 bg-white/5 border-white/10'
+                        }`}
+                    >
+                        <span className="shrink-0">{modeAbbr}</span>
+                        <span className="text-white/25">·</span>
+                        <span className={`shrink-0 inline-flex items-center gap-0.5 font-bold ${
+                            timing === 'ENTER_NOW' ? 'text-emerald-400' : timing === 'SKIP' ? 'text-red-400' : 'text-yellow-400'
+                        }`}>
+                            <span className={`w-1 h-1 rounded-full shrink-0 ${timing === 'ENTER_NOW' ? 'bg-emerald-400 animate-pulse' : timing === 'SKIP' ? 'bg-red-400' : 'bg-yellow-400'}`} />
+                            {actionLabel}
+                        </span>
+                    </span>
                 )}
             </div>
 
@@ -122,6 +139,13 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                     <span className={`text-[10px] font-mono font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(0)}
                     </span>
+                ) : !hasData ? (
+                    <>
+                        <span className="h-2 w-8 rounded bg-white/10 animate-pulse" />
+                        <div className="w-full h-0.5 bg-white/10 rounded-full overflow-hidden">
+                            <div className="h-full w-1/3 bg-white/10 animate-pulse" />
+                        </div>
+                    </>
                 ) : (
                     <>
                         <span className={`text-[9px] font-mono font-bold ${prob >= 0.6 ? 'text-emerald-400' : prob >= 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
@@ -134,12 +158,14 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 )}
             </div>
 
-            {/* LTP / DEAD (15%) */}
-            <div className="w-[15%] flex flex-col items-end pr-2">
+            {/* LTP / DEAD (16%) */}
+            <div className="w-[16%] flex flex-col items-end pr-2">
                 {isDead ? (
                     <span className="text-[7px] font-mono font-bold text-red-400/70 border border-red-500/20 px-1 rounded animate-pulse">
-                        🔴 DEAD
+                        DEAD
                     </span>
+                ) : !hasData && !hasOpenPosition ? (
+                    <span className="h-2.5 w-10 rounded bg-white/10 animate-pulse" />
                 ) : (
                     <span className="font-mono text-[10px] text-white/70 font-bold">
                         {price > 0 ? price.toFixed(1) : '—'}
@@ -147,12 +173,14 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 )}
             </div>
 
-            {/* Change% or Live PnL indicator (10%) */}
-            <div className="w-[10%] text-right">
+            {/* Change% or Live PnL indicator (12%) */}
+            <div className="w-[12%] text-right">
                 {hasOpenPosition ? (
                     <span className={`text-[8px] font-mono ${totalPnl >= 0 ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
                         {totalPnl >= 0 ? '▲' : '▼'}
                     </span>
+                ) : !hasData ? (
+                    <span className="inline-block h-2 w-8 rounded bg-white/10 animate-pulse ml-auto" />
                 ) : (
                     <span className={`text-[9px] font-mono whitespace-nowrap ${isUp ? 'text-emerald-400/80' : 'text-red-400/80'}`}>
                         {isUp ? '+' : ''}{percentChange.toFixed(1)}%
@@ -199,25 +227,14 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
             const pB = instB.agentDecision?.probability || 0;
             
             if (sortBy === 'ACTION') {
-                const getRank = (sym: string) => {
-                    const t = instruments[sym].agentDecision?.timing;
-                    if (t === 'ENTER_NOW') return 3;
-                    if (t === 'MONITOR' || t === 'WAIT') return 2; 
-                    if (t === 'SKIP') return 1;
-                    return 0;
-                };
-                const rankA = getRank(a);
-                const rankB = getRank(b);
+                const rankA = timingRank(instA.agentDecision?.timing);
+                const rankB = timingRank(instB.agentDecision?.timing);
                 if (rankA !== rankB) return rankB - rankA;
-                return pB - pA; // secondary sort by probability
-            } else {
-                // Primary sort by probability
-                if (Math.abs(pA - pB) > 0.01) return pB - pA;
-                // Secondary sort by timing
-                const tA = instA.agentDecision?.timing === 'ENTER_NOW' ? 1 : 0;
-                const tB = instB.agentDecision?.timing === 'ENTER_NOW' ? 1 : 0;
-                return tB - tA;
+                return pB - pA;
             }
+            // Prob primary; full timing rank as tie-breaker
+            if (Math.abs(pA - pB) > 0.01) return pB - pA;
+            return timingRank(instB.agentDecision?.timing) - timingRank(instA.agentDecision?.timing);
         });
     }, [symbols, filter, modeFilter, actionFilter, instruments, sortBy]);
 
@@ -290,16 +307,15 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                         
                         {/* Column Header */}
                         <div className="flex w-full text-[9px] text-white/30 font-mono mt-3 px-2 pb-1 border-b border-white/5 uppercase tracking-tighter">
-                            <div className="w-[25%]">Symbol</div>
-                            <div className="w-[15%]">Mode</div>
-                            <div className="w-[15%] cursor-pointer hover:text-white/60" onClick={() => setSortBy('ACTION')}>
-                                Action {sortBy === 'ACTION' ? '↓' : '↕'}
+                            <div className="w-[24%]">Symbol</div>
+                            <div className="w-[28%] cursor-pointer hover:text-white/60" onClick={() => setSortBy('ACTION')} title="Sort by action priority">
+                                Status {sortBy === 'ACTION' ? '↓' : '↕'}
                             </div>
-                            <div className="w-[20%] cursor-pointer hover:text-white/60" onClick={() => setSortBy('PROB')}>
+                            <div className="w-[20%] cursor-pointer hover:text-white/60" onClick={() => setSortBy('PROB')} title="Sort by probability">
                                 Prob% {sortBy === 'PROB' ? '↓' : '↕'}
                             </div>
-                            <div className="w-[15%] text-right pr-2">LTP</div>
-                            <div className="w-[10%] text-right">Chg</div>
+                            <div className="w-[16%] text-right pr-2">LTP</div>
+                            <div className="w-[12%] text-right">Chg</div>
                         </div>
                     </div>
                 </div>
@@ -360,7 +376,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                                     <span>Exit: {trade.exitPrice?.toFixed(2) || '—'}</span>
                                 </div>
                                 <div className="flex justify-between text-[9px] text-white/30">
-                                    <span>{new Date(trade.entryTime || '').toLocaleTimeString()} → {new Date(trade.exitTime || '').toLocaleTimeString()}</span>
+                                    <span>{new Date(trade.entryTime || '').toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })} → {new Date(trade.exitTime || '').toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}</span>
                                 </div>
                                 <div className="flex justify-between text-[9px]">
                                     <span className="text-white/30">{trade.source}</span>
@@ -378,7 +394,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                     <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                     <span>LIVE FEED</span>
                 </div>
-                <span>{symbols.length} SCANNING</span>
+                <span>{filtered.length} VISIBLE</span>
             </div>
         </GlassPanel>
     );

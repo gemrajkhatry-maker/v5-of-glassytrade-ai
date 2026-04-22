@@ -15,7 +15,16 @@
 - [trade_journal.py](file://backend/app/application/services/trade_journal.py)
 - [experiment_context.py](file://backend/app/application/services/experiment_context.py)
 - [development.yaml](file://backend/config/environments/development.yaml)
+- [consolidated.py](file://backend/config/consolidated.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Enhanced Database Layer with Consolidated Write Operations and Centralized Error Handling
+- Improved Session Profile Lookup with Multi-Tier Fallback Strategies
+- Strengthened Transaction Management and Reliability Through Unified Write Pipeline
+- Added Composite Profile Queries and Enhanced NPOC Persistence
+- Updated Configuration Management with Consolidated Settings Architecture
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -33,10 +42,12 @@
 This document explains the data persistence services that capture system state, support historical simulation, and manage research-grade datasets. It covers:
 - StateSnapshotBuilder: builds UI-ready state snapshots from session state
 - BacktestEngine: computes performance metrics from historical trade logs
-- Storage subsystem: SQLite-backed persistence with async write pipeline
+- Storage subsystem: SQLite-backed persistence with async write pipeline and consolidated error handling
 - Event Store: append-only domain events for deterministic replay
 - Research data management: trade journaling and experiment context
 - Configuration, performance tuning, and debugging aids
+
+**Updated** Enhanced with consolidated write operations, multi-tier session profile fallback strategies, and centralized error handling for improved reliability and transaction management.
 
 ## Project Structure
 The persistence stack spans application services, infrastructure storage, serialization DTOs, and domain ports. The async persistence bus decouples real-time trading from disk I/O, while the event store enables deterministic replay.
@@ -93,11 +104,13 @@ ES --> DB
 ## Core Components
 - StateSnapshotBuilder: transforms session state into a UI-friendly DTO with risk, stats, and playbook guard telemetry.
 - BacktestEngine: evaluates historical trade sequences and computes performance metrics.
-- SQLiteStorageAdapter: thread-safe SQLite persistence with WAL mode, indexing, and batched tick writes.
+- SQLiteStorageAdapter: thread-safe SQLite persistence with WAL mode, indexing, batched tick writes, and consolidated error handling.
 - AsyncPersistenceBus: queues writes on a background thread to avoid blocking the trading hot path.
 - EventStore: append-only domain events with idempotency and deterministic replay.
 - TradeJournal: daily JSONL logging for research-grade analysis and run comparisons.
 - ExperimentContext: stable run fingerprinting for reproducible experiments.
+
+**Updated** Enhanced with consolidated write operations through `_execute_write()` method, improved session profile lookup with multi-tier fallback strategies, and strengthened transaction management with unified error handling.
 
 **Section sources**
 - [state_snapshot_builder.py:22-175](file://backend/app/application/services/state_snapshot_builder.py#L22-L175)
@@ -204,6 +217,8 @@ PF --> Return["Return BacktestResult with metrics and trade_log"]
 Purpose:
 - Persistent storage for ticks, trades, LLM decisions, performance snapshots, session profiles, open positions, position events, and KV crash-safe state.
 
+**Updated** Enhanced with consolidated write operations, multi-tier session profile fallback strategies, and centralized error handling.
+
 Design highlights:
 - Thread-safe via a single persistent connection and a lock
 - WAL mode for concurrency and durability
@@ -211,6 +226,9 @@ Design highlights:
 - Batched tick writes (every 50 ticks or 5 seconds)
 - Separate critical vs. background queues in AsyncPersistenceBus
 - Rich query APIs for research and UI
+- Consolidated write operations through `_execute_write()` method
+- Multi-tier session profile lookup with fallback strategies
+- Enhanced transaction management with unified error handling
 
 ```mermaid
 classDiagram
@@ -236,6 +254,7 @@ class SQLiteStorageAdapter {
 -_tick_buffer : list
 -_last_flush_time : float
 -_flush_timer : Timer
++_execute_write(query, params, auto_commit)
 +save_tick(symbol, data)
 +save_trade(data)
 +save_llm_decision(data)
@@ -249,6 +268,10 @@ class SQLiteStorageAdapter {
 +save_position_event(event)
 +query_position_events(...)
 +kv_set(key, value)
++save_npoc(underlying, session_date, poc_price)
++mark_npoc_filled(underlying, session_date, filled_at)
++get_active_npocs(underlying)
++load_composite_profiles(symbol, market, limit)
 }
 StoragePort <|.. SQLiteStorageAdapter
 ```
@@ -417,6 +440,7 @@ JRN --> EC["ExperimentContext"]
 - Write batching:
   - Tick buffer flushes at 50 items or 5 seconds
   - Critical writes (trade/position) are prioritized to avoid starvation
+  - Consolidated write operations eliminate duplicated try/except/rollback patterns
 - Query optimization:
   - Indexed columns: ticks (symbol,time), trades (closed_at), decisions/performances (created_at), session profiles (symbol,market,date)
 - Memory management:
@@ -424,6 +448,7 @@ JRN --> EC["ExperimentContext"]
 - Backtesting:
   - Efficient equity curve and rolling peak computation
   - Sharpe ratio computed with sample variance for small samples
+- **Updated** Enhanced session profile lookup with multi-tier fallback strategies for improved reliability
 
 [No sources needed since this section provides general guidance]
 
@@ -436,12 +461,16 @@ Common issues and remedies:
   - AsyncPersistenceBus logs dropped writes; tune queue sizes or reduce write frequency
 - Write failures:
   - SQLite exceptions are caught and logged; inspect logs around storage operations
+  - Consolidated error handling through `_execute_write()` method
 - Event replay anomalies:
   - Use ReplayEngine to reconstruct state deterministically
   - Validate idempotency keys to prevent duplicate processing
 - Data integrity:
   - Use TradeJournal summaries and daily reports to detect anomalies
   - Compare runs using assessment thresholds to identify regressions
+- **Updated** Session profile lookup failures:
+  - Multi-tier fallback strategies handle various symbol formats (NSE/MCX)
+  - Enhanced error handling prevents system crashes during profile resolution
 
 **Section sources**
 - [database.py:204-217](file://backend/app/infrastructure/storage/database.py#L204-L217)
@@ -450,7 +479,7 @@ Common issues and remedies:
 - [trade_journal.py:761-796](file://backend/app/application/services/trade_journal.py#L761-L796)
 
 ## Conclusion
-The persistence stack combines deterministic event replay, robust SQL storage, asynchronous writes, and research-grade logging to support both real-time trading and historical analysis. Configuration flags enable controlled behavior across environments, while built-in diagnostics help maintain data integrity and performance.
+The persistence stack combines deterministic event replay, robust SQL storage, asynchronous writes, and research-grade logging to support both real-time trading and historical analysis. Configuration flags enable controlled behavior across environments, while built-in diagnostics help maintain data integrity and performance. The enhanced database layer provides improved reliability through consolidated write operations, multi-tier session profile fallback strategies, and centralized error handling.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
@@ -463,11 +492,16 @@ The persistence stack combines deterministic event replay, robust SQL storage, a
   - Playbook guard thresholds, explainability alerts, and LLM inference settings
 - Storage tuning:
   - SQLite journal mode, synchronous settings, and WAL checkpoints
+- **Updated** Consolidated configuration management:
+  - Unified settings architecture through `ConsolidatedConfig`
+  - Environment variable overrides for flexible deployment
+  - Strategy-specific configurations via YAML files
 
 **Section sources**
 - [development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
 - [config.py:61-84](file://backend/app/config.py#L61-L84)
 - [database.py:200-203](file://backend/app/infrastructure/storage/database.py#L200-L203)
+- [consolidated.py:173-426](file://backend/config/consolidated.py#L173-L426)
 
 ### State Serialization Patterns
 - DTO conversion layer:
@@ -501,3 +535,37 @@ The persistence stack combines deterministic event replay, robust SQL storage, a
 **Section sources**
 - [trade_journal.py:84-908](file://backend/app/application/services/trade_journal.py#L84-L908)
 - [experiment_context.py:18-70](file://backend/app/application/services/experiment_context.py#L18-L70)
+
+### Enhanced Database Features
+- **Updated** Consolidated Write Operations:
+  - `_execute_write()` method eliminates duplicated try/except/rollback patterns
+  - Unified transaction management across all write operations
+  - Improved error handling and rollback mechanisms
+- **Updated** Multi-Tier Session Profile Lookup:
+  - Exact symbol match as primary strategy
+  - Underlying extraction for options symbols (NSE/MCX formats)
+  - Market-wide fallback for session profile resolution
+  - Enhanced reliability through progressive fallback approaches
+- **Updated** Composite Profile Queries:
+  - `load_composite_profiles()` for multi-session analysis
+  - Support for session window calculations and trend analysis
+- **Updated** Enhanced NPOC Persistence:
+  - `save_npoc()`, `mark_npoc_filled()`, and `get_active_npocs()` methods
+  - Naked POC tracking for advanced market structure analysis
+
+**Section sources**
+- [database.py:220-234](file://backend/app/infrastructure/storage/database.py#L220-L234)
+- [database.py:595-650](file://backend/app/infrastructure/storage/database.py#L595-L650)
+- [database.py:922-941](file://backend/app/infrastructure/storage/database.py#L922-L941)
+- [database.py:869-897](file://backend/app/infrastructure/storage/database.py#L869-L897)
+
+### Session State Management Enhancements
+- **Updated** SessionStateManager Integration:
+  - Automatic prior session profile loading during session creation
+  - Enhanced error handling for profile resolution failures
+  - Support for multi-tier fallback strategies in profile lookup
+  - Improved session eviction policies for memory management
+
+**Section sources**
+- [session_state_manager.py:142-166](file://backend/app/application/services/session_state_manager.py#L142-L166)
+- [session_state_manager.py:171-189](file://backend/app/application/services/session_state_manager.py#L171-L189)

@@ -4,13 +4,11 @@ This is the critical bridge between the AMT engine (Layer 1 — underlying futur
 and the execution layer (Layer 2 — option contracts).
 
 For each option symbol (e.g., "CRUDEOIL 16 APR 8900 CALL"):
-  → underlying_symbol: "CRUDEOIL16APRFUT" (dynamically derived from option date)
+  → underlying_symbol: broker futures root from instruments.json (e.g. CRUDEOIL25APRFUT)
   → option_symbol: "CRUDEOIL 16 APR 8900 CALL" (for execution)
 
-Loaded from config/instruments.json at startup. Only numeric config (lot_size,
-strike_step, etc.) is read from the JSON file — the underlying_symbol is
-derived dynamically from the option contract's expiry date, so it never goes
-stale when contracts expire.
+Loaded from config/instruments.json. Update `underlying_symbol` when contracts roll.
+Optional DD+MON derivation is only a fallback when config omits the futures root.
 """
 
 from __future__ import annotations
@@ -19,7 +17,8 @@ import json
 import logging
 import os
 import re
-from dataclasses import dataclass, field
+from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -184,22 +183,36 @@ class UnderlyingFuturesProvider:
         if not config:
             return None
 
-        # Derive underlying futures symbol dynamically from the option contract date
+        # Prefer instruments.json `underlying_symbol` — it matches broker/Dhan tickers
+        # (e.g. CRUDEOIL25APRFUT). Dynamic DD+MM+FUT derivation does NOT match MCX/NSE
+        # contract names and breaks subscriptions + historical fetch.
+        configured = (config.underlying_symbol or "").strip()
         dynamic_symbol = self._derive_futures_symbol(option_symbol, underlying)
-        if dynamic_symbol:
+        if configured:
+            underlying_symbol = configured
+            if dynamic_symbol and dynamic_symbol != configured:
+                logger.debug(
+                    "Dual feed: %s → %s (config; derived would be %s)",
+                    option_symbol,
+                    underlying_symbol,
+                    dynamic_symbol,
+                )
+        elif dynamic_symbol:
             underlying_symbol = dynamic_symbol
             logger.debug(
-                "Dual feed mapping: %s → %s (dynamic)", option_symbol, underlying_symbol
-            )
-        else:
-            # Fallback to the hardcoded value from instruments.json
-            underlying_symbol = config.underlying_symbol
-            logger.warning(
-                "Could not derive futures symbol from option date for %s — "
-                "falling back to config: %s",
+                "Dual feed mapping: %s → %s (derived; no config symbol)",
                 option_symbol,
                 underlying_symbol,
             )
+        else:
+            logger.warning(
+                "No futures symbol in config and could not derive from %s",
+                option_symbol,
+            )
+            return None
+
+        if not underlying_symbol:
+            return None
 
         return DualFeedMapping(
             option_symbol=option_symbol,
@@ -208,6 +221,22 @@ class UnderlyingFuturesProvider:
             exchange=exchange,
             config=config,
         )
+
+    def build_futures_routing(
+        self, option_symbols: list[str]
+    ) -> tuple[dict[str, list[str]], list[str]]:
+        """Map each active futures root symbol → option legs that use it for AMT.
+
+        Returns:
+            (futures_symbol -> [option symbols], sorted unique futures roots)
+        """
+        fut_to_opts: dict[str, list[str]] = defaultdict(list)
+        for opt in option_symbols:
+            m = self.get_mapping(opt)
+            if m:
+                fut_to_opts[m.underlying_symbol].append(opt)
+        ordered = dict(sorted(fut_to_opts.items(), key=lambda x: x[0]))
+        return ordered, sorted(fut_to_opts.keys())
 
     def get_underlying_symbol(self, option_symbol: str) -> str | None:
         """Get just the underlying futures symbol for an option contract."""

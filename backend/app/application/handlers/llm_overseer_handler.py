@@ -407,7 +407,7 @@ class LLMOverseerHandler:
                             }
                         )
                     except Exception:
-                        pass
+                        logger.warning("LLM overseer decision persistence failed", exc_info=True)
 
                 with session._lock:
                     session._overseer_running = False

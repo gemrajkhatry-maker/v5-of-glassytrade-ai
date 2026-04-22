@@ -72,6 +72,8 @@ class TickReceived(DomainEvent):
     tick: OHLC = None
     order_book: OrderBook | None = None
     data: tuple[OHLC, ...] = ()  # full history window
+    # Underlying futures candles for regime / volume features (when dual feed is active)
+    agent_series: tuple[OHLC, ...] = ()
     daily_data: tuple[OHLC, ...] = ()  # Daily timeframe for structural bias
     hourly_data: tuple[OHLC, ...] = ()  # Hourly timeframe for execution bias
 

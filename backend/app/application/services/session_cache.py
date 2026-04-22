@@ -230,6 +230,17 @@ class SessionCache:
         data = self.get_underlying_data()
         return data is not None and len(data) >= min_length
 
+    def seed_underlying_if_sparse(self, history: list, max_candles: int) -> None:
+        """Load historical futures candles when the live buffer is still short."""
+        if not history:
+            return
+        with self._session._lock:
+            ud = getattr(self._session, "_underlying_data", None) or []
+            if len(ud) >= 10:
+                return
+            tail = list(history[-max_candles:])
+            self._session._underlying_data = tail
+
     # ----- Order Book Management -----
 
     def set_order_book(self, order_book: OrderBook | None) -> None:

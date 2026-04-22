@@ -62,9 +62,10 @@ def infer_location(price: float, amt_result: AMTResult) -> tuple[str, float]:
     FABIO: "Location is where price reacts" — must find meaningful level.
     If no specific level found, use VA boundary as default.
     """
+    px = float(price)
     va_range = abs(amt_result.value_area_high - amt_result.value_area_low)
     threshold = (
-        min(max(va_range * 0.35, price * 0.0025), price * 0.015) if price > 0 else 0.0
+        min(max(va_range * 0.35, px * 0.0025), px * 0.015) if px > 0 else 0.0
     )
     levels: list[tuple[str, float]] = [
         ("POC", amt_result.poc),
@@ -85,13 +86,13 @@ def infer_location(price: float, amt_result: AMTResult) -> tuple[str, float]:
     levels.extend([("LVN", level) for level in amt_result.lvns[:5]])
     levels.extend([("HVN", level) for level in amt_result.hvns[:5]])
     
-    location_type, location_level = _nearest_level(levels, price, threshold)
+    location_type, location_level = _nearest_level(levels, px, threshold)
     
     # FIX: If no specific level found, use VA boundary as fallback
     # This ensures we always have a valid location_type for thesis validation
     if location_type == "MID_RANGE" or location_level <= 0:
         # Use nearest VA boundary
-        if price > (amt_result.value_area_high + amt_result.value_area_low) / 2:
+        if px > (amt_result.value_area_high + amt_result.value_area_low) / 2:
             return "VAH", amt_result.value_area_high
         else:
             return "VAL", amt_result.value_area_low

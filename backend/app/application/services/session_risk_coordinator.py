@@ -9,17 +9,21 @@ Responsibilities:
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import threading
 from dataclasses import dataclass
+from datetime import date
 from typing import TYPE_CHECKING
 
 from app.domain.trading.services.risk_manager import RiskManager
+from app.domain.trading.services.kill_switch import KillSwitch
 from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager
 from app.domain.services.risk_tier_engine import RiskTierEngine, TierAPremiumCheck
 from app.domain.services.circuit_breakers import CircuitBreakers, BreakerReason, BreakerResult
 from app.domain.constants import ACCOUNT_MAX_LOSS_ABSOLUTE
+from app.application.services.entry_coordinator import MIN_GRADE_SCORE_THRESHOLD
 
 if TYPE_CHECKING:
     from app.domain.trading.models.entities import Signal
@@ -57,6 +61,7 @@ class SessionRiskCoordinator:
         use_risk_tier_engine: bool = False,
         trade_manager=None,
         min_grade_score: int | None = None,
+        kill_switch: KillSwitch | None = None,
     ):
         self._risk_managers: dict[str, RiskManager] = {}
         self._session_risk_managers: dict[str, SessionRiskManager] = {}
@@ -66,8 +71,7 @@ class SessionRiskCoordinator:
         self._session_creation_lock = threading.Lock()
         self._storage = storage
         self._trade_manager = trade_manager
-        from app.application.services.entry_coordinator import MIN_GRADE_SCORE_THRESHOLD
-
+        self._kill_switch = kill_switch or KillSwitch()
         self._min_grade_score = (
             min_grade_score if min_grade_score is not None else MIN_GRADE_SCORE_THRESHOLD
         )
@@ -85,7 +89,7 @@ class SessionRiskCoordinator:
         """
         with self._session_creation_lock:
             if symbol not in self._risk_managers:
-                self._risk_managers[symbol] = RiskManager()
+                self._risk_managers[symbol] = RiskManager(kill_switch=self._kill_switch)
             return self._risk_managers[symbol]
 
     def get_session_risk_manager(self, symbol: str) -> SessionRiskManager:
@@ -103,9 +107,6 @@ class SessionRiskCoordinator:
                 # Try to restore from storage
                 if self._storage and hasattr(self._storage, "kv_get"):
                     try:
-                        import json
-                        from datetime import date
-
                         saved = self._storage.kv_get(
                             f"risk_state_{symbol}_{date.today().isoformat()}"
                         )
@@ -129,9 +130,6 @@ class SessionRiskCoordinator:
                     # Restore engine state if available
                     if self._storage and hasattr(self._storage, "kv_get"):
                         try:
-                            import json
-                            from datetime import date
-
                             saved = self._storage.kv_get(
                                 f"rte_state_{symbol}_{date.today().isoformat()}"
                             )
@@ -290,11 +288,11 @@ class SessionRiskCoordinator:
 
     def halt_trading(self) -> None:
         """Activate the global emergency kill switch."""
-        RiskManager.halt_trading()
+        self._kill_switch.halt()
 
     def resume_trading(self) -> None:
         """Clear the global emergency kill switch."""
-        RiskManager.resume_trading()
+        self._kill_switch.resume()
 
     def get_system_risk_state(self) -> SystemRiskState:
         """Return an aggregated system-wide view of runtime risk state.
@@ -307,9 +305,9 @@ class SessionRiskCoordinator:
 
         if not managers:
             return SystemRiskState(
-                halted=RiskManager._global_halt,
+                halted=self._kill_switch.is_halted,
                 halt_reason="Emergency kill switch active"
-                if RiskManager._global_halt
+                if self._kill_switch.is_halted
                 else "",
                 daily_drawdown_pct=0.0,
                 consecutive_losses=0,
@@ -333,7 +331,7 @@ class SessionRiskCoordinator:
         ]
         halted_manager = next((rm for rm in managers if rm.is_halted), None)
 
-        if RiskManager._global_halt:
+        if self._kill_switch.is_halted:
             halted = True
             halt_reason = "Emergency kill switch active"
         elif halted_manager is not None:
@@ -373,9 +371,6 @@ class SessionRiskCoordinator:
             return
 
         try:
-            import json
-            from datetime import date
-
             srm = self._session_risk_managers.get(symbol)
             if srm:
                 self._storage.kv_set(

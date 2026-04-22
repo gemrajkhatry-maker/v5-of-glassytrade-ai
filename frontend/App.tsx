@@ -10,6 +10,7 @@ import { ChartConfig, ChartMode, AgentDecision } from './types';
 import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, Grid, BookOpen, Eye, TrendingUp } from 'lucide-react';
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
 import JournalPage from './components/JournalPage';
+import ModelStateBanner from './components/ModelStateBanner';
 
 const simpleId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
@@ -206,20 +207,35 @@ function App() {
                 </div>
 
                 {/* Overlay UI Layer */}
-                <div className="absolute inset-0 z-10 pointer-events-none p-4 flex flex-col justify-between">
+                <div className="absolute inset-0 z-10 flex flex-col pointer-events-none">
+
+                    {/* Primary model state — full width of chart area */}
+                    <div className="shrink-0 px-3 pt-3 pointer-events-auto">
+                        <ModelStateBanner
+                            genAI={activeInstrument.genAIAnalysis}
+                            amtResult={activeInstrument.amtAnalysis}
+                            agentDecision={activeInstrument.agentDecision}
+                            symbol={activeInstrument.symbol}
+                        />
+                    </div>
+
+                    <div className="flex-1 flex flex-col justify-between p-4 pointer-events-none min-h-0">
 
                     {/* Top Bar Area */}
                     <div className="flex justify-between items-start pointer-events-auto">
                         {/* Left Toggle (Scanner) & Chart Controls */}
-                        <div className="flex items-start gap-2">
+                        <div className="flex flex-col gap-2 items-start max-w-[min(100%,52rem)]">
+                            <div className="flex items-start gap-2 flex-wrap">
                             {!sidebarOpen && (
                                 <button onClick={() => setSidebarOpen(true)} className="p-2 bg-white/5 backdrop-blur rounded-lg text-white hover:bg-white/10 transition-colors">
                                     <Activity size={20} />
                                 </button>
                             )}
 
-                            {/* CHART MODE TABS (Pills) */}
-                            <div className="flex bg-white/10 backdrop-blur-md rounded-full p-1 gap-1 shadow-inner border border-white/10">
+                            {/* Chart view */}
+                            <div className="flex flex-col gap-1">
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-white/35 pl-1">Chart view</span>
+                                <div className="flex bg-white/10 backdrop-blur-md rounded-full p-1 gap-1 shadow-inner border border-white/10">
                                 <button
                                     onClick={() => setChartMode('STANDARD')}
                                     className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'STANDARD' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
@@ -241,13 +257,16 @@ function App() {
                                     className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'RANGE' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
                                 >
                                     <span className="flex items-center gap-1.5">
-                                        <TrendingUp size={14} /> Range
+                                        <TrendingUp size={14} /> Range bars
                                     </span>
                                 </button>
+                                </div>
                             </div>
 
-                            {/* Dual Volume Profile Tabs (Pills) */}
-                            <div className="flex bg-white/10 backdrop-blur-md rounded-full p-1 gap-1 shadow-inner border border-white/10 ml-2">
+                            {/* Volume profile overlay */}
+                            <div className="flex flex-col gap-1">
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-white/35 pl-1">Profile overlay</span>
+                                <div className="flex bg-white/10 backdrop-blur-md rounded-full p-1 gap-1 shadow-inner border border-white/10">
                                 {([
                                     { key: 'session', label: 'Session' },
                                     { key: 'leg', label: 'Leg' },
@@ -265,47 +284,9 @@ function App() {
                                         {label}
                                     </button>
                                 ))}
+                                </div>
                             </div>
-                            
-                            {/* Breadcrumb Info Mode */}
-                            <div className="flex items-center bg-black/40 backdrop-blur rounded-full px-3 py-1.5 text-[10px] font-bold tracking-wider text-white/50 border border-white/10 ml-2">
-                                {chartMode === 'STANDARD' ? 'Standard Candles' : chartMode === 'FOOTPRINT' ? 'Footprint' : 'Range'} 
-                                <span className="mx-2 text-white/20">→</span> 
-                                {config.vpMode === 'off' ? 'No Profile' :
-                                 config.vpMode === 'session' ? 'Session Profile' :
-                                 config.vpMode === 'leg' ? 'Leg Profile' : 'Combined Profile'}
                             </div>
-                        </div>
-
-                        {/* Top Bar Status Pin */}
-                        <div className="absolute top-14 left-0 right-0 pointer-events-none flex justify-center">
-                            {(() => {
-                                const genAI = activeInstrument.genAIAnalysis;
-                                const amtResult = activeInstrument.amtAnalysis;
-                                const isDead = genAI?.rationale?.includes('DEAD') || genAI?.rawOutput?.includes('QUANT_DEAD_MARKET');
-                                const volMsg = amtResult?.aggression && amtResult.aggression < 0.2 ? 'Vol < 5% avg' : 'Vol OK';
-                                
-                                return (
-                                    <div className="pointer-events-auto flex items-center bg-[#0f172a]/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-2xl overflow-hidden">
-                                        <div className="px-4 py-2 border-r border-white/10 flex items-center gap-2">
-                                            <Brain className="w-3.5 h-3.5 text-blue-400" />
-                                            <span className="text-[10px] font-bold text-white/80 uppercase tracking-widest">
-                                                MODEL: {genAI?.direction && genAI.direction !== 'FLAT' ? `ENTRY (${genAI.direction})` : isDead ? 'SLEEPING' : 'MONITORING'}
-                                            </span>
-                                        </div>
-                                        <div className={`px-4 py-2 border-r border-white/10 flex items-center gap-2 font-mono text-[10px] font-bold ${isDead ? 'bg-red-500/20 text-red-400' : 'bg-green-500/10 text-emerald-400'}`}>
-                                            {isDead ? (
-                                                 <><div className="w-1.5 h-1.5 bg-red-500 rounded-full" /> <span>DEAD MARKET</span></>
-                                            ) : (
-                                                 <><div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" /> <span>LIVE SCANNING</span></>
-                                            )}
-                                        </div>
-                                        <div className={`px-4 py-2 font-mono text-[10px] ${amtResult?.aggression && amtResult.aggression < 0.2 ? 'text-white/40' : 'text-blue-300'}`}>
-                                            {volMsg}
-                                        </div>
-                                    </div>
-                                );
-                            })()}
                         </div>
 
                         {/* Right Toggle (Analysis) + Chat Toggle */}
@@ -321,8 +302,6 @@ function App() {
                         </div>
                     </div>
 
-                    {/* Removed obsolete AI Floating Overlays */}
-
                     {/* Bottom Right: Live Opportunity Panel */}
                     <div className="flex justify-end items-end pointer-events-none">
                         <div className={`pointer-events-auto transition-all duration-300 origin-bottom-right ${showControls ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none translate-y-10'}`}>
@@ -334,6 +313,8 @@ function App() {
                                 onClose={() => setShowControls(false)}
                             />
                         </div>
+                    </div>
+
                     </div>
 
                 </div>

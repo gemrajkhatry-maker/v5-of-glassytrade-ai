@@ -2,17 +2,53 @@
 # Activate: GLASSYTRADE_STRATEGY=mcx_options
 # 
 # This strategy configures the system for MCX commodity options trading
-# with CRUDEOIL and NATURALGAS as the primary underlyings.
+# with CRUDEOIL, NATURALGAS, GOLDM (mini gold), SILVERM (mini silver — distinct from GOLD/SILVER).
 
 strategy:
   name: "mcx_options"
   description: "MCX commodity options trading with AMT methodology"
 
+# Route all sessions to MCX (development.yaml and similar must not leave MCX off / NSE on)
+exchanges:
+  NSE:
+    enabled: false
+  MCX:
+    enabled: true
+    symbols:
+      GOLD:
+        enabled: false
+      SILVER:
+        enabled: false
+      GOLDM:
+        enabled: true
+        exchange: "MCX"
+        segment: "MCX_COMM"
+        instrument_type: "OPT"
+        lot_size: 100
+        tick_size: 1.0
+        vp_bucket_size: 10.0
+        strike_interval: 100
+        min_oi: 1
+        imbalance_threshold: 50.0
+        slippage_bps: 8
+      SILVERM:
+        enabled: true
+        exchange: "MCX"
+        segment: "MCX_COMM"
+        instrument_type: "OPT"
+        lot_size: 500
+        tick_size: 1.0
+        vp_bucket_size: 25.0
+        strike_interval: 500
+        min_oi: 1
+        imbalance_threshold: 100.0
+        slippage_bps: 10
+
 # Scanner Configuration
 scanner:
   mode: "mcx_options"
-  underlyings: ["CRUDEOIL", "NATURALGAS"]
-  top_n: 4
+  underlyings: ["CRUDEOIL", "NATURALGAS", "GOLDM", "SILVERM"]
+  top_n: 6
   top_per_underlying: 2
   strikes_around_atm: 2
   expiry_index: 0
@@ -21,7 +57,7 @@ scanner:
 # Exchange Configuration
 exchange:
   default: "MCX"
-  symbols: ["CRUDEOIL", "NATURALGAS"]
+  symbols: ["CRUDEOIL", "NATURALGAS", "GOLDM", "SILVERM"]
   segment: "MCX_COMM"
 
 # AMT Thresholds (optimized for MCX commodities)
@@ -74,3 +110,11 @@ risk:
   max_daily_loss_pct: 0.02
   max_consecutive_losses: 3
   max_concurrent_positions: 4
+
+# Gap Fill Configuration (for low-liquidity MCX markets)
+gap_fill:
+  enabled: true
+  interval_seconds: 300  # Check every 5 minutes
+  min_gap_seconds: 60  # Only fill gaps > 60 seconds
+  max_lookback_seconds: 600  # Look back 10 minutes for gaps
+  max_fill_age_seconds: 120  # Don't fill gaps newer than 2 minutes (avoid current candle)

@@ -8,6 +8,12 @@ strategy:
   name: "nse_options"
   description: "NSE index options trading with AMT methodology"
 
+exchanges:
+  NSE:
+    enabled: true
+  MCX:
+    enabled: false
+
 # Scanner Configuration
 scanner:
   mode: "nse_options"

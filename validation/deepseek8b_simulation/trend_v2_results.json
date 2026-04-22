@@ -1,0 +1,636 @@
+{
+  "model": "DeepSeek-R1-Qwen3-8B-MLX-8bit",
+  "adapter": "poc_deepseek8b/deepseek8b_amt_adapter",
+  "dataset": "validation/deepseek8b_simulation/simulation_data_trend_v2.jsonl",
+  "total_samples": 100,
+  "evaluated_at": "2026-04-20T11:22:34.513113",
+  "metrics": {
+    "direction_accuracy": 0.11764705882352941,
+    "confidence_accuracy": 0.11764705882352941,
+    "joint_accuracy": 0.11764705882352941,
+    "parse_errors": 83,
+    "total_evaluated": 17,
+    "evaluation_time_seconds": 841.8315951824188,
+    "speed_examples_per_sec": 0.020194062681047537
+  },
+  "by_subtype": {
+    "Downtrend pullback to VAL retest, continuation": {
+      "correct": 0,
+      "total": 7
+    },
+    "Strong downtrend continuation below VAL": {
+      "correct": 0,
+      "total": 8
+    },
+    "Strong uptrend continuation above VAH": {
+      "correct": 2,
+      "total": 2
+    }
+  },
+  "detailed_results": [
+    {
+      "index": 3,
+      "scenario_subtype": "Downtrend pullback to VAL retest, continuation",
+      "expected_direction": "SHORT",
+      "expected_confidence": "Medium",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 10,
+      "scenario_subtype": "Strong downtrend continuation below VAL",
+      "expected_direction": "SHORT",
+      "expected_confidence": "High",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 11,
+      "scenario_subtype": "Strong downtrend continuation below VAL",
+      "expected_direction": "SHORT",
+      "expected_confidence": "High",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 16,
+      "scenario_subtype": "Strong uptrend continuation above VAH",
+      "expected_direction": "LONG",
+      "expected_confidence": "High",
+      "predicted_direction": "LONG",
+      "predicted_confidence": "High",
+      "predicted_rationale": "BREAKOUT",
+      "direction_correct": true,
+      "confidence_correct": true
+    },
+    {
+      "index": 21,
+      "scenario_subtype": "Downtrend pullback to VAL retest, continuation",
+      "expected_direction": "SHORT",
+      "expected_confidence": "Medium",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 24,
+      "scenario_subtype": "Strong downtrend continuation below VAL",
+      "expected_direction": "SHORT",
+      "expected_confidence": "High",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 25,
+      "scenario_subtype": "Strong uptrend continuation above VAH",
+      "expected_direction": "LONG",
+      "expected_confidence": "High",
+      "predicted_direction": "LONG",
+      "predicted_confidence": "High",
+      "predicted_rationale": "BREAKOUT",
+      "direction_correct": true,
+      "confidence_correct": true
+    },
+    {
+      "index": 32,
+      "scenario_subtype": "Strong downtrend continuation below VAL",
+      "expected_direction": "SHORT",
+      "expected_confidence": "High",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 49,
+      "scenario_subtype": "Downtrend pullback to VAL retest, continuation",
+      "expected_direction": "SHORT",
+      "expected_confidence": "Medium",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 55,
+      "scenario_subtype": "Downtrend pullback to VAL retest, continuation",
+      "expected_direction": "SHORT",
+      "expected_confidence": "Medium",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 59,
+      "scenario_subtype": "Strong downtrend continuation below VAL",
+      "expected_direction": "SHORT",
+      "expected_confidence": "High",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 72,
+      "scenario_subtype": "Strong downtrend continuation below VAL",
+      "expected_direction": "SHORT",
+      "expected_confidence": "High",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 92,
+      "scenario_subtype": "Downtrend pullback to VAL retest, continuation",
+      "expected_direction": "SHORT",
+      "expected_confidence": "Medium",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 94,
+      "scenario_subtype": "Downtrend pullback to VAL retest, continuation",
+      "expected_direction": "SHORT",
+      "expected_confidence": "Medium",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 96,
+      "scenario_subtype": "Downtrend pullback to VAL retest, continuation",
+      "expected_direction": "SHORT",
+      "expected_confidence": "Medium",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 97,
+      "scenario_subtype": "Strong downtrend continuation below VAL",
+      "expected_direction": "SHORT",
+      "expected_confidence": "High",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    },
+    {
+      "index": 98,
+      "scenario_subtype": "Strong downtrend continuation below VAL",
+      "expected_direction": "SHORT",
+      "expected_confidence": "High",
+      "predicted_direction": "",
+      "predicted_confidence": "",
+      "predicted_rationale": "",
+      "direction_correct": false,
+      "confidence_correct": false
+    }
+  ],
+  "errors": [
+    {
+      "index": 0,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> [Bullish] (TRENDING_DOWN is inherently bearish, but the session check is for the current state, so we'll consider the overall bias as bearish)"
+    },
+    {
+      "index": 1,
+      "error": "Failed to parse JSON",
+      "output": "!{\"SESSION\": \"RETEST\", \"LOCATION\": \"near VAL\", \"DISTANCE_TO_POC\": \"13\", \"BIAS\": \"RETEST\"}{\"REJECTION\": \"REJECTED\"}{\"REJECTION\": \"REJECTED\"}{\"REJECTION\": \"REJECTED\"}{\"REJECTION\": \"REJECTED\"}{\"REJECTION"
+    },
+    {
+      "index": 2,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 4,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 5,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> Bias [BEARISH]!RISK CHECK: [TREND] -> Permit [YES]!STRUCTURE CHECK: [NEAR VAL] -> Signal [NO]!AGGRESSION CHECK: [CVD_FALLING] -> Trigger [YES]!FINAL LOGIC: [TRENDING"
+    },
+    {
+      "index": 6,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 7,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [P&L] -> [Permit] (Yes)\n!STRUCTURE CHECK: [above VAH] -> [Confirmed] (Trendline Break)\n!AGGRESSION CHECK: [rising] -> [Trigger] (Trend"
+    },
+    {
+      "index": 8,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 9,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> [Bullish] (TRENDING_DOWN is inherently bearish, but the session check is for the current state, so we'll consider the overall bias as bearish)"
+    },
+    {
+      "index": 12,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 13,
+      "error": "Failed to parse JSON",
+      "output": "!{\"SESSION_CHECK\": \"TREND\"}{\"RISK_CHECK\": \"RECOVERY\"}{\"STRUCTURE_CHECK\": \"FAILED\"}{\"AGGRESSION_CHECK\": \"FAILED\"}{\"FINAL_LOGIC\": \"FAILED\"}!{\"direction\": \"LONG\", \"confidence\": \"Medium\", \"rationale\": \"FA"
+    },
+    {
+      "index": 14,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 15,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [RETEST] -> [Bullish] (Failed Auction)"
+    },
+    {
+      "index": 17,
+      "error": "Failed to parse JSON",
+      "output": "!{\"SESSION\": \"RETEST\", \"LOCATION\": \"VAL\", \"DISTANCE_TO_POC\": \"10\", \"DELTA\": \"-5742\", \"CVD\": \"falling\", \"VOLUME_SPIKE\": \"NO\", \"ORDERBOOK_IMBALANCE\": \"SELLERS\", \"ABSORPTION\": \"NO\"}!{\"REJECTION\"}!{\"REJEC"
+    },
+    {
+      "index": 18,
+      "error": "Failed to parse JSON",
+      "output": "!{\"SESSION\": \"REJECTION\"}{\"LOCATION\": \"VAL\"}{\"STRUCTURE\": \"TREND\"}{\"AGGRESSION\": \"FAILED\"}{\"FINAL\": \"FAILED\"}"
+    },
+    {
+      "index": 19,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 20,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_UP] -> [Bullish] (TRENDING_UP implies a continuation bias, so overall market sentiment is bullish)"
+    },
+    {
+      "index": 22,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_UP] -> [Bullish] (Trending Up session is inherently bullish)"
+    },
+    {
+      "index": 23,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 26,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [P&L] -> [Permit] (Yes)\n!STRUCTURE CHECK: [above VAH] -> [Confirmed] (Trendline Break)\n!AGGRESSION CHECK: [rising] -> [Trigger] (Trend"
+    },
+    {
+      "index": 27,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_UP] -> [Bullish] (TRENDING_UP implies a continuation bias)"
+    },
+    {
+      "index": 28,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TEST] -> [Bullish] (Trend)\n!RISK CHECK: [Trend] -> [Permit] (Trend)\n!STRUCTURE CHECK: [near VAH] -> [No] (Failed Auction)\n!AGGRESSION CHECK: [CVD rising] -> [No] (No Breakout)\n!FINAL "
+    },
+    {
+      "index": 29,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 30,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [P&L] -> [Permit] (Yes)\n!STRUCTURE CHECK: [VAH] -> [No] (Failed Breakout)\n!AGGRESSION CHECK: [CVD Rising] -> [Trigger] (Yes)\n!FINAL LO"
+    },
+    {
+      "index": 31,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_UP] -> [Bullish] (TRENDING_UP implies a continuation bias)"
+    },
+    {
+      "index": 33,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 34,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 35,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> Bias [BEARISH] 2. RISK CHECK: [TREND] -> Permit [YES] 3. STRUCTURE CHECK: [NEAR VAL] -> Signal [NO] 4. AGGRESSION CHECK: [CVD_FALLING] -> Trigger [NO] 5. FINAL LOGIC"
+    },
+    {
+      "index": 36,
+      "error": "Failed to parse JSON",
+      "output": "!{\"SESSION_CHECK\": \"TREND\"}{\"RISK_CHECK\": \"RECOVERY\"}{\"STRUCTURE_CHECK\": \"REJECTION\"}{\"AGGRESSION_CHECK\": \"FAILED\"}{\"FINAL_LOGIC\": \"FAILED\"}!"
+    },
+    {
+      "index": 37,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 38,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [RETEST] -> [Bullish] (Failed Auction)"
+    },
+    {
+      "index": 39,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_UP] -> [Bullish] (TRENDING_UP implies a continuation bias, hence BULLISH)  !RISK CHECK: [Volume_spike, Orderbook_imbalance: buyers] -> [Permit] (YES) (Volume_spike and buyer "
+    },
+    {
+      "index": 40,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] 2. RISK CHECK: [TREND] -> [Permit] 3. STRUCTURE CHECK: [BREAKOUT] -> [Confirmed] 4. AGGRESSION CHECK: [BREAKOUT] -> [Trigger]\"}"
+    },
+    {
+      "index": 41,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [BREAKOUT] -> Bias [Bullish]!RISK CHECK: [BREAKOUT] -> Permit [Yes]!STRUCTURE CHECK: [BREAKOUT] -> Signal [Confirmed]!AGGRESSION CHECK: [Bullish Breakout] -> Trigger [Confirmed]!FINAL "
+    },
+    {
+      "index": 42,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [RETEST] -> Bias [Bullish] (RETEST is a retest of a previous swing point, typically in the context of an uptrend, so BULLISH)"
+    },
+    {
+      "index": 43,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 44,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [Window] -> Bias [Bullish] (FAILED)\n!RISK CHECK: [P&L] -> Permit [No] (FAILED)\n!STRUCTURE CHECK: [Location] -> Signal [No] (FAILED)\n!AGGRESSION CHECK: [CVD] -> Trigger [No] (FAILED)\nFA"
+    },
+    {
+      "index": 45,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [P&L] -> [Permit] (Yes)\n!STRUCTURE CHECK: [VAH] -> [No] (Failed Breakout)\n!AGGRESSION CHECK: [CVD Rising] -> [Trigger] (Yes)\n!FINAL LO"
+    },
+    {
+      "index": 46,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_UP] -> [Bullish] (TRENDING_UP implies a continuation bias, so overall bias is Bullish)\n!RISK CHECK: [TREND] -> [Yes] (TREND is a high-probability setup, so risk is acceptable"
+    },
+    {
+      "index": 47,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 48,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 50,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 51,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> Bias [BEARISH]!RISK CHECK: [TREND] -> Permit [YES]!STRUCTURE CHECK: [NEAR VAL] -> Signal [NO]!AGGRESSION CHECK: [CVD_FALLING, SELLERS] -> Trigger [YES]!FINAL LOGIC: "
+    },
+    {
+      "index": 52,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [RETEST] -> Bias [Bullish] (RETEST typically indicates a potential trend continuation, so BULLISH)"
+    },
+    {
+      "index": 53,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> [Bullish] (TRENDING_DOWN is inherently bearish, but the session check is for the current state, so we'll consider the overall bias as bearish)"
+    },
+    {
+      "index": 54,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_UP] -> [Bullish] (Trend Up)\n!RISK CHECK: [TREND] -> [Permit] (Trend Up)\n!STRUCTURE CHECK: [NEAR VAH] -> [No] (Failed)\n!AGGRESSION CHECK: [CVD Rising, Buyers Imbalance] -> [Co"
+    },
+    {
+      "index": 56,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [BREAKOUT] -> Bias [Bullish] (BREAKOUT states typically have bullish bias)\n!RISK CHECK: [BREAKOUT] -> Permit [Yes] (BREAKOUT allows for trend continuation)\n!STRUCTURE CHECK: [BREAKOUT]"
+    },
+    {
+      "index": 57,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TEST] -> [Bullish] (Trend)\n!RISK CHECK: [Trend] -> [Permit] (Trend)\n!STRUCTURE CHECK: [near VAH] -> [No] (Failed)\n!AGGRESSION CHECK: [CVD rising] -> [No] (No Trigger)\n!FINAL LOGIC: [T"
+    },
+    {
+      "index": 58,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [FAILED]!LOCATION: [FAILED]!STRUCTURE: [FAILED]!AGGRESSION: [FAILED]!FAILED ALL CHECKS!FAILED ALL CHECKS!FAILED ALL CHECKS!FAILED ALL CHECKS!FAILED ALL CHECKS!FAILED ALL CHECKS!FAILED "
+    },
+    {
+      "index": 60,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> Bias [BEARISH]!RISK CHECK: [TREND] -> Permit [YES]!STRUCTURE CHECK: [NEAR VAL] -> Signal [NO]!AGGRESSION CHECK: [CVD_FALLING, SELLERS] -> Trigger [YES]!FINAL LOGIC: "
+    },
+    {
+      "index": 61,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [P&L] -> [Permit] (Yes)\n!STRUCTURE CHECK: [VAH] -> [No] (Failed Breakout)\n!AGGRESSION CHECK: [CVD Rising] -> [Trigger] (Yes)\n!FINAL LO"
+    },
+    {
+      "index": 62,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [RETEST] -> [Bullish] (Failed Auction)"
+    },
+    {
+      "index": 63,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [BREAKOUT] -> Bias [Bullish]!RISK CHECK: [BREAKOUT] -> Permit [Yes]!STRUCTURE CHECK: [BREAKOUT] -> Signal [Confirmed]!AGGRESSION CHECK: [Bullish Breakout] -> Trigger [Confirmed]!FINAL "
+    },
+    {
+      "index": 64,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [P&L] -> [Permit] (Yes)\n!STRUCTURE CHECK: [VAH] -> [No] (Failed Breakout)\n!AGGRESSION CHECK: [CVD Rising] -> [Trigger] (Yes)\n!FINAL LO"
+    },
+    {
+      "index": 65,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> Bias [BEARISH]!RISK CHECK: [TREND] -> Permit [YES]!STRUCTURE CHECK: [NEAR VAL] -> Signal [NO]!AGGRESSION CHECK: [CVD_FALLING, SELLERS] -> Trigger [YES]!FINAL LOGIC: "
+    },
+    {
+      "index": 66,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [P&L] -> [Permit] (Yes)\n!STRUCTURE CHECK: [VAH] -> [No] (Failed Breakout)\n!AGGRESSION CHECK: [CVD Rising] -> [Trigger] (Yes)\n!FINAL LO"
+    },
+    {
+      "index": 67,
+      "error": "Failed to parse JSON",
+      "output": "!{\"SESSION\": \"REJECTION\"}{\"LOCATION\": \"FAILED\"}{\"STRUCTURE\": \"FAILED\"}{\"AGGRESSION\": \"FAILED\"}{\"FAILED\"}{\"FAILED\"}{\"FAILED\"}{\"FAILED\"}{\"FAILED\"}{\"FAILED\"}{\"FAILED\"}{\"FAILED\"}{\"FAILED\"}{\"FAILED\"}{\"FAIL"
+    },
+    {
+      "index": 68,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_UP] -> [Bullish] (Trend Up)\n!RISK CHECK: [TREND] -> [Permit] (Trend Up)\n!STRUCTURE CHECK: [at VAH] -> [No] (VAH is a resistance level, failed breakouts are bearish)\n!AGGRESSI"
+    },
+    {
+      "index": 69,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [RETEST] -> Bias [Bullish] (Failed Auction)"
+    },
+    {
+      "index": 70,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 71,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> Bias [BEARISH]!RISK CHECK: [TREND] -> Permit [YES]!STRUCTURE CHECK: [NEAR VAL] -> Signal [NO]!AGGRESSION CHECK: [CVD_FALLING] -> Trigger [YES]!FINAL LOGIC: [TRENDING"
+    },
+    {
+      "index": 73,
+      "error": "Failed to parse JSON",
+      "output": "!{\"SESSION\": \"BREAKDOWN\", \"BIAS\": \"BULLISH\"}{\"SESSION\": \"BREAKDOWN\", \"BIAS\": \"BULLISH\"}{\"SESSION\": \"BREAKDOWN\", \"BIAS\": \"BULLISH\"}{\"SESSION\": \"BREAKDOWN\", \"BIAS\": \"BULLISH\"}{\"SESSION\": \"BREAKDOWN\", \"B"
+    },
+    {
+      "index": 74,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [RETEST] -> Bias [Bullish] (Failed Auction)"
+    },
+    {
+      "index": 75,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_UP] -> [Bullish] (Trending Up is inherently bullish)"
+    },
+    {
+      "index": 76,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 77,
+      "error": "Failed to parse JSON",
+      "output": "!{\"SESSION\": \"BREAKDOWN\", \"BIAS\": \"BULLISH\", \"RISK_CHECK\": \"P&L\", \"PERMIT\": \"YES\", \"STRUCTURE_CHECK\": \"FAILED\", \"NO\": \"FAILED\", \"AGGRESSION_CHECK\": \"CVD\", \"TRIGGER\": \"NO\", \"FAILED\"}"
+    },
+    {
+      "index": 78,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 79,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [P&L] -> [Permit] (Yes)\n!STRUCTURE CHECK: [VAH] -> [No] (Failed Breakout)\n!AGGRESSION CHECK: [CVD Rising] -> [Trigger] (Yes)\n!FINAL LO"
+    },
+    {
+      "index": 80,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 81,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 82,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [RETEST] -> Bias [Bullish] (Failed Auction)"
+    },
+    {
+      "index": 83,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> Bias [Bullish]"
+    },
+    {
+      "index": 84,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [P&L] -> [Permit] (Yes)\n!STRUCTURE CHECK: [VAH] -> [No] (Failed Breakout)\n!AGGRESSION CHECK: [CVD Rising] -> [Trigger] (Yes)\n!FINAL LO"
+    },
+    {
+      "index": 85,
+      "error": "Failed to parse JSON",
+      "output": "!{\"SESSION\": \"TRENDING\", \"BIAS\": \"BEARISH\"}{\"RISK\": \"NO\", \"RULE\": \"YES\"}{\"STRUCTURE\": \"NO\"}{\"AGGRESSION\": \"NO\"}{\"FINAL\": \"BEARISH\"}!{\"direction\": \"SHORT\", \"confidence\": \"Medium\", \"rationale\": \"TREND\"}"
+    },
+    {
+      "index": 86,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> Bias [BEARISH]!RISK CHECK: [TREND] -> Permit [YES]!STRUCTURE CHECK: [NEAR VAL] -> Signal [NO]!AGGRESSION CHECK: [CVD_FALLING, SELLERS] -> Trigger [YES]!FINAL LOGIC: "
+    },
+    {
+      "index": 87,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_DOWN] -> [Bullish] (TRENDING_DOWN is inherently bearish, but the bias is set to the market state, so we'll consider the state's implication. However, the user input is \"TREND"
+    },
+    {
+      "index": 88,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TRENDING_UP] -> [Bullish] (TRENDING_UP implies a continuation bias, so overall market sentiment is bullish)"
+    },
+    {
+      "index": 89,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [P&L] -> [Permit] (Yes)\n!STRUCTURE CHECK: [VAH] -> [No] (Failed Breakout)\n!AGGRESSION CHECK: [CVD Rising] -> [Trigger] (Yes)\n!FINAL LO"
+    },
+    {
+      "index": 90,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 91,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [INITIATIVE] -> [Bullish] (Trend Up)\n!RISK CHECK: [Trend Up] -> [Permit] (Yes)\n!STRUCTURE CHECK: [above VAH] -> [No] (Breakout)\n!AGGRESSION CHECK: [rising CVD] -> [Confirmed] (Trend Up"
+    },
+    {
+      "index": 93,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [TEST] -> [Bullish] (Trend)\n!RISK CHECK: [Trend] -> [Permit] (Trend)\n!STRUCTURE CHECK: [VAL] -> [No] (Trend)\n!AGGRESSION CHECK: [CVD: Falling] -> [No] (Trend)\n!FINAL LOGIC: [Trend] (Tr"
+    },
+    {
+      "index": 95,
+      "error": "Failed to parse JSON",
+      "output": "!"
+    },
+    {
+      "index": 99,
+      "error": "Failed to parse JSON",
+      "output": "!SESSION CHECK: [FAILED]!LOCATION: [FAILED]!STRUCTURE: [FAILED]!AGGRESSION: [FAILED]!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAILED!FAI"
+    }
+  ]
+}

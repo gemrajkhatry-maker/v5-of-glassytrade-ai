@@ -14,8 +14,9 @@ from app.domain.trading.models.enums import CushionState, Side
 from app.domain.services.tick_utils import round_to_tick
 
 if TYPE_CHECKING:
-    from app.domain.fabio_ai.services.exit_engine import ExitSignal
     from app.domain.trading.models.entities import Position
+
+from app.domain.fabio_ai.services.exit_signal import ExitSignal
 
 logger = logging.getLogger(__name__)
 
@@ -359,7 +360,6 @@ class TrailEngine:
         Returns:
             ExitSignal if exit triggered, None if just moved to BE.
         """
-        from app.domain.fabio_ai.services.exit_engine import ExitSignal
 
         is_long = position.side == Side.LONG or position.side.value == "LONG"
 

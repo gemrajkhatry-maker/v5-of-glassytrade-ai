@@ -234,4 +234,4 @@ class ExitCoordinator:
             try:
                 self._storage.delete_open_position(pos.id)
             except Exception:
-                log.debug("Failed to delete persisted position", exc_info=True)
+                log.warning("Failed to delete persisted position — stale position may appear on restart", exc_info=True)

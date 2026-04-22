@@ -1,12 +1,12 @@
 {
   "success": true,
-  "load_time": 3.702446222305298,
+  "load_time": 11.05648398399353,
   "total_samples": 50,
-  "correct_state": 50,
-  "correct_trade": 50,
-  "state_accuracy": 100.0,
-  "trade_accuracy": 100.0,
-  "avg_inference_time": 0.9711789846420288,
+  "correct_state": 41,
+  "correct_trade": 39,
+  "state_accuracy": 82.0,
+  "trade_accuracy": 78.0,
+  "avg_inference_time": 5.0758480453491215,
   "error": null,
   "sample_predictions": [
     {
@@ -24,20 +24,20 @@
       "expected_state": "FAILED BREAKOUT",
       "expected_trade": "SHORT",
       "predicted_state": "FAILED BREAKOUT",
-      "predicted_trade": "SHORT",
+      "predicted_trade": "LONG",
       "state_correct": true,
-      "trade_correct": true,
-      "output_snippet": "STATE: FAILED BREAKOUT\nTRADE: SHORT"
+      "trade_correct": false,
+      "output_snippet": "STATE: FAILED BREAKOUT\nTRADE: LONG"
     },
     {
       "sample_idx": 2,
       "expected_state": "FAILED BREAKOUT",
       "expected_trade": "SHORT",
       "predicted_state": "FAILED BREAKOUT",
-      "predicted_trade": "SHORT",
+      "predicted_trade": "LONG",
       "state_correct": true,
-      "trade_correct": true,
-      "output_snippet": "STATE: FAILED BREAKOUT\nTRADE: SHORT"
+      "trade_correct": false,
+      "output_snippet": "STATE: FAILED BREAKOUT\nTRADE: LONG"
     },
     {
       "sample_idx": 3,
@@ -63,11 +63,11 @@
       "sample_idx": 5,
       "expected_state": "TREND",
       "expected_trade": "LONG",
-      "predicted_state": "TREND",
+      "predicted_state": "REJECTION",
       "predicted_trade": "LONG",
-      "state_correct": true,
+      "state_correct": false,
       "trade_correct": true,
-      "output_snippet": "STATE: TREND\nTRADE: LONG"
+      "output_snippet": "STATE: REJECTION\nTRADE: LONG"
     },
     {
       "sample_idx": 6,
@@ -83,11 +83,11 @@
       "sample_idx": 7,
       "expected_state": "TREND",
       "expected_trade": "LONG",
-      "predicted_state": "TREND",
+      "predicted_state": "REJECTION",
       "predicted_trade": "LONG",
-      "state_correct": true,
+      "state_correct": false,
       "trade_correct": true,
-      "output_snippet": "STATE: TREND\nTRADE: LONG"
+      "output_snippet": "STATE: REJECTION\nTRADE: LONG"
     },
     {
       "sample_idx": 8,
@@ -123,11 +123,11 @@
       "sample_idx": 11,
       "expected_state": "TREND",
       "expected_trade": "SHORT",
-      "predicted_state": "TREND",
-      "predicted_trade": "SHORT",
-      "state_correct": true,
-      "trade_correct": true,
-      "output_snippet": "STATE: TREND\nTRADE: SHORT"
+      "predicted_state": "REJECTION",
+      "predicted_trade": "FLAT",
+      "state_correct": false,
+      "trade_correct": false,
+      "output_snippet": "STATE: REJECTION\nTRADE: FLAT"
     },
     {
       "sample_idx": 12,
@@ -174,20 +174,20 @@
       "expected_state": "BREAKOUT",
       "expected_trade": "SHORT",
       "predicted_state": "BREAKOUT",
-      "predicted_trade": "SHORT",
+      "predicted_trade": "LONG",
       "state_correct": true,
-      "trade_correct": true,
-      "output_snippet": "STATE: BREAKOUT\nTRADE: SHORT"
+      "trade_correct": false,
+      "output_snippet": "STATE: BREAKOUT\nTRADE: LONG"
     },
     {
       "sample_idx": 17,
       "expected_state": "BREAKOUT",
       "expected_trade": "SHORT",
       "predicted_state": "BREAKOUT",
-      "predicted_trade": "SHORT",
+      "predicted_trade": "LONG",
       "state_correct": true,
-      "trade_correct": true,
-      "output_snippet": "STATE: BREAKOUT\nTRADE: SHORT"
+      "trade_correct": false,
+      "output_snippet": "STATE: BREAKOUT\nTRADE: LONG"
     },
     {
       "sample_idx": 18,
@@ -203,11 +203,11 @@
       "sample_idx": 19,
       "expected_state": "TREND",
       "expected_trade": "SHORT",
-      "predicted_state": "TREND",
-      "predicted_trade": "SHORT",
-      "state_correct": true,
-      "trade_correct": true,
-      "output_snippet": "STATE: TREND\nTRADE: SHORT"
+      "predicted_state": "ROTATION",
+      "predicted_trade": "FLAT",
+      "state_correct": false,
+      "trade_correct": false,
+      "output_snippet": "STATE: ROTATION\nTRADE: FLAT"
     }
   ]
 }

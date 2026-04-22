@@ -41,7 +41,6 @@ from app.domain.trading.event_store import (
     EventBus,
     InMemoryEventStore,
     ReplayEngine,
-    initialize_event_system,
 )
 
 

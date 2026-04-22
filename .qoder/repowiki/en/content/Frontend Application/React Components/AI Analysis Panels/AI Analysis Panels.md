@@ -14,30 +14,50 @@
 - [textSanitizer.ts](file://frontend/utils/textSanitizer.ts)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Enhanced AIAnalysisPanel core with comprehensive AI decision visualization and analysis capabilities
+- Added new Rule Checklist section for systematic decision validation
+- Improved monitoring mode with reasoning model integration
+- Enhanced probability engine visualization with detailed logic formulas
+- Expanded overseer panel with comprehensive trade management
+- Added extensive market structure and technical analysis components
+- Integrated LVN (Large Volume Node) velocity play detection
+- Enhanced VWAP contextual analysis with sigma deviation visualization
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
-10. [Appendices](#appendices)
+6. [Enhanced AI Decision Visualization](#enhanced-ai-decision-visualization)
+7. [Rule-Based Decision Validation](#rule-based-decision-validation)
+8. [Dependency Analysis](#dependency-analysis)
+9. [Performance Considerations](#performance-considerations)
+10. [Troubleshooting Guide](#troubleshooting-guide)
+11. [Conclusion](#conclusion)
+12. [Appendices](#appendices)
 
 ## Introduction
-This document explains the AI analysis panel ecosystem that powers intelligent trading insights in the frontend. It covers five primary components:
-- AIAnalysisPanel: The central dashboard for AI-driven market insights, opportunity scoring, equity tracking, and risk communication.
-- LiveOpportunityCard: A floating card that highlights actionable trading opportunities across symbols.
-- EquityPanel: Real-time equity and session performance visualization.
-- ModelIOPanel: Debugging view of AI model inputs and outputs.
-- RiskStateDisplay: Immediate risk warnings and loss streak indicators.
+This document explains the AI analysis panel ecosystem that powers intelligent trading insights in the frontend. The enhanced system now features comprehensive AI decision visualization and analysis capabilities, providing traders with detailed market structure analysis, opportunity scoring, equity tracking, and risk communication. The system has been significantly upgraded to include advanced rule-based validation, LVN detection, and sophisticated probability engine visualization.
 
-It documents each component’s purpose, data requirements, visual presentation, interaction patterns, styling and theming, responsive behavior, accessibility, and integration within the broader trading application.
+The enhanced AI analysis panels consist of five primary components:
+- AIAnalysisPanel: The central dashboard for AI-driven market insights, comprehensive decision validation, and advanced technical analysis
+- LiveOpportunityCard: A floating card that highlights actionable trading opportunities across symbols
+- EquityPanel: Real-time equity and session performance visualization
+- ModelIOPanel: Debugging view of AI model inputs and outputs
+- RiskStateDisplay: Immediate risk warnings and loss streak indicators
+
+**Section sources**
+- [AIAnalysisPanel.tsx:7-18](file://frontend/components/AIAnalysisPanel.tsx#L7-L18)
+- [LiveOpportunityCard.tsx:5-11](file://frontend/components/ai/LiveOpportunityCard.tsx#L5-L11)
+- [EquityPanel.tsx:4-7](file://frontend/components/ai/EquityPanel.tsx#L4-L7)
+- [ModelIOPanel.tsx:5-7](file://frontend/components/ai/ModelIOPanel.tsx#L5-L7)
+- [RiskStateDisplay.tsx:5-7](file://frontend/components/ai/RiskStateDisplay.tsx#L5-L7)
 
 ## Project Structure
-The AI analysis panels are part of the frontend application and integrate with a server-driven trading system. The panels are composed inside the main App shell and receive data via a WebSocket-based hook that batches updates for performance.
+The AI analysis panels are part of the frontend application and integrate with a server-driven trading system. The panels are composed inside the main App shell and receive data via a WebSocket-based hook that batches updates for performance. The enhanced system now includes comprehensive rule validation, LVN detection, and advanced technical analysis components.
 
 ```mermaid
 graph TB
@@ -70,13 +90,13 @@ Risk --> Types
 **Diagram sources**
 - [App.tsx:374-386](file://frontend/App.tsx#L374-L386)
 - [useServerTradingSystem.ts:641-654](file://frontend/hooks/useServerTradingSystem.ts#L641-L654)
-- [AIAnalysisPanel.tsx:1-1039](file://frontend/components/AIAnalysisPanel.tsx#L1-L1039)
+- [AIAnalysisPanel.tsx:1-1183](file://frontend/components/AIAnalysisPanel.tsx#L1-L1183)
 - [LiveOpportunityCard.tsx:1-94](file://frontend/components/ai/LiveOpportunityCard.tsx#L1-L94)
 - [EquityPanel.tsx:1-78](file://frontend/components/ai/EquityPanel.tsx#L1-L78)
 - [ModelIOPanel.tsx:1-36](file://frontend/components/ai/ModelIOPanel.tsx#L1-L36)
 - [RiskStateDisplay.tsx:1-37](file://frontend/components/ai/RiskStateDisplay.tsx#L1-L37)
-- [DecisionHistoryPanel.tsx:1-98](file://frontend/components/ai/DecisionHistoryPanel.tsx#L1-L98)
-- [types.ts:1-376](file://frontend/types.ts#L1-L376)
+- [DecisionHistoryPanel.tsx:1-94](file://frontend/components/ai/DecisionHistoryPanel.tsx#L1-L94)
+- [types.ts:1-396](file://frontend/types.ts#L1-L396)
 - [textSanitizer.ts:1-51](file://frontend/utils/textSanitizer.ts#L1-L51)
 
 **Section sources**
@@ -84,11 +104,11 @@ Risk --> Types
 - [useServerTradingSystem.ts:641-654](file://frontend/hooks/useServerTradingSystem.ts#L641-L654)
 
 ## Core Components
-- AIAnalysisPanel: Central hub aggregating GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, AgentDecision, LLM history, order book, depth settings, and overseer actions. Renders session state, location markers, aggression metrics, market structure, IB/breaks, LVN plays, VWAP context, probability engine decisions, overseer actions, and optional Model I/O and Decision History panels.
-- LiveOpportunityCard: Highlights the best “ENTER_NOW” opportunity across symbols with direction, probability, estimated SL/TP, and navigation to the chart.
-- EquityPanel: Displays equity, open PnL, session realized PnL, target/circuit progress bar, and partial TP booking.
-- ModelIOPanel: Shows the AI prompt and raw output for debugging and transparency.
-- RiskStateDisplay: Communicates trading halts and consecutive loss streaks.
+- **AIAnalysisPanel**: Enhanced central hub aggregating GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, AgentDecision, LLM history, order book, depth settings, and overseer actions. Now features comprehensive rule validation, LVN detection, advanced probability engine visualization, and detailed market structure analysis.
+- **LiveOpportunityCard**: Highlights the best "ENTER_NOW" opportunity across symbols with direction, probability, estimated SL/TP, and navigation to the chart.
+- **EquityPanel**: Displays equity, open PnL, session realized PnL, target/circuit progress bar, and partial TP booking.
+- **ModelIOPanel**: Shows the AI prompt and raw output for debugging and transparency.
+- **RiskStateDisplay**: Communicates trading halts and consecutive loss streaks.
 
 **Section sources**
 - [AIAnalysisPanel.tsx:7-18](file://frontend/components/AIAnalysisPanel.tsx#L7-L18)
@@ -98,7 +118,7 @@ Risk --> Types
 - [RiskStateDisplay.tsx:5-7](file://frontend/components/ai/RiskStateDisplay.tsx#L5-L7)
 
 ## Architecture Overview
-The panels are driven by a server-side trading system that streams instrument states over WebSocket. The frontend batches updates and renders UI components with minimal re-renders. The AIAnalysisPanel composes smaller panels and cards, while the LiveOpportunityCard floats independently in the overlay area.
+The panels are driven by a server-side trading system that streams instrument states over WebSocket. The frontend batches updates and renders UI components with minimal re-renders. The enhanced AIAnalysisPanel now includes comprehensive rule validation, LVN detection, and advanced technical analysis components. The system prioritizes AMT-derived market state and aggression over stale LLM values, ensuring real-time market intelligence.
 
 ```mermaid
 sequenceDiagram
@@ -125,19 +145,21 @@ Card-->>App : Render floating card with action
 
 ## Detailed Component Analysis
 
-### AIAnalysisPanel
-Purpose:
-- Aggregate and present AI-driven insights, market structure, opportunity scoring, equity, and risk state in a single, scrollable dashboard.
+### Enhanced AIAnalysisPanel
+**Purpose:**
+- Aggregate and present comprehensive AI-driven insights, market structure analysis, opportunity scoring, equity, and risk state in an enhanced, scrollable dashboard with rule-based validation.
 
-Key responsibilities:
-- Construct a “monitoring mode” analysis from AMT when GenAI is unavailable.
-- Prefer AMT-derived market state and aggression over stale LLM values.
-- Compute derived metrics (LTP proxy, open PnL, balance ratio, sigma deviation).
-- Render session state, location markers, aggression metrics, market structure, IB/breaks, LVN plays, VWAP context, probability engine, overseer actions, and optional Model I/O and Decision History panels.
+**Key Responsibilities:**
+- Construct enhanced "monitoring mode" analysis from AMT when GenAI is unavailable, integrating reasoning model data
+- Prefer AMT-derived market state and aggression over stale LLM values
+- Compute derived metrics (LTP proxy, open PnL, balance ratio, sigma deviation)
+- Render comprehensive session state, location markers, aggression metrics, market structure, IB/breaks, LVN plays, VWAP context, probability engine, overseer actions, and optional Model I/O and Decision History panels
+- Implement systematic rule validation for decision-making
+- Provide advanced technical analysis with LVN detection and sigma deviation visualization
 
-Data requirements:
+**Data Requirements:**
 - GenAIAnalysis (direction, rationale, confidence, marketState, aggression, rawOutput, inputPrompt)
-- AMTAnalysis (sessionVwap, valueAreaHigh/Low, poc, profile shape, balanceRatio, OFI/CVD, structure, IB, prior levels, breaks, POC migration, LVN play, llmThinking)
+- AMTAnalysis (comprehensive market analysis with LVN detection, VWAP bands, structure confidence)
 - Portfolio (positions, closedTrades, equity, leverage)
 - RiskState (halted, haltReason, consecutiveLosses, dailyPnl)
 - AgentDecision (direction, probability, timing, sizeFraction, rationale)
@@ -146,36 +168,43 @@ Data requirements:
 - depth20Active flag
 - overseerAction and overseerReason
 
-Visual presentation:
-- Sticky header with engine status, target/circuit progress bar, EquityPanel, RiskStateDisplay, and LLM timeout banner.
-- Sections for Session & Leg, Location, Volume Aggression, Market Metrics, Market Structure, IB + Breaks, LVN Play, VWAP + Context, Probability Engine, Overseer, and optional Model I/O and Decision History.
+**Visual Presentation:**
+- Enhanced sticky header with engine status, target/circuit progress bar, EquityPanel, RiskStateDisplay, and LLM timeout banner
+- Comprehensive sections for Session & Leg, Location, Volume Aggression, Market Metrics, Market Structure, IB + Breaks, LVN Play, VWAP + Context, Probability Engine, Overseer, Trade Plan, Recent Exits, Rule Checklist, and Decision History
+- Advanced technical indicators with visual progress bars and sigma deviation meters
+- Systematic rule validation with pass/fail indicators
+- LVN (Large Volume Node) detection with velocity play visualization
 
-Interaction patterns:
-- Uses memoization to avoid unnecessary re-computations.
-- Renders fallback states when data is initializing or missing.
-- Integrates with DecisionHistoryPanel and ModelIOPanel conditionally.
+**Interaction Patterns:**
+- Uses extensive memoization to avoid unnecessary re-computations
+- Renders fallback states when data is initializing or missing
+- Integrates with DecisionHistoryPanel and ModelIOPanel conditionally
+- Provides expandable sections for detailed analysis
+- Implements rule-based decision validation with visual feedback
 
-Real-time updates:
-- Receives deltas from the server via the hook; updates are batched and merged efficiently.
+**Real-time Updates:**
+- Receives deltas from the server via the hook; updates are batched and merged efficiently
+- Enhanced monitoring mode automatically activates when GenAI is unavailable
+- LVN detection updates in real-time as volume nodes are identified
 
-Accessibility and responsiveness:
-- Uses semantic labels, monospace digits for financial data, and clear color-coded signals.
-- Responsive layout adapts to sidebar toggles and overlay positioning.
+**Accessibility and Responsiveness:**
+- Uses semantic labels, monospace digits for financial data, and clear color-coded signals
+- Responsive layout adapts to sidebar toggles and overlay positioning
+- Expandable/collapsible sections for better information hierarchy
+- Comprehensive color coding for different market states and decision types
 
 **Section sources**
 - [AIAnalysisPanel.tsx:20-50](file://frontend/components/AIAnalysisPanel.tsx#L20-L50)
-- [AIAnalysisPanel.tsx:62-71](file://frontend/components/AIAnalysisPanel.tsx#L62-L71)
-- [AIAnalysisPanel.tsx:86-104](file://frontend/components/AIAnalysisPanel.tsx#L86-L104)
+- [AIAnalysisPanel.tsx:37-50](file://frontend/components/AIAnalysisPanel.tsx#L37-L50)
+- [AIAnalysisPanel.tsx:52-59](file://frontend/components/AIAnalysisPanel.tsx#L52-L59)
 - [AIAnalysisPanel.tsx:170-185](file://frontend/components/AIAnalysisPanel.tsx#L170-L185)
-- [AIAnalysisPanel.tsx:187-705](file://frontend/components/AIAnalysisPanel.tsx#L187-L705)
-- [AIAnalysisPanel.tsx:707-771](file://frontend/components/AIAnalysisPanel.tsx#L707-L771)
-- [AIAnalysisPanel.tsx:773-801](file://frontend/components/AIAnalysisPanel.tsx#L773-L801)
+- [AIAnalysisPanel.tsx:187-1183](file://frontend/components/AIAnalysisPanel.tsx#L187-L1183)
 
-#### AIAnalysisPanel Data Flow
+#### Enhanced AI Analysis Data Flow
 ```mermaid
 flowchart TD
 Start(["Props Received"]) --> BuildLTP["Build LTP Proxy<br/>OrderBook mid or AMT VWAP"]
-BuildLTP --> EffectiveAnalysis["Effective Analysis<br/>GenAI or Monitoring Mode"]
+BuildLTP --> EffectiveAnalysis["Enhanced Effective Analysis<br/>GenAI or Monitoring Mode with Reasoning"]
 EffectiveAnalysis --> DisplayAnalysis["Display Analysis<br/>Prefer AMT market state/aggression"]
 DisplayAnalysis --> OpenPnL["Compute Open PnL"]
 OpenPnL --> Aggression["Parse Aggression Score"]
@@ -183,12 +212,13 @@ Aggression --> Location["Render Location Markers<br/>VAH/VAL/POC/LTP"]
 Location --> Metrics["Render Market Metrics<br/>OFI, CVD, Balance Ratio"]
 Metrics --> Structure["Render Market Structure<br/>Confidence + Signals"]
 Structure --> IB["Render IB + Breaks<br/>Proximity Warnings"]
-IB --> LVN["Render LVN Play"]
+IB --> LVN["Render LVN Play<br/>Velocity Detection"]
 LVN --> VWAP["Render VWAP + Context<br/>Sigma Deviation"]
 VWAP --> Prob["Render Probability Engine<br/>Direction, P(target), Timing, Size"]
-Prob --> Overseer["Render Overseer Action"]
-Overseer --> Optional["Optional Model I/O + Decision History"]
-Optional --> End(["Render Complete Panel"])
+Prob --> Overseer["Render Overseer Action<br/>Trade Management"]
+Overseer --> RuleCheck["Rule-Based Validation<br/>Systematic Decision Check"]
+RuleCheck --> Optional["Optional Model I/O + Decision History"]
+Optional --> End(["Render Enhanced Panel"])
 ```
 
 **Diagram sources**
@@ -205,24 +235,26 @@ Optional --> End(["Render Complete Panel"])
 - [AIAnalysisPanel.tsx:773-801](file://frontend/components/AIAnalysisPanel.tsx#L773-L801)
 
 ### LiveOpportunityCard
-Purpose:
-- Highlight the best “ENTER_NOW” opportunity across all scanned instruments with direction, probability, and estimated SL/TP.
+**Purpose:**
+- Highlight the best "ENTER_NOW" opportunity across all scanned instruments with direction, probability, and estimated SL/TP.
 
-Data requirements:
+**Data Requirements:**
 - symbol, agentDecision (direction, probability, timing), ltp.
 
-Visual presentation:
+**Visual Presentation:**
 - Displays symbol, LTP, direction badge, probability, estimated SL/TP, and a button to navigate to the chart.
+- Enhanced styling with purple accent border and gradient highlight for priority opportunities.
 
-Interaction patterns:
+**Interaction Patterns:**
 - onSelect triggers symbol change and hides controls.
 - onClose hides the floating card.
 
-Real-time updates:
+**Real-time Updates:**
 - Recomputed whenever instruments change; best opportunity is derived from the active instruments map.
 
-Accessibility and responsiveness:
+**Accessibility and Responsiveness:**
 - Uses clear color coding (green/red badges), monospace digits, and hover states.
+- Enhanced visual priority indicators for actionable opportunities.
 
 **Section sources**
 - [LiveOpportunityCard.tsx:13-31](file://frontend/components/ai/LiveOpportunityCard.tsx#L13-L31)
@@ -244,43 +276,43 @@ Render --> Interact["User Interacts:<br/>View Chart / Close"]
 - [LiveOpportunityCard.tsx:13-31](file://frontend/components/ai/LiveOpportunityCard.tsx#L13-L31)
 
 ### EquityPanel
-Purpose:
+**Purpose:**
 - Visualize portfolio equity, open PnL, session realized PnL, and partial TP booking.
 
-Data requirements:
+**Data Requirements:**
 - Portfolio (positions, closedTrades, equity, leverage).
 
-Visual presentation:
+**Visual Presentation:**
 - Equity and open PnL rows.
 - Target vs circuit progress bar with zero line marker.
 - Session realized PnL with directional coloring.
 - Partial TP booking indicator when applicable.
 
-Real-time updates:
+**Real-time Updates:**
 - Recomputed from portfolio positions and closed trades.
 
-Accessibility and responsiveness:
+**Accessibility and Responsiveness:**
 - Monospace fonts for financial figures, directional color coding, and compact layout.
 
 **Section sources**
 - [EquityPanel.tsx:10-73](file://frontend/components/ai/EquityPanel.tsx#L10-L73)
-- [types.ts:107-114](file://frontend/types.ts#L107-L114)
+- [types.ts:118-125](file://frontend/types.ts#L118-L125)
 
 ### ModelIOPanel
-Purpose:
+**Purpose:**
 - Provide transparency into AI model inputs and outputs for debugging and auditing.
 
-Data requirements:
+**Data Requirements:**
 - GenAIAnalysis (inputPrompt, rawOutput).
 
-Visual presentation:
+**Visual Presentation:**
 - Two-column display: Prompt → Model and Model → Output.
 - Sanitized text rendering for clean display.
 
-Real-time updates:
+**Real-time Updates:**
 - Updates when GenAIAnalysis changes.
 
-Accessibility and responsiveness:
+**Accessibility and Responsiveness:**
 - Scrollable container for long outputs, monospace typography.
 
 **Section sources**
@@ -288,20 +320,20 @@ Accessibility and responsiveness:
 - [textSanitizer.ts:17-32](file://frontend/utils/textSanitizer.ts#L17-L32)
 
 ### RiskStateDisplay
-Purpose:
+**Purpose:**
 - Communicate trading halts and consecutive loss streaks to the operator.
 
-Data requirements:
+**Data Requirements:**
 - RiskState (halted, haltReason, consecutiveLosses, dailyPnl).
 
-Visual presentation:
+**Visual Presentation:**
 - Halt banner with icon and reason when halted.
-- Consecutive loss counter and daily PnL otherwise.
+- Consecutive loss counter and daily Pnl otherwise.
 
-Real-time updates:
+**Real-time Updates:**
 - Updates when RiskState changes.
 
-Accessibility and responsiveness:
+**Accessibility and Responsiveness:**
 - Minimalist design with clear color cues.
 
 **Section sources**
@@ -309,36 +341,107 @@ Accessibility and responsiveness:
 - [types.ts:66-73](file://frontend/types.ts#L66-L73)
 
 ### DecisionHistoryPanel
-Purpose:
+**Purpose:**
 - Maintain an expandable timeline of past LLM decisions with timestamps and rationale.
 
-Data requirements:
+**Data Requirements:**
 - LLMHistoryEntry[] (timestamp, direction, confidence, rationale, inputPrompt, rawOutput).
 
-Visual presentation:
+**Visual Presentation:**
 - Vertical timeline with colored dots and rationale blocks.
 - Error detection for recent failures; optional export placeholder.
 
-Real-time updates:
+**Real-time Updates:**
 - Appends new entries and maintains a rolling window.
 
-Accessibility and responsiveness:
+**Accessibility and Responsiveness:**
 - Scrollable container with clear timestamps and concise rationale summaries.
 
 **Section sources**
 - [DecisionHistoryPanel.tsx:11-93](file://frontend/components/ai/DecisionHistoryPanel.tsx#L11-L93)
 - [types.ts:75-82](file://frontend/types.ts#L75-L82)
 
+## Enhanced AI Decision Visualization
+The enhanced AI analysis panel now provides comprehensive decision visualization through several key improvements:
+
+### Rule-Based Decision Validation
+The system implements a systematic rule checklist that validates trading decisions against multiple criteria:
+- Market State Validation: Checks for imbalanced or probing market conditions
+- Price Location Validation: Ensures price proximity to value area levels
+- Market Activity Validation: Confirms non-dead market state
+- Timing Validation: Verifies ENTER_NOW timing signal
+
+Each rule is represented with visual indicators showing pass/fail status, providing traders with clear decision justification.
+
+### LVN (Large Volume Node) Detection
+Advanced volume analysis identifies significant volume nodes with velocity play detection:
+- LVN price identification with velocity ratios
+- Target projection based on volume node strength
+- Rejection and delta flip confirmation signals
+- Visual indicators for trade setup confirmation
+
+### Enhanced Probability Engine
+The probability engine now provides detailed logic breakdown:
+- Direction, probability, timing, and size fraction visualization
+- Regime classification (trending, balanced, volatile)
+- Latency tracking for decision quality assessment
+- Expandable logic formulas section for transparency
+
+### Advanced Technical Analysis
+Comprehensive technical indicators with visual representation:
+- VWAP deviation sigma visualization with extreme zone warnings
+- Market structure confidence with acceptance/rejection signals
+- Initial balance detection with break validation
+- Delta score visualization with confidence indicators
+
+**Section sources**
+- [AIAnalysisPanel.tsx:1084-1148](file://frontend/components/AIAnalysisPanel.tsx#L1084-L1148)
+- [AIAnalysisPanel.tsx:695-720](file://frontend/components/AIAnalysisPanel.tsx#L695-L720)
+- [AIAnalysisPanel.tsx:860-924](file://frontend/components/AIAnalysisPanel.tsx#L860-L924)
+- [AIAnalysisPanel.tsx:412-554](file://frontend/components/AIAnalysisPanel.tsx#L412-L554)
+
+## Rule-Based Decision Validation
+The enhanced system implements a comprehensive rule validation framework:
+
+### Rule Checklist Implementation
+The system evaluates trading decisions against four critical rules:
+1. **AAA PRE-1 Rule**: Market state validation (imbalanced/probing acceptable)
+2. **MR Location Rule**: Price proximity to value area levels (within threshold distance)
+3. **Volume Alive Rule**: Non-dead market state confirmation
+4. **Timing Rule**: ENTER_NOW timing signal validation
+
+### Visual Rule Validation
+Each rule is displayed with:
+- Checkmark or X indicator based on pass/fail status
+- Color-coded feedback (green for pass, red for fail, yellow for partial)
+- Detailed explanations of rule evaluation results
+- Overall pass/fail count with percentage completion
+
+### Decision Verdict System
+Based on rule validation, the system provides:
+- Clear ENTER_NOW or MONITOR/WAIT verdict
+- Rationale for decision outcome
+- Visual indicators for decision quality
+- Historical rule compliance tracking
+
+**Section sources**
+- [AIAnalysisPanel.tsx:1084-1148](file://frontend/components/AIAnalysisPanel.tsx#L1084-L1148)
+- [AIAnalysisPanel.tsx:1139-1145](file://frontend/components/AIAnalysisPanel.tsx#L1139-L1145)
+
 ## Dependency Analysis
-- AIAnalysisPanel depends on:
-  - EquityPanel, RiskStateDisplay, ModelIOPanel, DecisionHistoryPanel for sub-components.
-  - types.ts for data contracts (GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, AgentDecision, LLMHistoryEntry).
-  - textSanitizer.ts for safe rendering of LLM outputs.
-- LiveOpportunityCard depends on:
-  - types.ts for AgentDecision and symbol.
-- App integrates:
-  - useServerTradingSystem.ts for data flow and symbol selection.
-  - AIAnalysisPanel and LiveOpportunityCard into the overlay UI.
+- **AIAnalysisPanel** depends on:
+  - Enhanced rule validation system for systematic decision assessment
+  - LVN detection algorithms for volume node analysis
+  - Advanced probability engine for decision quality scoring
+  - Comprehensive technical analysis libraries
+  - EquityPanel, RiskStateDisplay, ModelIOPanel, DecisionHistoryPanel for sub-components
+  - types.ts for enhanced data contracts (GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, AgentDecision, LLMHistoryEntry)
+  - textSanitizer.ts for safe rendering of LLM outputs
+- **LiveOpportunityCard** depends on:
+  - types.ts for AgentDecision and symbol
+- **App** integrates:
+  - useServerTradingSystem.ts for data flow and symbol selection
+  - Enhanced AIAnalysisPanel and LiveOpportunityCard into the overlay UI
 
 ```mermaid
 graph LR
@@ -347,6 +450,10 @@ AIAnalysis --> Risk["RiskStateDisplay.tsx"]
 AIAnalysis --> IO["ModelIOPanel.tsx"]
 AIAnalysis --> History["DecisionHistoryPanel.tsx"]
 AIAnalysis --> Types["types.ts"]
+AIAnalysis --> RuleCheck["Rule Validation System"]
+AIAnalysis --> LVN["LVN Detection"]
+AIAnalysis --> ProbEngine["Probability Engine"]
+AIAnalysis --> TechAnalysis["Technical Analysis"]
 IO --> Sanitizer["textSanitizer.ts"]
 LiveCard["LiveOpportunityCard.tsx"] --> Types
 App["App.tsx"] --> AIAnalysis
@@ -370,64 +477,79 @@ App --> Hook["useServerTradingSystem.ts"]
 - [useServerTradingSystem.ts:641-654](file://frontend/hooks/useServerTradingSystem.ts#L641-L654)
 
 ## Performance Considerations
-- Delta compression and batching: The hook merges incoming WebSocket messages and batches React updates to minimize re-renders during high-frequency updates.
-- Memoization: AIAnalysisPanel uses useMemo for derived values (LTP proxy, open PnL, aggression score) to avoid recomputation on unrelated prop changes.
-- Conditional rendering: Optional panels (Model I/O, Decision History) are rendered only when data is available.
-- Lightweight DOM: Panels use simple containers and minimal DOM nesting to keep rendering efficient.
-
-[No sources needed since this section provides general guidance]
+- **Enhanced Delta compression and batching**: The hook merges incoming WebSocket messages and batches React updates to minimize re-renders during high-frequency updates, now handling increased data complexity from enhanced analysis
+- **Extensive Memoization**: AIAnalysisPanel uses useMemo for derived values (LTP proxy, open PnL, aggression score, LVN detection, rule validation) to avoid recomputation on unrelated prop changes
+- **Conditional rendering**: Optional panels (Model I/O, Decision History, LVN detection) are rendered only when data is available
+- **Lightweight DOM**: Panels use simple containers and minimal DOM nesting to keep rendering efficient, even with expanded analysis capabilities
+- **Optimized technical calculations**: LVN detection and sigma deviation calculations are optimized for real-time performance
 
 ## Troubleshooting Guide
-Common issues and remedies:
-- No data displayed initially:
+**Common issues and remedies:**
+- **No data displayed initially:**
   - AIAnalysisPanel shows an initializing state when both GenAI and AMT are missing. Wait for backend to stream data.
-- Stale GenAI signals:
-  - AIAnalysisPanel falls back to monitoring mode using AMT data. Expect “Monitoring market state…” until GenAI responds.
-- LLM timeout banner:
-  - When GenAI is unavailable, a warning banner indicates “Running on Quant Logic Only.”
-- Risk halt:
+- **Enhanced stale GenAI signals:**
+  - AIAnalysisPanel falls back to monitoring mode using AMT data with reasoning model integration. Expect "Monitoring market state..." until GenAI responds.
+- **LLM timeout banner:**
+  - When GenAI is unavailable, a warning banner indicates "Running on Quant Logic Only."
+- **Risk halt:**
   - RiskStateDisplay shows a red banner with halt reason when trading is halted.
-- Decision history errors:
+- **Decision history errors:**
   - DecisionHistoryPanel detects 3+ recent errors and displays a warning banner indicating potential stale decisions.
-- Sanitization artifacts:
+- **Sanitization artifacts:**
   - ModelIOPanel uses textSanitizer to remove escape sequences and JSON wrappers for clean display.
+- **Rule validation failures:**
+  - Rule checklist shows failing criteria with detailed explanations for decision justification issues.
+- **LVN detection delays:**
+  - LVN detection may take time to establish volume nodes; check for velocity play indicators when available.
 
 **Section sources**
-- [AIAnalysisPanel.tsx:86-104](file://frontend/components/AIAnalysisPanel.tsx#L86-L104)
-- [AIAnalysisPanel.tsx:177-184](file://frontend/components/AIAnalysisPanel.tsx#L177-L184)
+- [AIAnalysisPanel.tsx:97-115](file://frontend/components/AIAnalysisPanel.tsx#L97-L115)
+- [AIAnalysisPanel.tsx:187-196](file://frontend/components/AIAnalysisPanel.tsx#L187-L196)
 - [RiskStateDisplay.tsx:15-23](file://frontend/components/ai/RiskStateDisplay.tsx#L15-L23)
 - [DecisionHistoryPanel.tsx:14-24](file://frontend/components/ai/DecisionHistoryPanel.tsx#L14-L24)
 - [ModelIOPanel.tsx:23-27](file://frontend/components/ai/ModelIOPanel.tsx#L23-L27)
 - [textSanitizer.ts:17-32](file://frontend/utils/textSanitizer.ts#L17-L32)
 
 ## Conclusion
-The AI analysis panels form a cohesive, real-time intelligence layer that surfaces market structure, opportunity scoring, equity, and risk state. They are designed for performance, clarity, and safety, with robust fallbacks and sanitization. Integration with the server-driven trading system ensures timely updates and minimal frontend overhead.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The enhanced AI analysis panels form a comprehensive, real-time intelligence layer that surfaces advanced market structure analysis, systematic rule validation, LVN detection, and sophisticated probability engine insights. The system is designed for performance, clarity, and safety, with robust fallbacks, extensive technical analysis, and comprehensive decision validation. Integration with the server-driven trading system ensures timely updates and minimal frontend overhead while providing traders with unprecedented insight into market dynamics and decision quality.
 
 ## Appendices
 
 ### Component Styling, Theming, and Accessibility
-- Theming:
-  - Dark theme with glassmorphism overlays, subtle borders, and gradient accents.
-  - Color-coded signals: green for bullish, red for bearish, amber/yellow for caution.
-- Responsiveness:
-  - Panels adapt to sidebar toggles and overlay positioning; scrollable containers for long content.
-- Accessibility:
-  - Semantic labels, monospace digits for financial data, clear contrast, and hover/focus states.
-  - Optional error banners and warnings are visually prominent.
+**Theming:**
+- Dark theme with glassmorphism overlays, subtle borders, and gradient accents
+- Enhanced color-coded signals: green for bullish, red for bearish, amber/yellow for caution, purple for priority opportunities
+- Advanced visual indicators for different market states and decision types
 
-[No sources needed since this section provides general guidance]
+**Responsiveness:**
+- Panels adapt to sidebar toggles and overlay positioning; scrollable containers for long content
+- Expandable sections for detailed analysis without cluttering the interface
+- Adaptive layouts for rule validation and technical analysis components
+
+**Accessibility:**
+- Semantic labels, monospace digits for financial data, clear contrast, and hover/focus states
+- Comprehensive color coding for different market states and decision types
+- Expandable sections with clear visual indicators for content hierarchy
+- Enhanced visual priority indicators for actionable opportunities
 
 ### Example Integration Patterns
-- Embedding AIAnalysisPanel:
-  - Passed instrument props from App to AIAnalysisPanel for rendering.
-- LiveOpportunityCard integration:
-  - Computed best opportunity across instruments and rendered as a floating overlay.
-- Data formatting:
-  - Sanitized LLM rationale and outputs for display.
-- Real-time updates:
-  - WebSocket deltas merged and batched by the hook; panels re-render only when relevant data changes.
+**Embedding Enhanced AIAnalysisPanel:**
+- Passed instrument props from App to AIAnalysisPanel for rendering with enhanced rule validation
+- Integration of LVN detection and technical analysis components
+- Systematic rule validation with visual feedback mechanisms
+
+**LiveOpportunityCard integration:**
+- Computed best opportunity across instruments and rendered as a floating overlay with enhanced styling
+- Priority indicators for actionable opportunities
+
+**Data formatting:**
+- Sanitized LLM rationale and outputs for display
+- Enhanced technical analysis data formatting with sigma deviation and confidence indicators
+
+**Real-time updates:**
+- WebSocket deltas merged and batched by the hook; panels re-render only when relevant data changes
+- Enhanced monitoring mode automatically activates with reasoning model integration
+- LVN detection updates in real-time as volume nodes are identified
 
 **Section sources**
 - [App.tsx:374-386](file://frontend/App.tsx#L374-L386)

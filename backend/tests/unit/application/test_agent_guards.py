@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager, RiskTier
-from app.domain.fabio_ai.services.entry_gate import compute_grade_score, check_vwap_bias
+from app.domain.fabio_ai.services.entry_gates.grading import compute_grade_score, check_vwap_bias
 from app.domain.trading.models.enums import SetupType
 
 
@@ -157,6 +157,6 @@ class TestAgentVWAPBias:
 class TestAgentCushionSL:
     def test_build_entry_signal_accepts_risk_sl_pct(self):
         import inspect
-        from app.domain.fabio_ai.services.entry_gate import build_entry_signal
+        from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
         sig = inspect.signature(build_entry_signal)
         assert "risk_sl_pct" in sig.parameters

@@ -15,7 +15,11 @@ _DEFAULT_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 
 def _cloud_fallback_enabled() -> bool:
-    """OpenRouter cloud path is opt-in; local MLX is the default contract."""
+    """OpenRouter cloud path is opt-in; local MLX is the default contract.
+    
+    When enabled (LLM_CLOUD_FALLBACK_ENABLED=1), ALL inference goes through
+    OpenRouter and the local MLX model is not loaded at all.
+    """
     v = (os.environ.get("LLM_CLOUD_FALLBACK_ENABLED") or "").strip().lower()
     return v in ("1", "true", "yes", "on")
 
@@ -25,11 +29,14 @@ class MLXInferenceAdapter(ILLMInference):
 
     _instance = None
     _env_loaded = False
+    _init_lock = threading.Lock()
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
+            with cls._init_lock:
+                if cls._instance is None:  # Double-check after acquiring lock
+                    cls._instance = super().__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
 
     def __init__(
@@ -46,9 +53,6 @@ class MLXInferenceAdapter(ILLMInference):
         self._model_path = model_path
         self._temperature = temperature
         self._max_new_tokens = max_new_tokens
-        # Rate limiter: 1 request per second for OpenRouter
-        self._last_request_time = 0.0
-        self._min_request_interval = 1.0  # 1 second
         self._start_background_loading()
         self._initialized = True
 
@@ -56,6 +60,15 @@ class MLXInferenceAdapter(ILLMInference):
         """Kick off model loading on a daemon thread so the server starts immediately."""
         self._ensure_runtime_env_loaded()
         if not self._is_loading and self.model is None:
+            # If cloud fallback is enabled, skip local model loading entirely
+            if _cloud_fallback_enabled():
+                logger.info(
+                    "LLM_CLOUD_FALLBACK_ENABLED=1 — skipping local MLX model load, "
+                    "using OpenRouter for all inference"
+                )
+                self._is_loading = False
+                self._initialized = True
+                return
             # Check if model path is configured
             model_path = self._effective_model_path()
             if not model_path:
@@ -65,6 +78,18 @@ class MLXInferenceAdapter(ILLMInference):
                 self._is_loading = False
                 self._initialized = True
                 return
+            
+            # Check if we should defer loading (prevent Metal crashes during uvicorn startup)
+            defer_loading = os.environ.get("MLX_DEFER_LOADING", "0").lower() in ("1", "true", "yes")
+            if defer_loading:
+                logger.info(
+                    "MLX_DEFER_LOADING=1 — deferring model load to first inference request "
+                    "(prevents Metal GPU crashes during uvicorn startup)"
+                )
+                self._is_loading = False
+                self._initialized = True
+                return
+            
             # Check if we should load immediately or defer
             # On macOS, MLX must be loaded in main thread, not background
             # So we load synchronously here to avoid OpenMP crashes
@@ -84,15 +109,6 @@ class MLXInferenceAdapter(ILLMInference):
         try:
             self._ensure_runtime_env_loaded()
             quiet_gemma4_tokenizer_config_warning()
-            # Try mlx_lm first (text-only models), fallback to mlx_vlm (vision models)
-            try:
-                from mlx_lm import load, generate
-
-                use_vlm = False
-            except ImportError:
-                from mlx_vlm import load, generate
-
-                use_vlm = True
 
             model_path = self._resolve_model_dir(
                 self._model_path or os.environ.get("MLX_MODEL_PATH", "")
@@ -100,11 +116,27 @@ class MLXInferenceAdapter(ILLMInference):
             adapter_path = self._resolve_local_path(
                 os.environ.get("MLX_ADAPTER_PATH", "")
             )
+            
+            logger.info(f"DEBUG: Resolving model architecture for {model_path}")
+            # Detect model architecture from config.json to choose the right loader.
+            # Gemma 4 26B A4B is a VLM (Gemma4ForConditionalGeneration) and MUST
+            # use mlx_vlm — mlx_lm will fail or misbehave on VLM architectures.
+            use_vlm = self._detect_vlm_architecture(model_path)
+            if use_vlm:
+                logger.info("DEBUG: Importing mlx_vlm...")
+                from mlx_vlm import load, generate
+                logger.info("Using mlx_vlm loader (VLM architecture detected)")
+            else:
+                logger.info("DEBUG: Importing mlx_lm...")
+                from mlx_lm import load, generate
+                logger.info("Using mlx_lm loader (text-only architecture)")
+
             try:
                 import mlx.core as mx
-
                 self._runtime_device = str(mx.default_device())
-            except Exception:
+                logger.info(f"DEBUG: MLX device: {self._runtime_device}")
+            except Exception as e:
+                logger.warning(f"DEBUG: Failed to get MLX device: {e}")
                 self._runtime_device = None
 
             with MLX_GPU_LOCK:
@@ -112,31 +144,85 @@ class MLXInferenceAdapter(ILLMInference):
                     logger.info(
                         f"Loading MLX model from {model_path} with adapter {adapter_path}..."
                     )
-                    if use_vlm:
-                        self.model, self.processor = load(
-                            model_path, adapter_path=adapter_path
-                        )
-                    else:
-                        self.model, self.tokenizer = load(
-                            model_path, adapter_path=adapter_path
-                        )
-                        self.processor = self.tokenizer  # Compatibility
+                    self.model, self.processor = load(
+                        model_path, adapter_path=adapter_path
+                    )
                 else:
                     logger.info(f"Loading MLX model from {model_path} (no adapter)...")
-                    if use_vlm:
-                        self.model, self.processor = load(model_path)
-                    else:
-                        self.model, self.tokenizer = load(model_path)
-                        self.processor = self.tokenizer  # Compatibility
+                    logger.info("DEBUG: Calling load()...")
+                    self.model, self.processor = load(model_path)
+                    logger.info("DEBUG: load() finished.")
 
             self._use_vlm = use_vlm
             self._is_loading = False
             logger.info("MLX model loaded successfully!")
         except Exception as e:
             logger.error(f"Failed to load MLX model: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             self._load_error = str(e)
             self._use_vlm = None
             self._is_loading = False
+
+    @staticmethod
+    def _detect_vlm_architecture(model_path: str) -> bool:
+        """Detect whether a model is a VLM by reading config.json.
+
+        VLMs have architectures like Gemma4ForConditionalGeneration,
+        LlavaForConditionalGeneration, etc. and contain vision/audio tokens.
+
+        IMPORTANT: Some fused production models strip vision weights but keep
+        the VLM config.json. We verify that vision/audio weights actually
+        exist in the model files before returning True.
+        """
+        import json
+        from pathlib import Path
+
+        config_file = Path(model_path) / "config.json"
+        if not config_file.exists():
+            return False
+
+        try:
+            with open(config_file) as f:
+                config = json.load(f)
+            architectures = config.get("architectures", [])
+            # VLM architectures contain "ConditionalGeneration" or "VLM"
+            is_vlm_config = False
+            for arch in architectures:
+                if "ConditionalGeneration" in arch or "VLM" in arch:
+                    is_vlm_config = True
+                    break
+            # Also check for vision/audio token configs
+            if not is_vlm_config:
+                if any("token_id" in k for k in config if k.startswith(("image_", "video_", "audio_", "vision_"))):
+                    is_vlm_config = True
+
+            if not is_vlm_config:
+                return False
+
+            # Config says VLM — but verify vision weights actually exist.
+            # Fused production models strip vision_tower/embed_vision weights
+            # while keeping the VLM config.json. Without vision weights,
+            # mlx_vlm.load() will fail with "Missing N parameters".
+            index_file = Path(model_path) / "model.safetensors.index.json"
+            if index_file.exists():
+                with open(index_file) as f:
+                    index = json.load(f)
+                weight_keys = index.get("weight_map", index.get("metadata", {}))
+                if isinstance(weight_keys, dict):
+                    has_vision = any(
+                        k.startswith(("vision_tower.", "embed_vision.", "visual."))
+                        for k in weight_keys
+                    )
+                    if not has_vision:
+                        logger.info(
+                            "VLM config detected but no vision weights in model — "
+                            "treating as text-only model"
+                        )
+                        return False
+        except Exception:
+            pass
+        return True
 
     @staticmethod
     def _resolve_local_path(path_value: str) -> str:
@@ -203,6 +289,32 @@ class MLXInferenceAdapter(ILLMInference):
             load_dotenv(env_path, override=False)
         cls._env_loaded = True
 
+    # ------------------------------------------------------------------
+    # Cloud LLM: model fallback chain, serialized queue, smart 429 handling
+    # ------------------------------------------------------------------
+
+    # Class-level request serialization lock — prevents concurrent API calls
+    # across all symbols/threads (OpenRouter free tier has very low concurrency)
+    _cloud_lock = threading.Lock()
+    _last_cloud_request_time: float = 0.0
+    _cloud_cooldown_until: float = 0.0  # Timestamp until which we skip all requests
+    _cloud_consecutive_429s: int = 0
+    _cloud_last_working_model: str | None = None
+
+    def _get_model_chain(self) -> list[str]:
+        """Parse MODEL_ID (comma-separated) into a fallback chain, or use defaults."""
+        raw = (os.environ.get("MODEL_ID") or "").strip()
+        if raw:
+            chain = [m.strip() for m in raw.split(",") if m.strip()]
+            if chain:
+                return chain
+        # Default chain: tested working free models
+        return [
+            "openai/gpt-oss-120b:free",
+            "nvidia/nemotron-3-super-120b-a12b:free",
+            "z-ai/glm-4.5-air:free",
+        ]
+
     def _predict_cloud(
         self,
         instruction: str,
@@ -210,126 +322,170 @@ class MLXInferenceAdapter(ILLMInference):
         temperature: float | None = None,
         max_tokens: int | None = None,
     ) -> str:
-        """Fallback: call OpenRouter cloud API when no local MLX model is available."""
+        """Cloud LLM inference with model fallback chain and smart rate-limit handling.
+
+        Key improvements over simple retry:
+        1. Model fallback chain — tries next model on 429 instead of blind retry
+        2. Serialized request queue — one API call at a time across all threads
+        3. Smart 429 handling — reads Retry-After header, respects cooldown
+        4. Cooldown escalation — after N consecutive 429s, pauses all requests
+        5. Remembers last working model — tries it first next time
+        """
         import json
         import time
         import urllib.request
         import urllib.error
 
         api_key = os.environ.get("OPENROUTER_API_KEY", "")
-        model_id = (os.environ.get("MODEL_ID") or "").strip() or "openrouter/auto"
         fallback_url = (
             (os.environ.get("CLOUD_FALLBACK_URL") or "").strip()
             or _DEFAULT_OPENROUTER_URL
         )
-        if not fallback_url.strip():
-            logger.error("CLOUD_FALLBACK_URL is empty after coercion; skipping urlopen")
-            return json.dumps(
-                {
-                    "direction": "FLAT",
-                    "rationale": "Cloud fallback URL is not configured",
-                    "confidence": "Low",
-                }
-            )
-
-        logger.info(
-            f"[CLOUD] OpenRouter config: model={model_id}, url={fallback_url}, api_key_len={len(api_key)}"
-        )
-
         if not api_key:
             raise LLMNotReadyError(
                 "No OPENROUTER_API_KEY configured for cloud fallback"
             )
 
-        # Rate limiting: enforce 1 request/second
-        import time as time_module
+        model_chain = self._get_model_chain()
+        # Prioritize the last model that worked
+        if self._cloud_last_working_model and self._cloud_last_working_model in model_chain:
+            model_chain.remove(self._cloud_last_working_model)
+            model_chain.insert(0, self._cloud_last_working_model)
 
-        with threading.Lock():
-            current_time = time_module.time()
-            time_since_last = current_time - self._last_request_time
-            if time_since_last < self._min_request_interval:
-                wait_time = self._min_request_interval - time_since_last
-                logger.info(
-                    f"Rate limiting: waiting {wait_time:.2f}s before next OpenRouter request"
-                )
-                time_module.sleep(wait_time)
-            self._last_request_time = time_module.time()
+        # --- Cooldown gate: if we've been hammering, wait ---
+        now = time.time()
+        if now < MLXInferenceAdapter._cloud_cooldown_until:
+            remaining = MLXInferenceAdapter._cloud_cooldown_until - now
+            logger.info(
+                f"[CLOUD] In cooldown for {remaining:.0f}s — returning FLAT"
+            )
+            return json.dumps({
+                "direction": "FLAT",
+                "rationale": f"Cloud LLM in cooldown ({remaining:.0f}s remaining) — rate limited",
+                "confidence": "Low",
+            })
 
-        # #Fix-429: Exponential backoff on rate limit errors
-        max_retries = 3
-        base_delay = 5.0  # seconds
-        last_error = None
+        # --- Serialized request: only one API call at a time ---
+        with MLXInferenceAdapter._cloud_lock:
+            # Enforce minimum interval between requests (2s for free tier)
+            min_interval = 2.0
+            elapsed = time.time() - MLXInferenceAdapter._last_cloud_request_time
+            if elapsed < min_interval:
+                wait = min_interval - elapsed
+                logger.debug(f"[CLOUD] Throttling: waiting {wait:.1f}s")
+                time.sleep(wait)
+            MLXInferenceAdapter._last_cloud_request_time = time.time()
 
-        for attempt in range(max_retries):
             temp = temperature if temperature is not None else self._temperature
             max_t = max_tokens if max_tokens is not None else self._max_new_tokens
-
             messages = [
                 {"role": "system", "content": instruction},
                 {"role": "user", "content": input_text},
             ]
 
-            payload = json.dumps(
-                {
+            # --- Try each model in the chain ---
+            last_error = None
+            for model_id in model_chain:
+                logger.info(
+                    f"[CLOUD] Trying model={model_id} "
+                    f"(chain_idx={model_chain.index(model_id)+1}/{len(model_chain)})"
+                )
+
+                payload = json.dumps({
                     "model": model_id,
                     "messages": messages,
                     "temperature": temp,
                     "max_tokens": max_t,
-                }
-            ).encode()
+                }).encode()
 
-            req = urllib.request.Request(
-                fallback_url,
-                data=payload,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "http://localhost:5190",
-                    "X-Title": "GlassyTrade AI",
-                },
-                method="POST",
-            )
+                req = urllib.request.Request(
+                    fallback_url,
+                    data=payload,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "http://localhost:5190",
+                        "X-Title": "GlassyTrade AI",
+                    },
+                    method="POST",
+                )
 
-            try:
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    result = json.loads(resp.read())
-                    choices = result.get("choices", [])
-                    if not choices:
-                        logger.warning(f"Cloud LLM returned no choices: {result}")
-                        continue
+                try:
+                    with urllib.request.urlopen(req, timeout=60) as resp:
+                        result = json.loads(resp.read())
+                        choices = result.get("choices", [])
+                        if not choices:
+                            logger.warning(f"[CLOUD] No choices from {model_id}: {result}")
+                            continue
+                        content = choices[0].get("message", {}).get("content")
+                        if content is None:
+                            logger.warning(f"[CLOUD] None content from {model_id}")
+                            continue
 
-                    content = choices[0].get("message", {}).get("content")
-                    # Validate content is not None before returning
-                    if content is None:
-                        logger.warning("Cloud LLM returned None content")
-                        continue
-                    return str(content)
-            except urllib.error.HTTPError as e:
-                last_error = e
-                if e.code == 429:
-                    # Rate limited — exponential backoff
-                    delay = base_delay * (2**attempt)
-                    logger.warning(
-                        f"Cloud LLM rate limited (429). "
-                        f"Retry {attempt + 1}/{max_retries} in {delay:.0f}s"
-                    )
-                    time.sleep(delay)
-                    continue
-                else:
-                    logger.error(f"Cloud LLM fallback HTTP {e.code} failed: {e.reason}")
+                        # Success! Reset 429 counter and remember working model
+                        MLXInferenceAdapter._cloud_consecutive_429s = 0
+                        MLXInferenceAdapter._cloud_last_working_model = model_id
+                        logger.info(f"[CLOUD] Success with {model_id} ({len(content)} chars)")
+                        return str(content)
+
+                except urllib.error.HTTPError as e:
                     last_error = e
-            except urllib.error.URLError as e:
-                logger.error(f"Cloud LLM fallback network failed: {e}")
-                last_error = e
-            except (json.JSONDecodeError, KeyError, IndexError) as e:
-                logger.error(f"Cloud LLM response malformed: {e}")
-                last_error = e
-            except Exception as e:
-                logger.error(f"Unexpected error in cloud fallback: {e}")
-                last_error = e
+                    if e.code == 429:
+                        MLXInferenceAdapter._cloud_consecutive_429s += 1
 
-        # All retries exhausted or fatal error
-        msg = f"Cloud fallback failed after {max_retries} attempts. Last error: {last_error}"
+                        # Read Retry-After header if available
+                        retry_after = e.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after)
+                            except ValueError:
+                                delay = 10.0
+                        else:
+                            delay = 5.0
+
+                        consecutive = MLXInferenceAdapter._cloud_consecutive_429s
+                        logger.warning(
+                            f"[CLOUD] 429 from {model_id} "
+                            f"(consecutive={consecutive}, retry_after={delay:.0f}s) "
+                            f"— trying next model"
+                        )
+
+                        # If we've hit 429 many times in a row, enter cooldown
+                        if consecutive >= len(model_chain) * 2:
+                            cooldown = min(delay * 3, 120)
+                            MLXInferenceAdapter._cloud_cooldown_until = (
+                                time.time() + cooldown
+                            )
+                            logger.warning(
+                                f"[CLOUD] Entering cooldown for {cooldown:.0f}s "
+                                f"(too many 429s)"
+                            )
+                            break  # Stop trying models, go to cooldown
+
+                        # Small delay before trying next model (don't slam)
+                        time.sleep(min(delay, 3.0))
+                        continue  # Try next model in chain
+
+                    else:
+                        logger.error(
+                            f"[CLOUD] HTTP {e.code} from {model_id}: {e.reason}"
+                        )
+                        continue  # Try next model
+
+                except urllib.error.URLError as e:
+                    logger.error(f"[CLOUD] Network error with {model_id}: {e}")
+                    last_error = e
+                    continue
+                except Exception as e:
+                    logger.error(f"[CLOUD] Unexpected error with {model_id}: {e}")
+                    last_error = e
+                    continue
+
+        # All models failed
+        msg = (
+            f"Cloud LLM failed — all {len(model_chain)} models exhausted. "
+            f"Last error: {last_error}"
+        )
         logger.error(msg)
         return json.dumps({"direction": "FLAT", "rationale": msg, "confidence": "Low"})
 
@@ -351,6 +507,33 @@ class MLXInferenceAdapter(ILLMInference):
             prefill: Optional prefill for assistant response.
         """
         self._ensure_runtime_env_loaded()
+        # When cloud fallback is explicitly enabled, always use cloud inference
+        if _cloud_fallback_enabled():
+            return self._predict_cloud(
+                instruction, input_text, temperature, max_tokens
+            )
+        
+        # Lazy loading: Load model on first inference request if deferred
+        if not self.model and not self._is_loading:
+            defer_loading = os.environ.get("MLX_DEFER_LOADING", "0").lower() in ("1", "true", "yes")
+            if defer_loading:
+                logger.info("MLX_DEFER_LOADING: Loading model on first inference request...")
+                self._is_loading = True
+                try:
+                    self._load_model()
+                    logger.info("✅ MLX model loaded successfully on first request!")
+                except Exception as e:
+                    logger.error(f"Failed to load MLX model on first request: {e}")
+                    self._load_error = str(e)
+                    self._is_loading = False
+                    # Fallback to cloud if available
+                    model_path = self._effective_model_path()
+                    if _cloud_fallback_enabled() and not model_path:
+                        return self._predict_cloud(
+                            instruction, input_text, temperature, max_tokens
+                        )
+                    raise LLMNotReadyError(f"Model failed to load: {e}")
+        
         if not self.model:
             if self._is_loading:
                 raise LLMNotReadyError("Model is still loading")
@@ -404,17 +587,22 @@ class MLXInferenceAdapter(ILLMInference):
 
         # Metal GPU crashes on concurrent generate() calls — serialize with lock
         import time as _time
+        from mlx_lm.sample_utils import make_sampler
 
         t0 = _time.time()
         with MLX_GPU_LOCK:
-            logger.info(f"[{target}] Starting generation (max_tokens={max_t})...")
-            # mlx_vlm defaults to deterministic parsing when sampling kwargs are omitted seamlessly
+            logger.info(f"[{target}] Starting generation (max_tokens={max_t}, temp={self._temperature})...")
+            # Pass sampling parameters for proper temperature control
+            # Trading decisions need low temperature (0.3) for deterministic output
+            # mlx_lm v0.31+ requires sampler object instead of direct temperature/top_p params
+            sampler = make_sampler(temp=self._temperature, top_p=0.95)
             response = generate(
                 self.model,
                 self.processor,
                 prompt=prompt,
                 max_tokens=max_t,
                 verbose=False,
+                sampler=sampler,
             )
             duration = _time.time() - t0
             logger.info(f"[{target}] Generation complete in {duration:.2f}s.")
@@ -509,7 +697,18 @@ class MLXInferenceAdapter(ILLMInference):
         return text
 
     def is_ready(self) -> bool:
-        """True only when local MLX weights are loaded (cloud is not counted as ready)."""
+        """True when the LLM is ready for inference (local MLX or cloud)."""
+        if _cloud_fallback_enabled():
+            # Cloud mode is ready as long as we have an API key
+            api_key = os.environ.get("OPENROUTER_API_KEY", "")
+            return bool(api_key.strip())
+        
+        # If deferred loading is enabled, report ready so predict() can trigger lazy load
+        defer_loading = os.environ.get("MLX_DEFER_LOADING", "0").lower() in ("1", "true", "yes")
+        if defer_loading:
+            # Ready if not currently loading and no error
+            return self._is_loading is False and self._load_error is None
+        
         if self._is_loading:
             return False
         if self._load_error is not None:

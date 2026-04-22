@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from app.domain.ports.market_data import IMarketData
 from app.domain.ports.broker import IBroker
 from app.domain.ports.storage import IStorage

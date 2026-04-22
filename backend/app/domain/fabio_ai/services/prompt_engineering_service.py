@@ -18,7 +18,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from app.domain.fabio_ai.services.entry_gate import cluster_aggressive_prints
+from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints, three_align_check
+from app.domain.trading.models.enums import MarketStateCodec
 
 if TYPE_CHECKING:
     from app.domain.trading.models.trading_context import TradingContext
@@ -87,9 +88,6 @@ class PromptEngineeringService:
         all_structural_levels = agg_levels + (prior_print_levels or [])
 
         # Strategy hint based on market state and session
-        from app.domain.trading.models.enums import MarketStateCodec
-        from app.domain.fabio_ai.services.entry_gate import three_align_check
-
         market_state_str = "Trending" if MarketStateCodec.is_imbalanced(ctx.market_state) else "Balanced"
 
         if MarketStateCodec.is_imbalanced(ctx.market_state) and session_info.allow_trend:

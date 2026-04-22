@@ -10,7 +10,7 @@ from app.domain.fabio_ai.services.amt_analyzer import (
     find_aggressive_prints,
     AMTConfig,
 )
-from app.domain.fabio_ai.services.entry_gate import sl_from_aggressive_print
+from app.domain.fabio_ai.services.entry_gates.signal_builder import sl_from_aggressive_print
 from app.domain.trading.models.value_objects import OHLC, AggressivePrint, AMTResult
 
 

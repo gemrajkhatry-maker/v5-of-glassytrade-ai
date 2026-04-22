@@ -136,7 +136,9 @@ class SettingsAdapter:
         """Get scanner underlyings from YAML config."""
         if self._mode_config:
             return self._mode_config.scanner_underlyings
-        underlyings = os.getenv("SCANNER_UNDERLYINGS", "CRUDEOIL,NATURALGAS")
+        underlyings = os.getenv(
+            "SCANNER_UNDERLYINGS", "CRUDEOIL,NATURALGAS,GOLDM,SILVERM"
+        )
         return [s.strip() for s in underlyings.split(",")]
     
     @property
@@ -279,6 +281,45 @@ class SettingsAdapter:
     def TICK_POLL_SECONDS(self) -> float:
         """Get tick poll seconds from env."""
         return float(os.getenv("TICK_POLL_SECONDS", "5.0"))
+    
+    # =========================================================================
+    # Gap Fill Configuration
+    # =========================================================================
+    
+    @property
+    def GAP_FILL_ENABLED(self) -> bool:
+        """Get gap fill enabled flag from YAML config."""
+        if self._mode_config:
+            return self._mode_config.system_config.gap_fill.enabled
+        return os.getenv("GAP_FILL_ENABLED", "true").lower() == "true"
+    
+    @property
+    def GAP_FILL_INTERVAL(self) -> int:
+        """Get gap fill interval in seconds from YAML config."""
+        if self._mode_config:
+            return self._mode_config.system_config.gap_fill.interval_seconds
+        return int(os.getenv("GAP_FILL_INTERVAL", "300"))
+    
+    @property
+    def GAP_FILL_MIN_GAP_SECONDS(self) -> int:
+        """Get minimum gap size in seconds from YAML config."""
+        if self._mode_config:
+            return self._mode_config.system_config.gap_fill.min_gap_seconds
+        return int(os.getenv("GAP_FILL_MIN_GAP_SECONDS", "60"))
+    
+    @property
+    def GAP_FILL_MAX_LOOKBACK(self) -> int:
+        """Get max lookback in seconds from YAML config."""
+        if self._mode_config:
+            return self._mode_config.system_config.gap_fill.max_lookback_seconds
+        return int(os.getenv("GAP_FILL_MAX_LOOKBACK", "600"))
+    
+    @property
+    def GAP_FILL_MAX_FILL_AGE(self) -> int:
+        """Get max fill age in seconds from YAML config."""
+        if self._mode_config:
+            return self._mode_config.system_config.gap_fill.max_fill_age_seconds
+        return int(os.getenv("GAP_FILL_MAX_FILL_AGE", "120"))
     
     # =========================================================================
     # Fallback mechanism for any attribute not explicitly defined

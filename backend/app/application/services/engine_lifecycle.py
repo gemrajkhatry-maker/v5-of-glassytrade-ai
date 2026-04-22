@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from app.config import settings
 from app.domain.trading.models.value_objects import OHLC
+from app.infrastructure.serialization.schemas import ohlc_to_dto
 
 if TYPE_CHECKING:
     from app.api.dependencies import ServiceGraph
@@ -60,6 +61,9 @@ class EngineLifecycle:
         self._market_data = graph.market_data
         self._session_service = graph.trading_session
         self._active_symbols: list[str] = graph.active_symbols
+        self._stream_symbols: list[str] = list(
+            getattr(graph, "stream_symbols", None) or graph.active_symbols
+        )
 
         self._stream_manager = stream_manager
         self._watchdog_manager = watchdog_manager
@@ -105,14 +109,14 @@ class EngineLifecycle:
             return
         self._running = True
 
-        # Initialize delegated modules
-        self._stream_manager.set_active_symbols(self._active_symbols)
+        # Initialize delegated modules — include futures roots for dual feed
+        self._stream_manager.set_active_symbols(self._stream_symbols)
         self._stream_manager.set_running(True)
         self._watchdog_manager.set_active_symbols(self._active_symbols)
         self._watchdog_manager.set_running(True)
 
-        # Initialize per-symbol state
-        for sym in self._active_symbols:
+        # Initialize per-symbol state (options + any extra feed symbols)
+        for sym in self._stream_symbols:
             initialize_symbol_state(sym)
 
         self._engine_start_time = time.time()
@@ -134,9 +138,9 @@ class EngineLifecycle:
         self._gc_task = asyncio.create_task(self._watchdog_manager.gc_loop())
 
         logger.info(
-            "Trading engine started for %d symbols: %s",
+            "Trading engine started for %d trade symbols (data feed: %d)",
             len(self._active_symbols),
-            self._active_symbols,
+            len(self._stream_symbols),
         )
 
     # ------------------------------------------------------------------
@@ -362,10 +366,6 @@ class EngineLifecycle:
                     if len(history) >= 1:
                         try:
                             last_candle = history[-1]
-                            from app.infrastructure.serialization.schemas import (
-                                ohlc_to_dto,
-                            )
-
                             self._state_broadcaster.set_state(
                                 sym,
                                 {
@@ -379,13 +379,46 @@ class EngineLifecycle:
                                 "Engine: initial seed done for %s (skipped LLM)", sym
                             )
                         except Exception:
-                            logger.debug(
-                                "Engine: initial seed failed for %s", sym, exc_info=True
+                            logger.warning(
+                                "Engine: initial seed failed for %s — trading without history", sym, exc_info=True
                             )
             except Exception:
                 logger.warning(
                     "Engine: history fetch failed for %s", sym, exc_info=True
                 )
+
+        # Underlying futures history — warms AMT/regime buffers before live ticks
+        provider = getattr(self._graph, "underlying_futures_provider", None)
+        if provider:
+            seen_fut: set[str] = set()
+            for sym in self._active_symbols:
+                m = provider.get_mapping(sym)
+                if not m:
+                    continue
+                fut = m.underlying_symbol
+                if fut in seen_fut:
+                    continue
+                seen_fut.add(fut)
+                try:
+                    await asyncio.sleep(1.0)
+                    fut_hist = await self._market_data.fetch_history(
+                        fut, settings.STREAM_INTERVAL, 500
+                    )
+                    if fut_hist:
+                        self._session_service.seed_underlying_from_history(
+                            fut, fut_hist
+                        )
+                        logger.info(
+                            "Engine: seeded %d underlying candles for %s",
+                            len(fut_hist),
+                            fut,
+                        )
+                except Exception:
+                    logger.warning(
+                        "Engine: underlying history fetch failed for %s",
+                        fut,
+                        exc_info=True,
+                    )
 
     def _load_candles_from_db(self, symbol: str, limit: int = 500) -> list[OHLC]:
         """Load closed candles from SQLite.

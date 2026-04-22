@@ -1,38 +1,26 @@
-"""
-Post Fine-Tuning Validation — Gemma-4-E4B AMT
-Tests the fine-tuned model against the full 24-case Fabio suite
-and verifies JSON output format matches what the system expects.
-
-System JSON contract (from llm_contract.py entry-json-v1):
-  {
-    "direction":  "LONG" | "SHORT" | "FLAT",
-    "confidence": "High" | "Medium" | "Low",
-    "rationale":  "Brief justification"
-  }
-
-Also validates:
-  - <think> reasoning block is present and non-trivial
-  - JSON is parseable without fallback heuristics
-  - Latency stays < 5s per call
-"""
-
 import argparse
 import json
 import re
 import time
 from mlx_lm import load, generate
-from mlx_lm.sample_utils import make_sampler
+from mlx_lm.sample_utils import make_sampler, make_repetition_penalty
 
 BASE_MODEL = "mlx-community/gemma-4-e4b-it-nvfp4"
 
 SYSTEM = (
     "You are an expert AMT scalping analyst using Fabio Valentini's Auction Market Theory. "
     "You READ the auction — you do NOT predict. "
-    "Your decision hierarchy: 1) Aggression (CVD/Delta/Bubbles) 2) Structure (State/Location) 3) Quant (Probability). "
-    "Always think through the narrative step by step inside <think> tags, then respond with a JSON object only. "
+    "MANDATORY REASONING STRUCTURE (Inside <think> tags): "
+    "1. SESSION CHECK: [Window] -> Bias [Bullish/Bearish/Neutral] "
+    "2. RISK CHECK: [P&L/Rule Status] -> Permit [Yes/No] "
+    "3. STRUCTURE CHECK: [State/Location] -> Signal [Confirmed/No] "
+    "4. AGGRESSION CHECK: [CVD/Delta/Bubbles] -> Trigger [Confirmed/No] "
+    "5. FINAL LOGIC: [Narrative summary] "
+    "Then respond with a JSON object only. "
     "JSON format: {\"direction\": \"LONG|SHORT|FLAT\", \"confidence\": \"High|Medium|Low\", \"rationale\": \"brief reason\"}"
 )
 
+# 24-Case Test Suite based on Fabio AMT Playbook
 TESTS = [
     ("Triple-A: All align → Long",
      "NSE Primary (09:30-11:30). Balanced. Price at VAL 22100. Aggressive selling -900 Delta but price NOT moving — iceberg buyers. "
@@ -129,26 +117,13 @@ TESTS = [
      "Strong buying momentum. SL about to hit.", "FLAT"),
 ]
 
-
 def parse_response(text: str) -> tuple[str, bool, bool, str]:
-    """
-    Returns: (direction, has_think_block, json_parseable, rationale)
-    """
-    # Check for <think> block
     think_match = re.search(r"<think>(.*?)</think>", text, re.DOTALL)
     has_think = think_match is not None and len((think_match.group(1) or "").strip()) > 20
-
-    # Extract JSON (after think block if present)
-    if think_match:
-        after_think = text[think_match.end():].strip()
-    else:
-        after_think = text
-
-    # Try direct JSON parse
+    after_think = text[think_match.end():].strip() if think_match else text
     json_ok = False
     direction = "FLAT"
     rationale = ""
-
     json_match = re.search(r"\{.*?\}", after_think, re.DOTALL)
     if json_match:
         try:
@@ -156,182 +131,81 @@ def parse_response(text: str) -> tuple[str, bool, bool, str]:
             json_ok = True
             direction = str(obj.get("direction", "FLAT")).upper()
             rationale = obj.get("rationale", "")
-            if direction not in ("LONG", "SHORT", "FLAT"):
-                direction = "FLAT"
+            if direction not in ("LONG", "SHORT", "FLAT"): direction = "FLAT"
         except Exception:
-            # Try keyword fallback
             t = after_think.lower()
-            if "long" in t:
-                direction = "LONG"
-            elif "short" in t:
-                direction = "SHORT"
-
+            if "long" in t: direction = "LONG"
+            elif "short" in t: direction = "SHORT"
     return direction, has_think, json_ok, rationale
 
-
 def run_validation(model_path: str, is_adapter: bool = False):
-    """Run 24-case validation against the loaded model."""
-    print(f"\n{'═'*72}")
-    if is_adapter:
-        print(f"  Loading fine-tuned model (adapter): {model_path}")
-    else:
-        print(f"  Loading model: {model_path}")
-    print(f"{'═'*72}")
-
+    print(f"\n{'═'*72}\n  Loading {'fine-tuned (adapter)' if is_adapter else 'model'}: {model_path}\n{'═'*72}")
     t0 = time.time()
-
     if is_adapter:
         from mlx_lm.lora import load as lora_load
         model, tokenizer = lora_load(BASE_MODEL, adapter_path=model_path)
     else:
         model, tokenizer = load(model_path)
+    print(f"  Loaded in {time.time() - t0:.1f}s\n")
 
-    load_time = time.time() - t0
-    print(f"  Loaded in {load_time:.1f}s\n")
+    sampler = make_sampler(temp=0.1)
+    rep_penalty = make_repetition_penalty(1.1, context_size=64)
 
-    sampler = make_sampler(temp=0.05)  # Very low temp: maximize determinism for eval
-
-    results = []
-    correct = 0
-    json_ok_count = 0
-    think_ok_count = 0
-    total_time = 0.0
-
-    print(f"  {'#':>2}  {'✓':4}  {'JSON':4}  {'<⩽>':4}  {'Test':42}  {'Exp':5}  {'Got':5}  {'t':>5}")
-    print(f"  {'─'*78}")
+    results = []; correct = 0; json_ok_count = 0; think_ok_count = 0; total_time = 0.0
+    print(f"  {'#':>2}  {'✓':4}  {'JSON':4}  {'<⩽>':4}  {'Test':42}  {'Exp':5}  {'Got':5}  {'t':>5}\n  {'─'*78}")
 
     for i, (name, inp, expected) in enumerate(TESTS):
-        msgs = [
-            {"role": "system",  "content": SYSTEM},
-            {"role": "user",    "content": inp},
-        ]
+        msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": inp}]
         try:
-            prompt = tokenizer.apply_chat_template(
-                msgs, tokenize=False, add_generation_prompt=True
-            )
+            prompt = tokenizer.apply_chat_template(msgs, tokenize=False, add_generation_prompt=True)
         except Exception:
             prompt = f"<|im_start|>system\n{SYSTEM}<|im_end|>\n<|im_start|>user\n{inp}<|im_end|>\n<|im_start|>assistant\n"
 
         t_start = time.time()
-        resp = generate(model, tokenizer, prompt=prompt, max_tokens=350, sampler=sampler)
+        # Correct usage for mlx-lm 0.31.2
+        resp = generate(model, tokenizer, prompt=prompt, max_tokens=600, sampler=sampler, logits_processors=[rep_penalty])
         elapsed = time.time() - t_start
         total_time += elapsed
 
         direction, has_think, json_parseable, rationale = parse_response(resp)
         ok = (direction == expected)
+        if ok: correct += 1
+        if json_parseable: json_ok_count += 1
+        if has_think: think_ok_count += 1
 
-        if ok:
-            correct += 1
-        if json_parseable:
-            json_ok_count += 1
-        if has_think:
-            think_ok_count += 1
-
-        status = "✅" if ok else "❌"
-        json_icon = "✅" if json_parseable else "❌"
-        think_icon = "✅" if has_think else "❌"
-
-        print(f"  {i+1:>2}  {status}    {json_icon}    {think_icon}    {name:42}  {expected:5}  {direction:5}  {elapsed:>4.1f}s")
+        print(f"  {i+1:>2}  {'✅' if ok else '❌'}    {'✅' if json_parseable else '❌'}    {'✅' if has_think else '❌'}    {name:42}  {expected:5}  {direction:5}  {elapsed:>4.1f}s")
         results.append({
-            "test": name,
-            "expected": expected,
-            "got": direction,
-            "correct": ok,
-            "json_parseable": json_parseable,
-            "has_think": has_think,
-            "rationale_preview": rationale[:80],
-            "latency_s": round(elapsed, 3),
-            "raw_response": resp[:300],
+            "test": name, "expected": expected, "got": direction, "correct": ok,
+            "json_parseable": json_parseable, "has_think": has_think, "rationale_preview": rationale[:80],
+            "latency_s": round(elapsed, 3), "raw_response": resp[:300],
         })
 
-    accuracy  = 100 * correct / len(TESTS)
-    avg_lat   = total_time / len(TESTS)
-    json_pct  = 100 * json_ok_count / len(TESTS)
-    think_pct = 100 * think_ok_count / len(TESTS)
+    accuracy = 100 * correct / len(TESTS); avg_lat = total_time / len(TESTS)
+    json_pct = 100 * json_ok_count / len(TESTS); think_pct = 100 * think_ok_count / len(TESTS)
 
-    # ─── Summary ──────────────────────────────────────────────────────────────
-    print(f"\n{'═'*72}")
-    print(f"  RESULTS:")
-    acc_icon   = "🟢" if accuracy >= 90 else ("🟡" if accuracy >= 75 else "🔴")
-    lat_icon   = "⚡" if avg_lat < 2 else ("✅" if avg_lat < 5 else "⚠️")
-    json_icon  = "🟢" if json_pct >= 95 else ("🟡" if json_pct >= 80 else "🔴")
-    think_icon = "🟢" if think_pct >= 90 else ("🟡" if think_pct >= 70 else "🔴")
+    print(f"\n{'═'*72}\n  RESULTS:")
+    print(f"  Accuracy:       {correct}/{len(TESTS)} = {accuracy:.0f}%   (target: ≥90%)")
+    print(f"  Avg latency:    {avg_lat:.2f}s/call     (target: <5s)")
+    print(f"  JSON parseable: {json_ok_count}/{len(TESTS)} = {json_pct:.0f}%  (target: 100%)")
+    print(f"  Has <think>:    {think_ok_count}/{len(TESTS)} = {think_pct:.0f}%  (target: ≥90%)")
 
-    print(f"  {acc_icon} Accuracy:       {correct}/{len(TESTS)} = {accuracy:.0f}%   (target: ≥90%)")
-    print(f"  {lat_icon} Avg latency:    {avg_lat:.2f}s/call     (target: <5s)")
-    print(f"  {json_icon} JSON parseable: {json_ok_count}/{len(TESTS)} = {json_pct:.0f}%  (target: 100%)")
-    print(f"  {think_icon} Has <think>:    {think_ok_count}/{len(TESTS)} = {think_pct:.0f}%  (target: ≥90%)")
-
-    # Find failures
     failures = [r for r in results if not r["correct"]]
     if failures:
         print(f"\n  Failures ({len(failures)}):")
-        for f in failures:
-            print(f"    ❌ {f['test']}: expected {f['expected']}, got {f['got']}")
-    else:
-        print("\n  🎉 Perfect score!")
-
-    # Speed assessment
-    print(f"\n  Speed budget: LLM_TIMEOUT=30s  |  Target <5s/call for scalping")
-    if avg_lat < 2:
-        print(f"  ⚡ EXCELLENT: {avg_lat:.2f}s avg — can handle all options strategies at this speed")
-    elif avg_lat < 5:
-        print(f"  ✅ GOOD: {avg_lat:.2f}s avg — within budget for real-time scalping")
-    else:
-        print(f"  ⚠️ SLOW: {avg_lat:.2f}s avg — consider lower quant or model pruning")
-
-    # System integration note
-    print(f"\n  System JSON contract validation:")
-    sample_json_ok = [r for r in results if r["json_parseable"]]
-    if sample_json_ok:
-        print(f"  Sample: {sample_json_ok[0]['rationale_preview']}")
-
-    out = {
-        "model_path": model_path,
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "accuracy_pct": round(accuracy, 1),
-        "correct": correct,
-        "total": len(TESTS),
-        "avg_latency_s": round(avg_lat, 3),
-        "json_parseable_pct": round(json_pct, 1),
-        "think_block_pct": round(think_pct, 1),
-        "failures": [{"test": f["test"], "expected": f["expected"], "got": f["got"]} for f in failures],
-        "results": results,
-    }
+        for f in failures: print(f"    ❌ {f['test']}: expected {f['expected']}, got {f['got']}")
+    else: print("\n  🎉 Perfect score!")
 
     out_file = f"poc_gemma4_e4b/validation_results_{int(time.time())}.json"
-    with open(out_file, "w") as f:
-        json.dump(out, f, indent=2)
+    with open(out_file, "w") as f: json.dump({"accuracy": accuracy, "results": results}, f, indent=2)
     print(f"\n  Full results saved → {out_file}")
-
-    return out
-
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--model", default="poc_gemma4_e4b/adapters",
-                   help="Path to adapter dir or fused model dir, or base model name")
-    p.add_argument("--base", action="store_true",
-                   help="Test base model (no adapter) for comparison")
+    p.add_argument("--model", default="poc_gemma4_e4b/adapters")
     args = p.parse_args()
-
-    if args.base:
-        print("Testing BASE model (no fine-tuning) for reference comparison...")
-        run_validation(BASE_MODEL, is_adapter=False)
-    else:
-        # Check if path looks like adapter dir
-        import os
-        is_adapter = os.path.isdir(args.model) and any(
-            f.endswith(".safetensors") or f == "adapter_config.json"
-            for f in os.listdir(args.model)
-        ) if os.path.isdir(args.model) else False
-
-        if is_adapter:
-            run_validation(args.model, is_adapter=True)
-        else:
-            # Assume it's a full model path (fused)
-            run_validation(args.model, is_adapter=False)
-
+    import os
+    is_adapter = os.path.isdir(args.model) and os.path.exists(os.path.join(args.model, "adapter_config.json"))
+    run_validation(args.model, is_adapter=is_adapter)
 
 if __name__ == "__main__":
     main()

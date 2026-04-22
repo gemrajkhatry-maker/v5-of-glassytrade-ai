@@ -37,8 +37,13 @@ VAL_FILE    = "poc_gemma4_e4b/data/valid.jsonl"
 SYSTEM = (
     "You are an expert AMT scalping analyst using Fabio Valentini's Auction Market Theory. "
     "You READ the auction — you do NOT predict. "
-    "Your decision hierarchy: 1) Aggression (CVD/Delta/Bubbles) 2) Structure (State/Location) 3) Quant (Probability). "
-    "Always think through the narrative step by step inside <think> tags, then respond with a JSON object only. "
+    "MANDATORY REASONING STRUCTURE (Inside <think> tags): "
+    "1. SESSION CHECK: [Window] -> Bias [Bullish/Bearish/Neutral] "
+    "2. RISK CHECK: [P&L/Rule Status] -> Permit [Yes/No] "
+    "3. STRUCTURE CHECK: [State/Location] -> Signal [Confirmed/No] "
+    "4. AGGRESSION CHECK: [CVD/Delta/Bubbles] -> Trigger [Confirmed/No] "
+    "5. FINAL LOGIC: [Narrative summary] "
+    "Then respond with a JSON object only. "
     "JSON format: {\"direction\": \"LONG|SHORT|FLAT\", \"confidence\": \"High|Medium|Low\", \"rationale\": \"brief reason\"}"
 )
 
@@ -50,6 +55,7 @@ SYSTEM = (
 def _make_example(user: str, direction: str, confidence: str,
                    think: str, rationale: str) -> dict:
     """Format a single ChatML training example."""
+    # Prepend the structured checklist to any logic provided
     assistant = (
         f"<think>\n{think}\n</think>\n"
         f'{{"direction": "{direction}", "confidence": "{confidence}", '
@@ -80,15 +86,11 @@ TRIPLE_A_EXAMPLES = [
         ),
         direction="LONG", confidence="High",
         think=(
-            "Step 1 - AGGRESSION: CVD slope +650 is SIGNIFICANT institutional buy pressure. "
-            "Delta -900 but price NOT falling = iceberg buyers absorbing. This is the Absorption→Accumulation→Aggression pattern Fabio describes. "
-            "Volume bubble 3000 contracts at VAL = big participant acting. "
-            "Step 2 - STRUCTURE: Balanced market at VAL = MEAN REVERSION model is active. "
-            "D-shape profile = buyers and sellers balanced, price at extreme (VAL) is optimal entry. "
-            "Step 3 - SECOND DRIVE: This is not the first touch. Higher conviction. "
-            "All three align: State (Balanced at VAL), Location (exact VAL), Aggression (iceberg buy absorption + CVD bullish). "
-            "VWAP check: price above VWAP = bullish bias confirmed. No CVD divergence. "
-            "Decision: LONG with High confidence."
+            "1. SESSION CHECK: Primary Window (09:30-11:30). Price (22100) > VWAP (22050) -> Bias Bullish.\n"
+            "2. RISK CHECK: No losses reported -> Permit Yes.\n"
+            "3. STRUCTURE CHECK: Balanced State at VAL extreme -> Signal Confirmed (Mean Reversion).\n"
+            "4. AGGRESSION CHECK: -900 Delta absorbed + 2.5σ buy bubble + CVD +650 -> Trigger Confirmed.\n"
+            "5. FINAL LOGIC: AAA setup at VAL with institutional absorption. Second drive confirmed. Fabio: 'Location + Aggression = 100 probability.' -> LONG."
         ),
         rationale="AAA setup: balanced at VAL, iceberg absorption, CVD +650, second drive. All three align → LONG."
     ),
@@ -101,14 +103,11 @@ TRIPLE_A_EXAMPLES = [
         ),
         direction="FLAT", confidence="High",
         think=(
-            "Step 1 - AGGRESSION: CVD slope +18 = near zero, essentially flat. Delta +12 = neutral. "
-            "No volume bubbles detected. NO aggression. "
-            "Step 2 - STRUCTURE: Balanced market at VAL, correct location. "
-            "But Fabio's rule: ALL THREE must align. Location alone is not enough. "
-            "Step 3 - FIRST DRIVE: Even lower conviction. "
-            "Missing element: the trigger. Without aggression (the bubble), there is no permission to enter. "
-            "Fabio says: 'When there is direction location and aggression your ability to read is 100.' Without aggression = 0. "
-            "Decision: FLAT. Wait for the bubble."
+            "1. SESSION CHECK: Primary Window. Price at VWAP -> Bias Neutral.\n"
+            "2. RISK CHECK: No constraints -> Permit Yes.\n"
+            "3. STRUCTURE CHECK: Balanced State at VAL extreme -> Signal Confirmed.\n"
+            "4. AGGRESSION CHECK: No bubbles, Delta neutral, CVD flat -> Trigger NOT Confirmed.\n"
+            "5. FINAL LOGIC: Fabio absolute rule: All three (State, Location, Aggression) must align. Missing aggression = NO trade. -> FLAT."
         ),
         rationale="Missing aggression trigger (no bubbles, neutral CVD). Location correct but incomplete setup → FLAT."
     ),
@@ -370,13 +369,11 @@ FILTER_EXAMPLES = [
         ),
         direction="FLAT", confidence="High",
         think=(
-            "Step 1 - AGGRESSION: Not specified — but VWAP filter overrides. "
-            "Step 2 - STRUCTURE: Price BELOW VWAP = BEARISH SESSION BIAS. "
-            "Fabio rule: 'Don't long below VWAP.' Price below fair value = sellers have control for the session. "
-            "120 points below VWAP is significant — this is not a small deviation. "
-            "Even if structure says VAL, VWAP bias says sellers might push it lower. "
-            "Expected value of the long < 1.5:1 after VWAP filter. NOT worth it. "
-            "Decision: FLAT. Wait for price to recover above VWAP, or wait for the SHORT side."
+            "1. SESSION CHECK: Primary Window. Price (21980) < VWAP (22100) -> Bias Bearish (Long Forbidden).\n"
+            "2. RISK CHECK: No constraints -> Permit Yes.\n"
+            "3. STRUCTURE CHECK: Balanced State at VAL extreme -> Signal Confirmed (Location OK).\n"
+            "4. AGGRESSION CHECK: Aggression present but disregarded due to session bias -> Trigger N/A.\n"
+            "5. FINAL LOGIC: Fabio absolute rule: 'Don't long below VWAP.' Bearish session bias overrides the long structural signal at VAL. Expectation of value is negative. -> FLAT."
         ),
         rationale="Long signal but price -120 below VWAP = bearish bias. Fabio VWAP filter: don't long below VWAP → FLAT."
     ),
@@ -389,12 +386,11 @@ FILTER_EXAMPLES = [
         ),
         direction="FLAT", confidence="High",
         think=(
-            "Step 1 - SHORT signal present. "
-            "Step 2 - VWAP CHECK: Price 250 points ABOVE VWAP = strong BULLISH session bias. "
-            "Fabio: 'Don't short above VWAP.' Price above fair value = buyers have session control. "
-            "Shorting against session bias = counter-flow trade. "
-            "Fabio rule #1: NO counter-flow trades. "
-            "Decision: FLAT. Wait for SHORT opportunity when price falls below VWAP, or take the LONG side."
+            "1. SESSION CHECK: Primary Window. Price (22550) > VWAP (22300) -> Bias Bullish (Short Forbidden).\n"
+            "2. RISK CHECK: No constraints -> Permit Yes.\n"
+            "3. STRUCTURE CHECK: Balanced State at VAH extreme -> Signal Confirmed (Location OK).\n"
+            "4. AGGRESSION CHECK: Aggression present but disregarded due to counter-flow bias -> Trigger N/A.\n"
+            "5. FINAL LOGIC: Fabio rule #1: 'No counter-flow trades.' Shorting against a strong bullish VWAP bias is forbidden. buyers have session control. -> FLAT."
         ),
         rationale="Short signal but price +250 above VWAP = bullish bias. Fabio: don't short above VWAP, no counter-flow → FLAT."
     ),
@@ -432,13 +428,11 @@ RISK_EXAMPLES = [
         ),
         direction="FLAT", confidence="High",
         think=(
-            "RISK RULE CHECK FIRST: 3 consecutive losses = MAX stop for the day reached. "
-            "Fabio: 'Three losses and walk away. No exceptions. Walk away.' "
-            "Regardless of signal quality (even A-grade), the RULE is absolute. "
-            "The model is: protect the account first, trade second. "
-            "Fabio: 'One trade the next day, everything covered.' "
-            "Session P&L negative, resilience depleted. Taking the 4th trade under stress = revenge trading risk. "
-            "Decision: FLAT. Session is over. Come back tomorrow."
+            "1. SESSION CHECK: Primary Window. Bias Bullish (Price above VWAP).\n"
+            "2. RISK CHECK: 3 consecutive losses -> STOP TRADING (Permit NO).\n"
+            "3. STRUCTURE CHECK: Balanced at VAL extreme -> Signal Confirmed (A-grade Location).\n"
+            "4. AGGRESSION CHECK: Bubble + CVD +450 + Second Drive -> Trigger Confirmed.\n"
+            "5. FINAL LOGIC: Risk rule veto: 'Three losses and walk away. No exceptions.' Even with an A+ signal, the session is over. Resilience is depleted, revenge trading risk is high. -> FLAT."
         ),
         rationale="3 consecutive losses = walk away rule triggered. Fabio: 3 losses → session done regardless of signal quality → FLAT."
     ),
@@ -1025,23 +1019,23 @@ def augment_numbers(example: dict, shift: float) -> dict:
 
 ALL_EXAMPLES = (
     TRIPLE_A_EXAMPLES * 4 +
-    DRIVE_EXAMPLES * 4 +
+    DRIVE_EXAMPLES * 5 +       # Increased weight on Second Drive logic
     MEAN_REV_EXAMPLES * 4 +
     SQUEEZE_EXAMPLES * 4 +
-    FILTER_EXAMPLES * 3 +
-    RISK_EXAMPLES * 3 +
-    SESSION_EXAMPLES * 3 +
-    ABORT_EXAMPLES * 4 +
-    LIQUIDITY_EXAMPLES * 3 +
-    TRANSCRIPT_EXAMPLES * 4 +
+    FILTER_EXAMPLES * 10 +      # HEAVY weight on VWAP/CVD filters (was 3)
+    RISK_EXAMPLES * 8 +        # HEAVY weight on Risk overrides (was 3)
+    SESSION_EXAMPLES * 8 +     # HEAVY weight on Session timing (was 3)
+    ABORT_EXAMPLES * 8 +       # HEAVY weight on Exits (was 4)
+    LIQUIDITY_EXAMPLES * 6 +   # Increased (was 3)
+    TRANSCRIPT_EXAMPLES * 6 +  # Increased (was 4)
     MCX_EXAMPLES * 4 +
-    OVERSEER_EXAMPLES * 3
+    OVERSEER_EXAMPLES * 4
 )
 
 # Add augmented variants with shifted prices
 AUGMENTED = []
-for ex in ALL_EXAMPLES[:60]:
-    for shift in [-50, +50, -100, +100]:
+for ex in ALL_EXAMPLES[:150]:  # Augment more base cases (was 60)
+    for shift in [-50, +50, -150, +150]:
         AUGMENTED.append(augment_numbers(ex, shift))
 
 FINAL = ALL_EXAMPLES + AUGMENTED

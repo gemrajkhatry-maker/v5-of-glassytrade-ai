@@ -42,6 +42,7 @@ from app.domain.fabio_ai.services.exit_rules import (
     TIME_STOP_TABLE,
     EXPIRY_TIME_STOP,
 )
+from app.domain.fabio_ai.services.exit_signal import ExitSignal
 from app.domain.fabio_ai.services.trail_engine import TrailEngine
 from app.domain.fabio_ai.services.scale_manager import ScaleManager
 from app.domain.fabio_ai.services.loss_tracker import LossTracker
@@ -113,20 +114,6 @@ class ExitReason:
     OVERSEER_EXIT = "OVERSEER_EXIT"
     OVERSEER_PARTIAL = "OVERSEER_PARTIAL"
     SPREAD_BLOWOUT = "SPREAD_BLOWOUT"
-
-
-# ---------------------------------------------------------------------------
-# ExitSignal — legacy compat (same shape as ExitDecision but mutable)
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ExitSignal:
-    """Returned by check_position when an exit is triggered."""
-
-    position_id: str
-    reason: str
-    exit_price: float
 
 
 # ---------------------------------------------------------------------------

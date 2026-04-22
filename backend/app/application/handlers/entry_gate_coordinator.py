@@ -16,6 +16,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
+from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import (
+    check_momentum_fade,
+    check_confirmation_bundle,
+)
+from app.domain.fabio_ai.services.entry_gates.gate_runner import run_gate_pipeline
+from app.domain.constants import CVD_SLOPE_EXTREME, CVD_SLOPE_HARD_BLOCK
+
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook
 
@@ -61,12 +69,6 @@ class EntryGateCoordinator:
         Returns:
             Tuple of (eligible: bool, reason: str, is_second_drive: bool)
         """
-        from app.domain.fabio_ai.services.entry_gate import (
-            three_align_check,
-            check_momentum_fade,
-            run_gate_pipeline,
-        )
-
         # Three-Align gate
         gate_passed, confirmation_strong, is_second_drive = three_align_check(
             data=data,
@@ -103,6 +105,7 @@ class EntryGateCoordinator:
             tick_age_seconds=1.0,
             symbol=getattr(tick, "symbol", ""),
             tick_size=tick_size,  # Pass tick size
+            is_extreme_deviation=getattr(amt_result, "is_extreme_deviation", False),
         )
 
         if not gate_passed:
@@ -138,8 +141,6 @@ class EntryGateCoordinator:
         Returns:
             Tuple of (passed: bool, reason: str)
         """
-        from app.domain.constants import CVD_SLOPE_EXTREME, CVD_SLOPE_HARD_BLOCK
-
         cvd_slope = getattr(amt_result, "cvd_slope", 0.0)
 
         # Extreme CVD in balance = don't fade (institutional pressure building)
@@ -229,6 +230,4 @@ class EntryGateCoordinator:
         Volume impulse is MANDATORY — no aggression = no trade.
         Need 2/3 overall, but volume impulse must be present.
         """
-        from app.domain.fabio_ai.services.entry_gate import check_confirmation_bundle
-
         return check_confirmation_bundle(data, tick, order_book)

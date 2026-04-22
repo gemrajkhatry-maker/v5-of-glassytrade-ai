@@ -26,20 +26,19 @@ from app.domain.trading.models.enums import (
 from app.domain.trading.models.entities import Signal
 from app.config import settings
 from app.domain.fabio_ai.services.regime_detector import RegimeDetector
-from app.domain.fabio_ai.services.trade_manager import TradeManager
+from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
 from app.domain.trading.events import SignalGenerated
 from app.domain.fabio_ai.services.session_context import get_session_info
-from app.domain.fabio_ai.services.entry_gate import (
-    build_entry_signal,
-    cluster_aggressive_prints,
-)
+from app.shared.parsing import resolve_session_market
+from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
+from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints
 
 # Import delegated modules
 from app.application.handlers.entry_gate_coordinator import EntryGateCoordinator
 # SignalConstructor removed - use build_entry_signal directly
 from app.shared.timezones import IST
 
-from app.application.handlers.position_sizer import PositionSizer
+from app.domain.fabio_ai.services.position_sizer import PositionSizer
 
 # Import error handling utilities
 from shared.error_handling import (
@@ -93,9 +92,272 @@ class LLMEntryHandler:
         # SignalConstructor removed - build_entry_signal used directly
         self._position_sizer = PositionSizer()
 
+    def session_market_for_symbol(self, symbol: str) -> str:
+        """IST session calendar for LLM/session gate — must match tradable venue."""
+        return resolve_session_market(self._exchange, symbol)
+
     # ------------------------------------------------------------------
     # Extracted helpers for _llm_worker_loop (CC reduction)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_session_phase_block_result(session_info, symbol, market_state_str, amt_result, tick) -> dict:
+        """Build FLAT result when session phase blocks entry."""
+        return {
+            "direction": "FLAT",
+            "rationale": f"Market in {session_info.session} phase. Entries are blocked by Session Gate.",
+            "confidence": "High",
+            "input_prompt": f"[SESSION GATE: Bypassed LLM] Market is currently in the {session_info.session} phase. Entering new trades is blocked by system rules until the active trading window resumes.",
+            "raw_output": "QUANT_PHASE_BLOCKED",
+            "market_state": market_state_str,
+        }
+
+    def _save_session_block_decision(self, symbol, market_state_str, amt_result, tick):
+        """Persist session block decision to storage."""
+        if self._storage:
+            try:
+                self._storage.save_llm_decision({
+                    "symbol": symbol, "direction": "FLAT", "confidence": "High",
+                    "rationale": f"Market in session phase block. Entries blocked.",
+                    "input_prompt": "", "raw_output": "QUANT_PHASE_BLOCKED",
+                    "market_state": market_state_str,
+                    "aggression": f"{amt_result.aggression:.4f}",
+                    "price": tick.close, "vah": amt_result.value_area_high,
+                    "val": amt_result.value_area_low, "poc": amt_result.poc,
+                    "delta": tick.delta, "volume": tick.volume,
+                    "profile_shape": getattr(amt_result, "profile_shape", ""),
+                    "setup_type": "SESSION_BLOCK", "strategy_hint": "",
+                })
+            except Exception:
+                logger.debug("Session block AMT snapshot persistence failed", exc_info=True)
+
+    def _build_strategy_hint(self, amt_result, session_info, symbol, session=None) -> str:
+        """Build strategy hint based on market state and session phase."""
+        if MarketStateCodec.is_imbalanced(amt_result.market_state) and session_info.allow_trend:
+            hint = "Market is IMBALANCED (trending). Favor trend continuation setups. Look for breakouts beyond VA boundaries."
+        elif MarketStateCodec.is_imbalanced(amt_result.market_state) and not session_info.allow_trend:
+            hint = "Market is IMBALANCED but session phase favors mean reversion only. Look for fades at VA extremes back toward POC."
+        else:
+            hint = "Market is BALANCED (range-bound). Favor mean reversion setups. Look for fades at VA extremes back toward POC."
+
+        session_hints = {
+            "NSE_PRIMARY": "[Primary Setup Window 09:30-11:30 — best window for AAA setups.]",
+            "NSE_MIDDAY": "[Midday Consolidation 11:30-14:00 — mean reversion only, no new trend trades.]",
+            "NSE_POWER_HOUR": "[Power Hour 14:00-15:15 — second-best window for AAA setups.]",
+        }
+        hint += session_hints.get(session_info.session, "")
+
+        if session and session.data and self._get_regime_detector(symbol).is_contracting(session.data):
+            hint += " [CAUTION: Market is contracting after expansion — prefer Stay Flat or mean reversion only.]"
+        return hint
+
+    def _build_profile_description(self, amt_result) -> str:
+        """Convert profile shape code to human-readable description."""
+        shape_descriptions = {
+            "D": "D-shape (balanced, rotational)",
+            "P": "P-shape (top-heavy, sellers may be trapped)",
+            "b": "b-shape (bottom-heavy, buying absorption)",
+            "B": "B-shape (bimodal, two value areas — potential breakout)",
+        }
+        return shape_descriptions.get(amt_result.profile_shape, "") if amt_result.profile_shape else ""
+
+    def _build_volume_bubble_summary(self, amt_result, tick) -> str:
+        """Summarize recent aggressive prints for LLM context."""
+        if not amt_result.aggressive_prints:
+            return ""
+        try:
+            time_str = tick.time.replace(".", "", 1).replace("-", "").replace("+", "")
+            if time_str.isdigit():
+                cutoff_dt = datetime.fromtimestamp(float(tick.time)) - timedelta(seconds=3000)
+            else:
+                cutoff_dt = datetime.fromisoformat(tick.time.replace("Z", "+00:00")) - timedelta(seconds=3000)
+        except (ValueError, OSError):
+            cutoff_dt = datetime.now() - timedelta(seconds=3000)
+
+        cutoff_time = cutoff_dt.isoformat()
+        recent_prints = [ap for ap in amt_result.aggressive_prints if ap.time >= cutoff_time][-3:]
+        parts = [f"{ap.side} bubble at {ap.price:.0f} ({ap.volume:.0f} vol, delta {ap.delta:+.0f})" for ap in recent_prints]
+        return "; ".join(parts)
+
+    @staticmethod
+    def _detect_option_type(symbol: str) -> str:
+        """Detect whether symbol is CALL, PUT, or UNKNOWN.
+        
+        Fix 1: Used for direction labeling to clarify BUY/SELL action.
+        """
+        if not symbol:
+            return "UNKNOWN"
+        symbol_upper = symbol.upper()
+        if "CALL" in symbol_upper or "CE" in symbol_upper:
+            return "CALL"
+        if "PUT" in symbol_upper or "PE" in symbol_upper:
+            return "PUT"
+        return "UNKNOWN"
+
+    @staticmethod
+    def _get_amt_time_window(ist_now) -> dict:
+        """Get current AMT time window for timing transparency.
+        
+        Fix 4: Exposes Fabio's time-based filters to frontend.
+        """
+        from app.domain.fabio_ai.services.session_context import get_amt_time_window
+        return get_amt_time_window(ist_now)
+
+    def _build_imbalance_summary(self, session) -> str:
+        """Extract stacked imbalances from footprint domain."""
+        fp_domain = getattr(session, "_last_fp_domain", None)
+        if not fp_domain:
+            return ""
+        try:
+            fp_vals = list(fp_domain.values()) if isinstance(fp_domain, dict) else None
+            latest_fp = fp_vals[-1] if fp_vals else None
+            if latest_fp and hasattr(latest_fp, "levels"):
+                stacked = [lv for lv in latest_fp.levels if getattr(lv, "stacked", False)]
+                if stacked:
+                    parts = []
+                    for lv in stacked[:3]:
+                        side = getattr(lv, "direction", getattr(lv, "side", "UNKNOWN"))
+                        price = getattr(lv, "price", 0)
+                        parts.append(f"{side} imbalance at {price:.0f}")
+                    return "STACKED IMBALANCES: " + ", ".join(parts)
+        except Exception:
+            logger.debug("Stacked imbalance extraction for LLM prompt failed", exc_info=True)
+        return ""
+
+    def _load_episodic_memory(self) -> str:
+        """Load recent trade history for LLM context."""
+        if not self._storage:
+            return ""
+        try:
+            _today = datetime.now(IST).strftime("%Y-%m-%d")
+            recent_trades = self._storage.get_recent_trades(limit=10)
+            if not recent_trades:
+                return ""
+            today_trades = [t for t in recent_trades if _today in str(t.get("time", ""))]
+            if not today_trades:
+                today_trades = recent_trades[:5]
+
+            parts = []
+            session_pnl = 0.0
+            for i, t in enumerate(today_trades, 1):
+                side = t.get("side", "?")
+                pnl = t.get("pnl", 0)
+                reason = t.get("reason", "")
+                session_pnl += pnl
+                sign = "+" if pnl >= 0 else ""
+                parts.append(f"{i}) {side} {sign}Rs{pnl:.0f} ({reason})")
+
+            pnl_sign = "+" if session_pnl >= 0 else ""
+            return f"Session P&L: {pnl_sign}Rs{session_pnl:.0f} ({len(today_trades)} trades). " + ", ".join(parts) + "."
+        except Exception:
+            logger.debug("Failed to load episodic memory", exc_info=True)
+            return ""
+
+    def _build_gate_context(self, amt_result, tick, session, session_info, agg_levels, fp_domain) -> str:
+        """Build Three-Align gate warning context for LLM."""
+        gate_passed, gate_reason, is_second_drive = self._gate_coordinator.check_entry_eligibility(
+            data=session.data, amt_result=amt_result, tick=tick,
+            order_book=session.order_book, direction="LONG",
+            aggressive_levels=agg_levels, footprint_domain=fp_domain,
+            session_info=session_info,
+        )
+        if gate_passed:
+            return "", is_second_drive
+        return (
+            f"[GATE WARNING] Three-Align NOT MET: "
+            f"Market state: {amt_result.market_state}, "
+            f"Price: {tick.close:.1f}, POC: {amt_result.poc:.1f}, "
+            f"VAH: {amt_result.value_area_high:.1f}, VAL: {amt_result.value_area_low:.1f}. "
+            f"You must have STRONG conviction to override. "
+        ), is_second_drive
+
+    def _build_market_data_ai(self, symbol, session, tick, amt_result, session_info,
+                               setup_type, strategy_hint, profile_shape_str, market_state_str,
+                               gate_context, is_second_drive, session_context_for_llm) -> dict:
+        """Build the complete market data dictionary for LLM inference."""
+        # Session elapsed time
+        from app.domain.fabio_ai.services.session_context import _to_ist
+        ist_now = _to_ist(tick.time)
+        market_open = ist_now.replace(hour=9, minute=15, second=0, microsecond=0)
+        elapsed_min = max(0, (ist_now - market_open).total_seconds() / 60)
+
+        # Prior cycle context
+        prior_context = []
+        with session._lock:
+            memory = getattr(session, "_llm_memory", [])
+            for m in memory[-2:]:
+                prior_context.append(f"[PRIOR CYCLE]: {m}")
+
+        # Quant context
+        agent_decision = getattr(session, "_agent_decision", None)
+        quant_context = {}
+        if agent_decision:
+            agent_regime = getattr(agent_decision, "regime", "")
+            if agent_regime == "DEAD":
+                return None, "DEAD"  # Signal DEAD regime
+            quant_context = {
+                "probability": round(getattr(agent_decision, "probability", 0.5), 3),
+                "has_edge": abs(getattr(agent_decision, "probability", 0.5) - 0.5) >= 0.10,
+                "regime": agent_regime,
+                "direction": agent_decision.direction,
+                "note": "If P is near 0.5, structural/aggression context MUST outweigh this quant estimate."
+            }
+
+        market_data_ai = {
+            "ltp": tick.close, "delta": tick.delta, "volume": tick.volume,
+            "vah": amt_result.value_area_high, "val": amt_result.value_area_low,
+            "poc": amt_result.poc, "market_state": market_state_str,
+            "aggression": amt_result.aggression,
+            "profile_shape": getattr(amt_result, "profile_shape", profile_shape_str),
+            "session_elapsed_minutes": round(elapsed_min, 1),
+            "prior_analysis_context": "\n".join(prior_context),
+            "quant_context": quant_context,
+            "strategy_hint": strategy_hint,
+            "volume_bubbles": self._build_volume_bubble_summary(amt_result, tick),
+            "stacked_imbalances": self._build_imbalance_summary(session),
+            "hvns": amt_result.hvns[:3] if amt_result.hvns else (),
+            "lvns": amt_result.lvns[:3] if amt_result.lvns else (),
+            "cvd_slope": amt_result.cvd_slope, "cvd_divergence": amt_result.cvd_divergence,
+            "vwap": amt_result.session_vwap if amt_result.session_vwap > 0 else tick.vwap,
+            "leg_poc": amt_result.leg_poc,
+            "leg_lvns": amt_result.leg_lvns[:3] if amt_result.leg_lvns else (),
+            "opening_relation": session_info.opening_relation,
+            "market_structure": amt_result.market_structure,
+            "structure_confidence": amt_result.structure_confidence,
+            "balance_ratio": amt_result.balance_ratio,
+            "episodic_memory": self._load_episodic_memory(),
+            "gate_context": session_context_for_llm + gate_context,
+            "ib_high": amt_result.ib_high, "ib_low": amt_result.ib_low,
+            "ib_complete": amt_result.ib_complete,
+            "prior_poc": amt_result.prior_poc, "prior_vah": amt_result.prior_vah,
+            "prior_val": amt_result.prior_val, "gap_type": amt_result.gap_type,
+            "opening_bias": amt_result.opening_bias,
+            "acceptance_above": amt_result.acceptance_above,
+            "acceptance_below": amt_result.acceptance_below,
+            "rejection_at_high": amt_result.rejection_at_high,
+            "rejection_at_low": amt_result.rejection_at_low,
+            "absorption_side": getattr(amt_result, "absorption_side", ""),
+            "absorption_range_ratio": getattr(amt_result, "absorption_range_ratio", 0.0),
+            "absorption_vol_ratio": getattr(amt_result, "absorption_vol_ratio", 0.0),
+            "price_velocity": amt_result.price_velocity,
+            "break_direction": amt_result.break_direction,
+            "break_type": amt_result.break_type, "break_level": amt_result.break_level,
+            "poc_signal": amt_result.poc_signal, "poc_vs_price": amt_result.poc_vs_price,
+            "lvn_play": amt_result.lvn_play, "is_second_drive": is_second_drive,
+            # Fix 1: Option type detection for direction labeling
+            "option_type": self._detect_option_type(symbol),
+            # Fix 4: AMT time window for timing transparency
+            "amt_time_window": self._get_amt_time_window(ist_now),
+        }
+
+        # ML signal for LLM meta-filter
+        agent = getattr(session, "_agent_decision", None)
+        if agent and agent.direction != "FLAT":
+            market_data_ai["ml_signal"] = {
+                "direction": agent.direction, "probability": agent.probability,
+                "regime": agent.regime,
+            }
+        return market_data_ai, "OK"
 
     @staticmethod
     def _enrich_market_context(market_data_ai: dict, amt_result) -> None:
@@ -302,7 +564,7 @@ class LLMEntryHandler:
 
                 # Re-entry gate check
                 _squeeze = _det.detect_squeeze(session.data, amt_result)
-                from app.domain.fabio_ai.services.entry_gate import compute_atr
+                from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import compute_atr
                 _atr = compute_atr(session.data, 14)
 
                 if _det.is_re_entry_blocked(
@@ -338,7 +600,7 @@ class LLMEntryHandler:
                     return
 
                 _cushion_sl = _risk_mgr.stop_loss_pct if _risk_mgr else None
-                from app.domain.fabio_ai.services.trade_manager import TradeManager
+                from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
                 from app.config import settings
 
                 entry_signal = build_entry_signal(
@@ -444,6 +706,16 @@ class LLMEntryHandler:
         if elapsed < 30:
             return False
 
+        # DEAD session gate: don't waste LLM API calls on every new candle
+        # when market is dead. The monitoring_trigger path (every 5 min in
+        # BALANCED/NO_TRADE) still provides periodic context updates.
+        if amt_result and amt_result.market_state == "DEAD":
+            logger.debug(
+                "LLM blocked: DEAD market — skip candle-triggered LLM for %s",
+                getattr(amt_result, '_symbol', ''),
+            )
+            return False
+
         return True
 
     def run_entry(
@@ -459,9 +731,7 @@ class LLMEntryHandler:
             session._ai_running = True
 
         market_state_str = (
-            "Trending"
-            if MarketStateCodec.is_imbalanced(amt_result.market_state)
-            else "Balanced"
+            "Trending" if MarketStateCodec.is_imbalanced(amt_result.market_state) else "Balanced"
         )
 
         # Session-aware setup bias
@@ -469,385 +739,93 @@ class LLMEntryHandler:
         prior_vah = prior.get("vah", 0) if prior else 0
         prior_val = prior.get("val", 0) if prior else 0
         open_price = session.data[0].open if session.data else 0
-        _market = self._exchange
-        if _market in ("NFO", "BSE"):
-            _market = "NSE"
+        _market = self.session_market_for_symbol(symbol)
         session_info = get_session_info(
-            timestamp=tick.time,
-            market=_market,
-            open_price=open_price,
-            prior_vah=prior_vah,
-            prior_val=prior_val,
+            timestamp=tick.time, market=_market, open_price=open_price,
+            prior_vah=prior_vah, prior_val=prior_val,
         )
 
-        # Build session context for LLM
-        session_context_for_llm = ""
+        # Session phase gate — block entries in restricted phases
         if not session_info.allow_entry:
-            logger.info(
-                "SESSION GATE: Phase %s blocks entries — skipping LLM for %s",
-                session_info.session,
-                symbol,
+            logger.info("SESSION GATE: Phase %s blocks entries — skipping LLM for %s",
+                        session_info.session, symbol)
+            ai_result = self._build_session_phase_block_result(
+                session_info, symbol, market_state_str, amt_result, tick
             )
-
-            ai_result = {
-                "direction": "FLAT",
-                "rationale": f"Market in {session_info.session} phase. Entries are blocked by Session Gate.",
-                "confidence": "High",
-                "input_prompt": f"[SESSION GATE: Bypassed LLM] Market is currently in the {session_info.session} phase. Entering new trades is blocked by system rules until the active trading window resumes.",
-                "raw_output": "QUANT_PHASE_BLOCKED",
-                "market_state": market_state_str,
-            }
-
             with session._lock:
                 session.last_ai_analysis = ai_result
                 session._ai_running = False
+            self._save_session_block_decision(symbol, market_state_str, amt_result, tick)
+            return
 
-            if self._storage:
-                try:
-                    self._storage.save_llm_decision(
-                        {
-                            "symbol": symbol,
-                            "direction": "FLAT",
-                            "confidence": "High",
-                            "rationale": ai_result["rationale"],
-                            "input_prompt": "",
-                            "raw_output": "QUANT_PHASE_BLOCKED",
-                            "market_state": market_state_str,
-                            "aggression": f"{amt_result.aggression:.4f}",
-                            "price": tick.close,
-                            "vah": amt_result.value_area_high,
-                            "val": amt_result.value_area_low,
-                            "poc": amt_result.poc,
-                            "delta": tick.delta,
-                            "volume": tick.volume,
-                            "profile_shape": getattr(amt_result, "profile_shape", ""),
-                            "setup_type": "SESSION_BLOCK",
-                            "strategy_hint": "",
-                        }
-                    )
-                except Exception:
-                    pass  # Non-critical session-state build failure — handler will return safely
-
-        if session_info.allow_trend:
-            session_context_for_llm += "Trend setups allowed. "
-        else:
-            session_context_for_llm += "Mean-reversion only. "
-
-        # Delegate gate checking to EntryGateCoordinator
-        agg_levels = cluster_aggressive_prints(amt_result.aggressive_prints)
-        prior_prints = getattr(session, "_prior_print_levels", [])
-        all_structural_levels = agg_levels + prior_prints
-        fp_domain = getattr(session, "_last_fp_domain", None)
-
-        # Check gates using delegated coordinator
-        gate_passed, gate_reason, is_second_drive = (
-            self._gate_coordinator.check_entry_eligibility(
-                data=session.data,
-                amt_result=amt_result,
-                tick=tick,
-                order_book=session.order_book,
-                direction="LONG",  # Default, will be overridden by LLM
-                aggressive_levels=all_structural_levels,
-                footprint_domain=fp_domain,
-                session_info=session_info,
-            )
+        # Session context for LLM
+        session_context_for_llm = (
+            "Trend setups allowed. " if session_info.allow_trend else "Mean-reversion only. "
         )
 
-        # Build gate context for LLM
-        three_align_context = ""
-        if not gate_passed:
-            three_align_context = (
-                f"[GATE WARNING] Three-Align NOT MET: "
-                f"Market state: {amt_result.market_state}, "
-                f"Price: {tick.close:.1f}, POC: {amt_result.poc:.1f}, "
-                f"VAH: {amt_result.value_area_high:.1f}, VAL: {amt_result.value_area_low:.1f}. "
-                f"You must have STRONG conviction to override. "
-            )
+        # Gate checking
+        agg_levels = cluster_aggressive_prints(amt_result.aggressive_prints)
+        prior_prints = getattr(session, "_prior_print_levels", [])
+        fp_domain = getattr(session, "_last_fp_domain", None)
+        gate_context, is_second_drive = self._build_gate_context(
+            amt_result, tick, session, session_info, agg_levels + prior_prints, fp_domain
+        )
 
-        gate_context = session_context_for_llm + three_align_context
-
-        # Determine setup type
-        if (
-            MarketStateCodec.is_imbalanced(amt_result.market_state)
-            and session_info.allow_trend
-        ):
+        # Setup type determination
+        if MarketStateCodec.is_imbalanced(amt_result.market_state) and session_info.allow_trend:
             setup_type = SetupType.TREND_MODEL
-            strategy_hint = "Market is IMBALANCED (trending). Favor trend continuation setups. Look for breakouts beyond VA boundaries."
-        elif (
-            MarketStateCodec.is_imbalanced(amt_result.market_state)
-            and not session_info.allow_trend
-        ):
-            setup_type = SetupType.MEAN_REVERSION
-            strategy_hint = "Market is IMBALANCED but session phase favors mean reversion only. Look for fades at VA extremes back toward POC."
         else:
             setup_type = SetupType.MEAN_REVERSION
-            strategy_hint = "Market is BALANCED (range-bound). Favor mean reversion setups. Look for fades at VA extremes back toward POC."
 
-        # Add session context to strategy hint
-        session_hints = {
-            "NSE_PRIMARY": "[Primary Setup Window 09:30-11:30 — best window for AAA setups.]",
-            "NSE_MIDDAY": "[Midday Consolidation 11:30-14:00 — mean reversion only, no new trend trades.]",
-            "NSE_POWER_HOUR": "[Power Hour 14:00-15:15 — second-best window for AAA setups.]",
-        }
-        hint = session_hints.get(session_info.session, "")
-        if hint:
-            strategy_hint += f" {hint}"
-
-        # Contraction advisory
-        if session.data and self._get_regime_detector(symbol).is_contracting(
-            session.data
-        ):
-            strategy_hint += " [CAUTION: Market is contracting after expansion — prefer Stay Flat or mean reversion only.]"
-
-        # Profile shape
-        profile_shape_str = ""
-        if amt_result.profile_shape:
-            shape_descriptions = {
-                "D": "D-shape (balanced, rotational)",
-                "P": "P-shape (top-heavy, sellers may be trapped)",
-                "b": "b-shape (bottom-heavy, buying absorption)",
-                "B": "B-shape (bimodal, two value areas — potential breakout)",
-            }
-            profile_shape_str = shape_descriptions.get(amt_result.profile_shape, "")
-
-        # Volume bubble summary
-        volume_bubble_desc = ""
-        if amt_result.aggressive_prints:
-            try:
-                if (
-                    tick.time.replace(".", "", 1)
-                    .replace("-", "")
-                    .replace("+", "")
-                    .isdigit()
-                ):
-                    cutoff_dt = datetime.fromtimestamp(float(tick.time)) - timedelta(
-                        seconds=3000
-                    )
-                else:
-                    cutoff_dt = datetime.fromisoformat(
-                        tick.time.replace("Z", "+00:00")
-                    ) - timedelta(seconds=3000)
-            except (ValueError, OSError):
-                cutoff_dt = datetime.now() - timedelta(seconds=3000)
-            cutoff_time = cutoff_dt.isoformat()
-            recent_prints = [
-                ap for ap in amt_result.aggressive_prints if ap.time >= cutoff_time
-            ][-3:]
-            bubble_parts = []
-            for ap in recent_prints:
-                bubble_parts.append(
-                    f"{ap.side} bubble at {ap.price:.0f} ({ap.volume:.0f} vol, delta {ap.delta:+.0f})"
-                )
-            volume_bubble_desc = "; ".join(bubble_parts)
-
-        # Stacked imbalances from footprint
-        imbalance_desc = ""
-        fp_domain = getattr(session, "_last_fp_domain", None)
-        if fp_domain:
-            try:
-                fp_vals = (
-                    list(fp_domain.values()) if isinstance(fp_domain, dict) else None
-                )
-                latest_fp = fp_vals[-1] if fp_vals else None
-                if latest_fp and hasattr(latest_fp, "levels"):
-                    stacked = [
-                        lv for lv in latest_fp.levels if getattr(lv, "stacked", False)
-                    ]
-                    if stacked:
-                        parts = []
-                        for lv in stacked[:3]:
-                            side = getattr(
-                                lv, "direction", getattr(lv, "side", "UNKNOWN")
-                            )
-                            price = getattr(lv, "price", 0)
-                            parts.append(f"{side} imbalance at {price:.0f}")
-                        imbalance_desc = "STACKED IMBALANCES: " + ", ".join(parts)
-            except Exception:
-                logger.debug("Exception handled silently", exc_info=True)
-
-        # Episodic memory
-        episodic_memory = ""
-        if self._storage:
-            try:
-                from app.shared.timezones import IST
-                _today = datetime.now(IST).strftime("%Y-%m-%d")
-                recent_trades = self._storage.get_recent_trades(limit=10)
-                if recent_trades:
-                    today_trades = [
-                        t for t in recent_trades if _today in str(t.get("time", ""))
-                    ]
-                    if not today_trades:
-                        today_trades = recent_trades[:5]
-                    parts = []
-                    session_pnl = 0.0
-                    for i, t in enumerate(today_trades, 1):
-                        side = t.get("side", "?")
-                        pnl = t.get("pnl", 0)
-                        reason = t.get("reason", "")
-                        session_pnl += pnl
-                        sign = "+" if pnl >= 0 else ""
-                        parts.append(f"{i}) {side} {sign}Rs{pnl:.0f} ({reason})")
-                    pnl_sign = "+" if session_pnl >= 0 else ""
-                    episodic_memory = (
-                        f"Session P&L: {pnl_sign}Rs{session_pnl:.0f} ({len(today_trades)} trades). "
-                        + ", ".join(parts)
-                        + "."
-                    )
-            except Exception:
-                logger.debug("Failed to load episodic memory", exc_info=True)
-
-        # SOFT QUANT GATE
-        # Instead of bypassing the LLM entirely when P ~ 0.5, we pass it as "context"
-        # and let the LLM use structural/aggression data to find an edge.
-        agent_decision = getattr(session, "_agent_decision", None)
-        quant_context = {}
-        if agent_decision:
-            agent_regime = getattr(agent_decision, "regime", "")
-            if agent_regime == "DEAD":
-                logger.info(
-                    "QUANT GATE: Market regime=DEAD (no volume) — skipping LLM for %s",
-                    symbol,
-                )
-                # Override timing to SKIP — dead market cannot have entries
-                agent_decision = _replace(agent_decision, timing="SKIP")
-                ai_result = {
-                    "direction": "FLAT",
-                    "rationale": "DEAD market: volume < 5% of average. No trade.",
-                    "confidence": "High",
-                    "input_prompt": "[QUANT GATE: Bypassed LLM] Market regime is DEAD (no volume). Waiting for expansion.",
-                    "raw_output": "QUANT_DEAD_MARKET",
-                    "market_state": market_state_str,
-                }
-                direction = "FLAT"
-                confidence = "High"
-                with session._lock:
-                    session.last_ai_analysis = ai_result
-                return
-
-            agent_prob = getattr(agent_decision, "probability", 0.5)
-            quant_context = {
-                "probability": round(agent_prob, 3),
-                "has_edge": abs(agent_prob - 0.5) >= 0.10,
-                "regime": agent_regime,
-                "direction": agent_decision.direction,
-                "note": "If P is near 0.5, structural/aggression context MUST outweigh this quant estimate."
-            }
-
-        # Build prior cycle context (2-cycle cap)
-        prior_context = []
-        with session._lock:
-            memory = getattr(session, "_llm_memory", [])
-            for m in memory[-2:]:
-                prior_context.append(f"[PRIOR CYCLE]: {m}")
-        
-        # Calculate session elapsed time for First Drive rule
-        from app.domain.fabio_ai.services.session_context import _to_ist
-        ist_now = _to_ist(tick.time)
-        # Assuming market open at 09:15 for NSE/MCX
-        market_open = ist_now.replace(hour=9, minute=15, second=0, microsecond=0)
-        elapsed_min = max(0, (ist_now - market_open).total_seconds() / 60)
+        strategy_hint = self._build_strategy_hint(amt_result, session_info, symbol, session)
+        profile_shape_str = self._build_profile_description(amt_result)
 
         # Build market data for LLM
-        market_data_ai = {
-            "ltp": tick.close,
-            "delta": tick.delta,
-            "volume": tick.volume,
-            "vah": amt_result.value_area_high,
-            "val": amt_result.value_area_low,
-            "poc": amt_result.poc,
-            "market_state": market_state_str,
-            "aggression": amt_result.aggression,
-            "profile_shape": getattr(amt_result, "profile_shape", profile_shape_str),
-            "session_elapsed_minutes": round(elapsed_min, 1),
-            "prior_analysis_context": "\n".join(prior_context),
-            "quant_context": quant_context,
-            "strategy_hint": strategy_hint,
-            "volume_bubbles": volume_bubble_desc,
-            "stacked_imbalances": imbalance_desc,
-            "hvns": amt_result.hvns[:3] if amt_result.hvns else (),
-            "lvns": amt_result.lvns[:3] if amt_result.lvns else (),
-            "cvd_slope": amt_result.cvd_slope,
-            "cvd_divergence": amt_result.cvd_divergence,
-            "vwap": amt_result.session_vwap
-            if amt_result.session_vwap > 0
-            else tick.vwap,
-            "leg_poc": amt_result.leg_poc,
-            "leg_lvns": amt_result.leg_lvns[:3] if amt_result.leg_lvns else (),
-            "opening_relation": session_info.opening_relation,
-            "market_structure": amt_result.market_structure,
-            "structure_confidence": amt_result.structure_confidence,
-            "balance_ratio": amt_result.balance_ratio,
-            "episodic_memory": episodic_memory,
-            "gate_context": gate_context,
-            "ib_high": amt_result.ib_high,
-            "ib_low": amt_result.ib_low,
-            "ib_complete": amt_result.ib_complete,
-            "prior_poc": amt_result.prior_poc,
-            "prior_vah": amt_result.prior_vah,
-            "prior_val": amt_result.prior_val,
-            "gap_type": amt_result.gap_type,
-            "opening_bias": amt_result.opening_bias,
-            "acceptance_above": amt_result.acceptance_above,
-            "acceptance_below": amt_result.acceptance_below,
-            "rejection_at_high": amt_result.rejection_at_high,
-            "rejection_at_low": amt_result.rejection_at_low,
-            # #22: Absorption context (primary AAA/Failed Auction trigger)
-            "absorption_side": getattr(amt_result, "absorption_side", ""),
-            "absorption_range_ratio": getattr(
-                amt_result, "absorption_range_ratio", 0.0
-            ),
-            "absorption_vol_ratio": getattr(amt_result, "absorption_vol_ratio", 0.0),
-            "price_velocity": amt_result.price_velocity,
-            "break_direction": amt_result.break_direction,
-            "break_type": amt_result.break_type,
-            "break_level": amt_result.break_level,
-            "poc_signal": amt_result.poc_signal,
-            "poc_vs_price": amt_result.poc_vs_price,
-            "lvn_play": amt_result.lvn_play,
-            "is_second_drive": is_second_drive,
-        }
+        market_data_ai, regime_status = self._build_market_data_ai(
+            symbol, session, tick, amt_result, session_info, setup_type,
+            strategy_hint, profile_shape_str, market_state_str,
+            gate_context, is_second_drive, session_context_for_llm,
+        )
 
-        # ML signal for LLM meta-filter
-        agent = getattr(session, "_agent_decision", None)
-        if agent and agent.direction != "FLAT":
-            market_data_ai["ml_signal"] = {
-                "direction": agent.direction,
-                "probability": agent.probability,
-                "regime": agent.regime,
+        if regime_status == "DEAD":
+            logger.info("QUANT GATE: Market regime=DEAD — skipping LLM for %s", symbol)
+            agent_decision = getattr(session, "_agent_decision", None)
+            if agent_decision:
+                agent_decision = _replace(agent_decision, timing="SKIP")
+            ai_result = {
+                "direction": "FLAT",
+                "rationale": "DEAD market: volume < 5% of average. No trade.",
+                "confidence": "High",
+                "input_prompt": "[QUANT GATE: Bypassed LLM] Market regime is DEAD (no volume). Waiting for expansion.",
+                "raw_output": "QUANT_DEAD_MARKET",
+                "market_state": market_state_str,
             }
+            with session._lock:
+                session.last_ai_analysis = ai_result
+                session._ai_running = False
+            return
 
-        # Ensure per-symbol queue and worker exist
+        # Enqueue for per-symbol LLM worker
         with self._workers_lock:
             if symbol not in self._llm_queues:
                 self._llm_queues[symbol] = queue.Queue(maxsize=10)
                 wt = threading.Thread(
-                    target=self._llm_worker_loop,
-                    args=(symbol,),
-                    daemon=True,
-                    name=f"LLM-Worker-{symbol}",
+                    target=self._llm_worker_loop, args=(symbol,),
+                    daemon=True, name=f"LLM-Worker-{symbol}",
                 )
                 self._worker_threads[symbol] = wt
                 wt.start()
 
-        # Enqueue the job for the dedicated LLM worker thread
         item = {
-            "session": session,
-            "symbol": symbol,
-            "tick": tick,
-            "amt_result": amt_result,
-            "market_data_ai": market_data_ai,
-            "setup_type": setup_type,
-            "session_info": session_info,
-            "strategy_hint": strategy_hint,
-            "profile_shape_str": profile_shape_str,
-            "market_state_str": market_state_str,
-            "enqueue_time": time.time(),
+            "session": session, "symbol": symbol, "tick": tick,
+            "amt_result": amt_result, "market_data_ai": market_data_ai,
+            "setup_type": setup_type, "session_info": session_info,
+            "strategy_hint": strategy_hint, "profile_shape_str": profile_shape_str,
+            "market_state_str": market_state_str, "enqueue_time": time.time(),
         }
         try:
             self._llm_queues[symbol].put_nowait(item)
-            logger.debug(
-                f"Queued LLM analysis for {symbol} (Queue size: {self._llm_queues[symbol].qsize()})"
-            )
+            logger.debug(f"Queued LLM analysis for {symbol}")
         except queue.Full:
             logger.warning(f"LLM Queue full, dropping analysis for {symbol}")
             with session._lock:
@@ -869,6 +847,7 @@ class LLMEntryHandler:
                 if item is None:
                     break
 
+                task_done_called = False  # Track to prevent double task_done()
                 enqueue_time = item["enqueue_time"]
                 session = item["session"]
                 symbol = item["symbol"]
@@ -889,7 +868,9 @@ class LLMEntryHandler:
                     )
                     with session._lock:
                         session._ai_running = False
-                    worker_queue.task_done()
+                    if not task_done_called:
+                        worker_queue.task_done()
+                        task_done_called = True
                     continue
 
                 if not self._gen_ai_service.is_ready():
@@ -1001,18 +982,56 @@ class LLMEntryHandler:
                 confidence = ai_result.get("confidence", "Low")
                 raw_rationale = ai_result.get("rationale", "System error: invalid AI return")
                 
-                # SANITIZE LLM OUTPUT: Extract clean rationale from JSON artifacts
-                # This prevents raw JSON from bleeding into UI and database
-                rationale = self._sanitize_rationale(raw_rationale, direction)
-
-                # Apply safety nets (buy-only mode, VWAP extreme)
-                direction, confidence, rationale = self._apply_safety_nets(
-                    direction, confidence, rationale, tick, amt_result
-                )
-
-                confidence = ai_result.get(
-                    "confidence", "High" if direction != "FLAT" else "Medium"
-                )
+                # CONSISTENCY GUARD: Prevent rapid confidence flips (Block 1.4)
+                # Track last LLM evaluation to prevent contradictions within 60s
+                current_time = time.time()
+                min_interval = 60  # seconds
+                
+                last_eval_time = getattr(session, '_last_llm_evaluation_time', 0)
+                last_confidence = getattr(session, '_last_llm_confidence', "Medium")
+                last_direction = getattr(session, '_last_llm_direction', "FLAT")
+                
+                # Check if we're within the minimum re-evaluation interval
+                if current_time - last_eval_time < min_interval:
+                    logger.info(
+                        "LLM re-evaluation skipped: %.1fs since last evaluation (min %ds)",
+                        current_time - last_eval_time,
+                        min_interval,
+                    )
+                    # Hold previous decision
+                    direction = last_direction
+                    confidence = last_confidence
+                    rationale = "Held from previous evaluation (cooldown active)"
+                else:
+                    # CONSISTENCY GUARD: Check for High→Low confidence flips
+                    if (last_confidence == "High" and 
+                        confidence in ["Low", "None"] and
+                        direction == "FLAT"):
+                        logger.warning(
+                            "LLM CONSISTENCY VIOLATION: High→%s confidence flip within %.1fs. "
+                            "Previous: %s %s, Current: %s %s. Holding previous decision.",
+                            confidence,
+                            current_time - last_eval_time,
+                            last_direction,
+                            last_confidence,
+                            direction,
+                            confidence,
+                        )
+                        # Hold previous decision instead of flipping
+                        direction = last_direction
+                        confidence = last_confidence
+                        rationale = "CONSISTENCY GUARD: Prevented High→Low flip"
+                    else:
+                        # Sanitize and apply safety nets as normal
+                        rationale = self._sanitize_rationale(raw_rationale, direction)
+                        direction, confidence, rationale = self._apply_safety_nets(
+                            direction, confidence, rationale, tick, amt_result
+                        )
+                    
+                    # Update tracking
+                    session._last_llm_evaluation_time = current_time
+                    session._last_llm_confidence = confidence
+                    session._last_llm_direction = direction
                 logger.info(
                     "LLM result: direction=%s confidence=%s", direction, confidence
                 )
@@ -1125,7 +1144,7 @@ class LLMEntryHandler:
                             }
                         )
                     except Exception:
-                        logger.debug("Exception handled silently", exc_info=True)
+                        logger.debug("LLM decision persistence to storage failed", exc_info=True)
 
                 # Build signal using build_entry_signal (via _process_build_signal)
                 # TODO(Task 51): Simplify - return raw LLM decision and let caller use SignalPipeline
@@ -1139,7 +1158,9 @@ class LLMEntryHandler:
                 with session._lock:
                     session._ai_running = False
 
-                worker_queue.task_done()
+                if not task_done_called:
+                    worker_queue.task_done()
+                    task_done_called = True
 
             except Exception as e:
                 logger.error(f"Worker loop fatal error: {e}", exc_info=True)
@@ -1150,7 +1171,9 @@ class LLMEntryHandler:
                 except Exception:
                     pass  # Cleanup: _ai_running reset failed — next heartbeat will time out and clear
                 try:
-                    worker_queue.task_done()
+                    if not task_done_called:
+                        worker_queue.task_done()
+                        task_done_called = True
                 except Exception:
                     pass  # Cleanup: task_done on already-processed item — queue may be drained
 

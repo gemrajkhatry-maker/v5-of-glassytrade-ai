@@ -2,19 +2,28 @@
 
 <cite>
 **Referenced Files in This Document**
-- [backend/app/main.py](file://backend/app/main.py)
-- [backend/app/config.py](file://backend/app/config.py)
-- [ARCHITECTURE.md](file://ARCHITECTURE.md)
-- [backend/docs/architecture.md](file://backend/docs/architecture.md)
-- [backend/app/api/dependencies.py](file://backend/app/api/dependencies.py)
-- [backend/app/application/engine.py](file://backend/app/application/engine.py)
-- [backend/app/application/services/trading_session.py](file://backend/app/application/services/trading_session.py)
-- [backend/app/domain/trading/events.py](file://backend/app/domain/trading/events.py)
-- [backend/app/domain/ports/market_data.py](file://backend/app/domain/ports/market_data.py)
-- [backend/app/infrastructure/adapters/dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
-- [backend/app/infrastructure/adapters/paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
-- [backend/app/domain/fabio_ai/services/amt_analyzer.py](file://backend/app/domain/fabio_ai/services/amt_analyzer.py)
+- [appv2/backend/appv2/main.py](file://appv2/backend/appv2/main.py)
+- [appv2/backend/appv2/application/trading_engine.py](file://appv2/backend/appv2/application/trading_engine.py)
+- [appv2/backend/appv2/config/settings.py](file://appv2/backend/appv2/config/settings.py)
+- [appv2/backend/appv2/domain/ports/market_data.py](file://appv2/backend/appv2/domain/ports/market_data.py)
+- [appv2/backend/appv2/domain/ports/broker.py](file://appv2/backend/appv2/domain/ports/broker.py)
+- [appv2/backend/appv2/domain/ports/storage.py](file://appv2/backend/appv2/domain/ports/storage.py)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py](file://appv2/backend/appv2/infrastructure/dhan_feed.py)
+- [appv2/backend/appv2/infrastructure/dhan_executor.py](file://appv2/backend/appv2/infrastructure/dhan_executor.py)
+- [appv2/backend/appv2/application/strategy_orchestrator.py](file://appv2/backend/appv2/application/strategy_orchestrator.py)
+- [appv2/backend/appv2/application/session_state_manager.py](file://appv2/backend/appv2/application/session_state_manager.py)
+- [appv2/backend/appv2/infrastructure/stream_manager.py](file://appv2/backend/appv2/infrastructure/stream_manager.py)
+- [appv2/backend/appv2/api/state_broadcaster.py](file://appv2/backend/appv2/api/state_broadcaster.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Complete architectural overhaul to document the new appv2 system with dependency inversion patterns
+- Added comprehensive coverage of ports and adapters architecture with concrete implementations
+- Documented service decomposition patterns and per-symbol orchestration
+- Updated trading engine architecture with advanced AMT classification and exit management
+- Enhanced domain-driven design documentation with clear separation between domain logic and infrastructure
+- Added detailed coverage of hexagonal architecture principles and clean separation from external broker integrations
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -28,332 +37,401 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-GlassyTrade AI v5 is a production-grade, domain-driven design (DDD) and event-driven trading system implementing Fabio Valentini’s Auction Market Theory (AMT) methodology with AI-assisted entry decisions. The system follows a hexagonal (ports & adapters) architecture to isolate domain logic from external integrations (brokers, market data, inference engines). It features a standalone trading engine that continuously operates independent of frontend connections, ensuring uninterrupted trading while the frontend acts as a read-only viewer.
+GlassyTrade AI v5 appv2 represents a major architectural evolution featuring production-grade domain-driven design (DDD) and event-driven architecture with dependency inversion patterns. The system implements Fabio Valentini's Auction Market Theory (AMT) methodology with AI-assisted entry decisions through a sophisticated hexagonal architecture that emphasizes clean separation between domain logic and external integrations. The new architecture introduces comprehensive service decomposition patterns, per-symbol orchestration, and advanced AMT classification capabilities.
 
 ## Project Structure
-The backend is organized into layered packages:
-- API Layer: FastAPI routers and WebSocket endpoints
-- Application Layer: Trading engine, services, and handlers
-- Domain Layer: Pure domain services, models, and ports
-- Infrastructure Layer: Adapters for market data, broker, inference, and storage
-- Pipeline Layer: NiFi-style channels connecting ingestion to execution
+The appv2 backend follows a modern layered architecture with clear separation of concerns:
+
+- **API Layer**: FastAPI endpoints with WebSocket game-loop for real-time state broadcasting
+- **Application Layer**: Trading engine, orchestrators, and specialized services for per-symbol processing
+- **Domain Layer**: Pure domain services, models, and ports defining abstractions
+- **Infrastructure Layer**: Concrete adapters for market data, broker execution, and storage
+- **Configuration Layer**: Pydantic-based settings management with environment variable validation
 
 ```mermaid
 graph TB
 subgraph "API Layer"
-R1["Routers<br/>health, market, analysis, trading, ai, rl, metrics"]
-WS["WebSocket gameloop (read-only viewer)"]
+API["FastAPI Application<br/>REST endpoints + WebSocket"]
+WS["WebSocket Game-Loop<br/>Real-time state broadcasting"]
+ENDPOINTS["Health, Market, Signals, Positions<br/>Analytics endpoints"]
 end
 subgraph "Application Layer"
-ENG["TradingEngine (tick loop)"]
-SVC["Services<br/>trading_session, signal_tracking,<br/>session_state, risk, event_logger,<br/>trade_journal, backtest_engine"]
-HND["Handlers<br/>amt, llm_entry, entry_gate, signal,<br/>position_sizer, trade_lifecycle,<br/>llm_overseer, rl"]
+TE["TradingEngine<br/>Full trading pipeline"]
+SO["StrategyOrchestrator<br/>Per-symbol orchestration"]
+SSM["SessionStateManager<br/>Persistent state management"]
+ENTRY["EntryCoordinator<br/>Entry execution"]
+EXIT["ExitCoordinator<br/>Exit management"]
+RL["RiskOrchestrator<br/>Risk management"]
 end
 subgraph "Domain Layer"
-DOM["Domain Services<br/>fabio_ai/services, trading/models,<br/>probability, ports"]
+PORTS["Domain Ports<br/>MarketDataPort, BrokerPort, StoragePort"]
+MODELS["Domain Models<br/>Tick, OHLC, Signal, Trade"]
+SERVICES["Domain Services<br/>AMT analysis, state machines,<br/>gates, classification"]
 end
 subgraph "Infrastructure Layer"
-ADP["Adapters<br/>Dhan, PaperBroker, MLX, LightGBM"]
-STG["Storage<br/>SQLiteStorageAdapter"]
+DF["DhanMarketDataAdapter<br/>Market data adapter"]
+DE["DhanExecutorAdapter<br/>Order execution adapter"]
+SM["StreamManager<br/>WebSocket connection manager"]
+SB["SQLiteStorageAdapter<br/>Persistence adapter"]
 end
-R1 --> ENG
-WS --> ENG
-ENG --> SVC
-SVC --> DOM
-DOM --> ADP
-ADP --> STG
+API --> TE
+TE --> SO
+TE --> SSM
+TE --> ENTRY
+TE --> EXIT
+TE --> RL
+SO --> SERVICES
+ENTRY --> PORTS
+EXIT --> PORTS
+RL --> PORTS
+PORTS --> DF
+PORTS --> DE
+PORTS --> SB
 ```
 
 **Diagram sources**
-- [backend/docs/architecture.md:12-52](file://backend/docs/architecture.md#L12-L52)
-- [ARCHITECTURE.md:41-105](file://ARCHITECTURE.md#L41-L105)
+- [appv2/backend/appv2/main.py:92-241](file://appv2/backend/appv2/main.py#L92-L241)
+- [appv2/backend/appv2/application/trading_engine.py:77-638](file://appv2/backend/appv2/application/trading_engine.py#L77-L638)
+- [appv2/backend/appv2/domain/ports/market_data.py:11-64](file://appv2/backend/appv2/domain/ports/market_data.py#L11-L64)
 
 **Section sources**
-- [backend/docs/architecture.md:12-52](file://backend/docs/architecture.md#L12-L52)
-- [ARCHITECTURE.md:41-105](file://ARCHITECTURE.md#L41-L105)
+- [appv2/backend/appv2/main.py:92-241](file://appv2/backend/appv2/main.py#L92-L241)
+- [appv2/backend/appv2/application/trading_engine.py:77-638](file://appv2/backend/appv2/application/trading_engine.py#L77-L638)
 
 ## Core Components
-- Service Graph (DI Container): Singleton factory wiring all adapters, services, and strategies at startup
-- TradingEngine: Standalone event loop that streams market data, aggregates candles, and coordinates the trading pipeline
-- TradingSessionService: Orchestrates per-symbol state, delegates to focused handlers, and manages risk and lifecycle
-- Domain Ports: Abstractions for market data, broker, LLM inference, storage, and probability engines
-- Hexagonal Adapters: Concrete implementations for Dhan market data, paper broker, MLX inference, and SQLite storage
+- **TradingEngine**: Comprehensive trading engine managing all aspects of live trading with per-symbol orchestration
+- **StrategyOrchestrator**: Per-symbol service handling AMT analysis, state machine evaluation, and gate pipeline execution
+- **SessionStateManager**: Persistent state management with JSON serialization and storage integration
+- **Domain Ports**: Clean abstractions for market data, broker execution, and storage operations
+- **Concrete Adapters**: Production-ready implementations for Dhan market data and order execution
+- **Service Decomposition**: Modular services for advanced AMT classification, exit management, and risk orchestration
 
 **Section sources**
-- [backend/app/api/dependencies.py:43-327](file://backend/app/api/dependencies.py#L43-L327)
-- [backend/app/application/engine.py:59-126](file://backend/app/application/engine.py#L59-L126)
-- [backend/app/application/services/trading_session.py:85-232](file://backend/app/application/services/trading_session.py#L85-L232)
-- [backend/app/domain/ports/market_data.py:19-112](file://backend/app/domain/ports/market_data.py#L19-L112)
+- [appv2/backend/appv2/application/trading_engine.py:77-638](file://appv2/backend/appv2/application/trading_engine.py#L77-L638)
+- [appv2/backend/appv2/application/strategy_orchestrator.py:54-245](file://appv2/backend/appv2/application/strategy_orchestrator.py#L54-L245)
+- [appv2/backend/appv2/application/session_state_manager.py:87-159](file://appv2/backend/appv2/application/session_state_manager.py#L87-L159)
 
 ## Architecture Overview
-GlassyTrade AI v5 embraces:
-- DDD + Hexagonal (Ports & Adapters) + Event-Driven + Pipeline (NiFi-style)
-- Layered architecture separating domain logic, application orchestration, and infrastructure concerns
-- Service Graph dependency injection pattern for component lifecycle management
-- Standalone trading engine decoupled from frontend connections
+The appv2 system embraces modern architectural patterns:
+
+- **Hexagonal Architecture (Ports & Adapters)**: Clean separation between domain logic and external systems
+- **Dependency Inversion**: Domain services depend on abstractions, not concrete implementations
+- **Service Decomposition**: Modular services for specialized trading functions
+- **Per-Symbol Orchestration**: Isolated processing for each tradable symbol
+- **Advanced AMT Classification**: Multiple layers of market structure analysis
+- **Real-Time State Broadcasting**: WebSocket-based live updates for frontend consumers
 
 ```mermaid
 graph TB
-subgraph "Service Graph (DI Container)"
-EXC["ExchangeConfig"]
-REG["SymbolRegistry"]
-STR["ExchangeStrategy"]
-FAC["SessionContextFactory"]
-MDP["MarketDataPort (DhanAdapter)"]
-BRK["BrokerPort (PaperBroker)"]
-LLM["LLMInferencePort (MLXInferenceAdapter)"]
-GEN["GenerativeAIService"]
-STG["StoragePort (SQLiteStorageAdapter)"]
-PROB["ProbabilityInferencePort (LGBMProbabilityAdapter)"]
-TSS["TradingSessionService"]
+subgraph "Domain Layer (Abstractions)"
+MD["MarketDataPort"]
+BR["BrokerPort"]
+ST["StoragePort"]
+AMT["AMT Analysis Services"]
+STATE["State Management"]
+GATES["Gate Pipeline"]
 end
-subgraph "TradingEngine"
+subgraph "Infrastructure Layer (Implementations)"
+DM["DhanMarketDataAdapter"]
+DE["DhanExecutorAdapter"]
+DS["SQLiteStorageAdapter"]
 SM["StreamManager"]
-CA["CandleAggregator"]
-RB["RangeBarBuilder"]
-WD["WatchdogManager"]
+SB["GameStateBroadcaster"]
 end
-EXC --> STR
-REG --> FAC
-FAC --> TSS
-MDP --> TSS
-BRK --> TSS
-LLM --> GEN
-GEN --> TSS
-STG --> TSS
-PROB --> TSS
-TSS --> SM
-SM --> CA
-CA --> RB
-TSS --> WD
+subgraph "Application Layer (Services)"
+TE["TradingEngine"]
+SO["StrategyOrchestrator"]
+SSM["SessionStateManager"]
+ENTRY["EntryCoordinator"]
+EXIT["ExitCoordinator"]
+RL["RiskOrchestrator"]
+end
+MD --> DM
+BR --> DE
+ST --> DS
+AMT --> SO
+STATE --> SSM
+GATES --> SO
+TE --> SO
+TE --> ENTRY
+TE --> EXIT
+TE --> RL
+TE --> SM
+TE --> SB
 ```
 
 **Diagram sources**
-- [backend/app/api/dependencies.py:43-327](file://backend/app/api/dependencies.py#L43-L327)
-- [backend/app/application/engine.py:107-123](file://backend/app/application/engine.py#L107-L123)
+- [appv2/backend/appv2/domain/ports/market_data.py:11-64](file://appv2/backend/appv2/domain/ports/market_data.py#L11-L64)
+- [appv2/backend/appv2/domain/ports/broker.py:9-53](file://appv2/backend/appv2/domain/ports/broker.py#L9-L53)
+- [appv2/backend/appv2/domain/ports/storage.py:8-54](file://appv2/backend/appv2/domain/ports/storage.py#L8-L54)
+- [appv2/backend/appv2/application/trading_engine.py:77-638](file://appv2/backend/appv2/application/trading_engine.py#L77-L638)
 
 **Section sources**
-- [ARCHITECTURE.md:663-732](file://ARCHITECTURE.md#L663-L732)
-- [backend/app/api/dependencies.py:43-327](file://backend/app/api/dependencies.py#L43-L327)
+- [appv2/backend/appv2/application/trading_engine.py:77-638](file://appv2/backend/appv2/application/trading_engine.py#L77-L638)
+- [appv2/backend/appv2/domain/ports/market_data.py:11-64](file://appv2/backend/appv2/domain/ports/market_data.py#L11-L64)
 
 ## Detailed Component Analysis
 
-### Service Graph and Dependency Injection
-The Service Graph is a singleton factory that constructs and wires all components at application startup. It encapsulates exchange configuration, symbol registry, exchange strategy, and creates adapters for market data, broker, inference, and storage. It also initializes optional services like alerting, profiling, and scanning, and assigns references to the trading session and trackers.
-
-```mermaid
-classDiagram
-class ServiceGraph {
-+exchange_config : ExchangeConfig
-+symbol_registry : SymbolRegistry
-+exchange_strategy : ExchangeStrategy
-+session_factory : SessionContextFactory
-+market_data : MarketDataPort
-+broker : BrokerPort
-+llm_inference : LLMInferencePort
-+gen_ai_service : GenerativeAIService
-+storage : StoragePort
-+probability_engine : ProbabilityInferencePort
-+trading_session : TradingSessionService
-+engine : TradingEngine
-+active_symbols : list[str]
-+gate_tracker : GateRejectionTracker
-+latency_tracker : LatencyTracker
-+signal_tracker : SignalTrackingService
-+vp_contract_selector : VPContractSelector
-+option_scanner : OptionScannerService
-}
-```
-
-**Diagram sources**
-- [backend/app/api/dependencies.py:43-327](file://backend/app/api/dependencies.py#L43-L327)
-
-**Section sources**
-- [backend/app/api/dependencies.py:324-384](file://backend/app/api/dependencies.py#L324-L384)
-
-### Standalone Trading Engine
-The TradingEngine runs independently of frontend connections. It seeds historical data, recovers open positions, streams ticks, aggregates candles, and coordinates the trading pipeline. It exposes read-only access for frontend viewers and supports immediate state updates triggered from background threads.
+### TradingEngine: Comprehensive Trading Pipeline
+The TradingEngine serves as the central orchestrator managing all aspects of live trading operations. It implements a sophisticated pipeline that processes market data, executes trading decisions, and maintains real-time state synchronization.
 
 ```mermaid
 sequenceDiagram
-participant App as "FastAPI App"
-participant Lifespan as "lifespan()"
-participant Graph as "ServiceGraph"
-participant Engine as "TradingEngine"
-participant Session as "TradingSessionService"
-App->>Lifespan : Startup
-Lifespan->>Graph : get_service_graph()
-Lifespan->>Engine : TradingEngine(graph)
-Lifespan->>Engine : engine.start()
-Engine->>Engine : seed_history()
-Engine->>Engine : recover_open_positions()
-Engine->>Engine : start streaming tasks
-Engine->>Session : process_tick() via asyncio.to_thread()
-Session-->>Engine : state snapshot
-Engine-->>App : Ready for trading
+participant API as "FastAPI API"
+participant TE as "TradingEngine"
+participant SM as "StreamManager"
+participant SO as "StrategyOrchestrator"
+participant ENTRY as "EntryCoordinator"
+participant EXIT as "ExitCoordinator"
+API->>TE : Initialize with broker/storage adapters
+TE->>SM : Start WebSocket stream
+SM->>TE : on_tick(symbol, tick)
+TE->>SO : process_candle(candle)
+SO->>SO : AMT analysis + state machine
+SO->>SO : Gate pipeline evaluation
+SO-->>TE : Signal if gates pass
+TE->>ENTRY : Execute signal
+ENTRY->>EXIT : Manage exits
+TE->>API : Broadcast state via WebSocket
 ```
 
 **Diagram sources**
-- [backend/app/main.py:83-127](file://backend/app/main.py#L83-L127)
-- [backend/app/application/engine.py:131-177](file://backend/app/application/engine.py#L131-L177)
-- [backend/app/application/services/trading_session.py:233-417](file://backend/app/application/services/trading_session.py#L233-L417)
+- [appv2/backend/appv2/application/trading_engine.py:219-427](file://appv2/backend/appv2/application/trading_engine.py#L219-L427)
+- [appv2/backend/appv2/infrastructure/stream_manager.py:155-168](file://appv2/backend/appv2/infrastructure/stream_manager.py#L155-L168)
 
 **Section sources**
-- [backend/app/main.py:83-127](file://backend/app/main.py#L83-L127)
-- [backend/app/application/engine.py:131-177](file://backend/app/application/engine.py#L131-L177)
+- [appv2/backend/appv2/application/trading_engine.py:77-638](file://appv2/backend/appv2/application/trading_engine.py#L77-L638)
 
-### Event-Driven Pipeline and Domain Events
-The system uses immutable domain events to capture state changes and drive reactions across handlers. Events flow through the system to ensure idempotency, auditability, and clean separation of concerns.
+### StrategyOrchestrator: Per-Symbol AMT Processing
+The StrategyOrchestrator provides per-symbol orchestration for AMT analysis, state machine evaluation, and gate pipeline execution. Each symbol maintains its own isolated processing context with dedicated services for volume profile analysis, market state evaluation, and signal generation.
 
 ```mermaid
-classDiagram
-class DomainEvent {
-+event_id : string
-+timestamp : string
-+idempotency_key : string
-}
-class TickReceived
-class SignalGenerated
-class SignalValidated
-class FillReceived
-class PositionOpened
-class PositionClosed
-DomainEvent <|-- TickReceived
-DomainEvent <|-- SignalGenerated
-DomainEvent <|-- SignalValidated
-DomainEvent <|-- FillReceived
-DomainEvent <|-- PositionOpened
-DomainEvent <|-- PositionClosed
+flowchart TD
+START(["New Candle Received"]) --> VP["Volume Profile Update"]
+VP --> VWAP["VWAP Calculation"]
+VWAP --> CVD["CVD Tracker Update"]
+CVD --> STATE["Auction State Machine"]
+STATE --> AGG["Aggression Scoring"]
+AGG --> GATES["Gate Pipeline Evaluation"]
+GATES --> PASS{"Gates Pass?"}
+PASS --> |Yes| SIGNAL["Generate Signal"]
+PASS --> |No| WAIT["Wait for Next Opportunity"]
+SIGNAL --> EXEC["Execute via EntryCoordinator"]
 ```
 
 **Diagram sources**
-- [backend/app/domain/trading/events.py:39-499](file://backend/app/domain/trading/events.py#L39-L499)
+- [appv2/backend/appv2/application/strategy_orchestrator.py:75-136](file://appv2/backend/appv2/application/strategy_orchestrator.py#L75-L136)
 
 **Section sources**
-- [backend/app/domain/trading/events.py:39-499](file://backend/app/domain/trading/events.py#L39-L499)
+- [appv2/backend/appv2/application/strategy_orchestrator.py:54-245](file://appv2/backend/appv2/application/strategy_orchestrator.py#L54-L245)
 
-### Hexagonal Architecture and Ports
-The domain defines abstract ports for market data, broker, LLM inference, storage, and probability engines. Concrete adapters implement these ports, enabling clean isolation from external systems like Dhan market data and paper broker execution.
+### Domain Ports and Dependency Inversion
+The domain layer defines clean abstractions that enable dependency inversion, allowing the system to remain agnostic of specific broker implementations while maintaining strong separation of concerns.
 
 ```mermaid
 classDiagram
 class MarketDataPort {
-<<interface>>
-+ensure_initialized_sync(timeout)
-+close_sync()
-+fetch_history(symbol, interval, limit)
-+fetch_order_book(symbol)
-+get_ltp(symbol)
-+stream_full(symbols)
-+stream_depth_20(symbols)
-+get_option_chain(underlying, exchange, expiry_index)
+<<abstract>>
++subscribe(symbols : list[str]) void
++unsubscribe(symbols : list[str]) void
++start_stream(on_tick : callable) void
++stop_stream() void
++get_historical_candles(symbol : str, interval : str, days : int) list[OHLC]
++get_quote(symbol : str) Tick
++get_option_chain(underlying : str, expiry : str) list[dict]
++get_lot_size(symbol : str) int
++get_positions() list[dict]
 }
-class DhanMarketDataAdapter
-MarketDataPort <|.. DhanMarketDataAdapter
 class BrokerPort {
-<<interface>>
-+execute_order(signal, portfolio, symbol)
-+cancel_order(order_id)
+<<abstract>>
++place_order(symbol : str, side : OrderSide, order_type : OrderType, quantity : int, price : float, trigger_price : float, square_off : float, stop_loss_value : float) str
++cancel_order(order_id : str) bool
++get_order_status(order_id : str) OrderStatus
++get_positions() list[dict]
++get_open_orders() list[dict]
++get_portfolio() dict
++square_off_position(symbol : str) bool
++get_available_balance() float
 }
-class PaperBrokerAdapter
-BrokerPort <|.. PaperBrokerAdapter
+class StoragePort {
+<<abstract>>
++save_trade(trade_data : dict) str
++update_trade(trade_id : str, updates : dict) void
++get_trade(trade_id : str) dict
++get_open_trades(symbol : str) list[dict]
++get_trades_by_date(date_str : str) list[dict]
++save_signal(signal_data : dict) str
++kv_set(key : str, value : str) void
++kv_get(key : str) str
++kv_delete(key : str) void
++save_daily_pnl(date_str : str, pnl : float) void
++get_daily_pnl(date_str : str) float
+}
 ```
 
 **Diagram sources**
-- [backend/app/domain/ports/market_data.py:19-112](file://backend/app/domain/ports/market_data.py#L19-L112)
-- [backend/app/infrastructure/adapters/dhan_adapter.py:66-457](file://backend/app/infrastructure/adapters/dhan_adapter.py#L66-L457)
-- [backend/app/infrastructure/adapters/paper_broker.py:118-199](file://backend/app/infrastructure/adapters/paper_broker.py#L118-L199)
+- [appv2/backend/appv2/domain/ports/market_data.py:11-64](file://appv2/backend/appv2/domain/ports/market_data.py#L11-L64)
+- [appv2/backend/appv2/domain/ports/broker.py:9-53](file://appv2/backend/appv2/domain/ports/broker.py#L9-L53)
+- [appv2/backend/appv2/domain/ports/storage.py:8-54](file://appv2/backend/appv2/domain/ports/storage.py#L8-L54)
 
 **Section sources**
-- [backend/app/domain/ports/market_data.py:19-112](file://backend/app/domain/ports/market_data.py#L19-L112)
-- [backend/app/infrastructure/adapters/dhan_adapter.py:66-457](file://backend/app/infrastructure/adapters/dhan_adapter.py#L66-L457)
-- [backend/app/infrastructure/adapters/paper_broker.py:118-199](file://backend/app/infrastructure/adapters/paper_broker.py#L118-L199)
+- [appv2/backend/appv2/domain/ports/market_data.py:11-64](file://appv2/backend/appv2/domain/ports/market_data.py#L11-L64)
+- [appv2/backend/appv2/domain/ports/broker.py:9-53](file://appv2/backend/appv2/domain/ports/broker.py#L9-L53)
+- [appv2/backend/appv2/domain/ports/storage.py:8-54](file://appv2/backend/appv2/domain/ports/storage.py#L8-L54)
 
-### AMT Analysis and Gate Pipeline
-The AMT analyzer computes volume profiles, LVN/HVN detection, aggression scoring, and market state assessment. These results feed the agent pipeline and gate validation stages, culminating in signal generation and execution coordination.
+### Concrete Adapters: Production-Ready Implementations
+The infrastructure layer provides production-ready implementations that adhere to the domain port abstractions, enabling seamless switching between different broker providers and execution modes.
 
 ```mermaid
-flowchart TD
-Start(["New Tick Received"]) --> AMT["AMT Analysis<br/>Volume Profile, LVN/HVN, CVD, Aggression"]
-AMT --> Agent["Agent Pipeline<br/>Direction, Probability, Timing, Size"]
-Agent --> Gate["Gate Pipeline<br/>Three-Align + 12-gate Validation"]
-Gate --> Signal["Signal Construction<br/>SL/TP, Size"]
-Signal --> Exec["Execution Coordination<br/>Entry/Exit"]
-Exec --> End(["State Snapshot Updated"])
+classDiagram
+class DhanMarketDataAdapter {
++access_token : str
++client_id : str
++_broker : DhanBroker
++_on_tick : callable
++subscribe(symbols : list[str]) void
++unsubscribe(symbols : list[str]) void
++start_stream(on_tick : callable) void
++stop_stream() void
++get_historical_candles(symbol : str, interval : str, days : int) list[OHLC]
++get_quote(symbol : str) Tick
++get_option_chain(underlying : str, expiry : str) list[dict]
++get_lot_size(symbol : str) int
++get_positions() list[dict]
+}
+class DhanExecutorAdapter {
++access_token : str
++client_id : str
++live : bool
++_broker : DhanBroker
++_paper : PaperBrokerAdapter
++place_order(...) str
++cancel_order(order_id : str) bool
++get_order_status(order_id : str) OrderStatus
++get_positions() list[dict]
++get_open_orders() list[dict]
++get_portfolio() dict
++square_off_position(symbol : str) bool
++get_available_balance() float
+}
+MarketDataPort <|.. DhanMarketDataAdapter
+BrokerPort <|.. DhanExecutorAdapter
 ```
 
 **Diagram sources**
-- [backend/app/domain/fabio_ai/services/amt_analyzer.py:623-838](file://backend/app/domain/fabio_ai/services/amt_analyzer.py#L623-L838)
-- [backend/app/application/services/trading_session.py:461-517](file://backend/app/application/services/trading_session.py#L461-L517)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py:25-151](file://appv2/backend/appv2/infrastructure/dhan_feed.py#L25-L151)
+- [appv2/backend/appv2/infrastructure/dhan_executor.py:22-168](file://appv2/backend/appv2/infrastructure/dhan_executor.py#L22-L168)
 
 **Section sources**
-- [backend/app/domain/fabio_ai/services/amt_analyzer.py:623-838](file://backend/app/domain/fabio_ai/services/amt_analyzer.py#L623-L838)
-- [backend/app/application/services/trading_session.py:461-517](file://backend/app/application/services/trading_session.py#L461-L517)
+- [appv2/backend/appv2/infrastructure/dhan_feed.py:25-151](file://appv2/backend/appv2/infrastructure/dhan_feed.py#L25-L151)
+- [appv2/backend/appv2/infrastructure/dhan_executor.py:22-168](file://appv2/backend/appv2/infrastructure/dhan_executor.py#L22-L168)
 
-### Conceptual Overview
-The system’s data flow moves from external feeds to the trading engine, through the session coordinator, and into execution. The frontend connects via WebSocket to receive state updates without affecting trading continuity.
+### Advanced AMT Classification and Exit Management
+The system incorporates sophisticated AMT classification capabilities including opening classification, regime detection, and market structure analysis, along with advanced exit management through structural stops and partition exits.
 
 ```mermaid
 graph LR
-EXT["External Market Data"] --> SM["StreamManager"]
-SM --> TE["_tick_loop()"]
-TE --> CA["CandleAggregator"]
-CA --> TS["TradingSessionService.process_tick()"]
-TS --> HND["Handlers & Coordinators"]
-HND --> EXEC["Execution"]
-EXEC --> ST["Storage"]
-ST --> FE["Frontend Viewer (WS)"]
+CANDLE["Candle Input"] --> OPENING["Opening Classifier"]
+CANDLE --> REGIME["Regime Detector"]
+CANDLE --> STRUCT["Market Structure Classifier"]
+OPENING --> OBS["AMT Observation"]
+REGIME --> OBS
+STRUCT --> OBS
+OBS --> GATES["Gate Pipeline"]
+GATES --> SIGNAL["Signal Generation"]
+SIGNAL --> ENTRY["Entry Execution"]
+ENTRY --> STRUCT_STOP["Structural Stop Engine"]
+ENTRY --> PARTITION["Partition Exit Manager"]
+ENTRY --> DRIVE_DECAY["Drive Decay Tracker"]
+STRUCT_STOP --> EXIT["Exit Management"]
+PARTITION --> EXIT
+DRIVE_DECAY --> EXIT
 ```
 
 **Diagram sources**
-- [ARCHITECTURE.md:330-474](file://ARCHITECTURE.md#L330-L474)
-- [backend/app/application/engine.py:628-800](file://backend/app/application/engine.py#L628-L800)
+- [appv2/backend/appv2/application/trading_engine.py:280-310](file://appv2/backend/appv2/application/trading_engine.py#L280-L310)
+- [appv2/backend/appv2/application/trading_engine.py:158-160](file://appv2/backend/appv2/application/trading_engine.py#L158-L160)
 
 **Section sources**
-- [ARCHITECTURE.md:330-474](file://ARCHITECTURE.md#L330-L474)
-- [backend/app/application/engine.py:628-800](file://backend/app/application/engine.py#L628-L800)
+- [appv2/backend/appv2/application/trading_engine.py:148-180](file://appv2/backend/appv2/application/trading_engine.py#L148-L180)
+
+### Real-Time State Broadcasting and Frontend Integration
+The system provides comprehensive real-time state broadcasting through WebSocket connections, enabling frontend consumers to receive live updates without affecting trading operations.
+
+```mermaid
+sequenceDiagram
+participant TE as "TradingEngine"
+participant SB as "GameStateBroadcaster"
+participant WS as "WebSocket Client"
+participant FE as "Frontend Application"
+TE->>SB : broadcast_state(state)
+SB->>SB : Queue state update
+SB->>WS : Send keyframe/delta message
+WS->>FE : Receive state update
+FE->>FE : Update UI components
+FE->>WS : Send ping/subscribe messages
+WS->>TE : Handle client requests
+```
+
+**Diagram sources**
+- [appv2/backend/appv2/api/state_broadcaster.py:44-82](file://appv2/backend/appv2/api/state_broadcaster.py#L44-L82)
+- [appv2/backend/appv2/main.py:197-235](file://appv2/backend/appv2/main.py#L197-L235)
+
+**Section sources**
+- [appv2/backend/appv2/api/state_broadcaster.py:22-130](file://appv2/backend/appv2/api/state_broadcaster.py#L22-L130)
+- [appv2/backend/appv2/main.py:197-235](file://appv2/backend/appv2/main.py#L197-L235)
 
 ## Dependency Analysis
-The Service Graph centralizes component creation and wiring. Dependencies are injected into the TradingEngine and TradingSessionService, ensuring loose coupling and testability.
+The appv2 architecture implements clean dependency management through dependency inversion and service decomposition:
 
 ```mermaid
 graph TB
-SG["ServiceGraph"] --> MD["MarketDataPort"]
-SG --> BR["BrokerPort"]
-SG --> LLM["LLMInferencePort"]
-SG --> ST["StoragePort"]
-SG --> PR["ProbabilityInferencePort"]
-SG --> TS["TradingSessionService"]
-TS --> ENG["TradingEngine"]
-ENG --> SM["StreamManager"]
-ENG --> CA["CandleAggregator"]
-ENG --> WD["WatchdogManager"]
+CFG["Settings Configuration"] --> TE["TradingEngine"]
+CFG --> SM["StreamManager"]
+CFG --> SB["GameStateBroadcaster"]
+TE --> SO["StrategyOrchestrator"]
+TE --> SSM["SessionStateManager"]
+TE --> ENTRY["EntryCoordinator"]
+TE --> EXIT["ExitCoordinator"]
+TE --> RL["RiskOrchestrator"]
+SO --> AMT["AMT Analysis Services"]
+ENTRY --> PORTS["Domain Ports"]
+EXIT --> PORTS
+RL --> PORTS
+PORTS --> DM["DhanMarketDataAdapter"]
+PORTS --> DE["DhanExecutorAdapter"]
+PORTS --> DS["SQLiteStorageAdapter"]
+SM --> DM
+SB --> TE
 ```
 
 **Diagram sources**
-- [backend/app/api/dependencies.py:43-327](file://backend/app/api/dependencies.py#L43-L327)
-- [backend/app/application/engine.py:107-123](file://backend/app/application/engine.py#L107-L123)
+- [appv2/backend/appv2/config/settings.py:12-123](file://appv2/backend/appv2/config/settings.py#L12-L123)
+- [appv2/backend/appv2/application/trading_engine.py:86-180](file://appv2/backend/appv2/application/trading_engine.py#L86-L180)
 
 **Section sources**
-- [backend/app/api/dependencies.py:43-327](file://backend/app/api/dependencies.py#L43-L327)
-- [backend/app/application/engine.py:107-123](file://backend/app/application/engine.py#L107-L123)
+- [appv2/backend/appv2/config/settings.py:12-123](file://appv2/backend/appv2/config/settings.py#L12-L123)
+- [appv2/backend/appv2/application/trading_engine.py:86-180](file://appv2/backend/appv2/application/trading_engine.py#L86-L180)
 
 ## Performance Considerations
-- Asynchronous streaming and event loops minimize blocking and maximize throughput
-- Historical seeding and position recovery reduce downtime and improve continuity
-- Throttling and circuit breakers protect against overload and malformed data
-- Background thread-based persistence reduces write contention
+- **Asynchronous Processing**: Non-blocking operations throughout the pipeline minimize latency and maximize throughput
+- **Per-Symbol Isolation**: Each symbol maintains separate processing contexts, preventing cross-contamination and enabling independent scaling
+- **Advanced Throttling**: Configurable throttling mechanisms prevent excessive processing while maintaining responsiveness
+- **Efficient State Management**: Bounded memory usage with automatic cleanup and persistence integration
+- **Real-Time Broadcasting**: Optimized WebSocket communication with delta compression and rate limiting
+- **Heartbeat Monitoring**: Robust connection health monitoring with automatic reconnection and resubscription
 
 ## Troubleshooting Guide
-- Model readiness and validation: The backend waits for the LLM model to be ready and validates inference before accepting connections
-- Graceful shutdown: The engine stops streaming, flushes pending ticks, shuts down thread pools, and disconnects market data feeds
-- Watchdog and stale stream detection: Health monitoring and stale stream watchdogs keep the engine resilient
-- Error handling utilities: Centralized error handling and logging facilitate debugging and recovery
+- **Connection Issues**: StreamManager provides comprehensive heartbeat monitoring and automatic reconnection with exponential backoff
+- **Broker Integration**: DhanExecutorAdapter gracefully handles both live and paper trading modes with fallback mechanisms
+- **State Persistence**: SessionStateManager includes robust error handling and recovery for session state management
+- **WebSocket Communication**: GameStateBroadcaster manages client connections with proper cleanup and error recovery
+- **Configuration Validation**: Pydantic-based settings provide runtime validation with clear error messages for misconfiguration
 
 **Section sources**
-- [backend/app/main.py:88-169](file://backend/app/main.py#L88-L169)
-- [backend/app/application/engine.py:178-208](file://backend/app/application/engine.py#L178-L208)
-- [backend/app/application/services/trading_session.py:422-458](file://backend/app/application/services/trading_session.py#L422-L458)
+- [appv2/backend/appv2/infrastructure/stream_manager.py:169-256](file://appv2/backend/appv2/infrastructure/stream_manager.py#L169-L256)
+- [appv2/backend/appv2/infrastructure/dhan_executor.py:37-57](file://appv2/backend/appv2/infrastructure/dhan_executor.py#L37-L57)
+- [appv2/backend/appv2/application/session_state_manager.py:122-154](file://appv2/backend/appv2/application/session_state_manager.py#L122-L154)
 
 ## Conclusion
-GlassyTrade AI v5 demonstrates a mature, production-grade trading system built on DDD, hexagonal architecture, and event-driven pipelines. The Service Graph dependency injection pattern ensures clean component lifecycle management, while the standalone TradingEngine guarantees continuous trading operations independent of frontend connectivity. The hexagonal design cleanly isolates domain logic from external integrations, enabling maintainability, scalability, and robustness in live trading environments.
+GlassyTrade AI v5 appv2 represents a mature, production-grade trading system built on modern architectural principles including domain-driven design, dependency inversion, and hexagonal architecture. The system's comprehensive service decomposition enables maintainability, scalability, and robustness while maintaining clean separation between domain logic and external integrations. The advanced AMT classification capabilities, real-time state broadcasting, and sophisticated risk management demonstrate the system's capability to handle complex live trading scenarios with reliability and performance.

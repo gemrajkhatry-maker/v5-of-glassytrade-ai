@@ -55,6 +55,34 @@
       "big_order_filter_lots": 5,
       "range_bar_size": 180,
       "dead_volume_pct": 5
+    },
+    "GOLDM": {
+      "underlying_symbol": "GOLDM25APRFUT",
+      "underlying_segment": "MCX_COMM",
+      "options_segment": "MCX_COMM",
+      "strike_step": 100,
+      "lot_size": 100,
+      "tick_size": 1.0,
+      "session_start": "09:00",
+      "session_end": "23:30",
+      "ib_window_minutes": 30,
+      "big_order_filter_lots": 5,
+      "range_bar_size": 80,
+      "dead_volume_pct": 5
+    },
+    "SILVERM": {
+      "underlying_symbol": "SILVERM25APRFUT",
+      "underlying_segment": "MCX_COMM",
+      "options_segment": "MCX_COMM",
+      "strike_step": 500,
+      "lot_size": 5,
+      "tick_size": 1.0,
+      "session_start": "09:00",
+      "session_end": "23:30",
+      "ib_window_minutes": 30,
+      "big_order_filter_lots": 5,
+      "range_bar_size": 180,
+      "dead_volume_pct": 5
     }
   },
   "NSE": {

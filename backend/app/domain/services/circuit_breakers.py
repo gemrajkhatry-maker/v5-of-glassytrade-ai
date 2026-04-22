@@ -8,7 +8,7 @@ CONSECUTIVE LOSS RULE:
   On any WIN → reset consecutive_losses = 0
 
 DAILY MAX DRAWDOWN:
-  max_daily_loss = equity × 0.01 (1% = ₹10,000 on ₹10L account)
+  max_daily_loss = equity × 0.005 (0.5% = ₹5,000 on ₹10L account per Fabio guideline)
   IF daily_pnl <= -max_daily_loss → CIRCUIT BREAKER
   Close all open positions immediately. No new trades for the day.
 
@@ -60,7 +60,7 @@ class CircuitBreakers:
         equity: float = 1000000.0,
         max_consecutive_losses: int = 3,
         max_consecutive_losses_winning: int = 5,
-        max_daily_dd_pct: float = 0.01,  # 1% of equity
+        max_daily_dd_pct: float = 0.005,  # 0.5% of equity (Fabio guideline)
         daily_profit_target: float | None = None,
         account_max_loss: float | None = None,  # ₹30,000 hard cap (defaults to constant)
     ) -> None:

@@ -146,6 +146,7 @@ class AMTAnalysisDTO(BaseModel):
     poc_signal: str = Field(alias="pocSignal", default="")
     poc_vs_price: str = Field(alias="pocVsPrice", default="")
     lvn_play: Optional[dict[str, Any]] = Field(alias="lvnPlay", default=None)
+    is_second_drive: bool = Field(alias="isSecondDrive", default=False)  # Task 3.3: Fabio Playbook drive cycle
     # Cushion System State
     cushion_tier: str = Field(alias="cushionTier", default="Conservative")
     llm_thinking: str = Field(alias="llmThinking", default="")
@@ -609,6 +610,7 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         "pocSignal": r.poc_signal,
         "pocVsPrice": r.poc_vs_price,
         "lvnPlay": r.lvn_play,
+        "isSecondDrive": r.drive_entry_valid,  # Task 3.3: Fabio Playbook drive cycle
         # Developing VA (short lookback)
         "devPoc": r.dev_poc,
         "devVah": r.dev_vah,

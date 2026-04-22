@@ -14,7 +14,7 @@ from app.domain.trading.models.enums import MarketStateCodec, Source
 from app.infrastructure.serialization.schemas import portfolio_to_dto, stats_to_dto
 
 if TYPE_CHECKING:
-    from app.domain.fabio_ai.services.trade_manager import TradeManager
+    from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
     from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
 
 log = logging.getLogger(__name__)

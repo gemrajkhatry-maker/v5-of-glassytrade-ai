@@ -290,7 +290,7 @@ class SignalTrackingService:
                     }
                 )
             except Exception:
-                logger.debug("Failed to persist signal tracking record", exc_info=True)
+                logger.warning("Failed to persist signal tracking record — replay data gap", exc_info=True)
 
     def get_stats(self, symbol: str | None = None) -> dict:
         """Get signal generation statistics.

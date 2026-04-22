@@ -13,13 +13,15 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from app.domain.trading.models.enums import SignalType, Source
+from app.domain.trading.models.enums import SignalType, Source, SetupType as ST
+from app.domain.trading.models.entities import Signal
+from app.domain.services.tick_utils import round_down_to_tick, round_up_to_tick
+from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import compute_atr
+from app.domain.fabio_ai.services.entry_gates.grading import compute_grade_score
 from app.domain.fabio_ai.services.trade_thesis import build_trade_thesis
 
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
-    from app.domain.trading.models.entities import Signal
-    from app.domain.trading.models.enums import SetupType
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +40,16 @@ def sl_from_aggressive_print(
     """
     if not amt_result.aggressive_prints:
         return None
-    proximity = tick.close * 0.005
+    px = float(tick.close)
+    proximity = px * 0.005
     best = None
     for ap in amt_result.aggressive_prints[-5:]:
-        if is_buy and ap.side == "SELL" and ap.price < tick.close:
-            if abs(ap.price - tick.close) < proximity:
+        if is_buy and ap.side == "SELL" and ap.price < px:
+            if abs(ap.price - px) < proximity:
                 if best is None or ap.price > best:
                     best = ap.price
-        elif not is_buy and ap.side == "BUY" and ap.price > tick.close:
-            if abs(ap.price - tick.close) < proximity:
+        elif not is_buy and ap.side == "BUY" and ap.price > px:
+            if abs(ap.price - px) < proximity:
                 if best is None or ap.price < best:
                     best = ap.price
     if best is None:
@@ -73,51 +76,63 @@ def build_entry_signal(
     tick_size: float = 0.05,
 ) -> "Signal":
     """Build Signal from AMT decision using Fabio Playbook SL/TP."""
-    from app.domain.trading.models.enums import SetupType as ST
-    from app.domain.services.tick_utils import round_down_to_tick, round_up_to_tick
-    from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import compute_atr
 
     if setup_type is None:
         setup_type = ST.MEAN_REVERSION  # default: mean-reversion to POC
 
     is_buy = direction == "LONG"
     sig_type = SignalType.BUY if is_buy else SignalType.SELL
-    buffer = tick.close * 0.001
-    vwap = (
+    px = float(tick.close)
+    buffer = px * 0.001
+    vwap = float(
         amt_result.session_vwap
         if amt_result.session_vwap > 0
         else (tick.vwap if tick.vwap > 0 else 0)
     )
     agg_sl = sl_from_aggressive_print(amt_result, tick, is_buy, buffer, inside_cluster=inside_cluster)
     va_width = abs(amt_result.value_area_high - amt_result.value_area_low)
-    min_reward = tick.close * 0.005
+    min_reward = px * 0.005
 
-    if setup_type == ST.MEAN_REVERSION:
+    if setup_type == ST.RESPONSIVE_FADE:
+        # FABIO PLAYBOOK: Fade extreme deviation back to Value (POC or VWAP)
+        tp_price = amt_result.poc if abs(px - amt_result.poc) > abs(px - vwap) else vwap
+        
+        # Tight SL just beyond the extreme candle or 1.5σ further
+        sl_dist = max(min_reward * 0.5, px * 0.002)
+        stop_price = px - sl_dist if is_buy else px + sl_dist
+        
+        # Ensure we are actually fading (TP must be in opposite direction of deviation)
+        if (is_buy and tp_price < px) or (not is_buy and tp_price > px):
+            # If TP is wrong way, default to a conservative mean reversion
+            tp_price = vwap
+            
+        allow_trail = True
+    elif setup_type == ST.MEAN_REVERSION:
         tp_price = amt_result.poc
         if is_buy:
             extreme_val = amt_result.value_area_low
             sl_dir = 1 if inside_extreme else -1
             stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            max_sl_dist = min(va_width * 0.5, tick.close * 0.02) if va_width > 0 else tick.close * 0.005
-            if abs(tick.close - stop_price) > max_sl_dist:
-                stop_price = tick.close - max_sl_dist
-            if not agg_sl and vwap and stop_price < vwap < tick.close:
+            max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
+            if abs(px - stop_price) > max_sl_dist:
+                stop_price = px - max_sl_dist
+            if not agg_sl and vwap and stop_price < vwap < px:
                 stop_price = vwap - buffer
-            if tp_price <= tick.close or stop_price >= tick.close or (tp_price - tick.close) < min_reward:
-                tp_price = tick.close * 1.010
-                stop_price = tick.close * 0.995
+            if tp_price <= px or stop_price >= px or (tp_price - px) < min_reward:
+                tp_price = px * 1.010
+                stop_price = px * 0.995
         else:
             extreme_val = amt_result.value_area_high
             sl_dir = -1 if inside_extreme else 1
             stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            max_sl_dist = min(va_width * 0.5, tick.close * 0.02) if va_width > 0 else tick.close * 0.005
-            if abs(stop_price - tick.close) > max_sl_dist:
-                stop_price = tick.close + max_sl_dist
-            if not agg_sl and vwap and stop_price > vwap > tick.close:
+            max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
+            if abs(stop_price - px) > max_sl_dist:
+                stop_price = px + max_sl_dist
+            if not agg_sl and vwap and stop_price > vwap > px:
                 stop_price = vwap + buffer
-            if tp_price >= tick.close or stop_price <= tick.close or (tick.close - tp_price) < min_reward:
-                tp_price = tick.close * 0.990
-                stop_price = tick.close * 1.005
+            if tp_price >= px or stop_price <= px or (px - tp_price) < min_reward:
+                tp_price = px * 0.990
+                stop_price = px * 1.005
         allow_trail = False
     else:
         if is_buy:
@@ -125,45 +140,44 @@ def build_entry_signal(
             extreme_val = amt_result.poc
             sl_dir = 1 if inside_extreme else -1
             stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            max_sl_dist = min(va_width * 0.75, tick.close * 0.03) if va_width > 0 else tick.close * 0.01
-            if abs(tick.close - stop_price) > max_sl_dist:
-                stop_price = tick.close - max_sl_dist
-            if not agg_sl and vwap and stop_price < vwap < tick.close:
+            max_sl_dist = min(va_width * 0.75, px * 0.03) if va_width > 0 else px * 0.01
+            if abs(px - stop_price) > max_sl_dist:
+                stop_price = px - max_sl_dist
+            if not agg_sl and vwap and stop_price < vwap < px:
                 stop_price = vwap - buffer
-            if tp_price <= tick.close or stop_price >= tick.close:
-                tp_price = tick.close * 1.020
-                stop_price = tick.close * 0.990
+            if tp_price <= px or stop_price >= px:
+                tp_price = px * 1.020
+                stop_price = px * 0.990
         else:
             tp_price = amt_result.value_area_low - (amt_result.poc - amt_result.value_area_low)
             extreme_val = amt_result.poc
             sl_dir = -1 if inside_extreme else 1
             stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            max_sl_dist = min(va_width * 0.75, tick.close * 0.03) if va_width > 0 else tick.close * 0.01
-            if abs(stop_price - tick.close) > max_sl_dist:
-                stop_price = tick.close + max_sl_dist
-            if not agg_sl and vwap and stop_price > vwap > tick.close:
+            max_sl_dist = min(va_width * 0.75, px * 0.03) if va_width > 0 else px * 0.01
+            if abs(stop_price - px) > max_sl_dist:
+                stop_price = px + max_sl_dist
+            if not agg_sl and vwap and stop_price > vwap > px:
                 stop_price = vwap + buffer
-            if tp_price >= tick.close or stop_price <= tick.close:
-                tp_price = tick.close * 0.980
-                stop_price = tick.close * 1.010
+            if tp_price >= px or stop_price <= px:
+                tp_price = px * 0.980
+                stop_price = px * 1.010
         allow_trail = True
 
     # Minimum SL floor: ATR-based (1x ATR) or 1.5% of price, whichever is larger
-    atr_val = compute_atr(data, 14) if data and len(data) >= 14 else tick.close * 0.015
-    min_sl_dist = max(tick.close * 0.015, atr_val)
-    if abs(tick.close - stop_price) < min_sl_dist:
-        stop_price = tick.close - min_sl_dist if is_buy else tick.close + min_sl_dist
+    atr_val = compute_atr(data, 14) if data and len(data) >= 14 else px * 0.015
+    min_sl_dist = max(px * 0.015, atr_val)
+    if abs(px - stop_price) < min_sl_dist:
+        stop_price = px - min_sl_dist if is_buy else px + min_sl_dist
 
     # Cushion SL override (never tighten below min_sl_dist)
     if risk_sl_pct is not None and risk_sl_pct > 0:
-        cushion_dist = max(tick.close * risk_sl_pct, min_sl_dist)
-        if cushion_dist < abs(tick.close - stop_price):
-            stop_price = tick.close - cushion_dist if is_buy else tick.close + cushion_dist
+        cushion_dist = max(px * risk_sl_pct, min_sl_dist)
+        if cushion_dist < abs(px - stop_price):
+            stop_price = px - cushion_dist if is_buy else px + cushion_dist
 
     setup_label = "MeanRev" if setup_type == ST.MEAN_REVERSION else "Trend"
 
-    # Compute confluence grade score for gate validation
-    from app.domain.fabio_ai.services.entry_gates.grading import compute_grade_score
+    # Compute confluence grade
 
     grade_score = compute_grade_score(
         direction=direction,
@@ -181,14 +195,14 @@ def build_entry_signal(
         stop_price = round_up_to_tick(float(stop_price), tick_size)
         tp_price = round_down_to_tick(float(tp_price), tick_size)
 
-    risk = abs(tick.close - stop_price)
-    reward = abs(tp_price - tick.close)
+    risk = abs(px - stop_price)
+    reward = abs(tp_price - px)
     rr = reward / risk if risk > 0 else 0
 
     logger.info(
         "build_entry_signal: %s %s entry=%.2f SL=%.2f TP=%.2f risk=%.2f reward=%.2f RR=%.2f "
         "poc=%.2f vah=%.2f val=%.2f vwap=%.2f agg_sl=%s",
-        setup_label, direction, tick.close, stop_price, tp_price,
+        setup_label, direction, px, stop_price, tp_price,
         risk, reward, rr,
         amt_result.poc, amt_result.value_area_high, amt_result.value_area_low, vwap, agg_sl,
     )
@@ -206,7 +220,6 @@ def build_entry_signal(
         1.0 if confidence == "High" else (0.75 if confidence == "Medium" else 0.5)
     ) * lvn_multiplier
 
-    from app.domain.trading.models.entities import Signal
     return Signal(
         type=sig_type,
         price=tick.close,

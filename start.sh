@@ -18,7 +18,7 @@ echo "Starting backend on :9090..."
 cd "$BACKEND_DIR"
 KMP_DUPLICATE_LIB_OK=TRUE \
 GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}" \
-GLASSYTRADE_STRATEGY="${GLASSYTRADE_STRATEGY:-mcx_options}" \
+GLASSYTRADE_STRATEGY="${GLASSYTRADE_STRATEGY:-nse_index_options}" \
 PYTHONPATH="$PROJECT_DIR:$BACKEND_DIR" \
 DEBUG=false \
 nohup "$BACKEND_DIR/venv/bin/python" -u -m uvicorn app.main:app \

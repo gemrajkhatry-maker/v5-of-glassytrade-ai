@@ -234,3 +234,17 @@ class TestOptionScannerService:
 
         _, kwargs = broker.get_option_chain.call_args
         assert kwargs["exchange"] == "MCX"
+
+
+def test_silverm_mcx_mini_configured_like_silver_chain():
+    """SILVERM is a separate Dhan chain; must use 500 strike step and loose OI floor."""
+    assert "SILVERM" in OptionScannerService._SCAN_MCX_UNDERLYINGS
+    assert OptionScannerService._STRIKE_INTERVALS["SILVERM"] == 500
+    assert OptionScannerService._MIN_OI["SILVERM"] == 0
+
+
+def test_goldm_mcx_mini_configured_like_gold_chain():
+    """GOLDM is a separate Dhan chain; same 100 strike step and loose OI as GOLD."""
+    assert "GOLDM" in OptionScannerService._SCAN_MCX_UNDERLYINGS
+    assert OptionScannerService._STRIKE_INTERVALS["GOLDM"] == 100
+    assert OptionScannerService._MIN_OI["GOLDM"] == 0

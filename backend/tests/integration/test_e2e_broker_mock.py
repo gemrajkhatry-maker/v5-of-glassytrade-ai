@@ -18,10 +18,10 @@ from typing import Dict, List, Optional
 
 import pytest
 
-from app.domain.fabio_ai.services.trade_manager import (
+from app.domain.fabio_ai.services.exit_engine import (
     CushionState,
     ExitReason,
-    TradeManager,
+    ExitEngine as TradeManager,
     TradeManagerConfig,
 )
 from app.domain.services.circuit_breakers import BreakerReason, BreakerResult, CircuitBreakers

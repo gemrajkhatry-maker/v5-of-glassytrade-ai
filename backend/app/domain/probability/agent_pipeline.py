@@ -56,8 +56,10 @@ from app.domain.constants import (
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook
     from app.domain.ports.probability_inference import IProbabilityInference
+    from app.domain.probability.regime_hysteresis_store import RegimeHysteresisStore
 
-from app.domain.fabio_ai.services.entry_gate import three_align_check
+from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
+from app.domain.fabio_ai.services.entry_gates.gate_runner import run_gate_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -163,17 +165,6 @@ class RegimeHysteresis:
             allowed_short=raw_regime.allowed_short if self._current_regime == raw_regime.regime else True,
             risk_scale=raw_regime.risk_scale,
         )
-
-
-# Per-symbol hysteresis state (keyed by symbol)
-_regime_hysteresis: dict[str, RegimeHysteresis] = {}
-
-
-def get_regime_hysteresis(symbol: str) -> RegimeHysteresis:
-    """Get or create a RegimeHysteresis instance for a symbol."""
-    if symbol not in _regime_hysteresis:
-        _regime_hysteresis[symbol] = RegimeHysteresis(min_persistence=3)
-    return _regime_hysteresis[symbol]
 
 
 def classify_regime(
@@ -399,7 +390,6 @@ def assess_timing(
         return "WAIT"
 
     # ── FULL 12-GATE PIPELINE (EXECUTION SYNC) ──
-    from app.domain.fabio_ai.services.entry_gate import run_gate_pipeline
 
     # Use generic thresholds for scanner; actual execution gate is still the final decider
     # symbol and tick_age_seconds are now passed from the session service
@@ -438,17 +428,113 @@ def assess_timing(
     return "ENTER_NOW"
 
 
+def calculate_timing_probability(
+    data: list[OHLC],
+    tick: OHLC,
+    amt_result: AMTResult,
+    direction: str,
+    playbook: str,
+    timing_decision: str,
+) -> float:
+    """Calculate timing probability based on entry conditions.
+    
+    Returns probability [0.0, 1.0] that this is an optimal entry timing.
+    This fixes the issue where UI showed 0.0% timing probability.
+    
+    Factors:
+    - ATR vs bar range ratio (lower ratio = higher probability)
+    - Delta confirmation strength
+    - CVD slope alignment with direction
+    - Playbook-specific conditions (e.g., return_to_value near VAL/VAH)
+    """
+    if timing_decision == "SKIP":
+        return 0.0
+    if timing_decision == "WAIT":
+        return 0.3  # Base probability for WAIT states
+    
+    # ENTER_NOW: calculate based on quality factors
+    if len(data) < 5 or tick is None:
+        return 0.5  # Insufficient data
+    
+    atr5 = sum(d.high - d.low for d in data[-5:]) / 5
+    bar_range = tick.high - tick.low
+    delta_abs = abs(float(getattr(tick, "delta", 0) or 0))
+    
+    # Factor 1: Bar range vs ATR (lower = better timing)
+    range_ratio = bar_range / atr5 if atr5 > 0 else 1.0
+    range_score = max(0.0, 1.0 - (range_ratio / 3.0))  # 1.0 if ratio=0, 0.0 if ratio>=3
+    
+    # Factor 2: Delta confirmation strength
+    delta_score = min(1.0, delta_abs / 500.0)  # Normalize (adjust based on instrument)
+    
+    # Factor 3: CVD slope alignment
+    cvd_slope = float(getattr(amt_result, "cvd_slope", 0) or 0)
+    cvd_aligned = (direction == "LONG" and cvd_slope > 0) or (direction == "SHORT" and cvd_slope < 0)
+    cvd_score = 0.8 if cvd_aligned else 0.2
+    
+    # Factor 4: Playbook-specific timing quality
+    playbook_score = 0.5
+    if playbook == "return_to_value":
+        va_width = abs(amt_result.value_area_high - amt_result.value_area_low)
+        if va_width > 0:
+            distance_from_edge = min(
+                abs(tick.close - amt_result.value_area_high),
+                abs(tick.close - amt_result.value_area_low)
+            )
+            edge_proximity = 1.0 - (distance_from_edge / va_width)
+            playbook_score = 0.5 + 0.5 * edge_proximity
+    
+    # Weighted average
+    timing_prob = (
+        0.30 * range_score +
+        0.25 * delta_score +
+        0.25 * cvd_score +
+        0.20 * playbook_score
+    )
+    
+    # Log input→output for debugging
+    logger.info(
+        "TIMING PROB: %.3f | range_ratio=%.2f (score=%.2f) | delta=%.0f (score=%.2f) | "
+        "cvd_slope=%.2f (aligned=%s, score=%.2f) | playbook=%s (score=%.2f)",
+        timing_prob, range_ratio, range_score, delta_abs, delta_score,
+        cvd_slope, cvd_aligned, cvd_score, playbook, playbook_score
+    )
+    
+    return min(1.0, max(0.0, timing_prob))
+
+
 def select_playbook(regime: RegimeState, amt_result: AMTResult) -> str:
-    """Map regime and auction state to one of the canonical playbooks."""
+    """Map regime and auction state to one of the canonical playbooks.
+    
+    FIX: NO_TRADE market state (price at POC) is a sub-state of BALANCED.
+    When session regime is NO_TRADE but leg regime is BALANCED/TRENDING,
+    use leg regime as fallback to avoid empty playbook.
+    
+    This allows the system to:
+    1. Monitor setups even when price is at POC
+    2. Return non-zero probabilities for direction
+    3. Let timing agent decide when to enter (WAIT/SKIP/ENTER_NOW)
+    """
     ms = getattr(amt_result, "market_state", "")
+    
+    # Primary: session regime
     if regime.regime == "TRENDING" and MarketStateCodec.is_imbalanced(ms):
         return "imbalance_continuation"
-    if regime.regime == "BALANCED" and MarketStateCodec.is_balanced(ms):
+    if regime.regime == "BALANCED" and (MarketStateCodec.is_balanced(ms) or MarketStateCodec.is_no_trade(ms)):
         return "return_to_value"
     # PROBING playbook: unconfirmed break with aggression confirmation
     # Supports acceptance (continuation) and rejection (fade) scenarios
     if MarketStateCodec.is_probing(ms):
         return "probing_breakout"
+    
+    # FALLBACK: If session is NO_TRADE, use leg regime
+    leg_regime = getattr(amt_result, "leg_regime", "")
+    if regime.regime == "NO_TRADE" or MarketStateCodec.is_no_trade(ms):
+        if leg_regime == "BALANCED":
+            return "return_to_value"
+        if leg_regime == "TRENDING":
+            return "imbalance_continuation"
+    
     return ""
 
 
@@ -671,15 +757,19 @@ def run_agent_pipeline(
     features: dict[str, float],
     order_book: "OrderBook | None" = None,
     tick_size: float = 0.05,
-    symbol: str = "",  # NEW: symbol for gate checks
-    tick_age_seconds: float = 1.0,  # NEW: tick age for gate checks
+    symbol: str = "",
+    tick_age_seconds: float = 1.0,
+    hysteresis_store: "RegimeHysteresisStore | None" = None,
 ) -> AgentDecision:
     """Run the full 4-agent pipeline. Target: <1ms total."""
     t0 = time.perf_counter_ns()
 
     # Agent 1: Regime (with hysteresis to prevent rapid flipping)
     raw_regime = classify_regime(data, amt_result, tick)
-    regime = get_regime_hysteresis(symbol).apply(raw_regime) if symbol else raw_regime
+    if symbol and hysteresis_store is not None:
+        regime = hysteresis_store.get(symbol).apply(raw_regime)
+    else:
+        regime = raw_regime
     if regime.regime == "DEAD":
         elapsed_us = (time.perf_counter_ns() - t0) // 1000
         return AgentDecision(

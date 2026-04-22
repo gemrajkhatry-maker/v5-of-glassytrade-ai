@@ -201,8 +201,23 @@ class OFICalculator:
 
     def update(self, candle: OHLC) -> OFIResult:
         """Update with new candle and return rolling OFI."""
-        self._deltas.append(float(candle.delta))
-        self._volumes.append(float(candle.volume))
+        delta = float(candle.delta)
+        volume = float(candle.volume)
+        
+        # Validate inputs
+        if volume <= 0:
+            return OFIResult(ofi=0.0, window=len(self._deltas))
+        
+        # Delta should never exceed volume in magnitude (sanity check)
+        if abs(delta) > volume:
+            logger.warning(
+                "OFI delta (%.0f) exceeds volume (%.0f) — normalizing",
+                delta, volume
+            )
+            delta = volume if delta > 0 else -volume
+        
+        self._deltas.append(delta)
+        self._volumes.append(volume)
 
         total_vol = sum(self._volumes)
         if total_vol <= 0:
@@ -210,6 +225,16 @@ class OFICalculator:
 
         total_delta = sum(self._deltas)
         ofi = total_delta / total_vol
+        
+        # Clamp to valid range [-1.0, +1.0]
+        ofi = max(-1.0, min(1.0, ofi))
+        
+        # Detect suspiciously round numbers (possible hardcoded/capped values)
+        if abs(ofi) > 0.001 and abs(ofi % 1.0) < 0.001:
+            logger.warning(
+                "OFI suspiciously round: %.3f — possible calculation error",
+                ofi
+            )
 
         return OFIResult(ofi=ofi, window=len(self._deltas))
 

@@ -15,6 +15,7 @@ from uuid import uuid4
 
 from app.application.services.trade_journal import TradeJournal
 from app.application.services.experiment_context import build_experiment_context
+from app.domain.trading.models.utils import safe_side as _safe_side
 
 if TYPE_CHECKING:
     from app.domain.trading.models.entities import Position, Signal
@@ -103,7 +104,7 @@ class SessionEventLogger:
         self._journal.log_entry(
             symbol=symbol,
             position_id=position.id,
-            side=position.side.value if hasattr(position.side, 'value') else str(position.side),
+            side=_safe_side(position.side),
             entry_price=position.entry_price,
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
@@ -146,7 +147,7 @@ class SessionEventLogger:
         self._journal.log_exit(
             symbol=symbol,
             position_id=position.id,
-            side=position.side.value if hasattr(position.side, 'value') else str(position.side),
+            side=_safe_side(position.side),
             entry_price=position.entry_price,
             exit_price=position.exit_price or position.entry_price,
             exit_reason=position.close_reason or "UNKNOWN",

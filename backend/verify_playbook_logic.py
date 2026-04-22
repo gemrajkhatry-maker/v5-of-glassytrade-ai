@@ -15,7 +15,8 @@ mock_mc.aggression_sigma = lambda vol, hist, period: 1.0 # mock sigma
 
 from app.domain.trading.models.value_objects import OHLC, AMTResult
 from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
-from app.domain.fabio_ai.services.entry_gate import three_align_check, check_confirmation_bundle
+from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
+from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import check_confirmation_bundle
 from app.domain.trading.models.enums import MarketState
 
 def create_candle(close, open_=None, high=None, low=None, volume=1000, delta=100):

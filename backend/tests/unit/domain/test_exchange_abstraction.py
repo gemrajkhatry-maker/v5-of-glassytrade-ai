@@ -419,15 +419,13 @@ class TestAbstractionLayerConsistency:
         It is skipped if the full import chain fails.
         """
         try:
-            from app.api.dependencies import get_service_graph, set_service_graph
             from app.application.service_graph import ServiceGraph
             from config.config import Configuration
         except Exception:
             pytest.skip("Full service graph import chain not available in test env")
             return
 
-        set_service_graph(ServiceGraph(Configuration.from_unified()))
-        graph = get_service_graph()
+        graph = ServiceGraph(Configuration.from_unified())
         from app.domain.ports import IExchangeStrategy
 
         strat = graph.get(IExchangeStrategy)

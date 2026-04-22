@@ -84,12 +84,17 @@ def extract_features(
     oi: float = 0.0,
     prev_oi: float = 0.0,
     is_mcx: bool = False,
+    align_volume_with_data: bool = False,
 ) -> dict[str, float]:
     """Extract active model features plus any runtime-only diagnostic extras.
 
     All values are floats. Missing data defaults to 0.0.
     Options-specific params (option_type_flag, moneyness_pct, etc.)
     are passed from the trading session when trading options.
+
+    When ``align_volume_with_data`` is True, ``data`` is underlying futures bars
+    while ``tick`` may still be the option print — volume / delta features that
+    must match the ``data`` series use the last bar of ``data`` instead of ``tick``.
     """
     close = tick.close
     if close <= 0:
@@ -123,7 +128,10 @@ def extract_features(
         f["close_position_in_range"] = 0.5
 
     # --- Group B: Order Flow ---
-    f["delta_normalized"] = tick.delta / tick.volume if tick.volume > 0 else 0.0
+    _flow = data[-1] if align_volume_with_data and data else tick
+    f["delta_normalized"] = (
+        _flow.delta / _flow.volume if _flow.volume > 0 else 0.0
+    )
     f["cvd_slope"] = amt_result.cvd_slope
     div = amt_result.cvd_divergence
     f["cvd_divergence_flag"] = 1.0 if div == "BULLISH_DIV" else (-1.0 if div == "BEARISH_DIV" else 0.0)
@@ -135,12 +143,15 @@ def extract_features(
         ema = data[-20].volume
         for d in data[-19:]:
             ema = alpha * d.volume + (1 - alpha) * ema
-        f["volume_vs_ema20"] = tick.volume / ema if ema > 0 else 1.0
+        _vol_ref = _flow.volume if align_volume_with_data else tick.volume
+        f["volume_vs_ema20"] = _vol_ref / ema if ema > 0 else 1.0
     else:
         f["volume_vs_ema20"] = 1.0
 
     # Delta acceleration (current - previous)
-    f["delta_acceleration"] = (tick.delta - data[-2].delta) if len(data) >= 2 else 0.0
+    f["delta_acceleration"] = (
+        (_flow.delta - data[-2].delta) if len(data) >= 2 else 0.0
+    )
 
     # Cumulative delta last 3 bars
     last3 = data[-3:] if len(data) >= 3 else data

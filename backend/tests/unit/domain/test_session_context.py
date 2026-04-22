@@ -4,7 +4,11 @@ from datetime import date, datetime, timezone, timedelta
 
 import pytest
 
-from app.domain.fabio_ai.services.session_context import is_expiry_day, seconds_to_close
+from app.domain.fabio_ai.services.session_context import (
+    get_session_info,
+    is_expiry_day,
+    seconds_to_close,
+)
 
 
 _IST = timezone(timedelta(hours=5, minutes=30))
@@ -65,3 +69,22 @@ def test_mcx_seconds_to_close():
 def test_unknown_exchange_returns_zero():
     dt = datetime(2026, 2, 25, 10, 0, 0, tzinfo=_IST)
     assert seconds_to_close(dt, "UNKNOWN") == 0.0
+
+
+# ---- get_session_info: NSE vs MCX after NSE cash close (regression) ----
+
+
+def test_nse_post_market_after_1530_ist():
+    """After 15:30 IST, NSE calendar is POST_MARKET — no new entries."""
+    ts = "2026-04-17T16:57:00+05:30"
+    info = get_session_info(timestamp=ts, market="NSE")
+    assert info.session == "POST_MARKET"
+    assert info.allow_entry is False
+
+
+def test_mcx_afternoon_still_allows_entry_same_clock():
+    """Same wall clock: MCX afternoon session — entries allowed (not NSE POST_MARKET)."""
+    ts = "2026-04-17T16:57:00+05:30"
+    info = get_session_info(timestamp=ts, market="MCX")
+    assert info.session == "MCX_AFTERNOON"
+    assert info.allow_entry is True

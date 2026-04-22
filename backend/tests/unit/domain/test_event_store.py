@@ -13,10 +13,8 @@ from app.domain.trading.events import (
 from app.domain.trading.event_store import (
     InMemoryEventStore,
     EventBus,
+    EventSystem,
     ReplayEngine,
-    get_event_bus,
-    get_event_store,
-    initialize_event_system,
     DuplicateEventError,
 )
 
@@ -225,7 +223,9 @@ class TestEventBus:
 
     def test_publish_to_store(self):
         """Events are persisted to event store."""
-        bus, store = initialize_event_system("memory")
+        system = EventSystem("memory")
+        store = system.event_store  # Get store first so bus can reference it
+        bus = system.event_bus
 
         event = FillReceived(
             trade_id="T1",
@@ -247,7 +247,9 @@ class TestEventBus:
         but skips persistence of duplicates. This is by design - handlers
         may need to see duplicate notifications for reconciliation.
         """
-        bus, store = initialize_event_system("memory")
+        system = EventSystem("memory")
+        store = system.event_store  # Get store first so bus can reference it
+        bus = system.event_bus
 
         received_count = []
 
@@ -273,11 +275,12 @@ class TestEventBus:
         assert len(received_count) == 1
         assert store.get_event_count() == 1
 
-    def test_global_bus_singleton(self):
-        """get_event_bus returns singleton."""
-        bus1 = get_event_bus()
-        bus2 = get_event_bus()
-        assert bus1 is bus2
+    def test_event_system_isolation(self):
+        """Each EventSystem instance has isolated bus and store."""
+        system1 = EventSystem("memory")
+        system2 = EventSystem("memory")
+        assert system1.event_bus is not system2.event_bus
+        assert system1.event_store is not system2.event_store
 
 
 class TestReplayEngine:

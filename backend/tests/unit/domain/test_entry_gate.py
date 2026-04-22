@@ -1,14 +1,23 @@
 """Contract tests for entry_gate.py — pure quant functions, no mocks needed."""
 
 import pytest
-from app.domain.fabio_ai.services.entry_gate import (
+from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook, OrderBookLevel, AggressivePrint
+from app.domain.fabio_ai.services.entry_gates.three_align import (
     three_align_check,
+    cluster_aggressive_prints,
+)
+from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import (
     check_confirmation_bundle,
     compute_atr,
+)
+from app.domain.fabio_ai.services.entry_gates.signal_builder import (
     build_entry_signal,
     sl_from_aggressive_print,
 )
-from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook, OrderBookLevel, AggressivePrint
+from app.domain.fabio_ai.services.entry_gates.grading import (
+    compute_grade_score,
+    check_vwap_bias,
+)
 from app.domain.trading.models.enums import SetupType, SignalType, Source
 
 
@@ -138,29 +147,29 @@ class TestSLFromAggressivePrint:
 
 class TestCheckVWAPBias:
     def test_long_below_vwap_warning(self):
-        from app.domain.fabio_ai.services.entry_gate import check_vwap_bias
+        from app.domain.fabio_ai.services.entry_gates.grading import check_vwap_bias
         result = check_vwap_bias("LONG", price=98.0, vwap=100.0, vwap_upper_2=104.0, vwap_lower_2=96.0)
         assert result["warning"] is True
         assert result["overextended"] is False
 
     def test_short_above_vwap_warning(self):
-        from app.domain.fabio_ai.services.entry_gate import check_vwap_bias
+        from app.domain.fabio_ai.services.entry_gates.grading import check_vwap_bias
         result = check_vwap_bias("SHORT", price=102.0, vwap=100.0, vwap_upper_2=104.0, vwap_lower_2=96.0)
         assert result["warning"] is True
         assert result["overextended"] is False
 
     def test_long_at_vwap_2sigma_overextended(self):
-        from app.domain.fabio_ai.services.entry_gate import check_vwap_bias
+        from app.domain.fabio_ai.services.entry_gates.grading import check_vwap_bias
         result = check_vwap_bias("LONG", price=104.0, vwap=100.0, vwap_upper_2=104.0, vwap_lower_2=96.0)
         assert result["overextended"] is True
 
     def test_short_at_vwap_minus_2sigma_overextended(self):
-        from app.domain.fabio_ai.services.entry_gate import check_vwap_bias
+        from app.domain.fabio_ai.services.entry_gates.grading import check_vwap_bias
         result = check_vwap_bias("SHORT", price=96.0, vwap=100.0, vwap_upper_2=104.0, vwap_lower_2=96.0)
         assert result["overextended"] is True
 
     def test_long_above_vwap_no_warning(self):
-        from app.domain.fabio_ai.services.entry_gate import check_vwap_bias
+        from app.domain.fabio_ai.services.entry_gates.grading import check_vwap_bias
         result = check_vwap_bias("LONG", price=101.0, vwap=100.0, vwap_upper_2=104.0, vwap_lower_2=96.0)
         assert result["warning"] is False
         assert result["overextended"] is False
@@ -177,7 +186,7 @@ class TestCheckVWAPBias:
 class TestClusterAggressivePrints:
     def test_merges_nearby(self):
         """Prints within 0.1% of each other merge into VWAP of cluster."""
-        from app.domain.fabio_ai.services.entry_gate import cluster_aggressive_prints
+        from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints
         prints = (
             AggressivePrint(price=100.0, time="t", volume=300, delta=100, side="BUY"),
             AggressivePrint(price=100.05, time="t", volume=200, delta=50, side="BUY"),
@@ -189,7 +198,7 @@ class TestClusterAggressivePrints:
 
     def test_separate_far(self):
         """Prints far apart stay as separate clusters."""
-        from app.domain.fabio_ai.services.entry_gate import cluster_aggressive_prints
+        from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints
         prints = (
             AggressivePrint(price=100.0, time="t", volume=300, delta=100, side="BUY"),
             AggressivePrint(price=105.0, time="t", volume=200, delta=50, side="BUY"),
@@ -199,7 +208,7 @@ class TestClusterAggressivePrints:
 
     def test_cap_at_5(self):
         """More than 5 clusters returns only top 5 by volume."""
-        from app.domain.fabio_ai.services.entry_gate import cluster_aggressive_prints
+        from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints
         # 7 prints far apart -> 7 clusters, capped to 5
         prints = tuple(
             AggressivePrint(price=100.0 + i * 10, time="t", volume=(i + 1) * 100, delta=50, side="BUY")
@@ -210,7 +219,7 @@ class TestClusterAggressivePrints:
 
     def test_empty(self):
         """Empty tuple returns empty list."""
-        from app.domain.fabio_ai.services.entry_gate import cluster_aggressive_prints
+        from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints
         assert cluster_aggressive_prints(()) == []
 
 
@@ -231,7 +240,7 @@ class TestThreeAlignAggressiveLevels:
 class TestImbalanceAlignment:
     def test_aligned_long_buy_imbalances(self):
         """LONG + mostly BUY imbalances -> +1."""
-        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.fabio_ai.services.entry_gates.grading import check_imbalance_alignment
         from app.domain.trading.models.value_objects import StackedImbalance
         imbalances = [
             StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
@@ -241,7 +250,7 @@ class TestImbalanceAlignment:
 
     def test_opposing_long_sell_imbalances(self):
         """LONG + mostly SELL imbalances -> -2."""
-        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.fabio_ai.services.entry_gates.grading import check_imbalance_alignment
         from app.domain.trading.models.value_objects import StackedImbalance
         imbalances = [
             StackedImbalance(direction="SELL", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
@@ -251,12 +260,12 @@ class TestImbalanceAlignment:
 
     def test_empty_imbalances(self):
         """No imbalances -> 0."""
-        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.fabio_ai.services.entry_gates.grading import check_imbalance_alignment
         assert check_imbalance_alignment("LONG", []) == 0
 
     def test_mixed_equal_imbalances(self):
         """Equal BUY and SELL -> 0."""
-        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.fabio_ai.services.entry_gates.grading import check_imbalance_alignment
         from app.domain.trading.models.value_objects import StackedImbalance
         imbalances = [
             StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
@@ -266,7 +275,7 @@ class TestImbalanceAlignment:
 
     def test_short_aligned_with_sell(self):
         """SHORT + mostly SELL imbalances -> +1."""
-        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.fabio_ai.services.entry_gates.grading import check_imbalance_alignment
         from app.domain.trading.models.value_objects import StackedImbalance
         imbalances = [
             StackedImbalance(direction="SELL", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
@@ -277,7 +286,7 @@ class TestImbalanceAlignment:
 
     def test_short_opposing_buy_imbalances(self):
         """SHORT + mostly BUY imbalances -> -2."""
-        from app.domain.fabio_ai.services.entry_gate import check_imbalance_alignment
+        from app.domain.fabio_ai.services.entry_gates.grading import check_imbalance_alignment
         from app.domain.trading.models.value_objects import StackedImbalance
         imbalances = [
             StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
@@ -297,7 +306,7 @@ class TestImbalanceAlignment:
 
 class TestCVDHardGate:
     def test_long_extreme_bearish_cvd_blocked(self):
-        from app.domain.fabio_ai.services.entry_gate import compute_grade_score
+        from app.domain.fabio_ai.services.entry_gates.grading import compute_grade_score
         tick = _tick(close=100)
         # CVD heavily opposing the LONG direction
         amt = _amt(poc=100, vah=105, val=95, cvd_slope=-55.0)
@@ -305,7 +314,7 @@ class TestCVDHardGate:
         assert score == -10
         
     def test_short_extreme_bullish_cvd_blocked(self):
-        from app.domain.fabio_ai.services.entry_gate import compute_grade_score
+        from app.domain.fabio_ai.services.entry_gates.grading import compute_grade_score
         tick = _tick(close=100)
         # CVD heavily opposing the SHORT direction
         amt = _amt(poc=100, vah=105, val=95, cvd_slope=55.0)
@@ -313,7 +322,7 @@ class TestCVDHardGate:
         assert score == -10
         
     def test_normal_cvd_passes_gate(self):
-        from app.domain.fabio_ai.services.entry_gate import compute_grade_score
+        from app.domain.fabio_ai.services.entry_gates.grading import compute_grade_score
         tick = _tick(close=100)
         # CVD is normal, does not trigger hard gate
         amt = _amt(poc=100, vah=105, val=95, cvd_slope=10.0)

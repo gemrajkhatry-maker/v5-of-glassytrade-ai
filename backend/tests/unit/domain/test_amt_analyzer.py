@@ -243,7 +243,7 @@ class TestConfirmationBundle:
 
     def test_spread_tightness_passes_tight_spread(self):
         """Tight bid-ask spread (≤5 bps) should pass spread check."""
-        from app.domain.fabio_ai.services.entry_gate import check_confirmation_bundle
+        from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import check_confirmation_bundle
 
         data = [_make_candle(100, volume=200, delta=80) for _ in range(30)]
         tick = _make_candle(100, volume=500, delta=200)
@@ -257,7 +257,7 @@ class TestConfirmationBundle:
 
     def test_spread_tightness_no_orderbook_blocks_when_others_weak(self):
         """No order book sets spread_tight = False. If others weak, it blocks."""
-        from app.domain.fabio_ai.services.entry_gate import check_confirmation_bundle
+        from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import check_confirmation_bundle
 
         data = [_make_candle(100, volume=200, delta=80) for _ in range(30)]
         # Normal volume, low delta = 0/2 for others
@@ -270,7 +270,7 @@ class TestEntryGateAuditFixes:
     """Tests for new audit fixes in entry_gate.py."""
 
     def test_min_candles_gate(self):
-        from app.domain.fabio_ai.services.entry_gate import min_candles_gate
+        from app.domain.fabio_ai.services.entry_gates.three_align import min_candles_gate
 
         data = [_make_candle(100) for _ in range(5)]
         assert min_candles_gate(data, 6) is False
@@ -278,7 +278,7 @@ class TestEntryGateAuditFixes:
         assert min_candles_gate(data, 6) is True
 
     def test_full_body_close_gate(self):
-        from app.domain.fabio_ai.services.entry_gate import full_body_close_gate
+        from app.domain.fabio_ai.services.entry_gates.three_align import full_body_close_gate
 
         # Wick-heavy candle (doji)
         doji = _make_candle(100, open_=100, high=105, low=95)
@@ -296,7 +296,7 @@ class TestEntryGateAuditFixes:
         assert full_body_close_gate(bear, 99, "SHORT") is True
 
     def test_nearest_round_number(self):
-        from app.domain.fabio_ai.services.entry_gate import nearest_round_number
+        from app.domain.fabio_ai.services.entry_gates.three_align import nearest_round_number
 
         assert nearest_round_number(6130) == 6000
         assert nearest_round_number(6350) == 6500  # 6350/500 = 12.7 -> 13*500 = 6500
@@ -621,3 +621,118 @@ class TestLiquiditySweepDetection:
 
         result = engine.update(candle, vah, val, baseline_vol)
         assert result.get("liquidity_sweep") == "SWEEP_HIGH"
+
+
+class TestSessionVsLegVABounds:
+    """Task 2.3: Session VA should always be within leg VA range."""
+
+    def test_session_va_clamped_to_leg_va(self, caplog):
+        """Session VAH/VAL should be clamped to leg VA bounds (Task 2.3)."""
+        import logging
+        caplog.set_level(logging.WARNING)
+        
+        analyzer = AMTAnalyzer()
+        
+        # Create data with a strong displacement leg
+        # First 20 candles: tight range (session VA will be small)
+        # Last 10 candles: strong displacement (leg VA will be large)
+        data = []
+        for i in range(20):
+            # Tight range around 800
+            data.append(OHLC(
+                time=f"2026-01-01T09:{i:02d}:00Z",
+                open=800.0,
+                high=802.0,
+                low=798.0,
+                close=800.0 + (i % 3),
+                volume=500,
+                delta=0,
+            ))
+        
+        # Add displacement candles (leg will form here)
+        for i in range(10):
+            data.append(OHLC(
+                time=f"2026-01-01T09:{20+i:02d}:00Z",
+                open=800.0 + i * 5,
+                high=808.0 + i * 5,
+                low=798.0 + i * 5,
+                close=805.0 + i * 5,
+                volume=1000,
+                delta=500,
+            ))
+        
+        # Run analysis
+        result = analyzer.analyze(data)
+        
+        # Session VA should encompass leg VA (session is wider or equal)
+        if result.value_area_high > 0 and result.leg_vah > 0:
+            assert result.value_area_high >= result.leg_vah - 0.01, (
+                f"Session VAH {result.value_area_high} should be >= Leg VAH {result.leg_vah}"
+            )
+        
+        if result.value_area_low > 0 and result.leg_val > 0:
+            assert result.value_area_low <= result.leg_val + 0.01, (
+                f"Session VAL {result.value_area_low} should be <= Leg VAL {result.leg_val}"
+            )
+
+
+class TestVWAPSigmaBounds:
+    """Task 2.1: VWAP sigma should stay within realistic bounds."""
+
+    def test_vwap_sigma_within_bounds(self):
+        """σ should stay -4 to +4 on synthetic data (Task 2.1)."""
+        analyzer = AMTAnalyzer()
+        
+        # Generate 60 minutes of realistic OHLC data
+        base_price = 800.0
+        data = []
+        for i in range(60):
+            # Realistic price movement (±0.5% per candle)
+            price = base_price + (i % 10 - 5) * 2.0
+            candle = OHLC(
+                time=f"2026-01-01T09:{i:02d}:00Z",
+                open=price,
+                high=price + 1.5,
+                low=price - 1.5,
+                close=price + 0.5,
+                volume=1000 + (i % 20) * 50,
+                delta=(i % 7 - 3) * 100,
+            )
+            data.append(candle)
+        
+        # Run analysis (order_book is optional)
+        result = analyzer.analyze(data)
+        
+        # Check that VWAP deviation sigma is within bounds
+        if result.vwap_deviation_sigmas is not None:
+            assert abs(result.vwap_deviation_sigmas) <= 4.0, (
+                f"VWAP sigma {result.vwap_deviation_sigmas} exceeds ±4.0 bound"
+            )
+
+    def test_vwap_std_has_minimum(self):
+        """VWAP std should have minimum value to prevent extreme sigma (Task 2.1)."""
+        analyzer = AMTAnalyzer()
+        
+        # Generate very low volatility data
+        data = []
+        for i in range(30):
+            candle = OHLC(
+                time=f"2026-01-01T09:{i:02d}:00Z",
+                open=800.0,
+                high=800.1,
+                low=799.9,
+                close=800.0,
+                volume=100,
+                delta=0,
+            )
+            data.append(candle)
+        
+        # Run analysis
+        result = analyzer.analyze(data)
+        
+        # With low volatility, sigma should still be reasonable (not > 4.0)
+        # because MIN_VWAP_STD=1.0 prevents tiny denominators
+        if result.vwap_deviation_sigmas is not None:
+            assert abs(result.vwap_deviation_sigmas) <= 4.0, (
+                f"VWAP sigma {result.vwap_deviation_sigmas} should be bounded with low vol data"
+            )

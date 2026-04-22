@@ -102,7 +102,7 @@ def run_live_checks() -> list[dict]:
     
     # Check 7: Entry Gate
     try:
-        from app.domain.fabio_ai.services.entry_gate import three_align_check
+        from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
         checks.append({
             "id": 7,
             "name": "Entry Gate",

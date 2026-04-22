@@ -13,6 +13,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from app.domain.services.candle_metrics import body as calc_body
+from app.domain.constants import CVD_SLOPE_EXTREME, D2_CVD_SLOPE_MAX
+from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import check_confirmation_bundle
+
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
 
@@ -29,7 +33,6 @@ def min_candles_gate(data: list, min_candles: int = 6) -> bool:
 
 def full_body_close_gate(tick: OHLC, break_level: float, direction: str) -> bool:
     """Fabio rule: Require full body candle close above breakout level."""
-    from app.domain.services.candle_metrics import body as calc_body
 
     body_size = calc_body(tick.open, tick.high, tick.low, tick.close)
     rng = tick.high - tick.low
@@ -135,8 +138,6 @@ def three_align_check(
 
     Returns (gate_passed, confirmation_strong[, is_second_drive]).
     """
-    from app.domain.constants import CVD_SLOPE_EXTREME, D2_CVD_SLOPE_MAX
-    from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import check_confirmation_bundle
 
     # Invalid profile values → block
     if amt_result.poc <= 0 or amt_result.value_area_high <= 0 or amt_result.value_area_low <= 0:

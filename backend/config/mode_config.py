@@ -26,6 +26,8 @@ from typing import Any, Dict, Optional
 
 import yaml
 
+from config.strategy_resolve import resolved_strategy_for_filesystem
+
 from app.config_models import SystemConfig
 from app.config_models.loader import load_config as load_system_config
 
@@ -104,20 +106,20 @@ class ModeConfigLoader:
         Returns:
             ModeConfig object with all configuration loaded
         """
+        if config_dir is None:
+            config_dir = str(Path(__file__).resolve().parent.parent / "config")
+        config_path = Path(config_dir)
+        strategy = resolved_strategy_for_filesystem(config_path, strategy)
+
         # Set environment variables for downstream loaders
         os.environ["GLASSYTRADE_ENV"] = environment
         os.environ["GLASSYTRADE_STRATEGY"] = strategy
-        
+
         # Load system config (this uses the enhanced loader with strategy support)
         system_config = load_system_config(
             config_dir=config_dir,
             strategy=strategy
         )
-        
-        # Load raw YAML files to extract scanner and exchange configs
-        if config_dir is None:
-            config_dir = str(Path(__file__).resolve().parent.parent / "config")
-        config_path = Path(config_dir)
         
         # Load base config
         base_data = {}
@@ -149,6 +151,10 @@ class ModeConfigLoader:
             **env_data.get("scanner", {}),
             **strat_data.get("scanner", {}),
         }
+        # Strategy file top-level keys consumed by ConsolidatedConfig.from_unified()
+        for extra in ("feature_flags", "amt_thresholds"):
+            if strat_data.get(extra):
+                scanner_config[extra] = strat_data[extra]
         
         # Extract exchange config (merge from all sources)
         exchange_config = {
@@ -187,15 +193,22 @@ class ModeConfigLoader:
             export GLASSYTRADE_STRATEGY=mcx_options
         """
         env = os.getenv("GLASSYTRADE_ENV", "paper")
-        strategy = os.getenv("GLASSYTRADE_STRATEGY", "mcx_options")
-        
+        raw = os.getenv("GLASSYTRADE_STRATEGY", "mcx_options")
+        config_path = Path(__file__).resolve().parent.parent / "config"
+        strategy = resolved_strategy_for_filesystem(config_path, raw)
+        if strategy != (raw or "").strip():
+            os.environ["GLASSYTRADE_STRATEGY"] = strategy
+
         logger.info(
-            "Loading configuration from environment: env=%s, strategy=%s",
+            "Loading configuration from environment: env=%s, strategy=%s (resolved from %r)",
             env,
-            strategy
+            strategy,
+            raw,
         )
-        
-        return ModeConfigLoader.load(environment=env, strategy=strategy)
+
+        return ModeConfigLoader.load(
+            environment=env, strategy=strategy, config_dir=str(config_path)
+        )
     
     @staticmethod
     def _load_secrets() -> Dict[str, str]:
@@ -207,9 +220,8 @@ class ModeConfigLoader:
         from dotenv import load_dotenv
         
         # Find .env file (search from current module location)
-        # Module is at: backend/config/mode_config.py
-        # .env is at: project_root/.env
-        env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+        # Module is at: backend/config/mode_config.py → project_root = 3 parents up
+        env_path = Path(__file__).resolve().parent.parent.parent / ".env"
         
         if env_path.exists():
             load_dotenv(env_path)

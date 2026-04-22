@@ -10,7 +10,7 @@ import pytest
 import time
 pytestmark = pytest.mark.skip(reason="Scale-in test API mismatch — cvd_confirming kwarg not in TradeManager.check_scale_in()")
 
-from app.domain.fabio_ai.services.trade_manager import TradeManager, TradeManagerConfig
+from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager, TradeManagerConfig
 
 
 class TestScaleInConditions:
