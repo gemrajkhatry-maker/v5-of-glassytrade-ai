@@ -556,7 +556,7 @@ class SessionEventRouter:
                     aggression_score=float(amt_result.aggression),
                 )
         except Exception:
-            pass  # Non-critical — tracking failure should not break pipeline
+            log.debug("AMT tracking failed (non-critical)", exc_info=True)
 
     # ----- Signal Execution -----
 

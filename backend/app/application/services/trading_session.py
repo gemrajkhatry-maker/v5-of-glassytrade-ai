@@ -834,7 +834,7 @@ class TradingSessionService:
                     event.symbol, event.tick, amt_result
                 )
         except Exception:
-            pass  # Advisory is non-critical
+            log.debug("Pre-candle advisory failed (non-critical)", exc_info=True)
 
         # Record level approaches for second drive tracking
         if hasattr(self._llm_handler, "_regime_detector"):

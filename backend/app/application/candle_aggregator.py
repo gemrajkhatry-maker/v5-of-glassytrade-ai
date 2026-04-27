@@ -94,6 +94,16 @@ class CandleAggregator:
         self._fp_accumulators[symbol] = TickFootprintAccumulator()
         self._delta_classifiers[symbol] = TickDeltaClassifier()
 
+    def remove_symbol(self, symbol: str) -> None:
+        """Clean up state for a symbol that is no longer active.
+
+        Args:
+            symbol: Trading symbol to remove
+        """
+        self._candle_states.pop(symbol, None)
+        self._fp_accumulators.pop(symbol, None)
+        self._delta_classifiers.pop(symbol, None)
+
     def _candle_start(self, ts: datetime) -> datetime:
         """Get candle start time by flooring to interval boundary.
 
