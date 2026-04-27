@@ -117,26 +117,26 @@ class MLXInferenceAdapter(ILLMInference):
                 os.environ.get("MLX_ADAPTER_PATH", "")
             )
             
-            logger.info(f"DEBUG: Resolving model architecture for {model_path}")
+            logger.debug(f"Resolving model architecture for {model_path}")
             # Detect model architecture from config.json to choose the right loader.
             # Gemma 4 26B A4B is a VLM (Gemma4ForConditionalGeneration) and MUST
             # use mlx_vlm — mlx_lm will fail or misbehave on VLM architectures.
             use_vlm = self._detect_vlm_architecture(model_path)
             if use_vlm:
-                logger.info("DEBUG: Importing mlx_vlm...")
+                logger.debug("Importing mlx_vlm...")
                 from mlx_vlm import load, generate
                 logger.info("Using mlx_vlm loader (VLM architecture detected)")
             else:
-                logger.info("DEBUG: Importing mlx_lm...")
+                logger.debug("Importing mlx_lm...")
                 from mlx_lm import load, generate
                 logger.info("Using mlx_lm loader (text-only architecture)")
 
             try:
                 import mlx.core as mx
                 self._runtime_device = str(mx.default_device())
-                logger.info(f"DEBUG: MLX device: {self._runtime_device}")
+                logger.debug(f"MLX device: {self._runtime_device}")
             except Exception as e:
-                logger.warning(f"DEBUG: Failed to get MLX device: {e}")
+                logger.warning(f"Failed to get MLX device: {e}")
                 self._runtime_device = None
 
             with MLX_GPU_LOCK:
@@ -149,9 +149,9 @@ class MLXInferenceAdapter(ILLMInference):
                     )
                 else:
                     logger.info(f"Loading MLX model from {model_path} (no adapter)...")
-                    logger.info("DEBUG: Calling load()...")
+                    logger.debug("Calling load()...")
                     self.model, self.processor = load(model_path)
-                    logger.info("DEBUG: load() finished.")
+                    logger.debug("load() finished.")
 
             self._use_vlm = use_vlm
             self._is_loading = False

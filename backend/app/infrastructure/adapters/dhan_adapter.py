@@ -433,7 +433,7 @@ class DhanMarketDataAdapter(IMarketData):
         broker = self.get_broker()
         loop = asyncio.get_event_loop()
 
-        logger.info,(
+        logger.info(
             "stream_poll: REST polling %d symbol(s) every %.1fs (MCX OPTFUT fallback)",
             len(symbols),
             poll_interval,

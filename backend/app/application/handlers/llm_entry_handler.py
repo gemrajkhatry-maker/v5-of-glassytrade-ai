@@ -10,12 +10,21 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import re
 import threading
 import time
 from dataclasses import replace as _replace
 from datetime import datetime, timedelta, timezone
 import queue
 from typing import TYPE_CHECKING, Callable, Optional
+
+# Compiled regex patterns for _sanitize_rationale (avoid per-call compilation)
+_UNCLOSED_JSON_RE = re.compile(r'\{[^}]{0,100}$')
+_ORPHANED_BRACE_RE = re.compile(r'\}[^{]{0,50}')
+_TRAILING_JSON_RE = re.compile(r'[\[{}\]"]\s*$')
+_WHITESPACE_RE = re.compile(r'\s+')
+
+from app.shared.symbol_utils import detect_option_type
 
 from app.domain.trading.models.enums import (
     MarketStateCodec,
@@ -180,21 +189,6 @@ class LLMEntryHandler:
         return "; ".join(parts)
 
     @staticmethod
-    def _detect_option_type(symbol: str) -> str:
-        """Detect whether symbol is CALL, PUT, or UNKNOWN.
-        
-        Fix 1: Used for direction labeling to clarify BUY/SELL action.
-        """
-        if not symbol:
-            return "UNKNOWN"
-        symbol_upper = symbol.upper()
-        if "CALL" in symbol_upper or "CE" in symbol_upper:
-            return "CALL"
-        if "PUT" in symbol_upper or "PE" in symbol_upper:
-            return "PUT"
-        return "UNKNOWN"
-
-    @staticmethod
     def _get_amt_time_window(ist_now) -> dict:
         """Get current AMT time window for timing transparency.
         
@@ -345,7 +339,7 @@ class LLMEntryHandler:
             "poc_signal": amt_result.poc_signal, "poc_vs_price": amt_result.poc_vs_price,
             "lvn_play": amt_result.lvn_play, "is_second_drive": is_second_drive,
             # Fix 1: Option type detection for direction labeling
-            "option_type": self._detect_option_type(symbol),
+            "option_type": detect_option_type(symbol),
             # Fix 4: AMT time window for timing transparency
             "amt_time_window": self._get_amt_time_window(ist_now),
         }
@@ -423,7 +417,6 @@ class LLMEntryHandler:
         Returns:
             Clean rationale text suitable for UI display and database storage
         """
-        import re
         import json
         
         if not raw_rationale:
@@ -457,17 +450,17 @@ class LLMEntryHandler:
                     pass
         
         # Remove JSON-like artifacts at the end (truncated JSON)
-        text = re.sub(r'\{[^}]{0,100}$', '', text)  # Remove unclosed JSON at end
-        text = re.sub(r'^[^{]{0,50\}', '', text)  # Remove orphaned closing brace at start
+        text = _UNCLOSED_JSON_RE.sub('', text)  # Remove unclosed JSON at end
+        text = _ORPHANED_BRACE_RE.sub('', text)  # Remove orphaned closing brace
         
         # Remove trailing JSON fragments
-        text = re.sub(r'[\[{}\]"]\s*$', '', text)
+        text = _TRAILING_JSON_RE.sub('', text)
         
         # Remove escaped characters
         text = text.replace('\\n', ' ').replace('\\t', ' ').replace('\\"', '"')
         
         # Clean up whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
+        text = _WHITESPACE_RE.sub(' ', text).strip()
         
         # If text is now empty, return generic message
         if not text:

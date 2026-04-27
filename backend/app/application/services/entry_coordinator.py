@@ -49,7 +49,7 @@ class EntryCoordinator:
         self,
         broker: IBroker,
         lifecycle_handler: TradeLifecycleHandler,
-        event_logger: EventLogger,
+        event_logger: SessionEventLogger,
         storage: IStorage | None,
         risk_coordinator,
         option_selector,

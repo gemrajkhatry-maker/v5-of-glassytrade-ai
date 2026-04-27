@@ -983,7 +983,7 @@ class TradingSessionService:
 
         # Record tick-to-signal latency
         if self._latency_tracker:
-            elapsed_ms = (_tick_time.monotonic() - _tick_start) * 1000
+            elapsed_ms = (time.monotonic() - _tick_start) * 1000
             self._latency_tracker.record(event.symbol, elapsed_ms)
 
     def _execute_signal(self, symbol: str, sig, session: SessionState) -> None:

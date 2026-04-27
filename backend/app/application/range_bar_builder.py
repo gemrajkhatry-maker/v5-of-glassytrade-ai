@@ -222,9 +222,9 @@ class RangeBarBuilder:
         self._next_ts += 60
         self._bars.append(bar)
 
-        # Trim old bars
+        # Trim old bars (in-place to avoid list copy)
         if len(self._bars) > self._max_bars:
-            self._bars = self._bars[-self._max_bars :]
+            del self._bars[:-self._max_bars]
 
         # Update volume profile
         # Use tick-sized price buckets

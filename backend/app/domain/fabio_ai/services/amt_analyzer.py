@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import deque
 from datetime import datetime
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
 from app.domain.fabio_ai.services import mlx_compute as mc
+from app.shared.symbol_utils import detect_option_type
 
 from app.domain.trading.models.enums import MarketState, SignalType, Source, SetupType
 from app.domain.trading.models.value_objects import (
@@ -92,7 +94,6 @@ from app.domain.services.displacement_detector import (
     detect_displacement,
     detect_acceptance,
 )
-from app.domain.services.signal_generator import SignalGenerator
 from app.domain.fabio_ai.services.opening_classifier import OpeningTypeClassifier
 from app.domain.fabio_ai.services.mtf_analyzer import MultiTimeframeAMTAnalyzer
 
@@ -179,7 +180,6 @@ from app.domain.services.lvn_detector import (
 def find_lvns(
     profile: list[VolumeProfileLevel],
     cfg: AMTConfig | None = None,
-    smoothed: list[float] | None = None,
 ) -> list[float]:
     """Thin wrapper — extracts prices from LVNLevel objects."""
     cfg = cfg or AMTConfig()
@@ -196,7 +196,6 @@ def find_lvns(
 def find_hvns(
     profile: list[VolumeProfileLevel],
     cfg: AMTConfig | None = None,
-    smoothed: list[float] | None = None,
 ) -> list[float]:
     """Thin wrapper — extracts prices from HVNLevel objects."""
     cfg = cfg or AMTConfig()
@@ -266,7 +265,7 @@ class AMTAnalyzer:
         self._vwap_cum_sq_vol: float = 0.0  # Σ((TP - shift)² × volume)
         self._vwap_shift: float = 0.0  # Reference price for numerically stable variance
         # Price deviations for proper VWAP std calculation (Task 2.1)
-        self._vwap_price_deviations: list[float] = []
+        self._vwap_price_deviations: deque = deque(maxlen=500)
         # Initial Balance tracker
         self._ib_tracker = InitialBalanceEngine(ib_minutes=IB_MINUTES)
         # Sticky IB break state (survives price re-entry into IB)
@@ -280,8 +279,6 @@ class AMTAnalyzer:
         # New modules (Phases 3-5)
         self._drive_tracker = DriveTracker()
         self._opening_classifier = OpeningTypeClassifier()
-        # MTFAnalyzer removed - uses MultiTimeframeAMTAnalyzer in configure() instead
-        # self._mtf_analyzer = MTFAnalyzer()  # This class doesn't exist, causes NameError
         # Initialize LVN tracker here to avoid AttributeError if configure() not called
         from app.domain.constants import LVN_MIN_PERSISTENCE_BARS, LVN_REMOVAL_THRESHOLD
         self._lvn_tracker = LVNPersistenceTracker(
@@ -294,21 +291,6 @@ class AMTAnalyzer:
         self._ofi_calculator = OFICalculator()
         self._absorption_detector = AbsorptionDetector()
         self._persistent_agg_scorer = PersistentAggressionScorer()
-
-    @staticmethod
-    def _detect_option_type(symbol: str) -> str:
-        """Detect whether symbol is CALL, PUT, or UNKNOWN.
-        
-        Fix 1: Used for direction labeling in frontend.
-        """
-        if not symbol:
-            return "UNKNOWN"
-        symbol_upper = symbol.upper()
-        if "CALL" in symbol_upper or "CE" in symbol_upper:
-            return "CALL"
-        if "PUT" in symbol_upper or "PE" in symbol_upper:
-            return "PUT"
-        return "UNKNOWN"
 
     def detect_displacement_leg(self, data: list[OHLC]) -> dict:
         """Detect displacement and return leg profile data.
@@ -1308,7 +1290,7 @@ class AMTAnalyzer:
             is_extreme_deviation=state_result.is_extreme_deviation,
             underlying_price=float(data[-1].close) if data else 0.0,
             # Fix 1: Option type for direction labeling
-            option_type=self._detect_option_type(symbol),
+            option_type=detect_option_type(symbol),
         )
 
     # -------------------------------------------------------------------

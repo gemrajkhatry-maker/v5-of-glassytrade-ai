@@ -33,10 +33,6 @@ class ScaleManager:
     SCALE_STEP_2_FRACTION = 0.30  # Add 30% on confirmation
     SCALE_STEP_3_FRACTION = 0.30  # Add 30% on breakout
 
-    def __init__(self):
-        """Initialize scale manager."""
-        pass
-
     def check_scale_in(
         self,
         position: "Position",

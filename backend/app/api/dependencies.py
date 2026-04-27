@@ -36,12 +36,6 @@ def get_gen_ai_service(request: Request):
     return request.app.state.service_graph.get(GenerativeAIService)
 
 
-def get_amt_analysis_service(request: Request):
-    """Dependency: AMT analysis service."""
-    from app.domain.services.amt_analysis_service import AMTAnalysisService
-    return request.app.state.service_graph.get(AMTAnalysisService)
-
-
 def get_volume_profile_service(request: Request):
     """Dependency: Volume profile service."""
     from app.domain.services.volume_profile_service import VolumeProfileService
