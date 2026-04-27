@@ -105,7 +105,7 @@ def parse_post_trade_response(raw_response: str) -> dict[str, Any]:
                 "mistake": str(parsed.get("mistake", "none")),
                 "improvement": str(parsed.get("improvement", "")),
             }
-    except (json.JSONDecodeError, ValueError, TypeError):
+    except (_json.JSONDecodeError, ValueError, TypeError):
         pass
 
     return {

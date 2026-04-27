@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer, IncrementalVolumeProfile
@@ -15,7 +15,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from dataclasses import dataclass
+
 from app.shared.timezones import IST
+
+
+@dataclass
+class FloatOHLC:
+    """Float-based OHLC for high-speed AMT analysis (avoids Decimal overhead)."""
+    time: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    vwap: float
+    taker_buy_volume: float
+    delta: float
 
 
 def _filter_today_session(data: list) -> list:
@@ -64,14 +80,8 @@ class AMTHandler:
         self._cached_profile: list | None = None
         self._cached_leg_profile: list | None = None
 
-    def _to_float_ohlc(self, data: list[OHLC]) -> list[Any]:
+    def _to_float_ohlc(self, data: list[OHLC]) -> list[FloatOHLC]:
         """Convert Decimal-based OHLC to float-based for high-speed AMT analysis."""
-        from dataclasses import make_dataclass
-        FloatOHLC = make_dataclass("FloatOHLC", [
-            ("time", str), ("open", float), ("high", float), ("low", float),
-            ("close", float), ("volume", float), ("vwap", float),
-            ("taker_buy_volume", float), ("delta", float)
-        ])
         return [
             FloatOHLC(
                 time=str(c.time),

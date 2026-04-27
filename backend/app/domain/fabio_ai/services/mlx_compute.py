@@ -1,8 +1,13 @@
 """Vectorized compute primitives — pure Python optimized for per-tick hot path.
 
-MLX GPU acceleration available for batch operations (>500 elements) via
-`batch_*` variants.  Per-tick operations use optimized pure Python since
-list→mx.array conversion overhead dominates for small arrays (<100 elements).
+MLX GPU acceleration is CURRENTLY DISABLED due to Metal GPU initialization
+crashes on this system. All computations use optimized pure Python.
+
+To re-enable MLX:
+  1. Install mlx: pip install mlx
+  2. Remove the mx = None / _HAS_MLX = False overrides below
+  3. Implement _ensure_mlx() to import mlx and return True
+  4. Verify batch_* functions work with MLX arrays
 
 On M1 Max: pure Python is ~20x faster than MLX for 100-element arrays.
 MLX wins at 5000+ elements (training pipelines, batch indicator computation).

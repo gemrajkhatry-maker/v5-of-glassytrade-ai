@@ -108,6 +108,59 @@ async def health_check(request: Request):
     return {"status": overall, "checks": checks}
 
 
+@router.get("/health/ready")
+async def readiness_check(request: Request):
+    """Readiness probe — checks if the system is ready to accept trading traffic.
+
+    Unlike /health (which checks current health), this verifies:
+    - Database connection is operational
+    - LLM model is loaded and ready
+    - Trading engine is running
+    - Active symbols are configured
+    """
+    try:
+        graph = request.app.state.service_graph
+    except Exception:
+        return {"status": "not_ready", "reason": "Service graph unavailable"}
+
+    checks: dict[str, str] = {}
+
+    # Database
+    try:
+        graph.storage.kv_set("_readiness_check", "1")
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+
+    # LLM
+    try:
+        llm_ready = getattr(graph.llm_inference, 'is_ready', lambda: False)()
+        checks["llm"] = "ok" if llm_ready else "not_loaded"
+    except Exception as e:
+        checks["llm"] = f"error: {e}"
+
+    # Trading engine
+    try:
+        engine = getattr(graph, "engine", None)
+        running = getattr(engine, "_running", False) if engine else False
+        checks["engine"] = "ok" if running else "not_started"
+    except Exception as e:
+        checks["engine"] = f"error: {e}"
+
+    # Active symbols
+    try:
+        symbols = getattr(graph, "active_symbols", []) or []
+        checks["symbols"] = f"ok ({len(symbols)} symbols)" if symbols else "none_configured"
+    except Exception as e:
+        checks["symbols"] = f"error: {e}"
+
+    # Overall: all checks must be ok
+    all_ok = all(v == "ok" or v.startswith("ok") for v in checks.values())
+    status = "ready" if all_ok else "not_ready"
+
+    return {"status": status, "checks": checks}
+
+
 @router.get("/v1/metrics")
 async def metrics():
     """Return current pipeline metrics."""

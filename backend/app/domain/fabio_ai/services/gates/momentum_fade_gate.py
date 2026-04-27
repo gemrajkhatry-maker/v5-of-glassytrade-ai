@@ -62,7 +62,7 @@ class MomentumFadeGate(EntryGate):
         body_size = calc_body(tick.open, tick.high, tick.low, tick.close)
         candle_range = tick.high - tick.low
 
-        if candle_range <= 0 or body < (candle_range * 0.70):
+        if candle_range <= 0 or body_size < (candle_range * 0.70):
             return GateResult(
                 passed=True,
                 gate_name=self.name,
@@ -75,7 +75,7 @@ class MomentumFadeGate(EntryGate):
 
         # Block SHORT entries against strong BULLISH momentum (no rejection wick)
         if direction == "SHORT" and tick.close > tick.open:
-            if upper_wick < (body * 0.3):
+            if upper_wick < (body_size * 0.3):
                 return GateResult(
                     passed=False,
                     gate_name=self.name,
@@ -86,7 +86,7 @@ class MomentumFadeGate(EntryGate):
 
         # Block LONG entries against strong BEARISH momentum (no rejection wick)
         if direction == "LONG" and tick.close < tick.open:
-            if lower_wick < (body * 0.3):
+            if lower_wick < (body_size * 0.3):
                 return GateResult(
                     passed=False,
                     gate_name=self.name,

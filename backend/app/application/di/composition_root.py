@@ -14,6 +14,8 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+from app.shared.mode import is_live_mode
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -129,7 +131,7 @@ def _create_market_data_adapter(container: DIContainer, config: "Configuration")
 
 
 def _create_broker_adapter(container: DIContainer, config: "Configuration"):
-    live_mode = _is_live_mode()
+    live_mode = is_live_mode()
     if live_mode:
         from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter
         return DhanBrokerAdapter(config)
@@ -174,7 +176,7 @@ def _create_probability_adapter(container: DIContainer, config: "Configuration")
         from app.infrastructure.adapters.lgbm_probability_adapter import LGBMProbabilityAdapter
         return LGBMProbabilityAdapter(model_dir)
     except Exception as exc:
-        if _is_live_mode():
+        if is_live_mode():
             raise RuntimeError(
                 "Probability model failed in live mode"
             ) from exc
@@ -238,7 +240,3 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
     )
 
 
-def _is_live_mode() -> bool:
-    env_mode = (os.getenv("GLASSYTRADE_ENV", "") or "").strip().lower()
-    trading_mode = (os.getenv("TRADING_MODE", "") or "").strip().lower()
-    return env_mode == "live" or trading_mode == "live"

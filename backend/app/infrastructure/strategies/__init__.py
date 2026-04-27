@@ -1,6 +1,5 @@
-"""Infrastructure exchange strategy implementations."""
+"""Infrastructure exchange strategy implementations.
 
-from app.infrastructure.strategies.nse_strategy import NSEExchangeStrategy
-from app.infrastructure.strategies.mcx_strategy import MCXExchangeStrategy
-
-__all__ = ["NSEExchangeStrategy", "MCXExchangeStrategy"]
+NOTE: NSEExchangeStrategy and MCXExchangeStrategy have been removed.
+Exchange strategies are now resolved via config_models.exchange_config.
+"""

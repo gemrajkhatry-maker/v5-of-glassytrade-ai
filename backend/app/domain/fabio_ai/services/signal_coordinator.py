@@ -179,31 +179,6 @@ class SignalCoordinator:
                     setup_type="NONE",
                 )
 
-        # 5. Conviction assessment — aligned with run_entry threshold (0.55)
-        if agent_prob >= CONFIDENCE_HIGH_THRESHOLD:
-            conviction = "HIGH"
-            should_enter = True
-        elif agent_prob >= AGENT_DECISION_THRESHOLD:
-            conviction = "MEDIUM"
-            should_enter = True  # run_entry allows P >= 0.55
-        elif agent_prob >= CONFIDENCE_LOW_THRESHOLD:
-            conviction = "LOW"
-            should_enter = True  # Allow with warning
-        else:
-            conviction = "NONE"
-            should_enter = False
-
-        if not should_enter:
-            return EntryEvaluation(
-                should_enter=False,
-                direction="FLAT",
-                probability=agent_prob,
-                timing="SKIP",
-                reason=f"Insufficient conviction (P={agent_prob:.3f})",
-                conviction=conviction,
-                setup_type="NONE",
-            )
-
         # 6. Determine setup type
         if amt_result.market_state == "BALANCED":
             setup_type = "MEAN_REVERSION"

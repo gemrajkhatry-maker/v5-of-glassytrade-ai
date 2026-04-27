@@ -3,6 +3,8 @@ import logging
 from config.consolidated import ConsolidatedConfig as Configuration
 import os
 
+from app.shared.mode import is_live_mode
+
 from app.domain.ports import (
     IMarketData,
     IBroker,
@@ -135,12 +137,6 @@ class ServiceGraph:
         if hasattr(_ts, "set_futures_option_map"):
             _ts.set_futures_option_map(self._fut_to_options)
 
-    @staticmethod
-    def _is_live_mode() -> bool:
-        env_mode = (os.getenv("GLASSYTRADE_ENV", "") or "").strip().lower()
-        trading_mode = (os.getenv("TRADING_MODE", "") or "").strip().lower()
-        return env_mode == "live" or trading_mode == "live"
-
     def _resolve_probability_engine(self):
         from app.domain.ports import IProbabilityInference
         from app.domain.ports.probability_inference import NoOpProbabilityAdapter
@@ -156,7 +152,7 @@ class ServiceGraph:
             # which might segfault on some systems.
             return self.get(IProbabilityInference)
         except (Exception, ImportError, RuntimeError) as exc:
-            if self._is_live_mode():
+            if is_live_mode():
                 # In live mode we still might want it, but if it segfaults, 
                 # we have no choice but to fallback or fail.
                 logger.error("CRITICAL: Probability engine failed in live mode: %s", exc)
@@ -303,7 +299,7 @@ class ServiceGraph:
                 e,
                 exc_info=True,
             )
-            if self._is_live_mode():
+            if is_live_mode():
                 raise RuntimeError(
                     "TradingSessionService creation failed in live mode."
                 ) from e
@@ -347,7 +343,7 @@ class ServiceGraph:
                 try:
                     return impl(model_dir)
                 except Exception as exc:
-                    if self._is_live_mode():
+                    if is_live_mode():
                         raise RuntimeError(
                             "LGBM probability model initialization failed in live mode."
                         ) from exc

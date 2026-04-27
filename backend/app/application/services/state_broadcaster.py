@@ -285,7 +285,7 @@ class StateBroadcaster:
             state["_symbol"] = symbol
             # Lazy import to avoid circular dependency
             from app.application.engine import _depth_to_dto
-            state["depth"] = _depth_to_dto(current_depth.get("book") if current_depth else None)
+            state["depth"] = _depth_to_dto(current_depth.get("book") if current_depth else None, symbol=symbol)
 
             # Range bars (visualization)
             if range_builder_dict:

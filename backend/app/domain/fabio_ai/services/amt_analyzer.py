@@ -85,7 +85,6 @@ from app.domain.services.initial_balance_engine import InitialBalanceEngine
 from app.domain.services.break_detector import (
     detect_break,
     check_ib_break_tick,
-    check_ib_break_tick,
 )
 from app.domain.services.lvn_play_detector import detect_lvn_play
 from app.domain.services.volume_profile import create_profile

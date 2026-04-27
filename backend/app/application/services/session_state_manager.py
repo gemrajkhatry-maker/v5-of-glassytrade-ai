@@ -28,6 +28,16 @@ from app.shared.timezones import IST
 logger = logging.getLogger(__name__)
 
 
+def _default_portfolio():
+    from app.domain.trading.models.aggregates import Portfolio
+    return Portfolio.create_default()
+
+
+def _default_learning_engine():
+    from app.domain.fabio_ai.services.learning_engine import LearningEngine
+    return LearningEngine()
+
+
 @dataclass
 class SessionState:
     """Mutable per-symbol state."""
@@ -35,16 +45,8 @@ class SessionState:
     symbol: str = ""
     data: list[OHLC] = field(default_factory=list)
     order_book: OrderBook | None = None
-    portfolio: Portfolio = field(
-        default_factory=lambda: __import__(
-            "app.domain.trading.models.aggregates", fromlist=["Portfolio"]
-        ).Portfolio.create_default()
-    )
-    learning: LearningEngine = field(
-        default_factory=lambda: __import__(
-            "app.domain.fabio_ai.services.learning_engine", fromlist=["LearningEngine"]
-        ).LearningEngine()
-    )
+    portfolio: Portfolio = field(default_factory=_default_portfolio)
+    learning: LearningEngine = field(default_factory=_default_learning_engine)
 
     # Cached latest results for query access
     last_amt: dict | None = None

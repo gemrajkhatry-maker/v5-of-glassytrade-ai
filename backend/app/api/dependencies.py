@@ -42,12 +42,6 @@ def get_amt_analysis_service(request: Request):
     return request.app.state.service_graph.get(AMTAnalysisService)
 
 
-def get_gate_pipeline(request: Request):
-    """Dependency: Gate pipeline."""
-    from app.domain.services.gate_pipeline import GatePipeline
-    return request.app.state.service_graph.get(GatePipeline)
-
-
 def get_volume_profile_service(request: Request):
     """Dependency: Volume profile service."""
     from app.domain.services.volume_profile_service import VolumeProfileService

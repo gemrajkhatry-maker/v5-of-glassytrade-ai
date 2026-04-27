@@ -10,7 +10,7 @@ import os
 import time
 import json
 import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Any
 from pathlib import Path
 

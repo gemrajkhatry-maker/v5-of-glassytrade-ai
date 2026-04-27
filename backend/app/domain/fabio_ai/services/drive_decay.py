@@ -112,7 +112,7 @@ class DriveDecay:
         """
         from app.domain.services.tick_utils import round_to_tick
 
-        bucket = round_to_tick(level, tick_size)
+        bucket = round_to_tick(level, record["tick_size"])
         record = self._drive_1_records.get(bucket)
 
         if record is None:
@@ -168,7 +168,7 @@ class DriveDecay:
             reason=reason,
         )
 
-    def clear_level(self, level: float) -> None:
+    def clear_level(self, level: float, tick_size: float = 0.05) -> None:
         """Clear Drive 1 record for a level (e.g., on session reset)."""
         from app.domain.services.tick_utils import round_to_tick
 

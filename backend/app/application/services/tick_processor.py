@@ -277,7 +277,7 @@ class TickProcessor:
             "ltp": ltp,
             "oi": oi,
             "_symbol": symbol,
-            "depth": _depth_to_dto(current_depth),
+            "depth": _depth_to_dto(current_depth, symbol=symbol),
         }
 
         try:

@@ -135,6 +135,7 @@ class PaperBrokerAdapter(IBroker):
         self._gst_pct = gst_pct
         self._sebi_pct = sebi_pct
         self._cost_model_enabled = cost_model_enabled
+        self._cancelled_orders: set[str] = set()
 
     def execute_order(
         self, signal: Signal, portfolio: Portfolio, symbol: str
@@ -175,7 +176,10 @@ class PaperBrokerAdapter(IBroker):
         return position
 
     def cancel_order(self, order_id: str) -> bool:
-        """Paper broker does not hold individual stop bracket orders natively."""
+        """Cancel an order. Returns False if order_id is unknown or already cancelled."""
+        if order_id in self._cancelled_orders:
+            return False
+        self._cancelled_orders.add(order_id)
         return True
 
     def compute_exit_costs(

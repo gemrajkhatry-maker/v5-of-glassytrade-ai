@@ -47,11 +47,30 @@ logger = logging.getLogger(__name__)
 from app.shared.timezones import IST
 
 
-def _depth_to_dto(book: OrderBook | None) -> dict | None:
-    """Convert OrderBook to DTO dict for JSON serialization."""
+_depth_cache: dict[str, tuple[int, dict | None]] = {}
+
+
+def _depth_to_dto(book: OrderBook | None, symbol: str = "") -> dict | None:
+    """Convert OrderBook to DTO dict for JSON serialization.
+
+    Caches result per symbol; only recomputes when depth hash changes.
+    """
     if not book:
+        if symbol:
+            _depth_cache.pop(symbol, None)
         return None
-    return {
+
+    # Quick hash of depth to detect changes
+    depth_hash = hash((
+        tuple((l.price, l.quantity) for l in book.bids[:20]),
+        tuple((l.price, l.quantity) for l in book.asks[:20]),
+    ))
+
+    cached = _depth_cache.get(symbol)
+    if cached and cached[0] == depth_hash:
+        return cached[1]
+
+    result = {
         "bids": [
             {"price": float(l.price), "quantity": float(l.quantity)}
             for l in book.bids[:20]
@@ -61,6 +80,9 @@ def _depth_to_dto(book: OrderBook | None) -> dict | None:
             for l in book.asks[:20]
         ],
     }
+    if symbol:
+        _depth_cache[symbol] = (depth_hash, result)
+    return result
 
 
 class TradingEngine:
@@ -458,7 +480,8 @@ class TradingEngine:
                     state["oi"] = oi
                     state["_symbol"] = pkt_symbol
                     state["depth"] = _depth_to_dto(
-                        self._current_depths[pkt_symbol]["book"]
+                        self._current_depths[pkt_symbol]["book"],
+                        symbol=pkt_symbol,
                     )
 
                     # Overlay footprint

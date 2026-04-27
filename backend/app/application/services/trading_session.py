@@ -22,6 +22,7 @@ import time
 from typing import TYPE_CHECKING
 
 from app.config import settings
+from app.shared.mode import is_live_mode
 from app.domain.constants import (
     AGENT_DECISION_THRESHOLD,
     CONFIDENCE_HIGH_THRESHOLD,
@@ -121,9 +122,7 @@ class TradingSessionService:
         signal_tracker=None,  # SignalTracker (from app.api) — gate rejection history
         event_bus: EventBus | None = None,  # Event bus for pub/sub pipeline
     ) -> None:
-        env_mode = (os.getenv("GLASSYTRADE_ENV", "") or "").strip().lower()
-        trading_mode = (os.getenv("TRADING_MODE", "") or "").strip().lower()
-        live_mode = env_mode == "live" or trading_mode == "live"
+        live_mode = is_live_mode()
 
         if probability_engine is None and live_mode:
             raise ValueError(
