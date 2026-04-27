@@ -59,12 +59,14 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const totalSize = openPositions.reduce((sum, p) => sum + (p.size || 0), 0);
 
     const isDead = inst.genAIAnalysis?.rationale?.includes('DEAD') || inst.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
-    const prob = inst.agentDecision?.probability || 0;
-    const timing = inst.agentDecision?.timing || 'SKIP';
-    const mode = inst.amtAnalysis?.marketState || 'BALANCED';
+    const hasAnalysis = inst.agentDecision !== null && inst.amtAnalysis !== null;
+    const prob = inst.agentDecision?.probability ?? 0;
+    const timing = inst.agentDecision?.timing ?? 'SKIP';
+    const mode = inst.amtAnalysis?.marketState ?? 'BALANCED';
     const modeAbbr = (mode || 'BAL').substring(0, 3).toUpperCase();
-    const actionLabel =
-        timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing === 'SKIP' ? 'SKIP' : (timing || '—').slice(0, 6);
+    const actionLabel = hasAnalysis
+        ? (timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing === 'SKIP' ? 'SKIP' : (timing || '—').slice(0, 6))
+        : '...';
 
     return (
         <button
@@ -109,7 +111,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                     <span className="text-[9px] font-bold text-emerald-400 font-mono truncate">
                         OPEN · {totalSize.toFixed(0)}L
                     </span>
-                ) : !hasData ? (
+                ) : !hasData || !hasAnalysis ? (
                     <span className="h-4 w-full max-w-[5.5rem] rounded bg-white/10 animate-pulse" />
                 ) : (
                     <span
@@ -139,7 +141,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                     <span className={`text-[10px] font-mono font-bold ${totalPnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                         {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(0)}
                     </span>
-                ) : !hasData ? (
+                ) : !hasData || !hasAnalysis ? (
                     <>
                         <span className="h-2 w-8 rounded bg-white/10 animate-pulse" />
                         <div className="w-full h-0.5 bg-white/10 rounded-full overflow-hidden">
@@ -220,7 +222,10 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
             const isDeadA = instA.genAIAnalysis?.rationale?.includes('DEAD') || instA.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
             const isDeadB = instB.genAIAnalysis?.rationale?.includes('DEAD') || instB.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
 
-            // 0. Dead markets always at the bottom
+            // 0. Dead or no-analysis symbols always at the bottom
+            const noAnalysisA = !instA.agentDecision || !instA.amtAnalysis;
+            const noAnalysisB = !instB.agentDecision || !instB.amtAnalysis;
+            if (noAnalysisA !== noAnalysisB) return noAnalysisA ? 1 : -1;
             if (isDeadA !== isDeadB) return isDeadA ? 1 : -1;
 
             const pA = instA.agentDecision?.probability || 0;
