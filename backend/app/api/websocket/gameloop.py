@@ -47,6 +47,21 @@ async def _safe_send(ws: WebSocket, data: dict) -> bool:
         return False
 
 
+def _deep_equal(a: object, b: object) -> bool:
+    """Deep equality check for nested dicts/lists used in delta compression."""
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        if len(a) != len(b):
+            return False
+        return all(k in b and _deep_equal(v, b[k]) for k, v in a.items())
+    if isinstance(a, (list, tuple)):
+        if len(a) != len(b):
+            return False
+        return all(_deep_equal(x, y) for x, y in zip(a, b))
+    return a == b
+
+
 def _compute_delta(prev: dict | None, current: dict) -> dict:
     if prev is None:
         return current
@@ -55,7 +70,7 @@ def _compute_delta(prev: dict | None, current: dict) -> dict:
     for key, value in current.items():
         if key.startswith("_"):
             continue
-        if prev.get(key) != value:
+        if not _deep_equal(prev.get(key), value):
             delta[key] = value
             changed = True
     return delta if changed else {}

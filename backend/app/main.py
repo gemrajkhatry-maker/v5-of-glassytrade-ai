@@ -126,6 +126,7 @@ def create_application() -> FastAPI:
             logger.info("Trading engine started — backend trades independently of frontend.")
         except Exception:
             logger.error("Trading engine failed to start!", exc_info=True)
+            app.state.engine_start_failed = True
         
         logger.info("Application started successfully")
         

@@ -56,6 +56,10 @@ def detect_market_state(
     leg_vah: float = 0.0,
     leg_val: float = 0.0,
     vwap_deviation_sigmas: float | None = None,
+    ib_break_direction: str = "",  # "UP" / "DOWN" / ""
+    ib_complete: bool = False,
+    ib_high: float = 0.0,
+    ib_low: float = 0.0,
 ) -> MarketStateResult:
     """Fabio's 4-state market state classification (FR-04).
 
@@ -76,6 +80,40 @@ def detect_market_state(
     va_range = max(effective_vah - effective_val, tick_size)
     
     is_extreme = vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) >= 3.0
+
+    # IB BREAK OVERRIDE: When IB break is confirmed and price is beyond IB level,
+    # force PROBING (or IMBALANCED if displacement+acceptance present).
+    # This connects the IB break detection pipeline to mode classification.
+    if ib_complete and ib_break_direction:
+        break_confirmed = (
+            (ib_break_direction == "UP" and ib_high > 0 and price >= ib_high)
+            or (ib_break_direction == "DOWN" and ib_low > 0 and price <= ib_low)
+        )
+        if break_confirmed:
+            if has_displacement and has_acceptance:
+                direction_label = "above" if ib_break_direction == "UP" else "below"
+                return MarketStateResult(
+                    state=MarketState.IMBALANCED,
+                    zone="OUTSIDE_VA",
+                    confidence=0.90,
+                    trigger=f"IB break {direction_label} IB {('high' if ib_break_direction == 'UP' else 'low')} {ib_high if ib_break_direction == 'UP' else ib_low:.2f} with displacement + acceptance",
+                    has_displacement=has_displacement,
+                    has_acceptance=has_acceptance,
+                    balance_ratio=balance_ratio,
+                    is_extreme_deviation=is_extreme,
+                )
+            else:
+                direction_label = "above" if ib_break_direction == "UP" else "below"
+                return MarketStateResult(
+                    state=MarketState.PROBING,
+                    zone="OUTSIDE_VA",
+                    confidence=0.75,
+                    trigger=f"IB break confirmed: price {direction_label} IB {('high' if ib_break_direction == 'UP' else 'low')} {ib_high if ib_break_direction == 'UP' else ib_low:.2f} — awaiting displacement",
+                    has_displacement=has_displacement,
+                    has_acceptance=has_acceptance,
+                    balance_ratio=balance_ratio,
+                    is_extreme_deviation=is_extreme,
+                )
 
     # GATE 3: NO_TRADE — dead zone around effective POC (FR-04-01)
     # FABIO FIX: If has_displacement is TRUE, we skip NO_TRADE. 

@@ -411,6 +411,13 @@ class TestAnalyzeIntegration:
             "BREAKOUT_UP",
             "BREAKOUT_DOWN",
             "TRANSITION",
+            # Fabio AMT: VAH probe states
+            "VAH_PROBE_EXHAUSTION",
+            "VAH_PROBE_TESTING",
+            "IB_BREAKOUT",
+            "IMBALANCE",
+            "EXPANSION",
+            "CHOP",
         }
         assert result.market_structure in valid_structures
 

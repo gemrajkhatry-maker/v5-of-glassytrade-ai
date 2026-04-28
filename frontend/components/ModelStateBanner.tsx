@@ -19,10 +19,15 @@ const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, 
             genAI?.rawOutput?.includes('QUANT_DEAD_MARKET') ||
             amtResult?.marketState === 'DEAD';
         const volLow = amtResult?.aggression != null && amtResult.aggression < 0.2;
-        const volMsg = volLow ? 'Vol below average — edge may be thin' : 'Vol healthy for playbook';
+        const volMsg = volLow ? 'Vol below prior session avg — edge may be thin' : 'Vol healthy vs prior session avg';
         const armed = agentDecision?.timing === 'ENTER_NOW';
         const dir = genAI?.direction;
         const hasEntry = dir && dir !== 'FLAT';
+
+        // IB break state — setup in progress
+        const ibBreak = amtResult?.breakDirection;
+        const ibComplete = amtResult?.ibComplete;
+        const isIBBreak = ibComplete && (ibBreak === 'UP' || ibBreak === 'DOWN');
 
         if (isDead) {
             return {
@@ -40,6 +45,17 @@ const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, 
                 subtitle: p != null ? `${symbol} · Quant timing +${p}% prob · ${volMsg}` : `${symbol} · ${volMsg}`,
                 barClass: 'bg-emerald-950/90 border-emerald-400/50',
                 accentClass: 'text-emerald-100',
+            };
+        }
+        if (isIBBreak) {
+            const breakLabel = ibBreak === 'UP' ? 'IB BREAK ↑' : 'IB BREAK ↓';
+            const setupLabel = hasEntry ? 'SETUP ACTIVE' : 'SETUP IN PROGRESS';
+            const breakDesc = ibBreak === 'UP' ? 'Initiative upside break' : 'Initiative downside break';
+            return {
+                title: `${breakLabel} — ${setupLabel}`,
+                subtitle: `${symbol} · ${breakDesc} · ${volMsg}`,
+                barClass: ibBreak === 'UP' ? 'bg-emerald-950/90 border-emerald-400/50' : 'bg-red-950/90 border-red-400/50',
+                accentClass: ibBreak === 'UP' ? 'text-emerald-100' : 'text-red-100',
             };
         }
         if (hasEntry) {

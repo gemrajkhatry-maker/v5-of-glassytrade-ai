@@ -155,6 +155,12 @@ def three_align_check(
 
     # CVD Hard Gate
     cvd_slope = getattr(amt_result, "cvd_slope", 0.0)
+    cvd_div = getattr(amt_result, "cvd_divergence", "")
+    
+    # CVD DIVERGENCE: When divergence is detected, it counts as strong confirmation.
+    # A divergence (price breaking one way, CVD going the other) IS itself a signal.
+    divergence_confirmation = bool(cvd_div and cvd_div != "")
+    
     if cvd_slope < -CVD_SLOPE_EXTREME and amt_result.market_state == "BALANCED":
         logger.info("Three-Align: BLOCKED — CVD extreme selling (%.0f) in balance", cvd_slope)
         return (False, False, False) if return_is_second_drive else (False, False)
@@ -262,11 +268,15 @@ def three_align_check(
 
     # Confirmation Bundle
     agg_ok = check_confirmation_bundle(data, tick, order_book)
-    if not agg_ok:
+    
+    # CVD divergence counts as strong confirmation override
+    confirmation_strong = agg_ok or divergence_confirmation
+    
+    if not confirmation_strong:
         logger.debug("Three-Align: blocked — confirmation bundle weak")
-        return (False, agg_ok, is_second_drive) if return_is_second_drive else (False, agg_ok)
+        return (False, False, False) if return_is_second_drive else (False, False)
 
-    gate_passed = state_ok and near_level and agg_ok
+    gate_passed = state_ok and near_level and confirmation_strong
     if not return_is_second_drive:
-        return gate_passed, agg_ok
-    return gate_passed, agg_ok, is_second_drive
+        return gate_passed, confirmation_strong
+    return gate_passed, confirmation_strong, is_second_drive

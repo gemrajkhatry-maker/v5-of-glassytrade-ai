@@ -147,6 +147,15 @@ async def readiness_check(request: Request):
     except Exception as e:
         checks["engine"] = f"error: {e}"
 
+    # Engine start failure flag (set in main.py when startup fails)
+    try:
+        if getattr(request.app.state, "engine_start_failed", False):
+            checks["engine_startup"] = "failed"
+        else:
+            checks["engine_startup"] = "ok"
+    except Exception:
+        checks["engine_startup"] = "unknown"
+
     # Active symbols
     try:
         symbols = getattr(graph, "active_symbols", []) or []
@@ -170,17 +179,25 @@ async def metrics():
 @router.post("/system/halt")
 async def system_halt(request: Request):
     """Emergency kill switch — immediately halt all trading."""
-    graph = request.app.state.service_graph
-    graph.trading_session.halt_trading()
-    return {"status": "halted"}
+    try:
+        graph = request.app.state.service_graph
+        graph.trading_session.halt_trading()
+        return {"status": "halted"}
+    except Exception as e:
+        logger.error("Halt failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/system/resume")
 async def system_resume(request: Request):
     """Clear the emergency kill switch and resume trading."""
-    graph = request.app.state.service_graph
-    graph.trading_session.resume_trading()
-    return {"status": "resumed"}
+    try:
+        graph = request.app.state.service_graph
+        graph.trading_session.resume_trading()
+        return {"status": "resumed"}
+    except Exception as e:
+        logger.error("Resume failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/system/playbook-guard/reset")

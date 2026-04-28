@@ -30,7 +30,7 @@ async def analyze_market(
     service: GenerativeAIService = Depends(get_gen_ai_service),
 ):
     """Analyzes market data using the fine-tuned Nanbeige model (Fabio Logic)."""
-    market_data = req.dict()
+    market_data = req.model_dump()
     analysis = service.analyze_market(market_data)
 
     return {

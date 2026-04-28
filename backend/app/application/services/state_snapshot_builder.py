@@ -184,6 +184,7 @@ def _camel_case_ai(data: dict | None) -> dict | None:
         "aggression": data.get("aggression", ""),
         "quantProbability": data.get("quant_probability", 0.0),
         "quantDirection": data.get("quant_direction", ""),
+        "llmStatus": data.get("llm_status", "AVAILABLE"),
     }
 
 

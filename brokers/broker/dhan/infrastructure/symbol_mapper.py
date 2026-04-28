@@ -597,14 +597,29 @@ class DhanSymbolMapper(ISymbolMapper):
         self._by_symbol.clear()
         self._by_trading_symbol.clear()
         self._by_trading_symbol_exchange.clear()
+        self._by_trading_symbol_lower.clear()
+        self._by_symbol_lower.clear()
+        
+        # Optimization: Filter for relevant segments before processing
+        # This drastically reduces records from ~100k to ~15k
+        if "SEM_EXM_EXCH_ID" in df.columns:
+            valid_exchanges = ["NSE", "NFO", "MCX", "BSE"]
+            df = df[df["SEM_EXM_EXCH_ID"].fillna("").str.upper().isin(valid_exchanges)]
+            
         self._instrument_df = df
 
-        for _, row in df.iterrows():
-            instrument = self._parse_instrument_row(row)
+        # Convert to dict records for O(N) performance — significantly faster than iterrows()
+        records = df.to_dict('records')
+        
+        # Cache method lookups
+        _parse_instrument_row = self._parse_instrument_row
+        _add_to_cache = self._add_to_cache
+        
+        for row in records:
+            instrument = _parse_instrument_row(row)
             if instrument:
-                # Pass raw SEM_TRADING_SYMBOL so we can index by both raw and custom
                 raw_ts = str(row.get("SEM_TRADING_SYMBOL", ""))
-                self._add_to_cache(instrument, raw_trading_symbol=raw_ts)
+                _add_to_cache(instrument, raw_trading_symbol=raw_ts)
 
     def _add_to_cache(
         self, instrument: DhanInstrument, raw_trading_symbol: str = ""
@@ -827,7 +842,7 @@ class DhanSymbolMapper(ISymbolMapper):
 
     def _parse_date(self, date_str: str) -> Optional[date]:
         """
-        Parse date from string.
+        Parse date from string with fast-path optimizations for common formats.
 
         Args:
             date_str: Date string in various formats.
@@ -839,9 +854,32 @@ class DhanSymbolMapper(ISymbolMapper):
             return None
 
         date_str = str(date_str).strip()
+        if not date_str or date_str == "nan":
+            return None
 
         if " " in date_str and ":" in date_str:
             date_str = date_str.split()[0]
+
+        # Fast-path for YYYY-MM-DD
+        if len(date_str) == 10 and date_str[4] == "-" and date_str[7] == "-":
+            try:
+                return date(int(date_str[0:4]), int(date_str[5:7]), int(date_str[8:10]))
+            except ValueError:
+                pass
+        
+        # Fast-path for DD-MM-YYYY
+        if len(date_str) == 10 and date_str[2] == "-" and date_str[5] == "-":
+            try:
+                return date(int(date_str[6:10]), int(date_str[3:5]), int(date_str[0:2]))
+            except ValueError:
+                pass
+
+        # Fast-path for YYYYMMDD
+        if len(date_str) == 8 and date_str.isdigit():
+            try:
+                return date(int(date_str[0:4]), int(date_str[4:6]), int(date_str[6:8]))
+            except ValueError:
+                pass
 
         formats = [
             "%Y-%m-%d",

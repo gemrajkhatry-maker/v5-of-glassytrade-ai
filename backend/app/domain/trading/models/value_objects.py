@@ -210,6 +210,15 @@ class AMTResult:
     underlying_price: float = 0.0
     # Fix 1: Option type for direction labeling (CALL/PUT/UNKNOWN)
     option_type: str = "UNKNOWN"
+    # Fabio AMT review: VAH probe state for critical IB test moments
+    vah_probe_state: str | None = None  # "VAH_PROBE_EXHAUSTION" | "VAH_PROBE_TESTING" | "IB_BREAKOUT" | None
+    # Fabio AMT review: Exhaustion warning at price extremes
+    exhaustion_warning: str | None = None  # Warning message when delta-flat at extreme
+    # Fabio AMT review: Swing delta metadata (when/where it occurred)
+    swing_delta_timestamp: str | None = None
+    swing_delta_price: float | None = None
+    # Fabio AMT review: Volume participation above VAH (%)
+    volume_above_vah_pct: float = 0.0
 
 
 # ---------------------------------------------------------------------------

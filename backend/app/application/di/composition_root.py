@@ -217,7 +217,7 @@ def _create_llm_adapter(container: DIContainer, config: "Configuration"):
 
 def _create_probability_adapter(container: DIContainer, config: "Configuration"):
     model_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", "models"
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "models"
     )
     model_dir = os.path.normpath(model_dir)
 

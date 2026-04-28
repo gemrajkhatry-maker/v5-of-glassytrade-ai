@@ -70,6 +70,7 @@ class SessionState:
     # LLM throttling state — MUST be accessed under _lock
     _last_ai_time: float = 0
     _ai_running: bool = False
+    _llm_status: str = "AVAILABLE"  # "AVAILABLE", "RUNNING", "COOLDOWN"
 
     # Overseer throttling state — MUST be accessed under _lock
     _last_overseer_time: float = 0

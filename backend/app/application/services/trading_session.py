@@ -620,6 +620,16 @@ class TradingSessionService:
             )
 
         srm = self._risk_coordinator.get_session_risk_manager(event.symbol)
+        
+        # Compute prior session average volume from prior profile
+        prior_avg_volume = 0.0
+        if prior:
+            prior_total_vol = prior.get("total_volume", 0.0)
+            prior_elapsed_min = prior.get("elapsed_minutes", 0.0)
+            if prior_total_vol > 0 and prior_elapsed_min > 0:
+                # Average volume per minute from prior session
+                prior_avg_volume = prior_total_vol / prior_elapsed_min
+        
         try:
             amt_result, amt_dto, fp_dto = self._amt_handlers[event.symbol].analyze(
                 amt_data,
@@ -631,6 +641,7 @@ class TradingSessionService:
                 session_pnl=srm.session_pnl if srm else 0.0,
                 option_tick=event.tick,
                 cvd_source=cvd_source,
+                prior_avg_volume=prior_avg_volume,
             )
         except Exception:
             log.error(
@@ -962,6 +973,7 @@ class TradingSessionService:
         )
         
         if (trigger_llm and is_new_candle) or monitoring_trigger:
+            session._llm_status = "RUNNING"
             self._event_router.trigger_llm_entry(session, event.symbol, event.tick, amt_result)
             if monitoring_trigger:
                 session._last_monitoring_llm = time.time()
@@ -972,6 +984,7 @@ class TradingSessionService:
                 )
 
         elif not has_position and not ai_running and _in_cooldown:
+            session._llm_status = "COOLDOWN"
             cooldown_status = cache.get_ai_analysis() or {}
             cooldown_status["direction"] = "FLAT"
             base_rationale = cooldown_status.get("rationale", "")
@@ -979,6 +992,7 @@ class TradingSessionService:
             cooldown_status["rationale"] = (
                 base_rationale + " [Cooldown — waiting before next entry]"
             )
+            cooldown_status["llm_status"] = "COOLDOWN"
             cache.set_ai_analysis(cooldown_status)
 
         # Record tick-to-signal latency

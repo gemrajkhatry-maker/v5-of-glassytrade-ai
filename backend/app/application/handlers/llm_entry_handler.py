@@ -218,6 +218,46 @@ class LLMEntryHandler:
             logger.debug("Stacked imbalance extraction for LLM prompt failed", exc_info=True)
         return ""
 
+    @staticmethod
+    def _build_institutional_context(amt_result) -> str:
+        """Summarize large institutional prints with weighting.
+        
+        Identifies prints >3x median volume as institutional and flags
+        dominant buying or selling pressure that should override CVD slope.
+        """
+        if not amt_result.aggressive_prints:
+            return ""
+        
+        volumes = [ap.volume for ap in amt_result.aggressive_prints]
+        if not volumes:
+            return ""
+        
+        sorted_vols = sorted(volumes)
+        median_vol = sorted_vols[len(sorted_vols) // 2]
+        threshold = median_vol * 3  # 3x median = institutional
+        
+        institutional_prints = [ap for ap in amt_result.aggressive_prints if ap.volume > threshold]
+        if not institutional_prints:
+            return ""
+        
+        total_inst_vol = sum(ap.volume for ap in institutional_prints)
+        buy_inst = sum(ap.volume for ap in institutional_prints if ap.side == "BUY")
+        sell_inst = sum(ap.volume for ap in institutional_prints if ap.side == "SELL")
+        
+        parts = [f"[INSTITUTIONAL ALERT] {len(institutional_prints)} large prints (>{threshold:.0f} vol)"]
+        parts.append(f"Total: {total_inst_vol:.0f} | Buy: {buy_inst:.0f} | Sell: {sell_inst:.0f}")
+        
+        if buy_inst > sell_inst * 1.5:
+            parts.append("Dominant: INSTITUTIONAL BUYING")
+        elif sell_inst > buy_inst * 1.5:
+            parts.append("Dominant: INSTITUTIONAL SELLING")
+        
+        # Recent large prints (last 3)
+        for ap in institutional_prints[-3:]:
+            parts.append(f"  {ap.side} {ap.volume:.0f} at {ap.price:.0f}")
+        
+        return " | ".join(parts)
+
     def _load_episodic_memory(self) -> str:
         """Load recent trade history for LLM context."""
         if not self._storage:
@@ -308,6 +348,7 @@ class LLMEntryHandler:
             "quant_context": quant_context,
             "strategy_hint": strategy_hint,
             "volume_bubbles": self._build_volume_bubble_summary(amt_result, tick),
+            "institutional_context": self._build_institutional_context(amt_result),
             "stacked_imbalances": self._build_imbalance_summary(session),
             "hvns": amt_result.hvns[:3] if amt_result.hvns else (),
             "lvns": amt_result.lvns[:3] if amt_result.lvns else (),
@@ -399,10 +440,10 @@ class LLMEntryHandler:
 
     @staticmethod
     def _mark_ai_done(session, worker_queue) -> None:
-        """Reset session AI flag and mark queue task done. Used on skip/error paths."""
+        """Reset session AI flag. Mark queue task done is handled by main loop."""
         with session._lock:
             session._ai_running = False
-        worker_queue.task_done()
+            session._llm_status = "AVAILABLE"
 
     @staticmethod
     def _sanitize_rationale(raw_rationale: str, direction: str) -> str:
@@ -722,6 +763,7 @@ class LLMEntryHandler:
         with session._lock:
             session._last_ai_time = time.time()
             session._ai_running = True
+            session._llm_status = "RUNNING"
 
         market_state_str = (
             "Trending" if MarketStateCodec.is_imbalanced(amt_result.market_state) else "Balanced"
@@ -748,6 +790,7 @@ class LLMEntryHandler:
             with session._lock:
                 session.last_ai_analysis = ai_result
                 session._ai_running = False
+                session._llm_status = "AVAILABLE"
             self._save_session_block_decision(symbol, market_state_str, amt_result, tick)
             return
 
@@ -796,6 +839,7 @@ class LLMEntryHandler:
             with session._lock:
                 session.last_ai_analysis = ai_result
                 session._ai_running = False
+                session._llm_status = "AVAILABLE"
             return
 
         # Enqueue for per-symbol LLM worker
@@ -823,6 +867,7 @@ class LLMEntryHandler:
             logger.warning(f"LLM Queue full, dropping analysis for {symbol}")
             with session._lock:
                 session._ai_running = False
+                session._llm_status = "AVAILABLE"
 
     def _llm_worker_loop(self, queue_symbol: str) -> None:
         """Dedicated background thread that processes LLM requests sequentially for a specific symbol."""
@@ -861,6 +906,7 @@ class LLMEntryHandler:
                     )
                     with session._lock:
                         session._ai_running = False
+                        session._llm_status = "AVAILABLE"
                     if not task_done_called:
                         worker_queue.task_done()
                         task_done_called = True
@@ -874,6 +920,7 @@ class LLMEntryHandler:
                             "confidence": "Low",
                         }
                         session._ai_running = False
+                        session._llm_status = "AVAILABLE"
                     worker_queue.task_done()
                     continue
 
@@ -954,12 +1001,14 @@ class LLMEntryHandler:
                     else:
                         with session._lock:
                             session._ai_running = False
+                            session._llm_status = "AVAILABLE"
                         worker_queue.task_done()
                         continue
                 except Exception as e:
                     logger.error(f"LLM inference exception: {e}", exc_info=True)
                     with session._lock:
                         session._ai_running = False
+                        session._llm_status = "AVAILABLE"
                     worker_queue.task_done()
                     continue
 
@@ -968,6 +1017,7 @@ class LLMEntryHandler:
                     logger.error(f"LLM worker received invalid ai_result: {ai_result}")
                     with session._lock:
                         session._ai_running = False
+                        session._llm_status = "AVAILABLE"
                     worker_queue.task_done()
                     continue
 
@@ -1150,6 +1200,7 @@ class LLMEntryHandler:
 
                 with session._lock:
                     session._ai_running = False
+                    session._llm_status = "AVAILABLE"
 
                 if not task_done_called:
                     worker_queue.task_done()
@@ -1161,6 +1212,7 @@ class LLMEntryHandler:
                     if "session" in locals() and session:
                         with session._lock:
                             session._ai_running = False
+                            session._llm_status = "AVAILABLE"
                 except Exception:
                     pass  # Cleanup: _ai_running reset failed — next heartbeat will time out and clear
                 try:

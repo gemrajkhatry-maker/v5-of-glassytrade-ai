@@ -107,6 +107,31 @@ class SessionEventRouter:
         self._scalp_enabled = scalp_enabled
         self._regime_hysteresis_store = RegimeHysteresisStore()
 
+    @staticmethod
+    def _is_critical_amt_inflection(
+        symbol: str,
+        amt_result: AMTResult,
+        live_price: float,
+    ) -> bool:
+        """Check if price is at a critical AMT inflection point requiring priority evaluation.
+
+        Fabio AMT: when price is at IB High/Low with extreme VWAP deviation,
+        the probability engine must NEVER be silent.
+        """
+        ib_high = amt_result.ib_high
+        ib_low = amt_result.ib_low
+        vwap_dev = amt_result.vwap_deviation_sigmas or 0.0
+        has_acceptance = amt_result.acceptance_above or amt_result.acceptance_below
+
+        # At IB High/Low test (within 1%)
+        at_ib_high = ib_high > 0 and abs(live_price - ib_high) / ib_high < 0.01
+        at_ib_low = ib_low > 0 and abs(live_price - ib_low) / ib_low < 0.01
+
+        # Extreme VWAP deviation
+        is_extreme = abs(vwap_dev) >= 2.0
+
+        return (at_ib_high or at_ib_low) and (is_extreme or has_acceptance)
+
     # ----- Agent Pipeline Routing -----
 
     def run_micro_agent_pipeline(
@@ -131,8 +156,31 @@ class SessionEventRouter:
             else list(event.data)
         )
         _use_underlying_series = len(getattr(event, "agent_series", ())) >= 20
-        if not self._probability_engine.is_ready() or len(_series) < 20:
+
+        # Fabio AMT: Priority trigger for critical inflection points
+        _tick_price = event.tick.close if event.tick else 0
+        is_critical_inflection = self._is_critical_amt_inflection(
+            event.symbol, amt_result, _tick_price,
+        )
+
+        if not self._probability_engine.is_ready():
+            if is_critical_inflection:
+                log.warning(
+                    "CRITICAL: %s at IB extreme but probability engine not ready",
+                    event.symbol,
+                )
             return None
+
+        if len(_series) < 20 and not is_critical_inflection:
+            return None
+
+        # At critical inflection points, log priority evaluation
+        if is_critical_inflection and len(_series) < 20:
+            log.info(
+                "PRIORITY TRIGGER: %s at critical AMT inflection — forcing evaluation with %d candles",
+                event.symbol,
+                len(_series),
+            )
         try:
             is_mcx = is_mcx_symbol(event.symbol)
             _regime_tick = _series[-1] if _use_underlying_series else event.tick

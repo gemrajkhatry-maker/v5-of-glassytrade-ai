@@ -107,6 +107,7 @@ class AMTHandler:
         session_pnl: float = 0.0,
         option_tick: OHLC | None = None,
         cvd_source: str = "",
+        prior_avg_volume: float = 0.0,
     ) -> tuple[AMTResult, dict, dict]:
         """Run AMT analysis and footprint generation.
 
@@ -120,6 +121,7 @@ class AMTHandler:
             session_pnl: Session P&L
             option_tick: The option contract tick (for per-symbol delta isolation)
             cvd_source: "underlying" if data from futures, "option" if from option premium
+            prior_avg_volume: Prior session average volume for baseline
 
         Returns:
             (amt_result, amt_dto, footprint_dto)
@@ -184,6 +186,7 @@ class AMTHandler:
             cushion_tier=cushion_tier, session_pnl=session_pnl,
             option_tick=option_tick,
             cvd_source=cvd_source,
+            prior_avg_volume=prior_avg_volume,
         )
 
         amt_dto = amt_result_to_dto(amt_result)

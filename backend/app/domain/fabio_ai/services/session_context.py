@@ -389,20 +389,41 @@ def seconds_to_close(current_time: datetime, exchange: str = "NSE") -> float:
 
 
 def opening_inventory_bias(
-    open_price: float, prior_vah: float, prior_val: float
+    open_price: float,
+    prior_vah: float,
+    prior_val: float,
+    current_price: float | None = None,
+    session_vwap: float | None = None,
+    vwap_deviation_sigmas: float | None = None,
 ) -> str:
     """Determine inventory bias from opening price vs prior session value area.
 
-    Returns "" (invalid inputs), "LONG_BIAS", "SHORT_BIAS", or "NEUTRAL".
+    Returns "" (invalid inputs), "LONG_BIAS", "SHORT_BIAS", "NEUTRAL",
+    or "*_INVALIDATED" when price has moved 1σ+ against the bias through VWAP.
     """
     if prior_vah <= 0 or prior_val <= 0:
         return ""
+
+    # Compute initial bias
     if open_price > prior_vah:
-        return "LONG_BIAS"
+        initial_bias = "LONG_BIAS"
     elif open_price < prior_val:
-        return "SHORT_BIAS"
+        initial_bias = "SHORT_BIAS"
     else:
         return "NEUTRAL"
+
+    # Auto-invalidation: if price moved 1σ+ against bias through VWAP
+    if (
+        current_price is not None
+        and session_vwap is not None
+        and vwap_deviation_sigmas is not None
+    ):
+        if initial_bias == "SHORT_BIAS" and vwap_deviation_sigmas >= 1.0:
+            return "SHORT_BIAS_INVALIDATED"
+        elif initial_bias == "LONG_BIAS" and vwap_deviation_sigmas <= -1.0:
+            return "LONG_BIAS_INVALIDATED"
+
+    return initial_bias
 
 
 # ---------------------------------------------------------------------------

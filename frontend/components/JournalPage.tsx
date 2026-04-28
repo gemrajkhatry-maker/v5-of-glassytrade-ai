@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Filter, BarChart3, List } from 'lucide-react';
 import { sanitizeRationale } from '../utils/textSanitizer';
+import { shortSymbolName } from '../utils/symbol';
 
 interface JournalSummary {
     date: string;
@@ -99,18 +100,6 @@ function formatDuration(s: number): string {
     const m = Math.floor(s / 60);
     const sec = Math.round(s % 60);
     return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
-}
-
-function shortSymbol(sym: string): string {
-    // "NIFTY 2 MAR 25250 PUT" → "NIFTY 25250 PE"
-    const parts = sym.split(' ');
-    if (parts.length >= 4) {
-        const underlying = parts[0];
-        const strike = parts[parts.length - 2];
-        const type = parts[parts.length - 1] === 'PUT' ? 'PE' : 'CE';
-        return `${underlying} ${strike} ${type}`;
-    }
-    return sym;
 }
 
 export default function JournalPage({ onBack }: { onBack: () => void }) {

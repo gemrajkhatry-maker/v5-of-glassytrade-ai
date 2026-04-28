@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./venv/bin/pytest tests/unit/domain/test_amt_analyzer.py --tb=short -q 2>&1 | head -30)",
+      "Bash(./venv/bin/pytest tests/unit/domain/test_amt_analyzer.py --tb=short -q 2>&1 | tail -5)",
+      "Bash(./venv/bin/pytest tests/unit/ --ignore=tests/unit/domain/test_generative_ai_service.py --ignore=tests/unit/domain/test_phase5_storage_ports.py --ignore=tests/unit/test_npoc_tracker.py --tb=short -q 2>&1 | tail -5)",
+      "Bash(./venv/bin/pytest tests/unit/domain/test_amt_analyzer.py::TestAnalyzeIntegration::test_analyze_trending_data --tb=long 2>&1 | tail -40)",
+      "Bash(system_profiler SPHardwareDataType 2>/dev/null | grep -E \"Model|Chip|Memory|Cores\" || system_profiler SPHardwareDataType 2>/dev/null | grep -E \"Model Name|Processor|Memory\")",
+      "Bash(cd:*)",
+      "Bash(system_profiler SPHardwareDataType 2>/dev/null | grep -E \"Chip|Processor|Memory|Graphics\")",
+      "Bash(ps aux:*)",
+      "Bash(ls:*)",
+      "Bash(source:*)",
+      "Bash(du:*)",
+      "Bash(df:*)",
+      "Bash(find:*)",
+      "Bash(sleep:*)",
+      "Bash(cat:*)",
+      "Bash(kill:*)",
+      "Bash(rm:*)",
+      "Bash(rm -rf ~/.cache/huggingface/hub/models--mlx-community--gemma-4-31b-it-4bit && echo \"Deleted 31b-it-4bit \\(17GB\\)\")",
+      "Bash(rm -rf ~/.cache/huggingface/hub/models--mlx-community--gemma-4-26b-a4b-it-4bit && echo \"Deleted 26b-a4b-it-4bit \\(15GB\\)\")",
+      "Bash(rm -rf ~/.cache/huggingface/hub/models--mlx-community--gemma-4-e4b-8bit && echo \"Deleted e4b-8bit \\(8.4GB\\)\")",
+      "Bash(rm -rf ~/.cache/huggingface/hub/models--mlx-community--gemma-4-26b-a4b-it-nvfp4 && echo \"Deleted 26b-a4b-it-nvfp4 \\(8.3GB\\)\")",
+      "Bash(rm -rf ~/.cache/huggingface/hub/models--mlx-community--gemma-4-e2b-8bit && echo \"Deleted e2b-8bit \\(5.5GB\\)\")",
+      "Bash(rm -rf ~/.cache/huggingface/hub/models--unsloth--gemma-4-E2B-it-GGUF ~/.cache/huggingface/hub/models--google--gemma-4-e4b-it ~/.cache/huggingface/hub/models--kai-os--gemma4-31b-Opus-4.6-reasoning ~/.cache/huggingface/hub/models--mlx-community--gemma-4-31b-4bit ~/.cache/huggingface/hub/models--mlx-community--gemma-4-26b-a4b-4bit && echo \"Deleted remaining stubs\")",
+      "Bash(echo:*)",
+      "Bash(rm -rf poc_gemma4_e4b/fused_model poc_gemma4_e4b/fused_model_q4 && echo \"Deleted fused models \\(11GB\\)\")",
+      "Bash(rm -f poc_gemma4_e4b/validation_results_*.json poc_gemma4_e4b/debug_case1.py && echo \"Deleted stale validation results and debug script\")",
+      "Bash(rm -rf ~/.cache/huggingface/hub/models--mlx-community--gemma-4-e4b-it-nvfp4 && echo \"Deleted gemma-4-e4b-it-nvfp4 \\(6.4GB\\)\")",
+      "Bash(tail:*)",
+      "WebFetch(github.com)",
+      "Bash(head:*)",
+      "Bash(python:*)",
+      "Bash(sw_vers)"
+    ]
+  }
+}

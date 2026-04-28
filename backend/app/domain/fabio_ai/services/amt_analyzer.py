@@ -573,6 +573,83 @@ class AMTAnalyzer:
         return result
 
     @staticmethod
+    def _detect_vah_probe(
+        live_price: float,
+        vah: float,
+        ib_high: float,
+        vwap_deviation_sigmas: float,
+        delta_score: float,
+    ) -> str | None:
+        """Detect when price is probing above VAH near IB High — critical AMT state.
+
+        Fabio AMT framework: when price is above VAH and testing IB High,
+        this is a pivotal moment that requires special classification.
+        """
+        if live_price <= vah:
+            return None  # Not above VAH
+
+        is_near_ib = ib_high > 0 and abs(live_price - ib_high) / ib_high < 0.01  # Within 1%
+        is_extreme = abs(vwap_deviation_sigmas) >= 2.0
+        is_delta_flat = abs(delta_score) < 0.1
+
+        if is_near_ib and is_extreme and is_delta_flat:
+            return "VAH_PROBE_EXHAUSTION"
+        elif is_near_ib and vwap_deviation_sigmas > 0:
+            return "VAH_PROBE_TESTING"
+        elif live_price > ib_high > 0:
+            return "IB_BREAKOUT"
+
+        return None
+
+    @staticmethod
+    def _check_exhaustion(
+        delta_score: float,
+        vwap_deviation_sigmas: float,
+        aggression: float,
+        volume_above_vah_pct: float,
+    ) -> str | None:
+        """Detect exhaustion at price extremes.
+
+        Fabio AMT: when price is at extreme but delta is flat,
+        the move lacks conviction and may reverse violently.
+        """
+        warnings: list[str] = []
+
+        # Delta-flat at extreme (the critical signal)
+        if abs(delta_score) < 0.1 and abs(vwap_deviation_sigmas) >= 2.0:
+            warnings.append("EXHAUSTION: Delta neutral at VWAP extreme — move lacks conviction")
+
+        # Low volume above VAH
+        if volume_above_vah_pct < 10.0 and vwap_deviation_sigmas > 1.5:
+            warnings.append("THIN_VOLUME: Only {:.1f}% volume above VAH — probe may reverse".format(volume_above_vah_pct))
+
+        # Low aggression at extreme
+        if aggression < 1.5 and abs(vwap_deviation_sigmas) >= 2.0:
+            warnings.append("LOW_AGGRESSION: Weak participation at price extreme")
+
+        if not warnings:
+            return None
+
+        severity = "HIGH" if len(warnings) >= 2 else "MEDIUM"
+        return f"[{severity}] " + " | ".join(warnings)
+
+    @staticmethod
+    def _compute_volume_above_vah(
+        profile: list,
+        vah: float,
+    ) -> float:
+        """Compute percentage of volume above VAH."""
+        if not profile or vah <= 0:
+            return 0.0
+
+        total_vol = sum(level.volume for level in profile)
+        if total_vol <= 0:
+            return 0.0
+
+        vol_above = sum(level.volume for level in profile if level.price > vah)
+        return (vol_above / total_vol) * 100
+
+    @staticmethod
     def _compute_developing_va(developing_profile):
         """Compute developing Value Area from incremental profile."""
         dev_poc, dev_vah, dev_val = 0.0, 0.0, 0.0
@@ -836,6 +913,7 @@ class AMTAnalyzer:
         option_tick: OHLC | None = None,
         cvd_source: str = "",
         symbol: str = "",  # Fix 1: Full symbol name for option type detection
+        prior_avg_volume: float = 0.0,  # Prior session average volume for baseline
     ) -> AMTResult:
         """Run the full AMT analysis pipeline.
 
@@ -855,7 +933,11 @@ class AMTAnalyzer:
             hourly_data: Hourly timeframe data
             option_tick: Option contract tick (for per-symbol delta isolation)
             cvd_source: "underlying" if data comes from futures, "option" if from option premium
+            prior_avg_volume: Prior session average volume for baseline comparison
         """
+        # Store prior session avg volume for baseline calculation
+        self._prior_session_avg_volume = prior_avg_volume
+        
         empty = AMTResult(
             market_state=MarketState.BALANCED.value,
             poc=0,
@@ -967,11 +1049,18 @@ class AMTAnalyzer:
         bubble_retests = self._bubble_registry.get_retests(current.close)
 
         # Baseline volume for acceptance/rejection
-        baseline_vol = (
-            sum(d.volume for d in recent_data[-20:]) / min(20, len(recent_data))
-            if recent_data
-            else 0.0
-        )
+        # Use prior session average volume when available (more meaningful baseline
+        # than current session rolling average, especially in early session)
+        prior_avg_vol = getattr(self, '_prior_session_avg_volume', 0.0)
+        if prior_avg_vol > 0:
+            baseline_vol = prior_avg_vol
+        else:
+            # Fallback to current session rolling average
+            baseline_vol = (
+                sum(d.volume for d in recent_data[-20:]) / min(20, len(recent_data))
+                if recent_data
+                else 0.0
+            )
 
         # Acceptance/Rejection engine
         ar_state = self._ar_engine.update(current, vah, val, baseline_vol)
@@ -1015,6 +1104,10 @@ class AMTAnalyzer:
         )
         balance_ratio = inside_count / balance_window if balance_window > 0 else 0.0
 
+        # IB state needed for market state detection (IB break → mode classification)
+        ib_state = self._ib_tracker.update(current)
+        ib_high, ib_low, ib_complete = ib_state.ib_high, ib_state.ib_low, ib_state.is_complete
+
         prices = sorted(set(float(d.close) for d in recent_data[-50:]))
         tick_size = min(
             (
@@ -1038,6 +1131,10 @@ class AMTAnalyzer:
             leg_vah=leg_data.get("vah", 0.0),
             leg_val=leg_data.get("val", 0.0),
             vwap_deviation_sigmas=vwap_deviation_sigmas,
+            ib_break_direction=self._ib_break_direction,
+            ib_complete=ib_complete,
+            ib_high=ib_high,
+            ib_low=ib_low,
         )
         market_state = state_result.state
         zone = state_result.zone
@@ -1103,10 +1200,6 @@ class AMTAnalyzer:
 
         # Market structure classification
         structure = self._classify_market_structure(data, session_vwap, market_state)
-
-        # Initial Balance tracking
-        ib_state = self._ib_tracker.update(current)
-        ib_high, ib_low, ib_complete = ib_state.ib_high, ib_state.ib_low, ib_state.is_complete
 
         # POC migration with price alignment
         poc_migration = self._poc_tracker.update(poc, current.close)
@@ -1176,6 +1269,35 @@ class AMTAnalyzer:
             _live_price, poc, lvns, hvns, vah, val, tick_size, current,
         )
 
+        # ── Fabio AMT: VAH Probe / IB Test Detection ──────────────────
+        vah_probe_state = self._detect_vah_probe(
+            live_price=_live_price,
+            vah=vah,
+            ib_high=ib_high,
+            vwap_deviation_sigmas=vwap_deviation_sigmas or 0.0,
+            delta_score=delta_normalized_option,
+        )
+
+        # ── Fabio AMT: Volume Above VAH ───────────────────────────────
+        volume_above_vah_pct = self._compute_volume_above_vah(profile, vah)
+
+        # ── Fabio AMT: Exhaustion Detection at Extremes ───────────────
+        exhaustion_warning = self._check_exhaustion(
+            delta_score=delta_normalized_option,
+            vwap_deviation_sigmas=vwap_deviation_sigmas or 0.0,
+            aggression=aggression_score,
+            volume_above_vah_pct=volume_above_vah_pct,
+        )
+
+        # ── Fabio AMT: Swing Delta Metadata ───────────────────────────
+        _swing_delta_value = leg_data.get("swing_delta", 0.0)
+        _swing_delta_timestamp = None
+        _swing_delta_price = None
+        # Swing delta occurred at the most recent aggressive print if available
+        if agg_prints:
+            _swing_delta_timestamp = agg_prints[-1].time
+            _swing_delta_price = agg_prints[-1].price
+
         # ── SETUP IDENTIFICATION (3 PM Fix) ──────────────────────────
         _setup = SetupType.MEAN_REVERSION
         if state_result.is_extreme_deviation:
@@ -1243,6 +1365,9 @@ class AMTAnalyzer:
                     open_price=session_open_price,
                     prior_vah=prior_vah,
                     prior_val=prior_val,
+                    current_price=_live_price,
+                    session_vwap=session_vwap,
+                    vwap_deviation_sigmas=vwap_deviation_sigmas,
                 )
                 if prior_vah > 0
                 else ""
@@ -1276,8 +1401,6 @@ class AMTAnalyzer:
             hourly_vah=mtf_result.hourly.vah if mtf_result else 0.0,
             hourly_val=mtf_result.hourly.val if mtf_result else 0.0,
             hourly_poc=mtf_result.hourly.poc if mtf_result else 0.0,
-            market_structure=structure.state,
-            structure_confidence=structure.confidence_score,
             day_type=day_type,
             absorption_side=absorption_side,
             absorption_range_ratio=absorption_range_ratio,
@@ -1291,6 +1414,17 @@ class AMTAnalyzer:
             underlying_price=float(data[-1].close) if data else 0.0,
             # Fix 1: Option type for direction labeling
             option_type=detect_option_type(symbol),
+            # Fabio AMT: VAH probe state overrides structure when at IB test
+            market_structure=vah_probe_state if vah_probe_state else structure.state,
+            structure_confidence=(
+                structure.confidence_score * 0.7 if volume_above_vah_pct < 10.0 and vah_probe_state in ("VAH_PROBE_EXHAUSTION", "VAH_PROBE_TESTING")
+                else structure.confidence_score
+            ),
+            vah_probe_state=vah_probe_state,
+            exhaustion_warning=exhaustion_warning,
+            swing_delta_timestamp=_swing_delta_timestamp,
+            swing_delta_price=_swing_delta_price,
+            volume_above_vah_pct=volume_above_vah_pct,
         )
 
     # -------------------------------------------------------------------
