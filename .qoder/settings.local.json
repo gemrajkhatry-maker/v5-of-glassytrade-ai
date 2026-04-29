@@ -32,7 +32,21 @@
       "WebFetch(github.com)",
       "Bash(head:*)",
       "Bash(python:*)",
-      "Bash(sw_vers)"
+      "Bash(sw_vers)",
+      "Bash(npx tsc:*)",
+      "Bash(lsof:*)",
+      "Bash(ps:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git remote:*)",
+      "Bash(pwd:*)",
+      "Bash(git stash:*)",
+      "WebFetch(www.chartfanatics.com)",
+      "WebFetch(www.tradezella.com)"
     ]
   }
 }

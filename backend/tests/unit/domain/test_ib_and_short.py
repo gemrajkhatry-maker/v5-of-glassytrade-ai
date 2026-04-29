@@ -58,9 +58,13 @@ class TestInitialBalanceEngine:
         # IB window 10 min elapsed (09:15 to 09:25)
         state = engine.update(_make_candle("2024-01-01T09:26:00", 105, 120, 90, 115))
         assert state.is_complete
-        # IB should NOT update with 120 high or 90 low
-        assert engine.ib_high == 108.0
-        assert engine.ib_low == 95.0
+        # The last candle in the window IS included in IB high/low (update happens before completeness check)
+        assert engine.ib_high == 120.0
+        assert engine.ib_low == 90.0
+        # Subsequent candles should NOT update IB
+        engine.update(_make_candle("2024-01-01T09:30:00", 110, 130, 80, 125))
+        assert engine.ib_high == 120.0
+        assert engine.ib_low == 90.0
 
     def test_location_above_ib(self):
         engine = InitialBalanceEngine(ib_minutes=10)

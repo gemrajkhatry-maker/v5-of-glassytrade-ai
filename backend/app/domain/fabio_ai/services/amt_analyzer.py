@@ -1079,21 +1079,21 @@ class AMTAnalyzer:
         # Task 2.3: Validate session VA encompasses leg VA bounds
         # Session profile uses all session data, leg profile uses only displacement leg
         # So session VA should be >= leg VA (session encompasses leg)
+        # NOTE: Do NOT clamp session VA to leg VA — session VA must reflect the true
+        # volume profile. Log the discrepancy for diagnostics but keep session VA intact.
         leg_vah_temp = leg_data.get("vah", 0.0)
         leg_val_temp = leg_data.get("val", 0.0)
         if vah > 0 and leg_vah_temp > 0 and vah < leg_vah_temp:
             logger.warning(
-                "Session VAH (%.2f) < Leg VAH (%.2f) — clamping to leg VAH (Task 2.3)",
+                "Session VAH (%.2f) < Leg VAH (%.2f) — session profile may be incomplete (Task 2.3)",
                 vah, leg_vah_temp
             )
-            vah = leg_vah_temp
-            
+
         if val > 0 and leg_val_temp > 0 and val > leg_val_temp:
             logger.warning(
-                "Session VAL (%.2f) > Leg VAL (%.2f) — clamping to leg VAL (Task 2.3)",
+                "Session VAL (%.2f) > Leg VAL (%.2f) — session profile may be incomplete (Task 2.3)",
                 val, leg_val_temp
             )
-            val = leg_val_temp
 
         if ar_state["acceptance_above"] or ar_state["acceptance_below"]:
             has_acceptance = True

@@ -147,6 +147,12 @@ class PaperBrokerAdapter(IBroker):
         Fabio Rule 4: LLM entries use 40/30/30 scale-in.
         """
         entry_price = float(getattr(signal, "price", 0))
+        if entry_price <= 0:
+            logger.error(
+                "Paper broker: rejected signal with price=%s for %s — invalid price",
+                entry_price, symbol,
+            )
+            return None
 
         scale_in = (signal.metadata or {}).get("scale_in", False)
         scale_fraction = 0.4 if scale_in else 1.0

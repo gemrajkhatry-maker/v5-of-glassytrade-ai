@@ -473,12 +473,12 @@ class TestDecisionHistory:
 
 
 class TestAggressionDirectionSign:
-    pytestmark = pytest.mark.skip(reason="Pre-existing aggression direction sign assertion")
     """Verify direction_sign correctly identifies bullish vs bearish."""
 
     def test_bullish_signals_give_positive_direction(self):
+        scorer = AggressionScorer()
         # Set majority of the 7 signals to positive
-        result = AggressionScorer.score(
+        result = scorer.score(
             footprint_confirmed=True,
             cvd_confirmed=True,
             big_trade_confirmed=True,
@@ -488,7 +488,8 @@ class TestAggressionDirectionSign:
         assert result.direction_sign == 1
 
     def test_empty_signals_give_negative_direction(self):
-        result = AggressionScorer.score()
+        scorer = AggressionScorer()
+        result = scorer.score()
         # With no signals, there are 0 bullish out of 7 total
         # 0 > 7/2 is False → direction_sign = -1
         assert result.direction_sign == -1
@@ -500,6 +501,7 @@ class TestAggressionDirectionSign:
 
 
 class TestProbingSignalGeneration:
+    pytestmark = pytest.mark.skip(reason="AMTAnalyzer._generate_signal removed — signals now go through SignalPipeline exclusively")
     """Verify PROBING state generates signals with correct conditions."""
 
     def test_probing_above_vah_bullish(self):

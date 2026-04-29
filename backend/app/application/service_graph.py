@@ -73,6 +73,16 @@ class ServiceGraph:
         if hasattr(ts, "set_futures_option_map"):
             ts.set_futures_option_map(self._fut_to_options)
 
+        # Wire observability trackers to metrics endpoint
+        gate_tracker = getattr(ts, "_gate_tracker", None)
+        latency_tracker = getattr(ts, "_latency_tracker", None)
+        if gate_tracker and latency_tracker:
+            try:
+                from app.api.routers.metrics import set_trackers
+                set_trackers(gate_tracker, latency_tracker)
+            except Exception:
+                logger.warning("Failed to wire metrics trackers — metrics endpoint will return errors", exc_info=True)
+
     @property
     def config(self) -> Configuration:
         return self._config

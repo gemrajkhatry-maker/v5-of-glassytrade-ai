@@ -209,10 +209,14 @@ def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
 
     # Force explicit description of aggression variables
     cvd_desc = f"CVD Slope is {cvd_raw:+.1f}. "
-    if abs(cvd_raw) > 500:
-        cvd_desc += "SIGNIFICANT institutional pressure detected. "
-    elif abs(cvd_raw) < 50:
-        cvd_desc += "Weak institutional participation. "
+    if cvd_raw < -100:
+        cvd_desc += "Sustained selling — CVD EXTREME SELLING. DO NOT FADE. "
+    elif cvd_raw > 100:
+        cvd_desc += "Sustained buying — CVD EXTREME BUYING. DO NOT FADE. "
+    elif cvd_raw < 0:
+        cvd_desc += "Sustained selling. "
+    elif cvd_raw > 0:
+        cvd_desc += "Sustained buying. "
     parts.append(cvd_desc)
 
     delta_desc = f"Current Delta is {delta:+.0f}. "
@@ -220,13 +224,16 @@ def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
         delta_desc += "Neutral aggression."
     parts.append(delta_desc)
 
-    parts.append(f"Aggression Score: {aggression_score:.2f} (0.0 to 2.0 scale).")
+    if isinstance(aggression_score, str):
+        parts.append(f"Aggression: {aggression_score}")
+    else:
+        parts.append(f"Aggression Score: {aggression_score:.2f} (0.0 to 2.0 scale).")
 
     cvd_div = data.get("cvd_divergence", "")
     if cvd_div == "BEARISH_DIV":
-        parts.append("⚠️ CVD DIVERGENCE: Bearish setup. Do not go long.")
+        parts.append("\u26a0\ufe0f CVD DIVERGENCE: Bearish — DO NOT GO LONG.")
     elif cvd_div == "BULLISH_DIV":
-        parts.append("⚠️ CVD DIVERGENCE: Bullish setup. Do not go short.")
+        parts.append("\u26a0\ufe0f CVD DIVERGENCE: Bullish — DO NOT GO SHORT.")
 
     # Priority 2: Quant Probability (Soft Gate Context)
     quant_ctx = data.get("ml_signal") or data.get("quant_context")

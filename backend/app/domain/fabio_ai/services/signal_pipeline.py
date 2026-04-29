@@ -19,6 +19,7 @@ from typing import Any, Callable
 
 from app.domain.trading.models.entities import Signal
 from app.domain.trading.models.enums import MarketState, SignalType, SetupType, Source
+from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +262,7 @@ class SignalPipeline:
             reason=context.metadata.get("reason", "SignalPipeline"),
             stop_loss=Decimal(str(context.stop_loss)),
             take_profit=Decimal(str(context.take_profit)),
-            timestamp=datetime.datetime.now().isoformat(),
+            timestamp=datetime.datetime.now(IST).isoformat(),
             setup=self._determine_setup_type(context),
             source=source,
             metadata={

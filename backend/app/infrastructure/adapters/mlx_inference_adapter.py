@@ -571,9 +571,23 @@ class MLXInferenceAdapter(ILLMInference):
             {"role": "user", "content": clean_input},
         ]
 
-        prompt = self.processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
+        try:
+            prompt = self.processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        except Exception as e:
+            # Fallback for models (like Gemma 2) that don't support the 'system' role
+            if "system" in str(e).lower() or "role" in str(e).lower():
+                logger.debug("System role not supported by tokenizer, merging into user message.")
+                merged_messages = [
+                    {"role": "user", "content": f"{sys_msg}\n\n{clean_input}"}
+                ]
+                prompt = self.processor.apply_chat_template(
+                    merged_messages, tokenize=False, add_generation_prompt=True
+                )
+            else:
+                raise e
+
         # Inject prefill (e.g., forcing JSON start)
         prompt += prefill
 

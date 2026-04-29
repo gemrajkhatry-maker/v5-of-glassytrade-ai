@@ -100,7 +100,8 @@ class TradeLifecycleHandler:
         if not open_positions:
             return False
 
-        for pos in open_positions:
+        # Iterate over a snapshot — close_position mutates portfolio.positions
+        for pos in list(open_positions):
             # Skip positions already closed
             if pos.status != "OPEN":
                 continue

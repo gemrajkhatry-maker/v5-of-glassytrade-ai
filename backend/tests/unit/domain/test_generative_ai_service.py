@@ -2,14 +2,14 @@
 
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 from app.domain.fabio_ai.services.prompt_builder import build_entry_prompt, parse_entry_response
-from app.domain.ports.llm_inference import LLMInferencePort
+from app.domain.ports.llm_inference import ILLMInference
 
 
 # ---------------------------------------------------------------------------
 # Mock LLM adapter
 # ---------------------------------------------------------------------------
 
-class MockLLMAdapter(LLMInferencePort):
+class MockLLMAdapter(ILLMInference):
     def __init__(self, response=""):
         self._response = response
 
@@ -20,7 +20,7 @@ class MockLLMAdapter(LLMInferencePort):
         return True
 
 
-class FailingLLMAdapter(LLMInferencePort):
+class FailingLLMAdapter(ILLMInference):
     def predict(self, instruction, input_text):
         raise RuntimeError("Model crashed")
 
@@ -69,7 +69,7 @@ class TestBuildPrompt:
 
     def test_zero_delta(self):
         prompt = build_entry_prompt(_make_market_data(delta=0))
-        assert "no aggression" in prompt.lower()
+        assert "neutral aggression" in prompt.lower()
 
     def test_price_near_val(self):
         prompt = build_entry_prompt(_make_market_data(ltp=15000.0))

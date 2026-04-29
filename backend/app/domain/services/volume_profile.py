@@ -309,10 +309,8 @@ class IncrementalVolumeProfile:
         self._requested_buckets = buckets
         self._concentrated = concentrated  # True = volume at close price only
         self._tick_size = tick_size
-        self._buckets = buckets if buckets > 0 else 200  # Temporary default
-        self._volumes: list[list[float]] = [
-            [0.0, 0.0, 0.0] for _ in range(self._buckets)
-        ]
+        self._buckets = buckets if buckets > 0 else 0  # 0 = auto-compute on first candle
+        self._volumes: list[list[float]] = []
         self._min_price: float = 0.0
         self._max_price: float = 0.0
         self._step: float = 0.0

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from unittest.mock import MagicMock, call
 
-from app.domain.ports.npoc import NPOCPort, NPOCRecord, NPOCResult
+from app.domain.ports.npoc import INPOC, NPOCRecord, NPOCResult
 from app.domain.fabio_ai.services.npoc_tracker import NPOCTracker
 
 
@@ -310,11 +310,11 @@ class TestNPOCTracker:
         assert result.nearest_below.price == 24300.0
 
     # ------------------------------------------------------------------
-    # NPOCPort interface compliance
+    # INPOC interface compliance
     # ------------------------------------------------------------------
 
     def test_implements_npoc_port(self):
-        assert isinstance(self.tracker, NPOCPort)
+        assert isinstance(self.tracker, INPOC)
 
     def test_interface_methods_exist(self):
         assert hasattr(self.tracker, "add_session_poc")

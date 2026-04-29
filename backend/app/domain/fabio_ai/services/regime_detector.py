@@ -427,6 +427,75 @@ class RegimeDetector:
 
         return None
 
+    def detect_bollinger_squeeze(self, data: list["OHLC"], period: int = 20) -> bool:
+        """Bollinger Band squeeze: BB width < 10% of price = compression.
+
+        When Bollinger Bands narrow significantly, it indicates low volatility
+        and often precedes a sharp directional move (Fabio Rule 10: Momentum Squeeze).
+
+        Args:
+            data: OHLC candles for analysis.
+            period: Lookback period for SMA/std (default 20).
+
+        Returns:
+            True if BB width < 10% of price (squeeze condition).
+        """
+        if len(data) < period:
+            return False
+
+        closes = [c.close for c in data[-period:]]
+        sma = sum(closes) / period
+        variance = sum((c - sma) ** 2 for c in closes) / period
+        std = variance ** 0.5
+
+        # BB width = (upper - lower) / sma = 4*std / sma
+        if sma <= 0:
+            return False
+        bb_width = 4 * std / sma
+        return bb_width < 0.10  # 10% of price = squeeze
+
+    def is_atr_compressed(self, data: list["OHLC"], lookback: int = 20) -> bool:
+        """ATR compression: current ATR < 50% of prior ATR.
+
+        Measures whether recent volatility has compressed relative to
+        the preceding period. Combined with Bollinger squeeze, this
+        provides a volatility-independent confirmation of compression.
+
+        Args:
+            data: OHLC candles for analysis.
+            lookback: Candles per ATR window (default 20).
+
+        Returns:
+            True if current ATR < 50% of prior period ATR.
+        """
+        required = lookback * 2
+        if len(data) < required:
+            return False
+
+        recent_atr = self._compute_atr(data[-lookback:])
+        prior_atr = self._compute_atr(data[-required:-lookback])
+
+        if prior_atr <= 0:
+            return False
+        return recent_atr < 0.5 * prior_atr
+
+    @staticmethod
+    def _compute_atr(candles: list["OHLC"]) -> float:
+        """Compute Average True Range for a list of candles."""
+        if len(candles) < 2:
+            return 0.0
+        true_ranges = []
+        prev_close = candles[0].close
+        for c in candles[1:]:
+            tr = max(
+                c.high - c.low,
+                abs(c.high - prev_close),
+                abs(c.low - prev_close),
+            )
+            true_ranges.append(tr)
+            prev_close = c.close
+        return sum(true_ranges) / len(true_ranges) if true_ranges else 0.0
+
     # ------------------------------------------------------------------
     # Follow-Through Analysis (Fabio)
     # ------------------------------------------------------------------

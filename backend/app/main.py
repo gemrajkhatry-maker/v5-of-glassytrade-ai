@@ -32,7 +32,7 @@ from app.api.routers import (
 )
 from app.api.websocket.gameloop import router as gameloop_router
 from app.application.service_graph import ServiceGraph
-from config.config import Configuration
+from config.consolidated import ConsolidatedConfig as Configuration
 
 # Configure logging
 logging.basicConfig(
@@ -134,7 +134,7 @@ def create_application() -> FastAPI:
         
         # Shutdown
         logger.info("Shutting down GlassyTrade AI application...")
-        
+
         # Stop trading engine
         if graph.engine:
             try:
@@ -142,7 +142,14 @@ def create_application() -> FastAPI:
                 logger.info("Trading engine stopped")
             except Exception:
                 logger.error("Engine stop failed — resources may not be cleaned up", exc_info=True)
-        
+
+        # Cleanup handler thread pools (LLMEntryHandler, LLMOverseerHandler)
+        try:
+            graph.trading_session.cleanup()
+            logger.info("Handler thread pools cleaned up")
+        except Exception:
+            logger.debug("Handler cleanup failed — non-critical", exc_info=True)
+
         logger.info("Shutdown complete")
     
     app = FastAPI(
@@ -152,22 +159,21 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Load configuration — must match app.config.settings (YAML strategy + MCX/NSE), not env-only.
+    config = Configuration.from_unified()
+    logger.info(f"Loaded configuration (unified): {config}")
+
     # Add CORS middleware
-    # NOTE: For WebSocket connections, we need to use allow_origin_regex instead of
-    # allow_origins=["*"] when allow_credentials=True, otherwise WS connections get 403
+    # Origins loaded from configuration (consolidated.py)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Allow all origins for development
-        allow_credentials=True,
+        allow_origins=config.cors_origins,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
     app.add_middleware(WebSocketLogMiddleware)
-
-    # Load configuration — must match app.config.settings (YAML strategy + MCX/NSE), not env-only.
-    config = Configuration.from_unified()
-    logger.info(f"Loaded configuration (unified): {config}")
 
     # Create service graph
     service_graph = ServiceGraph(config)
@@ -189,18 +195,5 @@ def create_application() -> FastAPI:
     return app
 
 
-def main() -> None:
-    """Main entry point."""
-    try:
-        logger.info("Created FastAPI application")
-    except Exception as e:
-        logger.error(f"Failed to create application: {e}")
-        sys.exit(1)
-
-
 # Create the FastAPI app at module level for Uvicorn
 app = create_application()
-
-
-if __name__ == "__main__":
-    main()

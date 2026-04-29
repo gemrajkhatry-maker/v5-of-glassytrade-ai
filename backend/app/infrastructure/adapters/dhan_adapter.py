@@ -354,7 +354,7 @@ class DhanMarketDataAdapter(IMarketData):
             logger.info("Fetched %d candles for %s (%s)", len(result), symbol, interval)
             return result
         except Exception:
-            logger.exception("Failed to fetch history for %s", symbol)
+            logger.warning("Failed to fetch history for %s (interval=%s, limit=%d)", symbol, interval, limit, exc_info=True)
             return []
 
     async def fetch_order_book(self, symbol: str) -> OrderBook | None:
@@ -387,7 +387,7 @@ class DhanMarketDataAdapter(IMarketData):
                 return None
             return OrderBook(bids=tuple(bids), asks=tuple(asks))
         except Exception:
-            logger.debug("Order book fetch failed for %s", symbol, exc_info=True)
+            logger.warning("Order book fetch failed for %s", symbol, exc_info=True)
             return None
 
     def get_ltp(self, symbol: str) -> float:
@@ -398,7 +398,7 @@ class DhanMarketDataAdapter(IMarketData):
             instrument = self._make_instrument(symbol)
             return float(broker.get_ltp(instrument))
         except Exception:
-            logger.debug("LTP fetch failed for %s", symbol, exc_info=True)
+            logger.warning("LTP fetch failed for %s", symbol, exc_info=True)
             return 0.0
 
     async def stream_full(self, symbols: list[str]) -> AsyncIterator[dict]:

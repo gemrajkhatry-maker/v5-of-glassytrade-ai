@@ -181,9 +181,8 @@ class SessionRiskCoordinator:
         if not managers:
             return 0.0
 
-        current_equity = sum(rm.daily_state.current_equity for rm in managers)
-        # Cumulative P&L = current equity - starting capital
-        return current_equity - self._capital
+        # Cumulative P&L is the sum of realized P&L across all symbols
+        return sum(rm.daily_state.realized_pnl for rm in managers)
 
     def check_account_loss_limit(self) -> BreakerResult:
         """Check if account-level absolute loss limit has been breached.
@@ -346,8 +345,8 @@ class SessionRiskCoordinator:
         else:
             daily_drawdown_pct = 0.0
 
-        # Compute cumulative account P&L
-        cumulative_account_pnl = current_equity - self._capital
+        # Compute cumulative account P&L by summing realized P&L
+        cumulative_account_pnl = sum(rm.daily_state.realized_pnl for rm in managers)
 
         return SystemRiskState(
             halted=halted,

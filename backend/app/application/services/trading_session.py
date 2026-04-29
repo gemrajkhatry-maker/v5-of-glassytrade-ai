@@ -83,16 +83,6 @@ from app.application.services.state_snapshot_builder import build_state_snapshot
 from app.application.services.session_cache import SessionCache
 from app.application.services.session_event_router import SessionEventRouter
 
-# Import error handling utilities
-from shared.error_handling import (
-    handle_errors,
-    safe_execute,
-    ErrorContext,
-    log_and_continue,
-    TradingError,
-    StorageError,
-)
-
 # Import safe parsing utilities
 from app.shared.parsing import is_mcx_symbol, extract_bar_minute, resolve_session_market
 from app.shared.timezones import IST
@@ -986,12 +976,17 @@ class TradingSessionService:
         elif not has_position and not ai_running and _in_cooldown:
             session._llm_status = "COOLDOWN"
             cooldown_status = cache.get_ai_analysis() or {}
+            prev_dir = cooldown_status.get("direction", "FLAT")
             cooldown_status["direction"] = "FLAT"
             base_rationale = cooldown_status.get("rationale", "")
             base_rationale = base_rationale.split(" [Cooldown")[0]
-            cooldown_status["rationale"] = (
-                base_rationale + " [Cooldown — waiting before next entry]"
-            )
+            
+            if prev_dir != "FLAT":
+                new_rationale = f"FLAT (COOLDOWN) — Original decision was {prev_dir}. {base_rationale} [Cooldown active]"
+            else:
+                new_rationale = base_rationale + " [Cooldown — waiting before next entry]"
+                
+            cooldown_status["rationale"] = new_rationale
             cooldown_status["llm_status"] = "COOLDOWN"
             cache.set_ai_analysis(cooldown_status)
 
@@ -1045,6 +1040,16 @@ class TradingSessionService:
     def resume_trading(self) -> None:
         """Clear the global emergency kill switch."""
         self._risk_coordinator.resume_trading()
+
+    def cleanup(self) -> None:
+        """Shutdown handler thread pools during application teardown.
+
+        Must be called during FastAPI lifespan shutdown to prevent
+        thread pool leaks (LLMEntryHandler, LLMOverseerHandler each
+        hold _executor + _predict_executor ThreadPoolExecutors).
+        """
+        self._llm_handler.cleanup()
+        self._overseer_handler.cleanup()
 
     def get_system_risk_state(self) -> SystemRiskState:
         """Return an aggregated system-wide view of runtime risk state."""

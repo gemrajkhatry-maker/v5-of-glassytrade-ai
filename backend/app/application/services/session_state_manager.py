@@ -72,6 +72,11 @@ class SessionState:
     _ai_running: bool = False
     _llm_status: str = "AVAILABLE"  # "AVAILABLE", "RUNNING", "COOLDOWN"
 
+    # LLM consistency guard — prevents rapid confidence flips
+    _last_llm_evaluation_time: float = 0  # epoch; 0 means guard inactive until first eval
+    _last_llm_confidence: str = "Medium"
+    _last_llm_direction: str = "FLAT"
+
     # Overseer throttling state — MUST be accessed under _lock
     _last_overseer_time: float = 0
     _overseer_running: bool = False

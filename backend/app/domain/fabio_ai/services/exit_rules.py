@@ -36,9 +36,12 @@ TIME_STOP_TABLE: dict[tuple[str, str], float] = {
 
 EXPIRY_TIME_STOP: float = 600
 
+# Hard ceiling: 120-minute absolute max hold for options scalping (Fabio Gap #3)
+HARD_MAX_HOLD_SECONDS: float = 7200
+
 
 # ---------------------------------------------------------------------------
-# Exit Reasons (duplicated here for convenience, canonical in exit_engine.py)
+# Exit Reasons (canonical source — imported by exit_engine.py)
 # ---------------------------------------------------------------------------
 
 class ExitReason:
@@ -149,6 +152,9 @@ def check_time_stop(
         if MarketStateCodec.is_imbalanced(market_state):
             max_hold = 7200
 
+    # Hard ceiling: never exceed 120 minutes regardless of market state
+    max_hold = min(max_hold, HARD_MAX_HOLD_SECONDS)
+
     if (current_time - entry_time_epoch) >= max_hold:
         entry_price = float(position.entry_price)
         price_move_pct = (
@@ -236,6 +242,9 @@ def check_time_stop_with_price(
         max_hold = max_hold_seconds
         if MarketStateCodec.is_imbalanced(market_state):
             max_hold = 7200
+
+    # Hard ceiling: never exceed 120 minutes regardless of market state
+    max_hold = min(max_hold, HARD_MAX_HOLD_SECONDS)
 
     if (current_time - entry_time_epoch) >= max_hold:
         entry_price = float(position.entry_price)

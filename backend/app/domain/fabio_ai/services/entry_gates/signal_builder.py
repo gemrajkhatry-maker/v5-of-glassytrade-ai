@@ -84,6 +84,7 @@ def build_entry_signal(
     sig_type = SignalType.BUY if is_buy else SignalType.SELL
     px = float(tick.close)
     buffer = px * 0.001
+    tp_source = "poc"  # default for MEAN_REVERSION / RESPONSIVE_FADE
     vwap = float(
         amt_result.session_vwap
         if amt_result.session_vwap > 0
@@ -135,8 +136,21 @@ def build_entry_signal(
                 stop_price = px * 1.005
         allow_trail = False
     else:
+        # TREND_MODEL — Fabio playbook: target prior balance POC or NPOC.
+        # Priority chain: NPOC in direction → prior_poc (if beyond VA) → VA extension (fallback)
+        tp_source = "va_extension"  # default fallback
+
         if is_buy:
-            tp_price = amt_result.value_area_high + (amt_result.value_area_high - amt_result.poc)
+            # LONG: prefer npoc_above → prior_poc above VAH → VA extension
+            if amt_result.npoc_above > 0 and amt_result.npoc_above > px:
+                tp_price = amt_result.npoc_above
+                tp_source = "npoc"
+            elif amt_result.prior_poc > amt_result.value_area_high and amt_result.prior_poc > px:
+                tp_price = amt_result.prior_poc
+                tp_source = "prior_poc"
+            else:
+                tp_price = amt_result.value_area_high + (amt_result.value_area_high - amt_result.poc)
+
             extreme_val = amt_result.poc
             sl_dir = 1 if inside_extreme else -1
             stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
@@ -149,7 +163,16 @@ def build_entry_signal(
                 tp_price = px * 1.020
                 stop_price = px * 0.990
         else:
-            tp_price = amt_result.value_area_low - (amt_result.poc - amt_result.value_area_low)
+            # SHORT: prefer npoc_below → prior_poc below VAL → VA extension
+            if amt_result.npoc_below > 0 and amt_result.npoc_below < px:
+                tp_price = amt_result.npoc_below
+                tp_source = "npoc"
+            elif 0 < amt_result.prior_poc < amt_result.value_area_low and amt_result.prior_poc < px:
+                tp_price = amt_result.prior_poc
+                tp_source = "prior_poc"
+            else:
+                tp_price = amt_result.value_area_low - (amt_result.poc - amt_result.value_area_low)
+
             extreme_val = amt_result.poc
             sl_dir = -1 if inside_extreme else 1
             stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
@@ -176,6 +199,8 @@ def build_entry_signal(
             stop_price = px - cushion_dist if is_buy else px + cushion_dist
 
     setup_label = "MeanRev" if setup_type == ST.MEAN_REVERSION else "Trend"
+    if setup_label == "Trend" and tp_source != "va_extension":
+        setup_label = f"Trend({tp_source})"
 
     # Compute confluence grade
 
@@ -241,5 +266,6 @@ def build_entry_signal(
             "trade_thesis": thesis.to_metadata(),
             "session_risk_pct": session_risk_pct,
             "grade_score": grade_score,
+            "tp_source": tp_source,
         },
     )

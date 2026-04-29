@@ -147,6 +147,10 @@ async def gameloop_ws(ws: WebSocket):
     try:
         while True:
             raw = await ws.receive_text()
+            # Reject payloads > 1MB to prevent memory exhaustion
+            if len(raw) > 1_048_576:
+                await ws.send_json({"error": "Payload too large (max 1MB)"})
+                continue
             data = json.loads(raw)
 
             # --- Server-driven mode: read from TradingEngine ---
@@ -170,7 +174,8 @@ async def gameloop_ws(ws: WebSocket):
                         except (TypeError, ValueError):
                             continue
                     if candles:
-                        session.data = candles
+                        with session._lock:
+                            session.data = candles
                 await ws.send_json(
                     {
                         "status": "history_loaded",
@@ -290,6 +295,7 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
     )
 
     try:
+        last_data_time = time.time()
         while True:
             if client_task.done():
                 logger.info("Viewer loop: client task done, exiting")
@@ -298,10 +304,18 @@ async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
             # Wait for engine to produce new data
             new_gen = await engine.wait_for_update(known_gen, timeout=5.0)
             if new_gen == known_gen:
+                # Engine hasn't produced new data — check for stale engine
+                if time.time() - last_data_time > 60:
+                    logger.warning(
+                        "Viewer loop: engine stale for >60s (gen=%d), disconnecting client",
+                        known_gen,
+                    )
+                    break
                 if not await _safe_send(ws, {"pong": True}):
                     break
                 continue  # No new data — loop back and check client_task
             known_gen = new_gen
+            last_data_time = time.time()
 
             # Send updated states for all symbols
             send_ok = True

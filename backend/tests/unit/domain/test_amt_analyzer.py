@@ -633,13 +633,17 @@ class TestLiquiditySweepDetection:
 class TestSessionVsLegVABounds:
     """Task 2.3: Session VA should always be within leg VA range."""
 
-    def test_session_va_clamped_to_leg_va(self, caplog):
-        """Session VAH/VAL should be clamped to leg VA bounds (Task 2.3)."""
+    def test_session_va_not_clamped_to_leg_va(self, caplog):
+        """Session VAH/VAL should NOT be clamped to leg VA bounds (ITR-1-04).
+
+        Session VA must reflect the true volume profile. If session VA < leg VA,
+        a warning is logged but values are not mutated.
+        """
         import logging
         caplog.set_level(logging.WARNING)
-        
+
         analyzer = AMTAnalyzer()
-        
+
         # Create data with a strong displacement leg
         # First 20 candles: tight range (session VA will be small)
         # Last 10 candles: strong displacement (leg VA will be large)
@@ -655,7 +659,7 @@ class TestSessionVsLegVABounds:
                 volume=500,
                 delta=0,
             ))
-        
+
         # Add displacement candles (leg will form here)
         for i in range(10):
             data.append(OHLC(
@@ -667,20 +671,18 @@ class TestSessionVsLegVABounds:
                 volume=1000,
                 delta=500,
             ))
-        
+
         # Run analysis
         result = analyzer.analyze(data)
-        
-        # Session VA should encompass leg VA (session is wider or equal)
-        if result.value_area_high > 0 and result.leg_vah > 0:
-            assert result.value_area_high >= result.leg_vah - 0.01, (
-                f"Session VAH {result.value_area_high} should be >= Leg VAH {result.leg_vah}"
-            )
-        
-        if result.value_area_low > 0 and result.leg_val > 0:
-            assert result.value_area_low <= result.leg_val + 0.01, (
-                f"Session VAL {result.value_area_low} should be <= Leg VAL {result.leg_val}"
-            )
+
+        # Session VA should reflect the true profile (NOT clamped)
+        assert result.value_area_high > 0
+        assert result.value_area_low > 0
+
+        # If session VAH < leg VAH, a warning should be logged
+        if result.value_area_high > 0 and result.leg_vah > 0 and result.value_area_high < result.leg_vah:
+            assert any("session profile may be incomplete" in r.message for r in caplog.records), \
+                "Warning should be logged when session VAH < leg VAH"
 
 
 class TestVWAPSigmaBounds:

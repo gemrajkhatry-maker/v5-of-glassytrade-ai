@@ -167,7 +167,7 @@ class TestExecuteDecision:
             session, "SYM", 105.0, pos_state,
         )
         session.portfolio.partial_close_position.assert_called_once()
-        tm.adjust_stop_loss.assert_called_once_with("pos-1", 100.0)
+        tm.adjust_stop_loss.assert_called_once_with(mock_pos, 100.0)
 
     def test_partial_already_taken(self):
         handler, _, tm, _ = _make_handler()
@@ -193,7 +193,7 @@ class TestExecuteDecision:
             session, "SYM", 105.0, pos_state,
         )
         session.portfolio.close_position.assert_called_once()
-        tm.unregister_position.assert_called_once_with("pos-1")
+        tm.record_exit_time.assert_called_once()
 
     def test_add_profitable(self):
         handler, _, _, _ = _make_handler()
@@ -281,6 +281,7 @@ class TestTimeout:
         mp.position_id = "pos-1"
         tm._positions = {"pos-1": mp}
         tm.get_position_state.return_value = _make_pos_state()
+        tm.get_position_metrics.return_value = {}
 
         tick = MagicMock()
         tick.close = 105.0
@@ -323,63 +324,78 @@ class TestProbabilityOverride:
         from app.domain.ports.probability_inference import ProbabilityEstimate
         prob_engine = MagicMock()
         prob_engine.is_ready.return_value = True
-        prob_engine.estimate.return_value = ProbabilityEstimate(
-            p_long_target=0.20, p_short_target=0.80,
-            expected_mfe_long=0.0, expected_mfe_short=0.0,
-        )
+        def fake_estimate(features):
+            return ProbabilityEstimate(
+                p_long_target=0.20, p_short_target=0.80,
+                expected_mfe_long=0.0, expected_mfe_short=0.0,
+            )
+        prob_engine.estimate.side_effect = fake_estimate
 
-        handler, gen_ai, tm, storage = _make_handler(
-            predict_return='{"action":"HOLD","reason":"looks fine"}',
-            probability_engine=prob_engine,
-        )
+        # Patch extract_features to return dummy features so the probability path succeeds
+        def fake_extract_features(*args, **kwargs):
+            from app.domain.probability.features import FEATURE_NAMES
+            return {name: 0.0 for name in FEATURE_NAMES}
+        
+        with patch('app.domain.probability.features.extract_features', side_effect=fake_extract_features):
 
-        # Need 20+ data bars for probability engine to fire
-        from app.domain.trading.models.value_objects import OHLC
-        fake_bars = [OHLC(open=100, high=101, low=99, close=100, volume=1000, delta=0, time="2025-01-01T10:00:00Z", vwap=100)] * 25
-        session = FakeSession(data=fake_bars)
-        mock_pos = MagicMock()
-        mock_pos.status = "OPEN"
-        mock_pos.id = "pos-1"
-        session.portfolio.positions = [mock_pos]
+            handler, gen_ai, tm, storage = _make_handler(
+                predict_return='{"action":"HOLD","reason":"looks fine"}',
+                probability_engine=prob_engine,
+            )
 
-        mp = MagicMock()
-        mp.position_id = "pos-1"
-        tm._positions = {"pos-1": mp}
-        tm.get_position_state.return_value = _make_pos_state()
+            # Need 20+ data bars for probability engine to fire
+            from app.domain.trading.models.value_objects import OHLC
+            fake_bars = [OHLC(open=100, high=101, low=99, close=100, volume=1000, delta=0, time="2025-01-01T10:00:00Z", vwap=100)] * 25
+            session = FakeSession(data=fake_bars)
+            mock_pos = MagicMock()
+            mock_pos.status = "OPEN"
+            mock_pos.id = "pos-1"
+            mock_pos.symbol = "SYM"
+            mock_pos.side.value = "LONG"
+            mock_pos.entry_price = 100.0
+            mock_pos.is_open = True
+            mock_pos.partial_taken = False
+            session.portfolio.positions = [mock_pos]
 
-        tick = MagicMock()
-        tick.close = 105.0
-        tick.delta = 10.0
-        tick.vwap = 100.0
-        tick.volume = 1000
-        tick.open = 100.0
-        tick.high = 106.0
-        tick.low = 99.0
-        tick.time = "2025-01-01T10:30:00Z"
+            mp = MagicMock()
+            mp.position_id = "pos-1"
+            tm._positions = {"pos-1": mp}
+            tm.get_position_state.return_value = _make_pos_state()
+            tm.get_position_metrics.return_value = {}
 
-        amt = MagicMock()
-        amt.market_state = "BALANCED"
-        amt.value_area_high = 110.0
-        amt.value_area_low = 90.0
-        amt.poc = 100.0
-        amt.cvd_slope = 0.0
-        amt.cvd_divergence = None
-        amt.aggressive_prints = []
-        amt.aggression = 0.5
-        amt.session_vwap = 100.0
-        amt.hvns = []
-        amt.lvns = []
-        amt.leg_poc = 0
-        amt.leg_lvns = []
-        amt.profile_shape = "D"
-        amt.lvn_play = None
+            tick = MagicMock()
+            tick.close = 105.0
+            tick.delta = 10.0
+            tick.vwap = 100.0
+            tick.volume = 1000
+            tick.open = 100.0
+            tick.high = 106.0
+            tick.low = 99.0
+            tick.time = "2025-01-01T10:30:00Z"
 
-        handler.run_overseer(session, "SYM", tick, amt)
-        # _llm_queues is a per-symbol dict after the multi-symbol refactor
-        q = handler._llm_queues.get("SYM")
-        if q:
-            q.join()
+            amt = MagicMock()
+            amt.market_state = "BALANCED"
+            amt.value_area_high = 110.0
+            amt.value_area_low = 90.0
+            amt.poc = 100.0
+            amt.cvd_slope = 0.0
+            amt.cvd_divergence = None
+            amt.aggressive_prints = []
+            amt.aggression = 0.5
+            amt.session_vwap = 100.0
+            amt.hvns = []
+            amt.lvns = []
+            amt.leg_poc = 0
+            amt.leg_lvns = []
+            amt.profile_shape = "D"
+            amt.lvn_play = None
 
-        # Should have called close_position due to probability override
-        # P(long wins) = 0.20, so P(adverse for LONG) = 0.80 > 0.65 → FULL_EXIT
-        session.portfolio.close_position.assert_called_once()
+            handler.run_overseer(session, "SYM", tick, amt)
+            # _llm_queues is a per-symbol dict after the multi-symbol refactor
+            q = handler._llm_queues.get("SYM")
+            if q:
+                q.join()
+
+            # Should have called close_position due to probability override
+            # P(long wins) = 0.20, so P(adverse for LONG) = 0.80 > 0.65 → FULL_EXIT
+            session.portfolio.close_position.assert_called_once()

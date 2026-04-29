@@ -172,6 +172,10 @@ class Position:
         """Move stop-loss to entry price (break-even)."""
         self.stop_loss = self.entry_price
 
+    def set_partial_taken(self, value: bool) -> None:
+        """Set partial_taken flag. Compatibility shim for test API."""
+        self.partial_taken = value
+
     def should_close(self, current_price: Decimal) -> tuple[bool, str]:
         """Check whether the position should be closed at *current_price*."""
         if self.side == Side.LONG:

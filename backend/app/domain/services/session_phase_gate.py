@@ -95,10 +95,12 @@ class SessionPhaseGate:
         event_dates: list[str] | None = None,
         friday_reduce: bool = True,
         thursday_reduce: bool = True,
+        friday_skip: bool = False,
     ) -> None:
         self._event_dates = set(event_dates or [])
         self._friday_reduce = friday_reduce
         self._thursday_reduce = thursday_reduce
+        self._friday_skip = friday_skip
 
     def evaluate(self, timestamp: datetime | None = None) -> PhaseState:
         """Evaluate current phase based on IST time.
@@ -120,6 +122,17 @@ class SessionPhaseGate:
                 size_multiplier=0.0,
                 reason=f"Event day ({date_str}) — NO TRADE",
                 is_event_day=True,
+                day_of_week=day_name,
+            )
+
+        # Friday skip (Fabio Gap #2b)
+        if self._friday_skip and day_name == "FRIDAY":
+            return PhaseState(
+                phase=TradingPhase.CLOSED,
+                allowed_action=AllowedAction.NO_TRADE,
+                is_blocked=True,
+                size_multiplier=0.0,
+                reason="Friday skip enabled — NO TRADE",
                 day_of_week=day_name,
             )
 

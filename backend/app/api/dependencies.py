@@ -10,7 +10,6 @@ module-level singleton.
 from fastapi import Request
 
 from app.application.service_graph import ServiceGraph
-from config.config import Configuration
 
 
 def get_service_graph_from_request(request: Request) -> ServiceGraph:
@@ -34,36 +33,6 @@ def get_gen_ai_service(request: Request):
     """Dependency: Generative AI service."""
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
     return request.app.state.service_graph.get(GenerativeAIService)
-
-
-def get_volume_profile_service(request: Request):
-    """Dependency: Volume profile service."""
-    from app.domain.services.volume_profile_service import VolumeProfileService
-    return request.app.state.service_graph.get(VolumeProfileService)
-
-
-def get_lvn_analyzer(request: Request):
-    """Dependency: LVN analyzer."""
-    from app.domain.services.lvn_analyzer import LVNAnalyzer
-    return request.app.state.service_graph.get(LVNAnalyzer)
-
-
-def get_market_state_classifier(request: Request):
-    """Dependency: Market state classifier."""
-    from app.domain.services.market_state_classifier import MarketStateClassifier
-    return request.app.state.service_graph.get(MarketStateClassifier)
-
-
-def get_aggression_scorer(request: Request):
-    """Dependency: Aggression scorer."""
-    from app.domain.services.aggression_scorer import AggressionScorer
-    return request.app.state.service_graph.get(AggressionScorer)
-
-
-def get_signal_generator(request: Request):
-    """Dependency: Signal generator."""
-    from app.domain.services.signal_generator import SignalGenerator
-    return request.app.state.service_graph.get(SignalGenerator)
 
 
 def get_configuration(request: Request):

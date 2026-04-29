@@ -49,15 +49,6 @@ from app.shared.timezones import IST
 
 from app.domain.fabio_ai.services.position_sizer import PositionSizer
 
-# Import error handling utilities
-from shared.error_handling import (
-    handle_errors,
-    safe_execute,
-    ErrorContext,
-    LLMError,
-    SignalError,
-)
-
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
@@ -493,7 +484,10 @@ class LLMEntryHandler:
         # Remove JSON-like artifacts at the end (truncated JSON)
         text = _UNCLOSED_JSON_RE.sub('', text)  # Remove unclosed JSON at end
         text = _ORPHANED_BRACE_RE.sub('', text)  # Remove orphaned closing brace
-        
+
+        # Remove HTML tags to prevent stored XSS (ITR-3-003)
+        text = re.sub(r'<[^>]+>', '', text)
+
         # Remove trailing JSON fragments
         text = _TRAILING_JSON_RE.sub('', text)
         
@@ -617,23 +611,10 @@ class LLMEntryHandler:
                         )
                     return
                 
-                # Max trades check
-                _risk_mgr = getattr(session, "_session_risk_manager", None)
-                if _risk_mgr and not _risk_mgr.can_trade:
-                    logger.info(
-                        "Max trades per session cap reached (%d trades) — blocking entry",
-                        _risk_mgr.trade_count,
-                    )
-                    if self._journal:
-                        self._journal.log_rejection(
-                            symbol=symbol,
-                            reason="MAX_TRADES_CAP",
-                            amt=session.last_amt,
-                            llm_direction=direction,
-                        )
-                    return
+                # Max trades check removed — _session_risk_manager no longer exists on SessionState
+                # Risk capping is now handled by SessionRiskCoordinator at the engine level
 
-                _cushion_sl = _risk_mgr.stop_loss_pct if _risk_mgr else None
+                _cushion_sl = None  # TODO: source from SessionRiskCoordinator when available
                 from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
                 from app.config import settings
 
@@ -1104,7 +1085,7 @@ class LLMEntryHandler:
                             attribution=self._compute_journal_attribution(_agent, direction),
                         )
                     except Exception:
-                        logger.debug("Journal log_signal failed", exc_info=True)
+                        logger.warning("Journal log_signal failed", exc_info=True)
 
                 # Use delegated modules for gate checking and signal construction
                 if direction in ("LONG", "SHORT"):
@@ -1132,6 +1113,7 @@ class LLMEntryHandler:
                                 llm_direction=direction,
                             )
                         direction = "FLAT"
+                        rationale += f" [GATE BLOCKED: {gate_reason}]"
 
                 # Save LLM decision & Update Memory
                 with session._lock:
@@ -1187,7 +1169,7 @@ class LLMEntryHandler:
                             }
                         )
                     except Exception:
-                        logger.debug("LLM decision persistence to storage failed", exc_info=True)
+                        logger.warning("LLM decision persistence to storage failed", exc_info=True)
 
                 # Build signal using build_entry_signal (via _process_build_signal)
                 # TODO(Task 51): Simplify - return raw LLM decision and let caller use SignalPipeline

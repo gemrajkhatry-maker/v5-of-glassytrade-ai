@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import TYPE_CHECKING, Callable, Optional
 
 from app.domain.ports.storage import IKeyValueStorage
@@ -41,6 +42,7 @@ from app.domain.fabio_ai.services.exit_rules import (
     update_excursions,
     TIME_STOP_TABLE,
     EXPIRY_TIME_STOP,
+    ExitReason,
 )
 from app.domain.fabio_ai.services.exit_signal import ExitSignal
 from app.domain.fabio_ai.services.trail_engine import TrailEngine
@@ -95,25 +97,8 @@ class TradeManagerConfig:
     trail_activation_r: float = 1.0
     # Instrument tick size for SL/TP rounding
     tick_size: float = 0.05
-
-
-# ---------------------------------------------------------------------------
-# Exit reasons
-# ---------------------------------------------------------------------------
-
-
-class ExitReason:
-    """Exit reason constants."""
-    STOP_LOSS = "STOP_LOSS"
-    TAKE_PROFIT = "TAKE_PROFIT"
-    TRAILING_STOP = "TRAILING_STOP"
-    TIME_STOP = "TIME_STOP"
-    PARTIAL_TAKE_PROFIT = "PARTIAL_TAKE_PROFIT"
-    SCRATCH = "SCRATCH"
-    BREAK_EVEN = "BREAK_EVEN"
-    OVERSEER_EXIT = "OVERSEER_EXIT"
-    OVERSEER_PARTIAL = "OVERSEER_PARTIAL"
-    SPREAD_BLOWOUT = "SPREAD_BLOWOUT"
+    # Hard ceiling: 120-minute absolute max hold (override for backtesting)
+    hard_max_hold_seconds: float = 7200
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +150,132 @@ class ExitEngine:
         # Tests may modify MAX_DAILY_LOSSES at runtime
         self._global_daily_losses = 0
         self._symbol_daily_losses = {}
+
+        # Compatibility shim: _positions dict for tests using old TradeManager API
+        self._positions: dict[str, Position] = {}
+
+    # ------------------------------------------------------------------
+    # Compatibility shim for old TradeManager API (tests)
+    # ------------------------------------------------------------------
+
+    def register_position(
+        self,
+        position_id: str,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+        **kwargs,
+    ) -> None:
+        """Create a Position entity and store it in _positions dict.
+
+        Compatibility shim for tests using the old TradeManager API.
+        Production code should use Position objects directly.
+        """
+        side_enum = Side.LONG if side == "LONG" else Side.SHORT
+        pos = Position(
+            id=position_id,
+            symbol=symbol,
+            side=side_enum,
+            entry_price=Decimal(str(entry_price)),
+            stop_loss=Decimal(str(stop_loss)),
+            take_profit=Decimal(str(take_profit)),
+            initial_stop=Decimal(str(stop_loss)),
+        )
+        self._positions[position_id] = pos
+
+    def has_managed_positions(self, symbol: str) -> bool:
+        """Check if any positions exist for a symbol.
+
+        Compatibility shim for tests using the old TradeManager API.
+        """
+        return any(p.symbol == symbol for p in self._positions.values())
+
+    def check_position(
+        self,
+        position: Position | str,
+        current_price: float,
+        current_time: float | None = None,
+        time_to_close: float = 0.0,
+        cvd_slope: float = 0.0,
+        stop_price: float | None = None,
+    ) -> Optional[ExitSignal]:
+        """Check all exit rules for a Position entity.
+
+        Accepts either a Position object (production API) or a position_id
+        string (old TradeManager API for test compatibility).
+
+        Returns an ``ExitSignal`` (or ``None``).
+        """
+        # Resolve position from id string for backward compatibility
+        if isinstance(position, str):
+            pos = self._positions.get(position)
+            if pos is None:
+                logger.warning("ExitEngine: position %s not found in _positions", position)
+                return None
+        else:
+            pos = position
+
+        now = current_time if current_time is not None else time.time()
+        pos.tick_count += 1
+
+        is_long = pos.side == Side.LONG or pos.side.value == "LONG"
+        sl = float(pos.stop_loss)
+
+        # ----- 1. STOP LOSS -----
+        sl_check = stop_price if stop_price is not None else current_price
+        if (is_long and sl_check <= sl) or (not is_long and sl_check >= sl):
+            logger.info(
+                "ExitEngine: STOP LOSS hit for %s at %.2f", pos.id, current_price
+            )
+            self.record_loss(pos.symbol, current_price)
+            pos.advance_cushion_state(CushionState.CLOSED)
+            return ExitSignal(pos.id, ExitReason.STOP_LOSS, current_price)
+
+        # ----- 2. MAE/MFE tracking -----
+        update_excursions(pos, current_price)
+
+        # ----- 3. ATR TRAILING STOP (delegates to TrailEngine) -----
+        self._trail_engine.apply_atr_trail(pos, current_price)
+
+        # ----- 4. TIME STOP / SCRATCH -----
+        if pos.tick_count < 5:
+            return None
+
+        return check_time_stop_with_price(
+            position=pos,
+            current_price=current_price,
+            current_time=now,
+            time_to_close=time_to_close,
+            max_hold_seconds=self._config.max_hold_seconds,
+            scratch_threshold_pct=self._config.scratch_threshold_pct,
+        )
+
+    def check_spread_blowout(
+        self,
+        position_id: str | Position | None = None,
+        best_bid: float = 0.0,
+        best_ask: float = 0.0,
+        premium: float = 0.0,
+        max_spread_pct: float = 0.03,
+        *,
+        position: Position | None = None,
+    ) -> Optional[ExitSignal]:
+        """Check for spread blowout. Accepts position_id string or Position object."""
+        pos = position
+        if pos is None and position_id is not None:
+            if isinstance(position_id, str):
+                pos = self._positions.get(position_id)
+            else:
+                pos = position_id
+        if pos is None:
+            return None
+
+        blowout = check_spread_blowout(pos, best_bid, best_ask, premium, max_spread_pct)
+        if blowout:
+            pos.advance_cushion_state(CushionState.CLOSED)
+        return blowout
 
     # ------------------------------------------------------------------
     # Daily loss tracking (delegates to LossTracker)
@@ -240,59 +351,8 @@ class ExitEngine:
         return is_valid_rr(entry, sl, tp, min_rr)
 
     # ------------------------------------------------------------------
-    # Stateless core: check_position(Position, price) → ExitDecision | None
+    # Position metrics
     # ------------------------------------------------------------------
-
-    def check_position(
-        self,
-        position: Position,
-        current_price: float,
-        current_time: float | None = None,
-        time_to_close: float = 0.0,
-        cvd_slope: float = 0.0,
-        stop_price: float | None = None,
-    ) -> Optional[ExitSignal]:
-        """Check all exit rules for a Position entity.
-
-        This is the stateless API — the Position object is mutated directly
-        for lifecycle state (stop-loss advances, cushion-state transitions, etc.).
-
-        Returns an ``ExitSignal`` (or ``None``).
-        """
-        now = current_time if current_time is not None else time.time()
-        position.tick_count += 1
-
-        is_long = position.side == Side.LONG or position.side.value == "LONG"
-        sl = float(position.stop_loss)
-
-        # ----- 1. STOP LOSS -----
-        sl_check = stop_price if stop_price is not None else current_price
-        if (is_long and sl_check <= sl) or (not is_long and sl_check >= sl):
-            logger.info(
-                "ExitEngine: STOP LOSS hit for %s at %.2f", position.id, current_price
-            )
-            self.record_loss(position.symbol, current_price)
-            position.advance_cushion_state(CushionState.CLOSED)
-            return ExitSignal(position.id, ExitReason.STOP_LOSS, current_price)
-
-        # ----- 2. MAE/MFE tracking -----
-        update_excursions(position, current_price)
-
-        # ----- 3. ATR TRAILING STOP (delegates to TrailEngine) -----
-        self._trail_engine.apply_atr_trail(position, current_price)
-
-        # ----- 4. TIME STOP / SCRATCH -----
-        if position.tick_count < 5:
-            return None
-
-        return check_time_stop_with_price(
-            position=position,
-            current_price=current_price,
-            current_time=now,
-            time_to_close=time_to_close,
-            max_hold_seconds=self._config.max_hold_seconds,
-            scratch_threshold_pct=self._config.scratch_threshold_pct,
-        )
 
     def get_position_metrics(
         self,
@@ -357,21 +417,6 @@ class ExitEngine:
             vwap_upper_2=vwap_upper_2,
             vwap_lower_2=vwap_lower_2,
         )
-
-    # ------------------------------------------------------------------
-    # Spread blowout (delegates to exit_rules)
-    # ------------------------------------------------------------------
-
-    def check_spread_blowout(
-        self,
-        position: Position,
-        best_bid: float,
-        best_ask: float,
-        premium: float,
-        max_spread_pct: float = 0.03,
-    ) -> Optional[ExitSignal]:
-        """Check for spread blowout and return exit signal if triggered."""
-        return check_spread_blowout(position, best_bid, best_ask, premium, max_spread_pct)
 
     # ------------------------------------------------------------------
     # Adjust SL (delegates to TrailEngine)

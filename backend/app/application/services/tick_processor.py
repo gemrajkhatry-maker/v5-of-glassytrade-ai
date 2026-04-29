@@ -237,7 +237,7 @@ class TickProcessor:
                         sell_vol=sell_per_tick,
                     )
         except Exception:
-            pass  # Non-critical — depth book degrades gracefully
+            logger.debug("Range bar backfill failed for %s — non-critical", symbol, exc_info=True)  # Non-critical — depth book degrades gracefully
 
     def get_range_builder_dict(self, symbol: str) -> dict | None:
         """Get range bar dict for a symbol.

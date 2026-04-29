@@ -212,12 +212,18 @@ class GatePipeline:
         if ctx.market_state == MarketState.NO_TRADE:
             # EXCEPTION: If it's an extreme deviation, we override NO_TRADE
             # because we want to fade the extreme even if it's near POC of a leg.
-            if not ctx.is_extreme_deviation:
+            # Guardrail: still require minimum R:R of 1.0 for safety.
+            if ctx.is_extreme_deviation:
+                if ctx.r_r_ratio < 1.0:
+                    return self._hard_fail(
+                        3, GateReason.FLAT,
+                        f"Extreme fade rejected: R:R {ctx.r_r_ratio:.2f} < 1.0 minimum"
+                    )
+                logger.info("Responsive Fade: Overriding NO_TRADE due to extreme σ deviation (R:R=%.2f)", ctx.r_r_ratio)
+            else:
                 return self._hard_fail(
                     3, GateReason.FLAT, "Price at POC dead zone (state=NO_TRADE)"
                 )
-            else:
-                logger.info("Responsive Fade: Overriding NO_TRADE due to extreme σ deviation")
 
         # HARD GATE 4: PROBING state — allow with aggression confirmation
         # PROBING can trade when: aggression >= threshold AND at a key level

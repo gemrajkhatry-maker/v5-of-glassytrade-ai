@@ -88,31 +88,6 @@ def compose_container(config: "Configuration") -> DIContainer:
 
     # --- Domain Services ---
     container.register_singleton(
-        _volume_profile_service(),
-        lambda c: _create_volume_profile_service(c),
-    )
-
-    container.register_singleton(
-        _lvn_analyzer(),
-        lambda c: _create_lvn_analyzer(c),
-    )
-
-    container.register_singleton(
-        _market_state_classifier(),
-        lambda c: _create_market_state_classifier(c),
-    )
-
-    container.register_singleton(
-        _aggression_scorer(),
-        lambda c: _create_aggression_scorer(c),
-    )
-
-    container.register_singleton(
-        _signal_generator(),
-        lambda c: _create_signal_generator(c),
-    )
-
-    container.register_singleton(
         _gate_pipeline(),
         lambda c: _create_gate_pipeline(c, config),
     )
@@ -158,11 +133,6 @@ def _llm_inference_port():
 def _probability_inference_port():
     from app.domain.ports.probability_inference import IProbabilityInference
     return IProbabilityInference
-
-
-def _volume_profile_service():
-    from app.domain.services.volume_profile_service import VolumeProfileService
-    return VolumeProfileService
 
 
 def _trading_session_service():
@@ -233,11 +203,6 @@ def _create_probability_adapter(container: DIContainer, config: "Configuration")
         return NoOpProbabilityAdapter()
 
 
-def _create_volume_profile_service(container: DIContainer):
-    from app.domain.services.volume_profile_service import VolumeProfileService
-    return VolumeProfileService()
-
-
 def _create_trading_session(container: DIContainer, config: "Configuration"):
     """Create TradingSessionService with all dependencies from the container."""
     from app.domain.ports.broker import IBroker
@@ -254,7 +219,12 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
     try:
         from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
         gen_ai_service = GenerativeAIService(llm_adapter=llm_adapter)
-    except Exception:
+    except Exception as exc:
+        if is_live_mode():
+            raise RuntimeError(
+                "GenerativeAIService failed in live mode"
+            ) from exc
+        logger.error("GenerativeAIService failed to initialize — LLM features disabled", exc_info=True)
         gen_ai_service = None
 
     # Exchange config
@@ -278,6 +248,12 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
     except Exception:
         logger.debug("ALLOW_SHORT setting not available — defaulting to False")
 
+    # Observability trackers
+    from app.domain.services.gate_rejection_tracker import GateRejectionTracker
+    from app.domain.services.latency_tracker import LatencyTracker
+    gate_tracker = GateRejectionTracker()
+    latency_tracker = LatencyTracker()
+
     from app.application.services.trading_session import TradingSessionService
     return TradingSessionService(
         broker=broker,
@@ -286,6 +262,8 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
         probability_engine=probability_engine,
         exchange_config=exchange_config,
         allow_short=allow_short,
+        gate_tracker=gate_tracker,
+        latency_tracker=latency_tracker,
     )
 
 
@@ -311,26 +289,6 @@ def _npoc_port():
 def _exchange_strategy_port():
     from app.domain.ports.exchange_strategy import IExchangeStrategy
     return IExchangeStrategy
-
-
-def _lvn_analyzer():
-    from app.domain.services.lvn_analyzer import LVNAnalyzer
-    return LVNAnalyzer
-
-
-def _market_state_classifier():
-    from app.domain.services.market_state_classifier import MarketStateClassifier
-    return MarketStateClassifier
-
-
-def _aggression_scorer():
-    from app.domain.services.aggression_scorer import AggressionScorer
-    return AggressionScorer
-
-
-def _signal_generator():
-    from app.domain.services.signal_generator import SignalGenerator
-    return SignalGenerator
 
 
 def _gate_pipeline():
@@ -377,26 +335,6 @@ def _create_exchange_strategy(container: DIContainer, config: "Configuration"):
     else:
         from app.infrastructure.strategies.mcx_strategy import MCXExchangeStrategy
         return MCXExchangeStrategy(exc_config)
-
-
-def _create_lvn_analyzer(container: DIContainer):
-    from app.domain.services.lvn_analyzer import LVNAnalyzer
-    return LVNAnalyzer()
-
-
-def _create_market_state_classifier(container: DIContainer):
-    from app.domain.services.market_state_classifier import MarketStateClassifier
-    return MarketStateClassifier()
-
-
-def _create_aggression_scorer(container: DIContainer):
-    from app.domain.services.aggression_scorer import AggressionScorer
-    return AggressionScorer()
-
-
-def _create_signal_generator(container: DIContainer):
-    from app.domain.services.signal_generator import SignalGenerator
-    return SignalGenerator()
 
 
 def _create_gate_pipeline(container: DIContainer, config: "Configuration"):

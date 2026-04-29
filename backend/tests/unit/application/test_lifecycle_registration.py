@@ -39,7 +39,7 @@ def _make_position(
     side: Side = Side.LONG,
     source: Source = Source.LLM,
     entry_price: float = 100.0,
-    pos_id: str = "pos-1",
+    pos_id: str = "NIFTY-pos-1",
 ) -> Position:
     return Position(
         id=pos_id,
@@ -81,19 +81,19 @@ class TestPartitionStateAllSources:
     def test_agent_position_gets_partition_state(self):
         """The root-cause bug: Agent positions were never managed."""
         handler = TradeLifecycleHandler()
-        pos = _make_position(source=Source.AGENT, pos_id="agent-pos")
+        pos = _make_position(source=Source.AGENT, pos_id="NIFTY-agent-pos")
 
         handler.initialize_partition_state(pos.id)
 
-        assert "agent-pos" in handler._partition_states
+        assert "NIFTY-agent-pos" in handler._partition_states
 
     def test_amt_position_gets_partition_state(self):
         handler = TradeLifecycleHandler()
-        pos = _make_position(source=Source.AMT, pos_id="amt-pos")
+        pos = _make_position(source=Source.AMT, pos_id="NIFTY-amt-pos")
 
         handler.initialize_partition_state(pos.id)
 
-        assert "amt-pos" in handler._partition_states
+        assert "NIFTY-amt-pos" in handler._partition_states
 
     def test_partition_state_cleared_on_close(self):
         handler = TradeLifecycleHandler()

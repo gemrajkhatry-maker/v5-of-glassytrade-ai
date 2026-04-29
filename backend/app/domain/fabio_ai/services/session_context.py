@@ -365,6 +365,19 @@ def is_expiry_day(trade_date: date) -> bool:
     return trade_date.weekday() == 3  # Thursday = 3
 
 
+def is_monthly_expiry(trade_date: date) -> bool:
+    """Check if the given date is the monthly expiry (last Thursday).
+
+    NIFTY/BANKNIFTY monthly expiry is the last Thursday of the month.
+    If adding 7 days crosses into next month, this Thursday is the last one.
+    """
+    if trade_date.weekday() != 3:
+        return False
+    from datetime import timedelta
+    next_week = trade_date + timedelta(days=7)
+    return next_week.month != trade_date.month
+
+
 def seconds_to_close(current_time: datetime, exchange: str = "NSE") -> float:
     """Return seconds remaining until market close.
 
