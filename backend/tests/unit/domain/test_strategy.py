@@ -2,7 +2,6 @@
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="AMTSetupDetector stub — feature not yet implemented (planned Phase 5)")
 from app.domain.fabio_ai.strategy.protocols import (
     Setup,
     MarketContext,

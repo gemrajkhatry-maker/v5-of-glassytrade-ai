@@ -218,9 +218,9 @@ class TestAMTAnalyzer:
 
     def test_displacement_leg_returns_leg_lvns(self):
         """detect_displacement_leg should return LVN list (possibly empty)."""
-        analyzer = AMTAnalyzer()
+        from app.domain.services.displacement_detector import detect_displacement_leg
         data = generate_market_data(50, 100, "bullish")
-        result = analyzer.detect_displacement_leg(data)
+        result = detect_displacement_leg(data)
         assert isinstance(result, dict)
         assert isinstance(result["has_displacement"], bool)
         assert isinstance(result["lvns"], list)

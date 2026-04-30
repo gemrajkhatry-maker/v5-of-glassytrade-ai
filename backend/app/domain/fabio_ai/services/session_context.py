@@ -1,15 +1,16 @@
 """Session Context — time-of-day session awareness & opening relation.
 
 Supports two market regimes:
-  - NSE/MCX (Indian markets): 5-phase IST structure per Fabio methodology
+  - NSE/MCX (Indian markets): 6-phase IST structure per Fabio methodology
   - Crypto/Global: London / New York / Asia / Overlap
 
 The NSE phases directly map to Fabio's transcript:
   Phase 1 (09:15–09:30 IST): Opening Noise — DO NOT TRADE
-  Phase 2 (09:30–11:30 IST): Primary Setup Window — ALL MODELS ACTIVE
-  Phase 3 (11:30–14:00 IST): Midday Consolidation — REVERSION ONLY
-  Phase 4 (14:00–15:15 IST): Power Hour — ALL MODELS ACTIVE
-  Phase 5 (15:15–15:30 IST): Close Protection — EXIT ONLY, NO NEW ENTRIES
+  Phase 2 (09:30–10:15 IST): IB Formation — DO NOT TRADE (wait for completion)
+  Phase 3 (10:15–11:30 IST): Primary Setup Window — ALL MODELS ACTIVE
+  Phase 4 (11:30–14:00 IST): Midday Consolidation — REVERSION ONLY
+  Phase 5 (14:00–15:15 IST): Power Hour — ALL MODELS ACTIVE
+  Phase 6 (15:15–15:30 IST): Close Protection — EXIT ONLY, NO NEW ENTRIES
 
 MCX sessions:
   Pre-open (09:00–09:15 IST): DO NOT TRADE
@@ -105,21 +106,25 @@ def _get_nse_phase(
     if t < 570:  # before 09:30
         return ("NSE_OPENING", 1, False, False, False, False, "NEUTRAL")
 
-    # Phase 2: Primary Setup Window (09:30–11:30)
+    # Phase 2: IB Formation (09:30–10:15)
+    if t < 615:  # before 10:15
+        return ("NSE_IB_FORMATION", 2, False, False, False, False, "NEUTRAL")
+
+    # Phase 3: Primary Setup Window (10:15–11:30)
     if t < 690:  # before 11:30
-        return ("NSE_PRIMARY", 2, True, True, True, False, "TREND_CONTINUATION")
+        return ("NSE_PRIMARY", 3, True, True, True, False, "TREND_CONTINUATION")
 
-    # Phase 3: Midday Consolidation (11:30–14:00)
+    # Phase 4: Midday Consolidation (11:30–14:00)
     if t < 840:  # before 14:00
-        return ("NSE_MIDDAY", 3, True, False, True, False, "MEAN_REVERSION")
+        return ("NSE_MIDDAY", 4, True, False, True, False, "MEAN_REVERSION")
 
-    # Phase 4: Power Hour (14:00–15:15)
+    # Phase 5: Power Hour (14:00–15:15)
     if t < 915:  # before 15:15
-        return ("NSE_POWER_HOUR", 4, True, True, True, False, "TREND_CONTINUATION")
+        return ("NSE_POWER_HOUR", 5, True, True, True, False, "TREND_CONTINUATION")
 
-    # Phase 5: Close Protection (15:15–15:30)
+    # Phase 6: Close Protection (15:15–15:30)
     if t < 930:  # before 15:30
-        return ("NSE_CLOSE", 5, False, False, False, True, "NEUTRAL")
+        return ("NSE_CLOSE", 6, False, False, False, True, "NEUTRAL")
 
     # After market close
     return ("POST_MARKET", 0, False, False, False, False, "NEUTRAL")

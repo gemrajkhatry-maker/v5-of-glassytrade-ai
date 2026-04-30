@@ -2,7 +2,6 @@
 
 import pytest
 
-pytestmark = pytest.mark.skip(reason="OptionSelectionEngine stub — feature not yet implemented")
 from app.domain.services.option_selection_engine import (
     OptionSelectionEngine,
     Moneyness,
@@ -41,7 +40,7 @@ class TestOptionSelectionEngine:
             available_options=self._make_options(),
         )
         assert result.allowed
-        assert result.contract.contract_type == ContractType.CE
+        assert result.contract.option_type == ContractType.CE
 
     def test_short_selects_pe(self):
         engine = OptionSelectionEngine()
@@ -54,7 +53,7 @@ class TestOptionSelectionEngine:
             available_options=self._make_options(),
         )
         assert result.allowed
-        assert result.contract.contract_type == ContractType.PE
+        assert result.contract.option_type == ContractType.PE
 
     def test_aaa_selects_atm(self):
         engine = OptionSelectionEngine()
@@ -80,10 +79,10 @@ class TestOptionSelectionEngine:
             available_options=self._make_options(),
         )
         assert result.allowed
-        assert result.contract.moneyness == Moneyness.OTM_1
+        assert result.contract.moneyness == Moneyness.OTM1
 
     def test_low_oi_rejected(self):
-        engine = OptionSelectionEngine()
+        engine = OptionSelectionEngine(min_oi=15000)
         options = self._make_options()
         for o in options:
             o["oi"] = 100  # below NIFTY threshold

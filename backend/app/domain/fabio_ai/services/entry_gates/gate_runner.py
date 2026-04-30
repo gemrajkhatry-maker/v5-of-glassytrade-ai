@@ -13,7 +13,7 @@ def run_gate_pipeline(
     aggression_score: float = 0.0,
     is_risk_halted: bool = False,
     halt_reason: str = "",
-    tick_age_seconds: float = 1.0,
+    tick_age_seconds: float = 1.1,
     symbol: str = "",
     max_distance_to_level_ticks: float = 3.0,
     probing_aggression_threshold: float = 3.0,
@@ -22,6 +22,9 @@ def run_gate_pipeline(
     min_rr_ratio: float = 1.5,
     tick_size: float = 0.05,
     is_extreme_deviation: bool = False,
+    pcr: float = 1.0,  # Put-Call Ratio for NSE options bias
+    oi_walls: list = None,  # OI walls for NSE protection levels
+    favor_strategy: str = "NEUTRAL",  # Session-favored strategy
 ) -> tuple[bool, str, str]:
     """Run the 12-gate pipeline for additional validation.
 
@@ -82,6 +85,8 @@ def run_gate_pipeline(
         is_risk_halted=is_risk_halted,
         halt_reason=halt_reason,
         eia_window_active=eia_suppressed,
+        pcr=pcr,  # PCR bias for NSE options
+        oi_walls=oi_walls or [],  # OI walls for NSE protection levels
         is_extreme_deviation=is_extreme_deviation,
         setup_type=amt_result.setup or "NONE",
         r_r_ratio=rr,
@@ -91,6 +96,7 @@ def run_gate_pipeline(
         min_aggression_score=min_aggression_score,
         max_cushion_ticks=max_cushion_ticks,
         min_rr_ratio=min_rr_ratio,
+        favor_strategy=favor_strategy,  # Session strategy filter
     )
 
     result = GatePipeline().evaluate(ctx)

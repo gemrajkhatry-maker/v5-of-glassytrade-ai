@@ -219,6 +219,14 @@ class AMTResult:
     swing_delta_price: float | None = None
     # Fabio AMT review: Volume participation above VAH (%)
     volume_above_vah_pct: float = 0.0
+    # PCR (Put-Call Ratio) for NSE options bias
+    pcr: float = 1.0  # Put-Call ratio (OI-based): <0.85 bullish, >1.15 bearish, 0.85-1.15 neutral
+    # OI Walls for NSE protection levels
+    oi_walls: tuple = field(default_factory=tuple)  # List of OIWall dataclasses
+    # Squeeze detection state for breakout setups
+    squeeze_state: dict = field(default_factory=dict)
+    # Session-favored strategy for session timing filter (Fabio's timing rules)
+    session_favor_strategy: str = "NEUTRAL"  # MEAN_REVERSION | TREND_CONTINUATION | NEUTRAL
 
 
 # ---------------------------------------------------------------------------

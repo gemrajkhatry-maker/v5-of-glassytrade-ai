@@ -109,7 +109,19 @@ def build_entry_signal(
             
         allow_trail = True
     elif setup_type == ST.MEAN_REVERSION:
+        # Fabio playbook: Mean reversion targets prior POC (previous balance area)
+        # When prior POC is available and beyond current price, use it as target
         tp_price = amt_result.poc
+        if amt_result.prior_poc > 0:
+            # Use prior POC if it's a valid mean reversion target
+            # For LONG: prior_poc above current price is good target
+            # For SHORT: prior_poc below current price is good target
+            if is_buy and amt_result.prior_poc > px:
+                tp_price = amt_result.prior_poc
+                tp_source = "prior_poc"
+            elif not is_buy and amt_result.prior_poc < px:
+                tp_price = amt_result.prior_poc
+                tp_source = "prior_poc"
         if is_buy:
             extreme_val = amt_result.value_area_low
             sl_dir = 1 if inside_extreme else -1

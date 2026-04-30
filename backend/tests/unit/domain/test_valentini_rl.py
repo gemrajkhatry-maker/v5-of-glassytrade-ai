@@ -210,9 +210,9 @@ class TestSessionContext:
         assert opening_relation(90, 105, 95) == "OUT_BELOW"
 
     def test_session_info_london_favors_reversion(self):
-        # 04:30 UTC -> 10:00 IST -> NSE_PRIMARY
+        # 05:00 UTC -> 10:30 IST -> NSE_PRIMARY (after IB formation ends at 10:15)
         info = get_session_info(
-            "2025-01-15T04:30:00+00:00",
+            "2025-01-15T05:00:00+00:00",
             open_price=100,
             prior_vah=105,
             prior_val=95,

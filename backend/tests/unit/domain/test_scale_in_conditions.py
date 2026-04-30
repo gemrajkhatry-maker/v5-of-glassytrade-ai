@@ -1,264 +1,235 @@
 """Tests for P2-12: Precise 40/30/30 scale-in conditions.
 
-SKIPPED: Test method signatures don't match current TradeManager.check_scale_in() API.
-Tests pass cvd_confirming= kwarg but method doesn't accept it.
+Tests for ScaleManager scale-in logic based on confirmation/breakout prices.
 """
 
 from __future__ import annotations
 
 import pytest
-import time
-pytestmark = pytest.mark.skip(reason="Scale-in test API mismatch — cvd_confirming kwarg not in TradeManager.check_scale_in()")
+from decimal import Decimal
 
-from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager, TradeManagerConfig
+from app.domain.fabio_ai.services.scale_manager import ScaleManager
+from app.domain.trading.models.entities import Position
+from app.domain.trading.models.enums import Side
 
 
 class TestScaleInConditions:
     """Tests for Fabio-compliant 40/30/30 scale-in logic."""
 
     def setup_method(self):
-        self.tm = TradeManager(config=TradeManagerConfig())
+        self.scale_manager = ScaleManager()
 
-    def test_phase2_requires_all_conditions(self):
-        """Phase 2 needs: LVN hold + CVD confirm + 60s + aggression >= 1.0."""
-        self.tm.register_position(
-            position_id="test1",
+    def test_no_scale_in_when_max_step_reached(self):
+        """After step 3 = no more scale-in."""
+        pos = Position(
+            id="test_max",
             symbol="NIFTY",
-            side="LONG",
-            entry_price=24800.0,
-            stop_loss=24700.0,
-            take_profit=24900.0,
-            enable_scale_in=True,
+            side=Side.LONG,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24700"),
+            take_profit=Decimal("24900"),
         )
-        # Missing LVN hold
-        result = self.tm.check_scale_in(
-            position_id="test1",
-            current_price=24850.0,
-            cvd_confirming=True,
-            time_in_position_seconds=120.0,
-            aggression_sigma=1.5,
-            price_holding_lvn=False,
-        )
+        pos.scale_step = 3
+        pos.scale_confirm_price = Decimal("24850")
+        pos.scale_breakout_price = Decimal("24900")
+        
+        result = self.scale_manager.check_scale_in(pos, 24950.0)
         assert result == 0.0
 
-        # Missing CVD confirmation
-        result = self.tm.check_scale_in(
-            position_id="test1",
-            current_price=24850.0,
-            cvd_confirming=False,
-            time_in_position_seconds=120.0,
-            aggression_sigma=1.5,
-            price_holding_lvn=True,
-        )
-        assert result == 0.0
-
-        # Missing time requirement
-        result = self.tm.check_scale_in(
-            position_id="test1",
-            current_price=24850.0,
-            cvd_confirming=True,
-            time_in_position_seconds=30.0,
-            aggression_sigma=1.5,
-            price_holding_lvn=True,
-        )
-        assert result == 0.0
-
-        # Missing aggression
-        result = self.tm.check_scale_in(
-            position_id="test1",
-            current_price=24850.0,
-            cvd_confirming=True,
-            time_in_position_seconds=120.0,
-            aggression_sigma=0.5,
-            price_holding_lvn=True,
-        )
-        assert result == 0.0
-
-    def test_phase2_triggers_when_all_conditions_met(self):
-        """All conditions met = Phase 2 triggers with 0.3."""
-        self.tm.register_position(
-            position_id="test2",
+    def test_no_scale_in_in_loss_territory_long(self):
+        """Don't scale in when price is below entry."""
+        pos = Position(
+            id="test_loss",
             symbol="NIFTY",
-            side="LONG",
-            entry_price=24800.0,
-            stop_loss=24700.0,
-            take_profit=24900.0,
-            enable_scale_in=True,
+            side=Side.LONG,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24700"),
+            take_profit=Decimal("24900"),
         )
-        result = self.tm.check_scale_in(
-            position_id="test2",
-            current_price=24850.0,
-            cvd_confirming=True,
-            time_in_position_seconds=120.0,
-            aggression_sigma=1.5,
-            price_holding_lvn=True,
+        pos.scale_step = 1
+        pos.scale_confirm_price = Decimal("24850")
+        pos.scale_breakout_price = Decimal("24900")
+        
+        # Price below entry
+        result = self.scale_manager.check_scale_in(pos, 24750.0)
+        assert result == 0.0
+
+    def test_no_scale_in_in_loss_territory_short(self):
+        """Don't scale in when price is above entry for shorts."""
+        pos = Position(
+            id="test_loss_short",
+            symbol="NIFTY",
+            side=Side.SHORT,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24900"),
+            take_profit=Decimal("24700"),
         )
+        pos.scale_step = 1
+        pos.scale_confirm_price = Decimal("24750")
+        pos.scale_breakout_price = Decimal("24700")
+        
+        # Price above entry for short
+        result = self.scale_manager.check_scale_in(pos, 24850.0)
+        assert result == 0.0
+
+    def test_step1_to_step2_long(self):
+        """Step 1 to Step 2 triggers with 0.3 for longs."""
+        pos = Position(
+            id="test_step2_long",
+            symbol="NIFTY",
+            side=Side.LONG,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24700"),
+            take_profit=Decimal("24900"),
+        )
+        pos.scale_step = 1
+        pos.scale_confirm_price = Decimal("24850")
+        pos.scale_breakout_price = Decimal("24900")
+        
+        result = self.scale_manager.check_scale_in(pos, 24850.0)
         assert result == 0.3
+        assert pos.scale_step == 2
 
-    def test_phase3_requires_imbalanced_state(self):
-        """Phase 3 requires IMBALANCED market state."""
-        self.tm.register_position(
-            position_id="test3",
+    def test_step1_to_step2_short(self):
+        """Step 1 to Step 2 triggers with 0.3 for shorts."""
+        pos = Position(
+            id="test_step2_short",
             symbol="NIFTY",
-            side="LONG",
-            entry_price=24800.0,
-            stop_loss=24700.0,
-            take_profit=24900.0,
-            enable_scale_in=True,
+            side=Side.SHORT,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24900"),
+            take_profit=Decimal("24700"),
         )
-        # Trigger Phase 2 first
-        self.tm.check_scale_in(
-            position_id="test3",
-            current_price=24850.0,
-            cvd_confirming=True,
-            time_in_position_seconds=120.0,
-            aggression_sigma=1.5,
-            price_holding_lvn=True,
-        )
-
-        # Phase 3 with BALANCED state = blocked
-        result = self.tm.check_scale_in(
-            position_id="test3",
-            current_price=24900.0,
-            cvd_slope=5.0,
-            market_state="BALANCED",
-        )
-        assert result == 0.0
-
-    def test_phase3_requires_cvd_expansion(self):
-        """Phase 3 requires CVD expanding in trade direction."""
-        self.tm.register_position(
-            position_id="test4",
-            symbol="NIFTY",
-            side="LONG",
-            entry_price=24800.0,
-            stop_loss=24700.0,
-            take_profit=24900.0,
-            enable_scale_in=True,
-        )
-        # Trigger Phase 2 first
-        self.tm.check_scale_in(
-            position_id="test4",
-            current_price=24850.0,
-            cvd_confirming=True,
-            time_in_position_seconds=120.0,
-            aggression_sigma=1.5,
-            price_holding_lvn=True,
-        )
-
-        # Phase 3 with opposing CVD = blocked
-        result = self.tm.check_scale_in(
-            position_id="test4",
-            current_price=24900.0,
-            cvd_slope=-5.0,  # Opposing
-            market_state="IMBALANCED",
-        )
-        assert result == 0.0
-
-    def test_phase3_triggers_when_all_conditions_met(self):
-        """All Phase 3 conditions met = triggers with 0.3."""
-        self.tm.register_position(
-            position_id="test5",
-            symbol="NIFTY",
-            side="LONG",
-            entry_price=24800.0,
-            stop_loss=24700.0,
-            take_profit=24900.0,
-            enable_scale_in=True,
-        )
-        # Trigger Phase 2
-        self.tm.check_scale_in(
-            position_id="test5",
-            current_price=24850.0,
-            cvd_confirming=True,
-            time_in_position_seconds=120.0,
-            aggression_sigma=1.5,
-            price_holding_lvn=True,
-        )
-        # Trigger Phase 3
-        result = self.tm.check_scale_in(
-            position_id="test5",
-            current_price=24900.0,
-            cvd_slope=5.0,
-            market_state="IMBALANCED",
-        )
+        pos.scale_step = 1
+        pos.scale_confirm_price = Decimal("24750")
+        pos.scale_breakout_price = Decimal("24700")
+        
+        result = self.scale_manager.check_scale_in(pos, 24750.0)
         assert result == 0.3
+        assert pos.scale_step == 2
 
-    def test_no_scale_in_when_disabled(self):
-        """Scale-in disabled = no triggers."""
-        self.tm.register_position(
-            position_id="test6",
+    def test_step2_to_step3_long(self):
+        """Step 2 to Step 3 triggers with 0.3 for longs."""
+        pos = Position(
+            id="test_step3_long",
             symbol="NIFTY",
-            side="LONG",
-            entry_price=24800.0,
-            stop_loss=24700.0,
-            take_profit=24900.0,
-            enable_scale_in=False,
+            side=Side.LONG,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24700"),
+            take_profit=Decimal("24900"),
         )
-        result = self.tm.check_scale_in(
-            position_id="test6",
-            current_price=24850.0,
-            cvd_confirming=True,
-            time_in_position_seconds=120.0,
-            aggression_sigma=1.5,
-            price_holding_lvn=True,
-        )
-        assert result == 0.0
-
-    def test_max_scale_step_reached(self):
-        """After Phase 3 = no more scale-in."""
-        self.tm.register_position(
-            position_id="test7",
-            symbol="NIFTY",
-            side="LONG",
-            entry_price=24800.0,
-            stop_loss=24700.0,
-            take_profit=24900.0,
-            enable_scale_in=True,
-        )
-        # Trigger Phase 2
-        self.tm.check_scale_in(
-            position_id="test7",
-            current_price=24850.0,
-            cvd_confirming=True,
-            time_in_position_seconds=120.0,
-            aggression_sigma=1.5,
-            price_holding_lvn=True,
-        )
-        # Trigger Phase 3
-        self.tm.check_scale_in(
-            position_id="test7",
-            current_price=24900.0,
-            cvd_slope=5.0,
-            market_state="IMBALANCED",
-        )
-        # Already at max
-        result = self.tm.check_scale_in(
-            position_id="test7",
-            current_price=24950.0,
-            cvd_slope=10.0,
-            market_state="IMBALANCED",
-        )
-        assert result == 0.0
-
-    def test_short_position_scale_in(self):
-        """Scale-in works for SHORT positions too."""
-        self.tm.register_position(
-            position_id="test8",
-            symbol="NIFTY",
-            side="SHORT",
-            entry_price=24800.0,
-            stop_loss=24900.0,
-            take_profit=24700.0,
-            enable_scale_in=True,
-        )
-        # Phase 2
-        result = self.tm.check_scale_in(
-            position_id="test8",
-            current_price=24750.0,
-            cvd_confirming=True,
-            time_in_position_seconds=120.0,
-            aggression_sigma=1.5,
-            price_holding_lvn=True,
-        )
+        pos.scale_step = 2
+        pos.scale_confirm_price = Decimal("24850")
+        pos.scale_breakout_price = Decimal("24900")
+        
+        result = self.scale_manager.check_scale_in(pos, 24900.0)
         assert result == 0.3
+        assert pos.scale_step == 3
+
+    def test_step2_to_step3_short(self):
+        """Step 2 to Step 3 triggers with 0.3 for shorts."""
+        pos = Position(
+            id="test_step3_short",
+            symbol="NIFTY",
+            side=Side.SHORT,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24900"),
+            take_profit=Decimal("24700"),
+        )
+        pos.scale_step = 2
+        pos.scale_confirm_price = Decimal("24750")
+        pos.scale_breakout_price = Decimal("24700")
+        
+        result = self.scale_manager.check_scale_in(pos, 24700.0)
+        assert result == 0.3
+        assert pos.scale_step == 3
+
+    def test_no_trigger_below_confirm_price(self):
+        """No scale-in when price below confirmation level."""
+        pos = Position(
+            id="test_no_trigger",
+            symbol="NIFTY",
+            side=Side.LONG,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24700"),
+            take_profit=Decimal("24900"),
+        )
+        pos.scale_step = 1
+        pos.scale_confirm_price = Decimal("24850")
+        pos.scale_breakout_price = Decimal("24900")
+        
+        result = self.scale_manager.check_scale_in(pos, 24840.0)
+        assert result == 0.0
+        assert pos.scale_step == 1
+
+    def test_zero_prices_do_not_trigger(self):
+        """Zero confirmation/breakout prices don't trigger scale-in."""
+        pos = Position(
+            id="test_zero",
+            symbol="NIFTY",
+            side=Side.LONG,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24700"),
+            take_profit=Decimal("24900"),
+        )
+        pos.scale_step = 1
+        pos.scale_confirm_price = Decimal("0")
+        pos.scale_breakout_price = Decimal("0")
+        
+        result = self.scale_manager.check_scale_in(pos, 25000.0)
+        assert result == 0.0
+
+    def test_get_scale_status(self):
+        """get_scale_status returns correct info."""
+        pos = Position(
+            id="test_status",
+            symbol="NIFTY",
+            side=Side.LONG,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24700"),
+            take_profit=Decimal("24900"),
+        )
+        pos.scale_step = 2
+        pos.scale_confirm_price = Decimal("24850")
+        pos.scale_breakout_price = Decimal("24900")
+        
+        status = self.scale_manager.get_scale_status(pos)
+        assert status["scale_step"] == 2
+        assert status["remaining_fraction"] == 0.3
+
+    def test_initialize_scale_prices(self):
+        """initialize_scale_prices sets correct values."""
+        pos = Position(
+            id="test_init",
+            symbol="NIFTY",
+            side=Side.LONG,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24700"),
+            take_profit=Decimal("24900"),
+        )
+        
+        self.scale_manager.initialize_scale_prices(pos, 24850.0, 24900.0)
+        
+        assert pos.scale_step == 1
+        assert float(pos.scale_confirm_price) == 24850.0
+        assert float(pos.scale_breakout_price) == 24900.0
+
+    def test_reset_scale_state(self):
+        """reset_scale_state clears all scale values."""
+        pos = Position(
+            id="test_reset",
+            symbol="NIFTY",
+            side=Side.LONG,
+            entry_price=Decimal("24800"),
+            stop_loss=Decimal("24700"),
+            take_profit=Decimal("24900"),
+        )
+        pos.scale_step = 2
+        pos.scale_confirm_price = Decimal("24850")
+        pos.scale_breakout_price = Decimal("24900")
+        
+        self.scale_manager.reset_scale_state(pos)
+        
+        assert pos.scale_step == 1
+        assert float(pos.scale_confirm_price) == 0.0
+        assert float(pos.scale_breakout_price) == 0.0

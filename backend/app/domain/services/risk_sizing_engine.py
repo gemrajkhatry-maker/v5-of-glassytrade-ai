@@ -1,4 +1,4 @@
-"""Risk Sizing Engine — deterministic Kelly-based position sizing.
+"""Risk Sizing Engine — deterministic Kelly-based position sizing with theta decay.
 
 CHANGE 5: Replace any LLM-based sizing with deterministic formula.
 
@@ -8,6 +8,7 @@ CHANGE 5: Replace any LLM-based sizing with deterministic formula.
   LOT CALC: floor(max_risk / (stop_points × lot_size))
   SCALE-IN: 40% / 30% / 30% plan
   RR MINIMUM: 2.0 (ideal 2.5-4.0)
+  THETA: Options time decay adjustment (NSE-specific)
 """
 
 from __future__ import annotations
@@ -39,12 +40,17 @@ class SizingResult:
     scale_in_1: int  # lots for first entry (40%)
     scale_in_2: int  # lots for second entry (30%)
     scale_in_3: int  # lots for third entry (30%)
+    # Theta-aware fields for options
+    theta_decay_risk: float = 0.0  # Estimated theta per day
+    holding_cost_ratio: float = 0.0  # theta / expected_profit
+    theta_adjusted_lots: int = 0  # Reduced lots if theta is high
 
 
 class RiskSizingEngine:
-    """Deterministic Kelly-based position sizing.
+    """Deterministic Kelly-based position sizing with theta awareness.
 
     No LLM involvement. Pure math. Sub-millisecond execution.
+    For options trading, factors in time decay (theta) from Fabio's spec.
     """
 
     # Lot sizes per instrument
@@ -66,6 +72,7 @@ class RiskSizingEngine:
         cushion_multiplier: float = 0.20,  # 20% of session PnL
         consecutive_loss_threshold: int = 2,  # reduce to min on 2+ losses
         min_rr: float = 2.0,  # minimum risk:reward
+        theta_risk_threshold: float = 0.20,  # theta must be < 20% of expected profit
     ) -> None:
         self._base_risk = base_risk_pct
         self._min_risk = min_risk_pct
@@ -73,6 +80,7 @@ class RiskSizingEngine:
         self._cushion_mult = cushion_multiplier
         self._consec_loss_thresh = consecutive_loss_threshold
         self._min_rr = min_rr
+        self._theta_risk_threshold = theta_risk_threshold
 
     def calculate(
         self,
@@ -84,6 +92,9 @@ class RiskSizingEngine:
         stop_price: float,
         target_price: float,
         direction: str,
+        theta: float = 0.0,  # Daily theta per contract
+        expected_hold_minutes: int = 60,
+        days_to_expiry: int = 5,
     ) -> SizingResult:
         """Calculate position size based on risk parameters.
 
@@ -96,6 +107,9 @@ class RiskSizingEngine:
             stop_price: Stop loss price
             target_price: Take profit price
             direction: "LONG" or "SHORT"
+            theta: Daily theta (time decay) per contract
+            expected_hold_minutes: Expected holding time in minutes
+            days_to_expiry: Days until expiry (for theta normalization)
         """
         # Risk tier selection
         if consecutive_losses >= self._consec_loss_thresh:
@@ -140,6 +154,9 @@ class RiskSizingEngine:
                 scale_in_1=0,
                 scale_in_2=0,
                 scale_in_3=0,
+                theta_decay_risk=0.0,
+                holding_cost_ratio=0.0,
+                theta_adjusted_lots=0,
             )
 
         rr_ratio = target_points / stop_points if stop_points > 0 else 0
@@ -157,11 +174,38 @@ class RiskSizingEngine:
                 scale_in_1=0,
                 scale_in_2=0,
                 scale_in_3=0,
+                theta_decay_risk=0.0,
+                holding_cost_ratio=0.0,
+                theta_adjusted_lots=0,
             )
 
-        # Lot calculation
+        # Theta calculation for options
+        # Expected profit per contract = target_points * lot_size
         lot_size = self.LOT_SIZES.get(underlying, 1)
-        lots = math.floor(max_risk_amount / (stop_points * lot_size))
+        expected_profit_per_contract = target_points * lot_size
+
+        # Holding time in days
+        hold_days = expected_hold_minutes / 375.0  # ~375 trading minutes per day
+
+        # Theta cost = daily_theta * hold_days * lots
+        theta_decay_risk = abs(theta) * hold_days
+
+        # Holding cost ratio = theta cost / expected profit
+        holding_cost_ratio = 0.0
+        if expected_profit_per_contract > 0:
+            holding_cost_ratio = theta_decay_risk / expected_profit_per_contract
+
+        # Lot calculation with theta adjustment
+        raw_lots = math.floor(max_risk_amount / (stop_points * lot_size))
+
+        # Reduce lots if theta is too high (> threshold of expected profit)
+        if holding_cost_ratio > self._theta_risk_threshold and raw_lots > 0:
+            reduction_factor = max(0.5, 1.0 - holding_cost_ratio)
+            lots = max(1, math.floor(raw_lots * reduction_factor))
+            reason_suffix = f", theta-adjusted ({holding_cost_ratio:.1%} holding cost)"
+        else:
+            lots = raw_lots
+            reason_suffix = ""
 
         if lots < 1:
             return SizingResult(
@@ -177,6 +221,9 @@ class RiskSizingEngine:
                 scale_in_1=0,
                 scale_in_2=0,
                 scale_in_3=0,
+                theta_decay_risk=theta_decay_risk,
+                holding_cost_ratio=holding_cost_ratio,
+                theta_adjusted_lots=0,
             )
 
         # Scale-in plan: 40% / 30% / 30%
@@ -196,8 +243,11 @@ class RiskSizingEngine:
             rr_ratio=rr_ratio,
             risk_tier=risk_tier,
             allowed=True,
-            reason=f"Lots={lots} ({scale_1}/{scale_2}/{scale_3}), R:R={rr_ratio:.1f}, risk={risk_pct:.2%}",
+            reason=f"Lots={lots} ({scale_1}/{scale_2}/{scale_3}), R:R={rr_ratio:.1f}, risk={risk_pct:.2%}{reason_suffix}",
             scale_in_1=scale_1,
             scale_in_2=scale_2,
             scale_in_3=scale_3,
+            theta_decay_risk=theta_decay_risk,
+            holding_cost_ratio=holding_cost_ratio,
+            theta_adjusted_lots=lots,
         )

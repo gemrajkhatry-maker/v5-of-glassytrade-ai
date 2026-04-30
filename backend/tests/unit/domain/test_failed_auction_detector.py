@@ -3,45 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from dataclasses import dataclass, field
 
 from app.domain.fabio_ai.strategy.setup_detector import AMTSetupDetector
 from app.domain.fabio_ai.strategy.protocols import MarketContext
-
-# This feature is planned but not yet implemented.  Stubs provide importable
-# types so the test suite collects, but real logic is absent.
-pytestmark = pytest.mark.skip(reason="AMTSetupDetector stub — feature not yet implemented (planned Phase 5)")
-
-
-@dataclass
-class StubMarketContext:
-    """Test implementation of MarketContext with extended fields."""
-
-    symbol: str = "NIFTY"
-    current_price: float = 24800.0
-    market_state: str = "BALANCED"
-    regime: str = "NORMAL"
-    vwap: float = 24800.0
-    vah: float = 24900.0
-    val: float = 24700.0
-    poc: float = 24800.0
-    cvd_slope: float = 0.0
-    delta: float = 0.0
-    profile_shape: str = ""
-    volume_bubbles: str = ""
-    lvns: list = field(default_factory=list)
-    hvns: list = field(default_factory=list)
-    # Extended fields for FAILED_AUCTION detection
-    prior_vah: float = 0.0
-    prior_val: float = 0.0
-    prior_poc: float = 0.0
-    probe_bars: int = 0
-    delta_flipping: bool = False
-    cvd_diverging: bool = False
-    rejection_at_high: bool = False
-    rejection_at_low: bool = False
-    acceptance_above: bool = False
-    acceptance_below: bool = False
 
 
 class TestFailedAuctionDetector:
@@ -52,7 +16,7 @@ class TestFailedAuctionDetector:
 
     def test_requires_probing_state(self):
         """FAILED_AUCTION only triggers in PROBING state."""
-        ctx = StubMarketContext(
+        ctx = MarketContext(
             market_state="BALANCED",
             prior_vah=24900.0,
             prior_val=24700.0,
@@ -66,7 +30,7 @@ class TestFailedAuctionDetector:
 
     def test_requires_prior_va_boundaries(self):
         """Cannot detect without prior VAH/VAL."""
-        ctx = StubMarketContext(
+        ctx = MarketContext(
             market_state="PROBING",
             prior_vah=0.0,
             prior_val=0.0,
@@ -77,7 +41,7 @@ class TestFailedAuctionDetector:
 
     def test_requires_price_beyond_va(self):
         """Price must be outside prior VA to probe."""
-        ctx = StubMarketContext(
+        ctx = MarketContext(
             market_state="PROBING",
             prior_vah=24900.0,
             prior_val=24700.0,
@@ -90,7 +54,7 @@ class TestFailedAuctionDetector:
 
     def test_acceptance_blocks_failed_auction(self):
         """If acceptance is confirmed, it's not a failed auction."""
-        ctx = StubMarketContext(
+        ctx = MarketContext(
             market_state="PROBING",
             prior_vah=24900.0,
             prior_val=24700.0,
@@ -104,10 +68,11 @@ class TestFailedAuctionDetector:
 
     def test_failed_auction_above_vah_short(self):
         """Probe above VAH with rejection = FAILED_AUCTION SHORT."""
-        ctx = StubMarketContext(
+        ctx = MarketContext(
             market_state="PROBING",
             prior_vah=24900.0,
             prior_val=24700.0,
+            prior_poc=24800.0,
             poc=24800.0,
             current_price=24920.0,
             probe_bars=2,
@@ -126,10 +91,11 @@ class TestFailedAuctionDetector:
 
     def test_failed_auction_below_val_long(self):
         """Probe below VAL with rejection = FAILED_AUCTION LONG."""
-        ctx = StubMarketContext(
+        ctx = MarketContext(
             market_state="PROBING",
             prior_vah=24900.0,
             prior_val=24700.0,
+            prior_poc=24800.0,
             poc=24800.0,
             current_price=24680.0,
             probe_bars=3,
@@ -147,7 +113,7 @@ class TestFailedAuctionDetector:
 
     def test_low_confirmation_score_blocks(self):
         """Need at least 3 confirmation points."""
-        ctx = StubMarketContext(
+        ctx = MarketContext(
             market_state="PROBING",
             prior_vah=24900.0,
             prior_val=24700.0,
@@ -162,21 +128,21 @@ class TestFailedAuctionDetector:
 
     def test_confidence_scales_with_confirmation(self):
         """More confirmation = higher confidence."""
-        weak_ctx = StubMarketContext(
+        weak_ctx = MarketContext(
             market_state="PROBING",
             prior_vah=24900.0,
             prior_val=24700.0,
-            poc=24800.0,
+            prior_poc=24800.0,
             current_price=24920.0,
             probe_bars=2,
             delta_flipping=True,
             rejection_at_high=False,  # Lower score
         )
-        strong_ctx = StubMarketContext(
+        strong_ctx = MarketContext(
             market_state="PROBING",
             prior_vah=24900.0,
             prior_val=24700.0,
-            poc=24800.0,
+            prior_poc=24800.0,
             current_price=24920.0,
             probe_bars=3,
             delta_flipping=True,
@@ -192,10 +158,11 @@ class TestFailedAuctionDetector:
 
     def test_identify_returns_failed_auction_first(self):
         """FAILED_AUCTION should be checked first in identify()."""
-        ctx = StubMarketContext(
+        ctx = MarketContext(
             market_state="PROBING",
             prior_vah=24900.0,
             prior_val=24700.0,
+            prior_poc=24800.0,
             poc=24800.0,
             current_price=24680.0,
             probe_bars=2,
@@ -209,11 +176,10 @@ class TestFailedAuctionDetector:
 
     def test_trigger_conditions_populated(self):
         """Trigger conditions should be meaningful."""
-        ctx = StubMarketContext(
+        ctx = MarketContext(
             market_state="PROBING",
             prior_vah=24900.0,
             prior_val=24700.0,
-            poc=24800.0,
             current_price=24920.0,
             probe_bars=2,
             delta_flipping=True,

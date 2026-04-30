@@ -402,6 +402,9 @@ class SessionEventRouter:
                 max_cushion_ticks=500.0,
                 min_rr_ratio=0.1,
                 tick_size=tick_size,
+                pcr=getattr(amt_result, "pcr", 1.0),  # Pass PCR for NSE options bias
+                oi_walls=getattr(amt_result, "oi_walls", []),  # Pass OI walls for NSE protection levels
+                favor_strategy=getattr(amt_result, "session_favor_strategy", "NEUTRAL"),  # Session strategy filter
             )
 
             if gate_passed:
