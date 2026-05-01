@@ -98,6 +98,11 @@ class GateContext:
     key_levels: list[float] = field(default_factory=list)
     nearest_level: float = 0.0
     distance_to_level_ticks: float = 0.0
+    lvns_near_price: list[float] = field(default_factory=list)  # LVNs within 5 ticks
+
+    # TP/SL validation
+    take_profit: float = 0.0  # For gate validation
+    stop_loss: float = 0.0
 
     # Drive state (from DriveTracker)
     drive_number: int = 0
@@ -122,15 +127,25 @@ class GateContext:
     # PCR bias (Put-Call Ratio for NSE options)
     pcr: float = 1.0  # Put-Call Ratio
     pcr_aligned: bool = True  # Direction aligned with PCR bias
-    
+
+    # Entry direction from LLM
+    direction: str = "LONG"  # "LONG" or "SHORT"
+
+    # VWAP extreme filter (Fabio spec: BLOCK at VWAP ±2σ)
+    vwap_sigma: float = 0.0  # Current VWAP deviation in standard deviations
+
+    # Consecutive losses per symbol (Fabio spec)
+    consecutive_losses: int = 0
+
+    # Max trades per symbol (Fabio spec: 5 per session)
+    trades_today: int = 0
+    max_trades_per_symbol: int = 5
+
     # New: Extreme deviation escalation (> 3.0 sigma)
     is_extreme_deviation: bool = False
 
     # Configurable gate thresholds (exchange-specific)
     max_distance_to_level_ticks: float = 3.0  # Gate 6: max ticks from nearest level
-    probing_aggression_threshold: float = (
-        3.0  # Gate 4: min aggression for PROBING state
-    )
     min_aggression_score: float = 2.0  # Gate 8: minimum aggression for any entry
     max_cushion_ticks: float = 10.0  # Gate 9: max cushion (ticks from price to level)
     min_rr_ratio: float = 1.5  # Gate 10: minimum risk-reward ratio
@@ -154,6 +169,9 @@ class GateContext:
     # Quorum configuration (overridable per exchange/session)
     soft_gate_quorum: int = SOFT_GATE_QUORUM  # Minimum soft gates that must pass
 
+    # PROBING state threshold (DEPRECATED - kept for backward compatibility)
+    probing_aggression_threshold: float = 3.0
+
 
 @dataclass
 class GateResult:
@@ -171,6 +189,11 @@ class GateResult:
     soft_gates_total: int = 0            # Total soft gates evaluated
     soft_gates_passed: int = 0           # Soft gates that passed
     quorum_met: bool = False             # True if soft_gates_passed >= quorum
+    
+    # LLM guidance fields (pre-computed valid directions)
+    allowed_directions: list[str] = field(default_factory=lambda: ["LONG", "SHORT", "FLAT"])
+    confidence_level: str = "MEDIUM"      # HIGH/MEDIUM/LOW based on rules_passed
+    should_wait: bool = False            # True if FIRST_DRIVE or similar
 
     @property
     def is_trade(self) -> bool:
@@ -222,42 +245,57 @@ class GatePipeline:
                 2, GateReason.SESSION_STOPPED, ctx.halt_reason or "Risk limit hit"
             )
 
-        # HARD GATE 3: NO_TRADE state
-        if ctx.market_state == MarketState.NO_TRADE:
-            # EXCEPTION: If it's an extreme deviation, we override NO_TRADE
-            # because we want to fade the extreme even if it's near POC of a leg.
-            # Guardrail: still require minimum R:R of 1.0 for safety.
-            if ctx.is_extreme_deviation:
-                if ctx.r_r_ratio < 1.0:
-                    return self._hard_fail(
-                        3, GateReason.FLAT,
-                        f"Extreme fade rejected: R:R {ctx.r_r_ratio:.2f} < 1.0 minimum"
-                    )
-                logger.info("Responsive Fade: Overriding NO_TRADE due to extreme σ deviation (R:R=%.2f)", ctx.r_r_ratio)
-            else:
-                return self._hard_fail(
-                    3, GateReason.FLAT, "Price at POC dead zone (state=NO_TRADE)"
-                )
+        # HARD GATE 2b: Consecutive loss throttle (Fabio spec: 2+ losses = 30min cooldown)
+        if ctx.consecutive_losses >= 2:
+            return self._hard_fail(
+                2, GateReason.FLAT,
+                f"Consecutive loss throttle: {ctx.consecutive_losses} losses - wait 30min"
+            )
 
-        # HARD GATE 4: PROBING state — allow with aggression confirmation
-        # PROBING can trade when: aggression >= threshold AND at a key level
-        # This supports the PROBING + BALANCED playbook (acceptance/rejection)
-        if ctx.market_state == MarketState.PROBING:
-            if ctx.aggression_score < ctx.probing_aggression_threshold:
-                return self._hard_fail(
-                    4,
-                    GateReason.FLAT,
-                    f"PROBING without high aggression ({ctx.aggression_score:.1f} < {ctx.probing_aggression_threshold:.1f})",
-                )
-            # PROBING + HIGH aggression → allow through (playbook handles direction)
+        # HARD GATE 2c: Max trades per symbol (Fabio spec: 5 per session)
+        if ctx.trades_today >= ctx.max_trades_per_symbol:
+            return self._hard_fail(
+                2, GateReason.FLAT,
+                f"Max trades reached: {ctx.trades_today}/{ctx.max_trades_per_symbol} for {ctx.symbol}"
+            )
 
-        # HARD GATE 5: Profile + key level
+        # HARD GATE 3: NO_TRADE state (REMOVED - 2-state model)
+        # Note: With Fabio's 2-state model, NO_TRADE state no longer exists
+
+        # HARD GATE 4: PROBING state (REMOVED - part of IMBALANCED in 2-state)
+        # Note: PROBING is now classified as IMBALANCED (unconfirmed break)
+
+        # HARD GATE 5: Profile + key level (LVN preferred for continuation)
+        # Fabio Location Gate (NEW): Block LONG when price > VAH in BALANCED session
+        is_long = str(ctx.direction).upper() == "LONG"
+        is_balanced = ctx.market_state == MarketState.BALANCED
+        if is_long and is_balanced and ctx.price > ctx.vah:
+            return self._hard_fail(
+                5, GateReason.FLAT,
+                f"Location Gate: LONG blocked - price {ctx.price:.2f} > VAH {ctx.vah:.2f} in BALANCED session"
+            )
+        # Fabio VWAP Extreme Filter: Block LONG at VWAP +2σ or higher
+        if is_long and ctx.vwap_sigma >= 2.0:
+            return self._hard_fail(
+                5, GateReason.FLAT,
+                f"VWAP Extreme: LONG blocked - price at +{ctx.vwap_sigma:.1f}σ VWAP (extreme overextension)"
+            )
         if ctx.nearest_level <= 0:
             return self._hard_fail(5, GateReason.WAIT, "No key level near price")
+        # Fabio's rule: LVN provides highest probability reaction zone
+        # For trend continuation, require LVN within 2 ticks
+        if ctx.lvns_near_price:
+            nearest_lvn = min(ctx.lvns_near_price, key=lambda x: abs(x - ctx.price))
+            if abs(nearest_lvn - ctx.price) / ctx.tick_size > 2.0:
+                logger.debug(
+                    "LVN enforcement: nearest LVN at %.2f (%.1f ticks from price)",
+                    nearest_lvn, abs(nearest_lvn - ctx.price) / ctx.tick_size
+                )
 
         # HARD GATE 7: Drive validation
+        # Fabio's rule: First drive should be suppressed (wait for re-test)
         if ctx.drive_number == 1:
-            return self._hard_fail(7, GateReason.FLAT, "D1: first drive, entry suppressed")
+            return self._hard_fail(7, GateReason.FLAT, "D1: first drive, entry suppressed - wait for re-test")
         if ctx.drive_number >= 3:
             return self._hard_fail(
                 7, GateReason.FLAT, f"D{ctx.drive_number}: level exhausted"
@@ -375,6 +413,24 @@ class GatePipeline:
                 detail=f"R:R {ctx.r_r_ratio:.2f} >= {ctx.min_rr_ratio:.1f}",
             ))
 
+        # SOFT GATE 14: TP within VA bounds (Fabio: target previous balance area)
+        # Validate TP is within 2x VA width from price (not too far)
+        va_width = ctx.vah - ctx.val
+        max_tp_dist = va_width * 2.0 if va_width > 0 else ctx.price * 0.02
+        tp_distance = abs(ctx.take_profit - ctx.price)
+        if tp_distance > max_tp_dist and ctx.take_profit > 0:
+            soft_results.append(_SoftGateResult(
+                gate=14, name="TP within VA bounds",
+                passed=False, reason=GateReason.SKIP,
+                detail=f"TP {ctx.take_profit:.2f} too far from price ({tp_distance:.2f} > {max_tp_dist:.2f})",
+            ))
+        else:
+            soft_results.append(_SoftGateResult(
+                gate=14, name="TP within VA bounds",
+                passed=True, reason=GateReason.TRADE,
+                detail=f"TP {ctx.take_profit:.2f} within VA bounds",
+            ))
+
         # ── Evaluate quorum ───────────────────────────────────────────────
         total = len(soft_results)
         passed_count = sum(1 for r in soft_results if r.passed)
@@ -427,6 +483,27 @@ class GatePipeline:
             "ALL GATES PASSED: hard gates OK, soft quorum met (%d/%d)",
             passed_count, total,
         )
+        
+        # Compute allowed directions based on location rules
+        allowed_directions = ["LONG", "SHORT", "FLAT"]
+        if ctx.market_state == MarketState.BALANCED:
+            if ctx.price > ctx.vah:
+                allowed_directions = ["SHORT", "FLAT"]
+            elif ctx.price < ctx.val:
+                allowed_directions = ["LONG", "FLAT"]
+            else:
+                allowed_directions = ["FLAT", "WAIT"]
+        
+        # Compute confidence based on soft gates passed
+        if passed_count == 4 and ctx.lvns_near_price:
+            confidence_level = "HIGH"
+        elif passed_count == 3:
+            confidence_level = "MEDIUM"
+        else:
+            confidence_level = "LOW"
+        
+        # FIRST_DRIVE forces WAIT
+        should_wait = ctx.drive_number == 1
 
         # ── ESCALATION (3 PM Fix) ──────────────────────────────────────────
         # If extreme deviation is present, upgrade the result to TRADE
@@ -449,6 +526,9 @@ class GatePipeline:
             soft_gates_total=total,
             soft_gates_passed=passed_count,
             quorum_met=True,
+            allowed_directions=allowed_directions,
+            confidence_level=confidence_level,
+            should_wait=should_wait,
         )
 
     @staticmethod

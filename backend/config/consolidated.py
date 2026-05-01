@@ -170,6 +170,20 @@ class ScannerConfig(BaseModel):
     expiry_index: int = Field(default=0, ge=0, le=4, description="Expiry index")
 
 
+class FeatureFlags(BaseModel):
+    """Feature flag configuration."""
+
+    allow_short: bool = Field(default=True, description="Allow short positions")
+    short_signals_enabled: bool = Field(default=True, description="Enable short signals")
+    scalp_engine_enabled: bool = Field(default=False, description="Enable scalping engine")
+    scalp_ib_breakout: bool = Field(default=False, description="Enable IB breakout scalping")
+    risk_tier_engine: bool = Field(default=True, description="Use risk tier engine")
+    llm_execution_enabled: bool = Field(default=True, description="Enable LLM execution")
+    llm_pre_candle_advisory: bool = Field(default=True, description="Enable LLM pre-candle advisory")
+    llm_post_trade: bool = Field(default=True, description="Enable LLM post-trade analysis")
+    realistic_cost_model: bool = Field(default=True, description="Use realistic cost model")
+
+
 class ConsolidatedConfig(BaseModel):
     """Consolidated application configuration.
 
@@ -185,6 +199,7 @@ class ConsolidatedConfig(BaseModel):
     amt: AMTConfig = Field(default_factory=AMTConfig)
     notifications: NotificationConfig = Field(default_factory=NotificationConfig)
     scanner: ScannerConfig = Field(default_factory=ScannerConfig)
+    feature_flags: FeatureFlags = Field(default_factory=FeatureFlags)
 
     # CORS settings
     cors_origins: List[str] = Field(
@@ -412,6 +427,20 @@ class ConsolidatedConfig(BaseModel):
             else base.scanner_underlyings
         )
 
+        # Update feature flags from scanner config
+        feature_flags = base.feature_flags.model_copy(
+            update={
+                "allow_short": bool(feat.get("allow_short", base.feature_flags.allow_short)),
+                "short_signals_enabled": bool(feat.get("short_signals_enabled", base.feature_flags.short_signals_enabled)),
+                "scalp_engine_enabled": bool(feat.get("scalp_engine_enabled", base.feature_flags.scalp_engine_enabled)),
+                "scalp_ib_breakout": bool(feat.get("scalp_ib_breakout", base.feature_flags.scalp_ib_breakout)),
+                "risk_tier_engine": bool(feat.get("risk_tier_engine", base.feature_flags.risk_tier_engine)),
+                "llm_pre_candle_advisory": bool(feat.get("llm_pre_candle_advisory", base.feature_flags.llm_pre_candle_advisory)),
+                "llm_post_trade": bool(feat.get("llm_post_trade", base.feature_flags.llm_post_trade)),
+                "realistic_cost_model": bool(feat.get("realistic_cost_model", base.feature_flags.realistic_cost_model)),
+            }
+        )
+
         return base.model_copy(
             update={
                 "trading": trading,
@@ -419,6 +448,7 @@ class ConsolidatedConfig(BaseModel):
                 "risk": risk,
                 "amt": amt,
                 "scanner": scanner,
+                "feature_flags": feature_flags,
                 "default_exchange": mode.default_exchange,
                 "dhan_symbols": sym,
                 "scanner_underlyings": und,

@@ -374,6 +374,12 @@ class LLMEntryHandler:
             "option_type": detect_option_type(symbol),
             # Fix 4: AMT time window for timing transparency
             "amt_time_window": self._get_amt_time_window(ist_now),
+            # LLM constraints (from gate pipeline results)
+            "allowed_directions": ["LONG", "SHORT", "FLAT"],  # Will be overridden by gate result
+            "should_wait": False,
+            "confidence_rubric": "4/4->HIGH, 3/4->MEDIUM, <3->ABORT",
+            # Open positions for straddle prevention
+            "open_positions": session.portfolio.get_open_positions_summary() if hasattr(session, 'portfolio') else [],
         }
 
         # ML signal for LLM meta-filter

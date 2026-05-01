@@ -539,20 +539,15 @@ def select_playbook(regime: RegimeState, amt_result: AMTResult) -> str:
     # Primary: session regime
     if regime.regime == "TRENDING" and MarketStateCodec.is_imbalanced(ms):
         return "imbalance_continuation"
-    if regime.regime == "BALANCED" and (MarketStateCodec.is_balanced(ms) or MarketStateCodec.is_no_trade(ms)):
+    if regime.regime == "BALANCED" and MarketStateCodec.is_balanced(ms):
         return "return_to_value"
-    # PROBING playbook: unconfirmed break with aggression confirmation
-    # Supports acceptance (continuation) and rejection (fade) scenarios
-    if MarketStateCodec.is_probing(ms):
-        return "probing_breakout"
     
-    # FALLBACK: If session is NO_TRADE, use leg regime
+    # FALLBACK: Use leg regime for edge cases
     leg_regime = getattr(amt_result, "leg_regime", "")
-    if regime.regime == "NO_TRADE" or MarketStateCodec.is_no_trade(ms):
-        if leg_regime == "BALANCED":
-            return "return_to_value"
-        if leg_regime == "TRENDING":
-            return "imbalance_continuation"
+    if leg_regime == "BALANCED":
+        return "return_to_value"
+    if leg_regime == "TRENDING":
+        return "imbalance_continuation"
     
     return ""
 
@@ -587,8 +582,6 @@ def summarize_feature_drivers(
         drivers.append((1.2, "auction: imbalance accepted"))
     elif playbook == "return_to_value" and MarketStateCodec.is_balanced(ms):
         drivers.append((1.2, "auction: balanced rotation"))
-    elif playbook == "probing_breakout" and MarketStateCodec.is_probing(ms):
-        drivers.append((1.2, "auction: probing outside value"))
 
     if abs(features.get("nearest_lvn_distance_pct", 1.0)) <= 0.003:
         drivers.append((1.0, "location: near LVN"))
@@ -601,13 +594,6 @@ def summarize_feature_drivers(
         val_gap = abs(features.get("close_vs_val_pct", 1.0))
         if val_gap <= 0.004:
             drivers.append((0.9, "location: probing VAL"))
-    elif playbook == "probing_breakout":
-        vah_gap = abs(features.get("close_vs_vah_pct", 1.0))
-        val_gap = abs(features.get("close_vs_val_pct", 1.0))
-        if vah_gap <= 0.004:
-            drivers.append((0.9, "location: testing VAH"))
-        elif val_gap <= 0.004:
-            drivers.append((0.9, "location: testing VAL"))
 
     directional_checks = [
         ("delta_normalized", "orderflow: positive delta", "orderflow: negative delta"),

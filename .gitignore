@@ -73,3 +73,11 @@ backend/rl_logs/
 *.tfevents.*
 node_modules/
 dist/
+
+# Test coverage
+.coverage*
+coverage.json
+htmlcov/
+
+# AI IDE files
+.poolside/

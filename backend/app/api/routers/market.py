@@ -43,3 +43,13 @@ async def get_orderbook(
             "asks": [{"price": a.price, "quantity": a.quantity} for a in ob.asks],
         }
     }
+
+
+@router.get("/lot-size/{symbol}")
+async def get_lot_size(
+    symbol: str,
+    market_data: IMarketData = Depends(get_market_data),
+):
+    """Get the lot size for a specific symbol."""
+    lot_size = market_data.get_lot_size(symbol)
+    return {"symbol": symbol, "lotSize": lot_size}

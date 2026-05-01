@@ -26,18 +26,20 @@ class TestSessionPhaseGate:
         assert state.phase == TradingPhase.CLOSED
         assert state.is_blocked
 
-    def test_opening_noise_blocked(self):
+    def test_opening_auction_allows_trading(self):
+        """Opening auction should allow ALL_MODELS per Fabio's methodology."""
         gate = SessionPhaseGate()
         state = gate.evaluate(self._ts(9, 20, "TUE"))
-        assert state.phase == TradingPhase.OPENING_NOISE
-        assert state.is_blocked
-        assert state.allowed_action == AllowedAction.NO_TRADE
+        assert state.phase == TradingPhase.OPENING_AUCTION
+        assert not state.is_blocked  # Opening auction is tradeable
+        assert state.allowed_action == AllowedAction.ALL_MODELS
 
     def test_monday_extended_opening(self):
+        """Monday extended opening should still allow trading."""
         gate = SessionPhaseGate()
         state = gate.evaluate(self._ts(9, 35, "MON"))
-        assert state.phase == TradingPhase.OPENING_NOISE
-        assert state.is_blocked  # still in extended opening
+        assert state.phase == TradingPhase.OPENING_AUCTION
+        assert not state.is_blocked  # Extended opening is also tradeable
 
     def test_aaa_window(self):
         gate = SessionPhaseGate()
@@ -88,7 +90,7 @@ class TestSessionPhaseGate:
     def test_can_trade_method(self):
         gate = SessionPhaseGate()
         assert gate.can_trade(self._ts(10, 0, "TUE")) is True
-        assert gate.can_trade(self._ts(9, 20, "TUE")) is False
+        assert gate.can_trade(self._ts(9, 20, "TUE")) is True  # Opening auction now tradable
         assert gate.can_trade(self._ts(15, 20, "TUE")) is False
 
     def test_is_aaa_allowed(self):

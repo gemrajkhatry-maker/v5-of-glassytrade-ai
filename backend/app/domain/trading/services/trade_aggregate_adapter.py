@@ -16,10 +16,11 @@ from decimal import Decimal
 from typing import Optional
 
 from app.domain.trading.models.trade_aggregate import (
-    Trade,
+    Confidence,
     Direction,
     EntrySignal,
     Fill,
+    Trade,
     create_trade as create_trade_aggregate,
     create_trade_from_snapshot,
 )
@@ -166,7 +167,7 @@ class TradeAggregateService:
             take_profit=Decimal(str(take_profit)),
             position_size=Decimal(str(position_size)),
             setup_type=setup_type,
-            confidence=confidence,  # type: ignore
+            confidence=Confidence(confidence),
         )
 
         timestamp = datetime.now(timezone.utc).isoformat()

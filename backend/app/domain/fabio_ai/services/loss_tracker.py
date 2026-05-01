@@ -106,6 +106,11 @@ class LossTracker:
 
         # Session PnL tracking
         self._session_realized_pnl: float = 0.0
+        self._session_high_water_mark: float = 0.0  # Track highest PnL for drawdown calc
+
+        # Session-level PnL limits (Fabio spec: -30k circuit, +15k target)
+        self._session_circuit = -30000.0  # Hard stop entire session
+        self._session_target = 15000.0    # Switch to MONITOR ONLY mode
 
         # Cooldown tracking per symbol (session-level)
         self._last_exit_time: dict[str, float] = {}
@@ -376,6 +381,41 @@ class LossTracker:
         """
         with self._lock:
             return self._session_realized_pnl
+
+    def is_session_circuit_hit(self) -> bool:
+        """Check if session circuit breaker (-30k) is hit.
+
+        Fabio spec: -30,000 INR hard stop for entire session.
+
+        Returns:
+            True if session PnL <= -30,000.
+        """
+        with self._lock:
+            return self._session_realized_pnl <= self._session_circuit
+
+    def is_session_target_hit(self) -> bool:
+        """Check if session target (+15k) is hit.
+
+        Fabio spec: +15,000 INR triggers MONITOR ONLY mode.
+
+        Returns:
+            True if session PnL >= +15,000.
+        """
+        with self._lock:
+            return self._session_realized_pnl >= self._session_target
+
+    def get_session_status(self) -> str:
+        """Get current session status per Fabio spec.
+
+        Returns:
+            "TARGET_HIT" if +15k, "CIRCUIT_HIT" if -30k, "ACTIVE" otherwise.
+        """
+        with self._lock:
+            if self._session_realized_pnl >= self._session_target:
+                return "TARGET_HIT"
+            if self._session_realized_pnl <= self._session_circuit:
+                return "CIRCUIT_HIT"
+            return "ACTIVE"
 
     def compute_dynamic_risk(
         self,

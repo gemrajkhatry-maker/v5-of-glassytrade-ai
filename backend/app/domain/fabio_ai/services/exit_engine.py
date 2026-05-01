@@ -48,6 +48,7 @@ from app.domain.fabio_ai.services.exit_signal import ExitSignal
 from app.domain.fabio_ai.services.trail_engine import TrailEngine
 from app.domain.fabio_ai.services.scale_manager import ScaleManager
 from app.domain.fabio_ai.services.loss_tracker import LossTracker
+from app.domain.fabio_ai.services.pyramid_manager import PyramidManager
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,8 @@ class TradeManagerConfig:
     tick_size: float = 0.05
     # Hard ceiling: 120-minute absolute max hold (override for backtesting)
     hard_max_hold_seconds: float = 7200
+    # Minimum hold time before exit allowed (Fabio rule: 120s)
+    MIN_HOLD_SECONDS: float = 120.0
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +149,7 @@ class ExitEngine:
             persist_fn=persist_fn,
             max_daily_losses=self.MAX_DAILY_LOSSES,
         )
+        self._pyramid_manager = PyramidManager()
         # Expose loss_tracker's internal state for test compatibility
         # Tests may modify MAX_DAILY_LOSSES at runtime
         self._global_daily_losses = 0
@@ -223,7 +227,21 @@ class ExitEngine:
         is_long = pos.side == Side.LONG or pos.side.value == "LONG"
         sl = float(pos.stop_loss)
 
-        # ----- 1. STOP LOSS -----
+        # ----- 1. MIN HOLD TIME CHECK (Fabio rule: 120s minimum) -----
+        entry_time_ts = 0
+        if pos.entry_time:
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(str(pos.entry_time).replace("Z", "+00:00"))
+                entry_time_ts = dt.timestamp()
+            except (ValueError, TypeError):
+                entry_time_ts = 0
+
+        if entry_time_ts > 0 and (now - entry_time_ts) < self._config.MIN_HOLD_SECONDS:
+            # Not enough time held - block exit
+            return None
+
+        # ----- 2. STOP LOSS -----
         sl_check = stop_price if stop_price is not None else current_price
         if (is_long and sl_check <= sl) or (not is_long and sl_check >= sl):
             logger.info(
@@ -375,6 +393,45 @@ class ExitEngine:
     def check_scale_in(self, position: Position, current_price: float) -> float:
         """Stateless scale-in check operating on a Position entity."""
         return self._scale_manager.check_scale_in(position, current_price)
+
+    # ------------------------------------------------------------------
+    # Pyramid add (delegates to PyramidManager) - FR-09
+    # ------------------------------------------------------------------
+
+    def check_pyramid(
+        self,
+        position: Position,
+        current_price: float,
+        aggression_score: float,
+        entry_lvns: list[float],
+        current_lvn: float,
+    ) -> tuple[float, float] | None:
+        """Check if pyramid add conditions are met.
+
+        Args:
+            position: Position to check.
+            current_price: Current market price.
+            aggression_score: Current aggression score.
+            entry_lvns: LVN levels used for previous entries.
+            current_lvn: Nearest LVN to current price.
+
+        Returns:
+            Tuple of (size_multiplier, unified_sl) or None if no add.
+        """
+        is_long = position.side == Side.LONG or position.side.value == "LONG"
+        result = self._pyramid_manager.check_pyramid(
+            entry_price=float(position.entry_price),
+            current_price=current_price,
+            is_long=is_long,
+            aggression_score=aggression_score,
+            add_count=position.scale_step - 1,  # scale_step 1 = no adds yet
+            entry_lvns=entry_lvns,
+            current_lvn=current_lvn,
+            current_sl=float(position.stop_loss),
+        )
+        if result:
+            return (result.size_multiplier, result.unified_sl)
+        return None
 
     # ------------------------------------------------------------------
     # CVD helpers (delegates to TrailEngine)

@@ -19,6 +19,7 @@ from app.domain.trading.models.enums import (
     CushionState,
 )
 from app.domain.services.decimal_utils import to_decimal
+from app.domain.fabio_ai.services.exit_rules import classify_exit, ExitReason
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +133,7 @@ class Position:
     scale_step: int = 1                 # 1=initial, 2=confirmation, 3=breakout
     scale_confirm_price: Decimal = field(default_factory=lambda: Decimal("0"))
     scale_breakout_price: Decimal = field(default_factory=lambda: Decimal("0"))
+    entry_lvns: list[float] = field(default_factory=list)  # LVNs used for scale-ins
 
     @property
     def is_open(self) -> bool:
@@ -173,8 +175,11 @@ class Position:
         self.stop_loss = self.entry_price
 
     def set_partial_taken(self, value: bool) -> None:
-        """Set partial_taken flag. Compatibility shim for test API."""
+        """Set partial_taken flag and auto-transition cushion state."""
         self.partial_taken = value
+        # Auto-transition to CUSHIONED when partial is taken (Fabio Rule 4)
+        if value and self.cushion_state == CushionState.OPEN:
+            self.advance_cushion_state(CushionState.CUSHIONED)
 
     def should_close(self, current_price: Decimal) -> tuple[bool, str]:
         """Check whether the position should be closed at *current_price*."""
@@ -196,7 +201,33 @@ class Position:
         self.status = PositionStatus.CLOSED
         self.exit_price = price
         self.exit_time = time
-        self.close_reason = reason
+        # Classify exit per Fabio spec (only if reason not already a valid Fabio reason)
+        valid_reasons = {
+            ExitReason.STOP_LOSS, ExitReason.TAKE_PROFIT, ExitReason.TRAILING_STOP,
+            ExitReason.TIME_STOP, ExitReason.PARTIAL_TAKE_PROFIT, ExitReason.SCRATCH,
+            ExitReason.BREAK_EVEN, ExitReason.OVERSEER_EXIT, ExitReason.OVERSEER_PARTIAL,
+            ExitReason.SPREAD_BLOWOUT, ExitReason.ADVERSE_EXIT,
+        }
+        legacy_formats = {"Stop Loss", "Take Profit (Full)", "Take Profit", "SCRATCH", "TIME_STOP"}
+        if reason not in valid_reasons and reason not in legacy_formats:
+            entry = float(self.entry_price)
+            sl = float(self.stop_loss)
+            tp = float(self.take_profit)
+            direction = "LONG" if self.side == Side.LONG else "SHORT"
+            self.close_reason = classify_exit(
+                direction=direction,
+                entry_price=entry,
+                exit_price=float(price),
+                sl=sl,
+                tp=tp,
+                is_manual=reason in ("MANUAL", "USER_EXIT", "LLM_EXIT"),
+            )
+        elif reason == "Stop Loss":
+            self.close_reason = ExitReason.STOP_LOSS
+        elif "Take Profit" in reason:
+            self.close_reason = ExitReason.TAKE_PROFIT
+        else:
+            self.close_reason = reason
 
     @staticmethod
     def from_signal(signal: Signal, symbol: str, size: Decimal) -> "Position":

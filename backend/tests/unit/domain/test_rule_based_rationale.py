@@ -97,19 +97,19 @@ class TestRuleBasedRationaleFlat:
     """Test rationale for FLAT decisions."""
 
     def test_no_trade_state(self):
-        """NO_TRADE state generates correct rationale."""
+        """NO_TRADE state (now mapped to BALANCED) generates correct rationale."""
         gen = RuleBasedRationale()
         ctx = _ctx(direction="FLAT", market_state="NO_TRADE")
         rationale = gen.generate(ctx)
-        assert "NO_TRADE" in rationale
+        assert "BALANCED" in rationale  # NO_TRADE mapped to BALANCED
         assert "POC" in rationale
 
     def test_probing_state(self):
-        """PROBING state generates correct rationale."""
+        """PROBING state (now mapped to IMBALANCED) generates correct rationale."""
         gen = RuleBasedRationale()
         ctx = _ctx(direction="FLAT", market_state="PROBING")
         rationale = gen.generate(ctx)
-        assert "PROBING" in rationale
+        assert "IMBALANCED" in rationale  # PROBING mapped to IMBALANCED
 
     def test_insufficient_aggression(self):
         """Low aggression generates correct rationale."""

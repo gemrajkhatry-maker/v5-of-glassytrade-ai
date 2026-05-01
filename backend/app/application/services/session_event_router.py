@@ -14,6 +14,7 @@ import time as _time_mod
 from typing import TYPE_CHECKING, Any
 
 from app.config import settings
+from app.shared.config_features import Feature, feature_enabled
 from app.domain.constants import (
     AGENT_DECISION_THRESHOLD,
     CONFIDENCE_HIGH_THRESHOLD,
@@ -413,7 +414,7 @@ class SessionEventRouter:
 
                 if exec_dir == "SHORT":
                     short_ok, short_results = evaluate_short_gates(
-                        short_enabled=getattr(settings, "SHORT_SIGNALS_ENABLED", False),
+                        short_enabled=feature_enabled(settings, Feature.SHORT_SIGNALS),
                         market_state=amt_result.market_state,
                         displacement_direction=getattr(
                             amt_result, "displacement_direction", ""

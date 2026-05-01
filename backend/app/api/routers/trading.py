@@ -1,9 +1,13 @@
 """Trading router — portfolio, stats, and lifecycle REST endpoints."""
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.application.services.trading_session import TradingSessionService
+
 from app.api.dependencies import get_storage, get_trading_session
-from app.application.services.trading_session import TradingSessionService
 from app.domain.ports.storage import IStorage
 from app.domain.trading.models.enums import Source
 from app.infrastructure.serialization.schemas import (

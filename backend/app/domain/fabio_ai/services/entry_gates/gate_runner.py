@@ -35,12 +35,12 @@ def run_gate_pipeline(
     from app.domain.trading.models.enums import MarketState as MS
 
     state_map = {
-        "NO_TRADE": MS.NO_TRADE,
+        "NO_TRADE": MS.BALANCED,  # Map old state to BALANCED
         "BALANCED": MS.BALANCED,
         "BALANCE": MS.BALANCED,
         "IMBALANCED": MS.IMBALANCED,
         "IMBALANCE": MS.IMBALANCED,
-        "PROBING": MS.PROBING,
+        "PROBING": MS.IMBALANCED,  # Map probing to IMBALANCED
     }
     ms = state_map.get(market_state.upper(), MS.BALANCED)
 

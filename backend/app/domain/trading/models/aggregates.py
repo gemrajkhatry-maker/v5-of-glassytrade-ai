@@ -17,6 +17,7 @@ from decimal import Decimal
 from app.domain.trading.models.enums import Side, Source, PositionStatus
 from app.domain.trading.models.entities import Position, Signal
 from app.domain.trading.models.value_objects import OHLC, StrategyStats
+from app.domain.fabio_ai.services.exit_rules import classify_exit, ExitReason
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,45 @@ class Portfolio:
             leverage=LEVERAGE,
             config=PortfolioConfig(),
         )
+
+    def has_straddle_conflict(self, symbol: str, strike: float | int) -> bool:
+        """Check if opening a position would create a straddle.
+        
+        Straddles are forbidden in AMT - you cannot have both CE and PE
+        at the same strike price simultaneously.
+        
+        Args:
+            symbol: The underlying symbol (e.g., "CRUDEOIL")
+            strike: The strike price to check
+            
+        Returns:
+            True if a straddle would be created, False otherwise
+        """
+        for pos in self.positions:
+            if not pos.is_open:
+                continue
+            # Strike is stored in position metadata
+            pos_strike = (pos.metadata or {}).get("strike", 0)
+            # Check same symbol and SAME strike (exact match)
+            if pos.symbol == symbol and pos_strike == strike:
+                return True
+        return False
+
+    def get_open_positions_summary(self) -> list[dict]:
+        """Get summary of open positions for LLM context.
+        
+        Returns list of {symbol, strike, side, size} for each open position.
+        """
+        result = []
+        for pos in self.positions:
+            if pos.is_open:
+                result.append({
+                    "symbol": pos.symbol,
+                    "strike": (pos.metadata or {}).get("strike", 0),
+                    "side": str(pos.side.value) if hasattr(pos.side, "value") else str(pos.side),
+                    "size": float(pos.size),
+                })
+        return result
 
     # ----- queries -----
 
@@ -263,6 +303,15 @@ class Portfolio:
         if self.has_open_position_for_source(signal.source):
             return None
 
+        # Straddle prevention: don't allow both CE and PE at same strike
+        strike = (signal.metadata or {}).get("strike", 0)
+        if strike and self.has_straddle_conflict(symbol, strike):
+            logger.warning(
+                "Straddle prevention: blocking %s at strike %s - position already exists",
+                symbol, strike
+            )
+            return None
+
         # Tiered position sizing based on confidence, clamped to 0.25%-0.5%
         # COMPOUNDING: Use session-aware risk if available (Fabio cushion system)
         session_risk_pct = (signal.metadata or {}).get("session_risk_pct", None)
@@ -293,9 +342,14 @@ class Portfolio:
         # Snap to whole lot multiples for options
         lot_size = Decimal(str((signal.metadata or {}).get("option_lot_size", 0)))
         if lot_size > 0:
-            num_lots = max(1, int(size / lot_size))
-            size = Decimal(num_lots) * lot_size
+            # Round size to nearest lot multiple (not truncate)
+            num_lots = max(1.0, round(float(size) / float(lot_size)))
+            size = Decimal(int(num_lots)) * lot_size
             full_size = max(full_size, size)  # ensure full_size >= deployed
+        
+        # MCX-specific: Ensure minimum 1 lot for commodity options
+        if lot_size > 0 and size < lot_size * Decimal("0.5"):
+            size = lot_size
 
         # Apply slippage to entry price for realistic fill simulation
         side = Side.LONG if signal.is_buy else Side.SHORT

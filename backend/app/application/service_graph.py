@@ -5,7 +5,8 @@ compose_container(). Property accessors preserve the legacy API
 used by main.py, engine.py, and api/dependencies.py.
 """
 
-from typing import Type, TypeVar, TYPE_CHECKING
+from typing import Type, TypeVar
+
 import logging
 
 from config.consolidated import ConsolidatedConfig as Configuration
@@ -18,9 +19,6 @@ from app.domain.ports import (
     IProbabilityInference,
     INotification,
 )
-
-if TYPE_CHECKING:
-    from app.application.services.trading_session import TradingSessionService
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +55,9 @@ class ServiceGraph:
         if not self._active_symbols:
             try:
                 from app.config import settings as _settings
-                self._active_symbols = list(getattr(_settings, "DHAN_SYMBOLS", []) or [])
+                # Access via the SettingsAdapter which has DHAN_SYMBOLS property
+                symbols = getattr(_settings, "DHAN_SYMBOLS", [])
+                self._active_symbols = list(symbols) if symbols else []
             except Exception:
                 self._active_symbols = []
 

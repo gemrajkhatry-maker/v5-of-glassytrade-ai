@@ -18,14 +18,13 @@ from typing import TYPE_CHECKING, Callable
 
 from app.config import settings
 from app.application.utils import is_market_open
+from app.domain.ports.market_data import IMarketData
+from app.shared.timezones import IST
 
 if TYPE_CHECKING:
-    from app.domain.ports.market_data import IMarketData
     from app.application.services.trading_session import TradingSessionService
 
 logger = logging.getLogger(__name__)
-
-from app.shared.timezones import IST
 
 _DHAN_CONNECT_COOLDOWN: float = 5.0
 _MAX_STREAM_RETRIES = 10
@@ -41,7 +40,7 @@ class StreamManager:
     def __init__(
         self,
         market_data: IMarketData,
-        session_service: TradingSessionService | None = None,
+        session_service: "TradingSessionService | None" = None,
         fetch_historical_callback: Callable | None = None,
     ):
         """Initialize stream manager.

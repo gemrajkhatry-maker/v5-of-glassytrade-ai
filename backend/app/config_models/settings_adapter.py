@@ -264,6 +264,14 @@ class SettingsAdapter:
         return os.getenv("LLM_EXECUTION_ENABLED", "true").lower() == "true"
     
     @property
+    def LLM_POST_TRADE(self) -> bool:
+        """Get LLM post-trade flag from YAML config."""
+        if self._mode_config:
+            flags = self._mode_config.scanner_config.get("feature_flags", {})
+            return flags.get("llm_post_trade", True)
+        return os.getenv("LLM_POST_TRADE", "true").lower() == "true"
+    
+    @property
     def CAPITAL(self) -> float:
         """Get trading capital from YAML config."""
         if self._mode_config:

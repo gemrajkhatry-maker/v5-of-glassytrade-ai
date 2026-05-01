@@ -30,6 +30,7 @@ def _default_context(**overrides) -> GateContext:
         setup_type="TREND_CONTINUATION",
         r_r_ratio=2.5,
         cushion_ticks=3.0,
+        take_profit=110.0,  # Add TP for VA bounds check
     )
     defaults.update(overrides)
     return GateContext(**defaults)
@@ -39,7 +40,7 @@ def test_soft_gate_6_price_at_entry_zone_passes():
     """Gate 6 should pass when price is within 3 ticks of level."""
     ctx = _default_context(distance_to_level_ticks=1.0)
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed >= 3, f"Only {result.soft_gates_passed}/4 soft gates passed"
+    assert result.soft_gates_passed >= 4, f"Only {result.soft_gates_passed}/5 soft gates passed"
 
 
 def test_soft_gate_6_fails_when_far_from_level():
@@ -47,53 +48,53 @@ def test_soft_gate_6_fails_when_far_from_level():
     ctx = _default_context(distance_to_level_ticks=5.0)  # > 3 ticks
     result = GatePipeline().evaluate(ctx)
     # Should fail gate 6 but might pass others
-    assert result.soft_gates_passed < 4
+    assert result.soft_gates_passed < 5
 
 
 def test_soft_gate_8_aggression_minimum_passes():
     """Gate 8 should pass when aggression >= 2.0."""
     ctx = _default_context(aggression_score=2.5)
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed >= 3
+    assert result.soft_gates_passed >= 4
 
 
 def test_soft_gate_8_fails_low_aggression():
     """Gate 8 should fail when aggression < 2.0."""
     ctx = _default_context(aggression_score=1.5)  # < 2.0
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed < 4
+    assert result.soft_gates_passed < 5
 
 
 def test_soft_gate_9_cushion_ticks_passes():
     """Gate 9 should pass when cushion <= 10 ticks."""
     ctx = _default_context(cushion_ticks=8.0)
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed >= 3
+    assert result.soft_gates_passed >= 4
 
 
 def test_soft_gate_9_fails_high_cushion():
     """Gate 9 should fail when cushion > 10 ticks."""
     ctx = _default_context(cushion_ticks=12.0)  # > 10
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed < 4
+    assert result.soft_gates_passed < 5
 
 
 def test_soft_gate_10_rr_ratio_passes():
     """Gate 10 should pass when R:R >= 1.5."""
     ctx = _default_context(r_r_ratio=2.0)
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed >= 3
+    assert result.soft_gates_passed >= 4
 
 
 def test_soft_gate_10_fails_low_rr():
     """Gate 10 should fail when R:R < 1.5."""
     ctx = _default_context(r_r_ratio=1.2)  # < 1.5
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed < 4
+    assert result.soft_gates_passed < 5
 
 
 def test_rule_checklist_breakout_above_vah():
-    """Integration test: confirmed breakout above VAH should pass 4/4 rules."""
+    """Integration test: confirmed breakout above VAH should pass 5/5 rules."""
     ctx = _default_context(
         market_state=MarketState.IMBALANCED,
         price=106.0,  # Above VAH
@@ -105,7 +106,7 @@ def test_rule_checklist_breakout_above_vah():
     )
     
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed == 4, f"Expected 4/4 rules to pass, got {result.soft_gates_passed}/4"
+    assert result.soft_gates_passed == 5, f"Expected 5/5 rules to pass, got {result.soft_gates_passed}/5"
     assert result.quorum_met
     assert result.passed
 

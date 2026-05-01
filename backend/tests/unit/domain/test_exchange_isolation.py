@@ -112,7 +112,7 @@ class TestMCXScannerFiltering:
         nse = ExchangeConfig.for_exchange("NSE")
 
         assert mcx.get_lot_size("CRUDEOIL") == 100
-        assert nse.get_lot_size("NIFTY") == 25
+        assert nse.get_lot_size("NIFTY") == 25  # NIFTY options lot size
         assert mcx.get_lot_size("GOLD") == 100
 
 

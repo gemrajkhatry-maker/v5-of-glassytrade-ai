@@ -56,6 +56,7 @@ class ExitReason:
     OVERSEER_EXIT = "OVERSEER_EXIT"
     OVERSEER_PARTIAL = "OVERSEER_PARTIAL"
     SPREAD_BLOWOUT = "SPREAD_BLOWOUT"
+    ADVERSE_EXIT = "ADVERSE_EXIT"  # Fabio: exit price < entry (loss before SL hit)
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +249,46 @@ def check_time_stop_with_price(
 
     if (current_time - entry_time_epoch) >= max_hold:
         entry_price = float(position.entry_price)
+        sl = float(position.stop_loss or position.initial_stop or 0)
+        tp = float(position.take_profit or 0)
+        
+        # Calculate R-multiple (profit relative to risk)
+        is_long = position.side.value == "LONG" if hasattr(position.side, "value") else str(position.side) == "LONG"
+        risk_per_unit = abs(entry_price - sl) if sl else 0
+        profit_per_unit = current_price - entry_price if is_long else entry_price - current_price
+        r_multiple = (profit_per_unit / risk_per_unit) if risk_per_unit > 0 else 0
+        
+        # R-MULTIPLE CHECK: Don't exit if ≥ 1R, activate trailing instead
+        if r_multiple >= 1.0:
+            logger.info(
+                "TIME_STOP: Skipping exit for %s - R-multiple=%.2fR (≥ 1R), activating trail",
+                position.id,
+                r_multiple,
+            )
+            # Return None to let trailing stop handle it
+            return None
+        
+        # 0.5R to 1R: Move SL to breakeven, give more time
+        if 0.5 <= r_multiple < 1.0:
+            logger.info(
+                "TIME_STOP: Breakeven for %s - R-multiple=%.2fR (0.5R-1R)",
+                position.id,
+                r_multiple,
+            )
+            position.stop_loss = position.entry_price  # Move to breakeven
+            position.breakeven_set = True
+            # Extend hold time by 30% for this case
+            position.applied_time_stop = int(max_hold * 1.3)
+            return None
+        
+        # Negative P&L: Exit with warning
+        if r_multiple < 0:
+            logger.warning(
+                "TIME_STOP: SL NOT TRIGGERED BUG for %s - negative P&L at TIME_STOP",
+                position.id,
+            )
+        
+        # 0 to 0.5R: Exit immediately
         price_move_pct = (
             abs(current_price - entry_price) / entry_price if entry_price else 0.0
         )
@@ -419,6 +460,67 @@ def check_spread_blowout(
         return ExitSignal(position.id, ExitReason.SPREAD_BLOWOUT, exit_price)
 
     return None
+
+
+def classify_exit(
+    direction: str,
+    entry_price: float,
+    exit_price: float,
+    sl: float,
+    tp: float,
+    is_partial: bool = False,
+    is_time_exit: bool = False,
+    is_manual: bool = False,
+) -> str:
+    """Classify exit type per Fabio spec.
+
+    Args:
+        direction: "LONG" or "SHORT"
+        entry_price: Entry price
+        exit_price: Exit price
+        sl: Stop loss price
+        tp: Take profit price
+        is_partial: Whether this is a partial exit
+        is_time_exit: Whether this was a time stop
+        is_manual: Whether this was manually triggered
+
+    Returns:
+        Exit reason string per Fabio classification.
+    """
+    is_long = direction == "LONG"
+
+    # Check for take profit hits (must be before SL) - with tolerance for slippage
+    tp_tolerance = max(abs(entry_price * 0.001), 0.5)  # 0.1% or 0.5 points tolerance
+    if is_long and exit_price >= (tp - tp_tolerance):
+        return ExitReason.TAKE_PROFIT
+    if not is_long and exit_price <= (tp + tp_tolerance):
+        return ExitReason.TAKE_PROFIT
+
+    # Check for stop loss hits - with tolerance for slippage
+    if is_long and exit_price <= (sl + tp_tolerance):
+        return ExitReason.STOP_LOSS
+    if not is_long and exit_price >= (sl - tp_tolerance):
+        return ExitReason.STOP_LOSS
+
+    # Adverse exit: exited below entry without hitting SL/TP
+    if is_long and exit_price < entry_price and not is_manual:
+        return ExitReason.ADVERSE_EXIT
+    if not is_long and exit_price > entry_price and not is_manual:
+        return ExitReason.ADVERSE_EXIT
+
+    # Time partial
+    if is_time_exit:
+        return ExitReason.TIME_STOP
+
+    # Partial profit
+    if is_partial and exit_price > entry_price:
+        return ExitReason.PARTIAL_TAKE_PROFIT
+
+    # Manual exit
+    if is_manual:
+        return "MANUAL_EXIT"
+
+    return ExitReason.SCRATCH
 
 
 def get_session_time_stop(

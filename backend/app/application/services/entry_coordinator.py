@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from app.domain.ports.storage import IStorage
 from app.domain.ports.broker import IBroker
+from app.domain.services.risk_sizing_engine import RiskSizingEngine, SizingResult
 
 if TYPE_CHECKING:
     from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
@@ -54,6 +55,7 @@ class EntryCoordinator:
         risk_coordinator,
         option_selector,
         state_manager: SessionStateManager,
+        sizing_engine: RiskSizingEngine | None = None,
     ) -> None:
         self._broker = broker
         self._lifecycle_handler = lifecycle_handler
@@ -62,6 +64,7 @@ class EntryCoordinator:
         self._risk_coordinator = risk_coordinator
         self._option_selector = option_selector
         self._state_manager = state_manager
+        self._sizing_engine = sizing_engine or RiskSizingEngine()
 
     def execute_signal(self, symbol: str, sig: Signal, session: SessionState) -> None:
         """Execute a trade signal — MUST run on main thread or under lock.
@@ -237,6 +240,11 @@ class EntryCoordinator:
             # Initialize partition exit state for P1/P2/P3 management
             # Position already has lifecycle fields set by Position.from_signal()
             self._lifecycle_handler.initialize_partition_state(position.id)
+            # Track scale step for 40/30/30 execution plan
+            position.scale_step = 1  # First entry of scale-in plan
+            # Track entry LVN for pyramid adds (FR-09)
+            if sig.metadata and "entry_lvn" in sig.metadata:
+                position.entry_lvns = [sig.metadata["entry_lvn"]]
             self._event_logger.log_position_event(
                 position_id=position.id,
                 symbol=symbol,

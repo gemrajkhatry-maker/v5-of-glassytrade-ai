@@ -1,6 +1,19 @@
 
 import { ChartConfig } from './types';
 
+// Time constants
+export const IST_OFFSET_SECONDS = 19800; // UTC+5:30 for Indian Standard Time
+
+// Chart constants
+export const DEFAULT_BAR_SPACING = {
+  STANDARD: 6,
+  FOOTPRINT: 160,
+  RANGE: 40,
+  MIN_STANDARD: 2,
+  MIN_FOOTPRINT: 100,
+  MIN_RANGE: 20,
+};
+
 export const DEFAULT_CONFIG: ChartConfig = {
   symbol: '',
   interval: '5m',

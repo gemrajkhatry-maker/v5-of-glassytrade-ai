@@ -104,7 +104,7 @@ class TestPositionSerialization:
         d = position_to_dto(p)
         assert d["status"] == "CLOSED"
         assert d["exitPrice"] == 90
-        assert d["closeReason"] == "Take Profit (Full)"
+        assert d["closeReason"] == "TAKE_PROFIT"  # Fabio spec format
 
 
 class TestPortfolioSerialization:

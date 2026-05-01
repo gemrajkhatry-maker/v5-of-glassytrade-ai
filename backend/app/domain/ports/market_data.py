@@ -109,3 +109,11 @@ class IMarketData(ABC):
     def get_option_chain(self, underlying: str, exchange: str = "NFO", expiry_index: int = 0):
         """Fetch option chain. Override in adapters that support options."""
         return None
+
+    def get_lot_size(self, symbol: str) -> int:
+        """Get the lot size for a specific symbol.
+
+        Returns:
+            Lot size (default 1 for equities).
+        """
+        return 1

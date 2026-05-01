@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 
 class TradingPhase(str, Enum):
-    OPENING_NOISE = "OPENING_NOISE"  # 09:15-09:30 — build profile, no trade
+    OPENING_AUCTION = "OPENING_AUCTION"  # 09:15-09:30 — institutional flow, all models active
     AAA_WINDOW = "AAA_WINDOW"  # 09:30-11:30 — all models active
     MIDDAY = "MIDDAY"  # 11:30-14:00 — mean reversion only
     POWER_HOUR = "POWER_HOUR"  # 14:00-15:15 — all models active
@@ -158,15 +158,15 @@ class SessionPhaseGate:
                 day_of_week=day_name,
             )
 
-        # Phase 1: Opening Noise
+        # Phase 1: Opening Auction (Fabio: institutional players show hands here)
         p1_end = self._P1_END_MONDAY if day_name == "MONDAY" else self._P1_END
         if time_now < p1_end:
             return PhaseState(
-                phase=TradingPhase.OPENING_NOISE,
-                allowed_action=AllowedAction.NO_TRADE,
-                is_blocked=True,
-                size_multiplier=0.0,
-                reason=f"Opening noise ({'extended 09:45' if day_name == 'MONDAY' else '09:30'}) — building profile",
+                phase=TradingPhase.OPENING_AUCTION,
+                allowed_action=AllowedAction.ALL_MODELS,
+                is_blocked=False,
+                size_multiplier=1.0,
+                reason=f"Opening auction ({'extended 09:45' if day_name == 'MONDAY' else '09:30'}) — institutional flow active",
                 day_of_week=day_name,
             )
 
@@ -257,7 +257,7 @@ class SessionPhaseGate:
         # #29: IB-based phase transitions override time-based phases
 
         # Phase 1: If IB is complete early, transition to Phase 2
-        if time_state.phase == TradingPhase.OPENING_NOISE:
+        if time_state.phase == TradingPhase.OPENING_AUCTION:
             if ib_complete:
                 return PhaseState(
                     phase=TradingPhase.AAA_WINDOW,

@@ -20,9 +20,6 @@ from app.domain.fabio_ai.services.footprint_analyzer import TickFootprintAccumul
 from app.domain.services.tick_delta import TickDeltaClassifier, candle_delta_proxy
 from app.shared.timezones import IST
 
-if TYPE_CHECKING:
-    pass
-
 logger = logging.getLogger(__name__)
 
 

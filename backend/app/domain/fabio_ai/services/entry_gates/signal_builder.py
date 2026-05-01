@@ -35,6 +35,9 @@ def sl_from_aggressive_print(
 ) -> float | None:
     """Fabio playbook: SL just beyond the aggressive print cluster + buffer.
 
+    Fabio's rule: Place stop above the big aggression print, NOT above the high.
+    We prefer large prints (size-weighted) as tie-breaker, but proximity is primary.
+
     When *inside_cluster* is True (Fabio Gap #13), the buffer direction is
     reversed so the SL sits 1-2 ticks INSIDE the cluster for a tighter stop.
     """
@@ -43,15 +46,26 @@ def sl_from_aggressive_print(
     px = float(tick.close)
     proximity = px * 0.005
     best = None
-    for ap in amt_result.aggressive_prints[-5:]:
+    best_size = 0
+
+    # Prioritize proximity, use size as tie-breaker (Fabio: "big ball" priority)
+    for ap in amt_result.aggressive_prints[-10:]:
         if is_buy and ap.side == "SELL" and ap.price < px:
             if abs(ap.price - px) < proximity:
-                if best is None or ap.price > best:
+                ap_size = getattr(ap, 'size', 0) or getattr(ap, 'quantity', 0) or 0
+                # Prefer larger prints when prices are similar
+                if best is None or abs(ap.price - px) < abs(best - px) or \
+                   (abs(ap.price - px) == abs(best - px) and ap_size > best_size):
                     best = ap.price
+                    best_size = ap_size
         elif not is_buy and ap.side == "BUY" and ap.price > px:
             if abs(ap.price - px) < proximity:
-                if best is None or ap.price < best:
+                ap_size = getattr(ap, 'size', 0) or getattr(ap, 'quantity', 0) or 0
+                if best is None or abs(ap.price - px) < abs(best - px) or \
+                   (abs(ap.price - px) == abs(best - px) and ap_size > best_size):
                     best = ap.price
+                    best_size = ap_size
+
     if best is None:
         return None
     if is_buy:
@@ -90,9 +104,13 @@ def build_entry_signal(
         if amt_result.session_vwap > 0
         else (tick.vwap if tick.vwap > 0 else 0)
     )
+    # Get aggressive print SL (Fabio: stop above big ball)
     agg_sl = sl_from_aggressive_print(amt_result, tick, is_buy, buffer, inside_cluster=inside_cluster)
     va_width = abs(amt_result.value_area_high - amt_result.value_area_low)
     min_reward = px * 0.005
+
+    # Fabio Gap #5: ALWAYS prefer aggressive print SL if available
+    # This ensures stop is above institutional aggression, not above arbitrary level
 
     if setup_type == ST.RESPONSIVE_FADE:
         # FABIO PLAYBOOK: Fade extreme deviation back to Value (POC or VWAP)
@@ -126,9 +144,11 @@ def build_entry_signal(
             extreme_val = amt_result.value_area_low
             sl_dir = 1 if inside_extreme else -1
             stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
-            if abs(px - stop_price) > max_sl_dist:
-                stop_price = px - max_sl_dist
+            # Fabio: If aggressive print SL exists, use it
+            if not agg_sl:
+                max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
+                if abs(px - stop_price) > max_sl_dist:
+                    stop_price = px - max_sl_dist
             if not agg_sl and vwap and stop_price < vwap < px:
                 stop_price = vwap - buffer
             if tp_price <= px or stop_price >= px or (tp_price - px) < min_reward:
@@ -138,9 +158,10 @@ def build_entry_signal(
             extreme_val = amt_result.value_area_high
             sl_dir = -1 if inside_extreme else 1
             stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
-            if abs(stop_price - px) > max_sl_dist:
-                stop_price = px + max_sl_dist
+            if not agg_sl:
+                max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
+                if abs(stop_price - px) > max_sl_dist:
+                    stop_price = px + max_sl_dist
             if not agg_sl and vwap and stop_price > vwap > px:
                 stop_price = vwap + buffer
             if tp_price >= px or stop_price <= px or (px - tp_price) < min_reward:
@@ -166,9 +187,14 @@ def build_entry_signal(
             extreme_val = amt_result.poc
             sl_dir = 1 if inside_extreme else -1
             stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            max_sl_dist = min(va_width * 0.75, px * 0.03) if va_width > 0 else px * 0.01
-            if abs(px - stop_price) > max_sl_dist:
-                stop_price = px - max_sl_dist
+            # Fabio: If aggressive print SL exists, use it regardless of distance
+            if agg_sl:
+                pass  # Use aggressive print SL
+            else:
+                # Only apply max distance if no aggressive print SL
+                max_sl_dist = min(va_width * 0.75, px * 0.03) if va_width > 0 else px * 0.01
+                if abs(px - stop_price) > max_sl_dist:
+                    stop_price = px - max_sl_dist
             if not agg_sl and vwap and stop_price < vwap < px:
                 stop_price = vwap - buffer
             if tp_price <= px or stop_price >= px:
@@ -188,9 +214,13 @@ def build_entry_signal(
             extreme_val = amt_result.poc
             sl_dir = -1 if inside_extreme else 1
             stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            max_sl_dist = min(va_width * 0.75, px * 0.03) if va_width > 0 else px * 0.01
-            if abs(stop_price - px) > max_sl_dist:
-                stop_price = px + max_sl_dist
+            # Fabio: If aggressive print SL exists, use it regardless of distance
+            if agg_sl:
+                pass  # Use aggressive print SL
+            else:
+                max_sl_dist = min(va_width * 0.75, px * 0.03) if va_width > 0 else px * 0.01
+                if abs(stop_price - px) > max_sl_dist:
+                    stop_price = px + max_sl_dist
             if not agg_sl and vwap and stop_price > vwap > px:
                 stop_price = vwap + buffer
             if tp_price >= px or stop_price <= px:
@@ -279,5 +309,6 @@ def build_entry_signal(
             "session_risk_pct": session_risk_pct,
             "grade_score": grade_score,
             "tp_source": tp_source,
+            "entry_lvn": amt_result.lvn_play.get("price", 0.0) if amt_result.lvn_play else 0.0,
         },
     )

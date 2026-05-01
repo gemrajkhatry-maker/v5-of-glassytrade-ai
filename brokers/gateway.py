@@ -9,7 +9,7 @@ Provides:
 """
 
 import logging
-from typing import Optional, List, Dict, Type, Any
+from typing import Optional, List, Dict, Type, Any, Union
 from datetime import datetime
 import asyncio
 from enum import Enum
@@ -23,7 +23,8 @@ from shared.entities.models import (
     Order,
     Position,
     OrderStatus,
-    Exchange
+    Exchange,
+    OptionChain,
 )
 from shared.resilience import CircuitBreaker, CircuitBreakerError, CircuitState
 

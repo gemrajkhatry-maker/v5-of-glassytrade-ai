@@ -6,7 +6,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from app.api.dependencies import get_active_symbols, get_gen_ai_service, get_storage
+from app.api.dependencies import get_active_symbols, get_gen_ai_service, get_storage, get_trade_journal
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 from app.infrastructure.storage.database import SQLiteStorageAdapter
 
@@ -172,11 +172,9 @@ async def get_decision_history(
 async def get_journal(
     date: Optional[str] = Query(None),
     run_id: Optional[str] = Query(None, alias="runId"),
+    journal = Depends(get_trade_journal),
 ):
     """Returns journal entries for a given date (YYYY-MM-DD)."""
-    from app.application.services.trade_journal import TradeJournal
-
-    journal = TradeJournal()
     return {"entries": journal.read_entries(date, run_id=run_id)}
 
 
@@ -184,11 +182,9 @@ async def get_journal(
 async def get_journal_trades(
     date: Optional[str] = Query(None),
     run_id: Optional[str] = Query(None, alias="runId"),
+    journal = Depends(get_trade_journal),
 ):
     """Returns completed trades (entry+exit pairs) for a given date."""
-    from app.application.services.trade_journal import TradeJournal
-
-    journal = TradeJournal()
     return {"trades": journal.get_completed_trades(date, run_id=run_id)}
 
 
@@ -196,11 +192,9 @@ async def get_journal_trades(
 async def get_journal_summary(
     date: Optional[str] = Query(None),
     run_id: Optional[str] = Query(None, alias="runId"),
+    journal = Depends(get_trade_journal),
 ):
     """Returns trade summary for a given date."""
-    from app.application.services.trade_journal import TradeJournal
-
-    journal = TradeJournal()
     return journal.summary(date, run_id=run_id)
 
 
@@ -208,11 +202,9 @@ async def get_journal_summary(
 async def get_journal_report(
     date: Optional[str] = Query(None),
     run_id: Optional[str] = Query(None, alias="runId"),
+    journal = Depends(get_trade_journal),
 ):
     """Returns attribution and symbol-level report for a given date/run."""
-    from app.application.services.trade_journal import TradeJournal
-
-    journal = TradeJournal()
     return journal.report(date, run_id=run_id)
 
 
@@ -221,11 +213,9 @@ async def get_journal_compare(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
     run_ids: Optional[str] = Query(None, alias="runIds"),
+    journal = Depends(get_trade_journal),
 ):
     """Compare one or more runs across an inclusive date range."""
-    from app.application.services.trade_journal import TradeJournal
-
-    journal = TradeJournal()
     parsed_run_ids = [item.strip() for item in run_ids.split(",")] if run_ids else None
     return journal.compare_runs(start_date=start, end_date=end, run_ids=parsed_run_ids)
 
@@ -253,11 +243,9 @@ async def get_journal_promotion(
         90.0, alias="minFeatureDriverCoverageRate"
     ),
     min_aggression_driver_rate: float = Query(75.0, alias="minAggressionDriverRate"),
+    journal = Depends(get_trade_journal),
 ):
     """Assess whether one or more paper-trading runs are ready for promotion."""
-    from app.application.services.trade_journal import TradeJournal
-
-    journal = TradeJournal()
     parsed_run_ids = [item.strip() for item in run_ids.split(",")] if run_ids else None
     return journal.assess_promotion(
         start_date=start,

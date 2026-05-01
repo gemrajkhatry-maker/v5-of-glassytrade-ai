@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
 from app.application.range_bar_builder import RangeBarBuilder
 from app.application.services.state_snapshot_builder import _camel_case_ai
+from app.shared.depth_dto import order_book_to_dto
 
 if TYPE_CHECKING:
     from app.application.candle_aggregator import CandleAggregator
@@ -270,14 +271,12 @@ class TickProcessor:
         
         Uses _camel_case_ai from state_snapshot_builder for consistent DTO formatting.
         """
-        from app.application.engine import _depth_to_dto
-
         msg: dict = {
             "tick": ohlc_to_dto(tick),
             "ltp": ltp,
             "oi": oi,
             "_symbol": symbol,
-            "depth": _depth_to_dto(current_depth, symbol=symbol),
+            "depth": order_book_to_dto(current_depth),
         }
 
         try:

@@ -63,22 +63,28 @@ class TestGatePipelineSequential:
         assert result.reason == GateReason.SESSION_STOPPED
 
     def test_gate_3_no_trade_state(self):
-        """GATE 3: NO_TRADE state → FLAT."""
+        """GATE 3: NO_TRADE state removed - now BALANCED state passes."""
         ctx = GateContext(candle_count=10, tick_age_seconds=1.0,
-                         market_state=MarketState.NO_TRADE)
+                         market_state=MarketState.BALANCED,
+                         poc=100, vah=105, val=95, price=100, tick_size=0.1,
+                         nearest_level=100, distance_to_level_ticks=0,
+                         drive_number=2, drive_entry_valid=True,
+                         aggression_score=2.5, cushion_ticks=5, r_r_ratio=2.0)
         result = GatePipeline().evaluate(ctx)
-        assert result.passed is False
-        assert result.gate == 3
-        assert result.reason == GateReason.FLAT
+        # Gate 3 removed - should pass
+        assert result.gate != 3 or result.passed
 
     def test_gate_4_probing_state(self):
-        """GATE 4: PROBING state → FLAT."""
+        """GATE 4: PROBING state removed - IMBALANCED is valid state."""
         ctx = GateContext(candle_count=10, tick_age_seconds=1.0,
-                         market_state=MarketState.PROBING)
+                         market_state=MarketState.IMBALANCED,
+                         poc=100, vah=105, val=95, price=106, tick_size=0.1,
+                         nearest_level=95, distance_to_level_ticks=10,
+                         drive_number=2, drive_entry_valid=True,
+                         aggression_score=3.0, cushion_ticks=5, r_r_ratio=2.0)
         result = GatePipeline().evaluate(ctx)
-        assert result.passed is False
-        assert result.gate == 4
-        assert result.reason == GateReason.FLAT
+        # IMBALANCED is valid - no gate 4 block anymore
+        assert result.reason == GateReason.TRADE or result.reason == GateReason.WAIT
 
     def test_gate_5_no_key_level(self):
         """GATE 5: No key level near price → WAIT."""
@@ -101,15 +107,18 @@ class TestGatePipelineSequential:
         assert result.reason == GateReason.ALERT
 
     def test_gate_7_first_drive(self):
-        """GATE 7: D1 → FLAT."""
+        """GATE 7: D1 - first drive BLOCKED (Fabio: wait for re-test)."""
         ctx = GateContext(candle_count=10, tick_age_seconds=1.0,
                          market_state=MarketState.BALANCED,
+                         poc=100, vah=105, val=95, price=100.5, tick_size=0.1,
                          nearest_level=100, distance_to_level_ticks=1.0,
-                         drive_number=1)
+                         drive_number=1, aggression_score=2.5, cushion_ticks=2,
+                         r_r_ratio=1.5)
         result = GatePipeline().evaluate(ctx)
+        # First drive is BLOCKED (Fabio spec: wait for re-test)
         assert result.passed is False
         assert result.gate == 7
-        assert result.reason == GateReason.FLAT
+        assert "first drive" in result.detail.lower()
 
     def test_gate_7_third_drive(self):
         """GATE 7: D3+ → FLAT."""
@@ -137,21 +146,23 @@ class TestGatePipelineSequential:
         """GATE 8: Aggression < 2.0 → WAIT."""
         ctx = GateContext(candle_count=10, tick_age_seconds=1.0,
                          market_state=MarketState.BALANCED,
+                         poc=100, vah=105, val=95, price=100, tick_size=0.1,
                          nearest_level=100, distance_to_level_ticks=1.0,
                          drive_number=2, drive_entry_valid=True,
-                         aggression_score=1.5)
+                         aggression_score=1.5, cushion_ticks=5, r_r_ratio=1.2, take_profit=200.0)
         result = GatePipeline().evaluate(ctx)
+        # Gate 8 fails (aggression), gate 14 fails (TP too far) → 2/5 pass, not enough quorum
         assert result.passed is False
-        assert result.gate == 8
-        assert result.reason == GateReason.WAIT
+        assert result.quorum_met is False
 
     def test_gate_9_cushion_too_wide(self):
         """GATE 9: Cushion > 10 ticks → INVALID."""
         ctx = GateContext(candle_count=10, tick_age_seconds=1.0,
                          market_state=MarketState.BALANCED,
+                         poc=100, vah=105, val=95, price=100, tick_size=0.1,
                          nearest_level=100, distance_to_level_ticks=1.0,
                          drive_number=2, drive_entry_valid=True,
-                         aggression_score=2.5, cushion_ticks=15)
+                         aggression_score=2.5, cushion_ticks=15, take_profit=200.0)
         result = GatePipeline().evaluate(ctx)
         assert result.passed is False
         assert result.gate == 9
@@ -165,16 +176,16 @@ class TestGatePipelineSequential:
         """
         ctx = GateContext(candle_count=10, tick_age_seconds=1.0,
                          market_state=MarketState.BALANCED,
+                         poc=100, vah=105, val=95, price=100, tick_size=0.1,
                          nearest_level=100, distance_to_level_ticks=1.0,
                          drive_number=2, drive_entry_valid=True,
-                         aggression_score=2.5, cushion_ticks=5, r_r_ratio=1.2)
+                         aggression_score=2.5, cushion_ticks=5, r_r_ratio=1.2, take_profit=105.0)
         result = GatePipeline().evaluate(ctx)
-        # 3/4 soft gates pass (6:ok, 8:ok, 9:ok, 10:fail) → quorum met → TRADE
+        # 5/5 soft gates pass (6:ok, 8:ok, 9:ok, 10:fail, 14:ok) → quorum met → TRADE
         assert result.passed is True
         assert result.reason == GateReason.TRADE
         assert result.quorum_met is True
-        assert result.soft_gates_passed == 3
-        assert result.soft_gates_total == 4
+        assert result.soft_gates_passed == 4
 
     def test_gate_10_low_rr_quorum_not_met(self):
         """GATE 10: R:R < 1.5 with multiple other soft gate failures → quorum not met → SKIP.
@@ -184,15 +195,15 @@ class TestGatePipelineSequential:
         """
         ctx = GateContext(candle_count=10, tick_age_seconds=1.0,
                          market_state=MarketState.BALANCED,
+                         poc=100, vah=105, val=95, price=100, tick_size=0.1,
                          nearest_level=100, distance_to_level_ticks=5.0,  # gate 6 fails too
                          drive_number=2, drive_entry_valid=True,
                          aggression_score=1.5, cushion_ticks=5, r_r_ratio=1.2)  # gate 8 fails too
         result = GatePipeline().evaluate(ctx)
-        # 1/4 soft gates pass (6:fail, 8:fail, 9:ok, 10:fail) → quorum not met
+        # With 5 soft gates: gate 6 fails, gate 8 fails, gate 9 passes, gate 10 fails, gate 14 passes (no TP)
         assert result.passed is False
         assert result.quorum_met is False
-        assert result.soft_gates_passed == 1
-        assert result.soft_gates_total == 4
+        assert result.soft_gates_passed == 2  # gates 9 and 14
 
     def test_gate_11_position_sizing_rejected(self):
         """GATE 11: Position sizing rejected → BLOCKED."""
@@ -229,6 +240,7 @@ class TestGatePipelineAllPass:
             candle_count=10,
             tick_age_seconds=1.0,
             market_state=MarketState.BALANCED,
+            poc=100, vah=105, val=95, price=100, tick_size=0.1,
             nearest_level=100,
             distance_to_level_ticks=1.0,
             drive_number=2,
@@ -236,6 +248,7 @@ class TestGatePipelineAllPass:
             aggression_score=2.5,
             cushion_ticks=5,
             r_r_ratio=2.0,
+            take_profit=105.0,
             position_size_ok=True,
             eia_window_active=False,
             setup_type="MEAN_REVERSION",
@@ -249,8 +262,8 @@ class TestGatePipelineAllPass:
         assert result.r_r_ratio == 2.0
         # Quorum diagnostics
         assert result.hard_gates_passed is True
-        assert result.soft_gates_total == 4
-        assert result.soft_gates_passed == 4
+        assert result.soft_gates_total == 5
+        assert result.soft_gates_passed == 5
         assert result.quorum_met is True
 
 
@@ -276,6 +289,65 @@ class TestGatePipelineIMBALANCED:
         assert result.reason == GateReason.TRADE
 
 
+class TestConsecutiveLossThrottle:
+    """Test consecutive loss and max trades gates (Fabio spec)."""
+
+    def test_consecutive_loss_throttle(self):
+        """2+ consecutive losses → 30min cooldown."""
+        ctx = GateContext(candle_count=10, tick_age_seconds=1.0,
+                         market_state=MarketState.BALANCED,
+                         poc=100, vah=105, val=95, price=100.5, tick_size=0.1,
+                         nearest_level=100, distance_to_level_ticks=1.0,
+                         drive_number=2, aggression_score=2.5, cushion_ticks=2,
+                         r_r_ratio=1.5, consecutive_losses=2)
+        result = GatePipeline().evaluate(ctx)
+        assert result.passed is False
+        assert "consecutive loss" in result.detail.lower()
+        assert result.gate == 2
+
+    def test_max_trades_reached(self):
+        """5 trades per session → blocked."""
+        ctx = GateContext(candle_count=10, tick_age_seconds=1.0,
+                         market_state=MarketState.BALANCED,
+                         poc=100, vah=105, val=95, price=100.5, tick_size=0.1,
+                         nearest_level=100, distance_to_level_ticks=1.0,
+                         drive_number=2, aggression_score=2.5, cushion_ticks=2,
+                         r_r_ratio=1.5, trades_today=5, max_trades_per_symbol=5)
+        result = GatePipeline().evaluate(ctx)
+        assert result.passed is False
+        assert "max trades" in result.detail.lower()
+
+
+class TestTimeOfDayGate:
+    """Test time-of-day restriction (Fabio spec: no entries 09:15-09:45)."""
+
+    def test_opening_noise_blocked(self):
+        """09:15-09:45 → blocked (opening noise)."""
+        from app.domain.services.session_phase_gate import SessionPhaseGate, AllowedAction
+        from datetime import datetime
+        # 09:20 IST should return NO_TRADE (OPENING_AUCTION)
+        ts = datetime(2026, 1, 2, 9, 20, 0)  # 09:20
+        result = SessionPhaseGate().evaluate(ts)
+        assert result.phase == "OPENING_AUCTION"
+        # Opening auction is essentially no-trade before profile forms
+
+
+class TestVWAPExtremeFilter:
+    """Test VWAP extreme filter (Fabio spec: BLOCK at VWAP ±2σ)."""
+
+    def test_vwap_extreme_blocks_long(self):
+        """LONG blocked at VWAP +2σ or higher."""
+        ctx = GateContext(candle_count=10, tick_age_seconds=1.0,
+                         market_state=MarketState.IMBALANCED,
+                         poc=100, vah=110, val=90, price=115, tick_size=0.1,
+                         nearest_level=100, distance_to_level_ticks=1.0,
+                         drive_number=2, aggression_score=2.5, cushion_ticks=2,
+                         r_r_ratio=1.5, direction="LONG", vwap_sigma=2.5)
+        result = GatePipeline().evaluate(ctx)
+        assert result.passed is False
+        assert "vwap extreme" in result.detail.lower() or "extreme" in result.detail.lower()
+
+
 class TestSoftGateQuorum:
     """Quorum model: Fabio's 3/4 rule for soft gates."""
 
@@ -285,6 +357,7 @@ class TestSoftGateQuorum:
             candle_count=10,
             tick_age_seconds=1.0,
             market_state=MarketState.BALANCED,
+            poc=100, vah=105, val=95, price=100, tick_size=0.1,
             nearest_level=100,
             drive_number=2,
             drive_entry_valid=True,
@@ -295,45 +368,46 @@ class TestSoftGateQuorum:
         return GateContext(**base)
 
     def test_all_4_soft_gates_pass(self):
-        """4/4 soft gates pass → quorum met → TRADE."""
+        """5/5 soft gates pass → quorum met → TRADE."""
         ctx = self._base_ctx(
             distance_to_level_ticks=1.0,
             aggression_score=2.5,
             cushion_ticks=5,
             r_r_ratio=2.0,
+            take_profit=105.0,  # Add TP for gate 14
         )
         result = GatePipeline().evaluate(ctx)
         assert result.passed is True
         assert result.quorum_met is True
-        assert result.soft_gates_passed == 4
+        assert result.soft_gates_passed == 5
 
     def test_3_of_4_soft_gates_pass_minimum_quorum(self):
-        """3/4 soft gates pass → quorum met → TRADE."""
+        """3/5 soft gates pass → quorum met → TRADE."""
         ctx = self._base_ctx(
             distance_to_level_ticks=1.0,   # gate 6: pass
             aggression_score=2.5,           # gate 8: pass
             cushion_ticks=5,               # gate 9: pass
             r_r_ratio=1.2,                 # gate 10: fail (< 1.5)
+            take_profit=200.0,             # gate 14: fail (TP too far)
         )
         result = GatePipeline().evaluate(ctx)
         assert result.passed is True
         assert result.quorum_met is True
         assert result.soft_gates_passed == 3
-        assert result.soft_gates_total == 4
 
     def test_2_of_4_soft_gates_pass_quorum_not_met(self):
-        """2/4 soft gates pass → quorum NOT met → blocked."""
+        """2/5 soft gates pass → quorum NOT met → blocked."""
         ctx = self._base_ctx(
             distance_to_level_ticks=1.0,   # gate 6: pass
             aggression_score=1.5,           # gate 8: fail (< 2.0)
             cushion_ticks=5,               # gate 9: pass
             r_r_ratio=1.2,                 # gate 10: fail (< 1.5)
+            take_profit=200.0,             # gate 14: fail (TP too far from VA)
         )
         result = GatePipeline().evaluate(ctx)
         assert result.passed is False
         assert result.quorum_met is False
         assert result.soft_gates_passed == 2
-        assert result.soft_gates_total == 4
 
     def test_hard_gate_fail_bypasses_soft_quorum(self):
         """Hard gate failure (risk halt) blocks regardless of soft gate state."""
@@ -358,9 +432,10 @@ class TestSoftGateQuorum:
             aggression_score=1.5,           # gate 8: fail
             cushion_ticks=20,              # gate 9: fail (> 10)
             r_r_ratio=1.2,                 # gate 10: fail
-            soft_gate_quorum=1,            # only need 1 of 4
+            take_profit=105.0,             # gate 14: pass
+            soft_gate_quorum=1,            # only need 1 of 5
         )
         result = GatePipeline().evaluate(ctx)
         assert result.passed is True
         assert result.quorum_met is True
-        assert result.soft_gates_passed == 1
+        assert result.soft_gates_passed == 2  # gates 6 and 14

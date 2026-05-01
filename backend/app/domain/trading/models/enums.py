@@ -10,14 +10,14 @@ class MarketStateCodec:
 
     Handles legacy formats like "MarketState.BALANCED", mixed-case, and
     the "BALANCE"/"IMBALANCE" variants from MarketStructureState.
-    Supports the 4-state model: NO_TRADE, BALANCED, IMBALANCED, PROBING.
+    Supports Fabio's 2-state model: BALANCED, IMBALANCED.
     """
 
     @staticmethod
-    def is_no_trade(value: object) -> bool:
-        """Return True if *value* represents a no-trade dead zone."""
+    def is_tradeable(value: object) -> bool:
+        """Return True if the state allows trading (both states are tradeable)."""
         s = str(value).upper()
-        return s in ("NO_TRADE", "NOTRADE", "MARKETSTATE.NO_TRADE")
+        return s in ("BALANCED", "BALANCE", "IMBALANCED", "IMBALANCE")
 
     @staticmethod
     def is_balanced(value: object) -> bool:
@@ -32,27 +32,21 @@ class MarketStateCodec:
         return s in ("IMBALANCED", "IMBALANCE", "MARKETSTATE.IMBALANCED")
 
     @staticmethod
-    def is_probing(value: object) -> bool:
-        """Return True if *value* represents an unconfirmed break."""
-        s = str(value).upper()
-        return s in ("PROBING", "MARKETSTATE.PROBING")
+    def is_no_trade(value: object) -> bool:
+        """Legacy method - NO_TRADE state no longer exists in 2-state model."""
+        return False
 
     @staticmethod
-    def is_tradeable(value: object) -> bool:
-        """Return True if the state allows trading."""
-        s = str(value).upper()
-        return s in ("BALANCED", "BALANCE", "IMBALANCED", "IMBALANCE")
+    def is_probing(value: object) -> bool:
+        """Legacy method - PROBING state no longer exists in 2-state model."""
+        return False
 
     @staticmethod
     def encode(value: object) -> float:
-        """Return numeric encoding: IMBALANCED=1.0, BALANCED=0.0, PROBING=0.5, NO_TRADE=-1.0."""
+        """Return numeric encoding: IMBALANCED=1.0, BALANCED=0.0."""
         s = str(value).upper()
         if "IMBALANCED" in s or "IMBALANCE" in s:
             return 1.0
-        if "PROBING" in s:
-            return 0.5
-        if "NO_TRADE" in s or "NOTRADE" in s:
-            return -1.0
         return 0.0
 
 
@@ -135,18 +129,14 @@ class Source(str, Enum):
 
 
 class MarketState(str, Enum):
-    """Auction Market Theory market state (4-state model per FR-04).
-
-    NO_TRADE: Price within ±2 ticks of POC — dead zone, no edge.
-    BALANCED: Price inside VAH-VAL range — rotational, mean-reverting.
+    """Fabio's 2-state model (simplified from FR-04 for alignment).
+    
+    BALANCED: Price inside VAH-VAL — rotational, mean-reverting.
     IMBALANCED: Price outside VA + displacement + acceptance — trending.
-    PROBING: Price outside VA without displacement — unconfirmed break.
     """
 
-    NO_TRADE = "NO_TRADE"
     BALANCED = "BALANCED"
     IMBALANCED = "IMBALANCED"
-    PROBING = "PROBING"
 
 
 class MarketStructureState(str, Enum):

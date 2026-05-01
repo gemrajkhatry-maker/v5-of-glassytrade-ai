@@ -60,10 +60,11 @@ describe('useServerTradingSystem', () => {
     expect(result.current.connected).toBe(false);
   });
 
-  it('should show empty connection status initially', () => {
+  it('should show loading connection status initially', () => {
     const { result } = renderHook(() => useServerTradingSystem(DEFAULT_CONFIG));
     
-    expect(result.current.connectionStatus).toBe('');
+    // The hook shows a loading message on first start
+    expect(result.current.connectionStatus).toContain('Loading');
   });
 
   it('should return tickBus event target', () => {

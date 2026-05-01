@@ -18,9 +18,6 @@ from typing import TYPE_CHECKING
 from app.config import settings
 from app.application.utils import is_market_open
 from app.domain.trading.models.utils import safe_side as _safe_side
-
-if TYPE_CHECKING:
-    from app.application.stream_manager import StreamManager
 from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
@@ -39,7 +36,7 @@ class WatchdogManager:
     source of truth for position protection and stream monitoring.
     """
 
-    def __init__(self, session_service, stream_manager: StreamManager):
+    def __init__(self, session_service, stream_manager: "StreamManager"):
         self._session_service = session_service
         self._stream_manager = stream_manager
         self._running = False

@@ -100,6 +100,8 @@ class TestVWAPTrail:
         amt.vwap_lower_1 = 99.0
         amt.vwap_upper_2 = 102.0
         amt.vwap_lower_2 = 98.0
+        # Force aggression_score to be a real number, not a MagicMock
+        amt.aggression_score = 0.0
 
         handler.check_exits(portfolio, 100.0, amt_result=amt)
         handler._exit_engine.apply_vwap_trail.assert_called_once()

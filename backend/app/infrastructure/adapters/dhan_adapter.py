@@ -400,6 +400,17 @@ class DhanMarketDataAdapter(IMarketData):
         except Exception:
             logger.warning("LTP fetch failed for %s", symbol, exc_info=True)
             return 0.0
+    
+    def get_lot_size(self, symbol: str) -> int:
+        """Get lot size for a symbol."""
+        try:
+            self.ensure_initialized_sync()
+            broker = self.get_broker()
+            instrument = self._make_instrument(symbol)
+            return broker.get_lot_size(instrument.symbol, instrument.exchange)
+        except Exception:
+            logger.warning("Lot size fetch failed for %s", symbol, exc_info=True)
+            return 1
 
     async def stream_full(self, symbols: list[str]) -> AsyncIterator[dict]:
         """Stream live FULL packets via DhanBroker.stream_full().

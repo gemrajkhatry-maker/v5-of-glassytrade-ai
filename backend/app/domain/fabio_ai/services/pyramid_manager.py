@@ -79,6 +79,10 @@ class PyramidManager:
         if current_lvn > 0:
             for prev_lvn in entry_lvns:
                 if abs(current_lvn - prev_lvn) < current_lvn * 0.003:  # Within 0.3%
+                    logger.debug(
+                        "Pyramid blocked: LVN %.2f too close to previous %.2f",
+                        current_lvn, prev_lvn
+                    )
                     return None
 
         # Size: Add 1 = 100%, Add 2 = 50%

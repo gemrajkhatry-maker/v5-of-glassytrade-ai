@@ -10,6 +10,7 @@ module-level singleton.
 from fastapi import Request
 
 from app.application.service_graph import ServiceGraph
+from config.consolidated import ConsolidatedConfig as Configuration
 
 
 def get_service_graph_from_request(request: Request) -> ServiceGraph:
@@ -48,3 +49,9 @@ def get_trading_session(request: Request):
 def get_active_symbols(request: Request):
     """Dependency: active symbols selected by scanner / config."""
     return list(request.app.state.service_graph.active_symbols)
+
+
+def get_trade_journal(request: Request):
+    """Dependency: Trade journal service."""
+    from app.application.services.trade_journal import TradeJournal
+    return TradeJournal()

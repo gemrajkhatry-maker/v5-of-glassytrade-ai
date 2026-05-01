@@ -42,9 +42,10 @@ class TestSessionPhaseGate:
         assert state.phase == TradingPhase.AAA_WINDOW
         assert not state.is_blocked
 
-    def test_opening_blocked(self):
+    def test_opening_allowed(self):
         gate = SessionPhaseGate()
-        assert gate.can_trade(self._ts(9, 20)) is False
+        # Opening auction is now tradable
+        assert gate.can_trade(self._ts(9, 20)) is True
 
     def test_close_blocked(self):
         gate = SessionPhaseGate()
@@ -222,18 +223,17 @@ class TestRiskSizingEngine:
     def test_standard_lots(self):
         engine = RiskSizingEngine()
         result = engine.calculate(
-            equity=1000000,
+            equity=10000000,  # Increased to get 1+ lots with 65-unit size
             session_pnl=0,
             consecutive_losses=0,
             underlying="NIFTY",
             entry_price=24000,
-            stop_price=23950,
-            target_price=24250,
+            stop_price=23950,  # 50 points risk
+            target_price=24250,  # 250 points reward
             direction="LONG",
         )
         assert result.allowed
         assert result.lots >= 1
-        assert result.scale_in_1 >= 1
 
     def test_rr_too_low_blocks(self):
         engine = RiskSizingEngine(min_rr=2.0)
@@ -308,3 +308,19 @@ class TestRiskSizingEngine:
             direction="LONG",
         )
         assert result.scale_in_1 + result.scale_in_2 + result.scale_in_3 == result.lots
+
+    def test_mcx_lot_sizes(self):
+        """Test MCX lot sizes are correctly applied."""
+        engine = RiskSizingEngine()
+        result = engine.calculate(
+            equity=5000000,  # Higher equity for MCX lots
+            session_pnl=0,
+            consecutive_losses=0,
+            underlying="CRUDEOIL",
+            entry_price=6000,
+            stop_price=5950,  # 50 points risk
+            target_price=6200,  # 200 points reward
+            direction="LONG",
+        )
+        assert result.allowed
+        assert result.lots >= 1

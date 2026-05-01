@@ -1,17 +1,15 @@
-"""Market State Engine — 4-state classification per Fabio AMT spec (FR-04).
+"""Market State Engine — 2-state classification per Fabio AMT spec.
 
 States:
-  NO_TRADE: Price within ±POC_NO_TRADE_TICKS of POC — dead zone, no edge.
   BALANCED: Price inside VAH–VAL — rotational, mean-reverting.
   IMBALANCED: Price outside VA + displacement + acceptance — trending.
-  PROBING: Price outside VA without displacement — unconfirmed break.
 
 Zone sub-classification (within BALANCED):
   NEAR_VAH: Price in upper half of VA (above midpoint)
   NEAR_VAL: Price in lower half of VA (below midpoint)
   NEAR_POC: Price within 10% of VA range from POC
 
-All transitions are logged for audit trail (FR-04-07).
+All transitions are logged for audit trail.
 """
 
 from __future__ import annotations
@@ -61,108 +59,24 @@ def detect_market_state(
     ib_high: float = 0.0,
     ib_low: float = 0.0,
 ) -> MarketStateResult:
-    """Fabio's 4-state market state classification (FR-04).
+    """Fabio's 2-state market state classification.
 
     Priority order:
-    1. EXTREME_DEVIATION — Price > 3.0 sigma from VWAP (Escalated Responsive)
-    2. NO_TRADE — price at POC dead zone (only if NO displacement)
-    3. PROBING — price outside VA without displacement
-    4. IMBALANCED — price outside VA + displacement + acceptance
-    5. BALANCED — price inside VA
+    1. BALANCED — price inside VA with acceptance
+    2. IMBALANCED — price outside VA OR displacement+acceptance
     """
     _has_active_leg = has_displacement and leg_poc > 0
     effective_poc = leg_poc if _has_active_leg else poc
     effective_vah = leg_vah if (_has_active_leg and leg_vah > 0) else vah
     effective_val = leg_val if (_has_active_leg and leg_val > 0) else val
 
-    poc_distance = abs(price - effective_poc)
-    no_trade_zone = tick_size * POC_NO_TRADE_TICKS
     va_range = max(effective_vah - effective_val, tick_size)
-    
     is_extreme = vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) >= 3.0
-
-    # IB BREAK OVERRIDE: When IB break is confirmed and price is beyond IB level,
-    # force PROBING (or IMBALANCED if displacement+acceptance present).
-    # This connects the IB break detection pipeline to mode classification.
-    if ib_complete and ib_break_direction:
-        break_confirmed = (
-            (ib_break_direction == "UP" and ib_high > 0 and price >= ib_high)
-            or (ib_break_direction == "DOWN" and ib_low > 0 and price <= ib_low)
-        )
-        if break_confirmed:
-            if has_displacement and has_acceptance:
-                direction_label = "above" if ib_break_direction == "UP" else "below"
-                return MarketStateResult(
-                    state=MarketState.IMBALANCED,
-                    zone="OUTSIDE_VA",
-                    confidence=0.90,
-                    trigger=f"IB break {direction_label} IB {('high' if ib_break_direction == 'UP' else 'low')} {ib_high if ib_break_direction == 'UP' else ib_low:.2f} with displacement + acceptance",
-                    has_displacement=has_displacement,
-                    has_acceptance=has_acceptance,
-                    balance_ratio=balance_ratio,
-                    is_extreme_deviation=is_extreme,
-                )
-            else:
-                direction_label = "above" if ib_break_direction == "UP" else "below"
-                return MarketStateResult(
-                    state=MarketState.PROBING,
-                    zone="OUTSIDE_VA",
-                    confidence=0.75,
-                    trigger=f"IB break confirmed: price {direction_label} IB {('high' if ib_break_direction == 'UP' else 'low')} {ib_high if ib_break_direction == 'UP' else ib_low:.2f} — awaiting displacement",
-                    has_displacement=has_displacement,
-                    has_acceptance=has_acceptance,
-                    balance_ratio=balance_ratio,
-                    is_extreme_deviation=is_extreme,
-                )
-
-    # GATE 3: NO_TRADE — dead zone around effective POC (FR-04-01)
-    # FABIO FIX: If has_displacement is TRUE, we skip NO_TRADE. 
-    # Displacement at POC is a valid initiation signal, not a dead zone.
-    if poc_distance <= no_trade_zone and not has_displacement:
-        poc_label = f"leg POC {effective_poc:.2f}" if _has_active_leg else f"session POC {poc:.2f}"
-        return MarketStateResult(
-            state=MarketState.NO_TRADE,
-            zone="NEAR_POC",
-            confidence=0.95,
-            trigger=f"Price {price:.2f} within {POC_NO_TRADE_TICKS} ticks of {poc_label} (No displacement)",
-            has_displacement=has_displacement,
-            has_acceptance=has_acceptance,
-            balance_ratio=balance_ratio,
-            is_extreme_deviation=is_extreme
-        )
 
     # Inside effective value area (leg VA when active, session VA otherwise)
     inside_va = effective_val <= price <= effective_vah
 
-    # ── BREAKOUT SENSITIVITY (Approved Fix) ──
-    if inside_va and has_displacement:
-        edge_threshold = va_range * 0.05
-        at_upper_edge = price > (vah - edge_threshold)
-        at_lower_edge = price < (val + edge_threshold)
-        if at_upper_edge or at_lower_edge:
-            return MarketStateResult(
-                state=MarketState.PROBING,
-                zone="OUTSIDE_VA",
-                confidence=0.70,
-                trigger=f"Pre-emptive PROBING: Price {price:.2f} at VA edge with displacement",
-                has_displacement=has_displacement,
-                has_acceptance=has_acceptance,
-                balance_ratio=balance_ratio,
-                is_extreme_deviation=is_extreme
-            )
-
-    if inside_va:
-        if balance_ratio < 0.30:
-            return MarketStateResult(
-                state=MarketState.PROBING,
-                zone="OUTSIDE_VA",
-                confidence=0.55,
-                trigger=f"Price {price:.2f} inside VA but balance_ratio {balance_ratio:.0%} < 30% — probing edge",
-                has_displacement=has_displacement,
-                has_acceptance=has_acceptance,
-                balance_ratio=balance_ratio,
-                is_extreme_deviation=is_extreme
-            )
+    if inside_va and balance_ratio >= 0.5:
         zone = classify_zone(price, effective_poc, effective_vah, effective_val)
         va_label = "leg" if _has_active_leg else "session"
         return MarketStateResult(
@@ -176,24 +90,18 @@ def detect_market_state(
             is_extreme_deviation=is_extreme
         )
     
+    # Outside VA OR displacement+acceptance = IMBALANCED
+    trigger_parts = []
+    if not inside_va:
+        trigger_parts.append(f"outside VA [{effective_val:.2f}, {effective_vah:.2f}]")
     if has_displacement and has_acceptance:
-        return MarketStateResult(
-            state=MarketState.IMBALANCED,
-            zone="OUTSIDE_VA",
-            confidence=0.85,
-            trigger=f"Price {price:.2f} outside VA with displacement + acceptance",
-            has_displacement=has_displacement,
-            has_acceptance=has_acceptance,
-            balance_ratio=balance_ratio,
-            is_extreme_deviation=is_extreme
-        )
-
-    # Outside VA without displacement = PROBING
+        trigger_parts.append("displacement + acceptance")
+    
     return MarketStateResult(
-        state=MarketState.PROBING,
+        state=MarketState.IMBALANCED,
         zone="OUTSIDE_VA",
-        confidence=0.60,
-        trigger=f"Price {price:.2f} outside VA without displacement (unconfirmed)",
+        confidence=0.85,
+        trigger=f"Price {price:.2f} " + ", ".join(trigger_parts),
         has_displacement=has_displacement,
         has_acceptance=has_acceptance,
         balance_ratio=balance_ratio,

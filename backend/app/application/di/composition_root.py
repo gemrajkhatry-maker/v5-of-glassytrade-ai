@@ -244,7 +244,8 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
     allow_short = False
     try:
         from app.config import settings as _settings
-        allow_short = bool(getattr(_settings, "ALLOW_SHORT", False))
+        from app.config.features import Feature, feature_enabled
+        allow_short = feature_enabled(_settings, Feature.ALLOW_SHORT)
     except Exception:
         logger.debug("ALLOW_SHORT setting not available — defaulting to False")
 

@@ -14,18 +14,17 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import TYPE_CHECKING
 
+from app.application.protocols import (
+    IServiceGraph,
+    IStreamManager,
+    IWatchdogManager,
+    IStateBroadcaster,
+    ITickProcessor,
+)
 from app.config import settings
 from app.domain.trading.models.value_objects import OHLC
 from app.infrastructure.serialization.schemas import ohlc_to_dto
-
-if TYPE_CHECKING:
-    from app.api.dependencies import ServiceGraph
-    from app.application.stream_manager import StreamManager
-    from app.application.watchdog_manager import WatchdogManager
-    from app.application.services.state_broadcaster import StateBroadcaster
-    from app.application.services.tick_processor import TickProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +41,11 @@ class EngineLifecycle:
 
     def __init__(
         self,
-        graph: "ServiceGraph",
-        stream_manager: "StreamManager",
-        watchdog_manager: "WatchdogManager",
-        state_broadcaster: "StateBroadcaster",
-        tick_processor: "TickProcessor",
+        graph: IServiceGraph,
+        stream_manager: IStreamManager,
+        watchdog_manager: IWatchdogManager,
+        state_broadcaster: IStateBroadcaster,
+        tick_processor: ITickProcessor,
     ):
         """Initialize engine lifecycle manager.
 

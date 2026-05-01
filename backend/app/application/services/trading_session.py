@@ -22,6 +22,7 @@ import time
 from typing import TYPE_CHECKING
 
 from app.config import settings
+from app.shared.config_features import Feature, feature_enabled
 from app.shared.mode import is_live_mode
 from app.domain.constants import (
     AGENT_DECISION_THRESHOLD,
@@ -66,6 +67,7 @@ from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggress
 from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
 from app.application.services.entry_coordinator import EntryCoordinator
 from app.application.services.exit_coordinator import ExitCoordinator
+from app.domain.services.risk_sizing_engine import RiskSizingEngine
 
 # Import delegated modules
 from app.application.services.session_state_manager import (
@@ -141,8 +143,8 @@ class TradingSessionService:
         self._state_manager = SessionStateManager(storage=storage)
         self._risk_coordinator = SessionRiskCoordinator(
             storage=storage,
-            capital=float(getattr(settings, "CAPITAL", 5000000)),
-            use_risk_tier_engine=getattr(settings, "RISK_TIER_ENGINE", False),
+            capital=settings.CAPITAL,
+            use_risk_tier_engine=feature_enabled(settings, Feature.RISK_TIER_ENGINE),
         )
         self._event_logger = SessionEventLogger(storage=storage)
 
@@ -175,7 +177,7 @@ class TradingSessionService:
             journal=self._event_logger._journal,
             exchange=self._exchange,
             allow_short=self._allow_short,
-            llm_timeout=float(getattr(settings, "LLM_TIMEOUT_SECONDS", 15)),
+            llm_timeout=settings.LLM_TIMEOUT_SECONDS,
         )
         self._rl_handler = RLHandler()
 
@@ -193,7 +195,7 @@ class TradingSessionService:
         self._post_trade_analyst = PostTradeAnalyst(
             gen_ai_service=gen_ai_service,
             storage=storage,
-            enabled=getattr(settings, "LLM_POST_TRADE", True),
+            enabled=feature_enabled(settings, Feature.LLM_POST_TRADE),
         )
 
         # Exit Coordinator — extracted exit callback logic
@@ -210,6 +212,10 @@ class TradingSessionService:
         )
 
         # Entry Coordinator — extracted signal execution logic
+        # Wire broker's exchange config (with dynamic lot sizes) to RiskSizingEngine
+        broker_exchange_config = getattr(broker, "get_exchange_config", None)
+        exchange_cfg_for_sizing = broker_exchange_config() if broker_exchange_config else None
+        
         self._entry_coordinator = EntryCoordinator(
             broker=broker,
             lifecycle_handler=self._lifecycle_handler,
@@ -218,24 +224,25 @@ class TradingSessionService:
             risk_coordinator=self._risk_coordinator,
             option_selector=self._option_selector,
             state_manager=self._state_manager,
+            sizing_engine=RiskSizingEngine(exchange_config=exchange_cfg_for_sizing),
         )
 
         # Pre-Candle Advisor — non-blocking advisory for dashboard (T-60s before bar close)
         self._pre_candle_advisor = PreCandleAdvisor(
             gen_ai_service=gen_ai_service,
-            enabled=getattr(settings, "LLM_PRE_CANDLE_ADVISORY", True),
+            enabled=feature_enabled(settings, Feature.LLM_PRE_CANDLE_ADVISORY),
         )
 
         # Scalping components (Phase 4)
-        self._scalp_enabled = getattr(settings, "SCALP_ENGINE_ENABLED", False)
+        self._scalp_enabled = feature_enabled(settings, Feature.SCALP_ENGINE)
         self._one_min_engines: dict = {}
         self._fifteen_sec_engines: dict = {}
         self._ib_scalp_engines: dict = {}
 
         # Mobile alerts (Phase 5)
         self._alerts = MobileAlertSystem(
-            bot_token=getattr(settings, "TELEGRAM_BOT_TOKEN", ""),
-            chat_id=getattr(settings, "TELEGRAM_CHAT_ID", ""),
+            bot_token=settings.TELEGRAM_BOT_TOKEN,
+            chat_id=settings.TELEGRAM_CHAT_ID,
         )
 
         # Self-healing (Phase 5)

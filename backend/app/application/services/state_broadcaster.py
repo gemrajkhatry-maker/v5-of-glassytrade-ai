@@ -17,9 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.application.services.state_snapshot_builder import build_state_snapshot
 from app.infrastructure.serialization.schemas import ohlc_to_dto
-
-if TYPE_CHECKING:
-    pass
+from app.shared.depth_dto import order_book_to_dto
 
 logger = logging.getLogger(__name__)
 
@@ -283,9 +281,7 @@ class StateBroadcaster:
 
             state["oi"] = getattr(session, "_last_oi", 0)
             state["_symbol"] = symbol
-            # Lazy import to avoid circular dependency
-            from app.application.engine import _depth_to_dto
-            state["depth"] = _depth_to_dto(current_depth.get("book") if current_depth else None, symbol=symbol)
+            state["depth"] = order_book_to_dto(current_depth.get("book") if current_depth else None)
 
             # Range bars (visualization)
             if range_builder_dict:

@@ -486,6 +486,23 @@ class DhanBroker(IBrokerPort):
     def get_ltp(self, instrument: Instrument) -> float:
         return self.get_quote(instrument).ltp
 
+    def get_lot_size(self, symbol: str, exchange: Optional[Exchange] = None) -> int:
+        """Get lot size for a symbol (sync)."""
+        try:
+            instrument = self._run_async(self.resolve_symbol(symbol, exchange))
+            return instrument.lot_size
+        except Exception as e:
+            logger.warning(f"Failed to get lot size for {symbol}: {e}")
+            return 1
+
+    def get_exchange_config(self) -> "DhanExchangeConfig":
+        """Get ExchangeConfig for RiskSizingEngine integration.
+        
+        Returns a config that fetches lot sizes from the broker's instrument cache.
+        This ensures RiskSizingEngine uses accurate lot sizes.
+        """
+        return DhanExchangeConfig(self)
+
     async def get_quotes_batch_async(
         self, symbols: List[str], exchange: Optional[Exchange] = None
     ) -> Dict[str, Quote]:
@@ -820,3 +837,30 @@ class DhanBroker(IBrokerPort):
             f"DhanBroker(config={self._config!r}, "
             f"initialized={self._initialized}, closed={self._closed})"
         )
+
+
+class DhanExchangeConfig:
+    """ExchangeConfig implementation using DhanBroker's instrument cache.
+    
+    This provides accurate lot sizes to RiskSizingEngine from the broker's
+    official instrument data, ensuring positions are sized correctly.
+    Implements ExchangeConfig protocol for drop-in compatibility.
+    """
+    
+    def __init__(self, broker: "DhanBroker"):
+        self._broker = broker
+    
+    def get_lot_size(self, symbol_or_underlying: str) -> int:
+        """Get lot size from broker's instrument cache.
+        
+        Accepts symbol_or_underlying and normalizes it (matches ExchangeConfig protocol).
+        """
+        # Normalize symbol: "NIFTY 27 FEB 25500 CALL" -> "NIFTY"
+        clean = (
+            symbol_or_underlying.upper()
+            .replace("NSE:", "")
+            .replace("MCX:", "")
+            .strip()
+        )
+        underlying = clean.split("-")[0].split(" ")[0]
+        return self._broker.get_lot_size(underlying)

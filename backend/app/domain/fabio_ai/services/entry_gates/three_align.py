@@ -261,10 +261,13 @@ def three_align_check(
         if past_touches > 0 and recent_touches == 0:
             is_second_drive = True
 
-    if amt_result.market_state == "IMBALANCED" and near_level and not is_second_drive:
-        if abs(cvd_slope) <= D2_CVD_SLOPE_MAX:
-            logger.debug("Three-Align: blocked — first drive only, waiting for re-test")
-            return (False, False, False) if return_is_second_drive else (False, False)
+    # Fabio: First drive IS valid entry with aggression confirmation
+    # Removed the block that prevented first drive entries
+    # The code below was blocking first drive in IMBALANCED state - WRONG
+    # if amt_result.market_state == "IMBALANCED" and near_level and not is_second_drive:
+    #     if abs(cvd_slope) <= D2_CVD_SLOPE_MAX:
+    #         logger.debug("Three-Align: blocked — first drive only, waiting for re-test")
+    #         return (False, False, False) if return_is_second_drive else (False, False)
 
     # Confirmation Bundle
     agg_ok = check_confirmation_bundle(data, tick, order_book)

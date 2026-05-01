@@ -94,9 +94,7 @@ class SignalPipeline:
             logger.warning("SignalPipeline: no symbol in context")
             return None
 
-        if context.market_state == "NO_TRADE":
-            logger.debug("SignalPipeline: market_state is NO_TRADE, skipping")
-            return None
+        # No longer skip on "NO_TRADE" - state removed in 2-state model
 
         # Step 1: Gate validation (skip if no gate_pipeline for testing)
         if self._gate_pipeline:
@@ -178,15 +176,12 @@ class SignalPipeline:
             nearest_level = min(key_levels, key=lambda l: abs(l - current_price))
             distance_to_level_ticks = abs(current_price - nearest_level) / max(tick_size, 0.001)
 
-        # Map market state string to MarketState enum
+        # Map market state string to MarketState enum (2-state model)
         market_state = MarketState.BALANCED
         ms_upper = context.market_state.upper()
-        if ms_upper == "NO_TRADE":
-            market_state = MarketState.NO_TRADE
-        elif ms_upper == "IMBALANCED":
+        if ms_upper == "IMBALANCED":
             market_state = MarketState.IMBALANCED
-        elif ms_upper == "PROBING":
-            market_state = MarketState.PROBING
+        # NO_TRADE and PROBING states removed - map to BALANCED/IMBALANCED
 
         # Compute R:R ratio and cushion
         rr_ratio = 0.0
@@ -239,6 +234,9 @@ class SignalPipeline:
             setup_type=context.setup_type or context.metadata.get("setup_type", "NONE"),
             r_r_ratio=rr_ratio,
             cushion_ticks=cushion_ticks,
+            # TP/SL for validation
+            take_profit=context.take_profit,
+            stop_loss=context.stop_loss,
             # Quorum
             soft_gate_quorum=SOFT_GATE_QUORUM,
         )

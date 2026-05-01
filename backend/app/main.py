@@ -9,7 +9,6 @@ This module sets up the dependency injection graph and starts the FastAPI applic
 
 import asyncio
 import faulthandler
-import logging
 import signal
 import sys
 from contextlib import asynccontextmanager
@@ -30,19 +29,18 @@ from app.api.routers import (
     rl_router,
     metrics_router,
 )
+from app.api.routers.observability import router as observability_router
+from app.api.routers.alerts import router as alerts_router
+from app.api.routers.analysis import router as analysis_router
 from app.api.websocket.gameloop import router as gameloop_router
 from app.application.service_graph import ServiceGraph
+from app.core.correlation import CorrelationIdMiddleware
+from app.core.logging import setup_logging, get_logger
 from config.consolidated import ConsolidatedConfig as Configuration
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-    ],
-)
-logger = logging.getLogger(__name__)
+# Configure structured logging
+setup_logging()
+logger = get_logger(__name__)
 
 
 class WebSocketLogMiddleware:
@@ -173,6 +171,9 @@ def create_application() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Add correlation ID middleware for request tracing
+    app.add_middleware(CorrelationIdMiddleware)
+
     app.add_middleware(WebSocketLogMiddleware)
 
     # Create service graph
@@ -185,12 +186,15 @@ def create_application() -> FastAPI:
     # Register routers
     app.include_router(health_router, prefix="", tags=["health"])
     app.include_router(health_router, prefix="/api", tags=["health"])
-    app.include_router(market_router, prefix="/market", tags=["market"])
-    app.include_router(trading_router, prefix="/trading", tags=["trading"])
+    app.include_router(market_router, prefix="/api", tags=["market"])
+    app.include_router(analysis_router, prefix="/api", tags=["analysis"])
+    app.include_router(trading_router, prefix="/api", tags=["trading"])
     app.include_router(gameloop_router, prefix="/api", tags=["websocket"])
     app.include_router(ai_router, prefix="/api", tags=["ai"])
     app.include_router(rl_router, prefix="/rl", tags=["rl"])
     app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
+    app.include_router(observability_router, prefix="/api", tags=["observability"])
+    app.include_router(alerts_router, prefix="/api", tags=["alerts"])
 
     return app
 

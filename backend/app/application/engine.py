@@ -22,11 +22,11 @@ import logging
 import time
 import threading
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from shared.resilience import PerEntityCircuitBreaker
 from app.config import settings
 from app.application.utils import is_market_open
+from app.application.protocols import IServiceGraph
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
 
 # Import delegated modules
@@ -39,50 +39,10 @@ from app.application.services.tick_processor import TickProcessor
 from app.application.services.state_broadcaster import StateBroadcaster
 from app.application.services.engine_lifecycle import EngineLifecycle
 
-if TYPE_CHECKING:
-    from app.api.dependencies import ServiceGraph
-
 logger = logging.getLogger(__name__)
 
 from app.shared.timezones import IST
-
-
-_depth_cache: dict[str, tuple[int, dict | None]] = {}
-
-
-def _depth_to_dto(book: OrderBook | None, symbol: str = "") -> dict | None:
-    """Convert OrderBook to DTO dict for JSON serialization.
-
-    Caches result per symbol; only recomputes when depth hash changes.
-    """
-    if not book:
-        if symbol:
-            _depth_cache.pop(symbol, None)
-        return None
-
-    # Quick hash of depth to detect changes
-    depth_hash = hash((
-        tuple((l.price, l.quantity) for l in book.bids[:20]),
-        tuple((l.price, l.quantity) for l in book.asks[:20]),
-    ))
-
-    cached = _depth_cache.get(symbol)
-    if cached and cached[0] == depth_hash:
-        return cached[1]
-
-    result = {
-        "bids": [
-            {"price": float(l.price), "quantity": float(l.quantity)}
-            for l in book.bids[:20]
-        ],
-        "asks": [
-            {"price": float(l.price), "quantity": float(l.quantity)}
-            for l in book.asks[:20]
-        ],
-    }
-    if symbol:
-        _depth_cache[symbol] = (depth_hash, result)
-    return result
+from app.shared.depth_dto import order_book_to_dto as _depth_to_dto
 
 
 class TradingEngine:
@@ -99,7 +59,7 @@ class TradingEngine:
         await engine.wait_for_update(known_generation)
     """
 
-    def __init__(self, graph: ServiceGraph) -> None:
+    def __init__(self, graph: IServiceGraph) -> None:
         self._graph = graph
         self._market_data = graph.market_data
         self._session_service = graph.trading_session

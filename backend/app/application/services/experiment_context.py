@@ -7,6 +7,7 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
+from app.shared.config_features import Feature, feature_enabled
 from app.config import settings
 from app.domain.fabio_ai.services.llm_contract import (
     CANONICAL_RUNTIME_MODEL_FAMILY,
@@ -41,8 +42,8 @@ def build_experiment_context() -> ExperimentContext:
         "trading_mode": settings.TRADING_MODE,
         "exchange": settings.DEFAULT_EXCHANGE,
         "stream_interval": settings.STREAM_INTERVAL,
-        "allow_short": settings.ALLOW_SHORT,
-        "llm_execution_enabled": settings.LLM_EXECUTION_ENABLED,
+        "allow_short": feature_enabled(settings, Feature.ALLOW_SHORT),
+        "llm_execution_enabled": feature_enabled(settings, Feature.LLM_EXECUTION),
         "scanner_mode": settings.SCANNER_MODE,
         "llm_model_family": CANONICAL_RUNTIME_MODEL_FAMILY,
         "llm_entry_contract_version": ENTRY_CONTRACT_VERSION,
@@ -60,8 +61,8 @@ def build_experiment_context() -> ExperimentContext:
         trading_mode=settings.TRADING_MODE,
         exchange=settings.DEFAULT_EXCHANGE,
         stream_interval=settings.STREAM_INTERVAL,
-        allow_short=settings.ALLOW_SHORT,
-        llm_execution_enabled=settings.LLM_EXECUTION_ENABLED,
+        allow_short=feature_enabled(settings, Feature.ALLOW_SHORT),
+        llm_execution_enabled=feature_enabled(settings, Feature.LLM_EXECUTION),
         scanner_mode=settings.SCANNER_MODE,
         llm_model_family=CANONICAL_RUNTIME_MODEL_FAMILY,
         llm_entry_contract_version=ENTRY_CONTRACT_VERSION,

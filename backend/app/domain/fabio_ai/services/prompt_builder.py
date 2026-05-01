@@ -337,6 +337,43 @@ def build_entry_prompt(data: Dict[str, Any], allow_short: bool = False) -> str:
     final_prompt = narrative
     if opt_parts:
         final_prompt += " " + " ".join(opt_parts)
+    
+    # Add LLM constraint rules (PRIORITY HIERARCHY)
+    allowed_directions = data.get("allowed_directions", ["LONG", "SHORT", "FLAT"])
+    should_wait = data.get("should_wait", False)
+    open_positions = data.get("open_positions", [])
+    
+    constraint_parts = [
+        "\n\n***IMMUTABLE CONSTRAINTS (follow in ORDER, do NOT skip):***",
+    ]
+    
+    # P0: Straddle prevention
+    if open_positions:
+        constraint_parts.append(
+            f"- OPEN POSITIONS: {open_positions} — DO NOT enter opposite side of same strike"
+        )
+    
+    # P1: First Drive rule
+    if should_wait:
+        constraint_parts.append(
+            "- ⚠️ FIRST DRIVE DETECTED: Output WAIT immediately. No reasoning needed."
+        )
+    
+    # P2: Allowed directions (non-negotiable)
+    if len(allowed_directions) < 3:
+        constraint_parts.append(
+            f"- DIRECTION CONSTRAINT: Only output {allowed_directions} — CVD cannot override"
+        )
+    
+    constraint_parts.append(
+        "\n***CONFIDENCE RUBRIC (MUST FOLLOW):***\n"
+        "• 4/4 rules + aligned location → HIGH confidence\n"
+        "• 3/4 rules + aligned location → MEDIUM confidence\n"
+        "• 3/4 rules + conflicting CVD → LOW confidence\n"
+        "• <3 rules passed → ABORT (output FLAT with conf=LOW)"
+    )
+    
+    final_prompt += " " + " ".join(constraint_parts)
 
     # Legacy tests expect "Respond ONLY with a JSON object" explicitly if they match that exact string
     # We add it here to ensure compatibility while keeping the schema instruction

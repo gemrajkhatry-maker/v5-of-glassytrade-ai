@@ -116,10 +116,12 @@ class RuleBasedRationale:
 
     def _generate_flat_rationale(self, ctx: RationaleContext) -> str:
         """Generate rationale for FLAT decision."""
-        if ctx.market_state == "NO_TRADE":
-            return f"NO_TRADE: Price at POC dead zone ({ctx.poc:.2f}). Waiting for price to move away from POC."
         if ctx.market_state == "PROBING":
-            return f"PROBING: Price outside VA without displacement confirmation. Waiting for acceptance."
+            # PROBING mapped to IMBALANCED in 2-state model
+            return f"Market IMBALANCED: Price outside VA ({ctx.val:.2f}-{ctx.vah:.2f}). Waiting for acceptance."
+        if ctx.market_state == "NO_TRADE":
+            # NO_TRADE mapped to BALANCED in 2-state model  
+            return f"Market BALANCED: Price near POC ({ctx.poc:.2f}). Waiting for directional movement."
         if ctx.aggression_score < 2.0:
             return f"Insufficient aggression ({ctx.aggression_score:.1f}/4.5). Need ≥2.0 for trade signal."
         if ctx.r_r_ratio < 1.5:

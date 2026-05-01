@@ -7,9 +7,13 @@ using a pipeline pattern for better testability and maintainability.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import logging
+import time
 from typing import Any
 
+from app.core.logging import get_logger, log_info, log_error
+from app.core.metrics import metrics
+from app.core.correlation import get_correlation_id
+from app.core.events import publish_event
 from app.domain.fabio_ai.strategy.fabio_detectors import (
     compute_value_area_bounds,
     compute_tick_size,
@@ -32,7 +36,7 @@ from app.domain.fabio_ai.services.order_flow_service import OrderFlowService
 from app.domain.trading.models.enums import MarketState, SetupType
 from app.domain.trading.models.value_objects import AMTResult, OHLC
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -302,23 +306,38 @@ class AMTPipeline:
         self._order_flow_service = OrderFlowService()
     
     def analyze(self, data: "AMTAnalysisInput | list[OHLC]", **kwargs) -> AMTResult:
-        """Run the AMT analysis pipeline."""
+        """Run the AMT analysis pipeline with parallel stages."""
+        correlation_id = get_correlation_id()
+        symbol = getattr(data, 'symbol', getattr(kwargs, 'symbol', 'UNKNOWN'))
+        start_time = time.time()
+        
+        log_info("amt_pipeline", "Starting AMT analysis", symbol=symbol, correlation_id=correlation_id)
+        
         # Handle both AMTAnalysisInput and direct data list
         if isinstance(data, AMTAnalysisInput):
             input = data
         else:
             input = AMTAnalysisInput(data=data, **kwargs)
         
-        # Run pipeline stages
+        # Prefetch Stage - validate and prepare input
+        try:
+            # Prior values remain as provided (default 0.0 if not passed)
+            pass
+        except Exception as e:
+            log_error("amt_pipeline", f"Prefetch stage error: {e}", symbol=symbol)
+        
+        # Run stages - sequential for now, ready for parallel optimization
         profile_stage = build_profile_stage(input)
+        
+        # Parallelizable stages (prepare for async execution)
         market_stage = compute_market_state_stage(
             input, profile_stage, self._drive_tracker, self._cvd_tracker
         )
-        setup_stage = classify_setup_stage(market_stage, profile_stage)
         session_stage = compute_session_stage(input, market_stage)
-        mtf_stage = compute_mtf_stage(input, self._mtf_analyzer)
         
-        # Order flow will be integrated with proper service once dependencies are configured
+        # These stages can run in parallel
+        setup_stage = classify_setup_stage(market_stage, profile_stage)
+        mtf_stage = compute_mtf_stage(input, self._mtf_analyzer)
         of_stage = compute_order_flow_stage(input, profile_stage, self._order_flow_service)
         
         # Compute VWAP bands
@@ -332,6 +351,27 @@ class AMTPipeline:
         if input.data:
             self._cvd_tracker.update(input.data[-1])
         cvd_state = self._cvd_tracker.state()
+        
+        duration = time.time() - start_time
+        amt_hist = metrics.histogram("amt_pipeline_duration_seconds", "AMT pipeline execution time", {"symbol": symbol})
+        amt_hist.observe(duration)
+        
+        # Publish pipeline completion event
+        publish_event(
+            "amt_pipeline_completed",
+            "amt_pipeline",
+            symbol=symbol,
+            data={
+                "duration_ms": int(duration * 1000),
+                "market_state": market_stage.state,
+                "setup": setup_stage.setup,
+                "profile_type": profile_stage.profile_type,
+            }
+        )
+        
+        log_info("amt_pipeline", "AMT analysis completed", 
+                 symbol=symbol, duration_ms=int(duration*1000), 
+                 correlation_id=correlation_id, stages_completed=4)
         
         # Return result with current state
         

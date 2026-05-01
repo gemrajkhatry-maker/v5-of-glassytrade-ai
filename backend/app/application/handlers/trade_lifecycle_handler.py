@@ -139,6 +139,29 @@ class TradeLifecycleHandler:
             if add_fraction > 0:
                 portfolio.add_to_position(pos.id, add_fraction, current_price)
 
+            # 2b. Pyramid add check (FR-09: LVN-based scaling with aggression ≥ 3.0)
+            if amt_result and getattr(amt_result, "aggression_score", 0) >= 3.0:
+                entry_lvns = getattr(pos, "entry_lvns", [])
+                current_lvn = getattr(amt_result, "current_lvn", 0.0)
+                pyramid = None
+                if current_lvn > 0:
+                    pyramid = self._exit_engine.check_pyramid(
+                        pos,
+                        current_price,
+                        getattr(amt_result, "aggression_score", 0),
+                        entry_lvns,
+                        current_lvn,
+                    )
+                if pyramid:
+                    size_mult, new_sl = pyramid
+                    portfolio.add_to_position(pos.id, size_mult, current_price)
+                    pos.stop_loss = new_sl  # Unified stop for all entries
+                    # Record the LVN used for this add
+                    if not hasattr(pos, "entry_lvns"):
+                        pos.entry_lvns = []
+                    if current_lvn > 0:
+                        pos.entry_lvns.append(current_lvn)
+
             # 3. CVD kill signal check (grace period: skip first 3 ticks)
             if cvd_divergence and pos.tick_count >= 3:
                 cvd_exit = self._exit_engine.apply_cvd_kill_signal(
@@ -298,6 +321,10 @@ class TradeLifecycleHandler:
                 self._exit_engine.add_realized_pnl(float(realized_pnl))
                 if realized_pnl < 0:
                     self._exit_engine.record_loss(pos.symbol, float(pos.entry_price))
+
+                # Fabio FR-09: After P1 exit (1R hit), check for pyramid add
+                if psig.exit_type == "PARTITION_1":
+                    self._check_pyramid_add(pos, current_price, amt_result)
 
         # Apply partition manager's trail SL (breakeven/P3 trail) to position
         p_state_after = self._partition_states.get(pos.id)

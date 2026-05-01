@@ -21,6 +21,8 @@ const createMockInstrument = (overrides: Partial<InstrumentState> = {}): Instrum
   },
   amtAnalysis: null,
   activeSignal: null,
+  genAIAnalysis: null,
+  agentDecision: null,
   ...overrides,
 });
 
@@ -47,7 +49,7 @@ describe('MarketSidebar', () => {
 
   it('displays symbol count', () => {
     render(<MarketSidebar {...defaultProps} />);
-    expect(screen.getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('2 of 2')).toBeInTheDocument();
   });
 
   it('renders filter input', () => {
@@ -62,14 +64,17 @@ describe('MarketSidebar', () => {
     const input = screen.getByPlaceholderText('Filter symbols...');
     await user.type(input, '25600');
     
-    expect(screen.getByText(/25600/)).toBeInTheDocument();
+    // After filtering, should show only the symbol with 25600
+    const symbols = screen.getAllByRole('listitem');
+    expect(symbols.length).toBe(1);
+    expect(symbols[0]).toHaveTextContent('25600');
   });
 
   it('calls onSelect when symbol is clicked', async () => {
     const user = userEvent.setup();
     render(<MarketSidebar {...defaultProps} />);
     
-    const buttons = screen.getAllByRole('button');
+    const buttons = screen.getAllByRole('listitem');
     await user.click(buttons[1]);
     
     expect(mockOnSelect).toHaveBeenCalledWith('NIFTY 27 FEB 25600 CALL');
@@ -80,9 +85,9 @@ describe('MarketSidebar', () => {
     expect(screen.getByText('LIVE FEED')).toBeInTheDocument();
   });
 
-  it('shows scanning count', () => {
+  it('shows visible count in footer', () => {
     render(<MarketSidebar {...defaultProps} />);
-    expect(screen.getByText('2 SCANNING')).toBeInTheDocument();
+    expect(screen.getByText('2 VISIBLE')).toBeInTheDocument();
   });
 
   it('renders trade history section', () => {
@@ -111,7 +116,8 @@ describe('MarketSidebar', () => {
     };
     
     render(<MarketSidebar {...props} />);
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    // When no data, shows "Waiting for scanner..." or similar message
+    expect(screen.getByText(/scanner|waiting/i)).toBeInTheDocument();
   });
 
   it('displays symbol name correctly', () => {
@@ -119,9 +125,9 @@ describe('MarketSidebar', () => {
     expect(screen.getByText('NIFTY 25500')).toBeInTheDocument();
   });
 
-  it('has symbol buttons', () => {
+  it('has symbol list items', () => {
     render(<MarketSidebar {...defaultProps} />);
-    const buttons = screen.getAllByRole('button');
-    expect(buttons.length).toBeGreaterThan(0);
+    const items = screen.getAllByRole('listitem');
+    expect(items.length).toBeGreaterThan(0);
   });
 });

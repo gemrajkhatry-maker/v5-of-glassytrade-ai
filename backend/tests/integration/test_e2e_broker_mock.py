@@ -14,6 +14,7 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Dict, List, Optional
 
 import pytest
@@ -285,7 +286,6 @@ def test_e2e_entry_signal_to_order_placement(broker: MockBrokerAdapter, trade_ma
 # ==============================================================================
 
 
-@pytest.mark.skip(reason="Pre-existing test bug: expects auto cushion_state transition to CUSHIONED when partial_taken set — Position entity requires explicit advance_cushion_state call")
 def test_e2e_full_profitable_trade(broker: MockBrokerAdapter, trade_manager: TradeManager):
     """LONG position: entry at 100, price rises to TP zone, cushion activates, trail fires.
 
@@ -348,7 +348,7 @@ def test_e2e_full_profitable_trade(broker: MockBrokerAdapter, trade_manager: Tra
     trail_sl_at_114 = mp.stop_loss  # higher now
 
     # Force price below trail SL to trigger exit
-    exit_price = trail_sl_at_114 - 2.0  # well below trail SL
+    exit_price = trail_sl_at_114 - Decimal("2.0")  # well below trail SL
     sig = trade_manager.check_position(pos_id, exit_price)
 
     assert sig is not None, "Trail SL hit must generate exit signal"
@@ -367,8 +367,8 @@ def test_e2e_full_profitable_trade(broker: MockBrokerAdapter, trade_manager: Tra
     # ---- Step 7: Net PnL is positive ----
     # Partial: (108 - 100) * 5 = 40
     # Full: (exit_price - 100) * 5; exit_price = trail_sl_at_114 - 2 > entry (profitable)
-    partial_pnl = (108.0 - entry_price) * partial_qty
-    full_pnl = (exit_price - entry_price) * remaining_qty
+    partial_pnl = (Decimal(str(108.0)) - mp.entry_price) * partial_qty
+    full_pnl = (exit_price - mp.entry_price) * remaining_qty
     total_pnl = partial_pnl + full_pnl
 
     assert total_pnl > 0, f"Net PnL should be positive, got {total_pnl}"
@@ -527,7 +527,6 @@ def test_e2e_account_loss_limit_blocks_all_trading(
 # ==============================================================================
 
 
-@pytest.mark.skip(reason="Pre-existing test bug: Decimal.stop_loss - float arithmetic — test should use float(mp.stop_loss)")
 def test_e2e_multiple_symbols_independent(
     broker: MockBrokerAdapter,
     trade_manager: TradeManager,
@@ -598,7 +597,7 @@ def test_e2e_multiple_symbols_independent(
     trail_sl_a = mp_a.stop_loss  # trail SL after 114
 
     # Force exit for Symbol A (trail SL hit)
-    exit_price_a = trail_sl_a - 1.0
+    exit_price_a = trail_sl_a - Decimal("1.0")
     sig_a = trade_manager.check_position(pos_a, exit_price_a)
     assert sig_a is not None
     assert sig_a.reason in (ExitReason.STOP_LOSS, ExitReason.TRAILING_STOP)
@@ -621,8 +620,8 @@ def test_e2e_multiple_symbols_independent(
     assert len(b_orders) == 2, "Symbol B should have entry + SL exit"
 
     # ---- PnL per symbol ----
-    pnl_a = (exit_price_a - entry_a) * qty
-    pnl_b = (4975.0 - entry_b) * qty  # -25 * 10 = -250
+    pnl_a = (exit_price_a - Decimal(str(entry_a))) * qty
+    pnl_b = (Decimal(str(4975.0)) - Decimal(str(entry_b))) * qty  # -25 * 10 = -250
 
     assert pnl_a > 0, f"Symbol A should be profitable, got {pnl_a}"
     assert pnl_b < 0, f"Symbol B should be a loss, got {pnl_b}"
