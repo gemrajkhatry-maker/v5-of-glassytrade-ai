@@ -64,7 +64,7 @@ class DefaultExchangeConfig:
         return self._LOT_SIZES.get(underlying, 1)
 
 
-class RiskTier(str, Enum):
+class KellySizingTier(str, Enum):
     STANDARD = "STANDARD"  # 0.30% base risk
     REDUCED = "REDUCED"  # 0.25% (2+ consecutive losses)
     ELEVATED = "ELEVATED"  # 0.50% (cushion available)
@@ -136,7 +136,7 @@ class SizingResult:
     stop_points: float
     target_points: float
     rr_ratio: float
-    risk_tier: RiskTier
+    risk_tier: KellySizingTier
     allowed: bool
     reason: str
     scale_in_1: int  # lots for first entry (40%)
@@ -293,7 +293,7 @@ class RiskSizingEngine:
                     stop_points=0.0,
                     target_points=0.0,
                     rr_ratio=0.0,
-                    risk_tier=RiskTier.STANDARD,
+                    risk_tier=KellySizingTier.STANDARD,
                     allowed=False,
                     reason="Session phase: Opening Noise (09:15-09:30) - DO NOT TRADE",
                     scale_in_1=0,
@@ -317,7 +317,7 @@ class RiskSizingEngine:
                     stop_points=0.0,
                     target_points=0.0,
                     rr_ratio=0.0,
-                    risk_tier=RiskTier.STANDARD,
+                    risk_tier=KellySizingTier.STANDARD,
                     allowed=False,
                     reason="Session phase: Close Protection (15:15-15:30) - NO NEW ENTRIES",
                     scale_in_1=0,
@@ -359,7 +359,7 @@ class RiskSizingEngine:
                 stop_points=0.0,
                 target_points=0.0,
                 rr_ratio=0.0,
-                risk_tier=RiskTier.STANDARD,
+            risk_tier=KellySizingTier.STANDARD,
                 allowed=False,
                 reason=f"Expiry risk: Only {days_to_expiry} days to expiry (minimum 3 required)",
                 scale_in_1=0,
@@ -381,16 +381,16 @@ class RiskSizingEngine:
         
         # Risk tier selection
         if consecutive_losses >= self._consec_loss_thresh:
-            risk_tier = RiskTier.REDUCED
+            risk_tier = KellySizingTier.REDUCED
             risk_pct = self._min_risk
         elif session_pnl > 0:
             available_risk = max(
                 self._base_risk, session_pnl * self._cushion_mult / equity
             )
-            risk_tier = RiskTier.ELEVATED
+            risk_tier = KellySizingTier.ELEVATED
             risk_pct = min(available_risk, self._max_risk)
         else:
-            risk_tier = RiskTier.STANDARD
+            risk_tier = KellySizingTier.STANDARD
             risk_pct = self._base_risk
 
         # Hard clamp
@@ -540,7 +540,7 @@ class RiskSizingEngine:
                     stop_points=0.0,
                     target_points=0.0,
                     rr_ratio=0.0,
-                    risk_tier=RiskTier.STANDARD,
+                    risk_tier=KellySizingTier.STANDARD,
                     allowed=False,
                     reason="No trading on Friday - weekend positioning risk",
                     scale_in_1=0,

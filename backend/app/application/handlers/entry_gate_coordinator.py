@@ -92,7 +92,7 @@ class EntryGateCoordinator:
             return False, "Momentum fade detected", is_second_drive
 
         # Gate pipeline
-        gate_passed, gate_reason, gate_detail = run_gate_pipeline(
+        gate_passed, gate_reason, gate_detail, _soft_gates_passed, _soft_gates_total = run_gate_pipeline(
             data=data,
             amt_result=amt_result,
             tick=tick,

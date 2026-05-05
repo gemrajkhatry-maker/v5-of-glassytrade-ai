@@ -81,3 +81,23 @@ htmlcov/
 
 # AI IDE files
 .poolside/
+
+# AI tool skills directories
+.agents/
+.augment/
+.claude/
+.continue/
+.crush/
+.goose/
+.kilocode/
+.kiro/
+.pi/
+.qwen/
+.qoder/
+.trae/
+.vibe/
+.windsurf/
+.zencoder/
+
+# Skills lock file
+skills-lock.json

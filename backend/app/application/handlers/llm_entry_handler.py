@@ -403,8 +403,7 @@ class LLMEntryHandler:
             or getattr(amt_result, "price_velocity", 0) > 5.0
         )
 
-    @staticmethod
-    def _mark_ai_done(session, worker_queue) -> None:
+    def _mark_ai_done(self, session, worker_queue) -> None:
         """Reset session AI flag and mark queue task done. Used on skip/error paths."""
         with session._lock:
             session._ai_running = False
@@ -525,19 +524,15 @@ class LLMEntryHandler:
     def _process_build_signal(self, symbol, session, tick, direction, setup_type,
                               ai_result, confidence, market_state_str, session_info,
                               amt_result, profile_shape_str, strategy_hint,
-                              worker_queue) -> None:
+                              worker_queue) -> bool:
         """Check re-entry gates, circuit breakers, and build signal if eligible.
         
-        Extracted from _llm_worker_loop for readability and CC reduction.
-        
-        TODO(Task 51): Simplify - this method should return the raw LLM decision dict
-        instead of building signals. The caller (trading_session) should use SignalPipeline
-        to validate gates and create signals. This keeps LLMEntryHandler focused on
-        LLM inference management only.
+        Returns:
+            bool: True if task_done was called inside this method.
         """
         _ad = getattr(session, "_agent_decision", None)
         if self._check_direction_mismatch(_ad, direction, symbol, session, worker_queue):
-            return
+            return True
 
         with session._lock:
             live_positions = [
@@ -560,7 +555,7 @@ class LLMEntryHandler:
                             amt=session.last_amt,
                             llm_direction=direction,
                         )
-                    return
+                    return False
 
                 # Re-entry gate check
                 _squeeze = _det.detect_squeeze(session.data, amt_result)
@@ -581,7 +576,7 @@ class LLMEntryHandler:
                             amt=session.last_amt,
                             llm_direction=direction,
                         )
-                    return
+                    return False
                 
                 # Max trades check
                 _risk_mgr = getattr(session, "_session_risk_manager", None)
@@ -597,7 +592,7 @@ class LLMEntryHandler:
                             amt=session.last_amt,
                             llm_direction=direction,
                         )
-                    return
+                    return False
 
                 _cushion_sl = _risk_mgr.stop_loss_pct if _risk_mgr else None
                 from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
@@ -648,6 +643,7 @@ class LLMEntryHandler:
                                 entry_signal.metadata or {}
                             ).get("trade_thesis"),
                         )
+        return False
 
     def _get_regime_detector(self, symbol: str) -> RegimeDetector:
         """Return per-symbol RegimeDetector, creating one if needed."""
@@ -1148,12 +1144,12 @@ class LLMEntryHandler:
 
                 # Build signal using build_entry_signal (via _process_build_signal)
                 # TODO(Task 51): Simplify - return raw LLM decision and let caller use SignalPipeline
-                self._process_build_signal(
+                if self._process_build_signal(
                     symbol, session, tick, direction, setup_type, ai_result,
                     confidence, market_state_str, session_info, amt_result,
                     profile_shape_str, strategy_hint, worker_queue,
-                )
-
+                ):
+                    task_done_called = True
 
                 with session._lock:
                     session._ai_running = False

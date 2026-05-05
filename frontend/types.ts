@@ -61,6 +61,8 @@ export interface AgentDecision {
   rationale: string;
   playbook?: string;
   featureDrivers?: string[];
+  stopLoss?: number;
+  takeProfit?: number;
 }
 
 export interface RiskState {
@@ -145,6 +147,11 @@ export interface InstrumentState {
   overseerReason: string;
   stats: StrategyStats | null;
   depth20Active: boolean;
+  aggressionBlocked?: boolean;
+  gateScore?: {
+    passed: number;
+    total: number;
+  };
   stale?: boolean;
   ltp?: number;
   oi?: number;

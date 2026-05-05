@@ -37,6 +37,13 @@ from app.api.websocket.gameloop import router as gameloop_router
 from app.api.dependencies import init_singletons
 from app.core.correlation import CorrelationIdMiddleware
 from app.core.logging import setup_logging, get_logger
+from app.core.startup_telemetry import (
+    begin_phase,
+    end_phase,
+    mark_startup_failed,
+    mark_startup_finished,
+    mark_startup_started,
+)
 from config.consolidated import ConsolidatedConfig as Configuration
 from app.domain.ports.broker import IBroker
 from app.domain.ports.storage import IStorage
@@ -67,18 +74,22 @@ class WebSocketLogMiddleware:
 
 def create_application() -> FastAPI:
     """Create and configure the FastAPI application."""
+    mark_startup_started()
+    begin_phase("application_init")
     
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator:
         """Application lifespan: startup and shutdown."""
         # Startup
         logger.info("Starting GlassyTrade AI application...")
+        begin_phase("lifespan_startup")
 
         # Get service container from app state
         container = app.state.container
 
         # Run option scanner to select MCX/NSE contracts
         logger.info("Running option scanner to select contracts...")
+        begin_phase("option_scanner")
         try:
             from app.domain.fabio_ai.services.option_scanner import OptionScannerService
             from app.config import settings
@@ -118,20 +129,33 @@ def create_application() -> FastAPI:
                     "Option scanner found no contracts — using default underlyings: %s",
                     app.state.active_symbols
                 )
+            end_phase("option_scanner", "ok")
         except Exception as e:
             logger.error("Option scanner failed: %s — using default underlyings", e, exc_info=True)
+            end_phase("option_scanner", "failed", str(e))
+            mark_startup_failed("config", str(e))
 
         # Start the trading engine
         from app.application.engine import TradingEngine
         engine = TradingEngine(container)
         app.state.engine = engine
+        startup_ok = True
 
         try:
+            begin_phase("trading_engine")
             await engine.start()
+            end_phase("trading_engine", "ok")
             logger.info("Trading engine started — backend trades independently of frontend.")
         except Exception:
             logger.error("Trading engine failed to start!", exc_info=True)
             app.state.engine_start_failed = True
+            startup_ok = False
+            end_phase("trading_engine", "failed", "engine.start() raised exception")
+            mark_startup_failed("engine")
+
+        end_phase("lifespan_startup", "ok" if not getattr(app.state, "engine_start_failed", False) else "warn")
+        if startup_ok and not getattr(app.state, "engine_start_failed", False):
+            mark_startup_finished()
 
         logger.info("Application started successfully")
 
@@ -157,82 +181,96 @@ def create_application() -> FastAPI:
 
         logger.info("Shutdown complete")
     
-    app = FastAPI(
-        title="GlassyTrade AI",
-        description="Algorithmic trading system with AI-driven decision making",
-        version="1.0.0",
-        lifespan=lifespan,
-    )
+    begin_phase("app_factory")
+    try:
+        app = FastAPI(
+            title="GlassyTrade AI",
+            description="Algorithmic trading system with AI-driven decision making",
+            version="1.0.0",
+            lifespan=lifespan,
+        )
+        end_phase("app_factory", "ok")
+    except Exception as e:
+        end_phase("app_factory", "failed", str(e))
+        mark_startup_failed("runtime", str(e))
+        raise
 
-    # Load configuration — must match app.config.settings (YAML strategy + MCX/NSE), not env-only.
-    config = Configuration.from_unified()
-    logger.info(f"Loaded configuration (unified): {config}")
+    begin_phase("dependency_bootstrap")
+    try:
+        # Load configuration — must match app.config.settings (YAML strategy + MCX/NSE), not env-only.
+        config = Configuration.from_unified()
+        logger.info(f"Loaded configuration (unified): {config}")
 
-    # Add CORS middleware
-    # Origins loaded from configuration (consolidated.py)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=config.cors_origins,
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+        # Add CORS middleware
+        # Origins loaded from configuration (consolidated.py)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=config.cors_origins,
+            allow_credentials=False,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
-    # Add correlation ID middleware for request tracing
-    app.add_middleware(CorrelationIdMiddleware)
+        # Add correlation ID middleware for request tracing
+        app.add_middleware(CorrelationIdMiddleware)
+        app.add_middleware(WebSocketLogMiddleware)
 
-    app.add_middleware(WebSocketLogMiddleware)
+        # Initialize DI container from composition root
+        from app.application.di.composition_root import compose_container
+        container = compose_container(config)
 
-    # Initialize DI container from composition root
-    from app.application.di.composition_root import compose_container
-    container = compose_container(config)
-    
-    # Resolve services from container
-    trading_session = container.resolve(TradingSessionService)
-    broker = container.resolve(IBroker)
-    storage = container.resolve(IStorage)
-    market_data = container.resolve(IMarketData)
-    
-    # Store in app state for backward compatibility
-    app.state.container = container
-    app.state.graph = container  # Alias for backward compatibility
-    app.state.service_graph = container
-    app.state.trading_session = trading_session
-    app.state.market_data = market_data
-    app.state.broker = broker
-    app.state.storage = storage
-    
-    # Get active symbols from service or config
-    active_symbols = list(getattr(config, "dhan_symbols", []))
-    if not active_symbols:
-        from app.config import settings as _settings
-        active_symbols = list(getattr(_settings, "DHAN_SYMBOLS", []))
-    app.state.active_symbols = active_symbols
-    
-    # Initialize singletons for FastAPI dependencies
-    init_singletons(
-        trading_session=trading_session,
-        broker=broker,
-        storage=storage,
-        gen_ai_service=container.resolve(ILLMInference),
-        market_data=market_data,
-        configuration=config,
-        active_symbols=active_symbols,
-    )
+        # Resolve services from container
+        trading_session = container.resolve(TradingSessionService)
+        broker = container.resolve(IBroker)
+        storage = container.resolve(IStorage)
+        market_data = container.resolve(IMarketData)
 
-    # Register routers
-    app.include_router(health_router, prefix="", tags=["health"])
-    app.include_router(health_router, prefix="/api", tags=["health"])
-    app.include_router(market_router, prefix="/api", tags=["market"])
-    app.include_router(analysis_router, prefix="/api", tags=["analysis"])
-    app.include_router(trading_router, prefix="/api", tags=["trading"])
-    app.include_router(gameloop_router, prefix="/api", tags=["websocket"])
-    app.include_router(ai_router, prefix="/api", tags=["ai"])
-    app.include_router(rl_router, prefix="/rl", tags=["rl"])
-    app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
-    app.include_router(observability_router, prefix="/api", tags=["observability"])
-    app.include_router(alerts_router, prefix="/api", tags=["alerts"])
+        # Store in app state for backward compatibility
+        app.state.container = container
+        app.state.graph = container  # Alias for backward compatibility
+        app.state.service_graph = container
+        app.state.trading_session = trading_session
+        app.state.market_data = market_data
+        app.state.broker = broker
+        app.state.storage = storage
 
+        # Get active symbols from service or config
+        active_symbols = list(getattr(config, "dhan_symbols", []))
+        if not active_symbols:
+            from app.config import settings as _settings
+            active_symbols = list(getattr(_settings, "DHAN_SYMBOLS", []))
+        app.state.active_symbols = active_symbols
+
+        # Initialize singletons for FastAPI dependencies
+        init_singletons(
+            trading_session=trading_session,
+            broker=broker,
+            storage=storage,
+            gen_ai_service=container.resolve(ILLMInference),
+            market_data=market_data,
+            configuration=config,
+            active_symbols=active_symbols,
+        )
+
+        # Register routers
+        app.include_router(health_router, prefix="", tags=["health"])
+        app.include_router(health_router, prefix="/api", tags=["health"])
+        app.include_router(market_router, prefix="/api", tags=["market"])
+        app.include_router(analysis_router, prefix="/api", tags=["analysis"])
+        app.include_router(trading_router, prefix="/api", tags=["trading"])
+        app.include_router(gameloop_router, prefix="/api", tags=["websocket"])
+        app.include_router(ai_router, prefix="/api", tags=["ai"])
+        app.include_router(rl_router, prefix="/rl", tags=["rl"])
+        app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
+        app.include_router(observability_router, prefix="/api", tags=["observability"])
+        app.include_router(alerts_router, prefix="/api", tags=["alerts"])
+        end_phase("dependency_bootstrap", "ok")
+    except Exception as e:
+        end_phase("dependency_bootstrap", "failed", str(e))
+        mark_startup_failed("runtime", str(e))
+        raise
+
+    end_phase("application_init", "ok")
     return app
 
 

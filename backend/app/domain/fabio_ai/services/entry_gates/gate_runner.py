@@ -11,6 +11,7 @@ def run_gate_pipeline(
     drive_number: int = 0,
     drive_entry_valid: bool = False,
     aggression_score: float = 0.0,
+    cvd_conflict: bool = False,
     is_risk_halted: bool = False,
     halt_reason: str = "",
     tick_age_seconds: float = 1.1,
@@ -25,10 +26,11 @@ def run_gate_pipeline(
     pcr: float = 1.0,  # Put-Call Ratio for NSE options bias
     oi_walls: list = None,  # OI walls for NSE protection levels
     favor_strategy: str = "NEUTRAL",  # Session-favored strategy
-) -> tuple[bool, str, str]:
+) -> tuple[bool, str, str, int, int]:
     """Run the 12-gate pipeline for additional validation.
 
-    Call this AFTER three_align_check passes. Returns (passed, reason, detail).
+    Call this AFTER three_align_check passes.
+    Returns (passed, reason, detail, soft_gates_passed, soft_gates_total).
     """
     from app.domain.fabio_ai.services.gate_pipeline import GatePipeline, GateContext
     from app.domain.fabio_ai.services.eia_calendar import EIACalendar
@@ -82,6 +84,7 @@ def run_gate_pipeline(
         drive_number=drive_number,
         drive_entry_valid=drive_entry_valid,
         aggression_score=aggression_score,
+        cvd_conflict=cvd_conflict,
         is_risk_halted=is_risk_halted,
         halt_reason=halt_reason,
         eia_window_active=eia_suppressed,
@@ -99,7 +102,13 @@ def run_gate_pipeline(
     )
 
     result = GatePipeline().evaluate(ctx)
-    return result.passed, result.reason.value, result.detail
+    return (
+        result.passed,
+        result.reason.value,
+        result.detail,
+        result.soft_gates_passed,
+        result.soft_gates_total,
+    )
 
 
 def calculate_position_size(

@@ -89,19 +89,28 @@ async def health_check(
 
     # LLM check (critical for trading) - use gen_ai_service from the llm_handler
     try:
+        runtime_state: dict[str, object] | None = None
         # Get gen_ai_service from llm_handler since TradingSessionService doesn't expose it directly
         llm_handler = getattr(trading_session, "_llm_handler", None)
         gen_ai = getattr(llm_handler, "_gen_ai_service", None) if llm_handler else None
         if gen_ai is None:
             gen_ai = getattr(trading_session, "_gen_ai_service", None)
         if gen_ai is not None:
-            llm_ready = gen_ai.is_ready() if hasattr(gen_ai, 'is_ready') else False
+            llm_ready = gen_ai.is_ready() if hasattr(gen_ai, "is_ready") else False
             load_error = getattr(gen_ai, '_load_error', None)
+            runtime_state = getattr(gen_ai, "runtime_state", lambda: None)()
+            if isinstance(runtime_state, dict):
+                checks["llm_state"] = str(runtime_state.get("state") or "UNKNOWN")
+                reason = runtime_state.get("reason")
+                if reason:
+                    checks["llm_state_reason"] = str(reason)
         else:
             llm_ready = False
             load_error = "gen_ai_service not found"
         if llm_ready:
             checks["llm"] = "ok"
+        elif isinstance(runtime_state, dict) and str(runtime_state.get("state", "")).startswith("DEGRADED"):
+            checks["llm"] = "degraded"
         elif load_error:
             checks["llm"] = f"error: {load_error}"
         else:
@@ -122,9 +131,13 @@ async def health_check(
     # LLM/Probability are allowed to be 'not_ready' (still loading) without failing health
     if checks["database"].startswith("error"):
         overall = "unhealthy"
-    elif any(v.startswith("error") for v in checks.values()):
+    elif any(isinstance(v, str) and v.startswith("error") for v in checks.values()):
         overall = "unhealthy"
-    elif all(v in ["ok", "not_ready"] for v in checks.values()):
+    elif all(
+        v in ["ok", "not_ready", "degraded"]
+        for k, v in checks.items()
+        if k not in {"llm_state", "llm_state_reason"}
+    ):
         overall = "ok"
     else:
         overall = "degraded"
@@ -162,10 +175,27 @@ async def readiness_check(request: Request):
 
     # LLM
     try:
-        llm_ready = getattr(trading_session._gen_ai_service, 'is_ready', lambda: False)()
-        checks["llm"] = "ok" if llm_ready else "not_loaded"
+        gen_ai_service = getattr(trading_session, "_gen_ai_service", None)
+        llm_state = None
+        llm_ready = gen_ai_service.is_ready() if gen_ai_service else False
+        llm_state = (
+            gen_ai_service.runtime_state()
+            if gen_ai_service and hasattr(gen_ai_service, "runtime_state")
+            else None
+        )
+        if llm_ready:
+            checks["llm"] = "ok"
+        elif isinstance(llm_state, dict) and llm_state.get("state", "").startswith("DEGRADED"):
+            checks["llm"] = "degraded"
+        else:
+            checks["llm"] = "not_loaded"
     except Exception as e:
         checks["llm"] = f"error: {e}"
+    if isinstance(llm_state, dict):
+        checks["llm_state"] = str(llm_state.get("state") or "UNKNOWN")
+        reason = llm_state.get("reason")
+        if reason:
+            checks["llm_state_reason"] = str(reason)
 
     # Trading engine
     try:
@@ -192,7 +222,11 @@ async def readiness_check(request: Request):
         checks["symbols"] = f"error: {e}"
 
     # Overall: all checks must be ok
-    all_ok = all(v == "ok" or v.startswith("ok") for v in checks.values())
+    all_ok = all(
+        ((v == "ok" or (isinstance(v, str) and v.startswith("ok")) or v == "degraded"))
+        for k, v in checks.items()
+        if k not in {"llm_state", "llm_state_reason"}
+    )
     status = "ready" if all_ok else "not_ready"
 
     return {"status": status, "checks": checks}

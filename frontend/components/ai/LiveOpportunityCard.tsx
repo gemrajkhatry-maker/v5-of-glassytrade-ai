@@ -33,10 +33,15 @@ export const LiveOpportunityCard: React.FC<LiveOpportunityCardProps> = ({ symbol
     const isLong = agentDecision.direction === 'LONG';
     const prob = (agentDecision.probability * 100).toFixed(1);
 
-    // Estimate SL/TP for display based on typical Kelly logic defaults if not provided natively
-    // We'll calculate a visual SL/TP based on LTP. For Long: TP = LTP + 2%, SL = LTP - 1%. (Conceptual only).
-    const estTP = isLong ? ltp * 1.002 : ltp * 0.998;
-    const estSL = isLong ? ltp * 0.999 : ltp * 1.001;
+    const hasStructuralStop = typeof agentDecision.stopLoss === 'number' && agentDecision.stopLoss > 0;
+    const structuralStop = hasStructuralStop
+        ? agentDecision.stopLoss
+        : undefined;
+    const estTP = agentDecision.takeProfit && agentDecision.takeProfit > 0
+        ? agentDecision.takeProfit
+        : isLong
+            ? ltp * 1.002
+            : ltp * 0.998;
 
     return (
         <div className="w-80 bg-[#0f172a]/90 backdrop-blur-xl border border-purple-500/30 rounded-xl p-4 shadow-2xl relative overflow-hidden group">
@@ -73,11 +78,13 @@ export const LiveOpportunityCard: React.FC<LiveOpportunityCardProps> = ({ symbol
 
             <div className="grid grid-cols-2 gap-2 mb-3">
                 <div className="bg-white/5 rounded p-2 text-center border border-white/5">
-                    <span className="block text-[9px] text-white/40 uppercase mb-0.5">Est. SL</span>
-                    <span className="text-xs font-mono font-bold text-red-300">{estSL.toFixed(2)}</span>
+                    <span className="block text-[9px] text-white/40 uppercase mb-0.5">STRUCTURAL STOP</span>
+                    <span className="text-xs font-mono font-bold text-red-300">
+                        {hasStructuralStop ? structuralStop.toFixed(2) : '-'}
+                    </span>
                 </div>
                 <div className="bg-white/5 rounded p-2 text-center border border-white/5">
-                    <span className="block text-[9px] text-white/40 uppercase mb-0.5">Est. TP</span>
+                    <span className="block text-[9px] text-white/40 uppercase mb-0.5">EST. TP</span>
                     <span className="text-xs font-mono font-bold text-emerald-300">{estTP.toFixed(2)}</span>
                 </div>
             </div>

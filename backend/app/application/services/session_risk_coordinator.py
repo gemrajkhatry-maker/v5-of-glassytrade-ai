@@ -23,7 +23,7 @@ from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager
 from app.domain.services.risk_tier_engine import RiskTierEngine, TierAPremiumCheck
 from app.domain.services.circuit_breakers import CircuitBreakers, BreakerReason, BreakerResult
 from app.domain.constants import ACCOUNT_MAX_LOSS_ABSOLUTE
-from app.application.services.entry_coordinator import MIN_GRADE_SCORE_THRESHOLD
+from app.domain.constants import MIN_GRADE_SCORE_THRESHOLD
 
 if TYPE_CHECKING:
     from app.domain.trading.models.entities import Signal

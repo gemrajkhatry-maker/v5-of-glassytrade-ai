@@ -299,6 +299,8 @@ class TickProcessor:
                         "tpAdjust": ad.tp_adjust,
                         "latencyUs": ad.latency_us,
                         "rationale": ad.rationale,
+                        "stopLoss": getattr(ad, "stop_loss", None),
+                        "takeProfit": getattr(ad, "take_profit", None),
                     }
         except Exception:
             logger.debug("Exception handled silently", exc_info=True)

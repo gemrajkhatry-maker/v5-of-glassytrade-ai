@@ -116,21 +116,23 @@ def build_entry_signal(
     if ai_result and isinstance(ai_result, dict):
         raw_setup = ai_result.get('setup', '')
         if isinstance(raw_setup, str):
-            setup_type = raw_setup.replace('-', '_').lower()
-            # Map common variants
-            if setup_type in ('mean_rev', 'mean_reversion_playbook'):
-                setup_type = 'mean_reversion'
-            elif setup_type in ('trend_model_playbook', 'trend'):
-                setup_type = 'trend_model'
-            elif setup_type in ('responsive_fade_playbook', 'fade'):
-                setup_type = 'responsive_fade'
+            normalized = raw_setup.replace('-', '_').lower()
+            # Map common variants to enum members
+            if normalized in ('mean_rev', 'mean_reversion_playbook', 'mean_reversion'):
+                setup_type = ST.MEAN_REVERSION
+            elif normalized in ('trend_model_playbook', 'trend', 'trend_model'):
+                setup_type = ST.TREND_MODEL
+            elif normalized in ('responsive_fade_playbook', 'fade', 'responsive_fade'):
+                setup_type = ST.RESPONSIVE_FADE
+            else:
+                setup_type = ST.MEAN_REVERSION
         else:
-            setup_type = 'mean_reversion'
+            setup_type = ST.MEAN_REVERSION
     else:
-        setup_type = 'mean_reversion'
+        setup_type = ST.MEAN_REVERSION
 
     match setup_type:
-        case 'responsive_fade':
+        case ST.RESPONSIVE_FADE:
             # FABIO PLAYBOOK: Fade extreme deviation back to Value (POC or VWAP)
             tp_price = amt_result.poc if abs(px - amt_result.poc) > abs(px - vwap) else vwap
             
@@ -144,7 +146,7 @@ def build_entry_signal(
                 tp_price = vwap
                 
             allow_trail = True
-        case 'mean_reversion':
+        case ST.MEAN_REVERSION:
             # Fabio playbook: Mean reversion targets prior POC (previous balance area)
             # When prior POC is available and beyond current price, use it as target
             tp_price = amt_result.poc
@@ -186,7 +188,7 @@ def build_entry_signal(
                     tp_price = px * 0.990
                     stop_price = px * 1.005
             allow_trail = False
-        case 'trend_model':
+        case ST.TREND_MODEL:
             # TREND_MODEL — Fabio playbook: target prior balance POC or NPOC.
             # Priority chain: NPOC in direction → prior_poc (if beyond VA) → VA extension (fallback)
             tp_source = "va_extension"  # default fallback
@@ -245,6 +247,7 @@ def build_entry_signal(
                     tp_price = px * 0.980
                     stop_price = px * 1.010
             allow_trail = True
+
         case _:
             # Fallback to MEAN_REVERSION for unknown setups
             # Fabio playbook: Mean reversion targets prior POC (previous balance area)

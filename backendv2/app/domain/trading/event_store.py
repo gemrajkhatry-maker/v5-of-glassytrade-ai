@@ -86,7 +86,7 @@ class AuditTrailVerifier:
     """Verify deterministic state reconstruction from audit events.
 
     NOT a backtest engine — this is for audit trail verification only.
-    Ensures that replaying events produces the same state.
+    Ensures deterministic state re-application from recorded events.
     """
 
     def __init__(self, event_store: EventStore):
@@ -98,12 +98,12 @@ class AuditTrailVerifier:
         expected_event_count: int | None = None,
     ) -> dict[str, Any]:
         """
-        Verify that replaying events for an aggregate produces deterministic results.
+        Verify that re-applying recorded events for an aggregate is deterministic.
 
         Returns a report dict with:
         - event_count: number of events found
         - event_types: count by type
-        - is_deterministic: True if replay succeeds
+        - is_deterministic: True if re-application succeeds
         - errors: list of any errors encountered
         """
         events = self._event_store.get_events(aggregate_id=aggregate_id)

@@ -25,6 +25,7 @@ from app.application.protocols import (
 from app.config import settings
 from app.domain.trading.models.value_objects import OHLC
 from app.infrastructure.serialization.schemas import ohlc_to_dto
+from app.core.startup_telemetry import record_symbol_resolution
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +293,7 @@ class EngineLifecycle:
                     if position:
                         # Initialize partition state for exit management
                         self._session_service._lifecycle_handler.initialize_partition_state(
-                            position.id
+                            position.id, symbol
                         )
 
                         logger.info(
@@ -395,12 +396,29 @@ class EngineLifecycle:
         provider = UnderlyingFuturesProvider()
         if provider:
             seen_fut: set[str] = set()
+            underlying_ready: dict[str, bool] = {}
             for sym in self._active_symbols:
                 m = provider.get_mapping(sym)
                 if not m:
+                    record_symbol_resolution(sym, stage="underlying_mapping", found=False)
+                    self._session_service.set_symbol_trading_state(
+                        sym,
+                        "UNTRADABLE_NOW",
+                        "underlying mapping missing",
+                    )
                     continue
+                record_symbol_resolution(sym, stage="underlying_mapping", found=True)
+                self._session_service.set_symbol_trading_state(
+                    sym, "TRADABLE", None
+                )
                 fut = m.underlying_symbol
                 if fut in seen_fut:
+                    if not underlying_ready.get(fut, True):
+                        self._session_service.set_symbol_trading_state(
+                            sym,
+                            "UNTRADABLE_NOW",
+                            f"underlying history unavailable: {fut}",
+                        )
                     continue
                 seen_fut.add(fut)
                 try:
@@ -409,6 +427,7 @@ class EngineLifecycle:
                         fut, settings.STREAM_INTERVAL, 500
                     )
                     if fut_hist:
+                        record_symbol_resolution(fut, stage="underlying_history", found=True)
                         self._session_service.seed_underlying_from_history(
                             fut, fut_hist
                         )
@@ -417,7 +436,21 @@ class EngineLifecycle:
                             len(fut_hist),
                             fut,
                         )
+                        underlying_ready[fut] = True
+                    else:
+                        underlying_ready[fut] = False
+                        self._session_service.set_symbol_trading_state(
+                            sym,
+                            "UNTRADABLE_NOW",
+                            f"underlying history missing: {fut}",
+                        )
+                        record_symbol_resolution(fut, stage="underlying_history", found=False)
                 except Exception:
+                    underlying_ready[fut] = False
+                    record_symbol_resolution(fut, stage="underlying_history", found=False)
+                    self._session_service.set_symbol_trading_state(
+                        sym, "UNTRADABLE_NOW", f"underlying history fetch failed: {fut}"
+                    )
                     logger.warning(
                         "Engine: underlying history fetch failed for %s",
                         fut,

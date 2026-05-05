@@ -48,6 +48,8 @@ class SessionState:
 
     # Cached latest results for query access
     last_amt: dict | None = None
+    aggressionBlocked: bool = False
+    last_gate_score: dict[str, int] | None = None
     last_prediction: dict | None = None
     last_footprint: dict | None = None
     last_ai_analysis: dict | None = None
@@ -98,6 +100,10 @@ class SessionState:
     _aggression_explained_entries: int = 0
     _last_explainability_alert: str = ""
     _explainability_day: str = ""
+
+    # Symbol trading state (runtime gating)
+    trading_state: str = "TRADABLE"
+    trading_state_reason: str | None = None
 
 
 class SessionStateManager:

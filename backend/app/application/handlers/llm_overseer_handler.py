@@ -225,12 +225,6 @@ class LLMOverseerHandler:
                     }
                     pos_state.update(self._trade_manager.get_position_metrics(position))
 
-                    # CVD break-even: Move SL to entry when CVD confirms direction
-                    # This is Fabio's "buyers pushing on the gas" logic
-                    cvd_slope = float(getattr(amt_result, "cvd_slope", 0) or 0)
-                    if cvd_slope != 0:
-                        self._trade_manager.apply_cvd_breakeven(position, cvd_slope)
-
                 if pos_state is None:
                     logger.debug(
                         "Overseer: position %s closed before worker started",

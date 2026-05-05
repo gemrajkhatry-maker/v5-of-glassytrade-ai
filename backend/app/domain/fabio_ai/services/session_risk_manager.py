@@ -14,7 +14,7 @@ from enum import Enum
 logger = logging.getLogger(__name__)
 
 
-class RiskTier(str, Enum):
+class CapitalRiskBand(str, Enum):
     CONSERVATIVE = "CONSERVATIVE"
     NORMAL = "NORMAL"
     CUSHION = "CUSHION"
@@ -46,18 +46,18 @@ class SessionRiskManager:
     _halted: bool = False  # True when circuit breaker is triggered
 
     @property
-    def risk_tier(self) -> RiskTier:
+    def risk_tier(self) -> CapitalRiskBand:
         if self._halted:
-            return RiskTier.DEFENSIVE
+            return CapitalRiskBand.DEFENSIVE
         if self.consecutive_losses >= 2:
-            return RiskTier.DEFENSIVE
+            return CapitalRiskBand.DEFENSIVE
         if self.trade_count < 2:
-            return RiskTier.CONSERVATIVE
+            return CapitalRiskBand.CONSERVATIVE
         if self.consecutive_wins >= 2:
-            return RiskTier.MOMENTUM
+            return CapitalRiskBand.MOMENTUM
         if self.session_pnl > 0:
-            return RiskTier.CUSHION
-        return RiskTier.NORMAL
+            return CapitalRiskBand.CUSHION
+        return CapitalRiskBand.NORMAL
 
     @property
     def can_trade(self) -> bool:
@@ -97,13 +97,13 @@ class SessionRiskManager:
         - <= 30% of session profit (when in profit) — Fabio cushion rule
         """
         tier = self.risk_tier
-        if tier == RiskTier.CONSERVATIVE:
+        if tier == CapitalRiskBand.CONSERVATIVE:
             raw = 0.0025
-        elif tier == RiskTier.DEFENSIVE:
+        elif tier == CapitalRiskBand.DEFENSIVE:
             raw = 0.0025
-        elif tier == RiskTier.MOMENTUM:
+        elif tier == CapitalRiskBand.MOMENTUM:
             raw = 0.004
-        elif tier == RiskTier.CUSHION:
+        elif tier == CapitalRiskBand.CUSHION:
             raw = 0.0035
         else:  # NORMAL
             raw = self._base_sl_pct

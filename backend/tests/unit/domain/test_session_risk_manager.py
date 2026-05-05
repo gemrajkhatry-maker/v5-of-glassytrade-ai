@@ -1,40 +1,43 @@
 """Tests for SessionRiskManager — Fabio cushion/compounding system."""
 import pytest
-from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager, RiskTier
+from app.domain.fabio_ai.services.session_risk_manager import (
+    SessionRiskManager,
+    CapitalRiskBand,
+)
 
 
 class TestRiskTier:
     def test_initial_tier_is_conservative(self):
         mgr = SessionRiskManager()
-        assert mgr.risk_tier == RiskTier.CONSERVATIVE
+        assert mgr.risk_tier == CapitalRiskBand.CONSERVATIVE
 
     def test_normal_after_two_trades(self):
         mgr = SessionRiskManager()
         mgr.record_trade(-10)
         mgr.record_trade(20)
-        assert mgr.risk_tier == RiskTier.CUSHION  # pnl > 0
+        assert mgr.risk_tier == CapitalRiskBand.CUSHION  # pnl > 0
 
     def test_defensive_after_two_consecutive_losses(self):
         mgr = SessionRiskManager()
         mgr.record_trade(-10)
         mgr.record_trade(-10)
-        assert mgr.risk_tier == RiskTier.DEFENSIVE
+        assert mgr.risk_tier == CapitalRiskBand.DEFENSIVE
 
     def test_momentum_after_two_consecutive_wins(self):
         mgr = SessionRiskManager()
         mgr.record_trade(10)
         mgr.record_trade(10)
-        assert mgr.risk_tier == RiskTier.MOMENTUM
+        assert mgr.risk_tier == CapitalRiskBand.MOMENTUM
 
     def test_defensive_overrides_momentum(self):
         """Two consecutive losses override prior wins."""
         mgr = SessionRiskManager()
         mgr.record_trade(10)
         mgr.record_trade(10)
-        assert mgr.risk_tier == RiskTier.MOMENTUM
+        assert mgr.risk_tier == CapitalRiskBand.MOMENTUM
         mgr.record_trade(-10)
         mgr.record_trade(-10)
-        assert mgr.risk_tier == RiskTier.DEFENSIVE
+        assert mgr.risk_tier == CapitalRiskBand.DEFENSIVE
 
     def test_win_resets_loss_streak(self):
         mgr = SessionRiskManager()
@@ -83,4 +86,4 @@ class TestReset:
         assert mgr.session_pnl == 0.0
         assert mgr.trade_count == 0
         assert mgr.consecutive_wins == 0
-        assert mgr.risk_tier == RiskTier.CONSERVATIVE
+        assert mgr.risk_tier == CapitalRiskBand.CONSERVATIVE

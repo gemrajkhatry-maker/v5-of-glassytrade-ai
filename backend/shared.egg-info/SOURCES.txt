@@ -33,7 +33,6 @@ app/application/handlers/rl_handler.py
 app/application/handlers/signal_constructor.py
 app/application/handlers/trade_lifecycle_handler.py
 app/application/services/__init__.py
-app/application/services/backtest_engine.py
 app/application/services/entry_coordinator.py
 app/application/services/exit_coordinator.py
 app/application/services/experiment_context.py
@@ -234,7 +233,6 @@ scripts/audit_llm_rationales.py
 scripts/collect_training_data.py
 scripts/convert_to_mlx.py
 scripts/incremental_finetune.py
-scripts/run_backtest.py
 scripts/walkthrough_architecture.py
 shared.egg-info/PKG-INFO
 shared.egg-info/SOURCES.txt

@@ -88,7 +88,7 @@ Commands (write) and Queries (read) are separated for clear boundaries.
 - [ ] Event bus implementation
 
 ### Week 4: Integration & E2E
-- [ ] Historical data replay tests
+- [ ] Historical data scenario tests
 - [ ] Backtest validation against amt_docs specs
 - [ ] Frontend state simulation tests
 

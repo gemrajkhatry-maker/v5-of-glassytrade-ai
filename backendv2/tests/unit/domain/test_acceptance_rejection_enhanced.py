@@ -1,7 +1,7 @@
 """Enhanced Acceptance/Rejection tests with time accumulation and wick analysis."""
 import pytest
 
-from app.domain.amt.service.acceptance_rejection import ARState, WickAnalysis, AcceptanceRejectionEngine
+from app.domain.amt.service.acceptance_rejection import ARState, WickAnalysis, AcceptanceRejectionEngine, analyze_wick
 from app.domain.amt.service.acceptance_rejection import AcceptanceRejectionEngine
 
 

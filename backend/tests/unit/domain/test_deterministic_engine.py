@@ -15,7 +15,7 @@ from app.domain.services.aaa_precondition_engine import (
 )
 from app.domain.services.risk_sizing_engine import (
     RiskSizingEngine,
-    RiskTier,
+    KellySizingTier,
 )
 from app.domain.services.aaa_precondition_engine import (
     AAAPreconditionEngine,
@@ -23,7 +23,7 @@ from app.domain.services.aaa_precondition_engine import (
 )
 from app.domain.services.risk_sizing_engine import (
     RiskSizingEngine,
-    RiskTier,
+    KellySizingTier,
 )
 
 
@@ -262,7 +262,7 @@ class TestRiskSizingEngine:
             target_price=24250,
             direction="LONG",
         )
-        assert result.risk_tier == RiskTier.REDUCED
+        assert result.risk_tier == KellySizingTier.REDUCED
         assert result.risk_pct == 0.0025  # minimum
 
     def test_winning_session_elevates(self):
@@ -277,7 +277,7 @@ class TestRiskSizingEngine:
             target_price=24250,
             direction="LONG",
         )
-        assert result.risk_tier == RiskTier.ELEVATED
+        assert result.risk_tier == KellySizingTier.ELEVATED
         assert result.risk_pct >= 0.0030
 
     def test_banknifty_lots(self):

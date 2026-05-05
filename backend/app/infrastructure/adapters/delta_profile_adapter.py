@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from app.domain.ports.delta_profile import IDeltaProfile, DeltaBucket, DeltaProfile
 from app.domain.constants import DELTA_ZONE_SIGMA_MULT, DELTA_BUCKET_SIZE_DEFAULT
+from app.domain.services.delta_profile import detect_high_delta_zones
 
 logger = logging.getLogger(__name__)
 
@@ -91,25 +92,11 @@ class DeltaProfileAdapter(IDeltaProfile):
         if not self._buckets:
             return []
 
-        # Compute mean absolute net delta across all buckets
-        net_deltas = [abs(data[2]) for data in self._buckets.values() if data[3] > 0]
-        if not net_deltas:
-            return []
-
-        mean_abs = sum(net_deltas) / len(net_deltas)
-        threshold = mean_abs * sigma_mult
-
-        zones = []
-        for price, data in self._buckets.items():
-            net = data[2]
-            if direction == "LONG" and net < -threshold:
-                # High sell delta = trapped sellers = LONG entry zone
-                zones.append(price)
-            elif direction == "SHORT" and net > threshold:
-                # High buy delta = trapped buyers = SHORT entry zone
-                zones.append(price)
-
-        return sorted(zones)
+        return detect_high_delta_zones(
+            self._buckets,
+            direction=direction,
+            sigma_mult=sigma_mult,
+        )
 
     def get_delta_at_price(self, price: float) -> tuple[int, int, int]:
         """Get buy_delta, sell_delta, net_delta at a specific price level.

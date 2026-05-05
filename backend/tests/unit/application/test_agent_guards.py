@@ -6,7 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager, RiskTier
+from app.domain.fabio_ai.services.session_risk_manager import (
+    SessionRiskManager,
+    CapitalRiskBand,
+)
 from app.domain.fabio_ai.services.entry_gates.grading import compute_grade_score, check_vwap_bias
 from app.domain.trading.models.enums import SetupType
 
@@ -72,7 +75,7 @@ class TestAgentDefensiveTier:
         rm = SessionRiskManager()
         rm.record_trade(-100)
         rm.record_trade(-100)
-        assert rm.risk_tier == RiskTier.DEFENSIVE
+        assert rm.risk_tier == CapitalRiskBand.DEFENSIVE
         assert rm.risk_tier.name == "DEFENSIVE"
 
     def test_normal_tier_allows_agent(self):

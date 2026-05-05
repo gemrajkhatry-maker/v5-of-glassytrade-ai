@@ -31,6 +31,7 @@ __all__ = [
 
 import logging
 import time
+from datetime import datetime
 
 from app.config import settings
 from app.shared.config_features import Feature, feature_enabled
@@ -38,6 +39,7 @@ from app.shared.mode import is_live_mode
 from app.domain.constants import (
     AGENT_DECISION_THRESHOLD,
     CANDLE_INTERVAL_MINUTES,
+    IB_MINUTES,
 )
 from app.domain.trading.models.value_objects import OHLC, OrderBook
 from app.domain.trading.models.aggregates import Portfolio
@@ -51,6 +53,7 @@ from app.domain.trading.events import (
 from app.domain.trading.event_store import EventBus
 from app.domain.ports.broker import IBroker
 from app.domain.ports.storage import IStorage
+from app.domain.ports.notification_adapter import INotificationAdapter
 from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 from app.domain.ports.probability_inference import (
     IProbabilityInference,
@@ -86,6 +89,7 @@ from app.application.services.session_cache import SessionCache
 from app.application.services.session_event_router import SessionEventRouter
 from app.application.services.amt_service import AMTService
 from app.application.services.phase_manager import PhaseManager
+from app.infrastructure.adapters.telegram_adapter import TelegramAdapter
 
 # Import safe parsing utilities
 from app.shared.parsing import extract_bar_minute
@@ -112,6 +116,7 @@ class TradingSessionService:
         latency_tracker=None,  # LatencyTracker — observability
         signal_tracker=None,  # SignalTracker (from app.api) — gate rejection history
         event_bus: EventBus | None = None,  # Event bus for pub/sub pipeline
+        notification_adapter: INotificationAdapter | None = None,
     ) -> None:
         live_mode = is_live_mode()
 
@@ -140,9 +145,11 @@ class TradingSessionService:
 
         # --- Construct collaborators (override in tests) ---
         self._state_manager = self._create_state_manager(storage)
-        self._risk_coordinator = self._create_risk_coordinator(storage)
         self._event_logger = self._create_event_logger(storage)
         self._lifecycle_handler = self._create_lifecycle_handler(storage)
+        self._risk_coordinator = self._create_risk_coordinator(
+            storage, trade_manager=self._lifecycle_handler.trade_manager
+        )
         self._llm_handler = self._create_llm_handler(gen_ai_service, storage)
         self._overseer_handler = self._create_overseer_handler(gen_ai_service, storage, probability_engine)
         self._rl_handler = RLHandler()
@@ -160,12 +167,18 @@ class TradingSessionService:
         self._alerts = MobileAlertSystem(
             bot_token=settings.TELEGRAM_BOT_TOKEN,
             chat_id=settings.TELEGRAM_CHAT_ID,
+            adapter=notification_adapter
+            or TelegramAdapter(
+                bot_token=settings.TELEGRAM_BOT_TOKEN,
+                chat_id=settings.TELEGRAM_CHAT_ID,
+            )
         )
         self._order_rejection = OrderRejectionHandler()
         self._db_fallback = DBFallbackBuffer()
         self._event_router = self._create_event_router(broker, storage, exchange_config, probability_engine)
         self._session_caches: dict[str, SessionCache] = {}
         self._fut_to_options: dict[str, list[str]] = {}
+        self._recorded_trade_ids: set[str] = set()
 
         # Event bus integration — when provided, pipeline events flow through pub/sub
         self._event_bus = event_bus
@@ -195,11 +208,12 @@ class TradingSessionService:
     def _create_state_manager(self, storage):
         return SessionStateManager(storage=storage)
 
-    def _create_risk_coordinator(self, storage):
+    def _create_risk_coordinator(self, storage, trade_manager=None):
         return SessionRiskCoordinator(
             storage=storage,
             capital=settings.CAPITAL,
             use_risk_tier_engine=feature_enabled(settings, Feature.RISK_TIER_ENGINE),
+            trade_manager=trade_manager,
         )
 
     def _create_event_logger(self, storage):
@@ -218,6 +232,7 @@ class TradingSessionService:
             on_stop_out=self._on_stop_out,
             on_partial_exit=self._on_partial_exit,
             persist_fn=_persist_fn,
+            event_logger=self._event_logger,
             on_trade_closed=lambda sym, pnl, pos_id=None: self._on_trade_closed(
                 sym, pnl, pos_id
             ),
@@ -318,6 +333,18 @@ class TradingSessionService:
         """Which option legs share each subscribed futures root (for dual feed)."""
         self._fut_to_options = dict(fut_to_options)
 
+    def set_symbol_trading_state(
+        self, symbol: str, state: str, reason: str | None = None
+    ) -> None:
+        """Mark a symbol as tradable/untradable for runtime governance."""
+        session = self.get_or_create_session(symbol)
+        session.trading_state = state
+        session.trading_state_reason = reason
+
+    def get_symbol_trading_state(self, symbol: str) -> str:
+        """Return the current symbol trading state."""
+        return getattr(self.get_or_create_session(symbol), "trading_state", "TRADABLE")
+
     def on_underlying_futures_candle(self, futures_symbol: str, ohlc: OHLC) -> None:
         """Apply one futures OHLC update to every mapped option session."""
         for opt in self._fut_to_options.get(futures_symbol, ()):
@@ -353,6 +380,7 @@ class TradingSessionService:
         """
         session = self.get_or_create_session(symbol)
         cache = self._get_cache(symbol)
+        trading_enabled = session.trading_state == "TRADABLE"
         self._state_manager._maybe_reset_symbol_state(session, symbol, tick.time)
 
         # Drain pending signal from LLM worker thread + update tick time
@@ -375,8 +403,13 @@ class TradingSessionService:
                     pending = None
             except (ValueError, KeyError) as e:
                 log.debug("Signal age check error: %s", e, exc_info=True)
-        if pending:
+        if pending and trading_enabled:
             self._event_router.execute_signal(pending_symbol, pending_signal, session)
+        elif pending:
+            log.debug(
+                "Dropping queued signal for %s because trading is disabled",
+                symbol,
+            )
 
         # Update data store via SessionCache
         cache.update_candle_buffer(tick, self._storage, symbol)
@@ -397,6 +430,9 @@ class TradingSessionService:
                 )
 
         for pos in closed_positions:
+            if pos.id in self._recorded_trade_ids:
+                continue
+            self._recorded_trade_ids.add(pos.id)
             self._risk_coordinator.record_trade_result(
                 symbol, float(pos.pnl), session.portfolio
             )
@@ -487,7 +523,13 @@ class TradingSessionService:
     # ----- event handlers -----
 
     def _resolve_entry_decision(
-        self, agent_decision, cache: SessionCache, is_new_candle, has_position, _in_cooldown
+        self,
+        agent_decision,
+        cache: SessionCache,
+        is_new_candle,
+        has_position,
+        _in_cooldown,
+        trading_enabled: bool = True,
     ):
         """Resolve entry decision from agent or pending, return execution params."""
         _allow_short = self._allow_short
@@ -524,6 +566,13 @@ class TradingSessionService:
                         pending_decision.probability,
                     )
 
+        if not trading_enabled:
+            _exec_decision = None
+            _exec_amt = None
+            _exec_tick = None
+            _exec_prob = 0
+            _exec_dir = "NONE"
+
         _exec_dir = (
             getattr(_exec_decision, "direction", "NONE") if _exec_decision else "NONE"
         )
@@ -542,13 +591,14 @@ class TradingSessionService:
         _tick_start = time.monotonic()
         session = self.get_or_create_session(event.symbol)
         cache = self._get_cache(event.symbol)
+        trading_enabled = session.trading_state == "TRADABLE"
 
         # Initialize IB engine for this symbol if not exists
         if not hasattr(self, "_ib_engines"):
             self._ib_engines = {}
         if event.symbol not in self._ib_engines:
             self._ib_engines[event.symbol] = InitialBalanceEngine(
-                ib_minutes=30 if self._exchange == "NSE" else 30,
+                ib_minutes=IB_MINUTES,
             )
 
         # 0. Session phase check + profile save
@@ -634,21 +684,6 @@ class TradingSessionService:
         except Exception:
             log.debug("Pre-candle advisory failed (non-critical)", exc_info=True)
 
-        # Record level approaches for second drive tracking
-        if hasattr(self._llm_handler, "_regime_detector"):
-            key_levels = [
-                amt_result.poc,
-                amt_result.value_area_high,
-                amt_result.value_area_low,
-            ]
-            if amt_result.lvns:
-                key_levels.extend(amt_result.lvns[:3])
-            self._llm_handler._regime_detector.record_level_approach(
-                event.tick.close,
-                key_levels,
-                time.time(),
-            )
-
         # 1b. Micro-agent pipeline
         agent_decision = self._event_router.run_micro_agent_pipeline(event, amt_result, self._exchange_config)
         cache.set_agent_decision(agent_decision)
@@ -673,7 +708,10 @@ class TradingSessionService:
                     session.portfolio,
                     symbol=event.symbol,
                     current_price=event.tick.close,
+                    tick_low=float(event.tick.low),
+                    tick_high=float(event.tick.high),
                     cvd_divergence=amt_result.cvd_divergence,
+                    cvd_slope=float(getattr(amt_result, "cvd_slope", 0)),
                     order_book=event.order_book,
                     amt_result=amt_result,
                     imbalances=_imbalances,
@@ -702,12 +740,15 @@ class TradingSessionService:
             _in_cooldown = self._lifecycle_handler.in_cooldown(event.symbol)
 
             # SAVE last good decision for execution on next candle
-            if (
-                agent_decision
-                and agent_decision.direction != "FLAT"
-                and agent_decision.probability >= AGENT_DECISION_THRESHOLD
-            ):
-                cache.set_pending_decision(agent_decision, amt_result, event.tick)
+            if trading_enabled:
+                if (
+                    agent_decision
+                    and agent_decision.direction != "FLAT"
+                    and agent_decision.probability >= AGENT_DECISION_THRESHOLD
+                ):
+                    cache.set_pending_decision(agent_decision, amt_result, event.tick)
+            else:
+                cache.clear_pending_decision()
 
             # Priority score for UI display only
             _priority_score = 0.0
@@ -728,10 +769,17 @@ class TradingSessionService:
             # UNIFIED ENTRY PATH — delegated to focused helper methods
             _exec_decision, _exec_amt, _exec_tick, _exec_dir, _exec_prob, run_entry = (
                 self._resolve_entry_decision(
-                    agent_decision, cache, is_new_candle, has_position, _in_cooldown
+                    agent_decision,
+                    cache,
+                    is_new_candle,
+                    has_position,
+                    _in_cooldown,
+                    trading_enabled=trading_enabled,
                 )
             )
-            trigger_llm = self._event_router.should_trigger_llm(
+            trigger_llm = (
+                trading_enabled
+                and self._event_router.should_trigger_llm(
                 session,
                 has_position,
                 ai_running,
@@ -739,6 +787,7 @@ class TradingSessionService:
                 amt_result,
                 event,
                 ai_time,
+                )
             )
 
         self._event_router.run_overseer_if_needed(session, event, amt_result, self._exchange)
@@ -750,15 +799,14 @@ class TradingSessionService:
         )
         
         # 4b. Trigger LLM descriptor for UI
-        # Monitoring-mode LLM: fire every 5 min in BALANCED/NO_TRADE for context
-        # In DEAD state: fire every 15 min only (no trade expected, just context update)
-        _monitoring_interval = 900 if amt_result.market_state == "DEAD" else 300
+        # Monitoring-mode LLM: fire every 5 min in active market states for context
+        _monitoring_interval = 300
         monitoring_trigger = (
-            amt_result.market_state in ("BALANCED", "NO_TRADE", "DEAD")
+            amt_result.market_state in ("BALANCED", "IMBALANCED")
             and (time.time() - session._last_monitoring_llm) > _monitoring_interval
         )
         
-        if (trigger_llm and is_new_candle) or monitoring_trigger:
+        if trading_enabled and ((trigger_llm and is_new_candle) or monitoring_trigger):
             session._llm_status = "RUNNING"
             self._event_router.trigger_llm_entry(session, event.symbol, event.tick, amt_result)
             if monitoring_trigger:
@@ -824,6 +872,10 @@ class TradingSessionService:
 
     def _on_trade_closed(self, symbol: str, pnl: float, pos_id: str | None = None) -> None:
         """Callback from TradeLifecycleHandler — records PnL for session tracking."""
+        if pos_id and pos_id in self._recorded_trade_ids:
+            return
+        if pos_id:
+            self._recorded_trade_ids.add(pos_id)
         session = self._state_manager.get_or_create_session(symbol)
         self._event_router.on_trade_closed(symbol, pnl, pos_id, session)
 

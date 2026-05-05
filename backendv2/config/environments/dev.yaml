@@ -1,0 +1,33 @@
+environment: "development"
+broker_mode: "paper"
+log_level: "DEBUG"
+
+exchanges:
+  NSE:
+    enabled: true
+    symbols:
+      NIFTY:
+        enabled: true
+      BANKNIFTY:
+        enabled: false
+      FINNIFTY:
+        enabled: false
+  MCX:
+    enabled: false
+
+risk:
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.10
+  max_consecutive_losses: 10
+  max_concurrent_positions: 3
+
+cost_model:
+  enabled: true
+  base_slippage_bps: 15
+
+scanner:
+  mode: "nse_options"
+  top_n: 1
+  top_per_underlying: 1
+  strikes_around_atm: 2
+  expiry_index: 0

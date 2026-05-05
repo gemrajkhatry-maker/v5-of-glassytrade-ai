@@ -46,7 +46,7 @@ class TestScaleInExecution:
     ):
         """SizingResult returns scale_in_1,2,3 sizes that should be used."""
         # Sizing result returns scale_in_1,2,3 sizes that should be used
-        from app.domain.services.risk_sizing_engine import RiskSizingEngine, RiskTier
+        from app.domain.services.risk_sizing_engine import RiskSizingEngine, KellySizingTier
 
         engine = RiskSizingEngine()
         result = engine.calculate(

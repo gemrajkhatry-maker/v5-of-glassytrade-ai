@@ -503,6 +503,51 @@ class TradeJournal:
         )
         self._write(entry)
 
+    def log_break_even_move(
+        self,
+        *,
+        symbol: str,
+        position_id: str,
+        side: str,
+        entry_price: float,
+        stop_loss: float,
+        pnl: float = 0.0,
+        time_in_trade_s: float = 0.0,
+        amt: dict | None = None,
+        reason: str = "",
+    ) -> None:
+        """Log a breakeven move lifecycle event.
+
+        Args:
+            symbol: Trading symbol
+            position_id: Position identifier
+            side: Position side
+            entry_price: Entry price
+            stop_loss: Updated breakeven stop level
+            pnl: Unrealized or latest realized PnL at move time
+            time_in_trade_s: Time in trade when move happened
+            amt: AMT snapshot (optional)
+            reason: Human-readable rationale
+        """
+        entry = JournalEntry(
+            timestamp=self._now_ist(),
+            event_type="BREAK_EVEN_TRIGGERED",
+            symbol=symbol,
+            position_id=position_id,
+            side=side,
+            entry_price=entry_price,
+            exit_price=stop_loss,
+            exit_reason="BREAK_EVEN_TRIGGERED",
+            stop_loss=stop_loss,
+            take_profit=0.0,
+            pnl=round(pnl, 4),
+            time_in_trade_s=time_in_trade_s,
+            llm_rationale=reason,
+            **self._market_fields(amt),
+            **self._base_fields(),
+        )
+        self._write(entry)
+
     def _write(self, entry: JournalEntry) -> None:
         """Append a journal entry to the daily JSONL file."""
         fname = os.path.join(

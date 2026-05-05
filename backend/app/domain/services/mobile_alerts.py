@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+from app.domain.ports.notification_adapter import INotificationAdapter
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,10 +49,12 @@ class MobileAlertSystem:
         bot_token: str = "",
         chat_id: str = "",
         enabled: bool = True,
+        adapter: INotificationAdapter | None = None,
     ) -> None:
         self._bot_token = bot_token
         self._chat_id = chat_id
         self._enabled = enabled
+        self._adapter = adapter
         self._alerts_sent: list[Alert] = []
         self._last_critical: str = ""
 
@@ -85,32 +89,15 @@ class MobileAlertSystem:
             logger.info("ALERT: %s", formatted)
 
         # Send via Telegram if configured
-        if self._enabled and self._bot_token and self._chat_id:
+        if self._enabled and self._adapter is not None:
             try:
-                self._send_telegram(formatted)
+                self._adapter.send(formatted)
             except Exception as e:
                 logger.error("Failed to send Telegram alert: %s", e)
 
     def _send_telegram(self, message: str) -> None:
-        """Send message via Telegram Bot API."""
-        import urllib.request
-        import urllib.parse
-        import json
-
-        url = f"https://api.telegram.org/bot{self._bot_token}/sendMessage"
-        data = urllib.parse.urlencode(
-            {
-                "chat_id": self._chat_id,
-                "text": message,
-                "parse_mode": "HTML",
-            }
-        ).encode()
-
-        req = urllib.request.Request(url, data=data, method="POST")
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            result = json.loads(resp.read())
-            if not result.get("ok"):
-                logger.error("Telegram API error: %s", result)
+        """Direct transport path is deprecated."""
+        raise NotImplementedError("INotificationAdapter is required to send alerts.")
 
     def get_alerts(
         self,

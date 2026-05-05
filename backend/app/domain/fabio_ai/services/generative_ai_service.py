@@ -50,6 +50,12 @@ class GenerativeAIService:
         """Check if the underlying LLM adapter is ready for inference."""
         return self.llm_adapter.is_ready()
 
+    def runtime_state(self) -> dict[str, str | None]:
+        """Expose adapter runtime state for readiness and diagnostics."""
+        if hasattr(self.llm_adapter, "runtime_state"):
+            return self.llm_adapter.runtime_state()  # type: ignore[attr-defined]
+        return {"state": "UNKNOWN", "reason": "runtime_state not implemented"}
+
     def analyze_market(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze current market data for an *entry* decision.
 

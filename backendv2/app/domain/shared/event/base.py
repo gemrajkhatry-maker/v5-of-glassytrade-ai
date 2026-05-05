@@ -24,7 +24,7 @@ class DomainEvent:
 
     All events are immutable (frozen=True) to ensure:
     - Thread safety
-    - Deterministic replay
+    - Deterministic state re-application
     - Audit trail integrity
 
     Every event has:

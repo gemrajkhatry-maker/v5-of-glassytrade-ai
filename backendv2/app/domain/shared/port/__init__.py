@@ -6,6 +6,7 @@ This ensures dependency inversion: domain has zero dependencies on infrastructur
 
 from app.domain.shared.port.broker import IBroker
 from app.domain.shared.port.market_data import IMarketData
+from app.domain.shared.port.npoc import INPOC
 from app.domain.shared.port.storage import IStorage, IKeyValueStorage
 from app.domain.shared.port.llm_inference import ILLMInference, LLMNotReadyError
 from app.domain.shared.port.notifications import INotification
@@ -14,6 +15,7 @@ from app.domain.shared.port.probability import IProbabilityInference
 __all__ = [
     "IBroker",
     "IMarketData",
+    "INPOC",
     "IStorage",
     "IKeyValueStorage",
     "ILLMInference",

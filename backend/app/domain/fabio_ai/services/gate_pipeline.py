@@ -103,6 +103,7 @@ class GateContext:
 
     # Aggression (from AggressionScorer)
     aggression_score: float = 0.0
+    cvd_conflict: bool = False
 
     # Risk
     is_risk_halted: bool = False
@@ -218,6 +219,13 @@ class GatePipeline:
 
         # HARD GATE 4: IMBALANCED state — allow with aggression confirmation
         # IMBALANCED can trade when: aggression >= threshold AND at a key level
+        if ctx.cvd_conflict and ctx.aggression_score < ctx.min_aggression_score:
+            return self._hard_fail(
+                8,
+                GateReason.BLOCKED,
+                "No aggression + CVD conflict",
+            )
+
         if ctx.market_state == MarketState.IMBALANCED:
             if ctx.aggression_score < ctx.probing_aggression_threshold:
                 return self._hard_fail(

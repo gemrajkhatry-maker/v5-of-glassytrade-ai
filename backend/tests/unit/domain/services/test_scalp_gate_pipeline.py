@@ -103,7 +103,7 @@ class TestEvaluateScalpGates:
             position_size=100.0,
         )
         results = evaluate_scalp_gates(context)
-        # All gates are stubs that always pass
+        # All required gates pass under healthy scaffold conditions
         assert all(r.passed for r in results)
 
     def test_gate_types(self):
@@ -129,7 +129,7 @@ class TestEvaluateScalpGates:
             r for r in results if r.gate == ScalpGate.SESSION_TIMING
         )
         assert session_timing.passed is True
-        assert "stub" in session_timing.detail.lower()
+        assert "session window" in session_timing.detail.lower()
 
     def test_mtf_alignment_gate(self):
         """Test MTF alignment gate."""

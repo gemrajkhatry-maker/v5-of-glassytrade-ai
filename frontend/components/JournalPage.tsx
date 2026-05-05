@@ -34,6 +34,9 @@ interface CompletedTrade {
     mfe: number;
     mae: number;
     market_state: string;
+    thesis_aggression_trigger?: string;
+    thesis_setup_family?: string;
+    close_reason?: string;
     llm_rationale: string;
     position_id: string;
 }
@@ -71,6 +74,8 @@ interface JournalEntry {
 const EXIT_REASON_COLORS: Record<string, string> = {
     STOP_LOSS: 'text-red-400 bg-red-500/10',
     TAKE_PROFIT: 'text-emerald-400 bg-emerald-500/10',
+    EXIT_SIGNAL: 'text-cyan-300 bg-cyan-500/10',
+    ADVERSE_EXIT: 'text-rose-400 bg-rose-500/10',
     TRAILING_STOP: 'text-amber-400 bg-amber-500/10',
     TIME_STOP: 'text-orange-400 bg-orange-500/10',
     OVERSEER_EXIT: 'text-cyan-400 bg-cyan-500/10',
@@ -86,7 +91,34 @@ const EVENT_COLORS: Record<string, string> = {
     ENTRY_REJECTED: 'text-orange-400 bg-orange-500/10',
     EXIT: 'text-purple-400 bg-purple-500/10',
     OVERSEER_ACTION: 'text-cyan-400 bg-cyan-500/10',
+    BREAK_EVEN_TRIGGERED: 'text-yellow-400 bg-yellow-500/10',
 };
+
+function normalizedExitReason(exitReason: string, pnl: number): string {
+    if (!exitReason) return '-';
+    if (pnl < 0 && exitReason === 'TAKE_PROFIT') return 'ADVERSE_EXIT';
+    return exitReason;
+}
+
+function participantLabelFromTrade(trade: CompletedTrade): { text: string; classes: string } | null {
+    const setupFamily = (trade.thesis_setup_family || '').toLowerCase();
+    if (setupFamily === 'imbalance_continuation') {
+        return { text: 'INITIATIVE ↑', classes: 'bg-emerald-400/20 text-emerald-300' };
+    }
+    if (setupFamily === 'return_to_value') {
+        return { text: 'RESPONSIVE ↓', classes: 'bg-blue-400/20 text-blue-300' };
+    }
+
+    const trigger = (trade.thesis_aggression_trigger || '').toLowerCase();
+    if (trigger.includes('break_') || trigger.includes('cvd') || trigger.includes('expansion') || trigger.includes('initiative')) {
+        return { text: 'INITIATIVE ↑', classes: 'bg-emerald-400/20 text-emerald-300' };
+    }
+    if (trigger.includes('responsive') || trigger.includes('neutral') || trigger.includes('volume_present') || trigger.includes('price_movement')) {
+        return { text: 'RESPONSIVE ↓', classes: 'bg-blue-400/20 text-blue-300' };
+    }
+
+    return null;
+}
 
 function formatTime(ts: string): string {
     try {
@@ -189,7 +221,7 @@ export default function JournalPage({ onBack }: { onBack: () => void }) {
                     <>
                         <div className="flex items-center gap-2">
                             <Filter size={14} className="text-white/40" />
-                            {['ALL', 'SIGNAL_GENERATED', 'ENTRY_EXECUTED', 'ENTRY_REJECTED', 'EXIT', 'OVERSEER_ACTION'].map(f => (
+                            {['ALL', 'SIGNAL_GENERATED', 'ENTRY_EXECUTED', 'ENTRY_REJECTED', 'EXIT', 'BREAK_EVEN_TRIGGERED', 'OVERSEER_ACTION'].map(f => (
                                 <button key={f} onClick={() => setFilter(f)}
                                     className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${filter === f ? 'bg-purple-500/20 text-purple-300' : 'bg-white/5 text-white/40 hover:text-white/70'}`}>
                                     {f === 'ALL' ? 'All' : f.replace(/_/g, ' ')}
@@ -251,7 +283,8 @@ function TradesTable({ trades }: { trades: CompletedTrade[] }) {
                 {trades.map((t, i) => {
                     const pnlColor = t.pnl > 0 ? 'text-emerald-400' : t.pnl < 0 ? 'text-red-400' : 'text-white/50';
                     const rowBg = i % 2 === 0 ? 'bg-white/[0.02]' : '';
-                    const reasonColor = EXIT_REASON_COLORS[t.exit_reason] || 'text-white/50 bg-white/5';
+                    const resolvedReason = normalizedExitReason(t.exit_reason, t.pnl);
+                    const reasonColor = EXIT_REASON_COLORS[resolvedReason] || 'text-white/50 bg-white/5';
                     return (
                         <tr key={t.position_id || i} className={`${rowBg} hover:bg-white/5 transition-colors`}>
                             <td className="py-2 px-2 text-white/60 font-mono text-xs">{formatTime(t.entry_time)}</td>
@@ -262,6 +295,15 @@ function TradesTable({ trades }: { trades: CompletedTrade[] }) {
                                     {t.side === 'LONG' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                                     {t.side}
                                 </span>
+                                {(() => {
+                                    const participant = participantLabelFromTrade(t);
+                                    if (!participant) return null;
+                                    return (
+                                        <span className={`inline-flex mt-1 px-1 py-0.5 rounded text-[8px] ${participant.classes}`}>
+                                            {participant.text}
+                                        </span>
+                                    );
+                                })()}
                             </td>
                             <td className="py-2 px-2 text-right font-mono text-xs text-white/70">
                                 {t.entry_price ? t.entry_price.toFixed(2) : '-'}
@@ -278,7 +320,7 @@ function TradesTable({ trades }: { trades: CompletedTrade[] }) {
                             <td className="py-2 px-2 text-xs text-white/50">{formatDuration(t.duration_s)}</td>
                             <td className="py-2 px-2">
                                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${reasonColor}`}>
-                                    {t.exit_reason?.replace(/_/g, ' ') || '-'}
+                                    {(resolvedReason || '').replace(/_/g, ' ') || '-'}
                                 </span>
                             </td>
                             <td className="py-2 px-2 text-right font-mono text-xs text-emerald-400/60">
@@ -325,7 +367,7 @@ function EventsTable({ entries }: { entries: JournalEntry[] }) {
                             <td className="py-2 px-2 text-white/60 font-mono text-xs">{formatTime(e.timestamp)}</td>
                             <td className="py-2 px-2">
                                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${EVENT_COLORS[e.event_type] || 'text-white/50'}`}>
-                                    {e.event_type?.replace(/_/g, ' ')}
+                                    {e.event_type === 'BREAK_EVEN_TRIGGERED' ? 'BE MOVE' : e.event_type?.replace(/_/g, ' ')}
                                 </span>
                             </td>
                             <td className="py-2 px-2 text-white/80 text-xs">{shortSymbolName(e.symbol) || '-'}</td>

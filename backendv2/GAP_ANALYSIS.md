@@ -1,406 +1,260 @@
-# BackendV2 vs Backend — Feature-Level Gap Analysis
+# BackendV2 vs Backend — CORRECTED Feature-Level Gap Analysis (from Actual Code)
 
-> **Backend**: 273 source files, 2,061 tests, production trading system
-> **BackendV2**: 53 source files, 209 tests, event-driven rewrite in progress
-> **Parity**: ~20% by file count, ~10% by feature completeness
-
----
-
-## 1. Event System & Domain Foundation
-
-| Feature | Backend | BackendV2 | Gap |
-|---------|---------|-----------|-----|
-| Domain events | 14 event types in `events.py` | 13 event types in `shared/event/` | ✅ Parity |
-| Event bus | `EventBus` in `event_store.py` | `EventBus` in `application/event_bus.py` | ✅ Better (error isolation, replay) |
-| Event store | SQLite + abstract | Abstract only | ⚠️ Need SQLite impl |
-| Domain ports | 8 ports in `domain/ports/` | 6 ports in `shared/port/` | ⚠️ Missing config_port |
-| DI container | `composition_root.py` + `container.py` | `di/container.py` | ✅ Cleaner |
-| Enums | Full set | Full set | ✅ Parity |
-| Value objects | Full set | Full set | ✅ Parity |
-| Entities (Position, Signal) | Full lifecycle | Full lifecycle | ✅ Parity |
-| Portfolio aggregate | Full (slippage, commission, scale-in) | Full | ✅ Parity |
-
-## 2. AMT Analysis Pipeline
-
-| Feature | Backend | BackendV2 | Gap |
-|---------|---------|-----------|-----|
-| Volume profile | 488L (CME Two-Row) | 130L (basic) | ⚠️ Need CME Two-Row pairs |
-| LVN/HVN detection | 392L (percentile + smoothing) | 173L (basic percentile) | ⚠️ Need smoothing + clustering |
-| CVD tracking | 163L | 162L | ✅ Near parity |
-| Aggression scorer | 281L (7-component) | 70L (σ outlier only) | ❌ Need 7-component model |
-| Acceptance/Rejection | 182L | 130L | ⚠️ Basic, need time accumulation |
-| Market state engine | 145L | 7L (stub) | ❌ Need full implementation |
-| Profile classifier | 238L | 7L (stub) | ❌ Need shape + POC migration |
-| Order flow detectors | 343L | 7L (stub) | ❌ Need BigTrade, Bubble, OFI, Absorption |
-| Initial balance engine | 172L | 7L (stub) | ❌ Need full IB analysis |
-| Break detector | 286L | 7L (stub) | ❌ Need IB break detection |
-| Displacement detector | 236L | 7L (stub) | ❌ Need displacement detection |
-| Drive tracker | 314L | 7L (stub) | ❌ Need momentum tracking |
-| Session context | 596L | 7L (stub) | ❌ Need gap, OBI, session info |
-| MTF analyzer | 118L | 7L (stub) | ❌ Need daily/hourly alignment |
-| Signal pipeline | 323L | — | ❌ Missing |
-| Gate pipeline | 427L | — | ❌ Missing |
-| Entry gates (6 modules) | ~800L total | — | ❌ Missing entirely |
-| AMT pipeline | 445L | — | ❌ Missing |
-| AMT parameters | 147L | — | ❌ Missing |
-| Composite profile | 235L | — | ❌ Missing |
-| Profile factory/selector | 136L | — | ❌ Missing |
-| Multi-timeframe AMT | 506L | — | ❌ Missing |
-| NPOC tracker | 189L | — | ❌ Missing |
-| OI analyzer | 181L | — | ❌ Missing |
-| Opening classifier | 96L | — | ❌ Missing |
-| Opening type classifier | 393L | — | ❌ Missing |
-| Footprint analyzer | 341L | — | ❌ Missing |
-| Order book analyzer | 217L | — | ❌ Missing |
-| Order flow service | 265L | — | ❌ Missing |
-| Level tracker | 107L | — | ❌ Missing |
-| Narrative builder | 99L | — | ❌ Missing |
-| Trade thesis | 200L | — | ❌ Missing |
-| RR validator | 116L | — | ❌ Missing |
-| Spread normalizer | 116L | — | ❌ Missing |
-| LVN play engine | 135L | — | ❌ Missing |
-| LVN quality scorer | 120L | — | ❌ Missing |
-| Drive decay | 180L | — | ❌ Missing |
-| EIA calendar | 180L | — | ❌ Missing |
-| NSE event calendar | 120L | — | ❌ Missing |
-| Regime detector | 575L | — | ❌ Missing |
-| Prediction engine | 209L | — | ❌ Missing |
-| VP contract selector | 653L | — | ❌ Missing |
-| VWAP service | 230L | — | ❌ Missing |
-| Loss tracker | 528L | — | ❌ Missing |
-| Scale manager | 168L | — | ❌ Missing |
-| Market structure classifier | 423L | — | ❌ Missing |
-
-## 3. Trade Management (Exit Domain)
-
-| Feature | Backend | BackendV2 | Gap |
-|---------|---------|-----------|-----|
-| Exit engine | 519L | — | ❌ Missing |
-| Exit rules | 585L | 80L (basic) | ⚠️ Need session-aware time stops |
-| Trail engine | 460L | — | ❌ Missing |
-| Partition exit manager | 231L | — | ❌ Missing |
-| Pyramid manager | 110L | — | ❌ Missing |
-| Position sizer | 136L | — | ❌ Missing |
-| Structural stop engine | 335L | — | ❌ Missing |
-| Exit signal | 18L | — | ❌ Missing |
-| Exit models | — | 79L | ✅ New |
-
-## 4. Risk Management
-
-| Feature | Backend | BackendV2 | Gap |
-|---------|---------|-----------|-----|
-| Risk manager | 257L | — | ❌ Missing |
-| Risk sizing engine | 668L | 61L (basic) | ⚠️ Need full implementation |
-| Risk tier engine | 285L | — | ❌ Missing |
-| Circuit breakers | 147L | In core_components | ⚠️ Need domain-level |
-| Flash crash protector | 123L | — | ❌ Missing |
-| Self-healing | 216L | — | ❌ Missing |
-| Position reconciliation | 163L | — | ❌ Missing |
-| Startup reconciliation | 143L | — | ❌ Missing |
-| Kill switch | In risk_manager | — | ❌ Missing |
-| Walk forward validator | 64L | — | ❌ Missing |
-| Watchdog | 148L | — | ❌ Missing |
-| State bus | 247L | — | ❌ Missing |
-| Latency tracker | 95L | — | ❌ Missing |
-| Mobile alerts | 140L | — | ❌ Missing |
-| OI wall detector | 136L | — | ❌ Missing |
-| OI wall engine | 182L | — | ❌ Missing |
-| Option selection engine | 221L | — | ❌ Missing |
-| Underlying futures provider | 289L | — | ❌ Missing |
-| Symbol registry | 93L | — | ❌ Missing |
-| Capital ladder | 94L | — | ❌ Missing |
-| Fifteen sec trigger | 49L | — | ❌ Missing |
-| Short signal gates | 172L | — | ❌ Missing |
-| Session phase gate | 329L | — | ❌ Missing |
-| Gate rejection tracker | 119L | — | ❌ Missing |
-| Scalp gate pipeline | 87L | — | ❌ Missing |
-| IB breakout scalp | 461L | — | ❌ Missing |
-| One min bar engine | 162L | — | ❌ Missing |
-| Tick delta | 194L | — | ❌ Missing |
-| Tick utils | 82L | — | ❌ Missing |
-| Candle metrics | 84L | — | ❌ Missing |
-| Volatility features | 182L | — | ❌ Missing |
-| Aggressive prints | 173L | — | ❌ Missing |
-| Decimal utils | 45L | — | ❌ Missing |
-
-## 5. AI/ML Domain
-
-| Feature | Backend | BackendV2 | Gap |
-|---------|---------|-----------|-----|
-| Generative AI service | 98L | — | ❌ Missing |
-| Prompt builder | 807L | — | ❌ Missing |
-| Prompt engineering service | 203L | — | ❌ Missing |
-| Response parser | 167L | — | ❌ Missing |
-| LLM rationale service | 117L | — | ❌ Missing |
-| Rule-based rationale | 267L | — | ❌ Missing |
-| LLM contract | 47L | — | ❌ Missing |
-| MLX compute | 301L | — | ❌ Missing |
-| Learning engine | 100L | — | ❌ Missing |
-| Prediction engine | 209L | — | ❌ Missing |
-| Regime detector | 575L | — | ❌ Missing |
-| Agent pipeline | ~400L | — | ❌ Missing |
-| RL system (env, trainer, etc.) | ~600L | — | ❌ Missing |
-| Option scanner | 560L | — | ❌ Missing |
-| Option selector | 335L | — | ❌ Missing |
-| Profile factory | 66L | — | ❌ Missing |
-| Profile selector | 70L | — | ❌ Missing |
-| Underlying profile router | 179L | — | ❌ Missing |
-| Alert manager | 242L | 108L | ⚠️ Basic |
-
-## 6. Application Layer (Orchestration)
-
-| Feature | Backend | BackendV2 | Gap |
-|---------|---------|-----------|-----|
-| Trading session service | 868L | — | ❌ THE core orchestrator |
-| Session state manager | 444L | — | ❌ Missing |
-| Session cache | 360L | — | ❌ Missing |
-| Session risk coordinator | 388L | — | ❌ Missing |
-| Session event logger | 312L | — | ❌ Missing |
-| Session event router | 703L | — | ❌ Missing |
-| Session phase manager | 155L | — | ❌ Missing |
-| AMT service | 149L | — | ❌ Missing |
-| Entry coordinator | 295L | — | ❌ Missing |
-| Exit coordinator | 237L | — | ❌ Missing |
-| Signal coordinator | 98L | — | ❌ Missing |
-| Signal tracking service | 385L | — | ❌ Missing |
-| State broadcaster | 353L | — | ❌ Missing |
-| State snapshot builder | 215L | — | ❌ Missing |
-| Tick processor | 327L | — | ❌ Missing |
-| Trade journal | 907L | — | ❌ Missing |
-| Engine lifecycle | 492L | — | ❌ Missing |
-| Backtest engine | 98L | — | ❌ Missing |
-| Forward test logger | 134L | — | ❌ Missing |
-| Gap detector | 340L | — | ❌ Missing |
-| Phase manager | 175L | — | ❌ Missing |
-| Experiment context | 70L | — | ❌ Missing |
-| AMT coordinator | 81L | — | ❌ Missing |
-
-## 7. Application Handlers
-
-| Feature | Backend | BackendV2 | Gap |
-|---------|---------|-----------|-----|
-| LLM entry handler | 1212L | — | ❌ Missing |
-| LLM overseer handler | 541L | — | ❌ Missing |
-| LLM decision processor | 143L | — | ❌ Missing |
-| LLM worker | 54L | — | ❌ Missing |
-| LLM context | 166L | — | ❌ Missing |
-| LLM signal processor | 99L | — | ❌ Missing |
-| LLM utils | 128L | — | ❌ Missing |
-| Trade lifecycle handler | 374L | — | ❌ Missing |
-| AMT handler | 208L | — | ❌ Missing |
-| Entry gate coordinator | 233L | — | ❌ Missing |
-| Post trade analyst | 261L | — | ❌ Missing |
-| Pre candle advisor | 190L | — | ❌ Missing |
-| RL handler | 54L | — | ❌ Missing |
-| Institutional detector | 115L | — | ❌ Missing |
-| Episodic loader | 60L | — | ❌ Missing |
-
-## 8. API Layer
-
-| Feature | Backend | BackendV2 | Gap |
-|---------|---------|-----------|-----|
-| Trading router | 103L | — | ❌ Missing |
-| Health router | 388L | — | ❌ Missing |
-| Market router | 55L | — | ❌ Missing |
-| AI router | 271L | — | ❌ Missing |
-| RL router | 201L | — | ❌ Missing |
-| Alerts router | 35L | — | ❌ Missing |
-| Analysis router | 63L | — | ❌ Missing |
-| Observability router | 33L | — | ❌ Missing |
-| Metrics router | 56L | 30L | ⚠️ Basic |
-| WebSocket / SSE | gameloop.py | — | ❌ Missing |
-| FastAPI app | main.py | main.py (196L) | ⚠️ Basic |
-| Dependencies | dependencies.py | — | ❌ Missing |
-
-## 9. Infrastructure
-
-| Feature | Backend | BackendV2 | Gap |
-|---------|---------|-----------|-----|
-| SQLite storage | 953L | — | ❌ Missing |
-| PostgreSQL adapter | — | 163L | ✅ New |
-| Redis cache | — | 103L | ✅ New |
-| Dhan adapter | 507L | 80L | ⚠️ Basic |
-| MLX inference adapter | 750L | — | ❌ Missing |
-| GGUF inference adapter | 154L | — | ❌ Missing |
-| LGBM probability adapter | 166L | — | ❌ Missing |
-| Paper broker | 208L | — | ❌ Missing |
-| MCX broker | ~200L | — | ❌ Missing |
-| Delta profile adapter | 142L | — | ❌ Missing |
-| NPOC adapter | 64L | — | ❌ Missing |
-| Null notification adapter | 16L | — | ❌ Missing |
-| Data generator | 81L | — | ❌ Missing |
-| Serialization schemas | ~300L | — | ❌ Missing |
-| Exchange strategies (NSE, MCX) | ~150L | — | ❌ Missing |
-| Config adapter | ~100L | — | ❌ Missing |
-| MLX GPU lock | ~50L | — | ❌ Missing |
-
-## 10. Configuration
-
-| Feature | Backend | BackendV2 | Gap |
-|---------|---------|-----------|-----|
-| base.yaml | ✅ | — | ❌ Missing |
-| environments/*.yaml | 3 files | — | ❌ Missing |
-| strategies/*.yaml | 2 files | — | ❌ Missing |
-| feature_flags.yaml | ✅ | — | ❌ Missing |
-| instruments.json | ✅ | — | ❌ Missing |
-| config.py | ✅ | — | ❌ Missing |
-| config_models/ | 6 files | — | ❌ Missing |
+> **DO NOT TRUST existing doc claims of "stubs" or "missing" — verify against actual code.**
+> The IMPLEMENTATION_PLAN.md, PROGRESS.md, and old GAP_ANALYSIS.md were written at an earlier stage and are **significantly outdated**.
+>
+> **Actual BackendV2**: 53+ source files, ~4,400 lines of implementation, ~4,400 lines of tests
+> **Parity**: ~30–45% by implementation, NOT the 10–20% previously claimed
 
 ---
 
-## Priority Ranking for Zero Parity
+## Key Correction: Files NOT "stubs" — they're REAL implementations
 
-### P0 — Blocking (can't trade without these)
+The prior gap analysis incorrectly flagged several files as "7L stubs" or "missing" that are actually fully implemented:
 
-1. **TradingSessionService** — the central orchestrator (868L)
+### Phase 2 AMT Services — Previously Claimed as "Stubs" but Actually Implemented
+
+| Service | Old Claim | Reality | Lines |
+|---------|-----------|---------|-------|
+| Market State Engine | "7L stub" (❌) | Full 2-state: BALANCED/IMBALANCED, zone classification, extreme σ detection, confidence scoring | 119L ✅ |
+| Profile Classifier | "7L stub" (❌) | P/b/D/B shape classification, POC migration tracking, price divergence detection | 136L ✅ |
+| Order Flow Detectors | "7L stub" (❌) | BigTradeDetector, BubbleDetector, OFICalculator, AbsorptionDetector | 171L ✅ |
+| Initial Balance Engine | "7L stub" (❌) | IB high/low tracking, timeout completion, prior day levels | 112L ✅ |
+| Break Detector | "7L stub" (❌) | Initiative break (UP/DOWN), Responsive fade, IB break (tick-based) | 105L ✅ |
+| Displacement Detector | "7L stub" (❌) | ATR multiplier displacement, direction & strength, multiple detection | 100L ✅ |
+| Drive Tracker | "7L stub" (❌) | D1/D2/D3+ tracking, momentum, entry validation, exhaustion | 74L ✅ |
+| Session Context | "7L stub" (❌) | Gap classification (SMALL/MEDIUM/LARGE), OBI (LONG/SHORT/NEUTRAL), session phase (MORNING/AFTERNOON), day type | 119L ✅ |
+| MTF Analyzer | "7L stub" (❌) | Daily/hourly alignment (ALIGNED_BULLISH/ALIGNED_BEARISH/DIVERGENT), higher TF level tracking | 116L ✅ |
+| Aggression Scorer | "70L sigma only" (❌) | Full 7-component additive scoring: footprint, CVD, big trade, absorption, OFI, LVN confluence, volume bubble. PLUS sigma-based legacy API, PersistentAggressionScorer with persistence bars | 211L ✅ |
+| Signal Generator | "missing" (❌) | Triple-A methodology: BUY absorption + above VWAP = LONG, SELL absorption + below VWAP = SHORT, R:R validation, both dict and Signal value object APIs | 131L ✅ |
+
+### Phase 3 Exit Domain — Previously Claimed as "Missing" but Actually Implemented
+
+| Feature | Old Claim | Reality | Lines |
+|---------|-----------|---------|-------|
+| Exit Engine | "missing" (❌) | Full: SL/TP (wick-based), time stop, spread blowout, trailing stop, partition exit (P1 at 1R, P2 at 2R), plus TrailEngine + PartitionExitManager | 226L ✅ |
+| Exit Rules | "basic" (⚠️) | classify_exit, check_time_stop, check_spread_blowout with session-aware limits | 80L ✅ |
+| Exit Models | "new" (✅) | ExitDecision, ExitReason value objects | 79L ✅ |
+
+### Phase 4 Risk Domain — Previously Claimed as "Missing" but Actually Implemented
+
+| Feature | Old Claim | Reality | Lines |
+|---------|-----------|---------|-------|
+| Risk Manager | "missing" (❌) | Full: DailyRiskState, KillSwitch, drawdown check (2%), consecutive losses (3), position limits (5), portfolio notional (60%), per-symbol notional (20%), drift detection | 200L ✅ |
+| Risk Sizing Engine | "basic" (⚠️) | Present but limited — needs tiered sizing implementation | 61L ⚠️ |
+
+### Phase 6 Infrastructure — More Complete Than Claimed
+
+| Feature | Old Claim | Reality | Lines |
+|---------|-----------|---------|-------|
+| PostgreSQL adapter | "new" (✅) | Full async adapter with connection pooling, retries, health check | 163L ✅ |
+| Redis cache | "new" (✅) | Full async cache with TTL, health check | 103L ✅ |
+| Database | "missing" (❌) | Full SQLite storage: trades, orders, market data, positions, tick batching | 373L ✅ |
+| Dhan adapter | "basic" (⚠️) | Place/cancel orders, position query, health check — needs more | 80L ⚠️ |
+
+---
+
+## What's TRULY Missing (verified against actual code)
+
+### Phase 2 — Remaining AMT Gaps
+
+| Feature | Backend (LOC) | BackendV2 | Action |
+|---------|---------------|-----------|--------|
+| Gate pipeline | 427L | ❌ Missing | **Need to port** |
+| Entry gates (6 modules, ~800L) | ~800L | ❌ Missing | **Need to port** |
+| Composite profile | 235L | ❌ Missing | **Need to port** |
+| Profile factory/selector | 136L | ❌ Missing | **Need to port** |
+| Multi-timeframe AMT (full) | 506L | 116L (basic) | Need enhanced — current MTF is daily/hourly only |
+| NPOC tracker | 189L | ❌ Missing | **Need to port** |
+| OI analyzer | 181L | ❌ Missing | **Need to port** |
+| Opening classifier | 96L + 393L | ❌ Missing | **Need to port** |
+| Footprint analyzer | 341L | ❌ Missing | **Need to port** |
+| Order book analyzer | 217L | ❌ Missing | **Need to port** |
+| Order flow service | 265L | ❌ Missing | **Need to port** |
+| Level tracker | 107L | ❌ Missing | **Need to port** |
+| Narrative builder | 99L | ❌ Missing | **Need to port** |
+| Trade thesis | 200L | ❌ Missing | **Need to port** |
+| RR validator | 116L | ❌ Missing | **Need to port** |
+| Spread normalizer | 116L | ❌ Missing | **Need to port** |
+| LVN play engine | 135L | ❌ Missing | **Need to port** |
+| LVN quality scorer | 120L | ❌ Missing | **Need to port** |
+| Drive decay | 180L | ❌ Missing | **Need to port** |
+| EIA calendar | 180L | ❌ Missing | **Need to port** |
+| NSE event calendar | 120L | ❌ Missing | **Need to port** |
+| Regime detector | 575L | ❌ Missing | **Need to port** |
+| Prediction engine | 209L | ❌ Missing | **Need to port** |
+| VP contract selector | 653L | ❌ Missing | **Need to port** |
+| VWAP service | 230L | ❌ Missing | **Need to port** |
+| Loss tracker | 528L | ❌ Missing | **Need to port** |
+| Scale manager | 168L | ❌ Missing | **Need to port** |
+| Market structure classifier | 423L | ❌ Missing | **Need to port** |
+| AMT parameters | 147L | ❌ Missing | **Need to port** |
+
+### Phase 3 — Exit Domain Gaps
+
+| Feature | Backend (LOC) | BackendV2 | Action |
+|---------|---------------|-----------|--------|
+| Trail Engine (full ATR/VWAP/CVD) | 460L | Partial (in exit_engine.py) | **Need full trail engine** |
+| Partition Exit Manager (full) | 231L | Partial (in exit_engine.py) | **Need dedicated module** |
+| Pyramid Manager | 110L | ❌ Missing | **Need to port** |
+| Position Sizer | 136L | ❌ Missing | **Need to port** |
+| Structural Stop Engine | 335L | ❌ Missing | **Need to port** |
+| Exit signal | 18L | ❌ Missing | **Need to port** |
+
+### Phase 4 — Risk Domain Gaps
+
+| Feature | Backend (LOC) | BackendV2 | Action |
+|---------|---------------|-----------|--------|
+| Risk Sizing Engine (full) | 668L | 61L (basic) | **Need tiered sizing, dynamic risk, compounding** |
+| Risk Tier Engine | 285L | ❌ Missing | **Need to port** |
+| Circuit Breakers | 147L | ❌ Missing (in core_components only) | **Need domain-level** |
+| Flash Crash Protector | 123L | ❌ Missing | **Need to port** |
+| Self-Healing | 216L | ❌ Missing | **Need to port** |
+| Position Reconciliation | 163L | ❌ Missing | **Need to port** |
+| Startup Reconciliation | 143L | ❌ Missing | **Need to port** |
+
+### Phase 5 — Application Layer (Mostly Missing)
+
+| Feature | Backend (LOC) | BackendV2 | Action |
+|---------|---------------|-----------|--------|
+| Trading Session Service | 868L | ❌ Missing | **THE core orchestrator** |
+| Session State Manager | 444L | ❌ Missing | **Need to port** |
+| Session Cache | 360L | ❌ Missing | **Need to port** |
+| Session Risk Coordinator | 388L | ❌ Missing | **Need to port** |
+| Entry Coordinator | 295L | ❌ Missing | **Need to port** |
+| Exit Coordinator | 237L | ❌ Missing | **Need to port** |
+| Tick Processor | 327L | ❌ Missing | **Need to port** |
+| State Snapshot Builder | 215L | ❌ Missing | **Need to port** |
+| State Broadcaster | 353L | ❌ Missing | **Need to port** |
+| Trade Journal | 907L | ❌ Missing | **Need to port** |
+| Engine Lifecycle | 492L | ❌ Missing | **Need to port** |
+| Signal Coordinator | 98L | ❌ Missing | **Need to port** |
+| Signal Tracking Service | 385L | ❌ Missing | **Need to port** |
+
+### Phase 5 — Handlers (Mostly Missing)
+
+| Feature | Backend (LOC) | BackendV2 | Action |
+|---------|---------------|-----------|--------|
+| LLM Entry Handler | 1212L | ❌ Missing | **Need to port** |
+| LLM Overseer Handler | 541L | ❌ Missing | **Need to port** |
+| Trade Lifecycle Handler | 374L | ❌ Missing | **Need to port** |
+| AMT Handler | 208L | ❌ Missing | **Need to port** |
+| Entry Gate Coordinator | 233L | ❌ Missing | **Need to port** |
+| Post Trade Analyst | 261L | ❌ Missing | **Need to port** |
+| Pre Candle Advisor | 190L | ❌ Missing | **Need to port** |
+
+### Phase 7 — API Layer (Mostly Missing)
+
+| Feature | Backend (LOC) | BackendV2 | Action |
+|---------|---------------|-----------|--------|
+| Trading Router | 103L | ❌ Missing | **Need to port** |
+| Health Router | 388L | ❌ Missing | **Need to port** |
+| Market Router | 55L | ❌ Missing | **Need to port** |
+| AI Router | 271L | ❌ Missing | **Need to port** |
+| RL Router | 201L | ❌ Missing | **Need to port** |
+| Alerts Router | 35L | ❌ Missing | **Need to port** |
+| Analysis Router | 63L | ❌ Missing | **Need to port** |
+| Observability Router | 33L | ❌ Missing | **Need to port** |
+| WebSocket/SSE | gameloop.py | ❌ Missing | **Need to port** |
+| FastAPI App (full) | main.py | main.py (basic) | Need middleware, CORS, lifespan |
+| Dependencies | dependencies.py | ❌ Missing | **Need to port** |
+
+### Phase 8 — AI/ML Domain (Entirely Missing)
+
+| Feature | Backend (LOC) | BackendV2 | Action |
+|---------|---------------|-----------|--------|
+| Generative AI Service | 98L | ❌ Missing | **Need to port** |
+| Prompt Builder | 807L | ❌ Missing | **Need to port** |
+| Prompt Engineering Service | 203L | ❌ Missing | **Need to port** |
+| Response Parser | 167L | ❌ Missing | **Need to port** |
+| LLM Rationale Service | 117L | ❌ Missing | **Need to port** |
+| MLX Compute | 301L | ❌ Missing | **Need to port** |
+| MLX Inference Adapter | 750L | ❌ Missing | **Need to port** |
+| GGUF Inference Adapter | 154L | ❌ Missing | **Need to port** |
+| LGBM Probability Adapter | 166L | ❌ Missing | **Need to port** |
+| Agent Pipeline | ~400L | ❌ Missing | **Need to port** |
+| RL System | ~600L | ❌ Missing | **Need to port** |
+
+### Infrastructure Gaps
+
+| Feature | Backend (LOC) | BackendV2 | Action |
+|---------|---------------|-----------|--------|
+| Paper Broker | 208L | ❌ Missing | **Need to port** |
+| MCX Broker | ~200L | ❌ Missing | **Need to port** |
+| Dhan Adapter (full) | 507L | 80L | **Need enhanced** |
+| Serialization Schemas | ~300L | ❌ Missing | **Need to port** |
+| Exchange Strategies | ~150L | ❌ Missing | **Need to port** |
+
+### Configuration Gaps
+
+| Feature | Backend | BackendV2 | Action |
+|---------|---------|-----------|--------|
+| Config models | 6 files | ❌ Missing | **Need to port** |
+| YAML environments (dev/paper/live) | 3 files | ❌ Missing | **Need to port** |
+| Strategy configs (NSE/MCX) | 2 files | ❌ Missing | **Need to port** |
+| feature_flags.yaml | ✅ | ❌ Missing | **Need to port** |
+| instruments.json | ✅ | ❌ Missing | **Need to port** |
+
+---
+
+## Corrected Priority Summary
+
+### Really Ready (P0 — don't re-port, already exists)
+These were falsely flagged as needing work but are already at parity or better:
+
+- ✅ Market State Engine (119L — better than backend 145L)
+- ✅ Profile Classifier (136L — P/b/D/B + POC migration)
+- ✅ Order Flow Detectors (171L — BigTrade, Bubble, OFI, Absorption)
+- ✅ Break Detector (105L — initiative, responsive, IB)
+- ✅ Displacement Detector (100L — ATR-based)
+- ✅ Initial Balance Engine (112L — IB tracking)
+- ✅ Drive Tracker (74L — D1/D2/D3+)
+- ✅ Session Context (119L — gap, OBI, session phase)
+- ✅ MTF Analyzer (116L — daily/hourly alignment)
+- ✅ Aggression Scorer (211L — full 7-component)
+- ✅ Signal Generator (131L — Triple-A methodology)
+- ✅ Exit Engine (226L — SL/TP, time stop, trail, partition)
+- ✅ Risk Manager (200L — drawdown, loss limits, drift)
+
+### P0 — Truly Missing (blocking trade execution)
+1. **TradingSessionService** — central orchestrator (868L backend)
 2. **SessionStateManager** — per-symbol state (444L)
-3. **SessionCache** — cached analysis data (360L)
-4. **TickProcessor** — tick processing pipeline (327L)
-5. **EntryCoordinator** — signal gating + entry (295L)
-6. **ExitCoordinator** — exit management (237L)
-7. **SessionRiskCoordinator** — per-symbol risk (388L)
-8. **StateSnapshotBuilder** — UI state (215L)
-9. **StateBroadcaster** — frontend updates (353L)
-10. **TradeLifecycleHandler** — position lifecycle (374L)
-11. **TradeJournal** — trade recording (907L)
-12. **EngineLifecycle** — startup/shutdown (492L)
-13. **SQLiteStorage** — persistence (953L)
-14. **DhanAdapter** — broker (507L → need full)
-15. **PaperBroker** — simulation (208L)
-16. **Config system** — YAML loading, settings
-17. **API routers** — health, trading, market, AI, RL, alerts, analysis
-18. **FastAPI app** — full middleware, CORS, lifespan
-19. **WebSocket/SSE** — real-time frontend
-20. **Serialization schemas** — Pydantic DTOs
+3. **EntryCoordinator** — signal gating + entry (295L)
+4. **ExitCoordinator** — exit management (237L)
+5. **TickProcessor** — tick pipeline (327L)
+6. **TradeJournal** — trade recording (907L)
+7. **EngineLifecycle** — startup/shutdown (492L)
+8. **PositionSizer** — position sizing (136L)
+9. **API routers** (health, trading, market, etc.)
+10. **WebSocket/SSE** — frontend real-time communication
+11. **Paper broker** — simulation (208L)
+12. **Config system** — YAML loading, settings
 
-### P1 — Core AMT (can't analyze without these)
+### P1 — Core AMT enhancements
+13. **Loss Tracker** — daily loss + circuit breakers (528L)
+14. **Gate pipeline** — multi-stage gating (427L)
+15. **Entry gates** — confirmation bundle (~800L)
+16. **VWAP service** — VWAP with σ bands (230L)
+17. **Pyramid Manager** — structured add-on (110L)
+18. **Structural Stop Engine** — LVN/VA-based SL (335L)
 
-21. **VolumeProfile** — CME Two-Row pairs (488L)
-22. **LVNDetector** — full percentile + smoothing (392L)
-23. **MarketStateEngine** — BALANCED/IMBALANCED (145L)
-24. **BreakDetector** — IB break detection (286L)
-25. **DisplacementDetector** — displacement (236L)
-26. **InitialBalanceEngine** — IB analysis (172L)
-27. **AggressionScorer** — full 7-component (281L)
-28. **OrderFlowDetectors** — BigTrade, Bubble, OFI, Absorption (343L)
-29. **SessionContext** — gap, OBI, session info (596L)
-30. **ProfileClassifier** — shape + POC migration (238L)
-31. **SignalGenerator** — Fabio spec gating (64L)
-32. **GatePipeline** — multi-stage entry gating (427L)
-33. **EntryGates** — confirmation bundle, detectors, grading (~800L)
-34. **MTFAnalyzer** — multi-timeframe (118L)
-35. **DriveTracker** — momentum (314L)
-36. **LossTracker** — daily loss + circuit breakers (528L)
-
-### P2 — Trade Management (can't manage positions without these)
-
-37. **ExitEngine** — main exit orchestrator (519L)
-38. **ExitRules** — session-aware time stops (585L)
-39. **TrailEngine** — ATR/VWAP/CVD trailing (460L)
-40. **PartitionExitManager** — P1/P2/P3 (231L)
-41. **PyramidManager** — structured add-on (110L)
-42. **PositionSizer** — fixed fractional (136L)
-43. **StructuralStopEngine** — LVN/VA/IB-based SL (335L)
-44. **RiskSizingEngine** — full implementation (668L)
-45. **RiskTierEngine** — risk tier management (285L)
-
-### P3 — Risk & Operations
-
-46. **RiskManager** — daily drawdown, kill switch (257L)
-47. **CircuitBreakers** — domain-level (147L)
-48. **FlashCrashProtector** — flash crash protection (123L)
-49. **SelfHealing** — order rejection, DB fallback (216L)
-50. **PositionReconciliation** — position sync (163L)
-51. **StartupReconciliation** — startup recovery (143L)
-52. **Watchdog** — monitoring (148L)
-53. **StateBus** — state event bus (247L)
-54. **WalkForwardValidator** — OOS validation (64L)
-
-### P4 — AI/ML
-
-55. **LLMEntryHandler** — LLM-based entry (1212L)
-56. **LLMOverseerHandler** — overseer validation (541L)
-57. **LLMDecisionProcessor** — decision processing (143L)
-58. **LLMWorker** — threaded LLM (54L)
-59. **PromptBuilder** — prompt construction (807L)
-60. **GenerativeAIService** — LLM integration (98L)
-61. **ResponseParser** — LLM response parsing (167L)
-62. **MLXCompute** — Apple Silicon GPU (301L)
-63. **MLXInferenceAdapter** — MLX inference (750L)
-64. **GGUFInferenceAdapter** — GGUF inference (154L)
-65. **LGBMProbabilityAdapter** — LGBM probability (166L)
-66. **RegimeDetector** — regime classification (575L)
-67. **AgentPipeline** — probability agent (~400L)
-68. **RLSystem** — RL training (~600L)
-69. **OptionScanner** — options chain scanning (560L)
-70. **OptionSelector** — option selection (335L)
-
-### P5 — Advanced Features
-
-71. **BacktestEngine** — historical backtesting (98L)
-72. **ForwardTestLogger** — forward test logging (134L)
-73. **GapDetector** — gap detection (340L)
-74. **PhaseManager** — session phase management (175L)
-75. **PostTradeAnalyst** — post-trade analysis (261L)
-76. **PreCandleAdvisor** — pre-candle advisory (190L)
-77. **InstitutionalDetector** — institutional detection (115L)
-78. **UnderlyingFuturesProvider** — underlying futures (289L)
-79. **OIWallDetector/Engine** — OI wall detection (318L)
-80. **FootprintAnalyzer** — footprint analysis (341L)
-81. **OrderBookAnalyzer** — order book analysis (217L)
-82. **MarketStructureClassifier** — market structure (423L)
-83. **VPContractSelector** — volume profile contract selection (653L)
-84. **MultiTimeframeAMT** — multi-timeframe AMT (506L)
-85. **NPOCAnalyzer** — NPOC tracking (189L)
-86. **DriveDecay** — drive decay (180L)
-87. **LevelTracker** — level tracking (107L)
-88. **NarrativeBuilder** — narrative building (99L)
-89. **TradeThesis** — trade thesis (200L)
-90. **RRValidator** — risk-reward validation (116L)
-91. **SpreadNormalizer** — spread normalization (116L)
-92. **OpeningTypeClassifier** — opening type (393L)
-93. **OpeningClassifier** — opening classification (96L)
-94. **EIACalendar** — EIA calendar (180L)
-95. **NSEEventCalendar** — NSE event calendar (120L)
-96. **PredictionEngine** — prediction engine (209L)
-97. **LearningEngine** — learning engine (100L)
-98. **AbsorptionValidator** — absorption validation (145L)
-99. **AlertManager** — alert management (242L)
-100. **MobileAlerts** — mobile alerts (140L)
+### P2 — Advanced Features
+19. Full AI/ML layer (LLM handlers, prompt builder, MLX inference, etc.)
+20. Full Dhan adapter (507L target)
+21. Enhanced order flow (footprint, order book, OI analysis)
+22. Advanced profile (composite, factory, NPOC)
+23. Regime detection, market structure classification
 
 ---
 
-## Summary
+## Corrected Test Status
 
-| Layer | Backend Files | BackendV2 Files | Parity |
-|-------|--------------|-----------------|--------|
-| Event system | 1 | 13 | ✅ Better |
-| Domain models | 20 | 7 | ✅ Core done |
-| AMT services | 92 | 19 | ❌ ~20% |
-| Exit/Trade mgmt | ~2000L | ~160L | ❌ ~8% |
-| Risk domain | ~2500L | ~60L | ❌ ~2% |
-| AI/ML | ~4000L | 0L | ❌ 0% |
-| Application | 56 files | 7 files | ❌ ~12% |
-| Handlers | 15 files | 3 files | ❌ ~20% |
-| API | 14 files | 2 files | ❌ ~14% |
-| Infrastructure | 23 files | 7 files | ❌ ~30% |
-| **Total** | **~273** | **~53** | **~20%** |
-
-### Key Insight
-
-The **domain foundation** (events, models, portfolio) is solid at ~80% parity.
-The **AMT pipeline** is at ~20% — the orchestrator exists but most specialized
-services are stubs. The **application layer** (orchestration, handlers) is at
-~12% — the critical `TradingSessionService`, `SessionStateManager`, `EntryCoordinator`,
-`ExitCoordinator`, etc. are all missing. The **AI/ML layer** is at 0%.
-
-### Recommended Approach
-
-Rather than porting file-by-file, focus on **vertical slices** — complete one
-end-to-end flow at a time:
-
-1. **Slice 1**: Tick → AMT analysis → Signal (core pipeline)
-2. **Slice 2**: Signal → Risk check → Entry → Position opened
-3. **Slice 3**: Position → Tick → Exit check → Position closed
-4. **Slice 4**: LLM entry handler → Overseer → Decision
-5. **Slice 5**: Full session lifecycle (init, run, shutdown, recovery)
+| Area | Tests | Status |
+|------|-------|--------|
+| Event system | test_events.py (255L), test_event_bus.py (190L) | ✅ Good |
+| Domain models | test_aggregates.py (221L), test_value_objects.py (188L), test_position.py (199L), test_enums | ✅ Good |
+| AMT services | 11 test files across amt/ + domain/ | ✅ Good |
+| Application handlers | 3 handler test files | ✅ Adequate |
+| Infrastructure | 5 test files (database, adapters, cache, alerts, postgres) | ✅ Good |
+| E2E | 3 test files (event_flow, triple_a, valentini_scalper) | ✅ Good |
+| **Total** | **~4,400 lines of tests** | **✅ Strong baseline** |

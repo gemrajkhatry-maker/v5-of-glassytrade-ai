@@ -39,7 +39,7 @@ def test_run_gate_pipeline_blocks_on_warmup_insufficient_candles():
     data = _session_candles()[:2]
     tick = data[-1]
     amt = _amt_imbalance()
-    passed, reason, detail = run_gate_pipeline(
+    passed, reason, detail, _soft_gates_passed, _soft_gates_total = run_gate_pipeline(
         data=data,
         amt_result=amt,
         tick=tick,
@@ -66,7 +66,7 @@ def test_run_gate_pipeline_passes_then_build_entry_signal_returns_signal():
     data = data + [tick]
     amt = _amt_imbalance()
 
-    passed, reason, detail = run_gate_pipeline(
+    passed, reason, detail, _soft_gates_passed, _soft_gates_total = run_gate_pipeline(
         data=data,
         amt_result=amt,
         tick=tick,

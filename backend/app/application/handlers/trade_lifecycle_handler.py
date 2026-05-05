@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
+from decimal import Decimal
 from typing import TYPE_CHECKING, Callable
 
 from app.domain.fabio_ai.services.exit_engine import ExitEngine, ExitReason, ExitSignal
@@ -56,13 +57,16 @@ class TradeLifecycleHandler:
         ]
         | None = None,
         persist_fn=None,
+        event_logger=None,
         on_trade_closed: Callable[[str, float], None] | None = None,
     ) -> None:
         self._exit_engine = exit_engine or ExitEngine(persist_fn=persist_fn)
         self._partition_manager = PartitionExitManager()
         self._partition_states: dict[str, PartitionState] = {}
+        self._partition_symbols: dict[str, str] = {}
         self._on_stop_out = on_stop_out
         self._on_partial_exit = on_partial_exit
+        self._event_logger = event_logger
         self._on_trade_closed = on_trade_closed
 
     @property
@@ -180,7 +184,25 @@ class TradeLifecycleHandler:
 
             # 4. CVD-based breakeven: move SL to entry when CVD confirms direction
             if cvd_slope != 0.0:
-                self._exit_engine.apply_cvd_breakeven(pos, cvd_slope)
+                if self._exit_engine.apply_cvd_breakeven(pos, cvd_slope):
+                    if self._event_logger:
+                        time_in_trade = 0.0
+                        if pos.exit_time and pos.entry_time:
+                            try:
+                                from datetime import datetime as _dt
+
+                                _exit = _dt.fromisoformat(pos.exit_time.replace("Z", "+00:00"))
+                                _entry = _dt.fromisoformat(pos.entry_time.replace("Z", "+00:00"))
+                                time_in_trade = (_exit - _entry).total_seconds()
+                            except Exception:
+                                time_in_trade = pos.tick_count * 0.5
+                        self._event_logger.log_break_even_triggered(
+                            symbol=symbol or pos.symbol,
+                            position=pos,
+                            pnl=float(pos.pnl or 0),
+                            time_in_trade_s=time_in_trade,
+                            reason=f"CVD slope {cvd_slope:.2f} confirmed {('LONG' if is_long else 'SHORT')}",
+                        )
 
             # 5. VWAP trail (Gap #9): trail SL to VWAP bands at 1.5R profit
             if amt_result and getattr(amt_result, "session_vwap", 0) > 0:
@@ -324,31 +346,49 @@ class TradeLifecycleHandler:
 
                 # Fabio FR-09: After P1 exit (1R hit), check for pyramid add
                 if psig.exit_type == "PARTITION_1":
-                    self._check_pyramid_add(pos, current_price, amt_result)
+                    self._check_pyramid_add(
+                        portfolio=portfolio,
+                        pos=pos,
+                        current_price=current_price,
+                        amt_result=amt_result,
+                    )
 
         # Apply partition manager's trail SL (breakeven/P3 trail) to position
         p_state_after = self._partition_states.get(pos.id)
         if p_state_after and p_state_after.trail_sl and p_state_after.trail_sl > 0:
             self._exit_engine.adjust_stop_loss(pos, p_state_after.trail_sl)
 
-    def initialize_partition_state(self, position_id: str) -> None:
+    def initialize_partition_state(self, position_id: str, symbol: str | None = None) -> None:
         """Initialize partition exit state for a newly opened position."""
         self._partition_states[position_id] = PartitionState()
+        if symbol:
+            self._partition_symbols[position_id] = symbol
 
     def clear_partition_state(self, position_id: str) -> None:
         """Clear partition state when a position is closed."""
         self._partition_states.pop(position_id, None)
+        self._partition_symbols.pop(position_id, None)
 
-    def has_managed_positions(self, symbol: str) -> bool:
+    def has_managed_positions(self, symbol: str, portfolio: Portfolio | None = None) -> bool:
         """Check if there are open positions for the symbol.
 
         Since ExitEngine is stateless, we just check partition states.
         This is used by LLM handler to decide if overseer should run.
         """
-        # Partition states track positions we're managing
+        if portfolio is not None:
+            return any(
+                p.is_open and getattr(p, "symbol", "") == symbol
+                for p in portfolio.positions
+            )
+
+        # Partition states track positions we're managing, but when portfolio
+        # is not supplied, fall back to recorded symbol ownership.
+        if not symbol:
+            return len(self._partition_states) > 0
+
         return any(
-            pid.startswith(symbol)
-            for pid in self._partition_states.keys()
+            pid.startswith(f"{symbol}:") or self._partition_symbols.get(pid) == symbol
+            for pid in self._partition_states
         )
 
     def in_cooldown(self, symbol: str) -> bool:
@@ -359,7 +399,7 @@ class TradeLifecycleHandler:
         """Invoke the on_trade_closed callback after a full close."""
         self.clear_partition_state(pos.id)
         if self._on_trade_closed and hasattr(pos, "pnl") and pos.pnl is not None:
-            self._on_trade_closed(pos.symbol, float(pos.pnl))
+            self._on_trade_closed(pos.symbol, float(pos.pnl), pos.id)
 
     @staticmethod
     def _resolve_stop_price(pos: Position, tick_low: float, tick_high: float) -> float | None:
@@ -372,3 +412,46 @@ class TradeLifecycleHandler:
             else str(pos.side) == "LONG"
         )
         return tick_low if is_long else tick_high
+
+    def _check_pyramid_add(
+        self,
+        portfolio: Portfolio,
+        pos: Position,
+        current_price: float,
+        amt_result,
+    ) -> None:
+        """Evaluate FR-09 pyramid add after PARTITION_1 partial exit."""
+        if amt_result is None:
+            return
+
+        aggression_score = getattr(amt_result, "aggression_score", 0) or 0
+        current_lvn = float(getattr(amt_result, "current_lvn", 0.0) or 0.0)
+        if aggression_score < 3.0 or current_lvn <= 0:
+            return
+
+        entry_lvns = list(getattr(pos, "entry_lvns", []))
+        pyramid = self._exit_engine.check_pyramid(
+            pos,
+            current_price,
+            aggression_score,
+            entry_lvns,
+            current_lvn,
+        )
+        if pyramid is None:
+            return
+
+        size_mult, new_sl = pyramid
+        if not portfolio.add_to_position(pos.id, size_mult, current_price):
+            return
+
+        pos.stop_loss = Decimal(str(new_sl))
+        if current_lvn > 0 and current_lvn not in entry_lvns:
+            pos.entry_lvns.append(current_lvn)
+
+        logger.info(
+            "Pyramid add executed for %s at %.2f size_mult=%.2f unified_sl=%.2f",
+            pos.id,
+            current_price,
+            size_mult,
+            new_sl,
+        )

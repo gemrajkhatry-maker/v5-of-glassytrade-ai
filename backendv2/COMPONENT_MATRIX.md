@@ -10,7 +10,7 @@
 | **Command Handlers** | ✅ Complete | 12 | UpdateTick, EvaluateEntry, CheckExit |
 | **Event Flow** | ✅ Complete | 5 | Tick→AMT→Signal→Position |
 | **Circuit Breaker** | ✅ Complete | 4 | Risk management |
-| **Event Store** | ✅ Complete | 2 | Event replay |
+| **Event Store** | ✅ Complete | 2 | Event audit |
 | **Metrics Registry** | ✅ Complete | 2 | Counters, gauges |
 | **Feature Flags** | ✅ Complete | 2 | Feature toggles |
 | **Storage (SQLite)** | ✅ Complete | 5 | Position persistence |

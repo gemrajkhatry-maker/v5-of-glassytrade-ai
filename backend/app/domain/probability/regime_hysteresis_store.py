@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import threading
 
-from app.domain.probability.agent_pipeline import RegimeHysteresis
+from app.domain.probability.regime_classifier import RegimeHysteresis
 
 
 class RegimeHysteresisStore:

@@ -8,8 +8,9 @@ Eliminates duplicated patterns across the codebase:
 
 from __future__ import annotations
 
-from enum import Enum
 from typing import Any
+
+from app.domain.trading.models.enums import Side
 
 
 def safe_side(value: Any) -> str:
@@ -22,62 +23,6 @@ def safe_side(value: Any) -> str:
     if hasattr(value, "value"):
         return value.value
     return str(value)
-
-
-class Side:
-    """Utility class for trade side normalization.
-
-    Handles the common pattern of converting between enum and string representations:
-        Side.normalize(pos.side)  # Returns "LONG" or "SHORT"
-
-    Usage:
-        Side.normalize(pos.side)  # Returns "LONG" or "SHORT"
-        Side.is_long(pos.side)    # Returns True if LONG
-    """
-
-    LONG = "LONG"
-    SHORT = "SHORT"
-
-    @staticmethod
-    def normalize(side: Any) -> str:
-        """Normalize side to string representation.
-
-        Handles:
-        - Enum with .value attribute
-        - String directly
-        - None (returns "FLAT")
-
-        Args:
-            side: The side to normalize (enum, string, or None).
-
-        Returns:
-            "LONG", "SHORT", or "FLAT".
-        """
-        if side is None:
-            return "FLAT"
-        if hasattr(side, 'value'):
-            return str(side.value).upper()
-        return str(side).upper()
-
-    @staticmethod
-    def is_long(side: Any) -> bool:
-        """Check if side is LONG."""
-        return Side.normalize(side) == Side.LONG
-
-    @staticmethod
-    def is_short(side: Any) -> bool:
-        """Check if side is SHORT."""
-        return Side.normalize(side) == Side.SHORT
-
-    @staticmethod
-    def opposite(side: Any) -> str:
-        """Return the opposite side."""
-        normalized = Side.normalize(side)
-        if normalized == Side.LONG:
-            return Side.SHORT
-        if normalized == Side.SHORT:
-            return Side.LONG
-        return "FLAT"
 
 
 class ValueSerializer:

@@ -7,10 +7,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
 
-from app.domain.fabio_ai.services.amt_pipeline import AMTResult
 from app.domain.trading.models.value_objects import OHLC
+from app.domain.trading.models.enums import MarketStateCodec
+from app.domain.fabio_ai.services.amt_pipeline import AMTResult
 
 logger = logging.getLogger(__name__)
 
@@ -88,54 +88,56 @@ class RegimeHysteresis:
 def classify_regime(
     data: list[OHLC],
     amt_result: AMTResult,
-    market_state: str,
-    session_name: str,
+    tick: OHLC | str | None,
+    session_name: str = "",
 ) -> RegimeState:
-    """Classify market regime based on volatility and structure.
+    """Classify regime using the rule set currently used by the pipeline."""
+    if len(data) < 20:
+        logger.info("Regime: DEAD — only %d candles (need 20)", len(data))
+        return RegimeState("DEAD", False, False, 0.0)
 
-    Args:
-        data: OHLC price bars
-        amt_result: AMT pipeline result
-        market_state: Current market state string
-        session_name: Trading session name
+    # Support legacy callers that pass market state directly.
+    if isinstance(tick, str):
+        market_state = tick
+        tick = data[-1] if data else None
+    else:
+        market_state = getattr(amt_result, "market_state", "")
 
-    Returns:
-        RegimeState with classification results
-    """
-    # Dead market - no activity
-    if amt_result.signal == "SKIP":
-        return RegimeState("DEAD", allowed_long=False, allowed_short=False, risk_scale=0.0)
+    if not tick:
+        logger.info("Regime: DEAD — no tick available")
+        return RegimeState("DEAD", False, False, 0.0)
 
-    # Volatile market - high ATR expansion
-    atr = _calculate_atr(data)
-    if atr > 0:
-        recent_high = max(h.high for h in data[-10:]) if len(data) >= 10 else 0
-        recent_low = min(h.low for h in data[-10:]) if len(data) >= 10 else 0
-        range_pct = (recent_high - recent_low) / ((recent_high + recent_low) / 2) if (recent_high + recent_low) > 0 else 0
-        if range_pct > 0.05:  # 5% range = volatile
-            return RegimeState("VOLATILE", allowed_long=True, allowed_short=True, risk_scale=0.5)
+    alpha = 2.0 / 21
+    ema_vol = data[-20].volume
+    for d in data[-19:]:
+        ema_vol = alpha * d.volume + (1 - alpha) * ema_vol
 
-    # Trending vs Balanced based on AMT signal
-    if market_state == "IMBALANCED":
-        return RegimeState("TRENDING", allowed_long=True, allowed_short=True, risk_scale=1.0)
-    
-    return RegimeState("BALANCED", allowed_long=True, allowed_short=True, risk_scale=1.0)
+    latest_vol = (
+        data[-1].volume
+        if data[-1].time != tick.time
+        else (data[-2].volume if len(data) >= 2 else tick.volume)
+    )
+    vol_ratio = latest_vol / ema_vol if ema_vol > 0 else 0
 
+    if tick.close <= 0 or vol_ratio < 0.01:
+        logger.info(
+            "Regime: DEAD — ltp=%.2f, vol_ratio=%.3f (latest_vol=%.0f, ema=%.0f)",
+            tick.close,
+            vol_ratio,
+            latest_vol,
+            ema_vol,
+        )
+        return RegimeState("DEAD", False, False, 0.0)
 
-def _calculate_atr(data: list[OHLC], period: int = 14) -> float:
-    """Calculate Average True Range."""
-    if len(data) < period:
-        return 0.0
-    
-    tr_list = []
-    for i in range(1, len(data)):
-        high = data[i].high
-        low = data[i].low
-        prev_close = data[i-1].close
-        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
-        tr_list.append(tr)
-    
-    if len(tr_list) < period:
-        return 0.0
-    
-    return sum(tr_list[-period:]) / period
+    atr_pct_scale = 1.0
+    atr5 = sum(d.high - d.low for d in data[-5:]) / 5
+    atr20 = sum(d.high - d.low for d in data[-20:]) / 20
+    atr_ratio = atr5 / atr20 if atr20 > 0 else 1.0
+
+    if atr_ratio > 3.0:
+        return RegimeState("VOLATILE", True, True, 0.5 * atr_pct_scale)
+
+    if MarketStateCodec.is_imbalanced(market_state):
+        return RegimeState("TRENDING", True, True, 1.0 * atr_pct_scale)
+
+    return RegimeState("BALANCED", True, True, 1.0 * atr_pct_scale)

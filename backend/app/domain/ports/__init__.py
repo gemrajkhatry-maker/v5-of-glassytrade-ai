@@ -10,6 +10,7 @@ from app.domain.ports.storage import IKeyValueStorage, IStorage
 from app.domain.ports.broker import IBroker
 from app.domain.ports.market_data import IMarketData
 from app.domain.ports.notifications import INotification
+from app.domain.ports.notification_adapter import INotificationAdapter
 from app.domain.ports.llm_inference import ILLMInference
 from app.domain.ports.probability_inference import IProbabilityInference
 from app.domain.ports.npoc import INPOC
@@ -22,6 +23,6 @@ __all__ = [
     "IRiskConfig", "IAnalysisConfig",
     "ISymbolRegistry", "IGlobalConfigProvider",
     "IKeyValueStorage", "IStorage", "IBroker", "IMarketData",
-    "INotification", "ILLMInference", "IProbabilityInference",
+    "INotification", "INotificationAdapter", "ILLMInference", "IProbabilityInference",
     "INPOC", "IDeltaProfile", "IExchangeStrategy",
 ]

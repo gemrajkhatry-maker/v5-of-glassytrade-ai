@@ -27,6 +27,16 @@ def _cloud_fallback_enabled() -> bool:
 class MLXInferenceAdapter(ILLMInference):
     """MLX-based LLM inference adapter for Apple Silicon — 10-30x faster than PyTorch MPS."""
 
+    STATE_UNINITIALIZED = "UNINITIALIZED"
+    STATE_INIT = "INIT"
+    STATE_DEFERRED = "DEFERRED_READY"
+    STATE_LOADING = "LOADING_LOCAL"
+    STATE_READY_LOCAL = "READY_LOCAL"
+    STATE_READY_CLOUD = "READY_CLOUD"
+    STATE_DEGRADED_NO_LOCAL_MODEL = "DEGRADED_NO_LOCAL_MODEL"
+    STATE_FAILED_LOCAL = "FAILED_LOCAL"
+    STATE_FAILED_CLOUD_CREDENTIALS = "FAILED_CLOUD_CREDENTIALS"
+
     _instance = None
     _env_loaded = False
     _init_lock = threading.Lock()
@@ -53,27 +63,36 @@ class MLXInferenceAdapter(ILLMInference):
         self._model_path = model_path
         self._temperature = temperature
         self._max_new_tokens = max_new_tokens
+        self._state = self.STATE_UNINITIALIZED
+        self._state_reason: str | None = None
         self._start_background_loading()
         self._initialized = True
 
+    def _set_state(self, state: str, reason: str | None = None) -> None:
+        self._state = state
+        self._state_reason = reason
+        logger.info("MLX state=%s reason=%s", state, reason or "")
+
     def _start_background_loading(self):
         """Kick off model loading on a daemon thread so the server starts immediately."""
+        self._set_state(self.STATE_INIT, "bootstrap")
         self._ensure_runtime_env_loaded()
         if not self._is_loading and self.model is None:
             # If cloud fallback is enabled, skip local model loading entirely
             if _cloud_fallback_enabled():
-                logger.info(
-                    "LLM_CLOUD_FALLBACK_ENABLED=1 — skipping local MLX model load, "
-                    "using OpenRouter for all inference"
-                )
-                self._is_loading = False
-                self._initialized = True
+                if not os.getenv("OPENROUTER_API_KEY", "").strip():
+                    self._load_error = "LLM_CLOUD_FALLBACK_ENABLED but OPENROUTER_API_KEY is missing"
+                    self._set_state(self.STATE_FAILED_CLOUD_CREDENTIALS, self._load_error)
+                    self._is_loading = False
+                    return
+                self._set_state(self.STATE_READY_CLOUD, "cloud fallback enabled")
                 return
             # Check if model path is configured
             model_path = self._effective_model_path()
             if not model_path:
-                logger.info(
-                    "MLX: No model path configured — set MLX_MODEL_PATH or LLM_CLOUD_FALLBACK_ENABLED=1"
+                self._set_state(
+                    self.STATE_DEGRADED_NO_LOCAL_MODEL,
+                    "No model path configured and cloud fallback disabled",
                 )
                 self._is_loading = False
                 self._initialized = True
@@ -82,10 +101,7 @@ class MLXInferenceAdapter(ILLMInference):
             # Check if we should defer loading (prevent Metal crashes during uvicorn startup)
             defer_loading = os.environ.get("MLX_DEFER_LOADING", "0").lower() in ("1", "true", "yes")
             if defer_loading:
-                logger.info(
-                    "MLX_DEFER_LOADING=1 — deferring model load to first inference request "
-                    "(prevents Metal GPU crashes during uvicorn startup)"
-                )
+                self._set_state(self.STATE_DEFERRED, "deferred loading active")
                 self._is_loading = False
                 self._initialized = True
                 return
@@ -93,6 +109,7 @@ class MLXInferenceAdapter(ILLMInference):
             # Check if we should load immediately or defer
             # On macOS, MLX must be loaded in main thread, not background
             # So we load synchronously here to avoid OpenMP crashes
+            self._set_state(self.STATE_LOADING, "loading local model synchronously")
             self._is_loading = True
             logger.info("Loading MLX model synchronously (main thread)...")
             try:
@@ -100,12 +117,14 @@ class MLXInferenceAdapter(ILLMInference):
             except Exception as e:
                 logger.error("Failed to load MLX model: %s", e)
                 self._load_error = str(e)
+                self._set_state(self.STATE_FAILED_LOCAL, self._load_error)
                 self._is_loading = False
                 # If cloud fallback configured, we'll use that instead
                 return
 
     def _load_model(self):
         """Load the MLX model and tokenizer from the configured path."""
+        self._set_state(self.STATE_LOADING, "loading local model")
         try:
             self._ensure_runtime_env_loaded()
             quiet_gemma4_tokenizer_config_warning()
@@ -155,6 +174,8 @@ class MLXInferenceAdapter(ILLMInference):
 
             self._use_vlm = use_vlm
             self._is_loading = False
+            self._load_error = None
+            self._set_state(self.STATE_READY_LOCAL, "local model loaded")
             logger.info("MLX model loaded successfully!")
         except Exception as e:
             logger.error("Failed to load MLX model: %s", e)
@@ -163,6 +184,7 @@ class MLXInferenceAdapter(ILLMInference):
             self._load_error = str(e)
             self._use_vlm = None
             self._is_loading = False
+            self._set_state(self.STATE_FAILED_LOCAL, self._load_error)
 
     @staticmethod
     def _detect_vlm_architecture(model_path: str) -> bool:
@@ -378,6 +400,9 @@ class MLXInferenceAdapter(ILLMInference):
 
             temp = temperature if temperature is not None else self._temperature
             max_t = max_tokens if max_tokens is not None else self._max_new_tokens
+            
+            # Note: Most OpenRouter models support 'system', but we use a list
+            # of messages that can be adjusted if needed.
             messages = [
                 {"role": "system", "content": instruction},
                 {"role": "user", "content": input_text},
@@ -509,6 +534,9 @@ class MLXInferenceAdapter(ILLMInference):
         self._ensure_runtime_env_loaded()
         # When cloud fallback is explicitly enabled, always use cloud inference
         if _cloud_fallback_enabled():
+            if not os.getenv("OPENROUTER_API_KEY", "").strip():
+                raise LLMNotReadyError("Cloud fallback enabled but OPENROUTER_API_KEY is missing")
+            self._set_state(self.STATE_READY_CLOUD, "cloud fallback path selected")
             return self._predict_cloud(
                 instruction, input_text, temperature, max_tokens
             )
@@ -517,14 +545,14 @@ class MLXInferenceAdapter(ILLMInference):
         if not self.model and not self._is_loading:
             defer_loading = os.environ.get("MLX_DEFER_LOADING", "0").lower() in ("1", "true", "yes")
             if defer_loading:
-                logger.info("MLX_DEFER_LOADING: Loading model on first inference request...")
+                self._set_state(self.STATE_LOADING, "lazy load on first request")
                 self._is_loading = True
                 try:
                     self._load_model()
-                    logger.info("✅ MLX model loaded successfully on first request!")
                 except Exception as e:
                     logger.error("Failed to load MLX model on first request: %s", e)
                     self._load_error = str(e)
+                    self._set_state(self.STATE_FAILED_LOCAL, self._load_error)
                     self._is_loading = False
                     # Fallback to cloud if available
                     model_path = self._effective_model_path()
@@ -538,7 +566,10 @@ class MLXInferenceAdapter(ILLMInference):
             if self._is_loading:
                 raise LLMNotReadyError("Model is still loading")
             model_path = self._effective_model_path()
-            if _cloud_fallback_enabled() and not model_path:
+            if _cloud_fallback_enabled():
+                if not os.getenv("OPENROUTER_API_KEY", "").strip():
+                    self._set_state(self.STATE_FAILED_CLOUD_CREDENTIALS, "Cloud fallback enabled but API key missing")
+                    raise LLMNotReadyError("Cloud fallback enabled but OPENROUTER_API_KEY is missing")
                 return self._predict_cloud(
                     instruction, input_text, temperature, max_tokens
                 )
@@ -566,14 +597,30 @@ class MLXInferenceAdapter(ILLMInference):
         if prefill is None:
             prefill = "{"
 
-        messages = [
-            {"role": "system", "content": sys_msg},
-            {"role": "user", "content": clean_input},
-        ]
+        # Gemma and some other models do not support the 'system' role in their
+        # default chat templates. We use a try-except block to fall back to
+        # merging the system message into the user message if needed.
+        try:
+            messages = [
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": clean_input},
+            ]
+            prompt = self.processor.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+        except Exception as e:
+            err_str = str(e).lower()
+            if "system" in err_str or "role" in err_str or "support" in err_str:
+                logger.info("MLX: System role not supported by template, merging into user message.")
+                messages = [
+                    {"role": "user", "content": f"{sys_msg}\n\n{clean_input}"},
+                ]
+                prompt = self.processor.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True
+                )
+            else:
+                raise
 
-        prompt = self.processor.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
-        )
         # Inject prefill (e.g., forcing JSON start)
         prompt += prefill
 
@@ -703,17 +750,30 @@ class MLXInferenceAdapter(ILLMInference):
             api_key = os.environ.get("OPENROUTER_API_KEY", "")
             return bool(api_key.strip())
         
-        # If deferred loading is enabled, report ready so predict() can trigger lazy load
+        # If deferred loading is enabled, report ready so predict() can trigger lazy load.
         defer_loading = os.environ.get("MLX_DEFER_LOADING", "0").lower() in ("1", "true", "yes")
         if defer_loading:
             # Ready if not currently loading and no error
-            return self._is_loading is False and getattr(self, '_load_error', None) is None
+            return self._is_loading is False and self._state in {
+                self.STATE_DEFERRED,
+                self.STATE_READY_LOCAL,
+                self.STATE_READY_CLOUD,
+            }
 
         if self._is_loading:
             return False
         if getattr(self, '_load_error', None) is not None:
             return False
         return self.model is not None
+
+    def runtime_state(self) -> dict[str, str | None]:
+        """Machine-readable MLX lifecycle state for observability and health contracts."""
+        return {
+            "state": self._state,
+            "reason": self._state_reason,
+            "load_error": self._load_error,
+            "is_loading": str(self._is_loading),
+        }
 
     def wait_until_ready(self, timeout: float = 120.0) -> bool:
         """Block until model is loaded or timeout. Returns True if ready."""

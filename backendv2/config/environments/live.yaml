@@ -1,0 +1,28 @@
+environment: "live"
+broker_mode: "live"
+log_level: "WARNING"
+
+exchanges:
+  NSE:
+    enabled: true
+  MCX:
+    enabled: true
+
+risk:
+  risk_per_trade_pct: 0.002
+  max_daily_loss_pct: 0.01
+  max_consecutive_losses: 2
+  max_concurrent_positions: 3
+  max_drawdown_pct: 0.03
+
+cost_model:
+  enabled: true
+  base_slippage_bps: 20
+
+scanner:
+  mode: "mcx_options"
+  top_n: 2
+  top_per_underlying: 1
+  strikes_around_atm: 1
+  expiry_index: 0
+

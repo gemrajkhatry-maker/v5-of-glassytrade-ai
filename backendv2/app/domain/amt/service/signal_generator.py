@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.domain.amt.model.amt_models import VolumeProfile, Absorption
+from app.domain.amt.model.amt_models import VolumeProfile, Absorption, Signal
 
 Bar = dict
 
@@ -28,7 +28,7 @@ def generate_signal(
         }
 
     last_abs = absorptions[-1]
-    last_bar = bars[absorptions[0].bar_index] if absorptions else bars[-1]
+    last_bar = bars[last_abs.bar_index] if absorptions else bars[-1]
     price = last_bar.get("close", 0)
 
     # LONG
@@ -61,3 +61,71 @@ def generate_signal(
         "type": "NO_TRADE", "entry": 0.0, "sl": 0.0, "tp": 0.0,
         "rr": 0.0, "confidence": 0.0, "reason": "Conditions not met",
     }
+
+
+def generate_triple_a_signal(
+    bars: list[Bar],
+    absorptions: list[Absorption],
+    vp: VolumeProfile | None,
+    vwap: float,
+    tp_multiplier: float = 2.0,
+    min_rr: float = 1.5,
+) -> Signal:
+    """
+    Generate Triple-A trading signal.
+
+    This is the main entry point for signal generation that returns
+    a Signal value object.
+
+    LONG: BUY absorption + price > VWAP + R:R >= min_rr
+    SHORT: SELL absorption + price < VWAP + R:R >= min_rr
+    """
+    if not absorptions or not bars:
+        return Signal(
+            type="NO_TRADE", entry=0.0, sl=0.0, tp=0.0,
+            rr=0.0, confidence=0.0, reason="No absorption",
+        )
+
+    last_abs = absorptions[-1]
+    last_bar = bars[last_abs.bar_index] if absorptions else bars[-1]
+    price = last_bar.get("close", 0)
+
+    # Default VP values if None
+    step = 1.0
+    val = 0.0
+    vah = 0.0
+    if vp is not None:
+        step = vp.step
+        val = vp.val
+        vah = vp.vah
+
+    # LONG
+    if last_abs.side == "BUY" and price > vwap:
+        entry = price
+        sl = val - step
+        tp = entry + (entry - sl) * tp_multiplier
+        rr = (tp - entry) / (entry - sl) if (entry - sl) != 0 else 0
+        if rr >= min_rr:
+            return Signal(
+                type="LONG", entry=entry, sl=sl, tp=tp,
+                rr=rr, confidence=last_abs.strength,
+                reason="Triple-A BUY absorption above VWAP",
+            )
+
+    # SHORT
+    if last_abs.side == "SELL" and price < vwap:
+        entry = price
+        sl = vah + step
+        tp = entry - (sl - entry) * tp_multiplier
+        rr = (entry - tp) / (sl - entry) if (sl - entry) != 0 else 0
+        if rr >= min_rr:
+            return Signal(
+                type="SHORT", entry=entry, sl=sl, tp=tp,
+                rr=rr, confidence=last_abs.strength,
+                reason="Triple-A SELL absorption below VWAP",
+            )
+
+    return Signal(
+        type="NO_TRADE", entry=0.0, sl=0.0, tp=0.0,
+        rr=0.0, confidence=0.0, reason="Conditions not met",
+    )

@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from app.domain.ports.storage import IStorage
 from app.domain.ports.broker import IBroker
+from app.domain.constants import MIN_GRADE_SCORE_THRESHOLD
 from app.domain.services.risk_sizing_engine import RiskSizingEngine, SizingResult
 
 if TYPE_CHECKING:
@@ -30,14 +31,6 @@ if TYPE_CHECKING:
     from app.domain.trading.models.entities import Signal
 
 log = logging.getLogger(__name__)
-
-# Minimum confluence gates that must pass before a signal may be executed.
-# This is the "2-of-N" floor: even if the pipeline marks a setup valid,
-# the grade_score must indicate at least MIN_A_B_C_GRADE independent
-# alignment factors (CVD, delta, session match, VWAP, imbalances…).
-# A-grade >= 3, B-grade >= 1.  We require B-grade or better.
-MIN_GRADE_SCORE_THRESHOLD = 1
-
 
 class EntryCoordinator:
     """Handles signal execution and position opening.
@@ -239,7 +232,7 @@ class EntryCoordinator:
                 )
             # Initialize partition exit state for P1/P2/P3 management
             # Position already has lifecycle fields set by Position.from_signal()
-            self._lifecycle_handler.initialize_partition_state(position.id)
+            self._lifecycle_handler.initialize_partition_state(position.id, symbol)
             # Track scale step for 40/30/30 execution plan
             position.scale_step = 1  # First entry of scale-in plan
             # Track entry LVN for pyramid adds (FR-09)

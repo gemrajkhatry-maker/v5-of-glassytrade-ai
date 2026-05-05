@@ -30,6 +30,7 @@ for _ancestor in _here.parents:
 
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
 from app.domain.ports.market_data import IMarketData
+from app.domain.services.market_data_utils import compute_vwap_approx, estimate_tick_delta
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +38,6 @@ from app.shared.timezones import IST
 
 
 # ---------------------------------------------------------------------------
-
-
-def _delta_proxy(o: float, h: float, l: float, c: float, v: float) -> float:
-    """Approximate delta from candle body when taker_buy_volume unavailable."""
-    spread = h - l
-    if spread <= 0 or v <= 0:
-        return 0.0
-    body_ratio = (c - o) / spread  # -1 to +1
-    return body_ratio * v
 
 
 def _exchange_enum(exchange_str: str | None):
@@ -334,8 +326,8 @@ class DhanMarketDataAdapter(IMarketData):
                 l = float(row["low"])
                 c = float(row["close"])
                 v = float(row.get("volume", 0))
-                delta = _delta_proxy(o, h, l, c, v)
-                vwap = (h + l + c) / 3  # industry-standard typical price
+                delta = estimate_tick_delta(o, h, l, c, v)
+                vwap = compute_vwap_approx(h, l, c)
 
                 result.append(
                     OHLC(

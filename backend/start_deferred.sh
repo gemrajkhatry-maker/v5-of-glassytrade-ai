@@ -2,7 +2,14 @@
 # Start backend WITHOUT loading MLX model immediately
 # Model will be loaded lazily on first request to avoid Metal crashes
 set -euo pipefail
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Optional preflight guard can be disabled only with explicit override.
+if [ "${SKIP_START_PREFLIGHT:-0}" != "1" ]; then
+  bash "$SCRIPT_DIR/start_preflight.sh"
+fi
+
+cd "$SCRIPT_DIR"
 export KMP_DUPLICATE_LIB_OK=TRUE
 export PYTHONPATH="${PYTHONPATH:-$PWD:$(dirname "$PWD")}"
 export GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}"

@@ -1,28 +1,21 @@
 #!/bin/bash
-# Start backend in MCX mode with LOCAL Gemma-2-2B adapter
-# Optimized for stability on Apple Silicon
+set -euo pipefail
 
-cd /Users/apple/Downloads/v5-of-glassytrade-ai/backend
+# Legacy MCX-local launcher.
+# Kept for compatibility but now delegates to the canonical deferred startup path
+# so MLX lifecycle semantics stay identical to all entry points.
 
-# Activate virtual environment
-source venv/bin/activate
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Set MCX mode environment variables
-export GLASSYTRADE_ENV=paper
-export GLASSYTRADE_STRATEGY=mcx_options
-export KMP_DUPLICATE_LIB_OK=TRUE
-export MLX_SET_NUM_THREADS=1
-export MLX_DEFER_LOADING=1
+export GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}"
+export GLASSYTRADE_STRATEGY="${GLASSYTRADE_STRATEGY:-mcx_options}"
 
-# Local MLX Inference (Using Gemma-2-2B for stability)
-export LLM_CLOUD_FALLBACK_ENABLED=0
-export MLX_MODEL_PATH="mlx-community/gemma-2-2b-it-4bit"
-export MLX_ADAPTER_PATH="/Users/apple/Downloads/v5-of-glassytrade-ai/poc18/adapters"
+if [ -n "${MLX_MODEL_PATH:-}" ]; then
+  export MLX_MODEL_PATH
+fi
+if [ -n "${MLX_ADAPTER_PATH:-}" ]; then
+  export MLX_ADAPTER_PATH
+fi
 
-echo "Starting backend in MCX mode (LOCAL LLM: GEMMA-2-2B)..."
-echo "Strategy: $GLASSYTRADE_STRATEGY"
-echo "Model: $MLX_MODEL_PATH"
-echo "Local Mode: Active (Cloud Fallback DISABLED)"
-
-# Start uvicorn
-exec uvicorn app.main:app --host 0.0.0.0 --port 9090 --log-level info
+echo "Delegating start_mcx_local.sh to canonical startup path (start_mcx.sh -> start_deferred.sh)"
+exec "$SCRIPT_DIR/start_mcx.sh" "$@"

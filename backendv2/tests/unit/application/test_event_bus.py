@@ -1,7 +1,7 @@
 """Unit tests for the application event bus."""
 
 import pytest
-from app.application.event_bus import EventBus
+from app.infrastructure.messaging.event_bus import EventBus
 from app.domain.shared.event.market import TickReceived
 from app.domain.shared.event.signal import SignalGenerated
 
@@ -108,7 +108,7 @@ class TestEventBusUnsubscribe:
 
 
 class TestEventBusHistory:
-    """Tests for event history and replay."""
+    """Tests for event history and audit readout."""
 
     def test_history_recorded(self):
         bus = EventBus()
@@ -140,15 +140,12 @@ class TestEventBusHistory:
         # History is trimmed to max_history // 2 when it exceeds max_history
         assert len(history) <= 5
 
-    def test_replay(self):
+    def test_timeline_read_only(self):
         bus = EventBus()
         bus.publish(TickReceived(symbol="BTC", price=50000, volume=1.0))
-        bus.clear_seen_ids()
-        received = []
-        bus.subscribe(TickReceived, lambda e: received.append(e))
-        count = bus.replay()
-        assert count == 1
-        assert len(received) == 1
+        timeline = bus.get_timeline(symbol="BTC", limit=10)
+        assert len(timeline) == 1
+        assert timeline[0]["symbol"] == "BTC"
 
 
 class TestEventBusStats:

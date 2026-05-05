@@ -55,13 +55,13 @@ class TestCircuitBreaker:
 class TestEventStore:
     """Tests for event store."""
     
-    def test_stores_and_replays_events(self):
+    def test_stores_and_tracks_events(self):
         store = EventStore()
         
         store.append(Event("TICK", 1234567890.0, {"price": 50000}))
         store.append(Event("SIGNAL", 1234567891.0, {"type": "LONG"}))
         
-        events = store.replay()
+        events = store.read_all()
         assert len(events) == 2
     
     def test_filters_by_type(self):

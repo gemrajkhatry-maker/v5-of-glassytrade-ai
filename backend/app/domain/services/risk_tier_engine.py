@@ -32,7 +32,7 @@ from app.domain.constants import CONFIDENCE_HIGH_THRESHOLD
 logger = logging.getLogger(__name__)
 
 
-class RiskTier(str, Enum):
+class SessionRiskTier(str, Enum):
     HALT = "HALT"
     C = "C"
     B = "B"
@@ -40,11 +40,11 @@ class RiskTier(str, Enum):
 
 
 # Risk percentage per tier (fraction of capital)
-TIER_RISK_PCT: dict[RiskTier, float] = {
-    RiskTier.HALT: 0.0,
-    RiskTier.C: 0.0015,  # 0.15%
-    RiskTier.B: 0.0025,  # 0.25%
-    RiskTier.A: 0.0045,  # 0.45%
+TIER_RISK_PCT: dict[SessionRiskTier, float] = {
+    SessionRiskTier.HALT: 0.0,
+    SessionRiskTier.C: 0.0015,  # 0.15%
+    SessionRiskTier.B: 0.0025,  # 0.25%
+    SessionRiskTier.A: 0.0045,  # 0.45%
 }
 
 # Tier unlock thresholds in R-multiples
@@ -84,7 +84,7 @@ class TierAPremiumCheck:
 class TierState:
     """Immutable snapshot of risk tier state."""
 
-    tier: RiskTier
+    tier: SessionRiskTier
     risk_pct: float
     daily_pnl_r: float
     consecutive_losses: int
@@ -109,7 +109,7 @@ class RiskTierEngine:
         self._max_consecutive_losses = max_consecutive_losses
 
         # State
-        self._tier: RiskTier = RiskTier.C
+        self._tier: SessionRiskTier = SessionRiskTier.C
         self._daily_pnl_r: float = 0.0
         self._consecutive_losses: int = 0
         self._trade_count: int = 0
@@ -117,8 +117,8 @@ class RiskTierEngine:
         self._halt_reason: str = ""
 
     @property
-    def tier(self) -> RiskTier:
-        return RiskTier.HALT if self._halted else self._tier
+    def tier(self) -> SessionRiskTier:
+        return SessionRiskTier.HALT if self._halted else self._tier
 
     @property
     def risk_pct(self) -> float:
@@ -196,46 +196,46 @@ class RiskTierEngine:
         if self._daily_pnl_r >= TIER_A_UNLOCK_R:
             # Check premium setup requirements for Tier A
             if premium_check and premium_check.is_premium:
-                if self._tier != RiskTier.A:
+                if self._tier != SessionRiskTier.A:
                     logger.info(
                         "RISK TIER: %s → A (daily_pnl=%.2fR, premium setup confirmed)",
                         self._tier.value,
                         self._daily_pnl_r,
                     )
-                self._tier = RiskTier.A
+                    self._tier = SessionRiskTier.A
             else:
                 # Not premium — stay at B
-                if self._tier != RiskTier.B:
+                if self._tier != SessionRiskTier.B:
                     logger.info(
                         "RISK TIER: %s → B (daily_pnl=%.2fR, premium not met)",
                         self._tier.value,
                         self._daily_pnl_r,
                     )
-                self._tier = RiskTier.B
+                self._tier = SessionRiskTier.B
         elif self._daily_pnl_r >= TIER_B_UNLOCK_R:
-            if self._tier != RiskTier.B:
+            if self._tier != SessionRiskTier.B:
                 logger.info(
                     "RISK TIER: %s → B (daily_pnl=%.2fR)",
                     self._tier.value,
                     self._daily_pnl_r,
                 )
-            self._tier = RiskTier.B
+            self._tier = SessionRiskTier.B
         else:
             # Check if we need to downgrade from A or B
-            if self._tier == RiskTier.A and self._daily_pnl_r < TIER_A_DOWNGRADE_R:
+            if self._tier == SessionRiskTier.A and self._daily_pnl_r < TIER_A_DOWNGRADE_R:
                 logger.info(
                     "RISK TIER: A → B (daily_pnl=%.2fR < %.1fR threshold)",
                     self._daily_pnl_r,
                     TIER_A_DOWNGRADE_R,
                 )
-                self._tier = RiskTier.B
-            elif self._tier == RiskTier.B and self._daily_pnl_r < TIER_B_DOWNGRADE_R:
+                self._tier = SessionRiskTier.B
+            elif self._tier == SessionRiskTier.B and self._daily_pnl_r < TIER_B_DOWNGRADE_R:
                 logger.info(
                     "RISK TIER: B → C (daily_pnl=%.2fR < %.1fR threshold)",
                     self._daily_pnl_r,
                     TIER_B_DOWNGRADE_R,
                 )
-                self._tier = RiskTier.C
+                self._tier = SessionRiskTier.C
             # else: stay at current tier
 
         return self.get_state()
@@ -243,7 +243,7 @@ class RiskTierEngine:
     def daily_reset(self) -> None:
         """Reset at session close. Called at 15:15 NSE / 23:15 MCX."""
         prev_tier = self._tier
-        self._tier = RiskTier.C
+        self._tier = SessionRiskTier.C
         self._daily_pnl_r = 0.0
         self._consecutive_losses = 0
         self._halted = False
@@ -264,7 +264,7 @@ class RiskTierEngine:
                 f"3-loss circuit breaker: {self._consecutive_losses} consecutive losses"
             )
             return False
-        return self.tier != RiskTier.HALT
+        return self.tier != SessionRiskTier.HALT
 
     def to_dict(self) -> dict:
         """Serialize for crash-safe persistence."""
@@ -278,7 +278,7 @@ class RiskTierEngine:
 
     def load_from_dict(self, data: dict) -> None:
         """Restore from persisted dict."""
-        self._tier = RiskTier(data.get("tier", "C"))
+        self._tier = SessionRiskTier(data.get("tier", "C"))
         self._daily_pnl_r = data.get("daily_pnl_r", 0.0)
         self._consecutive_losses = data.get("consecutive_losses", 0)
         self._trade_count = data.get("trade_count", 0)

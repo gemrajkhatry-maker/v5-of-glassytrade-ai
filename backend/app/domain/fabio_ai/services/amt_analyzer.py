@@ -1038,10 +1038,9 @@ class AMTAnalyzer:
             default=0.05,
         )
 
-        # Update session VWAP and compute bands before market state detection
-        typical_price = (current.high + current.low + current.close) / 3.0
-        session_vwap = self._update_session_vwap(current, typical_price)
-        _, _, _, _, _, vwap_deviation_sigmas = self._build_vwap_bands(session_vwap, current)
+        # VWAP bands are finalized after profile-shape analysis to avoid
+        # double-updating cumulative VWAP volume when evaluating a candle.
+        vwap_deviation_sigmas = 0.0
 
         state_result = detect_market_state(
             price=float(current.close),
@@ -1105,8 +1104,8 @@ class AMTAnalyzer:
             market_state = MarketState.BALANCED
             effective_profile_shape = "D"
 
-        # Session VWAP
-        typical_price = (current.high + current.low + current.close) / 3
+        # Session VWAP (single update per candle)
+        typical_price = (current.high + current.low + current.close) / 3.0
         session_vwap = self._update_session_vwap(current, typical_price)
 
         # VWAP bands

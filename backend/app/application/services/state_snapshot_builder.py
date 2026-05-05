@@ -95,8 +95,12 @@ def build_state_snapshot(
         "generation": session.learning.generation,
         "stats": llm_stats,
         "statsBySource": stats_by_source,
+        "tradingState": getattr(session, "trading_state", "TRADABLE"),
+        "tradingStateReason": getattr(session, "trading_state_reason", None),
         "agentDecision": _agent_decision_dto(session),
         "playbookGuard": _playbook_guard_status(session, risk_coordinator),
+        "aggressionBlocked": bool(getattr(session, "aggressionBlocked", False)),
+        "gateScore": getattr(session, "last_gate_score", None),
         "explainabilityMonitor": _explainability_status(session),
         "rlStatus": rl_handler.get_status(),
         "riskState": {
@@ -189,8 +193,10 @@ def _agent_decision_dto(session) -> dict | None:
         "featureDrivers": list(getattr(ad, "feature_drivers", ())),
         "timing": ad.timing,
         "sizeFraction": round(ad.size_fraction, 3),
+        "stopLoss": round(float(getattr(ad, "stop_loss", 0) or 0), 4),
         "slAdjust": round(ad.sl_adjust, 2),
         "tpAdjust": round(ad.tp_adjust, 2),
+        "takeProfit": round(float(getattr(ad, "take_profit", 0) or 0), 4),
         "latencyUs": ad.latency_us,
         "rationale": ad.rationale,
     }

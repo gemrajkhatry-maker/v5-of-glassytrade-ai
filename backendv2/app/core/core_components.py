@@ -90,7 +90,7 @@ class Event:
 
 
 class EventStore:
-    """In-memory event store with replay capability."""
+    """In-memory immutable event timeline for diagnostics and audits."""
     
     def __init__(self):
         self._events: List[Event] = []
@@ -103,7 +103,12 @@ class EventStore:
             return [e for e in self._events if e.event_type == event_type]
         return self._events.copy()
     
-    def replay(self) -> List[Event]:
+    def read_all(self) -> List[Event]:
+        """Read all recorded events."""
+        return self._events.copy()
+
+    def snapshot(self) -> List[Event]:
+        """Alias for read-only timeline snapshots."""
         return self._events.copy()
 
 

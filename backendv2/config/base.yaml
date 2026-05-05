@@ -1,0 +1,94 @@
+system:
+  name: "GlassyTrade AI"
+  version: "2.0.0"
+  candle_timeframe_minutes: 5
+  tick_history_depth: 500
+  db_path: "glassytrade.db"
+  log_level: "INFO"
+  capital: 5000000.0
+
+globals:
+  lvn_threshold: 0.15
+  hvn_threshold: 2.00
+  value_area_pct: 0.70
+  lvn_smoothing: 3
+  lvn_min_persistence_bars: 3
+  lvn_removal_threshold: 0.30
+  cvd_slope_window: 20
+  cvd_strong_slope: 2.0
+  balance_ratio_threshold: 0.55
+  displacement_multiplier: 1.5
+  big_trade_multiplier: 3.0
+  big_trade_cluster_count: 3
+  big_trade_cluster_ticks: 2
+  warm_up_minutes: 15
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.020
+  max_consecutive_losses: 3
+  max_drawdown_pct: 0.030
+
+exchanges:
+  NSE:
+    enabled: true
+    session_open: "09:15"
+    session_close: "15:15"
+    warmup_minutes: 15
+    symbols:
+      NIFTY:
+        enabled: true
+        lot_size: 25
+        tick_size: 0.05
+      BANKNIFTY:
+        enabled: true
+        lot_size: 15
+        tick_size: 0.05
+      FINNIFTY:
+        enabled: true
+        lot_size: 25
+        tick_size: 0.05
+  MCX:
+    enabled: true
+    session_open: "09:00"
+    session_close: "23:15"
+    warmup_minutes: 15
+    symbols:
+      CRUDEOIL:
+        enabled: true
+        lot_size: 100
+        tick_size: 1.0
+      NATURALGAS:
+        enabled: true
+        lot_size: 1250
+        tick_size: 0.1
+      GOLD:
+        enabled: true
+        lot_size: 100
+        tick_size: 1.0
+
+risk:
+  risk_per_trade_pct: 0.005
+  max_daily_loss_pct: 0.02
+  max_consecutive_losses: 3
+  max_drawdown_pct: 0.03
+  max_concurrent_positions: 5
+
+scanner:
+  mode: "mcx_options"
+  top_n: 3
+  top_per_underlying: 2
+  strikes_around_atm: 2
+  expiry_index: 0
+
+broker:
+  mode: "paper"
+  testnet: true
+
+cost_model:
+  enabled: true
+  base_slippage_bps: 15.0
+  stt_pct: 0.000625
+  exchange_fee_pct: 0.000495
+  brokerage_per_order: 20.0
+  gst_pct: 0.18
+  sebi_pct: 0.000001
+

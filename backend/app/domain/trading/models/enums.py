@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 
 
 class MarketStateCodec:
@@ -109,6 +110,35 @@ class Side(str, Enum):
 
     LONG = "LONG"
     SHORT = "SHORT"
+
+    @staticmethod
+    def normalize(side: Any) -> str:
+        """Normalize side to "LONG", "SHORT", or "FLAT"."""
+        if side is None:
+            return "FLAT"
+        if hasattr(side, "value"):
+            return str(side.value).upper()
+        return str(side).upper()
+
+    @classmethod
+    def is_long(cls, side: Any) -> bool:
+        """Check if a side is LONG."""
+        return cls.normalize(side) == cls.LONG
+
+    @classmethod
+    def is_short(cls, side: Any) -> bool:
+        """Check if a side is SHORT."""
+        return cls.normalize(side) == cls.SHORT
+
+    @classmethod
+    def opposite(cls, side: Any) -> str:
+        """Return opposite side as string."""
+        normalized = cls.normalize(side)
+        if normalized == cls.LONG:
+            return cls.SHORT
+        if normalized == cls.SHORT:
+            return cls.LONG
+        return "FLAT"
 
 
 class SignalType(str, Enum):

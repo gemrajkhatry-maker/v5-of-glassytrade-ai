@@ -3,6 +3,8 @@ import pytest
 from app.domain.amt.service.volume_profile import build_volume_profile, calculate_vwap
 from app.domain.amt.service.amt_analyzer import AMTAnalyzer
 from app.domain.amt.service.lvn_detector import detect_lvn_hvn, detect_lvn_play
+from app.domain.amt.service.orderflow_detectors import detect_absorptions
+from app.domain.amt.service.signal_generator import generate_triple_a_signal
 
 
 class TestVolumeProfile:
@@ -80,8 +82,10 @@ class TestAbsorption:
         
         for i in range(25):
             vol = 200 if i == 20 else avg_volume
+            # Make the spike bar have significantly compressed range (< 20% of avg)
+            bar_range = 0.05 if i == 20 else 0.3
             bars.append({
-                "high": 100.5, "low": 100.2, "close": 100.4,
+                "high": 100.5, "low": 100.5 - bar_range, "close": 100.4,
                 "volume": vol, "buyVolume": 150, "sellVolume": 50
             })
         
@@ -96,8 +100,10 @@ class TestAbsorption:
         
         for i in range(25):
             vol = 200 if i == 20 else 100
+            # Make the spike bar have significantly compressed range (< 20% of avg)
+            bar_range = 0.05 if i == 20 else 0.3
             bars.append({
-                "high": 100.5, "low": 100.2, "close": 100.4,
+                "high": 100.5, "low": 100.5 - bar_range, "close": 100.4,
                 "volume": vol, "buyVolume": 50, "sellVolume": 150
             })
         

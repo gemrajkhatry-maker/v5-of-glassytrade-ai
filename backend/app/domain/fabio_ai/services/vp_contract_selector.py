@@ -131,7 +131,7 @@ class VPContractSelector:
     }
 
     # Minimum R:R to keep a contract
-    MIN_RR_RATIO: float = 2.5
+    VP_MIN_RR_RATIO: float = 2.5
 
     # LVN threshold: volume < 15% of average
     LVN_THRESHOLD_PCT: float = 0.15
@@ -163,7 +163,7 @@ class VPContractSelector:
             VPSelectionResult with selected candidates and market states.
         """
         if min_rr is None:
-            min_rr = self.MIN_RR_RATIO
+            min_rr = self.VP_MIN_RR_RATIO
 
         all_candidates: list[VPContractCandidate] = {}
         market_states: dict[str, MarketState] = {}

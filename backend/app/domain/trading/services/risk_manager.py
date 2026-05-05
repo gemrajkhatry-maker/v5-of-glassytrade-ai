@@ -18,6 +18,7 @@ from decimal import Decimal
 from app.domain.trading.models.entities import Signal
 from app.domain.trading.models.aggregates import Portfolio
 from app.domain.trading.services.kill_switch import KillSwitch
+from app.domain.constants import MAX_DAILY_LOSS_PCT, MAX_CONSECUTIVE_LOSSES
 from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
@@ -53,8 +54,8 @@ class RiskManager:
     """Validates trade signals against portfolio risk constraints."""
 
     # Circuit-breaker thresholds (per Fabio AMT spec FR-10)
-    MAX_DAILY_DRAWDOWN_PCT: float = 0.02  # 2% from day's peak equity (FR-10-04)
-    MAX_CONSECUTIVE_LOSSES: int = 3  # 3 consecutive losses = pause (FR-10-03)
+    MAX_DAILY_DRAWDOWN_PCT: float = MAX_DAILY_LOSS_PCT  # 2% from day's peak equity (FR-10-04)
+    MAX_CONSECUTIVE_LOSSES: int = MAX_CONSECUTIVE_LOSSES  # 3 consecutive losses = pause (FR-10-03)
     MAX_CONCURRENT_POSITIONS: int = 5
     MAX_PORTFOLIO_NOTIONAL_PCT: Decimal = Decimal("0.60")  # 60% of equity total
     MAX_PER_SYMBOL_NOTIONAL_PCT: Decimal = Decimal("0.20")  # 20% of equity per symbol

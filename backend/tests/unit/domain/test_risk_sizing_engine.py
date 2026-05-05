@@ -5,7 +5,7 @@ from datetime import datetime
 
 from app.domain.services.risk_sizing_engine import (
     RiskSizingEngine,
-    RiskTier,
+    KellySizingTier,
     ExchangeConfig,
     DefaultExchangeConfig,
     SessionPhase,
@@ -65,7 +65,7 @@ class TestRiskSizingEngine:
             target_price=24120,
             direction="LONG",
         )
-        assert result.risk_tier == RiskTier.REDUCED
+        assert result.risk_tier == KellySizingTier.REDUCED
         assert result.risk_pct == 0.0025  # Min risk
 
     def test_session_pnl_elevated_risk(self):
@@ -81,7 +81,7 @@ class TestRiskSizingEngine:
             target_price=24120,
             direction="LONG",
         )
-        assert result.risk_tier == RiskTier.ELEVATED
+        assert result.risk_tier == KellySizingTier.ELEVATED
         assert result.risk_pct >= 0.0030
 
     def test_invalid_stop_rejected(self):

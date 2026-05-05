@@ -23,7 +23,7 @@ class CVDTracker:
 
     _MAX_HISTORY = 500
 
-    def __init__(self, slope_window: int = 40, divergence_window: int = 20):
+    def __init__(self, slope_window: int = 40, divergence_window: int = 20, max_history: int = 500):
         self._cvd: float = 0.0
         self._history: list[float] = []
         self._price_history: list[float] = []
@@ -32,6 +32,12 @@ class CVDTracker:
         self._last_time: str = ""
         self._slope_sign_history: list[int] = []
         self._last_emitted_slope: float = 0.0
+        self._max_history = max_history
+
+    @property
+    def cumulative_delta(self) -> float:
+        """Current cumulative delta value."""
+        return self._history[-1] if self._history else 0.0
 
     def reset(self) -> None:
         self._cvd = 0.0
@@ -58,7 +64,7 @@ class CVDTracker:
         self._history.append(self._cvd)
         self._price_history.append(price)
 
-        if len(self._history) > self._MAX_HISTORY:
+        if len(self._history) > self._max_history:
             self._history.pop(0)
             self._price_history.pop(0)
 

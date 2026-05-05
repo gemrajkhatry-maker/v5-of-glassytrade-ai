@@ -215,6 +215,29 @@ class SessionEventLogger:
                 attribution="managed_exit",
             )
 
+    def log_break_even_triggered(
+        self,
+        *,
+        symbol: str,
+        position: Position,
+        pnl: float,
+        time_in_trade_s: float,
+        reason: str = "",
+        amt: dict | None = None,
+    ) -> None:
+        """Log a breakeven move event for a managed position."""
+        self._journal.log_break_even_move(
+            symbol=symbol,
+            position_id=position.id,
+            side=_safe_side(position.side),
+            entry_price=float(position.entry_price),
+            stop_loss=float(position.stop_loss),
+            pnl=pnl,
+            time_in_trade_s=time_in_trade_s,
+            amt=amt,
+            reason=reason,
+        )
+
     def log_signal(
         self,
         symbol: str,

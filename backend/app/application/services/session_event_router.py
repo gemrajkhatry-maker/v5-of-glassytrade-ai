@@ -9,6 +9,7 @@ Responsibilities:
 
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
 import time as _time_mod
 from typing import TYPE_CHECKING, Any
@@ -23,6 +24,7 @@ from app.shared.parsing import is_mcx_symbol
 from app.domain.probability.features import extract_features
 from app.domain.probability.agent_pipeline import run_agent_pipeline
 from app.domain.probability.regime_hysteresis_store import RegimeHysteresisStore
+from app.domain.constants import MIN_AGGRESSION_SCORE, MAX_CUSHION_TICKS, MIN_RR_RATIO
 from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
 from app.domain.fabio_ai.services.entry_gates.gate_runner import run_gate_pipeline
 from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
@@ -248,7 +250,9 @@ class SessionEventRouter:
             amt_result: AMT analysis result
             exchange: Exchange name
         """
-        if not self._lifecycle_handler.has_managed_positions(event.symbol):
+        if not self._lifecycle_handler.has_managed_positions(
+            event.symbol, session.portfolio
+        ):
             return
 
         _mkt = exchange
@@ -307,7 +311,7 @@ class SessionEventRouter:
             ai_running=ai_running,
             has_position=has_position,
             has_managed_positions=self._lifecycle_handler.has_managed_positions(
-                event.symbol
+                event.symbol, session.portfolio
             ),
             in_cooldown=in_cooldown,
             last_entry_time=session._last_entry_time,
@@ -380,15 +384,28 @@ class SessionEventRouter:
                 if exchange_config
                 else 0.05
             )
+            cvd_slope = float(getattr(amt_result, "cvd_slope", 0.0))
+            aggression_score = float(getattr(amt_result, "aggression", 0.0))
+            cvd_conflict = (
+                (exec_dir == "LONG" and cvd_slope < 0.0)
+                or (exec_dir == "SHORT" and cvd_slope > 0.0)
+            )
 
-            gate_passed, gate_reason, gate_detail = run_gate_pipeline(
+            (
+                gate_passed,
+                gate_reason,
+                gate_detail,
+                soft_gates_passed,
+                soft_gates_total,
+            ) = run_gate_pipeline(
                 data=list(event.data),
                 amt_result=amt_result,
                 tick=event.tick,
                 market_state=amt_result.market_state,
                 drive_number=getattr(amt_result, "drive_number", 0),
                 drive_entry_valid=getattr(amt_result, "drive_entry_valid", False),
-                aggression_score=amt_result.aggression,
+                aggression_score=aggression_score,
+                cvd_conflict=cvd_conflict,
                 is_risk_halted=False,
                 halt_reason="",
                 tick_age_seconds=1.0,
@@ -396,18 +413,74 @@ class SessionEventRouter:
                 max_distance_to_level_ticks=exchange_config.max_distance_to_level_ticks
                 if exchange_config
                 else 3.0,
-                probing_aggression_threshold=0.0,
-                min_aggression_score=0.0,
-                max_cushion_ticks=500.0,
-                min_rr_ratio=0.1,
+                probing_aggression_threshold=MIN_AGGRESSION_SCORE,
+                min_aggression_score=MIN_AGGRESSION_SCORE,
+                max_cushion_ticks=MAX_CUSHION_TICKS,
+                min_rr_ratio=MIN_RR_RATIO,
                 tick_size=tick_size,
                 pcr=getattr(amt_result, "pcr", 1.0),  # Pass PCR for NSE options bias
                 oi_walls=getattr(amt_result, "oi_walls", []),  # Pass OI walls for NSE protection levels
                 favor_strategy=getattr(amt_result, "session_favor_strategy", "NEUTRAL"),  # Session strategy filter
             )
+            session.aggressionBlocked = (
+                cvd_conflict
+                and not gate_passed
+                and aggression_score < MIN_AGGRESSION_SCORE
+            )
+            session.last_gate_score = {
+                "passed": soft_gates_passed,
+                "total": soft_gates_total,
+            }
 
             if gate_passed:
-                if self._gate_tracker:
+                if scalp_enabled:
+                    from app.domain.services.scalp_gate_pipeline import ScalpContext, evaluate_scalp_gates
+
+                    mtf_bias = getattr(amt_result, "mtf_alignment", "")
+                    if not mtf_bias:
+                        mtf_bias = getattr(amt_result, "session_favor_strategy", "")
+                    scalp_ctx = ScalpContext(
+                        symbol=event.symbol,
+                        current_time=event.tick.time,
+                        mtf_bias=mtf_bias,
+                        distance_to_level_ticks=getattr(amt_result, "cushion_ticks", 0.0),
+                        risk_tier=(
+                            getattr(srm.risk_tier, "name", "NORMAL")
+                            if srm
+                            else "NORMAL"
+                        ),
+                        portfolio_utilization=(
+                            session.portfolio.utilization
+                            if hasattr(session.portfolio, "utilization")
+                            else 0.0
+                        ),
+                        open_positions=sum(
+                            1 for pos in session.portfolio.positions if pos.is_open
+                        ),
+                        position_size=sum(
+                            float(getattr(pos, "size", 0.0))
+                            for pos in session.portfolio.positions
+                            if pos.is_open
+                        ),
+                    )
+                    scalp_results = evaluate_scalp_gates(scalp_ctx)
+                    scalp_failures = [r for r in scalp_results if not r.passed]
+                    if scalp_failures:
+                        gate_passed = False
+                        gate_reason = "Scalp gate checks failed"
+                        gate_detail = "; ".join(
+                            f"{result.gate.value}:{result.detail}" for result in scalp_failures
+                        )
+                        log.info(
+                            "SCALP BLOCKED: %s — %s",
+                            event.symbol,
+                            gate_detail,
+                        )
+                        if self._gate_tracker:
+                            self._gate_tracker.record(
+                                event.symbol, "scalp_gate_pipeline", False
+                            )
+                if gate_passed and self._gate_tracker:
                     self._gate_tracker.record(event.symbol, "gate_pipeline", True)
 
                 if exec_dir == "SHORT":
@@ -457,6 +530,19 @@ class SessionEventRouter:
                 if signal:
                     session._last_entry_candle_time = event.tick.time
                     session._last_exec_mono = _time_mod.monotonic()
+                    ad = getattr(session, "_agent_decision", None)
+                    if ad is not None:
+                        try:
+                            session._agent_decision = replace(
+                                ad,
+                                stop_loss=float(signal.stop_loss),
+                                take_profit=float(signal.take_profit),
+                            )
+                        except Exception:
+                            log.debug(
+                                "Failed to persist signal stop/tp into agent decision",
+                                exc_info=True,
+                            )
                     log.info(
                         "EXECUTING: %s dir=%s P=%.3f via AMT pipeline",
                         event.symbol,
@@ -549,6 +635,7 @@ class SessionEventRouter:
             tick_size=tick_size,
             inside_extreme=scalp_enabled,
             risk_sl_pct=srm.stop_loss_pct if srm else None,
+            session_risk_pct=getattr(srm, "stop_loss_pct", None) if srm else None,
         )
 
     def _persist_gate_decision(
@@ -594,7 +681,7 @@ class SessionEventRouter:
             else:
                 self._signal_tracker.track_gate_block(
                     symbol=event.symbol,
-                    gate_name=f"GATE_{gate_passed}",
+                    gate_name=gate_reason or "GATE_BLOCKED",
                     gate_reason=gate_reason or "FLAT",
                     gate_detail=gate_detail or "",
                     market_state=amt_result.market_state,

@@ -39,7 +39,7 @@ backendv2/
 ## Key Features
 
 ✅ **Clean Architecture** - Domain independent of frameworks
-✅ **Event-Driven** - Idempotency, replay support
+✅ **Event-Driven** - Idempotency, audit trail
 ✅ **TDD** - 52 tests, 100% coverage on domain
 ✅ **Zero Parity** - Matches existing backend behavior
 ✅ **Financial Precision** - Decimal for all prices
