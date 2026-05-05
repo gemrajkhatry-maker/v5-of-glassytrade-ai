@@ -21,7 +21,7 @@ def set_trackers(
     gate_tracker: GateRejectionTracker,
     latency_tracker: LatencyTracker,
 ) -> None:
-    """Set tracker instances (called from ServiceGraph init)."""
+    """Set tracker instances (called from DI container init)."""
     global _gate_tracker, _latency_tracker
     _gate_tracker = gate_tracker
     _latency_tracker = latency_tracker

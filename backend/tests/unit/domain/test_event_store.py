@@ -14,7 +14,7 @@ from app.domain.trading.event_store import (
     InMemoryEventStore,
     EventBus,
     EventSystem,
-    ReplayEngine,
+    AuditTrailVerifier,
     DuplicateEventError,
 )
 
@@ -283,13 +283,13 @@ class TestEventBus:
         assert system1.event_store is not system2.event_store
 
 
-class TestReplayEngine:
-    """Tests for ReplayEngine."""
+class TestAuditTrailVerifier:
+    """Tests for AuditTrailVerifier."""
 
-    def test_replay_events(self):
-        """Can replay events to reconstruct state."""
+    def test_verify_events(self):
+        """Can verify events to reconstruct state."""
         store = InMemoryEventStore()
-        engine = ReplayEngine(store)
+        verifier = AuditTrailVerifier(store)
 
         # Add events
         signal = SignalGenerated(
@@ -316,15 +316,15 @@ class TestReplayEngine:
         store.append(signal)
         store.append(fill)
 
-        # Replay
-        state = engine.replay_to(aggregate_id="T1")
+        # Verify
+        state = verifier.verify_to(aggregate_id="T1")
 
         assert len(state["events"]) == 1  # Only T1 events
 
     def test_verify_determinism(self):
-        """Can verify deterministic replay."""
+        """Can verify deterministic verification."""
         store = InMemoryEventStore()
-        engine = ReplayEngine(store)
+        verifier = AuditTrailVerifier(store)
 
         events = [
             SignalGenerated(
@@ -345,7 +345,7 @@ class TestReplayEngine:
             store.append(e)
 
         # Verify determinism
-        assert engine.verify_determinism(events) is True
+        assert verifier.verify_determinism(events) is True
 
 
 class TestEventIdempotency:

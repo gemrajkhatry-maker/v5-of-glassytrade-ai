@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class IncrementalProfileFactory:
     """Creates IncrementalVolumeProfile instances with consistent bucket configuration.
 
-    DI pattern: Factory -> Router -> ServiceGraph injection.
+    DI pattern: Factory -> Router -> DIContainer injection.
     All profiles share the same bucket_size but maintain independent state.
 
     Args:

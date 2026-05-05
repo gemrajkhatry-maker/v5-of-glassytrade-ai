@@ -231,17 +231,6 @@ def classify_regime(
     if MarketStateCodec.is_imbalanced(amt_result.market_state):
         return RegimeState("TRENDING", True, True, 1.0 * atr_pct_scale)
 
-    # IB break override: when IB break is confirmed and price is beyond IB level,
-    # treat as TRENDING even if market_state hasn't caught up yet.
-    break_dir = getattr(amt_result, "break_direction", "")
-    if break_dir and getattr(amt_result, "ib_complete", False):
-        ib_high = getattr(amt_result, "ib_high", 0.0)
-        ib_low = getattr(amt_result, "ib_low", 0.0)
-        price = tick.close
-        if (break_dir == "UP" and ib_high > 0 and price >= ib_high) or \
-           (break_dir == "DOWN" and ib_low > 0 and price <= ib_low):
-            return RegimeState("TRENDING", True, True, 1.0 * atr_pct_scale)
-
     return RegimeState("BALANCED", True, True, 1.0 * atr_pct_scale)
 
 
@@ -528,26 +517,23 @@ def select_playbook(regime: RegimeState, amt_result: AMTResult) -> str:
     """
     ms = getattr(amt_result, "market_state", "")
     
-    # CVD/IB DIVERGENCE: Price breaking one way but CVD going the other = trap/fade
-    cvd_div = getattr(amt_result, "cvd_divergence", "")
-    break_dir = getattr(amt_result, "break_direction", "")
-    if cvd_div and break_dir:
-        if (cvd_div == "BULLISH_DIV" and break_dir == "DOWN") or \
-           (cvd_div == "BEARISH_DIV" and break_dir == "UP"):
-            return "cvd_ib_divergence_fade"
-    
     # Primary: session regime
     if regime.regime == "TRENDING" and MarketStateCodec.is_imbalanced(ms):
         return "imbalance_continuation"
-    if regime.regime == "BALANCED" and MarketStateCodec.is_balanced(ms):
+    if regime.regime == "BALANCED" and (MarketStateCodec.is_balanced(ms) or MarketStateCodec.is_no_trade(ms)):
         return "return_to_value"
+    # PROBING playbook: unconfirmed break with aggression confirmation
+    # Supports acceptance (continuation) and rejection (fade) scenarios
+    if MarketStateCodec.is_probing(ms):
+        return "probing_breakout"
     
-    # FALLBACK: Use leg regime for edge cases
+    # FALLBACK: If session is NO_TRADE, use leg regime
     leg_regime = getattr(amt_result, "leg_regime", "")
-    if leg_regime == "BALANCED":
-        return "return_to_value"
-    if leg_regime == "TRENDING":
-        return "imbalance_continuation"
+    if regime.regime == "NO_TRADE" or MarketStateCodec.is_no_trade(ms):
+        if leg_regime == "BALANCED":
+            return "return_to_value"
+        if leg_regime == "TRENDING":
+            return "imbalance_continuation"
     
     return ""
 
@@ -561,9 +547,6 @@ def playbook_thresholds(playbook: str) -> tuple[float, float, float]:
     if playbook == "probing_breakout":
         # PROBING requires higher conviction (unconfirmed break)
         return 0.58, 0.58, 0.06
-    if playbook == "cvd_ib_divergence_fade":
-        # Divergence fade: higher threshold (counter-trend risk)
-        return 0.57, 0.57, 0.05
     return 0.60, 0.60, 0.05
 
 
@@ -582,6 +565,8 @@ def summarize_feature_drivers(
         drivers.append((1.2, "auction: imbalance accepted"))
     elif playbook == "return_to_value" and MarketStateCodec.is_balanced(ms):
         drivers.append((1.2, "auction: balanced rotation"))
+    elif playbook == "probing_breakout" and MarketStateCodec.is_probing(ms):
+        drivers.append((1.2, "auction: probing outside value"))
 
     if abs(features.get("nearest_lvn_distance_pct", 1.0)) <= 0.003:
         drivers.append((1.0, "location: near LVN"))
@@ -594,6 +579,13 @@ def summarize_feature_drivers(
         val_gap = abs(features.get("close_vs_val_pct", 1.0))
         if val_gap <= 0.004:
             drivers.append((0.9, "location: probing VAL"))
+    elif playbook == "probing_breakout":
+        vah_gap = abs(features.get("close_vs_vah_pct", 1.0))
+        val_gap = abs(features.get("close_vs_val_pct", 1.0))
+        if vah_gap <= 0.004:
+            drivers.append((0.9, "location: testing VAH"))
+        elif val_gap <= 0.004:
+            drivers.append((0.9, "location: testing VAL"))
 
     directional_checks = [
         ("delta_normalized", "orderflow: positive delta", "orderflow: negative delta"),
@@ -931,11 +923,9 @@ def run_agent_pipeline(
 
     if signal.direction == "FLAT":
         elapsed_us = (time.perf_counter_ns() - t0) // 1000
-        # Always return the higher probability so UI can display it even without a trade signal
-        chosen_p = max(signal.p_long, signal.p_short)
         return AgentDecision(
             direction="FLAT",
-            probability=chosen_p,
+            probability=max(signal.p_long, signal.p_short),
             regime=regime.regime,
             playbook=playbook,
             timing="SKIP",
@@ -944,8 +934,8 @@ def run_agent_pipeline(
             tp_adjust=1.0,
             latency_us=elapsed_us,
             rationale=(
-                f"{playbook} | {regime.regime} regime | P(long)={signal.p_long:.3f} "
-                f"P(short)={signal.p_short:.3f} | No clear edge"
+                f"{playbook} | No edge — P(long)={signal.p_long:.3f} "
+                f"P(short)={signal.p_short:.3f}"
             ),
         )
 

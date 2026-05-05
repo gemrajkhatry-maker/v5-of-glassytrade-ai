@@ -1,57 +1,93 @@
-"""API dependency injection — thin wrappers over ServiceGraph.
+"""API dependency injection — explicit constructor injection (replaces ServiceGraph).
 
-Only imported by main.py and routers at startup. Keep imports minimal to avoid
-cascading import chains through domain services.
-
-All service access goes through FastAPI app.state.service_graph — there is no
-module-level singleton.
+This module provides FastAPI dependencies using module-level singletons
+created at startup, eliminating the ServiceGraph service locator anti-pattern.
 """
 
-from fastapi import Request
+from __future__ import annotations
 
-from app.application.service_graph import ServiceGraph
-from config.consolidated import ConsolidatedConfig as Configuration
+from fastapi import Depends, Request
+from typing import Annotated
 
-
-def get_service_graph_from_request(request: Request) -> ServiceGraph:
-    """Get service graph from FastAPI app state."""
-    return request.app.state.service_graph
-
-
-def get_market_data(request: Request):
-    """Dependency: Market data adapter."""
-    from app.domain.ports.market_data import IMarketData
-    return request.app.state.service_graph.get(IMarketData)
+# Module-level singletons (created by init_singletons() in main.py)
+_trading_session = None
+_broker = None
+_storage = None
+_gen_ai_service = None
+_market_data = None
+_configuration = None
+_active_symbols = []
 
 
-def get_storage(request: Request):
+def init_singletons(
+    trading_session,
+    broker,
+    storage,
+    gen_ai_service,
+    market_data,
+    configuration,
+    active_symbols,
+) -> None:
+    """Initialize module-level singletons at startup (called from main.py)."""
+    global _trading_session, _broker, _storage, _gen_ai_service
+    global _market_data, _configuration, _active_symbols
+
+    _trading_session = trading_session
+    _broker = broker
+    _storage = storage
+    _gen_ai_service = gen_ai_service
+    _market_data = market_data
+    _configuration = configuration
+    _active_symbols = active_symbols
+
+
+# FastAPI dependency functions
+def get_trading_session() -> "TradingSessionService":
+    """Dependency: Trading session service."""
+    return _trading_session
+
+
+def get_broker() -> "IBroker":
+    """Dependency: Broker adapter."""
+    return _broker
+
+
+def get_storage() -> "IStorage":
     """Dependency: Storage adapter."""
-    from app.domain.ports.storage import IStorage
-    return request.app.state.service_graph.get(IStorage)
+    return _storage
 
 
-def get_gen_ai_service(request: Request):
+def get_gen_ai_service() -> "GenerativeAIService":
     """Dependency: Generative AI service."""
-    from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    return request.app.state.service_graph.get(GenerativeAIService)
+    return _gen_ai_service
 
 
-def get_configuration(request: Request):
+def get_market_data() -> "IMarketData":
+    """Dependency: Market data adapter."""
+    return _market_data
+
+
+def get_configuration() -> "Configuration":
     """Dependency: Application configuration."""
-    return request.app.state.service_graph.get(Configuration)
+    return _configuration
 
 
-def get_trading_session(request: Request):
-    """Dependency: live trading session from the running app graph."""
-    return request.app.state.service_graph.trading_session
+def get_active_symbols() -> list:
+    """Dependency: Active symbols."""
+    return list(_active_symbols)
 
 
-def get_active_symbols(request: Request):
-    """Dependency: active symbols selected by scanner / config."""
-    return list(request.app.state.service_graph.active_symbols)
+# Annotated types for FastAPI
+TradingSessionDep = Annotated["TradingSessionService", Depends(get_trading_session)]
+BrokerDep = Annotated["IBroker", Depends(get_broker)]
+StorageDep = Annotated["IStorage", Depends(get_storage)]
+GenAIDep = Annotated["GenerativeAIService", Depends(get_gen_ai_service)]
+MarketDataDep = Annotated["IMarketData", Depends(get_market_data)]
+ConfigDep = Annotated["Configuration", Depends(get_configuration)]
+ActiveSymbolsDep = Annotated[list, Depends(get_active_symbols)]
 
-
-def get_trade_journal(request: Request):
+def get_trade_journal():
     """Dependency: Trade journal service."""
     from app.application.services.trade_journal import TradeJournal
     return TradeJournal()
+

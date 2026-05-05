@@ -48,7 +48,7 @@ exchanges:
 scanner:
   mode: "mcx_options"
   underlyings: ["CRUDEOIL", "NATURALGAS", "GOLDM", "SILVERM"]
-  top_n: 6
+  top_n: 4
   top_per_underlying: 2
   strikes_around_atm: 2
   expiry_index: 0
@@ -103,13 +103,6 @@ llm:
     - NO BOILERPLATE: Every analysis must be unique to the symbol's specific values.
     
     Respond ONLY with a JSON object: {"direction": "LONG/SHORT/FLAT", "rationale": "...", "confidence": "Low/Medium/High"}
-
-# Risk Configuration (MCX-specific)
-risk:
-  risk_per_trade_pct: 0.005
-  max_daily_loss_pct: 0.02
-  max_consecutive_losses: 3
-  max_concurrent_positions: 4
 
 # Gap Fill Configuration (for low-liquidity MCX markets)
 gap_fill:

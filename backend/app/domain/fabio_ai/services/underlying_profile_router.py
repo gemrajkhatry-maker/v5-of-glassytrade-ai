@@ -62,7 +62,7 @@ class UnderlyingProfileRouter:
     All volume profiles, LVNs, VAH/VAL are built on underlying price.
     Option contract is used only for: position sizing, expiry selection, OI check.
 
-    DI pattern: injected into ServiceGraph, consumed by engine.py and AMTHandler.
+    DI pattern: injected into DIContainer, consumed by engine.py and AMTHandler.
     """
 
     def __init__(self, profile_factory: "IncrementalProfileFactory") -> None:

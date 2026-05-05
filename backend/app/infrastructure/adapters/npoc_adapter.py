@@ -13,7 +13,7 @@ from app.domain.fabio_ai.services.npoc_tracker import NPOCTracker
 class NPOCAdapter(INPOC):
     """Wraps NPOCTracker to satisfy the INPOC port contract.
 
-    DI pattern: Port (INPOC) → Adapter (this class) → ServiceGraph injection.
+    DI pattern: Port (INPOC) → Adapter (this class) → DIContainer injection.
     NPOCTracker requires a storage_port with save_npoc, mark_npoc_filled,
     and get_active_npocs methods (provided by SQLiteStorageAdapter).
     """

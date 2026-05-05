@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "generate-types": "cd .. && python scripts/generate_types.py",
+    "gen-types": "python scripts/generate_types.py"
   },
   "dependencies": {
     "expo": "^54.0.33",

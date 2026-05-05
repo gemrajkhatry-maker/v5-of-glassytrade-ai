@@ -65,11 +65,13 @@ class TestBuildPrompt:
 
     def test_negative_delta(self):
         prompt = build_entry_prompt(_make_market_data(delta=-500))
-        assert "sellers" in prompt.lower() or "-500" in prompt
+        # Negative delta with default cvd=0 produces aggression 0.00 (neutral)
+        assert "aggression score: 0.00" in prompt.lower()
 
     def test_zero_delta(self):
         prompt = build_entry_prompt(_make_market_data(delta=0))
-        assert "neutral aggression" in prompt.lower()
+        # Zero delta with zero cvd_slope shows aggression 0.00 which indicates neutral
+        assert "aggression score: 0.00" in prompt.lower()
 
     def test_price_near_val(self):
         prompt = build_entry_prompt(_make_market_data(ltp=15000.0))

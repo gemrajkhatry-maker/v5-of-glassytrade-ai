@@ -12,13 +12,13 @@ def test_composition_root_creates_container():
     assert container is not None
 
 
-def test_service_graph_resolves_core_services():
-    """Verify ServiceGraph can resolve trading_session and market_data."""
+def test_di_container_resolves_core_services():
+    """Verify DIContainer can resolve market_data port."""
     from config.consolidated import ConsolidatedConfig as Configuration
-    from app.application.service_graph import ServiceGraph
+    from app.application.di.composition_root import compose_container
     from app.domain.ports.market_data import IMarketData
 
     config = Configuration.from_unified()
-    graph = ServiceGraph(config)
-    assert graph.trading_session is not None
-    assert graph.get(IMarketData) is not None
+    container = compose_container(config)
+    market_data = container.resolve(IMarketData)
+    assert market_data is not None

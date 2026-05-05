@@ -17,11 +17,76 @@ import argparse
 import json
 import os
 import sys
+from dataclasses import dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.application.services.backtest_engine import BacktestEngine
 from app.infrastructure.storage.database import SQLiteStorageAdapter
+
+
+@dataclass
+class KpiResult:
+    """KPI computation result for closed trades."""
+    total_trades: int
+    wins: int
+    losses: int
+    win_rate: float
+    total_pnl: float
+    avg_win: float
+    avg_loss: float
+    profit_factor: float
+    max_drawdown: float
+    max_drawdown_pct: float
+    sharpe_ratio: float
+
+
+def compute_kpis(trades: list, initial_capital: float = 10_000_000) -> KpiResult:
+    """Compute KPIs from closed trades list."""
+    if not trades:
+        return KpiResult(0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+    wins = [t.pnl for t in trades if t.pnl > 0]
+    losses = [t.pnl for t in trades if t.pnl <= 0]
+    total = len(trades)
+    win_rate = (len(wins) / total * 100) if total else 0.0
+    total_pnl = sum(t.pnl for t in trades)
+    avg_win = sum(wins) / len(wins) if wins else 0.0
+    avg_loss = abs(sum(losses) / len(losses)) if losses else 0.0
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
+    profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0.0
+
+    # Compute equity curve for drawdown
+    equity = initial_capital
+    peak = equity
+    max_dd = 0.0
+    for t in trades:
+        equity += t.pnl
+        peak = max(peak, equity)
+        dd = peak - equity
+        if dd > max_dd:
+            max_dd = dd
+    max_dd_pct = (max_dd / initial_capital) if initial_capital else 0.0
+
+    # Approximate Sharpe (simplified - assumes daily returns)
+    returns = [t.pnl / initial_capital for t in trades] if trades else [0]
+    avg_ret = sum(returns) / len(returns) if returns else 0
+    std_ret = (sum((r - avg_ret) ** 2 for r in returns) / len(returns)) ** 0.5 if len(returns) > 1 else 0
+    sharpe = (avg_ret / std_ret) * (len(returns) ** 0.5) if std_ret > 0 else 0.0
+
+    return KpiResult(
+        total_trades=total,
+        wins=len(wins),
+        losses=len(losses),
+        win_rate=win_rate,
+        total_pnl=total_pnl,
+        avg_win=avg_win,
+        avg_loss=avg_loss,
+        profit_factor=profit_factor,
+        max_drawdown=max_dd,
+        max_drawdown_pct=max_dd_pct,
+        sharpe_ratio=sharpe,
+    )
 
 
 def main() -> None:
@@ -49,8 +114,7 @@ def main() -> None:
         print(f"Database: {args.db}")
         return
 
-    engine = BacktestEngine(initial_capital=args.capital)
-    result = engine.run(trades)
+    result = compute_kpis(trades, args.capital)
     n = result.total_trades
     expectancy = result.total_pnl / n if n else 0.0
 

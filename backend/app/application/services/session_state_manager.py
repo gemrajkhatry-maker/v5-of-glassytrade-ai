@@ -28,16 +28,6 @@ from app.shared.timezones import IST
 logger = logging.getLogger(__name__)
 
 
-def _default_portfolio():
-    from app.domain.trading.models.aggregates import Portfolio
-    return Portfolio.create_default()
-
-
-def _default_learning_engine():
-    from app.domain.fabio_ai.services.learning_engine import LearningEngine
-    return LearningEngine()
-
-
 @dataclass
 class SessionState:
     """Mutable per-symbol state."""
@@ -45,8 +35,16 @@ class SessionState:
     symbol: str = ""
     data: list[OHLC] = field(default_factory=list)
     order_book: OrderBook | None = None
-    portfolio: Portfolio = field(default_factory=_default_portfolio)
-    learning: LearningEngine = field(default_factory=_default_learning_engine)
+    portfolio: Portfolio = field(
+        default_factory=lambda: __import__(
+            "app.domain.trading.models.aggregates", fromlist=["Portfolio"]
+        ).Portfolio.create_default()
+    )
+    learning: LearningEngine = field(
+        default_factory=lambda: __import__(
+            "app.domain.fabio_ai.services.learning_engine", fromlist=["LearningEngine"]
+        ).LearningEngine()
+    )
 
     # Cached latest results for query access
     last_amt: dict | None = None
@@ -70,12 +68,6 @@ class SessionState:
     # LLM throttling state — MUST be accessed under _lock
     _last_ai_time: float = 0
     _ai_running: bool = False
-    _llm_status: str = "AVAILABLE"  # "AVAILABLE", "RUNNING", "COOLDOWN"
-
-    # LLM consistency guard — prevents rapid confidence flips
-    _last_llm_evaluation_time: float = 0  # epoch; 0 means guard inactive until first eval
-    _last_llm_confidence: str = "Medium"
-    _last_llm_direction: str = "FLAT"
 
     # Overseer throttling state — MUST be accessed under _lock
     _last_overseer_time: float = 0

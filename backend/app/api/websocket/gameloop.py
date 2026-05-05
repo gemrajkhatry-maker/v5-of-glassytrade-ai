@@ -134,15 +134,13 @@ async def gameloop_ws(ws: WebSocket):
         logger.error("Failed to accept WebSocket connection: %s", e, exc_info=True)
         raise
 
-    # Use the service graph from app state (the one with the started engine)
+    # Use services from app state (the ones with the started engine)
     app = ws.scope.get("app")
-    if app and hasattr(app.state, "service_graph"):
-        graph = app.state.service_graph
-        logger.info("Using service graph from app.state")
+    if app and hasattr(app.state, "trading_session"):
+        session_service = app.state.trading_session
+        logger.info("Using services from app.state (DI container)")
     else:
-        raise RuntimeError("Service graph not available from app.state")
-    
-    session_service = graph.trading_session
+        raise RuntimeError("Trading session not available from app.state")
 
     try:
         while True:
@@ -157,7 +155,7 @@ async def gameloop_ws(ws: WebSocket):
             if "subscribe" in data:
                 symbol = data["subscribe"]
                 logger.info("WS viewer connected for %s", symbol)
-                await _viewer_loop(ws, graph, symbol)
+                await _viewer_loop(ws, app.state, symbol)
                 return
 
             # --- Client-driven mode (backward compat) ---
@@ -226,12 +224,12 @@ async def gameloop_ws(ws: WebSocket):
             pass  # Socket may already be closed
 
 
-async def _viewer_loop(ws: WebSocket, graph, symbol: str) -> None:
+async def _viewer_loop(ws: WebSocket, app_state, symbol: str) -> None:
     """Read-only viewer: streams engine state to frontend via delta compression."""
     from app.config import settings
     from app.infrastructure.serialization.schemas import ohlc_to_dto
 
-    engine = getattr(graph, "engine", None)
+    engine = getattr(app_state, "engine", None)
     if engine is None:
         # Fallback: engine not yet started — tell frontend to retry
         logger.warning("Trading engine not available, sending error to frontend")

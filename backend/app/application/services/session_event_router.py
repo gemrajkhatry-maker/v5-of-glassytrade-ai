@@ -346,7 +346,6 @@ class SessionEventRouter:
         run_entry: bool,
         exchange_config: Any,
         allow_short: bool,
-        risk_coordinator: SessionRiskCoordinator,
         scalp_enabled: bool,
     ) -> None:
         """Execute entry path: gate pipeline, SHORT gates, signal build, persist.
@@ -360,7 +359,6 @@ class SessionEventRouter:
             run_entry: Whether entry should run
             exchange_config: Exchange configuration
             allow_short: Whether short positions allowed
-            risk_coordinator: Risk coordinator for checks
             scalp_enabled: Whether scalping is enabled
         """
         _last_exec_mono = getattr(session, "_last_exec_mono", 0)
@@ -368,7 +366,7 @@ class SessionEventRouter:
         _can_execute = _time_since_last > 60
 
         if run_entry and _can_execute:
-            srm = risk_coordinator.get_session_risk_manager(event.symbol)
+            srm = self._risk_coordinator.get_session_risk_manager(event.symbol)
             if srm and not srm.can_trade:
                 log.info(
                     "ENTRY BLOCKED: %s — session risk: %s",

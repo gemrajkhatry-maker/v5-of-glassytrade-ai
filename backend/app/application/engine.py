@@ -22,11 +22,11 @@ import logging
 import time
 import threading
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from shared.resilience import PerEntityCircuitBreaker
 from app.config import settings
 from app.application.utils import is_market_open
-from app.application.protocols import IServiceGraph
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
 
 # Import delegated modules
@@ -39,10 +39,30 @@ from app.application.services.tick_processor import TickProcessor
 from app.application.services.state_broadcaster import StateBroadcaster
 from app.application.services.engine_lifecycle import EngineLifecycle
 
+from app.application.di.container import DIContainer
+from app.domain.ports.market_data import IMarketData
+from app.domain.ports.broker import IBroker
+from app.application.services.trading_session import TradingSessionService
+
 logger = logging.getLogger(__name__)
 
 from app.shared.timezones import IST
-from app.shared.depth_dto import order_book_to_dto as _depth_to_dto
+
+
+def _depth_to_dto(book: OrderBook | None) -> dict | None:
+    """Convert OrderBook to DTO dict for JSON serialization."""
+    if not book:
+        return None
+    return {
+        "bids": [
+            {"price": float(l.price), "quantity": float(l.quantity)}
+            for l in book.bids[:20]
+        ],
+        "asks": [
+            {"price": float(l.price), "quantity": float(l.quantity)}
+            for l in book.asks[:20]
+        ],
+    }
 
 
 class TradingEngine:
@@ -59,17 +79,27 @@ class TradingEngine:
         await engine.wait_for_update(known_generation)
     """
 
-    def __init__(self, graph: IServiceGraph) -> None:
-        self._graph = graph
-        self._market_data = graph.market_data
-        self._session_service = graph.trading_session
-        self._active_symbols: list[str] = graph.active_symbols
-        self._stream_symbols: list[str] = list(
-            getattr(graph, "stream_symbols", None) or graph.active_symbols
+    def __init__(self, container: DIContainer) -> None:
+        self._container = container
+        self._market_data = container.resolve(IMarketData)
+        self._session_service = container.resolve(TradingSessionService)
+        self._active_symbols: list[str] = []
+        try:
+            self._active_symbols = list(container.resolve(list))
+        except Exception:
+            pass
+
+        # Build futures routing (for AMT underlying feeds)
+        from app.domain.services.underlying_futures_provider import UnderlyingFuturesProvider
+        self._underlying_futures_provider = UnderlyingFuturesProvider()
+        self._fut_to_options, futures_roots = self._underlying_futures_provider.build_futures_routing(
+            self._active_symbols
         )
+        self._futures_symbol_set: frozenset[str] = frozenset(futures_roots)
+        self._stream_symbols: list[str] = sorted(set(self._active_symbols) | set(futures_roots))
+
+        # Active options are the active symbols minus futures roots
         self._active_option_symbols: frozenset[str] = frozenset(self._active_symbols)
-        _fut_map = getattr(graph, "futures_option_map", None) or {}
-        self._futures_symbol_set: frozenset[str] = frozenset(_fut_map.keys())
 
         # Circuit breaker for tick processing
         self._circuit_breaker = PerEntityCircuitBreaker(
@@ -167,7 +197,7 @@ class TradingEngine:
         )
         self._state_broadcaster = StateBroadcaster()
         self._lifecycle = EngineLifecycle(
-            graph=graph,
+            container=container,
             stream_manager=self._stream_manager,
             watchdog_manager=self._watchdog_manager,
             state_broadcaster=self._state_broadcaster,
@@ -440,8 +470,7 @@ class TradingEngine:
                     state["oi"] = oi
                     state["_symbol"] = pkt_symbol
                     state["depth"] = _depth_to_dto(
-                        self._current_depths[pkt_symbol]["book"],
-                        symbol=pkt_symbol,
+                        self._current_depths[pkt_symbol]["book"]
                     )
 
                     # Overlay footprint

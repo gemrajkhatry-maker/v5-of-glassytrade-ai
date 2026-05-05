@@ -388,6 +388,12 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 return;
             }
 
+            // Symbol switch acknowledgement (no-op, purely informational)
+            if (state.status === 'symbol_switched') {
+                console.log(`[TradingSystem] Symbol switched to ${state.symbol}`);
+                return;
+            }
+
             // Server mode init (multi-symbol)
             if (state.status === 'server_mode') {
                 const symbols: string[] = state.activeSymbols || [state.symbol];
@@ -423,20 +429,50 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 if (state.history && state.symbol) {
                     const sym = state.symbol;
                     
-                    // Initial history load: replace data
-                    // CRITICAL: Ensure history is sorted by time to prevent Lightweight Charts crash
-                    const sortedHistory = [...state.history].sort((a, b) => 
-                        new Date(a.time).getTime() - new Date(b.time).getTime()
-                    );
-                    setInstruments(prev => {
-                        const inst = prev[sym] || createInstrumentState(sym);
-                        return {
-                            ...prev,
-                            [sym]: { ...inst, data: sortedHistory },
-                        };
-                    });
+                    // Check if this is a gap fill or initial history load
+                    if (state._type === 'gap_fill') {
+                        // Gap fill: merge into existing data
+                        setInstruments(prev => {
+                            const inst = prev[sym] || createInstrumentState(sym);
+                            const merged = mergeCandleData(inst.data, state.history);
+                            return {
+                                ...prev,
+                                [sym]: { ...inst, data: merged },
+                            };
+                        });
+                        
+                        // Dispatch event to update chart without full re-render
+                        tickBusRef.current.dispatchEvent(new CustomEvent('gap_fill', {
+                            detail: { symbol: sym, candles: state.history }
+                        }));
+                        
+                        console.log(`[TradingSystem] Gap fill: ${state.history.length} candles merged for ${sym}`);
+                    } else {
+                        // Initial history load: replace data
+                        // CRITICAL: Ensure history is sorted by time to prevent Lightweight Charts crash
+                        const sortedHistory = [...state.history].sort((a, b) => 
+                            new Date(a.time).getTime() - new Date(b.time).getTime()
+                        );
+                        setInstruments(prev => {
+                            const inst = prev[sym] || createInstrumentState(sym);
+                            return {
+                                ...prev,
+                                [sym]: { ...inst, data: sortedHistory },
+                            };
+                        });
+                    }
                 }
                 console.log(`[TradingSystem] History loaded: ${state.count} candles`);
+                return;
+            }
+
+            // Handle stale-data notification from backend
+            if (state._type === 'stale' && state._symbol) {
+                setInstruments(prev => {
+                    const existing = prev[state._symbol];
+                    if (!existing) return prev;
+                    return { ...prev, [state._symbol]: { ...existing, stale: true } };
+                });
                 return;
             }
 
@@ -588,9 +624,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 const newAmtAnalysis = 'amt' in state
                     ? (state.amt ?? null)
                     : inst.amtAnalysis;
-                const newGenAIAnalysis = 'genAIAnalysis' in state
-                    ? (state.genAIAnalysis ?? null)
-                    : inst.genAIAnalysis;
+                const newGenAIAnalysis = state.genAIAnalysis ?? inst.genAIAnalysis;
                 const newPredictions = state.prediction?.predictions ?? inst.predictions;
                 const newModelWeights = state.modelWeights ?? inst.modelWeights;
                 const newGeneration = state.generation ?? inst.generation;

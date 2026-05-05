@@ -1,28 +1,40 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import MarketSidebar from '../../components/MarketSidebar';
 import { InstrumentState, TradePosition } from '../../types';
 
 // Helper to create mock instrument state
-const createMockInstrument = (overrides: Partial<InstrumentState> = {}): InstrumentState => ({
+const createMockInstrument = (symbol?: string, overrides: Partial<InstrumentState> = {}): InstrumentState => ({
+  symbol: symbol || 'NIFTY 27 FEB 25500 CALL',
   ltp: 25000,
   data: [
-    { time: '2024-01-01T10:00:00Z', open: 24900, high: 25100, low: 24800, close: 25000, volume: 1000 },
-    { time: '2024-01-01T10:05:00Z', open: 25000, high: 25150, low: 24950, close: 25100, volume: 1200 },
+    { time: '2024-01-01T10:00:00Z', open: 24900, high: 25100, low: 24800, close: 25000, volume: 1000, vwap: 25000, takerBuyVolume: 600, delta: 200 },
+    { time: '2024-01-01T10:05:00Z', open: 25000, high: 25150, low: 24950, close: 25100, volume: 1200, vwap: 25100, takerBuyVolume: 700, delta: 300 },
   ],
+  orderBook: null,
   portfolio: {
     positions: [] as TradePosition[],
     closedTrades: [],
     balance: 100000,
     equity: 100000,
-    unrealizedPnl: 0,
+    leverage: 10,
+    history: [],
     realizedPnl: 0,
   },
-  amtAnalysis: null,
-  activeSignal: null,
+  modelWeights: { trend: 0.2, momentum: 0.2, delta: 0.2, orderBook: 0.2, volatility: 0.2 },
+  generation: 0,
+  aiAnalysis: null,
   genAIAnalysis: null,
+  amtAnalysis: null,
   agentDecision: null,
+  llmHistory: [],
+  predictions: [],
+  overseerAction: '',
+  overseerReason: '',
+  stats: null,
+  depth20Active: false,
+  lastUpdate: Date.now(),
   ...overrides,
 });
 
@@ -31,8 +43,8 @@ describe('MarketSidebar', () => {
   
   const defaultProps = {
     instruments: {
-      'NIFTY 27 FEB 25500 CALL': createMockInstrument({ ltp: 25500 }),
-      'NIFTY 27 FEB 25600 CALL': createMockInstrument({ ltp: 25600 }),
+      'NIFTY 27 FEB 25500 CALL': createMockInstrument('NIFTY 27 FEB 25500 CALL', { ltp: 25500 }),
+      'NIFTY 27 FEB 25600 CALL': createMockInstrument('NIFTY 27 FEB 25600 CALL', { ltp: 25600 }),
     },
     activeSymbol: 'NIFTY 27 FEB 25500 CALL',
     onSelect: mockOnSelect,
@@ -109,7 +121,7 @@ describe('MarketSidebar', () => {
     const props = {
       ...defaultProps,
       instruments: {
-        'NIFTY 27 FEB 25500 CALL': createMockInstrument({ ltp: undefined, data: [] }),
+        'NIFTY 27 FEB 25500 CALL': createMockInstrument('NIFTY 27 FEB 25500 CALL', { ltp: undefined, data: [] }),
       },
       activeSymbol: 'NIFTY 27 FEB 25500 CALL',
       onSelect: mockOnSelect,

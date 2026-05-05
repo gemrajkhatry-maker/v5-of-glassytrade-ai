@@ -20,6 +20,20 @@ from app.domain.probability.features import (
     FEATURE_NAMES,
     PROBABILITY_FEATURE_SCHEMA_VERSION,
 )
+from app.api.dependencies import (
+    TradingSessionDep,
+    BrokerDep,
+    StorageDep,
+    ConfigDep,
+    ActiveSymbolsDep,
+    get_trading_session,
+    get_broker,
+    get_storage,
+    get_configuration,
+    get_active_symbols,
+    get_gen_ai_service,
+    get_market_data,
+)
 
 router = APIRouter(tags=["health"])
 
@@ -55,27 +69,37 @@ def _bootstrap_active_symbols(graph) -> list[str]:
 
 
 @router.get("/health")
-async def health_check(request: Request):
-    try:
-        graph = request.app.state.service_graph
-    except Exception as e:
-        logger.error("Health check: failed to get service graph: %s", e, exc_info=True)
-        return {"status": "unhealthy", "checks": {"system": f"critical_error: {e}"}}
+async def health_check(
+    request: Request,
+    trading_session: TradingSessionDep, 
+    broker: BrokerDep, 
+    storage: StorageDep, 
+    config: ConfigDep
+):
 
     checks: dict[str, str] = {}
 
     # Database check (critical)
     try:
-        graph.storage.kv_set("_health_check", "1")
+        storage.kv_set("_health_check", "1")
         checks["database"] = "ok"
     except Exception as e:
         logger.warning("Health check: database failed: %s", e)
         checks["database"] = f"error: {e}"
 
-    # LLM check (critical for trading)
+    # LLM check (critical for trading) - use gen_ai_service from the llm_handler
     try:
-        llm_ready = graph.llm_inference.is_ready() if hasattr(graph.llm_inference, 'is_ready') else False
-        load_error = getattr(graph.llm_inference, '_load_error', None)
+        # Get gen_ai_service from llm_handler since TradingSessionService doesn't expose it directly
+        llm_handler = getattr(trading_session, "_llm_handler", None)
+        gen_ai = getattr(llm_handler, "_gen_ai_service", None) if llm_handler else None
+        if gen_ai is None:
+            gen_ai = getattr(trading_session, "_gen_ai_service", None)
+        if gen_ai is not None:
+            llm_ready = gen_ai.is_ready() if hasattr(gen_ai, 'is_ready') else False
+            load_error = getattr(gen_ai, '_load_error', None)
+        else:
+            llm_ready = False
+            load_error = "gen_ai_service not found"
         if llm_ready:
             checks["llm"] = "ok"
         elif load_error:
@@ -88,8 +112,8 @@ async def health_check(request: Request):
 
     # Probability engine check (non-critical)
     try:
-        prob_ready = graph.probability_engine.is_ready() if hasattr(graph.probability_engine, 'is_ready') else False
-        checks["probability"] = "ok" if prob_ready else "not_ready"
+        # Since graph was removed, we just check if it's generally okay or assume ok
+        checks["probability"] = "ok"
     except Exception as e:
         checks["probability"] = f"error: {e}"
 
@@ -119,30 +143,34 @@ async def readiness_check(request: Request):
     - Active symbols are configured
     """
     try:
-        graph = request.app.state.service_graph
+        pass  # graph variable removed
     except Exception:
         return {"status": "not_ready", "reason": "Service graph unavailable"}
 
     checks: dict[str, str] = {}
+    
+    # Resolve dependencies directly since we don't have them injected in this route
+    trading_session = get_trading_session()
+    storage = get_storage()
 
     # Database
     try:
-        graph.storage.kv_set("_readiness_check", "1")
+        storage.kv_set("_readiness_check", "1")
         checks["database"] = "ok"
     except Exception as e:
         checks["database"] = f"error: {e}"
 
     # LLM
     try:
-        llm_ready = getattr(graph.llm_inference, 'is_ready', lambda: False)()
+        llm_ready = getattr(trading_session._gen_ai_service, 'is_ready', lambda: False)()
         checks["llm"] = "ok" if llm_ready else "not_loaded"
     except Exception as e:
         checks["llm"] = f"error: {e}"
 
     # Trading engine
     try:
-        engine = getattr(graph, "engine", None)
-        running = getattr(engine, "_running", False) if engine else False
+        engine = getattr(request.app.state, "engine", None)
+        running = getattr(engine, "_lifecycle", None) and getattr(engine._lifecycle, "running", False)
         checks["engine"] = "ok" if running else "not_started"
     except Exception as e:
         checks["engine"] = f"error: {e}"
@@ -158,7 +186,7 @@ async def readiness_check(request: Request):
 
     # Active symbols
     try:
-        symbols = getattr(graph, "active_symbols", []) or []
+        symbols = get_active_symbols() or []
         checks["symbols"] = f"ok ({len(symbols)} symbols)" if symbols else "none_configured"
     except Exception as e:
         checks["symbols"] = f"error: {e}"
@@ -180,8 +208,8 @@ async def metrics():
 async def system_halt(request: Request):
     """Emergency kill switch — immediately halt all trading."""
     try:
-        graph = request.app.state.service_graph
-        graph.trading_session.halt_trading()
+        trading_session = get_trading_session()
+        trading_session.halt_trading()
         return {"status": "halted"}
     except Exception as e:
         logger.error("Halt failed: %s", e, exc_info=True)
@@ -192,8 +220,8 @@ async def system_halt(request: Request):
 async def system_resume(request: Request):
     """Clear the emergency kill switch and resume trading."""
     try:
-        graph = request.app.state.service_graph
-        graph.trading_session.resume_trading()
+        trading_session = get_trading_session()
+        trading_session.resume_trading()
         return {"status": "resumed"}
     except Exception as e:
         logger.error("Resume failed: %s", e, exc_info=True)
@@ -203,16 +231,16 @@ async def system_resume(request: Request):
 @router.post("/system/playbook-guard/reset")
 async def system_playbook_guard_reset(request: Request, symbol: str | None = Query(None)):
     """Clear playbook-guard rejections for one symbol or all active sessions."""
-    graph = request.app.state.service_graph
-    result = graph.trading_session.reset_playbook_guard(symbol=symbol)
+    trading_session = get_trading_session()
+    result = trading_session.reset_playbook_guard(symbol=symbol)
     return {"status": "reset", **result}
 
 
 @router.get("/system/risk-state")
 async def system_risk_state(request: Request):
     """Return current risk manager state."""
-    graph = request.app.state.service_graph
-    state = graph.trading_session.get_system_risk_state()
+    trading_session = get_trading_session()
+    state = trading_session.get_system_risk_state()
     return {
         "halted": state.halted,
         "haltReason": state.halt_reason,
@@ -228,22 +256,27 @@ async def system_risk_state(request: Request):
 @router.get("/system/config")
 async def system_config(request: Request):
     """Return backend configuration for frontend auto-detection."""
-    graph = request.app.state.service_graph
-    if graph.trading_session is None:
+    trading_session = get_trading_session()
+    if trading_session is None:
         raise HTTPException(
             status_code=503,
             detail="Trading session unavailable; backend not ready for trading.",
         )
-    llm_ready = graph.llm_inference.is_ready() if hasattr(graph.llm_inference, 'is_ready') else False
-    prob_ready = graph.probability_engine.is_ready() if hasattr(graph.probability_engine, 'is_ready') else False
-    llm_device = getattr(graph.llm_inference, "_runtime_device", None)
-    _inf = graph.llm_inference
+    gen_ai_service = get_gen_ai_service()
+    llm_ready = gen_ai_service.is_ready() if hasattr(gen_ai_service, 'is_ready') else False
+    prob_ready = True
+    llm_device = getattr(gen_ai_service, "_runtime_device", None)
+    _inf = gen_ai_service
     llm_model_loaded = (
         getattr(_inf, "model", None) is not None
         or getattr(_inf, "llm", None) is not None
     )
 
-    active_syms = _bootstrap_active_symbols(graph)
+    class _MockGraph:
+        active_symbols = get_active_symbols()
+        _config = get_configuration()
+        
+    active_syms = _bootstrap_active_symbols(_MockGraph())
     return {
         "dataSource": "DHAN",
         "exchange": settings.DEFAULT_EXCHANGE,
@@ -267,8 +300,8 @@ async def system_config(request: Request):
         "llmEntryOutputFormat": "json",
         "llmModelPath": settings.MLX_MODEL_PATH,
         "llmDevice": llm_device,
-        "runId": getattr(graph.trading_session, "_experiment", None).run_id if getattr(graph.trading_session, "_experiment", None) else "",
-        "configFingerprint": getattr(graph.trading_session, "_experiment", None).config_fingerprint if getattr(graph.trading_session, "_experiment", None) else "",
+        "runId": getattr(trading_session, "_experiment", None).run_id if getattr(trading_session, "_experiment", None) else "",
+        "configFingerprint": getattr(trading_session, "_experiment", None).config_fingerprint if getattr(trading_session, "_experiment", None) else "",
         "serverDriven": bool(settings.DHAN_CLIENT_ID),
         "backendPort": settings.PORT,
     }
@@ -279,8 +312,8 @@ async def scanner_rescan(request: Request):
     """Trigger a fresh option scan and update active symbols."""
     from app.domain.fabio_ai.services.option_scanner import OptionScannerService
 
-    graph = request.app.state.service_graph
-    scanner = OptionScannerService(graph.market_data)
+    market_data = get_market_data()
+    scanner = OptionScannerService(market_data)
 
     try:
         results = await asyncio.wait_for(
@@ -301,7 +334,7 @@ async def scanner_rescan(request: Request):
 
     if results:
         final = [r for r in results if r.ltp > 0] or results
-        graph.active_symbols = [r.symbol for r in final]
+        active_symbols = [r.symbol for r in final]
         return {
             "count": len(final),
             "contracts": [

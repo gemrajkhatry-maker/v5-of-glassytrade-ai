@@ -112,121 +112,182 @@ def build_entry_signal(
     # Fabio Gap #5: ALWAYS prefer aggressive print SL if available
     # This ensures stop is above institutional aggression, not above arbitrary level
 
-    if setup_type == ST.RESPONSIVE_FADE:
-        # FABIO PLAYBOOK: Fade extreme deviation back to Value (POC or VWAP)
-        tp_price = amt_result.poc if abs(px - amt_result.poc) > abs(px - vwap) else vwap
-        
-        # Tight SL just beyond the extreme candle or 1.5σ further
-        sl_dist = max(min_reward * 0.5, px * 0.002)
-        stop_price = px - sl_dist if is_buy else px + sl_dist
-        
-        # Ensure we are actually fading (TP must be in opposite direction of deviation)
-        if (is_buy and tp_price < px) or (not is_buy and tp_price > px):
-            # If TP is wrong way, default to a conservative mean reversion
-            tp_price = vwap
-            
-        allow_trail = True
-    elif setup_type == ST.MEAN_REVERSION:
-        # Fabio playbook: Mean reversion targets prior POC (previous balance area)
-        # When prior POC is available and beyond current price, use it as target
-        tp_price = amt_result.poc
-        if amt_result.prior_poc > 0:
-            # Use prior POC if it's a valid mean reversion target
-            # For LONG: prior_poc above current price is good target
-            # For SHORT: prior_poc below current price is good target
-            if is_buy and amt_result.prior_poc > px:
-                tp_price = amt_result.prior_poc
-                tp_source = "prior_poc"
-            elif not is_buy and amt_result.prior_poc < px:
-                tp_price = amt_result.prior_poc
-                tp_source = "prior_poc"
-        if is_buy:
-            extreme_val = amt_result.value_area_low
-            sl_dir = 1 if inside_extreme else -1
-            stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            # Fabio: If aggressive print SL exists, use it
-            if not agg_sl:
-                max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
-                if abs(px - stop_price) > max_sl_dist:
-                    stop_price = px - max_sl_dist
-            if not agg_sl and vwap and stop_price < vwap < px:
-                stop_price = vwap - buffer
-            if tp_price <= px or stop_price >= px or (tp_price - px) < min_reward:
-                tp_price = px * 1.010
-                stop_price = px * 0.995
+    # Normalize setup from LLM output (e.g., 'mean-reversion' → 'mean_reversion')
+    if ai_result and isinstance(ai_result, dict):
+        raw_setup = ai_result.get('setup', '')
+        if isinstance(raw_setup, str):
+            setup_type = raw_setup.replace('-', '_').lower()
+            # Map common variants
+            if setup_type in ('mean_rev', 'mean_reversion_playbook'):
+                setup_type = 'mean_reversion'
+            elif setup_type in ('trend_model_playbook', 'trend'):
+                setup_type = 'trend_model'
+            elif setup_type in ('responsive_fade_playbook', 'fade'):
+                setup_type = 'responsive_fade'
         else:
-            extreme_val = amt_result.value_area_high
-            sl_dir = -1 if inside_extreme else 1
-            stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            if not agg_sl:
-                max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
-                if abs(stop_price - px) > max_sl_dist:
-                    stop_price = px + max_sl_dist
-            if not agg_sl and vwap and stop_price > vwap > px:
-                stop_price = vwap + buffer
-            if tp_price >= px or stop_price <= px or (px - tp_price) < min_reward:
-                tp_price = px * 0.990
-                stop_price = px * 1.005
-        allow_trail = False
+            setup_type = 'mean_reversion'
     else:
-        # TREND_MODEL — Fabio playbook: target prior balance POC or NPOC.
-        # Priority chain: NPOC in direction → prior_poc (if beyond VA) → VA extension (fallback)
-        tp_source = "va_extension"  # default fallback
+        setup_type = 'mean_reversion'
 
-        if is_buy:
-            # LONG: prefer npoc_above → prior_poc above VAH → VA extension
-            if amt_result.npoc_above > 0 and amt_result.npoc_above > px:
-                tp_price = amt_result.npoc_above
-                tp_source = "npoc"
-            elif amt_result.prior_poc > amt_result.value_area_high and amt_result.prior_poc > px:
-                tp_price = amt_result.prior_poc
-                tp_source = "prior_poc"
+    match setup_type:
+        case 'responsive_fade':
+            # FABIO PLAYBOOK: Fade extreme deviation back to Value (POC or VWAP)
+            tp_price = amt_result.poc if abs(px - amt_result.poc) > abs(px - vwap) else vwap
+            
+            # Tight SL just beyond the extreme candle or 1.5σ further
+            sl_dist = max(min_reward * 0.5, px * 0.002)
+            stop_price = px - sl_dist if is_buy else px + sl_dist
+            
+            # Ensure we are actually fading (TP must be in opposite direction of deviation)
+            if (is_buy and tp_price < px) or (not is_buy and tp_price > px):
+                # If TP is wrong way, default to a conservative mean reversion
+                tp_price = vwap
+                
+            allow_trail = True
+        case 'mean_reversion':
+            # Fabio playbook: Mean reversion targets prior POC (previous balance area)
+            # When prior POC is available and beyond current price, use it as target
+            tp_price = amt_result.poc
+            if amt_result.prior_poc > 0:
+                # Use prior POC if it's a valid mean reversion target
+                # For LONG: prior_poc above current price is good target
+                # For SHORT: prior_poc below current price is good target
+                if is_buy and amt_result.prior_poc > px:
+                    tp_price = amt_result.prior_poc
+                    tp_source = "prior_poc"
+                elif not is_buy and amt_result.prior_poc < px:
+                    tp_price = amt_result.prior_poc
+                    tp_source = "prior_poc"
+            if is_buy:
+                extreme_val = amt_result.value_area_low
+                sl_dir = 1 if inside_extreme else -1
+                stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
+                # Fabio: If aggressive print SL exists, use it
+                if not agg_sl:
+                    max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
+                    if abs(px - stop_price) > max_sl_dist:
+                        stop_price = px - max_sl_dist
+                if not agg_sl and vwap and stop_price < vwap < px:
+                    stop_price = vwap - buffer
+                if tp_price <= px or stop_price >= px or (tp_price - px) < min_reward:
+                    tp_price = px * 1.010
+                    stop_price = px * 0.995
             else:
-                tp_price = amt_result.value_area_high + (amt_result.value_area_high - amt_result.poc)
+                extreme_val = amt_result.value_area_high
+                sl_dir = -1 if inside_extreme else 1
+                stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
+                if not agg_sl:
+                    max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
+                    if abs(stop_price - px) > max_sl_dist:
+                        stop_price = px + max_sl_dist
+                if not agg_sl and vwap and stop_price > vwap > px:
+                    stop_price = vwap + buffer
+                if tp_price >= px or stop_price <= px or (px - tp_price) < min_reward:
+                    tp_price = px * 0.990
+                    stop_price = px * 1.005
+            allow_trail = False
+        case 'trend_model':
+            # TREND_MODEL — Fabio playbook: target prior balance POC or NPOC.
+            # Priority chain: NPOC in direction → prior_poc (if beyond VA) → VA extension (fallback)
+            tp_source = "va_extension"  # default fallback
 
-            extreme_val = amt_result.poc
-            sl_dir = 1 if inside_extreme else -1
-            stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            # Fabio: If aggressive print SL exists, use it regardless of distance
-            if agg_sl:
-                pass  # Use aggressive print SL
-            else:
-                # Only apply max distance if no aggressive print SL
-                max_sl_dist = min(va_width * 0.75, px * 0.03) if va_width > 0 else px * 0.01
-                if abs(px - stop_price) > max_sl_dist:
-                    stop_price = px - max_sl_dist
-            if not agg_sl and vwap and stop_price < vwap < px:
-                stop_price = vwap - buffer
-            if tp_price <= px or stop_price >= px:
-                tp_price = px * 1.020
-                stop_price = px * 0.990
-        else:
-            # SHORT: prefer npoc_below → prior_poc below VAL → VA extension
-            if amt_result.npoc_below > 0 and amt_result.npoc_below < px:
-                tp_price = amt_result.npoc_below
-                tp_source = "npoc"
-            elif 0 < amt_result.prior_poc < amt_result.value_area_low and amt_result.prior_poc < px:
-                tp_price = amt_result.prior_poc
-                tp_source = "prior_poc"
-            else:
-                tp_price = amt_result.value_area_low - (amt_result.poc - amt_result.value_area_low)
+            if is_buy:
+                # LONG: prefer npoc_above → prior_poc above VAH → VA extension
+                if amt_result.npoc_above > 0 and amt_result.npoc_above > px:
+                    tp_price = amt_result.npoc_above
+                    tp_source = "npoc"
+                elif amt_result.prior_poc > amt_result.value_area_high and amt_result.prior_poc > px:
+                    tp_price = amt_result.prior_poc
+                    tp_source = "prior_poc"
+                else:
+                    tp_price = amt_result.value_area_high + (amt_result.value_area_high - amt_result.poc)
 
-            extreme_val = amt_result.poc
-            sl_dir = -1 if inside_extreme else 1
-            stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
-            # Fabio: If aggressive print SL exists, use it regardless of distance
-            if agg_sl:
-                pass  # Use aggressive print SL
+                extreme_val = amt_result.poc
+                sl_dir = 1 if inside_extreme else -1
+                stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
+                # Fabio: If aggressive print SL exists, use it regardless of distance
+                if agg_sl:
+                    pass  # Use aggressive print SL
+                else:
+                    # Only apply max distance if no aggressive print SL
+                    max_sl_dist = min(va_width * 0.75, px * 0.03) if va_width > 0 else px * 0.01
+                    if abs(px - stop_price) > max_sl_dist:
+                        stop_price = px - max_sl_dist
+                if not agg_sl and vwap and stop_price < vwap < px:
+                    stop_price = vwap - buffer
+                if tp_price <= px or stop_price >= px:
+                    tp_price = px * 1.020
+                    stop_price = px * 0.990
             else:
-                max_sl_dist = min(va_width * 0.75, px * 0.03) if va_width > 0 else px * 0.01
-                if abs(stop_price - px) > max_sl_dist:
-                    stop_price = px + max_sl_dist
-            if not agg_sl and vwap and stop_price > vwap > px:
-                stop_price = vwap + buffer
-            if tp_price >= px or stop_price <= px:
-                tp_price = px * 0.980
-                stop_price = px * 1.010
-        allow_trail = True
+                # SHORT: prefer npoc_below → prior_poc below VAL → VA extension
+                if amt_result.npoc_below > 0 and amt_result.npoc_below < px:
+                    tp_price = amt_result.npoc_below
+                    tp_source = "npoc"
+                elif 0 < amt_result.prior_poc < amt_result.value_area_low and amt_result.prior_poc < px:
+                    tp_price = amt_result.prior_poc
+                    tp_source = "prior_poc"
+                else:
+                    tp_price = amt_result.value_area_low - (amt_result.poc - amt_result.value_area_low)
+
+                extreme_val = amt_result.poc
+                sl_dir = -1 if inside_extreme else 1
+                stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
+                # Fabio: If aggressive print SL exists, use it regardless of distance
+                if agg_sl:
+                    pass  # Use aggressive print SL
+                else:
+                    max_sl_dist = min(va_width * 0.75, px * 0.03) if va_width > 0 else px * 0.01
+                    if abs(stop_price - px) > max_sl_dist:
+                        stop_price = px + max_sl_dist
+                if not agg_sl and vwap and stop_price > vwap > px:
+                    stop_price = vwap + buffer
+                if tp_price >= px or stop_price <= px:
+                    tp_price = px * 0.980
+                    stop_price = px * 1.010
+            allow_trail = True
+        case _:
+            # Fallback to MEAN_REVERSION for unknown setups
+            # Fabio playbook: Mean reversion targets prior POC (previous balance area)
+            # When prior POC is available and beyond current price, use it as target
+            tp_price = amt_result.poc
+            if amt_result.prior_poc > 0:
+                # Use prior POC if it's a valid mean reversion target
+                # For LONG: prior_poc above current price is good target
+                # For SHORT: prior_poc below current price is good target
+                if is_buy and amt_result.prior_poc > px:
+                    tp_price = amt_result.prior_poc
+                    tp_source = "prior_poc"
+                elif not is_buy and amt_result.prior_poc < px:
+                    tp_price = amt_result.prior_poc
+                    tp_source = "prior_poc"
+            if is_buy:
+                extreme_val = amt_result.value_area_low
+                sl_dir = 1 if inside_extreme else -1
+                stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
+                # Fabio: If aggressive print SL exists, use it
+                if not agg_sl:
+                    max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
+                    if abs(px - stop_price) > max_sl_dist:
+                        stop_price = px - max_sl_dist
+                if not agg_sl and vwap and stop_price < vwap < px:
+                    stop_price = vwap - buffer
+                if tp_price <= px or stop_price >= px or (tp_price - px) < min_reward:
+                    tp_price = px * 1.010
+                    stop_price = px * 0.995
+            else:
+                extreme_val = amt_result.value_area_high
+                sl_dir = -1 if inside_extreme else 1
+                stop_price = agg_sl or (extreme_val + (sl_dir * buffer))
+                if not agg_sl:
+                    max_sl_dist = min(va_width * 0.5, px * 0.02) if va_width > 0 else px * 0.005
+                    if abs(stop_price - px) > max_sl_dist:
+                        stop_price = px + max_sl_dist
+                if not agg_sl and vwap and stop_price > vwap > px:
+                    stop_price = vwap + buffer
+                if tp_price >= px or stop_price <= px or (px - tp_price) < min_reward:
+                    tp_price = px * 0.990
+                    stop_price = px * 1.005
+            allow_trail = False
 
     # Minimum SL floor: ATR-based (1x ATR) or 1.5% of price, whichever is larger
     atr_val = compute_atr(data, 14) if data and len(data) >= 14 else px * 0.015

@@ -143,11 +143,27 @@ def compute_atr(data: list, period: int = 14) -> float:
         return 0.0
     window = data[-period:] if len(data) > period else data
     trs = []
-    prev_close = data[-len(window) - 1].close if len(data) > period else window[0].close
+    # Safely get prev_close
+    if len(data) > period:
+        prev_close_candle = data[-len(window) - 1]
+        prev_close = getattr(prev_close_candle, 'close', 0.0)
+    else:
+        prev_close_candle = window[0] if window else None
+        prev_close = getattr(prev_close_candle, 'close', 0.0)
+    
     for c in window:
-        high_low = c.high - c.low
-        high_prev = abs(c.high - prev_close)
-        low_prev = abs(c.low - prev_close)
+        # Safely extract numeric attributes
+        high = getattr(c, 'high', 0.0)
+        low = getattr(c, 'low', 0.0)
+        close = getattr(c, 'close', 0.0)
+        
+        if not (isinstance(high, (int, float)) and isinstance(low, (int, float)) and isinstance(close, (int, float))):
+            continue  # skip invalid candle
+        
+        high_low = high - low
+        high_prev = abs(high - prev_close)
+        low_prev = abs(low - prev_close)
         trs.append(max(high_low, high_prev, low_prev))
-        prev_close = c.close
+        prev_close = close
+    
     return sum(trs) / len(trs) if trs else 0.0

@@ -210,23 +210,6 @@ class AMTResult:
     underlying_price: float = 0.0
     # Fix 1: Option type for direction labeling (CALL/PUT/UNKNOWN)
     option_type: str = "UNKNOWN"
-    # Fabio AMT review: VAH probe state for critical IB test moments
-    vah_probe_state: str | None = None  # "VAH_PROBE_EXHAUSTION" | "VAH_PROBE_TESTING" | "IB_BREAKOUT" | None
-    # Fabio AMT review: Exhaustion warning at price extremes
-    exhaustion_warning: str | None = None  # Warning message when delta-flat at extreme
-    # Fabio AMT review: Swing delta metadata (when/where it occurred)
-    swing_delta_timestamp: str | None = None
-    swing_delta_price: float | None = None
-    # Fabio AMT review: Volume participation above VAH (%)
-    volume_above_vah_pct: float = 0.0
-    # PCR (Put-Call Ratio) for NSE options bias
-    pcr: float = 1.0  # Put-Call ratio (OI-based): <0.85 bullish, >1.15 bearish, 0.85-1.15 neutral
-    # OI Walls for NSE protection levels
-    oi_walls: tuple = field(default_factory=tuple)  # List of OIWall dataclasses
-    # Squeeze detection state for breakout setups
-    squeeze_state: dict = field(default_factory=dict)
-    # Session-favored strategy for session timing filter (Fabio's timing rules)
-    session_favor_strategy: str = "NEUTRAL"  # MEAN_REVERSION | TREND_CONTINUATION | NEUTRAL
 
 
 # ---------------------------------------------------------------------------

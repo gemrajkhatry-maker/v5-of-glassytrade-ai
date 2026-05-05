@@ -20,6 +20,30 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def compute_cumulative_deltas(candles: list) -> list:
+    """Compute cumulative volume delta (CVD) from candle data.
+
+    Business logic: running delta sum for each candle.
+    This replaces frontend computation with backend single source of truth.
+
+    Args:
+        candles: List of OHLC candle objects with delta field
+
+    Returns:
+        List of cumulative delta values (integers)
+    """
+    running_delta = 0
+    result = []
+    for c in candles:
+        try:
+            delta = float(getattr(c, "delta", 0) or 0)
+            running_delta += delta
+            result.append(int(running_delta))
+        except (TypeError, ValueError):
+            result.append(0)
+    return result
+
+
 def build_state_snapshot(
     session,
     risk_coordinator,
@@ -57,6 +81,7 @@ def build_state_snapshot(
         "amt": session.last_amt,
         "prediction": session.last_prediction,
         "footprint": session.last_footprint,
+        "cumulative_deltas": compute_cumulative_deltas(session.data),
         "genAIAnalysis": _camel_case_ai(ai_analysis),
         "overseerAction": (ai_analysis or {}).get("overseer_action", ""),
         "overseerReason": (ai_analysis or {}).get("overseer_reason", ""),

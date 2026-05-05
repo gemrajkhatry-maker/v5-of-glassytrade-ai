@@ -10,21 +10,12 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
-import re
 import threading
 import time
 from dataclasses import replace as _replace
 from datetime import datetime, timedelta, timezone
 import queue
 from typing import TYPE_CHECKING, Callable, Optional
-
-# Compiled regex patterns for _sanitize_rationale (avoid per-call compilation)
-_UNCLOSED_JSON_RE = re.compile(r'\{[^}]{0,100}$')
-_ORPHANED_BRACE_RE = re.compile(r'\}[^{]{0,50}')
-_TRAILING_JSON_RE = re.compile(r'[\[{}\]"]\s*$')
-_WHITESPACE_RE = re.compile(r'\s+')
-
-from app.shared.symbol_utils import detect_option_type
 
 from app.domain.trading.models.enums import (
     MarketStateCodec,
@@ -36,7 +27,7 @@ from app.domain.trading.models.entities import Signal
 from app.config import settings
 from app.domain.fabio_ai.services.regime_detector import RegimeDetector
 from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
-from app.domain.trading.events import SignalGenerated
+
 from app.domain.fabio_ai.services.session_context import get_session_info
 from app.shared.parsing import resolve_session_market
 from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
@@ -48,6 +39,15 @@ from app.application.handlers.entry_gate_coordinator import EntryGateCoordinator
 from app.shared.timezones import IST
 
 from app.domain.fabio_ai.services.position_sizer import PositionSizer
+
+# Import error handling utilities
+from shared.error_handling import (
+    handle_errors,
+    safe_execute,
+    ErrorContext,
+    LLMError,
+    SignalError,
+)
 
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
@@ -180,6 +180,21 @@ class LLMEntryHandler:
         return "; ".join(parts)
 
     @staticmethod
+    def _detect_option_type(symbol: str) -> str:
+        """Detect whether symbol is CALL, PUT, or UNKNOWN.
+        
+        Fix 1: Used for direction labeling to clarify BUY/SELL action.
+        """
+        if not symbol:
+            return "UNKNOWN"
+        symbol_upper = symbol.upper()
+        if "CALL" in symbol_upper or "CE" in symbol_upper:
+            return "CALL"
+        if "PUT" in symbol_upper or "PE" in symbol_upper:
+            return "PUT"
+        return "UNKNOWN"
+
+    @staticmethod
     def _get_amt_time_window(ist_now) -> dict:
         """Get current AMT time window for timing transparency.
         
@@ -208,46 +223,6 @@ class LLMEntryHandler:
         except Exception:
             logger.debug("Stacked imbalance extraction for LLM prompt failed", exc_info=True)
         return ""
-
-    @staticmethod
-    def _build_institutional_context(amt_result) -> str:
-        """Summarize large institutional prints with weighting.
-        
-        Identifies prints >3x median volume as institutional and flags
-        dominant buying or selling pressure that should override CVD slope.
-        """
-        if not amt_result.aggressive_prints:
-            return ""
-        
-        volumes = [ap.volume for ap in amt_result.aggressive_prints]
-        if not volumes:
-            return ""
-        
-        sorted_vols = sorted(volumes)
-        median_vol = sorted_vols[len(sorted_vols) // 2]
-        threshold = median_vol * 3  # 3x median = institutional
-        
-        institutional_prints = [ap for ap in amt_result.aggressive_prints if ap.volume > threshold]
-        if not institutional_prints:
-            return ""
-        
-        total_inst_vol = sum(ap.volume for ap in institutional_prints)
-        buy_inst = sum(ap.volume for ap in institutional_prints if ap.side == "BUY")
-        sell_inst = sum(ap.volume for ap in institutional_prints if ap.side == "SELL")
-        
-        parts = [f"[INSTITUTIONAL ALERT] {len(institutional_prints)} large prints (>{threshold:.0f} vol)"]
-        parts.append(f"Total: {total_inst_vol:.0f} | Buy: {buy_inst:.0f} | Sell: {sell_inst:.0f}")
-        
-        if buy_inst > sell_inst * 1.5:
-            parts.append("Dominant: INSTITUTIONAL BUYING")
-        elif sell_inst > buy_inst * 1.5:
-            parts.append("Dominant: INSTITUTIONAL SELLING")
-        
-        # Recent large prints (last 3)
-        for ap in institutional_prints[-3:]:
-            parts.append(f"  {ap.side} {ap.volume:.0f} at {ap.price:.0f}")
-        
-        return " | ".join(parts)
 
     def _load_episodic_memory(self) -> str:
         """Load recent trade history for LLM context."""
@@ -339,7 +314,6 @@ class LLMEntryHandler:
             "quant_context": quant_context,
             "strategy_hint": strategy_hint,
             "volume_bubbles": self._build_volume_bubble_summary(amt_result, tick),
-            "institutional_context": self._build_institutional_context(amt_result),
             "stacked_imbalances": self._build_imbalance_summary(session),
             "hvns": amt_result.hvns[:3] if amt_result.hvns else (),
             "lvns": amt_result.lvns[:3] if amt_result.lvns else (),
@@ -371,15 +345,9 @@ class LLMEntryHandler:
             "poc_signal": amt_result.poc_signal, "poc_vs_price": amt_result.poc_vs_price,
             "lvn_play": amt_result.lvn_play, "is_second_drive": is_second_drive,
             # Fix 1: Option type detection for direction labeling
-            "option_type": detect_option_type(symbol),
+            "option_type": self._detect_option_type(symbol),
             # Fix 4: AMT time window for timing transparency
             "amt_time_window": self._get_amt_time_window(ist_now),
-            # LLM constraints (from gate pipeline results)
-            "allowed_directions": ["LONG", "SHORT", "FLAT"],  # Will be overridden by gate result
-            "should_wait": False,
-            "confidence_rubric": "4/4->HIGH, 3/4->MEDIUM, <3->ABORT",
-            # Open positions for straddle prevention
-            "open_positions": session.portfolio.get_open_positions_summary() if hasattr(session, 'portfolio') else [],
         }
 
         # ML signal for LLM meta-filter
@@ -437,10 +405,10 @@ class LLMEntryHandler:
 
     @staticmethod
     def _mark_ai_done(session, worker_queue) -> None:
-        """Reset session AI flag. Mark queue task done is handled by main loop."""
+        """Reset session AI flag and mark queue task done. Used on skip/error paths."""
         with session._lock:
             session._ai_running = False
-            session._llm_status = "AVAILABLE"
+        worker_queue.task_done()
 
     @staticmethod
     def _sanitize_rationale(raw_rationale: str, direction: str) -> str:
@@ -455,6 +423,7 @@ class LLMEntryHandler:
         Returns:
             Clean rationale text suitable for UI display and database storage
         """
+        import re
         import json
         
         if not raw_rationale:
@@ -488,20 +457,17 @@ class LLMEntryHandler:
                     pass
         
         # Remove JSON-like artifacts at the end (truncated JSON)
-        text = _UNCLOSED_JSON_RE.sub('', text)  # Remove unclosed JSON at end
-        text = _ORPHANED_BRACE_RE.sub('', text)  # Remove orphaned closing brace
-
-        # Remove HTML tags to prevent stored XSS (ITR-3-003)
-        text = re.sub(r'<[^>]+>', '', text)
-
+        text = re.sub(r'\{[^}]{0,100}$', '', text)  # Remove unclosed JSON at end
+        text = re.sub(r'^[^{]{0,50\}', '', text)  # Remove orphaned closing brace at start
+        
         # Remove trailing JSON fragments
-        text = _TRAILING_JSON_RE.sub('', text)
+        text = re.sub(r'[\[{}\]"]\s*$', '', text)
         
         # Remove escaped characters
         text = text.replace('\\n', ' ').replace('\\t', ' ').replace('\\"', '"')
         
         # Clean up whitespace
-        text = _WHITESPACE_RE.sub(' ', text).strip()
+        text = re.sub(r'\s+', ' ', text).strip()
         
         # If text is now empty, return generic message
         if not text:
@@ -617,10 +583,23 @@ class LLMEntryHandler:
                         )
                     return
                 
-                # Max trades check removed — _session_risk_manager no longer exists on SessionState
-                # Risk capping is now handled by SessionRiskCoordinator at the engine level
+                # Max trades check
+                _risk_mgr = getattr(session, "_session_risk_manager", None)
+                if _risk_mgr and not _risk_mgr.can_trade:
+                    logger.info(
+                        "Max trades per session cap reached (%d trades) — blocking entry",
+                        _risk_mgr.trade_count,
+                    )
+                    if self._journal:
+                        self._journal.log_rejection(
+                            symbol=symbol,
+                            reason="MAX_TRADES_CAP",
+                            amt=session.last_amt,
+                            llm_direction=direction,
+                        )
+                    return
 
-                _cushion_sl = None  # TODO: source from SessionRiskCoordinator when available
+                _cushion_sl = _risk_mgr.stop_loss_pct if _risk_mgr else None
                 from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
                 from app.config import settings
 
@@ -750,7 +729,6 @@ class LLMEntryHandler:
         with session._lock:
             session._last_ai_time = time.time()
             session._ai_running = True
-            session._llm_status = "RUNNING"
 
         market_state_str = (
             "Trending" if MarketStateCodec.is_imbalanced(amt_result.market_state) else "Balanced"
@@ -777,7 +755,6 @@ class LLMEntryHandler:
             with session._lock:
                 session.last_ai_analysis = ai_result
                 session._ai_running = False
-                session._llm_status = "AVAILABLE"
             self._save_session_block_decision(symbol, market_state_str, amt_result, tick)
             return
 
@@ -826,7 +803,6 @@ class LLMEntryHandler:
             with session._lock:
                 session.last_ai_analysis = ai_result
                 session._ai_running = False
-                session._llm_status = "AVAILABLE"
             return
 
         # Enqueue for per-symbol LLM worker
@@ -849,12 +825,11 @@ class LLMEntryHandler:
         }
         try:
             self._llm_queues[symbol].put_nowait(item)
-            logger.debug(f"Queued LLM analysis for {symbol}")
+            logger.debug("Queued LLM analysis for %s", symbol)
         except queue.Full:
-            logger.warning(f"LLM Queue full, dropping analysis for {symbol}")
+            logger.warning("LLM Queue full, dropping analysis for %s", symbol)
             with session._lock:
                 session._ai_running = False
-                session._llm_status = "AVAILABLE"
 
     def _llm_worker_loop(self, queue_symbol: str) -> None:
         """Dedicated background thread that processes LLM requests sequentially for a specific symbol."""
@@ -863,7 +838,7 @@ class LLMEntryHandler:
             worker_queue = self._llm_queues.get(queue_symbol)
 
         if not worker_queue:
-            logger.error(f"Worker for {queue_symbol} started but no queue found!")
+            logger.error("Worker for %s started but no queue found!", queue_symbol)
             return
 
         while True:
@@ -893,7 +868,6 @@ class LLMEntryHandler:
                     )
                     with session._lock:
                         session._ai_running = False
-                        session._llm_status = "AVAILABLE"
                     if not task_done_called:
                         worker_queue.task_done()
                         task_done_called = True
@@ -907,7 +881,6 @@ class LLMEntryHandler:
                             "confidence": "Low",
                         }
                         session._ai_running = False
-                        session._llm_status = "AVAILABLE"
                     worker_queue.task_done()
                     continue
 
@@ -988,23 +961,20 @@ class LLMEntryHandler:
                     else:
                         with session._lock:
                             session._ai_running = False
-                            session._llm_status = "AVAILABLE"
                         worker_queue.task_done()
                         continue
                 except Exception as e:
-                    logger.error(f"LLM inference exception: {e}", exc_info=True)
+                    logger.error("LLM inference exception: %s", e, exc_info=True)
                     with session._lock:
                         session._ai_running = False
-                        session._llm_status = "AVAILABLE"
                     worker_queue.task_done()
                     continue
 
                 # Final safety guard against malformed ai_result
                 if not ai_result or not isinstance(ai_result, dict):
-                    logger.error(f"LLM worker received invalid ai_result: {ai_result}")
+                    logger.error("LLM worker received invalid ai_result: %s", ai_result)
                     with session._lock:
                         session._ai_running = False
-                        session._llm_status = "AVAILABLE"
                     worker_queue.task_done()
                     continue
 
@@ -1091,7 +1061,7 @@ class LLMEntryHandler:
                             attribution=self._compute_journal_attribution(_agent, direction),
                         )
                     except Exception:
-                        logger.warning("Journal log_signal failed", exc_info=True)
+                        logger.debug("Journal log_signal failed", exc_info=True)
 
                 # Use delegated modules for gate checking and signal construction
                 if direction in ("LONG", "SHORT"):
@@ -1119,7 +1089,6 @@ class LLMEntryHandler:
                                 llm_direction=direction,
                             )
                         direction = "FLAT"
-                        rationale += f" [GATE BLOCKED: {gate_reason}]"
 
                 # Save LLM decision & Update Memory
                 with session._lock:
@@ -1175,7 +1144,7 @@ class LLMEntryHandler:
                             }
                         )
                     except Exception:
-                        logger.warning("LLM decision persistence to storage failed", exc_info=True)
+                        logger.debug("LLM decision persistence to storage failed", exc_info=True)
 
                 # Build signal using build_entry_signal (via _process_build_signal)
                 # TODO(Task 51): Simplify - return raw LLM decision and let caller use SignalPipeline
@@ -1188,19 +1157,17 @@ class LLMEntryHandler:
 
                 with session._lock:
                     session._ai_running = False
-                    session._llm_status = "AVAILABLE"
 
                 if not task_done_called:
                     worker_queue.task_done()
                     task_done_called = True
 
             except Exception as e:
-                logger.error(f"Worker loop fatal error: {e}", exc_info=True)
+                logger.error("Worker loop fatal error: %s", e, exc_info=True)
                 try:
                     if "session" in locals() and session:
                         with session._lock:
                             session._ai_running = False
-                            session._llm_status = "AVAILABLE"
                 except Exception:
                     pass  # Cleanup: _ai_running reset failed — next heartbeat will time out and clear
                 try:

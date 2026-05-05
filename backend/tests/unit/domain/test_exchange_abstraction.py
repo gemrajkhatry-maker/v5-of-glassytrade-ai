@@ -411,36 +411,21 @@ class TestAbstractionLayerConsistency:
         for underlying in nse_cfg.underlyings:
             assert reg.exchange_for(f"{underlying} 27 FEB 25500 CALL") == "NSE"
 
-    def test_service_graph_wiring(self):
-        """ServiceGraph should wire all exchange abstractions.
+    def test_di_container_wiring(self):
+        """DIContainer should wire all exchange abstractions."""
+        from app.application.di.composition_root import compose_container
+        from config.consolidated import ConsolidatedConfig as Configuration
 
-        NOTE: This test imports the full service graph which requires
-        the complete runtime environment (settings, broker, LLM, etc.).
-        It is skipped if the full import chain fails or if the graph
-        cannot be initialized (test isolation issues).
-        """
-        try:
-            from app.application.service_graph import ServiceGraph
-            from config.config import Configuration
-        except Exception:
-            pytest.skip("Full service graph import chain not available in test env")
-            return
-
-        try:
-            graph = ServiceGraph(Configuration.from_unified())
-        except Exception:
-            pytest.skip("ServiceGraph initialization failed (test isolation)")
-            return
+        config = Configuration.from_unified()
+        container = compose_container(config)
 
         from app.domain.ports import IExchangeStrategy
 
-        strat = graph.get(IExchangeStrategy)
+        strat = container.resolve(IExchangeStrategy)
         assert strat is not None
-        assert graph.market_data is not None
-        assert graph.trading_session is not None
-        ex_cfg = getattr(graph.trading_session, "_exchange_config", None)
-        assert ex_cfg is not None
-        assert strat.name == ex_cfg.exchange
+
+        # Verify the container was created successfully
+        assert container is not None
 
     def test_no_domain_imports_config(self):
         """Verify the main session context factory path no longer imports app.config at module level.

@@ -11,6 +11,7 @@ Pure, stateless quant functions.
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING
 
 from app.domain.services.candle_metrics import body as calc_body
@@ -111,9 +112,12 @@ def extract_bubble_levels_from_footprint(fp_domain: dict | None, min_stacked_cou
     return bubble_levels
 
 
+from app.domain.fabio_ai.ports.three_align import ThreeAlignInput
+
+
 def three_align_check(
     data: list[OHLC],
-    amt_result: AMTResult,
+    amt_result: ThreeAlignInput,
     tick: OHLC,
     order_book=None,
     ib_high: float = 0.0,
@@ -140,36 +144,44 @@ def three_align_check(
     """
 
     # Invalid profile values → block
-    if amt_result.poc <= 0 or amt_result.value_area_high <= 0 or amt_result.value_area_low <= 0:
+    poc = amt_result.poc
+    vah = amt_result.value_area_high
+    val = amt_result.value_area_low
+    if poc is None or vah is None or val is None or poc <= 0 or vah <= 0 or val <= 0:
         return (False, False, False) if return_is_second_drive else (False, False)
 
-    # Fabio: Don't trade first 15-30 minutes
-    if not min_candles_gate(data):
-        logger.debug("Three-Align: blocked by min_candles_gate (session too young)")
-        return (False, False, False) if return_is_second_drive else (False, False)
+    # Guard against NaN/inf
+    if not (poc and vah and val):
+        if not (math.isfinite(poc) and math.isfinite(vah) and math.isfinite(val)):
+            return (False, False, False) if return_is_second_drive else (False, False)
 
-    va_range = amt_result.value_area_high - amt_result.value_area_low
-    state_ok = va_range > amt_result.poc * 0.001
+    va_range = vah - val
+    state_ok = va_range > poc * 0.001
     if not state_ok:
         return (False, False, False) if return_is_second_drive else (False, False)
 
     # CVD Hard Gate
-    cvd_slope = getattr(amt_result, "cvd_slope", 0.0)
-    cvd_div = getattr(amt_result, "cvd_divergence", "")
+    cvd_slope = amt_result.cvd_slope
+    if cvd_slope is not None and not math.isfinite(cvd_slope):
+        cvd_slope = None
+    cvd_div = amt_result.cvd_divergence
     
     # CVD DIVERGENCE: When divergence is detected, it counts as strong confirmation.
     # A divergence (price breaking one way, CVD going the other) IS itself a signal.
     divergence_confirmation = bool(cvd_div and cvd_div != "")
     
-    if cvd_slope < -CVD_SLOPE_EXTREME and amt_result.market_state == "BALANCED":
+    if cvd_slope is not None and cvd_slope < -CVD_SLOPE_EXTREME and amt_result.market_state == "BALANCED":
         logger.info("Three-Align: BLOCKED — CVD extreme selling (%.0f) in balance", cvd_slope)
         return (False, False, False) if return_is_second_drive else (False, False)
-    if cvd_slope > CVD_SLOPE_EXTREME and amt_result.market_state == "BALANCED":
+    if cvd_slope is not None and cvd_slope > CVD_SLOPE_EXTREME and amt_result.market_state == "BALANCED":
         logger.info("Three-Align: BLOCKED — CVD extreme buying (+%.0f) in balance", cvd_slope)
         return (False, False, False) if return_is_second_drive else (False, False)
 
     # Price Velocity Timing Qualifier (Bug #10)
-    price_velocity = abs(getattr(amt_result, "price_velocity", 0.0) or 0.0)
+    price_velocity = amt_result.price_velocity
+    if price_velocity is not None and not math.isfinite(price_velocity):
+        price_velocity = None
+    price_velocity = abs(price_velocity or 0.0)
     if price_velocity > 0.5:
         logger.info(
             "Three-Align: BLOCKED — price velocity too high (%.3f pts/s), whipsaw risk",
@@ -192,38 +204,38 @@ def three_align_check(
     # PROBING/IMBALANCED + active leg → leg_poc is the structural reference for the
     # current auction leg and should be checked first.
     # BALANCED → session POC/VAH/VAL remain the primary reference.
-    _leg_poc = getattr(amt_result, "leg_poc", 0.0)
-    _leg_vah = getattr(amt_result, "leg_vah", 0.0)
-    _leg_val = getattr(amt_result, "leg_val", 0.0)
+    _leg_poc = amt_result.leg_poc
+    _leg_vah = amt_result.leg_vah
+    _leg_val = amt_result.leg_val
     _use_leg_poc_first = (
         amt_result.market_state in ("PROBING", "IMBALANCED")
-        and _leg_poc > 0
+        and _leg_poc is not None and _leg_poc > 0
     )
 
     if _use_leg_poc_first:
         # Leg levels first — they represent the active auction structure
         levels_to_check: list[float] = [_leg_poc, _leg_vah, _leg_val]
         # Session levels still checked as secondary reference
-        levels_to_check.extend([amt_result.value_area_high, amt_result.value_area_low, amt_result.poc])
+        levels_to_check.extend([vah, val, poc])
         logger.debug(
             "Three-Align MR Location: using leg_poc=%.2f as primary (state=%s)",
             _leg_poc, amt_result.market_state,
         )
     else:
-        levels_to_check: list[float] = [
-            amt_result.value_area_high, amt_result.value_area_low, amt_result.poc,
-        ]
+        levels_to_check: list[float] = [vah, val, poc]
 
-    if getattr(amt_result, "dev_poc", 0) > 0:
+    if amt_result.dev_poc is not None and amt_result.dev_poc > 0:
         levels_to_check.extend([amt_result.dev_poc, amt_result.dev_vah, amt_result.dev_val])
     # When leg_poc is NOT used as primary (BALANCED state), still append it as secondary
-    if not _use_leg_poc_first and _leg_poc > 0:
+    if not _use_leg_poc_first and _leg_poc is not None and _leg_poc > 0:
         levels_to_check.extend([_leg_poc, _leg_vah, _leg_val])
-    if getattr(amt_result, "session_vwap", 0) > 0:
+    if amt_result.session_vwap is not None and amt_result.session_vwap > 0:
         levels_to_check.append(amt_result.session_vwap)
-    levels_to_check.extend((amt_result.hvns or [])[:3])
-    levels_to_check.extend(getattr(amt_result, "lvns", []) or [])
-    if getattr(amt_result, "leg_lvns", []):
+    if amt_result.hvns:
+        levels_to_check.extend((amt_result.hvns or [])[:3])
+    if amt_result.lvns:
+        levels_to_check.extend(amt_result.lvns or [])
+    if amt_result.leg_lvns:
         levels_to_check.extend(amt_result.leg_lvns)
     for ib_level in [ib_high, ib_low]:
         if ib_level > 0:
@@ -239,7 +251,7 @@ def three_align_check(
 
     active_level = 0.0
     for level in levels_to_check:
-        if level > 0 and abs(tick.close - level) < threshold:
+        if level is not None and level > 0 and abs(tick.close - level) < threshold:
             near_level = True
             active_level = level
             break

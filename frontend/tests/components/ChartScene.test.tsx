@@ -50,15 +50,25 @@ global.ResizeObserver = class ResizeObserver {
 };
 
 const mockData: OHLCData[] = [
-  { time: '2024-01-01T10:00:00Z', open: 24900, high: 25100, low: 24800, close: 25000, volume: 1000 },
-  { time: '2024-01-01T10:05:00Z', open: 25000, high: 25150, low: 24950, close: 25100, volume: 1200 },
+  { time: '2024-01-01T10:00:00Z', open: 24900, high: 25100, low: 24800, close: 25000, volume: 1000, vwap: 25000, takerBuyVolume: 600, delta: 200 },
+  { time: '2024-01-01T10:05:00Z', open: 25000, high: 25150, low: 24950, close: 25100, volume: 1200, vwap: 25100, takerBuyVolume: 700, delta: 300 },
 ];
 
 const defaultConfig: ChartConfig = {
+  symbol: 'NIFTY',
+  interval: '5m',
+  dataSource: 'live',
   bullColor: '#22c55e',
   bearColor: '#ef4444',
   showVolumeProfile: true,
   vpMode: 'combined',
+  glassOpacity: 0.5,
+  roughness: 0.5,
+  transmission: 0.5,
+  showGrid: true,
+  autoRotate: false,
+  showPredictions: true,
+  trend: 'sideways',
 };
 
 describe('ChartScene', () => {
@@ -163,7 +173,7 @@ describe('ChartScene', () => {
         takeProfit: 25200,
         status: 'OPEN' as const,
         entryTime: '2024-01-01T10:00:00Z',
-        source: 'FABIO',
+        source: 'AMT' as const,
         pnl: 0,
         unrealizedPnl: 100,
         notionalValue: 25000,

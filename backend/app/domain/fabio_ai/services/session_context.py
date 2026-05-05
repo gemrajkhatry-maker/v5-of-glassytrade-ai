@@ -1,16 +1,15 @@
 """Session Context — time-of-day session awareness & opening relation.
 
 Supports two market regimes:
-  - NSE/MCX (Indian markets): 6-phase IST structure per Fabio methodology
+  - NSE/MCX (Indian markets): 5-phase IST structure per Fabio methodology
   - Crypto/Global: London / New York / Asia / Overlap
 
 The NSE phases directly map to Fabio's transcript:
   Phase 1 (09:15–09:30 IST): Opening Noise — DO NOT TRADE
-  Phase 2 (09:30–10:15 IST): IB Formation — DO NOT TRADE (wait for completion)
-  Phase 3 (10:15–11:30 IST): Primary Setup Window — ALL MODELS ACTIVE
-  Phase 4 (11:30–14:00 IST): Midday Consolidation — REVERSION ONLY
-  Phase 5 (14:00–15:15 IST): Power Hour — ALL MODELS ACTIVE
-  Phase 6 (15:15–15:30 IST): Close Protection — EXIT ONLY, NO NEW ENTRIES
+  Phase 2 (09:30–11:30 IST): Primary Setup Window — ALL MODELS ACTIVE
+  Phase 3 (11:30–14:00 IST): Midday Consolidation — REVERSION ONLY
+  Phase 4 (14:00–15:15 IST): Power Hour — ALL MODELS ACTIVE
+  Phase 5 (15:15–15:30 IST): Close Protection — EXIT ONLY, NO NEW ENTRIES
 
 MCX sessions:
   Pre-open (09:00–09:15 IST): DO NOT TRADE
@@ -106,25 +105,21 @@ def _get_nse_phase(
     if t < 570:  # before 09:30
         return ("NSE_OPENING", 1, False, False, False, False, "NEUTRAL")
 
-    # Phase 2: IB Formation (09:30–10:15)
-    if t < 615:  # before 10:15
-        return ("NSE_IB_FORMATION", 2, False, False, False, False, "NEUTRAL")
-
-    # Phase 3: Primary Setup Window (10:15–11:30)
+    # Phase 2: Primary Setup Window (09:30–11:30)
     if t < 690:  # before 11:30
-        return ("NSE_PRIMARY", 3, True, True, True, False, "TREND_CONTINUATION")
+        return ("NSE_PRIMARY", 2, True, True, True, False, "TREND_CONTINUATION")
 
-    # Phase 4: Midday Consolidation (11:30–14:00)
+    # Phase 3: Midday Consolidation (11:30–14:00)
     if t < 840:  # before 14:00
-        return ("NSE_MIDDAY", 4, True, False, True, False, "MEAN_REVERSION")
+        return ("NSE_MIDDAY", 3, True, False, True, False, "MEAN_REVERSION")
 
-    # Phase 5: Power Hour (14:00–15:15)
+    # Phase 4: Power Hour (14:00–15:15)
     if t < 915:  # before 15:15
-        return ("NSE_POWER_HOUR", 5, True, True, True, False, "TREND_CONTINUATION")
+        return ("NSE_POWER_HOUR", 4, True, True, True, False, "TREND_CONTINUATION")
 
-    # Phase 6: Close Protection (15:15–15:30)
+    # Phase 5: Close Protection (15:15–15:30)
     if t < 930:  # before 15:30
-        return ("NSE_CLOSE", 6, False, False, False, True, "NEUTRAL")
+        return ("NSE_CLOSE", 5, False, False, False, True, "NEUTRAL")
 
     # After market close
     return ("POST_MARKET", 0, False, False, False, False, "NEUTRAL")
@@ -370,19 +365,6 @@ def is_expiry_day(trade_date: date) -> bool:
     return trade_date.weekday() == 3  # Thursday = 3
 
 
-def is_monthly_expiry(trade_date: date) -> bool:
-    """Check if the given date is the monthly expiry (last Thursday).
-
-    NIFTY/BANKNIFTY monthly expiry is the last Thursday of the month.
-    If adding 7 days crosses into next month, this Thursday is the last one.
-    """
-    if trade_date.weekday() != 3:
-        return False
-    from datetime import timedelta
-    next_week = trade_date + timedelta(days=7)
-    return next_week.month != trade_date.month
-
-
 def seconds_to_close(current_time: datetime, exchange: str = "NSE") -> float:
     """Return seconds remaining until market close.
 
@@ -407,41 +389,20 @@ def seconds_to_close(current_time: datetime, exchange: str = "NSE") -> float:
 
 
 def opening_inventory_bias(
-    open_price: float,
-    prior_vah: float,
-    prior_val: float,
-    current_price: float | None = None,
-    session_vwap: float | None = None,
-    vwap_deviation_sigmas: float | None = None,
+    open_price: float, prior_vah: float, prior_val: float
 ) -> str:
     """Determine inventory bias from opening price vs prior session value area.
 
-    Returns "" (invalid inputs), "LONG_BIAS", "SHORT_BIAS", "NEUTRAL",
-    or "*_INVALIDATED" when price has moved 1σ+ against the bias through VWAP.
+    Returns "" (invalid inputs), "LONG_BIAS", "SHORT_BIAS", or "NEUTRAL".
     """
     if prior_vah <= 0 or prior_val <= 0:
         return ""
-
-    # Compute initial bias
     if open_price > prior_vah:
-        initial_bias = "LONG_BIAS"
+        return "LONG_BIAS"
     elif open_price < prior_val:
-        initial_bias = "SHORT_BIAS"
+        return "SHORT_BIAS"
     else:
         return "NEUTRAL"
-
-    # Auto-invalidation: if price moved 1σ+ against bias through VWAP
-    if (
-        current_price is not None
-        and session_vwap is not None
-        and vwap_deviation_sigmas is not None
-    ):
-        if initial_bias == "SHORT_BIAS" and vwap_deviation_sigmas >= 1.0:
-            return "SHORT_BIAS_INVALIDATED"
-        elif initial_bias == "LONG_BIAS" and vwap_deviation_sigmas <= -1.0:
-            return "LONG_BIAS_INVALIDATED"
-
-    return initial_bias
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +416,7 @@ MCX_SUB_SESSIONS = {
     "US_SESSION": (19, 30, 23, 30), # 19:30 - 23:30 IST (US-driven)
 }
 
-MCX_US_OPENIST = (19, 30)  # 7:30 PM IST = US market influence
+MCX_US_OPEN_IST = (19, 30)  # 7:30 PM IST = US market influence
 
 
 def get_ib_window(exchange: str, current_time: datetime | None = None) -> tuple[int, int, int, int]:

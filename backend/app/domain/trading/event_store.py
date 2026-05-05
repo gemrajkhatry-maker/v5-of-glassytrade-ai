@@ -6,13 +6,13 @@ It provides:
 2. Idempotency detection (prevent duplicate events)
 3. Event ordering (timestamp-based)
 4. Query capabilities (get events for a specific trade/entity)
-5. Deterministic replay (reconstruct state from events)
+5. Deterministic verification (reconstruct state from events)
 
 DESIGN PRINCIPLES:
 - Events are immutable (frozen=True)
 - Idempotency key prevents duplicate processing
 - Events are never modified or deleted
-- Query by aggregate_id for trade-specific replay
+- Query by aggregate_id for trade-specific verification
 """
 
 from __future__ import annotations
@@ -334,16 +334,15 @@ class EventSystem:
 
 
 # ---------------------------------------------------------------------------
-# Replay Engine
+# Audit Trail Verifier
 # ---------------------------------------------------------------------------
 
 
-class ReplayEngine:
-    """Replay engine for deterministic State reconstruction.
+class AuditTrailVerifier:
+    """Audit trail verifier for deterministic State reconstruction.
 
-    Given a list of events, replays them to reconstruct state.
-    This ensures deterministic behavior - same events always
-    produce the same state.
+    Given a list of events, verifies that replaying them produces consistent
+    state. This is for audit trail verification - NOT for backtest execution.
     """
 
     def __init__(self, event_store: EventStore):
@@ -353,13 +352,15 @@ class ReplayEngine:
     def register_handler(
         self, event_type: str, handler: Callable[[DomainEvent], Any]
     ) -> None:
-        """Register a handler for replay."""
+        """Register a handler for event verification."""
         self._replay_handlers[event_type] = handler
 
-    def replay_to(
+    def verify_to(
         self, timestamp: str | None = None, aggregate_id: str | None = None
     ) -> dict[str, Any]:
-        """Replay all events up to timestamp/aggregate and return final state.
+        """Verify events up to timestamp/aggregate and return reconstructed state.
+
+        For audit trail verification - NOT for backtest execution.
 
         Returns a dict with:
         - trades: dict of trade_id -> trade state
@@ -378,7 +379,7 @@ class ReplayEngine:
             "events": events,
         }
 
-        # Replay each event
+        # Apply each event to reconstruct state
         for event in events:
             event_type = event.__class__.__name__
             if event_type in self._replay_handlers:
@@ -387,13 +388,17 @@ class ReplayEngine:
         return state
 
     def verify_determinism(self, events: list[DomainEvent]) -> bool:
-        """Verify that replaying events produces same result twice."""
-        state1 = self._replay_events(events)
-        state2 = self._replay_events(events)
+        """Verify that event verification produces consistent results.
+
+        Runs verification twice and compares outputs to ensure
+        deterministic behavior of state reconstruction.
+        """
+        state1 = self._verify_events(events)
+        state2 = self._verify_events(events)
         return state1 == state2
 
-    def _replay_events(self, events: list[DomainEvent]) -> dict[str, Any]:
-        """Internal replay implementation."""
+    def _verify_events(self, events: list[DomainEvent]) -> dict[str, Any]:
+        """Internal verification implementation."""
         state = {}
         for event in events:
             event_type = event.__class__.__name__

@@ -85,8 +85,8 @@ def run_gate_pipeline(
         is_risk_halted=is_risk_halted,
         halt_reason=halt_reason,
         eia_window_active=eia_suppressed,
-        pcr=pcr,  # PCR bias for NSE options
-        oi_walls=oi_walls or [],  # OI walls for NSE protection levels
+        weekly_bias="NEUTRAL",
+        weekly_bias_aligned=True,
         is_extreme_deviation=is_extreme_deviation,
         setup_type=amt_result.setup or "NONE",
         r_r_ratio=rr,
@@ -96,7 +96,6 @@ def run_gate_pipeline(
         min_aggression_score=min_aggression_score,
         max_cushion_ticks=max_cushion_ticks,
         min_rr_ratio=min_rr_ratio,
-        favor_strategy=favor_strategy,  # Session strategy filter
     )
 
     result = GatePipeline().evaluate(ctx)

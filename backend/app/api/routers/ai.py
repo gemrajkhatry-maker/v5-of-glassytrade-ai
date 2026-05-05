@@ -153,19 +153,24 @@ async def get_decision_history(
     active_symbols: list[str] = Depends(get_active_symbols),
 ):
     """Returns persisted decision history from SQLite — LLM decisions + signal decisions."""
-    # Cap limit to prevent massive responses
-    safe_limit = min(limit, 200)
-    llm_rows = storage.query_llm_decisions(
-        start=start, end=end, symbols=active_symbols if active_symbols else None
-    )
-    # Cap LLM rows too
-    if len(llm_rows) > safe_limit:
-        llm_rows = llm_rows[-safe_limit:]
-    signal_rows = storage.query_signal_decisions(
-        symbol=active_symbols[0] if active_symbols else None,
-        limit=safe_limit,
-    )
-    return {"decisions": llm_rows, "signal_decisions": signal_rows}
+    try:
+        # Cap limit to prevent massive responses
+        safe_limit = min(limit, 200)
+        llm_rows = storage.query_llm_decisions(
+            start=start, end=end, symbols=active_symbols if active_symbols else None
+        )
+        # Cap LLM rows too
+        if len(llm_rows) > safe_limit:
+            llm_rows = llm_rows[-safe_limit:]
+        signal_rows = storage.query_signal_decisions(
+            symbol=active_symbols[0] if active_symbols else None,
+            limit=safe_limit,
+        )
+        return {"decisions": llm_rows, "signal_decisions": signal_rows}
+    except Exception as e:
+        logger.error(f"Error in /ai/history: {e}", exc_info=True)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={"error": str(e), "type": str(type(e))})
 
 
 @router.get("/journal")

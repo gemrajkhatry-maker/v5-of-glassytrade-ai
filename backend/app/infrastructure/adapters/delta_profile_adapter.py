@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class DeltaProfileAdapter(IDeltaProfile):
     """Delta-colored volume profile with O(1) per tick updates.
 
-    DI pattern: Port (ABC) → Adapter (this class) → ServiceGraph injection.
+    DI pattern: Port (ABC) → Adapter (this class) → DIContainer injection.
 
     Each bucket maintains:
     - buy_delta: aggressive buyers (trades at ask)

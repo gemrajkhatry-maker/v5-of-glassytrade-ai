@@ -1,7 +1,7 @@
 {
   "MCX": {
     "CRUDEOIL": {
-      "underlying_symbol": "CRUDEOIL25APRFUT",
+      "underlying_symbol": "CRUDEOIL25MAYFUT",
       "underlying_segment": "MCX_COMM",
       "options_segment": "MCX_COMM",
       "strike_step": 50,
@@ -15,7 +15,7 @@
       "dead_volume_pct": 5
     },
     "NATURALGAS": {
-      "underlying_symbol": "NATURALGAS25APRFUT",
+      "underlying_symbol": "NATURALGAS25MAYFUT",
       "underlying_segment": "MCX_COMM",
       "options_segment": "MCX_COMM",
       "strike_step": 5,
@@ -29,7 +29,7 @@
       "dead_volume_pct": 5
     },
     "GOLD": {
-      "underlying_symbol": "GOLD25APRFUT",
+      "underlying_symbol": "GOLD25MAYFUT",
       "underlying_segment": "MCX_COMM",
       "options_segment": "MCX_COMM",
       "strike_step": 100,
@@ -43,7 +43,7 @@
       "dead_volume_pct": 5
     },
     "SILVER": {
-      "underlying_symbol": "SILVER25APRFUT",
+      "underlying_symbol": "SILVER25MAYFUT",
       "underlying_segment": "MCX_COMM",
       "options_segment": "MCX_COMM",
       "strike_step": 500,
@@ -57,7 +57,7 @@
       "dead_volume_pct": 5
     },
     "GOLDM": {
-      "underlying_symbol": "GOLDM25APRFUT",
+      "underlying_symbol": "GOLDM25MAYFUT",
       "underlying_segment": "MCX_COMM",
       "options_segment": "MCX_COMM",
       "strike_step": 100,
@@ -71,7 +71,7 @@
       "dead_volume_pct": 5
     },
     "SILVERM": {
-      "underlying_symbol": "SILVERM25APRFUT",
+      "underlying_symbol": "SILVERM25MAYFUT",
       "underlying_segment": "MCX_COMM",
       "options_segment": "MCX_COMM",
       "strike_step": 500,
@@ -87,7 +87,7 @@
   },
   "NSE": {
     "NIFTY": {
-      "underlying_symbol": "NIFTY25APRFUT",
+      "underlying_symbol": "NIFTY25MAYFUT",
       "underlying_segment": "NSE_FNO",
       "options_segment": "NSE_FNO",
       "strike_step": 50,
@@ -101,7 +101,7 @@
       "dead_volume_pct": 5
     },
     "BANKNIFTY": {
-      "underlying_symbol": "BANKNIFTY25APRFUT",
+      "underlying_symbol": "BANKNIFTY25MAYFUT",
       "underlying_segment": "NSE_FNO",
       "options_segment": "NSE_FNO",
       "strike_step": 100,
@@ -115,7 +115,7 @@
       "dead_volume_pct": 5
     },
     "FINNIFTY": {
-      "underlying_symbol": "FINNIFTY25APRFUT",
+      "underlying_symbol": "FINNIFTY25MAYFUT",
       "underlying_segment": "NSE_FNO",
       "options_segment": "NSE_FNO",
       "strike_step": 50,

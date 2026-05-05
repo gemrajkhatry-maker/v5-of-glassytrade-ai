@@ -644,8 +644,6 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         "cvdSource": r.cvd_source,
         # Bimodal active pole
         "bimodalActivePole": r.bimodal_active_pole,
-        # Option type for directional labels (CALL/PUT/UNKNOWN)
-        "optionType": r.option_type,
     }
 
 

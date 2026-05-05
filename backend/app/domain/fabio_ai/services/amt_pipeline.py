@@ -44,7 +44,7 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 @dataclass
-class ProfileStageResult:
+class _ProfileStageResult:
     """Result from profile building stage."""
     profile: list = field(default_factory=list)
     profile_type: str = "Session"
@@ -56,7 +56,7 @@ class ProfileStageResult:
 
 
 @dataclass  
-class MarketStateStageResult:
+class _MarketStateStageResult:
     """Result from market state detection stage."""
     has_displacement: bool = False
     has_acceptance: bool = False
@@ -70,7 +70,7 @@ class MarketStateStageResult:
 
 
 @dataclass
-class SetupStageResult:
+class _SetupStageResult:
     """Result from setup classification stage."""
     setup: str = "MEAN_REVERSION"
     profile_shape: str = "D"
@@ -78,7 +78,7 @@ class SetupStageResult:
 
 
 @dataclass
-class SessionStageResult:
+class _SessionStageResult:
     """Result from session context stage."""
     session_open: float = 0.0
     day_type: str = "UNKNOWN"
@@ -88,7 +88,7 @@ class SessionStageResult:
 
 
 @dataclass
-class MTFStageResult:
+class _MTFStageResult:
     """Result from multi-timeframe alignment stage."""
     alignment: str = ""
     daily_vah: float = 0.0
@@ -100,7 +100,7 @@ class MTFStageResult:
 
 
 @dataclass
-class OrderFlowStageResult:
+class _OrderFlowStageResult:
     """Result from order flow metrics stage."""
     aggression_score: float = 0.0
     has_aggression: bool = False
@@ -116,9 +116,9 @@ class OrderFlowStageResult:
 # Pipeline Stages
 # ---------------------------------------------------------------------------
 
-def build_profile_stage(input: AMTAnalysisInput) -> ProfileStageResult:
+def build_profile_stage(input: AMTAnalysisInput) -> _ProfileStageResult:
     """Stage 1: Build volume profile and extract POC/VA bounds."""
-    result = ProfileStageResult()
+    result = _ProfileStageResult()
     
     # Profile building
     if input.incremental_profile is not None:
@@ -145,12 +145,12 @@ def build_profile_stage(input: AMTAnalysisInput) -> ProfileStageResult:
 
 def compute_market_state_stage(
     input: AMTAnalysisInput, 
-    profile: ProfileStageResult,
+    profile: _ProfileStageResult,
     tracker: DriveTracker,
     cvd_tracker: CVDTracker,
-) -> MarketStateStageResult:
+) -> _MarketStateStageResult:
     """Stage 2: Compute market state, displacement, balance ratio."""
-    result = MarketStateStageResult()
+    result = _MarketStateStageResult()
     
     # Displacement leg detection
     result.leg_data = detect_displacement_leg(
@@ -183,11 +183,11 @@ def compute_market_state_stage(
 
 
 def classify_setup_stage(
-    market_state: MarketStateStageResult,
-    profile: ProfileStageResult,
-) -> SetupStageResult:
+    market_state: _MarketStateStageResult,
+    profile: _ProfileStageResult,
+) -> _SetupStageResult:
     """Stage 3: Classify setup type based on market state."""
-    result = SetupStageResult()
+    result = _SetupStageResult()
     
     # Setup identification logic
     _setup = SetupType.MEAN_REVERSION
@@ -204,10 +204,10 @@ def classify_setup_stage(
 
 def compute_session_stage(
     input: AMTAnalysisInput,
-    market_state: MarketStateStageResult,
-) -> SessionStageResult:
+    market_state: _MarketStateStageResult,
+) -> _SessionStageResult:
     """Stage 4: Compute session context (open, day type, strategy)."""
-    result = SessionStageResult()
+    result = _SessionStageResult()
     
     if input.data:
         result.session_open = extract_session_open(input.data, input.data[-1])
@@ -230,9 +230,9 @@ def compute_session_stage(
 def compute_mtf_stage(
     input: AMTAnalysisInput,
     mtf_analyzer: MultiTimeframeAMTAnalyzer,
-) -> MTFStageResult:
+) -> _MTFStageResult:
     """Stage 5: Compute multi-timeframe alignment."""
-    result = MTFStageResult()
+    result = _MTFStageResult()
     
     if input.daily_data and input.hourly_data and input.data:
         try:
@@ -256,11 +256,11 @@ def compute_mtf_stage(
 
 def compute_order_flow_stage(
     input: AMTAnalysisInput,
-    profile: ProfileStageResult,
+    profile: _ProfileStageResult,
     order_flow_service,
-) -> OrderFlowStageResult:
+) -> _OrderFlowStageResult:
     """Stage 6: Compute order flow metrics (CVD, absorption, OFI, aggression)."""
-    result = OrderFlowStageResult()
+    result = _OrderFlowStageResult()
     
     if order_flow_service:
         try:

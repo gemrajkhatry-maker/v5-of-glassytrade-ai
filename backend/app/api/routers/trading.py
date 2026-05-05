@@ -83,7 +83,7 @@ async def get_position_events(
     symbol: str | None = Query(default=None),
     storage: IStorage = Depends(get_storage),
 ):
-    """Return append-only lifecycle events for operator inspection and replay."""
+    """Return append-only lifecycle events for operator inspection & audit."""
     events = storage.query_position_events(position_id=position_id, symbol=symbol)
     return {
         "count": len(events),
@@ -96,7 +96,7 @@ async def get_position_lifecycle(
     position_id: str,
     storage: IStorage = Depends(get_storage),
 ):
-    """Return the replay-friendly lifecycle view for a single position."""
+    """Return the audit-friendly lifecycle view for a single position."""
     events = storage.query_position_events(position_id=position_id)
     if not events:
         raise HTTPException(status_code=404, detail="Position lifecycle not found")

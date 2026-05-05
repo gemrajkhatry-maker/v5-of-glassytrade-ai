@@ -15,8 +15,8 @@ import logging
 import time
 from datetime import datetime
 
+from app.application.di.container import DIContainer
 from app.application.protocols import (
-    IServiceGraph,
     IStreamManager,
     IWatchdogManager,
     IStateBroadcaster,
@@ -41,7 +41,7 @@ class EngineLifecycle:
 
     def __init__(
         self,
-        graph: IServiceGraph,
+        container: DIContainer,
         stream_manager: IStreamManager,
         watchdog_manager: IWatchdogManager,
         state_broadcaster: IStateBroadcaster,
@@ -50,19 +50,23 @@ class EngineLifecycle:
         """Initialize engine lifecycle manager.
 
         Args:
-            graph: Service graph with dependencies
+            container: DI container with dependencies
             stream_manager: Stream manager for market data
             watchdog_manager: Watchdog manager for SL/TP and health
             state_broadcaster: State broadcaster for WS updates
             tick_processor: Tick processor for market data processing
         """
-        self._graph = graph
-        self._market_data = graph.market_data
-        self._session_service = graph.trading_session
-        self._active_symbols: list[str] = graph.active_symbols
-        self._stream_symbols: list[str] = list(
-            getattr(graph, "stream_symbols", None) or graph.active_symbols
-        )
+        self._container = container
+        from app.domain.ports.market_data import IMarketData
+        from app.application.services.trading_session import TradingSessionService
+        self._market_data = container.resolve(IMarketData)
+        self._session_service = container.resolve(TradingSessionService)
+        self._active_symbols: list[str] = []
+        try:
+            self._active_symbols = list(container.resolve(list))
+        except Exception:
+            pass
+        self._stream_symbols: list[str] = list(self._active_symbols)
 
         self._stream_manager = stream_manager
         self._watchdog_manager = watchdog_manager
@@ -387,7 +391,8 @@ class EngineLifecycle:
                 )
 
         # Underlying futures history — warms AMT/regime buffers before live ticks
-        provider = getattr(self._graph, "underlying_futures_provider", None)
+        from app.domain.services.underlying_futures_provider import UnderlyingFuturesProvider
+        provider = UnderlyingFuturesProvider()
         if provider:
             seen_fut: set[str] = set()
             for sym in self._active_symbols:

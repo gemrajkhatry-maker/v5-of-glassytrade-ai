@@ -41,9 +41,11 @@ class TestCheckStaleness:
         assert check_staleness(enqueue_time, threshold=20.0)
 
     def test_boundary(self):
-        """Test boundary condition."""
+        """Test boundary condition - exactly at threshold is NOT stale (> is used)."""
         import time
-        enqueue_time = time.time() - 20.0
-        assert check_staleness(enqueue_time, threshold=20.0)
-        enqueue_time = time.time() - 19.0
+        # Use a small epsilon below threshold to ensure not stale
+        enqueue_time = time.time() - 19.9
+        # Just under threshold: 19.9 > 20.0 is False, so not stale
         assert not check_staleness(enqueue_time, threshold=20.0)
+        enqueue_time = time.time() - 20.1
+        assert check_staleness(enqueue_time, threshold=20.0)  # 20.1 > 20.0

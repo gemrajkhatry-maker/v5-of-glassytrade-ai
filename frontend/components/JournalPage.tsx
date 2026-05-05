@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, ChevronLeft, ChevronRight, TrendingUp, TrendingDown, Filter, BarChart3, List } from 'lucide-react';
 import { sanitizeRationale } from '../utils/textSanitizer';
-import { shortSymbolName } from '../utils/symbol';
+import { shortSymbolName, shortSymbol } from '../utils/symbol';
 
 interface JournalSummary {
     date: string;
@@ -256,7 +256,7 @@ function TradesTable({ trades }: { trades: CompletedTrade[] }) {
                         <tr key={t.position_id || i} className={`${rowBg} hover:bg-white/5 transition-colors`}>
                             <td className="py-2 px-2 text-white/60 font-mono text-xs">{formatTime(t.entry_time)}</td>
                             <td className="py-2 px-2 text-white/60 font-mono text-xs">{formatTime(t.exit_time)}</td>
-                            <td className="py-2 px-2 text-white/80 text-xs">{shortSymbol(t.symbol)}</td>
+                            <td className="py-2 px-2 text-white/80 text-xs">{shortSymbolName(t.symbol)}</td>
                             <td className="py-2 px-2">
                                 <span className={`flex items-center gap-1 text-xs ${t.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
                                     {t.side === 'LONG' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
@@ -328,7 +328,7 @@ function EventsTable({ entries }: { entries: JournalEntry[] }) {
                                     {e.event_type?.replace(/_/g, ' ')}
                                 </span>
                             </td>
-                            <td className="py-2 px-2 text-white/80 text-xs">{shortSymbol(e.symbol) || '-'}</td>
+                            <td className="py-2 px-2 text-white/80 text-xs">{shortSymbolName(e.symbol) || '-'}</td>
                             <td className="py-2 px-2">
                                 {e.side ? (
                                     <span className={`flex items-center gap-1 text-xs ${e.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>

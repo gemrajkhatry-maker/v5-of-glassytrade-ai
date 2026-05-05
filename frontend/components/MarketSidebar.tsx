@@ -1,8 +1,8 @@
+
 import React, { useState, useCallback, useMemo } from 'react';
 import GlassPanel from './GlassPanel';
 import { InstrumentState } from '../types';
 import { TrendingUp, TrendingDown, Search, BarChart3, History, Radio, Filter } from 'lucide-react';
-import { shortSymbol } from '../utils/symbol';
 
 interface MarketSidebarProps {
     instruments: Record<string, InstrumentState>;
@@ -16,6 +16,21 @@ function timingRank(timing: string | undefined): number {
     if (timing === 'MONITOR' || timing === 'WAIT') return 2;
     if (timing === 'SKIP') return 1;
     return 0;
+}
+
+/** Extract a short display name from Dhan symbol like "NIFTY 27 FEB 25500 CALL" -> "NIFTY 25500 CE" */
+function shortSymbol(sym: string): { name: string; tag: string } {
+    const parts = sym.split(' ');
+    // Options: "NIFTY 27 FEB 25500 CALL" or "CRUDEOIL 17 MAR 5900 PUT"
+    if (parts.length >= 4) {
+        const underlying = parts[0];
+        const strike = parts[parts.length - 2];
+        const optType = parts[parts.length - 1];
+        const tag = optType === 'CALL' ? 'CE' : optType === 'PUT' ? 'PE' : optType;
+        return { name: `${underlying} ${strike}`, tag };
+    }
+    // Fallback
+    return { name: sym.replace('USDT', ''), tag: '' };
 }
 
 /** Memoized symbol card to avoid re-rendering all cards when only one changes. */
@@ -44,19 +59,15 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const totalSize = openPositions.reduce((sum, p) => sum + (p.size || 0), 0);
 
     const isDead = inst.genAIAnalysis?.rationale?.includes('DEAD') || inst.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
-    const hasAnalysis = inst.agentDecision !== null && inst.amtAnalysis !== null;
-    const prob = inst.agentDecision?.probability ?? 0;
-    const timing = inst.agentDecision?.timing ?? 'SKIP';
-    const mode = inst.amtAnalysis?.marketState ?? 'BALANCED';
+    const prob = inst.agentDecision?.probability || 0;
+    const timing = inst.agentDecision?.timing || 'SKIP';
+    const mode = inst.amtAnalysis?.marketState || 'BALANCED';
     const modeAbbr = (mode || 'BAL').substring(0, 3).toUpperCase();
-    const actionLabel = hasAnalysis
-        ? (timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing === 'SKIP' ? 'SKIP' : (timing || '—').slice(0, 6))
-        : '...';
+    const actionLabel =
+        timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing === 'SKIP' ? 'SKIP' : (timing || '—').slice(0, 6);
 
     return (
         <button
-            role="listitem"
-            aria-selected={isActive}
             onClick={() => onSelect(sym)}
             className={`
                 w-full px-2 py-1.5 rounded flex items-center gap-0 group transition-all duration-200 text-left border-l-2
@@ -135,20 +146,13 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                             <div className="h-full w-1/3 bg-white/10 animate-pulse" />
                         </div>
                     </>
-                ) : inst.agentDecision?.probability !== undefined ? (
-                    <>
-                        <span className={`text-[9px] font-mono font-bold ${inst.agentDecision.probability >= 0.6 ? 'text-emerald-400' : inst.agentDecision.probability >= 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
-                            {Math.round(inst.agentDecision.probability * 100)}%
-                        </span>
-                        <div className="w-full h-0.5 bg-white/10 rounded-full overflow-hidden">
-                            <div className="h-full transition-all duration-500" style={{ width: `${inst.agentDecision.probability * 100}%`, backgroundColor: inst.agentDecision.probability >= 0.6 ? '#34d399' : inst.agentDecision.probability >= 0.5 ? '#fbbf24' : '#f87171' }} />
-                        </div>
-                    </>
                 ) : (
                     <>
-                        <span className="h-2 w-8 rounded bg-white/10 animate-pulse" />
+                        <span className={`text-[9px] font-mono font-bold ${prob >= 0.6 ? 'text-emerald-400' : prob >= 0.5 ? 'text-amber-400' : 'text-red-400'}`}>
+                            {Math.round(prob * 100)}%
+                        </span>
                         <div className="w-full h-0.5 bg-white/10 rounded-full overflow-hidden">
-                            <div className="h-full w-1/3 bg-white/10 animate-pulse" />
+                            <div className="h-full transition-all duration-500" style={{ width: `${prob * 100}%`, backgroundColor: prob >= 0.6 ? '#34d399' : prob >= 0.5 ? '#fbbf24' : '#f87171' }} />
                         </div>
                     </>
                 )}
@@ -195,7 +199,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
     const [actionFilter, setActionFilter] = useState('ALL');
     const [sortBy, setSortBy] = useState<'ACTION' | 'PROB'>('PROB');
 
-    const symbols = useMemo(() => Object.keys(instruments).sort(), [instruments]);
+    const symbols = Object.keys(instruments);
     const filtered = useMemo(() => {
         let f = symbols;
         
@@ -216,10 +220,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
             const isDeadA = instA.genAIAnalysis?.rationale?.includes('DEAD') || instA.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
             const isDeadB = instB.genAIAnalysis?.rationale?.includes('DEAD') || instB.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
 
-            // 0. Dead or no-analysis symbols always at the bottom
-            const noAnalysisA = !instA.agentDecision || !instA.amtAnalysis;
-            const noAnalysisB = !instB.agentDecision || !instB.amtAnalysis;
-            if (noAnalysisA !== noAnalysisB) return noAnalysisA ? 1 : -1;
+            // 0. Dead markets always at the bottom
             if (isDeadA !== isDeadB) return isDeadA ? 1 : -1;
 
             const pA = instA.agentDecision?.probability || 0;
@@ -266,13 +267,12 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                     <div className="flex flex-col gap-2">
                         {/* Text Search */}
                         <div className="relative">
-                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" size={14} aria-hidden="true" />
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" size={14} />
                             <input
                                 type="text"
                                 placeholder="Filter symbols..."
                                 value={filter}
                                 onChange={e => setFilter(e.target.value)}
-                                aria-label="Filter symbols by name"
                                 className="w-full bg-black/30 border border-white/10 rounded py-1.5 pl-8 pr-3 text-xs text-white placeholder-white/30 focus:outline-none focus:border-purple-500/50"
                             />
                         </div>
@@ -280,10 +280,9 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                         {/* Dropdown Filters */}
                         <div className="flex gap-2">
                             <div className="relative flex-1">
-                                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" size={10} aria-hidden="true" />
+                                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" size={10} />
                                 <select 
                                     value={modeFilter} onChange={e => setModeFilter(e.target.value)}
-                                    aria-label="Filter by market mode"
                                     className="w-full bg-black/30 border border-white/10 rounded py-1 pl-6 pr-2 text-[10px] text-white/70 appearance-none outline-none focus:border-white/20 cursor-pointer"
                                 >
                                     <option value="ALL">All Modes</option>
@@ -293,10 +292,9 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                                 </select>
                             </div>
                             <div className="relative flex-1">
-                                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" size={10} aria-hidden="true" />
+                                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" size={10} />
                                 <select 
                                     value={actionFilter} onChange={e => setActionFilter(e.target.value)}
-                                    aria-label="Filter by action type"
                                     className="w-full bg-black/30 border border-white/10 rounded py-1 pl-6 pr-2 text-[10px] text-white/70 appearance-none outline-none focus:border-white/20 cursor-pointer"
                                 >
                                     <option value="ALL">All Actions</option>
@@ -308,24 +306,14 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                         </div>
                         
                         {/* Column Header */}
-                        <div className="flex w-full text-[9px] text-white/30 font-mono mt-3 px-2 pb-1 border-b border-white/5 uppercase tracking-tighter" role="row">
+                        <div className="flex w-full text-[9px] text-white/30 font-mono mt-3 px-2 pb-1 border-b border-white/5 uppercase tracking-tighter">
                             <div className="w-[24%]">Symbol</div>
-                            <button
-                                className="w-[28%] text-left hover:text-white/60 focus:outline-none focus:text-white/60"
-                                onClick={() => setSortBy('ACTION')}
-                                aria-label="Sort by action priority"
-                                title="Sort by action priority"
-                            >
+                            <div className="w-[28%] cursor-pointer hover:text-white/60" onClick={() => setSortBy('ACTION')} title="Sort by action priority">
                                 Status {sortBy === 'ACTION' ? '↓' : '↕'}
-                            </button>
-                            <button
-                                className="w-[20%] text-left hover:text-white/60 focus:outline-none focus:text-white/60"
-                                onClick={() => setSortBy('PROB')}
-                                aria-label="Sort by probability"
-                                title="Sort by probability"
-                            >
+                            </div>
+                            <div className="w-[20%] cursor-pointer hover:text-white/60" onClick={() => setSortBy('PROB')} title="Sort by probability">
                                 Prob% {sortBy === 'PROB' ? '↓' : '↕'}
-                            </button>
+                            </div>
                             <div className="w-[16%] text-right pr-2">LTP</div>
                             <div className="w-[12%] text-right">Chg</div>
                         </div>
@@ -333,7 +321,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                 </div>
 
                 {/* Symbol List */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-1" role="list" aria-label="Market scanner symbols" aria-live="polite">
+                <div className="flex-1 overflow-y-auto p-2 space-y-1">
                     {filtered.length === 0 && (
                         <div className="text-center text-[10px] text-white/20 py-8">
                             {filter ? 'No matching symbols' : 'Waiting for scanner...'}

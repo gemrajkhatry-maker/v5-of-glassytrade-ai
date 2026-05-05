@@ -40,7 +40,7 @@ from app.domain.trading.events import (
 from app.domain.trading.event_store import (
     EventBus,
     InMemoryEventStore,
-    ReplayEngine,
+    AuditTrailVerifier,
 )
 
 
@@ -398,7 +398,7 @@ class TestDeterminismInvariant:
     def test_replay_produces_same_result_twice(self):
         """Replaying same events must produce identical state."""
         store = InMemoryEventStore()
-        engine = ReplayEngine(store)
+        engine = AuditTrailVerifier(store)
 
         events = [
             SignalGenerated(
@@ -434,7 +434,7 @@ class TestDeterminismInvariant:
     def test_different_event_order_same_final_state(self):
         """Event order should not change final derived state."""
         store1 = InMemoryEventStore()
-        engine1 = ReplayEngine(store1)
+        verifier1 = AuditTrailVerifier(store1)
 
         # Add in order: signal, fill
         events1 = [
@@ -463,7 +463,7 @@ class TestDeterminismInvariant:
             store1.append(e)
 
         store2 = InMemoryEventStore()
-        engine2 = ReplayEngine(store2)
+        verifier2 = AuditTrailVerifier(store2)
 
         # Add in reverse order: fill, signal
         events2 = [

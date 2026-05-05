@@ -34,6 +34,9 @@ class _ReadyAdapter:
 
 class _StubTradingSession:
     _experiment = None
+    
+    def cleanup(self):
+        pass
 
 
 @pytest.mark.asyncio
@@ -46,6 +49,22 @@ async def test_system_config_reports_runtime_port_and_symbols(monkeypatch):
     )
     fake_app = SimpleNamespace(state=SimpleNamespace(service_graph=graph))
     fake_request = SimpleNamespace(app=fake_app)
+    
+    # Mock get_trading_session to return the stub session
+    def _mock_get_session():
+        return graph.trading_session
+    
+    # Mock get_active_symbols to return the graph's active symbols
+    def _mock_get_active_symbols():
+        return graph.active_symbols
+    
+    # Mock get_gen_ai_service to return a ready adapter
+    def _mock_get_gen_ai():
+        return _ReadyAdapter()
+    
+    monkeypatch.setattr(health, "get_trading_session", _mock_get_session)
+    monkeypatch.setattr(health, "get_active_symbols", _mock_get_active_symbols)
+    monkeypatch.setattr(health, "get_gen_ai_service", _mock_get_gen_ai)
 
     payload = await health.system_config(fake_request)
 

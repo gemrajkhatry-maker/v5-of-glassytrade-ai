@@ -98,7 +98,7 @@ class MLXInferenceAdapter(ILLMInference):
             try:
                 self._load_model()
             except Exception as e:
-                logger.error(f"Failed to load MLX model: {e}")
+                logger.error("Failed to load MLX model: %s", e)
                 self._load_error = str(e)
                 self._is_loading = False
                 # If cloud fallback configured, we'll use that instead
@@ -117,26 +117,26 @@ class MLXInferenceAdapter(ILLMInference):
                 os.environ.get("MLX_ADAPTER_PATH", "")
             )
             
-            logger.debug(f"Resolving model architecture for {model_path}")
+            logger.info("DEBUG: Resolving model architecture for %s", model_path)
             # Detect model architecture from config.json to choose the right loader.
             # Gemma 4 26B A4B is a VLM (Gemma4ForConditionalGeneration) and MUST
             # use mlx_vlm — mlx_lm will fail or misbehave on VLM architectures.
             use_vlm = self._detect_vlm_architecture(model_path)
             if use_vlm:
-                logger.debug("Importing mlx_vlm...")
+                logger.info("DEBUG: Importing mlx_vlm...")
                 from mlx_vlm import load, generate
                 logger.info("Using mlx_vlm loader (VLM architecture detected)")
             else:
-                logger.debug("Importing mlx_lm...")
+                logger.info("DEBUG: Importing mlx_lm...")
                 from mlx_lm import load, generate
                 logger.info("Using mlx_lm loader (text-only architecture)")
 
             try:
                 import mlx.core as mx
                 self._runtime_device = str(mx.default_device())
-                logger.debug(f"MLX device: {self._runtime_device}")
+                logger.info("DEBUG: MLX device: %s", self._runtime_device)
             except Exception as e:
-                logger.warning(f"Failed to get MLX device: {e}")
+                logger.warning("DEBUG: Failed to get MLX device: %s", e)
                 self._runtime_device = None
 
             with MLX_GPU_LOCK:
@@ -148,16 +148,16 @@ class MLXInferenceAdapter(ILLMInference):
                         model_path, adapter_path=adapter_path
                     )
                 else:
-                    logger.info(f"Loading MLX model from {model_path} (no adapter)...")
-                    logger.debug("Calling load()...")
+                    logger.info("Loading MLX model from %s (no adapter)...", model_path)
+                    logger.info("DEBUG: Calling load()...")
                     self.model, self.processor = load(model_path)
-                    logger.debug("load() finished.")
+                    logger.info("DEBUG: load() finished.")
 
             self._use_vlm = use_vlm
             self._is_loading = False
             logger.info("MLX model loaded successfully!")
         except Exception as e:
-            logger.error(f"Failed to load MLX model: {e}")
+            logger.error("Failed to load MLX model: %s", e)
             import traceback
             logger.error(traceback.format_exc())
             self._load_error = str(e)
@@ -372,7 +372,7 @@ class MLXInferenceAdapter(ILLMInference):
             elapsed = time.time() - MLXInferenceAdapter._last_cloud_request_time
             if elapsed < min_interval:
                 wait = min_interval - elapsed
-                logger.debug(f"[CLOUD] Throttling: waiting {wait:.1f}s")
+                logger.debug("[CLOUD] Throttling: waiting %.1fs", wait)
                 time.sleep(wait)
             MLXInferenceAdapter._last_cloud_request_time = time.time()
 
@@ -415,17 +415,17 @@ class MLXInferenceAdapter(ILLMInference):
                         result = json.loads(resp.read())
                         choices = result.get("choices", [])
                         if not choices:
-                            logger.warning(f"[CLOUD] No choices from {model_id}: {result}")
+                            logger.warning("[CLOUD] No choices from %s: %s", model_id, result)
                             continue
                         content = choices[0].get("message", {}).get("content")
                         if content is None:
-                            logger.warning(f"[CLOUD] None content from {model_id}")
+                            logger.warning("[CLOUD] None content from %s", model_id)
                             continue
 
                         # Success! Reset 429 counter and remember working model
                         MLXInferenceAdapter._cloud_consecutive_429s = 0
                         MLXInferenceAdapter._cloud_last_working_model = model_id
-                        logger.info(f"[CLOUD] Success with {model_id} ({len(content)} chars)")
+                        logger.info("[CLOUD] Success with %s (%d chars)", model_id, len(content))
                         return str(content)
 
                 except urllib.error.HTTPError as e:
@@ -473,11 +473,11 @@ class MLXInferenceAdapter(ILLMInference):
                         continue  # Try next model
 
                 except urllib.error.URLError as e:
-                    logger.error(f"[CLOUD] Network error with {model_id}: {e}")
+                    logger.error("[CLOUD] Network error with %s: %s", model_id, e)
                     last_error = e
                     continue
                 except Exception as e:
-                    logger.error(f"[CLOUD] Unexpected error with {model_id}: {e}")
+                    logger.error("[CLOUD] Unexpected error with %s: %s", model_id, e)
                     last_error = e
                     continue
 
@@ -523,7 +523,7 @@ class MLXInferenceAdapter(ILLMInference):
                     self._load_model()
                     logger.info("✅ MLX model loaded successfully on first request!")
                 except Exception as e:
-                    logger.error(f"Failed to load MLX model on first request: {e}")
+                    logger.error("Failed to load MLX model on first request: %s", e)
                     self._load_error = str(e)
                     self._is_loading = False
                     # Fallback to cloud if available
@@ -542,7 +542,7 @@ class MLXInferenceAdapter(ILLMInference):
                 return self._predict_cloud(
                     instruction, input_text, temperature, max_tokens
                 )
-            detail = self._load_error or "unknown error"
+            detail = getattr(self, '_load_error', None) or "failed to load"
             raise LLMNotReadyError(
                 f"Local MLX model not loaded (path={model_path or '(none)'}): {detail}"
             )
@@ -571,23 +571,9 @@ class MLXInferenceAdapter(ILLMInference):
             {"role": "user", "content": clean_input},
         ]
 
-        try:
-            prompt = self.processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-        except Exception as e:
-            # Fallback for models (like Gemma 2) that don't support the 'system' role
-            if "system" in str(e).lower() or "role" in str(e).lower():
-                logger.debug("System role not supported by tokenizer, merging into user message.")
-                merged_messages = [
-                    {"role": "user", "content": f"{sys_msg}\n\n{clean_input}"}
-                ]
-                prompt = self.processor.apply_chat_template(
-                    merged_messages, tokenize=False, add_generation_prompt=True
-                )
-            else:
-                raise e
-
+        prompt = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
         # Inject prefill (e.g., forcing JSON start)
         prompt += prefill
 
@@ -605,7 +591,7 @@ class MLXInferenceAdapter(ILLMInference):
 
         t0 = _time.time()
         with MLX_GPU_LOCK:
-            logger.info(f"[{target}] Starting generation (max_tokens={max_t}, temp={self._temperature})...")
+            logger.info("[%s] Starting generation (max_tokens=%d, temp=%s)...", target, max_t, self._temperature)
             # Pass sampling parameters for proper temperature control
             # Trading decisions need low temperature (0.3) for deterministic output
             # mlx_lm v0.31+ requires sampler object instead of direct temperature/top_p params
@@ -619,7 +605,7 @@ class MLXInferenceAdapter(ILLMInference):
                 sampler=sampler,
             )
             duration = _time.time() - t0
-            logger.info(f"[{target}] Generation complete in {duration:.2f}s.")
+            logger.info("[%s] Generation complete in %.2fs.", target, duration)
 
         rendered = prefill + (response or "").strip()
         if is_overseer:
@@ -721,11 +707,11 @@ class MLXInferenceAdapter(ILLMInference):
         defer_loading = os.environ.get("MLX_DEFER_LOADING", "0").lower() in ("1", "true", "yes")
         if defer_loading:
             # Ready if not currently loading and no error
-            return self._is_loading is False and self._load_error is None
-        
+            return self._is_loading is False and getattr(self, '_load_error', None) is None
+
         if self._is_loading:
             return False
-        if self._load_error is not None:
+        if getattr(self, '_load_error', None) is not None:
             return False
         return self.model is not None
 
@@ -760,5 +746,5 @@ class MLXInferenceAdapter(ILLMInference):
                 logger.error("MLX model validation failed: empty response")
             return ok
         except Exception as e:
-            logger.error(f"MLX model validation failed: {e}")
+            logger.error("MLX model validation failed: %s", e)
             return False

@@ -1,7 +1,8 @@
-"""TradingSession — thin coordinator delegating to focused handlers.
+"""TradingSession — application service coordinating the event-driven trading pipeline.
 
 Manages per-symbol state, wires event subscriptions, and delegates:
-  - AMT analysis        → AMTHandler
+  - AMT analysis        → AMTService
+  - Session phase       → PhaseManager
   - Trade exits         → TradeLifecycleHandler
   - LLM entry decisions → LLMEntryHandler
   - RL status           → RLHandler
@@ -10,29 +11,37 @@ Manages per-symbol state, wires event subscriptions, and delegates:
   - Event logging       → SessionEventLogger
 """
 
-from __future__ import annotations
+# Re-export types from sub-modules for backward compatibility
+from app.application.services.session_risk_coordinator import SystemRiskState
+from app.application.services.session_state_manager import (
+    SessionStateManager,
+    SessionState,
+)
+from app.application.services.session_cache import SessionCache
+from app.application.services.session_event_logger import SessionEventLogger
 
-from dataclasses import replace as _dc_replace
-from datetime import datetime, timezone, timedelta
-from decimal import Decimal
+__all__ = [
+    "TradingSessionService",
+    "SystemRiskState",
+    "SessionStateManager",
+    "SessionState",
+    "SessionCache",
+    "SessionEventLogger",
+]
+
 import logging
-import os
-import threading
 import time
-from typing import TYPE_CHECKING
 
 from app.config import settings
 from app.shared.config_features import Feature, feature_enabled
 from app.shared.mode import is_live_mode
 from app.domain.constants import (
     AGENT_DECISION_THRESHOLD,
-    CONFIDENCE_HIGH_THRESHOLD,
-    RECENT_DATA_WINDOW,
     CANDLE_INTERVAL_MINUTES,
 )
-from app.domain.trading.models.value_objects import OHLC, OrderBook, AMTResult
+from app.domain.trading.models.value_objects import OHLC, OrderBook
 from app.domain.trading.models.aggregates import Portfolio
-from app.domain.trading.models.enums import MarketStateCodec, Source, MarketState
+from app.domain.trading.models.enums import Source, MarketState
 from app.domain.trading.events import (
     TickReceived,
     SignalGenerated,
@@ -54,26 +63,17 @@ from app.domain.services.mobile_alerts import MobileAlertSystem
 from app.domain.services.self_healing import OrderRejectionHandler, DBFallbackBuffer
 from app.application.handlers.post_trade_analyst import PostTradeAnalyst
 
-from app.application.handlers.amt_handler import AMTHandler
 from app.application.handlers.llm_entry_handler import LLMEntryHandler
 from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
 from app.application.handlers.rl_handler import RLHandler
 from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
 from app.application.handlers.pre_candle_advisor import PreCandleAdvisor
 from app.domain.fabio_ai.services.option_selector import OptionSelector
-from app.domain.fabio_ai.services.trade_thesis import validate_trade_thesis
-from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
-from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints
-from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
 from app.application.services.entry_coordinator import EntryCoordinator
 from app.application.services.exit_coordinator import ExitCoordinator
 from app.domain.services.risk_sizing_engine import RiskSizingEngine
 
-# Import delegated modules
-from app.application.services.session_state_manager import (
-    SessionStateManager,
-    SessionState,
-)
+# Import delegated modules (SessionStateManager already imported at top)
 from app.application.services.session_risk_coordinator import (
     SessionRiskCoordinator,
     SystemRiskState,
@@ -84,12 +84,12 @@ from app.application.services.session_event_logger import SessionEventLogger
 from app.application.services.state_snapshot_builder import build_state_snapshot
 from app.application.services.session_cache import SessionCache
 from app.application.services.session_event_router import SessionEventRouter
+from app.application.services.amt_service import AMTService
+from app.application.services.phase_manager import PhaseManager
 
 # Import safe parsing utilities
-from app.shared.parsing import is_mcx_symbol, extract_bar_minute, resolve_session_market
+from app.shared.parsing import extract_bar_minute
 from app.shared.timezones import IST
-
-from app.infrastructure.serialization.schemas import portfolio_to_dto, stats_to_dto
 
 log = logging.getLogger(__name__)
 
@@ -105,7 +105,6 @@ class TradingSessionService:
         broker: IBroker,
         gen_ai_service: GenerativeAIService,
         storage: IStorage | None = None,
-        amt_handler: AMTHandler | None = None,
         probability_engine: IProbabilityInference | None = None,
         exchange_config=None,  # ExchangeConfig — injected from ServiceGraph
         allow_short: bool = False,
@@ -139,143 +138,33 @@ class TradingSessionService:
             allow_short  # Use injected allow_short (from settings.ALLOW_SHORT)
         )
 
-        # Delegated modules
-        self._state_manager = SessionStateManager(storage=storage)
-        self._risk_coordinator = SessionRiskCoordinator(
-            storage=storage,
-            capital=settings.CAPITAL,
-            use_risk_tier_engine=feature_enabled(settings, Feature.RISK_TIER_ENGINE),
-        )
-        self._event_logger = SessionEventLogger(storage=storage)
-
-        # Focused handlers — per-symbol AMT handlers (VP state is per-instrument)
-        self._amt_handlers: dict[str, AMTHandler] = {}
-        self._default_amt_handler = amt_handler  # used as template for config
-
-        # Crash-safe state persistence via storage kv_set/kv_get
-        def _persist_fn(key: str, value: str | None = None) -> str | None:
-            if not self._storage or not hasattr(self._storage, "kv_set"):
-                return None
-            if value is None:
-                return self._storage.kv_get(key)
-            self._storage.kv_set(key, value)
-            return None
-
-        self._lifecycle_handler = TradeLifecycleHandler(
-            on_stop_out=self._on_stop_out,
-            on_partial_exit=self._on_partial_exit,
-            persist_fn=_persist_fn,
-            on_trade_closed=lambda sym, pnl, pos_id=None: self._on_trade_closed(
-                sym, pnl, pos_id
-            ),
-        )
-
-        self._llm_handler = LLMEntryHandler(
-            gen_ai_service,
-            storage=storage,
-            trade_manager=self._lifecycle_handler.trade_manager,
-            journal=self._event_logger._journal,
-            exchange=self._exchange,
-            allow_short=self._allow_short,
-            llm_timeout=settings.LLM_TIMEOUT_SECONDS,
-        )
+        # --- Construct collaborators (override in tests) ---
+        self._state_manager = self._create_state_manager(storage)
+        self._risk_coordinator = self._create_risk_coordinator(storage)
+        self._event_logger = self._create_event_logger(storage)
+        self._lifecycle_handler = self._create_lifecycle_handler(storage)
+        self._llm_handler = self._create_llm_handler(gen_ai_service, storage)
+        self._overseer_handler = self._create_overseer_handler(gen_ai_service, storage, probability_engine)
         self._rl_handler = RLHandler()
-
-        self._overseer_handler = LLMOverseerHandler(
-            gen_ai_service,
-            trade_manager=self._lifecycle_handler.trade_manager,
-            storage=storage,
-            probability_engine=self._probability_engine,
-        )
-
-        # Option selector for NSE options signal enrichment
         self._option_selector = OptionSelector()
-
-        # Post-Trade Analyst (Phase 3) — must be created before ExitCoordinator
-        self._post_trade_analyst = PostTradeAnalyst(
-            gen_ai_service=gen_ai_service,
-            storage=storage,
-            enabled=feature_enabled(settings, Feature.LLM_POST_TRADE),
-        )
-
-        # Exit Coordinator — extracted exit callback logic
-        self._exit_coordinator = ExitCoordinator(
-            broker=broker,
-            lifecycle_handler=self._lifecycle_handler,
-            event_logger=self._event_logger,
-            overseer_handler=self._overseer_handler,
-            state_manager=self._state_manager,
-            storage=storage,
-            llm_handler=self._llm_handler,
-            risk_coordinator=self._risk_coordinator,
-            post_trade_analyst=self._post_trade_analyst,
-        )
-
-        # Entry Coordinator — extracted signal execution logic
-        # Wire broker's exchange config (with dynamic lot sizes) to RiskSizingEngine
-        broker_exchange_config = getattr(broker, "get_exchange_config", None)
-        exchange_cfg_for_sizing = broker_exchange_config() if broker_exchange_config else None
-        
-        self._entry_coordinator = EntryCoordinator(
-            broker=broker,
-            lifecycle_handler=self._lifecycle_handler,
-            event_logger=self._event_logger,
-            storage=storage,
-            risk_coordinator=self._risk_coordinator,
-            option_selector=self._option_selector,
-            state_manager=self._state_manager,
-            sizing_engine=RiskSizingEngine(exchange_config=exchange_cfg_for_sizing),
-        )
-
-        # Pre-Candle Advisor — non-blocking advisory for dashboard (T-60s before bar close)
-        self._pre_candle_advisor = PreCandleAdvisor(
-            gen_ai_service=gen_ai_service,
-            enabled=feature_enabled(settings, Feature.LLM_PRE_CANDLE_ADVISORY),
-        )
-
-        # Scalping components (Phase 4)
+        self._post_trade_analyst = self._create_post_trade_analyst(gen_ai_service, storage)
+        self._exit_coordinator = self._create_exit_coordinator(broker, storage)
+        self._phase_manager = self._create_phase_manager(storage)
+        self._amt_service = AMTService(exchange=self._exchange)
+        self._entry_coordinator = self._create_entry_coordinator(broker, storage)
+        self._pre_candle_advisor = self._create_pre_candle_advisor(gen_ai_service)
         self._scalp_enabled = feature_enabled(settings, Feature.SCALP_ENGINE)
         self._one_min_engines: dict = {}
         self._fifteen_sec_engines: dict = {}
         self._ib_scalp_engines: dict = {}
-
-        # Mobile alerts (Phase 5)
         self._alerts = MobileAlertSystem(
             bot_token=settings.TELEGRAM_BOT_TOKEN,
             chat_id=settings.TELEGRAM_CHAT_ID,
         )
-
-        # Self-healing (Phase 5)
         self._order_rejection = OrderRejectionHandler()
         self._db_fallback = DBFallbackBuffer()
-
-        # Event Router — delegates all handler calls
-        self._event_router = SessionEventRouter(
-            lifecycle_handler=self._lifecycle_handler,
-            llm_handler=self._llm_handler,
-            overseer_handler=self._overseer_handler,
-            entry_coordinator=self._entry_coordinator,
-            exit_coordinator=self._exit_coordinator,
-            broker=broker,
-            storage=storage,
-            risk_coordinator=self._risk_coordinator,
-            probability_engine=self._probability_engine,
-            exchange_config=exchange_config,
-            exchange=self._exchange,
-            allow_short=self._allow_short,
-            gate_tracker=gate_tracker,
-            signal_tracker=signal_tracker,
-            scalp_enabled=self._scalp_enabled,
-        )
-
-        # Per-session caches (created on demand)
+        self._event_router = self._create_event_router(broker, storage, exchange_config, probability_engine)
         self._session_caches: dict[str, SessionCache] = {}
-
-        # Per-underlying market state cache — ensures CE/PE on the same underlying
-        # share the same market state instead of computing independently.
-        # Key: underlying name (e.g., "NIFTY"), Value: (timestamp, market_state_str)
-        self._underlying_state_cache: dict[str, tuple[float, str]] = {}
-        self._underlying_state_ttl = 60.0  # seconds
         self._fut_to_options: dict[str, list[str]] = {}
 
         # Event bus integration — when provided, pipeline events flow through pub/sub
@@ -298,6 +187,132 @@ class TradingSessionService:
             session = self._state_manager.get_or_create_session(symbol)
             self._session_caches[symbol] = SessionCache(session)
         return self._session_caches[symbol]
+
+    # ------------------------------------------------------------------
+    # Factory methods for collaborators — override in tests to swap adapters
+    # ------------------------------------------------------------------
+
+    def _create_state_manager(self, storage):
+        return SessionStateManager(storage=storage)
+
+    def _create_risk_coordinator(self, storage):
+        return SessionRiskCoordinator(
+            storage=storage,
+            capital=settings.CAPITAL,
+            use_risk_tier_engine=feature_enabled(settings, Feature.RISK_TIER_ENGINE),
+        )
+
+    def _create_event_logger(self, storage):
+        return SessionEventLogger(storage=storage)
+
+    def _create_lifecycle_handler(self, storage):
+        def _persist_fn(key: str, value: str | None = None) -> str | None:
+            if not self._storage or not hasattr(self._storage, "kv_set"):
+                return None
+            if value is None:
+                return self._storage.kv_get(key)
+            self._storage.kv_set(key, value)
+            return None
+
+        return TradeLifecycleHandler(
+            on_stop_out=self._on_stop_out,
+            on_partial_exit=self._on_partial_exit,
+            persist_fn=_persist_fn,
+            on_trade_closed=lambda sym, pnl, pos_id=None: self._on_trade_closed(
+                sym, pnl, pos_id
+            ),
+        )
+
+    def _create_llm_handler(self, gen_ai_service, storage):
+        return LLMEntryHandler(
+            gen_ai_service,
+            storage=storage,
+            trade_manager=self._lifecycle_handler.trade_manager,
+            journal=self._event_logger._journal,
+            exchange=self._exchange,
+            allow_short=self._allow_short,
+            llm_timeout=settings.LLM_TIMEOUT_SECONDS,
+        )
+
+    def _create_overseer_handler(self, gen_ai_service, storage, probability_engine):
+        return LLMOverseerHandler(
+            gen_ai_service,
+            trade_manager=self._lifecycle_handler.trade_manager,
+            storage=storage,
+            probability_engine=probability_engine,
+        )
+
+    def _create_post_trade_analyst(self, gen_ai_service, storage):
+        return PostTradeAnalyst(
+            gen_ai_service=gen_ai_service,
+            storage=storage,
+            enabled=feature_enabled(settings, Feature.LLM_POST_TRADE),
+        )
+
+    def _create_exit_coordinator(self, broker, storage):
+        return ExitCoordinator(
+            broker=broker,
+            lifecycle_handler=self._lifecycle_handler,
+            event_logger=self._event_logger,
+            overseer_handler=self._overseer_handler,
+            state_manager=self._state_manager,
+            storage=storage,
+            llm_handler=self._llm_handler,
+            risk_coordinator=self._risk_coordinator,
+            post_trade_analyst=self._post_trade_analyst,
+        )
+
+    def _create_phase_manager(self, storage):
+        return PhaseManager(
+            exchange=self._exchange,
+            storage=storage,
+            lifecycle_handler=self._lifecycle_handler,
+            risk_coordinator=self._risk_coordinator,
+            exit_coordinator=self._exit_coordinator,
+        )
+
+    def _create_entry_coordinator(self, broker, storage):
+        broker_exchange_config = getattr(broker, "get_exchange_config", None)
+        exchange_cfg = broker_exchange_config() if broker_exchange_config else None
+        return EntryCoordinator(
+            broker=broker,
+            lifecycle_handler=self._lifecycle_handler,
+            event_logger=self._event_logger,
+            storage=storage,
+            risk_coordinator=self._risk_coordinator,
+            option_selector=self._option_selector,
+            state_manager=self._state_manager,
+            sizing_engine=RiskSizingEngine(exchange_config=exchange_cfg),
+        )
+
+    def _create_pre_candle_advisor(self, gen_ai_service):
+        return PreCandleAdvisor(
+            gen_ai_service=gen_ai_service,
+            enabled=feature_enabled(settings, Feature.LLM_PRE_CANDLE_ADVISORY),
+        )
+
+    def _create_event_router(self, broker, storage, exchange_config, probability_engine):
+        return SessionEventRouter(
+            lifecycle_handler=self._lifecycle_handler,
+            llm_handler=self._llm_handler,
+            overseer_handler=self._overseer_handler,
+            entry_coordinator=self._entry_coordinator,
+            exit_coordinator=self._exit_coordinator,
+            broker=broker,
+            storage=storage,
+            risk_coordinator=self._risk_coordinator,
+            probability_engine=probability_engine,
+            exchange_config=exchange_config,
+            exchange=self._exchange,
+            allow_short=self._allow_short,
+            gate_tracker=self._gate_tracker,
+            signal_tracker=self._signal_tracker,
+            scalp_enabled=self._scalp_enabled,
+        )
+
+    # ------------------------------------------------------------------
+    # Session lifecycle
+    # ------------------------------------------------------------------
 
     def set_futures_option_map(self, fut_to_options: dict[str, list[str]]) -> None:
         """Which option legs share each subscribed futures root (for dual feed)."""
@@ -471,227 +486,6 @@ class TradingSessionService:
 
     # ----- event handlers -----
 
-    def _session_phase_check(self, event: TickReceived, session, cache: SessionCache) -> None:
-        """Check session phase and force-exit positions if Phase 5 (15:15-15:30 IST)."""
-        try:
-            _market = resolve_session_market(self._exchange, event.symbol)
-            session_phase = _get_si(timestamp=event.tick.time, market=_market)
-            cache.set_last_session_info(session_phase)
-            if session_phase.force_exit:
-                with session._lock:
-                    open_positions = [
-                        p for p in session.portfolio.positions if p.status == "OPEN"
-                    ]
-                    for pos in open_positions:
-                        # Calculate realized PnL before closing
-                        _close_price = event.tick.close
-                        realized_pnl = (
-                            (_close_price - pos.entry_price) * pos.size
-                            if pos.side.value == "LONG"
-                            else (pos.entry_price - _close_price) * pos.size
-                        )
-
-                        session.portfolio.close_position(
-                            pos.id,
-                            _close_price,
-                            "SESSION_CLOSE (Phase 5: 15:15 IST)",
-                        )
-
-                        # Record PnL for session tracking — MUST happen AFTER close_position
-                        # to ensure closed_trades list is updated
-                        if session and session.portfolio:
-                            self._risk_coordinator.record_trade_result(
-                                event.symbol, float(realized_pnl), session.portfolio
-                            )
-                        self._exit_coordinator.on_position_closed(event.symbol, None)
-
-                        # Clear partition state for the closed position
-                        self._lifecycle_handler.clear_partition_state(pos.id)
-                        if self._storage:
-                            try:
-                                self._storage.delete_open_position(pos.id)
-                            except Exception as e:
-                                log.error(
-                                    "Failed to delete open position %s: %s", pos.id, e
-                                )
-                        log.info(
-                            "Session Phase 5: force-closed position %s at %.2f (pnl=%.2f)",
-                            pos.id,
-                            _close_price,
-                            realized_pnl,
-                        )
-
-                if (
-                    self._storage
-                    and cache.get_latest_amt()
-                    and not getattr(session, "_profile_saved", False)
-                ):
-                    try:
-                        session_date = datetime.now(IST).strftime("%Y-%m-%d")
-                        _agg_prints = cache.get_aggressive_prints()
-                        _print_clusters = (
-                            cluster_aggressive_prints(tuple(_agg_prints))
-                            if _agg_prints
-                            else []
-                        )
-                        last_amt = cache.get_latest_amt()
-                        profile_data = {
-                            "symbol": event.symbol,
-                            "market": _market,
-                            "session_date": session_date,
-                            "poc": last_amt.get("poc", 0),
-                            "vah": last_amt.get("vah", 0),
-                            "val": last_amt.get("val", 0),
-                            "profile_shape": last_amt.get("profileShape", ""),
-                            "total_volume": sum(d.volume for d in cache.get_data()[-RECENT_DATA_WINDOW:]),
-                            "print_levels": [
-                                {"price": p, "side": "MIXED"}
-                                for p in _print_clusters[:5]
-                            ],
-                            "is_underlying": cache.has_underlying_data(),
-                        }
-                        self._storage.save_session_profile(profile_data)
-                        cache.set_profile_saved(True)
-                        log.info(
-                            "Saved session profile for %s on %s",
-                            event.symbol,
-                            session_date,
-                        )
-                    except Exception as e:
-                        log.error(
-                            "Failed to save session profile: %s", e, exc_info=True
-                        )
-        except Exception as e:
-            log.critical(
-                "Session phase check CRITICAL failure for %s — FORCING EXIT ALL POSITIONS",
-                event.symbol,
-                exc_info=True,
-            )
-            exit_price = getattr(event.tick, "close", None)
-            with session._lock:
-                for pos in list(session.portfolio.positions):
-                    try:
-                        # Calculate realized PnL before closing
-                        _ep = exit_price if exit_price is not None else 0
-                        _er_pnl = (
-                            (_ep - pos.entry_price) * pos.size
-                            if pos.side.value == "LONG"
-                            else (pos.entry_price - _ep) * pos.size
-                        )
-
-                        session.portfolio.close_position(
-                            pos.id,
-                            exit_price if exit_price is not None else Decimal("0"),
-                            "EMERGENCY_SESSION_PHASE",
-                        )
-
-                        # Record PnL for session tracking
-                        if session and session.portfolio:
-                            self._risk_coordinator.record_trade_result(
-                                event.symbol, float(_er_pnl), session.portfolio
-                            )
-                        self._exit_coordinator.on_position_closed(event.symbol, None)
-                    except Exception as close_err:
-                        log.error(
-                            "Failed to emergency close position %s: %s",
-                            pos.id,
-                            close_err,
-                        )
-
-    def _run_amt_analysis(self, event: TickReceived, session, prior, cache: SessionCache) -> object:
-        """Run AMT analysis with data source selection and prior profile injection."""
-        # Dual feed: use underlying futures data for AMT analysis (only if we have enough data)
-        # Lowered threshold from 20 to 5 candles — CVD on option data produces sign-flipping noise
-        # because option delta is driven by MM hedging, not actual market direction.
-        _underlying_min_candles = 5
-        amt_data = list(event.data)
-        cvd_source = "option"  # default: option premium data
-        if cache.has_underlying_data(_underlying_min_candles):
-            amt_data = cache.get_underlying_data()
-            cvd_source = "underlying"
-        elif amt_data:
-            log.warning(
-                "AMT: using option premium data for %s (no underlying futures available) "
-                "— CVD/OFI will be from option ticks, not NIFTY FUT. Interpret with caution.",
-                event.symbol,
-            )
-
-        srm = self._risk_coordinator.get_session_risk_manager(event.symbol)
-        
-        # Compute prior session average volume from prior profile
-        prior_avg_volume = 0.0
-        if prior:
-            prior_total_vol = prior.get("total_volume", 0.0)
-            prior_elapsed_min = prior.get("elapsed_minutes", 0.0)
-            if prior_total_vol > 0 and prior_elapsed_min > 0:
-                # Average volume per minute from prior session
-                prior_avg_volume = prior_total_vol / prior_elapsed_min
-        
-        try:
-            amt_result, amt_dto, fp_dto = self._amt_handlers[event.symbol].analyze(
-                amt_data,
-                event.order_book,
-                prior_poc=prior.get("poc", 0.0) if prior else 0.0,
-                prior_vah=prior.get("vah", 0.0) if prior else 0.0,
-                prior_val=prior.get("val", 0.0) if prior else 0.0,
-                cushion_tier=srm.risk_tier.name if srm else "NORMAL",
-                session_pnl=srm.session_pnl if srm else 0.0,
-                option_tick=event.tick,
-                cvd_source=cvd_source,
-                prior_avg_volume=prior_avg_volume,
-            )
-        except Exception:
-            log.error(
-                "AMT analysis failed for %s — skipping tick",
-                event.symbol,
-                exc_info=True,
-            )
-            return None
-
-        # Update cache with AMT results
-        cache.update_amt(amt_result, amt_dto, fp_dto)
-
-        # Bug #4 fix: Share market state across options on the same underlying.
-        # CE and PE on the same underlying MUST show the same market state.
-        # Store this option's market state keyed by underlying, and override
-        # if a sibling option already produced a fresher state.
-        _underlying = event.symbol.split(" ")[0].split("-")[0].upper()
-        _current_ms = amt_result.market_state
-        _now = time.time()
-        _cached = self._underlying_state_cache.get(_underlying)
-        if _cached:
-            _cached_ts, _cached_ms = _cached
-            if (_now - _cached_ts) < self._underlying_state_ttl:
-                # There's a fresh cached state from a sibling option —
-                # override this option's state to ensure consistency.
-                if _cached_ms != _current_ms:
-                    log.info(
-                        "Underlying state sync: %s overriding %s → %s (from sibling option)",
-                        _underlying, _current_ms, _cached_ms,
-                    )
-                    _current_ms = _cached_ms
-                    # Override the market state on the frozen AMTResult
-                    amt_result = _dc_replace(amt_result, market_state=_cached_ms)
-                    amt_dto["marketState"] = _cached_ms
-        # Always update the cache with this option's state
-        self._underlying_state_cache[_underlying] = (_now, _current_ms)
-
-        log.info(
-            "AMT analysis done for %s: poc=%.2f vah=%.2f val=%.2f agg=%.2f ofi=%.3f cvd=%.1f state=%s ibH=%.2f ibL=%.2f",
-            event.symbol,
-            amt_dto.get("poc", 0),
-            amt_dto.get("valueAreaHigh", 0),
-            amt_dto.get("valueAreaLow", 0),
-            amt_dto.get("aggression", 0),
-            amt_dto.get("ofi", 0),
-            amt_dto.get("cvdSlope", 0),
-            amt_dto.get("marketState", "N/A"),
-            amt_dto.get("ibHigh", 0),
-            amt_dto.get("ibLow", 0),
-        )
-
-        return amt_result
-
     def _resolve_entry_decision(
         self, agent_decision, cache: SessionCache, is_new_candle, has_position, _in_cooldown
     ):
@@ -758,14 +552,15 @@ class TradingSessionService:
             )
 
         # 0. Session phase check + profile save
-        self._session_phase_check(event, session, cache)
+        self._phase_manager.check_and_handle_phase(
+            event, session, cache
+        )
 
         # 1. AMT Analysis + Footprint
         prior = getattr(session, "_prior_profile", None)
-        if event.symbol not in self._amt_handlers:
-            self._amt_handlers[event.symbol] = AMTHandler()
-
-        amt_result = self._run_amt_analysis(event, session, prior, cache)
+        amt_result = self._amt_service.run_analysis(
+            event, session, cache, self._risk_coordinator, prior
+        )
         if amt_result is None:
             # AMT failure — use a minimal sentinel so downstream exit/position
             # management still runs.  Entering new positions requires valid AMT,
@@ -774,12 +569,7 @@ class TradingSessionService:
                 "AMT analysis failed for %s — continuing with exits/overseer only",
                 event.symbol,
             )
-            amt_result = AMTResult(
-                market_state=MarketState.BALANCED.value,
-                poc=0.0,
-                value_area_high=0.0,
-                value_area_low=0.0,
-            )
+            amt_result = self._amt_service.create_sentinel_result()
 
         # Update IB engine — use underlying futures when available (Phase 1B)
         ib_tick = event.tick
@@ -956,8 +746,7 @@ class TradingSessionService:
         # 4a. Execute entry using proper AMT pipeline
         self._event_router.execute_entry_path(
             event, session, amt_result, _exec_dir, _exec_prob, run_entry,
-            self._exchange_config, self._allow_short, self._risk_coordinator,
-            self._scalp_enabled,
+            self._exchange_config, self._allow_short, self._scalp_enabled,
         )
         
         # 4b. Trigger LLM descriptor for UI

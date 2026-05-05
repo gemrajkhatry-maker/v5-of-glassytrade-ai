@@ -189,8 +189,7 @@ class OFIResult:
 
 class OFICalculator:
     """Order Flow Imbalance over rolling window (FR-03-12).
-
-    OFI = (ask_vol - bid_vol) / total_vol, averaged over last N candles.
+    OFI = OFI
     Uses candle delta as proxy for (ask_vol - bid_vol).
     """
 

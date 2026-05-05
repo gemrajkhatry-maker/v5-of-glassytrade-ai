@@ -225,6 +225,14 @@ class SessionCache:
         """Get the underlying data buffer."""
         return getattr(self._session, "_underlying_data", None)
 
+    def get_option_data(self) -> list:
+        """Get candle data for the option (used when no underlying futures available).
+        
+        Returns the session candle buffer - option premium data for AMT analysis.
+        This is used as a fallback when underlying futures data is not available.
+        """
+        return list(self._session.data) if self._session.data else []
+
     def has_underlying_data(self, min_length: int = 20) -> bool:
         """Check if we have enough underlying data for analysis."""
         data = self.get_underlying_data()

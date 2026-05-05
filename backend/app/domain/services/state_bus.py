@@ -135,6 +135,7 @@ class StateBus:
                         symbol,
                         age_ms,
                     )
+                    return None  # Reject stale data
             except (ValueError, TypeError):
                 pass  # Invalid timestamp — skip freshness check
 

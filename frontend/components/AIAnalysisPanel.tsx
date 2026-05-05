@@ -271,13 +271,11 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                 )}
                                 {openingBias && (
                                     <div className={`px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wide ${
-                                        openingBias.includes('INVALIDATED') ? 'bg-orange-500/15 text-orange-400 border border-orange-500/30' :
-                                        openingBias.includes('LONG') ? 'bg-green-500/15 text-green-400 border border-green-500/30' :
-                                        openingBias.includes('SHORT') ? 'bg-red-500/15 text-red-400 border border-red-500/30' :
+                                        openingBias.includes('BULL') || openingBias.includes('UP') ? 'bg-green-500/15 text-green-400 border border-green-500/30' :
+                                        openingBias.includes('BEAR') || openingBias.includes('DOWN') ? 'bg-red-500/15 text-red-400 border border-red-500/30' :
                                         'bg-white/5 text-white/50 border border-white/10'
                                     }`}>
-                                        OPEN: {openingBias.replace('_BIAS', '').replace('_INVALIDATED', '')}
-                                        {openingBias.includes('INVALIDATED') && ' ⚠'}
+                                        OPEN: {openingBias}
                                     </div>
                                 )}
                             </div>
@@ -726,30 +724,8 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             </div>
                         </div>
                         {((amtResult?.structureConfidence ?? 0) >= 70 && (amtResult?.structureConfidence ?? 0) <= 80) && (
-                            <div className={`absolute top-2 right-2 px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded text-[8px] font-bold animate-pulse ${
-                                (() => {
-                                    const isCE = amtResult?.optionType === 'CALL';
-                                    const isPE = amtResult?.optionType === 'PUT';
-                                    const rejHigh = amtResult?.rejectionAtHigh;
-                                    const rejLow = amtResult?.rejectionAtLow;
-                                    if (isCE && rejHigh) return 'text-red-400';
-                                    if (isPE && rejLow) return 'text-emerald-400';
-                                    if (isCE) return 'text-orange-400';
-                                    if (isPE) return 'text-blue-400';
-                                    return 'text-yellow-400';
-                                })()
-                            }`}>
-                                {(() => {
-                                    const isCE = amtResult?.optionType === 'CALL';
-                                    const isPE = amtResult?.optionType === 'PUT';
-                                    const rejHigh = amtResult?.rejectionAtHigh;
-                                    const rejLow = amtResult?.rejectionAtLow;
-                                    if (isCE && rejHigh) return 'WAIT FOR BEARISH CONFIRM';
-                                    if (isPE && rejLow) return 'WAIT FOR BULLISH CONFIRM';
-                                    if (isCE) return 'CE: WATCH UPSIDE BREAK';
-                                    if (isPE) return 'PE: WATCH DOWNSIDE BREAK';
-                                    return 'WAIT FOR REJECTION';
-                                })()}
+                            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded text-[8px] text-yellow-400 font-bold animate-pulse">
+                                WAIT FOR REJECTION
                             </div>
                         )}
                     </div>
@@ -1065,11 +1041,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     }`}>
                                         {swingDelta > 0 ? '+' : ''}{swingDelta > 1000 ? `${(swingDelta / 1000).toFixed(1)}K` : swingDelta.toFixed(0)}
                                         {swingDelta > 500 ? ' (INITIATIVE)' : swingDelta < -500 ? ' (RESPONSIVE)' : ''}
-                                        {amtResult.swingDeltaTimestamp && amtResult.swingDeltaPrice && (
-                                            <span className="text-white/20 ml-1">
-                                                (at {new Date(amtResult.swingDeltaTimestamp).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}, ~{amtResult.swingDeltaPrice.toFixed(0)})
-                                            </span>
-                                        )}
                                     </span>
                                 </div>
                             )}
@@ -1171,29 +1142,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                                     return <div className="mt-2 text-center text-[9px] text-white/40">Calculating σ...</div>;
                                                 })()
                                             )}
-                                            {/* Fabio AMT: Exhaustion Warning */}
-                                            {amtResult.exhaustionWarning && (
-                                                <div className="mt-2 p-2 rounded bg-red-500/10 border border-red-500/30 text-red-400">
-                                                    <div className="text-[9px] font-bold flex items-center gap-1">
-                                                        <span>⚠</span> EXHAUSTION DETECTED
-                                                    </div>
-                                                    <div className="text-[8px] mt-1 font-mono text-white/60">
-                                                        {amtResult.exhaustionWarning}
-                                                    </div>
-                                                </div>
-                                            )}
-                                            {/* Fabio AMT: Volume Above VAH */}
-                                            {(amtResult.volumeAboveVahPct ?? 0) > 0 && (
-                                                <div className="mt-2 flex justify-between items-center text-[9px]">
-                                                    <span className="text-white/40">Volume Above VAH</span>
-                                                    <span className={`font-mono font-bold ${
-                                                        (amtResult.volumeAboveVahPct ?? 0) < 10 ? 'text-red-400' : 'text-white/60'
-                                                    }`}>
-                                                        {amtResult.volumeAboveVahPct?.toFixed(1)}%
-                                                        {(amtResult.volumeAboveVahPct ?? 0) < 10 && ' ⚠ THIN'}
-                                                    </span>
-                                                </div>
-                                            )}
                                         </div>
                                     )}
                                 </>
@@ -1224,14 +1172,9 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                         {amtResult?.openingBias && (
                             <div className="flex justify-between">
                                 <span className="text-white/40">Opening Bias</span>
-                                <span className={`font-mono font-bold ${
-                                    amtResult.openingBias.includes('INVALIDATED') ? 'text-orange-400' :
-                                    amtResult.openingBias === 'LONG_BIAS' ? 'text-emerald-400' :
+                                <span className={`font-mono font-bold ${amtResult.openingBias === 'LONG_BIAS' ? 'text-emerald-400' :
                                     amtResult.openingBias === 'SHORT_BIAS' ? 'text-red-400' : 'text-white/50'
-                                }`}>
-                                    {amtResult.openingBias.replace('_BIAS', '').replace('_INVALIDATED', '')}
-                                    {amtResult.openingBias.includes('INVALIDATED') && ' ⚠ INVALIDATED'}
-                                </span>
+                                    }`}>{amtResult.openingBias.replace('_BIAS', '')}</span>
                             </div>
                         )}
                         {(amtResult?.priceVelocity ?? 0) > 0 && (
@@ -1353,17 +1296,13 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             const structure = amtResult.marketStructure;
                             const confidence = amtResult.structureConfidence ?? 0;
                             
-                            // Structure color coding — aligned with backend MarketStructureClassifier vocabulary
+                            // Structure color coding
                             const structureConfig: Record<string, { color: string; bg: string; icon: string; desc: string }> = {
-                                'BALANCE': { color: 'text-amber-400', bg: 'bg-amber-500/10 border-amber-500/20', icon: '◉', desc: 'Range-bound auction — value acceptance' },
-                                'IMBALANCE': { color: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/20', icon: '△', desc: 'One-sided auction — price discovery' },
-                                'TRANSITION': { color: 'text-blue-400', bg: 'bg-blue-500/10 border-blue-500/20', icon: '◇', desc: 'State change in progress' },
-                                'EXPANSION': { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20', icon: '▲', desc: 'Trending expansion — initiative activity' },
-                                'CHOP': { color: 'text-gray-400', bg: 'bg-gray-500/10 border-gray-500/20', icon: '≈', desc: 'Directionless chop — low conviction' },
-                                // VAH probe states (Priority 2)
-                                'VAH_PROBE_EXHAUSTION': { color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/30', icon: '⚠', desc: 'Delta-flat at VAH extreme — exhaustion risk' },
-                                'VAH_PROBE_TESTING': { color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/20', icon: '◎', desc: 'Testing VAH near IB High — watch for acceptance' },
-                                'IB_BREAKOUT': { color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/30', icon: '↑', desc: 'Price accepted above IB High — initiative continuation' },
+                                'TREND_UP': { color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/30', icon: '↗', desc: 'Higher highs & higher lows — bullish trend' },
+                                'TREND_DOWN': { color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/30', icon: '↘', desc: 'Lower highs & lower lows — bearish trend' },
+                                'RANGE': { color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/30', icon: '⟷', desc: 'Price rotating between support/resistance' },
+                                'BREAKOUT': { color: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/30', icon: '⚡', desc: 'Price breaking out of range — potential trend start' },
+                                'REVERSAL': { color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/30', icon: '↺', desc: 'Trend reversal in progress' },
                             };
                             
                             const config = structureConfig[structure] || { color: 'text-white/60', bg: 'bg-white/5 border-white/10', icon: '●', desc: 'Unknown structure' };
@@ -1411,15 +1350,11 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     <div className="px-1.5 py-1 bg-white/5 rounded border border-white/10">
                                         <div className="text-[8px] text-white/40 font-bold mb-1">TRADING CONTEXT</div>
                                         <div className="text-[8px] text-white/50">
-                                            {structure === 'BALANCE' && 'Range-bound auction — fade VAH/VAL, target POC'}
-                                            {structure === 'IMBALANCE' && 'Trending — follow direction, avoid counter-trend'}
-                                            {structure === 'TRANSITION' && 'State change — wait for new value area to form'}
-                                            {structure === 'EXPANSION' && 'Initiative move — enter on pullback to value edge'}
-                                            {structure === 'CHOP' && 'Directionless — reduce size or stay flat'}
-                                            {structure === 'VAH_PROBE_EXHAUSTION' && 'Delta-flat at VAH — high reversal risk, consider fade'}
-                                            {structure === 'VAH_PROBE_TESTING' && 'Testing VAH near IB High — watch for acceptance or rejection'}
-                                            {structure === 'IB_BREAKOUT' && 'Accepted above IB High — initiative continuation likely'}
-                                            {!['BALANCE', 'IMBALANCE', 'TRANSITION', 'EXPANSION', 'CHOP', 'VAH_PROBE_EXHAUSTION', 'VAH_PROBE_TESTING', 'IB_BREAKOUT'].includes(structure) && 'Assess market structure for context'}
+                                            {structure === 'TREND_UP' && 'Look for pullback entries in direction of trend'}
+                                            {structure === 'TREND_DOWN' && 'Look for rally entries to short in direction of trend'}
+                                            {structure === 'RANGE' && 'Fade extremes — buy support, sell resistance'}
+                                            {structure === 'BREAKOUT' && 'Wait for acceptance before entering — avoid false breaks'}
+                                            {structure === 'REVERSAL' && 'High risk/reward — confirm with volume & CVD'}
                                         </div>
                                     </div>
                                 </>
@@ -1432,19 +1367,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
             {/* 04. PROBABILITY ENGINE */}
             <div className="flex flex-col gap-2">
                 <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
-                    <div className="flex items-center gap-2">
-                        <span>04. Probability</span>
-                        {(() => {
-                            const llmStatus = (analysis as any)?.llmStatus || 'AVAILABLE';
-                            if (llmStatus === 'RUNNING') {
-                                return <span className="text-[8px] px-1 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 font-mono">LLM RUNNING</span>;
-                            }
-                            if (llmStatus === 'COOLDOWN') {
-                                return <span className="text-[8px] px-1 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 font-mono">LLM COOLDOWN</span>;
-                            }
-                            return null;
-                        })()}
-                    </div>
+                    <span>04. Probability</span>
                     <Brain className="w-3 h-3 hover:text-white/80 transition-colors" />
                 </div>
                 <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2 relative overflow-hidden">
@@ -1552,14 +1475,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             </details>
                         </>
                     ) : (
-                        <div className="text-[10px] text-white/30 text-center py-2">
-                            {(() => {
-                                const llmStatus = (analysis as any)?.llmStatus || 'AVAILABLE';
-                                if (llmStatus === 'COOLDOWN') return 'Quant Active — LLM Cooling';
-                                if (llmStatus === 'RUNNING') return 'Quant Active — LLM Evaluating...';
-                                return 'Waiting for first tick...';
-                            })()}
-                        </div>
+                        <div className="text-[10px] text-white/30 text-center py-2">Waiting for probability engine...</div>
                     )}
                 </div>
             </div>
@@ -1724,75 +1640,34 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
             {/* 05. RULE CHECKLIST */}
             <div className="flex flex-col gap-2 mt-2">
                 {(() => {
-                    const agentDir = agentDecision?.direction || 'FLAT';
-                    const agentTiming = agentDecision?.timing || 'SKIP';
-                    const agentProb = agentDecision?.probability || 0;
-                    const marketState = amtResult?.marketState || 'BALANCED';
+                    let passedCount = 0;
+                    const ts = amtResult?.tickSize || 0.05;
+                    const distThreshold = 5 * ts;
+                    if (amtResult?.marketState !== 'DEAD') passedCount++;
+                    if (currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold) passedCount++;
+                    if (amtResult?.marketState !== 'DEAD') passedCount++;
+                    if (agentDecision?.timing === 'ENTER_NOW') passedCount++;
+                    const totalRules = 4;
                     const sigmaV = amtResult?.vwapDeviationSigmas || 0;
-                    const ibBreak = amtResult?.breakDirection || '';
-                    const ibComplete = amtResult?.ibComplete || false;
-                    const acceptanceAbove = amtResult?.acceptanceAbove || false;
-                    const acceptanceBelow = amtResult?.acceptanceBelow || false;
-
-                    // 4 meaningful rules (no duplicates)
-                    const rules = [
-                        {
-                            name: 'Market Active',
-                            pass: marketState !== 'DEAD',
-                            detail: marketState,
-                        },
-                        {
-                            name: 'Structural Edge',
-                            pass: ibComplete || acceptanceAbove || acceptanceBelow,
-                            detail: ibBreak
-                                ? `IB Break ${ibBreak === 'UP' ? '↑' : '↓'}`
-                                : acceptanceAbove
-                                ? 'Acceptance ↑'
-                                : acceptanceBelow
-                                ? 'Acceptance ↓'
-                                : 'No structural trigger',
-                        },
-                        {
-                            name: 'Probability Edge',
-                            pass: agentProb >= 0.52,
-                            detail: `${(agentProb * 100).toFixed(0)}% ${agentDir}`,
-                        },
-                        {
-                            name: 'Timing Gate',
-                            pass: agentTiming === 'ENTER_NOW',
-                            detail: agentTiming,
-                        },
-                    ];
-
-                    const passedCount = rules.filter(r => r.pass).length;
-                    const totalRules = rules.length;
-
-                    // Verdict with STANDBY state
-                    let verdictText: string;
-                    let verdictClass: string;
-
-                    if (Math.abs(sigmaV) >= 3.0) {
-                        verdictText = 'RESPONSIVE FADE — EXTREME σ';
-                        verdictClass = 'text-orange-400 border-orange-500/40 bg-orange-500/10';
-                    } else if (agentTiming === 'ENTER_NOW' && agentProb >= 0.55) {
-                        verdictText = 'ENTER NOW';
-                        verdictClass = 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10';
-                    } else if (passedCount >= 2 && passedCount < totalRules) {
-                        verdictText = 'STANDBY — Setup forming';
-                        verdictClass = 'text-yellow-400 border-yellow-500/40 bg-yellow-500/10';
-                    } else {
-                        verdictText = 'MONITOR — No edge';
-                        verdictClass = 'text-blue-300 border-blue-500/30 bg-blue-500/10';
-                    }
+                    const verdictText =
+                        Math.abs(sigmaV) >= 3.0
+                            ? 'RESPONSIVE FADE ACTIVE'
+                            : agentDecision?.timing === 'ENTER_NOW'
+                              ? 'ENTER_NOW'
+                              : 'MONITOR -> WAIT';
+                    const verdictClass =
+                        Math.abs(sigmaV) >= 3.0
+                            ? 'text-orange-400 border-orange-500/40 bg-orange-500/10'
+                            : 'text-blue-300 border-blue-500/30 bg-blue-500/10';
 
                     return (
                         <details className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2 group cursor-pointer relative overflow-hidden">
-                            <div className={`absolute top-0 left-0 w-1 h-full ${passedCount === totalRules ? 'bg-emerald-500' : passedCount >= 2 ? 'bg-yellow-500' : 'bg-white/10'}`} />
+                            <div className={`absolute top-0 left-0 w-1 h-full ${passedCount === totalRules ? 'bg-emerald-500' : passedCount > 0 ? 'bg-yellow-500' : 'bg-white/10'}`} />
                             <summary className="list-none flex flex-col gap-2 pl-2 text-[10px] text-white/40 uppercase tracking-widest font-bold">
                                 <div className="flex justify-between items-center w-full">
                                     <div className="flex items-center gap-2">
                                         <span>05. Rule Checklist</span>
-                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${passedCount === totalRules ? 'bg-emerald-500/20 text-emerald-400' : passedCount >= 2 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/10 text-white/40'}`}>
+                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${passedCount === totalRules ? 'bg-emerald-500/20 text-emerald-400' : passedCount > 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/10 text-white/40'}`}>
                                             {passedCount === totalRules ? '\u2713 ' : ''}{passedCount}/{totalRules} Passed
                                         </span>
                                     </div>
@@ -1804,15 +1679,97 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                 </div>
                             </summary>
                             <div className="space-y-1.5 pt-2 border-t border-white/5 mt-2 pl-2">
-                                {rules.map((rule, idx) => (
-                                    <div key={idx} className="flex items-center gap-2 text-[10px]">
-                                        <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${rule.pass ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
-                                            {rule.pass ? '✓' : '✗'}
-                                        </div>
-                                        <span className="text-white/60 w-28">{rule.name}</span>
-                                        <span className="text-white/40 font-mono text-[9px]">{rule.detail}</span>
+                                <div className="flex items-center gap-2 text-[10px]">
+                                    <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${amtResult?.marketState !== 'DEAD' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
+                                        {amtResult?.marketState !== 'DEAD' ? '✓' : '✗'}
                                     </div>
-                                ))}
+                                    <span className="text-white/60 w-24">AAA PRE-1</span>
+                                    <span className="text-white/40 font-mono text-[9px]">Session {amtResult?.marketState || 'BALANCED'}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px]">
+                                    <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${currentLtp && amtResult?.valueAreaLow && (Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold || Math.abs(amtResult.vwapDeviationSigmas || 0) >= 3.0) ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
+                                        {currentLtp && amtResult?.valueAreaLow && (Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold || Math.abs(amtResult.vwapDeviationSigmas || 0) >= 3.0) ? '✓' : '✗'}
+                                    </div>
+                                    <span className="text-white/60 w-24">MR Location</span>
+                                    <span className="text-white/40 font-mono text-[9px]">
+                                        {(() => {
+                                            const sigma = amtResult?.vwapDeviationSigmas || 0;
+                                            if (Math.abs(sigma) >= 3.0) return `⚠️ EXTREME EXTENSION — ${sigma > 0 ? '+' : ''}${sigma.toFixed(2)}σ (Fade Zone)`;
+                                            
+                                            const ltp = currentLtp;
+                                            const vah = amtResult?.valueAreaHigh;
+                                            const val = amtResult?.valueAreaLow;
+                                            const poc = amtResult?.poc;
+                                            const ibH = amtResult?.ibHigh;
+                                            const ibL = amtResult?.ibLow;
+                                            const breakDir = amtResult?.breakDirection;
+                                            
+                                            // IB break context (Fix 2: Initiative breakdown/breakout)
+                                            if (ltp && ibL && ltp < ibL && breakDir === 'DOWN') {
+                                                return `Price below IB Low (${ibL.toFixed(1)}) — Initiative breakdown, targets at 1.5x/2.0x IB extension`;
+                                            }
+                                            if (ltp && ibH && ltp > ibH && breakDir === 'UP') {
+                                                return `Price above IB High (${ibH.toFixed(1)}) — Initiative breakout, targets at 1.5x/2.0x IB extension`;
+                                            }
+                                            
+                                            // VA context (Fix 2: Clarify this is OPTION value area)
+                                            if (ltp && val && ltp < val) {
+                                                return `Price below option VAL (${val.toFixed(1)}) — Bearish auction, option premium discounted`;
+                                            }
+                                            if (ltp && vah && ltp > vah) {
+                                                return `Price above option VAH (${vah.toFixed(1)}) — Bullish auction, option premium extended`;
+                                            }
+                                            
+                                            // POC context
+                                            if (ltp && poc) {
+                                                const pocDist = Math.abs(ltp - poc);
+                                                const threshold = distThreshold * 2;
+                                                if (pocDist < threshold) return `Price at option POC (${poc.toFixed(1)}) — Fair value, no edge`;
+                                                return ltp < poc ? `Price below option POC — Lower value area, seek support` : `Price above option POC — Upper value area, seek resistance`;
+                                            }
+                                            
+                                            return 'Price in mid-range — No structural reference';
+                                        })()}
+                                    </span>
+                                </div>
+                                
+                                {/* P1-11: Prior Day Levels */}
+                                {amtResult && (amtResult.priorVah || amtResult.priorVal || amtResult.priorPoc) && (
+                                    <div className="mt-1 pl-5 flex flex-wrap gap-2 opacity-50">
+                                        {amtResult.priorVah && <span className="text-[8px] font-mono">P-VAH: {amtResult.priorVah.toFixed(1)}</span>}
+                                        {amtResult.priorVal && <span className="text-[8px] font-mono">P-VAL: {amtResult.priorVal.toFixed(1)}</span>}
+                                        {amtResult.priorPoc && <span className="text-[8px] font-mono">P-POC: {amtResult.priorPoc.toFixed(1)}</span>}
+                                    </div>
+                                )}
+                                <div className="flex items-center gap-2 text-[10px]">
+                                    <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${amtResult?.marketState !== 'DEAD' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-red-500/20 border-red-500/50 text-red-400'}`}>
+                                        {amtResult?.marketState !== 'DEAD' ? '✓' : '✗'}
+                                    </div>
+                                    <span className="text-white/60 w-24">Volume Alive</span>
+                                    <span className="text-white/40 font-mono text-[9px]">{amtResult?.marketState !== 'DEAD' ? 'ACTIVE' : 'DEAD'}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px]">
+                                    <div className={`w-3 h-3 rounded-full flex items-center justify-center border ${agentDecision?.timing === 'ENTER_NOW' ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400' : 'bg-white/10 border-white/20 text-white/60'}`}>
+                                        {agentDecision?.timing === 'ENTER_NOW' ? '✓' : '⏸'}
+                                    </div>
+                                    <span className="text-white/60 w-24">Timing</span>
+                                    {(() => {
+                                        const timing = agentDecision?.timing || 'SKIP';
+                                        const timeWindow = amtResult?.amtTimeWindow;
+                                        
+                                        if (!timeWindow) return <span className="text-white/40 font-mono text-[9px]">{timing}</span>;
+                                        
+                                        const timingColor = timing === 'ENTER_NOW' ? 'text-emerald-400' : 
+                                                            timing === 'WAIT' ? 'text-yellow-400' : 'text-white/40';
+                                        
+                                        return (
+                                            <div className="flex flex-col gap-0.5">
+                                                <span className={`font-mono text-[9px] font-bold ${timingColor}`}>{timing}</span>
+                                                <span className="text-[8px] text-white/30">{timeWindow.label}</span>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
                             </div>
                             <div className="mt-2 pt-2 border-t border-white/5 pl-2">
                                 <span className="text-[9px] text-white/30 cursor-pointer hover:text-white/70 transition-colors">View Rule Book</span>

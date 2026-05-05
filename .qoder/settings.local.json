@@ -46,7 +46,16 @@
       "Bash(pwd:*)",
       "Bash(git stash:*)",
       "WebFetch(www.chartfanatics.com)",
-      "WebFetch(www.tradezella.com)"
+      "WebFetch(www.tradezella.com)",
+      "Bash(rm -rf /Users/apple/Downloads/v5-of-glassytrade-ai/.qoder/skills)",
+      "Bash(rm -f ~/.qoder/update.lock)",
+      "Bash(qoder update:*)",
+      "Bash(command:*)",
+      "Bash(rm -rf /Users/apple/.qoder/skills)",
+      "Bash(mkdir:*)"
     ]
+  },
+  "chat": {
+    "permissionMode": "dont_ask"
   }
 }

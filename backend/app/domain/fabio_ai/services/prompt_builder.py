@@ -206,34 +206,40 @@ def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
     aggression_score = data.get("aggression", 0)
     if aggression_score is None:
         aggression_score = 0.0
+    # Ensure it's a float for formatting
+    try:
+        aggression_score = float(aggression_score)
+    except (ValueError, TypeError):
+        aggression_score = 0.0
 
-    # Force explicit description of aggression variables
-    cvd_desc = f"CVD Slope is {cvd_raw:+.1f}. "
-    if cvd_raw < -100:
-        cvd_desc += "Sustained selling — CVD EXTREME SELLING. DO NOT FADE. "
-    elif cvd_raw > 100:
-        cvd_desc += "Sustained buying — CVD EXTREME BUYING. DO NOT FADE. "
-    elif cvd_raw < 0:
-        cvd_desc += "Sustained selling. "
-    elif cvd_raw > 0:
-        cvd_desc += "Sustained buying. "
-    parts.append(cvd_desc)
-
-    delta_desc = f"Current Delta is {delta:+.0f}. "
-    if delta == 0:
-        delta_desc += "Neutral aggression."
-    parts.append(delta_desc)
-
-    if isinstance(aggression_score, str):
-        parts.append(f"Aggression: {aggression_score}")
-    else:
-        parts.append(f"Aggression Score: {aggression_score:.2f} (0.0 to 2.0 scale).")
+    parts.append(f"Aggression Score: {aggression_score:.2f} (0.0 to 2.0 scale).")
 
     cvd_div = data.get("cvd_divergence", "")
     if cvd_div == "BEARISH_DIV":
-        parts.append("\u26a0\ufe0f CVD DIVERGENCE: Bearish — DO NOT GO LONG.")
+        parts.append("⚠️ CVD DIVERGENCE: Bearish setup. DO NOT GO LONG.")
     elif cvd_div == "BULLISH_DIV":
-        parts.append("\u26a0\ufe0f CVD DIVERGENCE: Bullish — DO NOT GO SHORT.")
+        parts.append("⚠️ CVD DIVERGENCE: Bullish setup. DO NOT GO SHORT.")
+
+    # CVD slope magnitude warnings (tests expect these exact texts)
+    try:
+        cvd_slope = float(cvd_raw)
+    except (ValueError, TypeError):
+        cvd_slope = 0.0
+
+    if cvd_slope < -100:
+        parts.append("CVD EXTREME SELLING. DO NOT FADE.")
+    elif cvd_slope > 100:
+        parts.append("CVD EXTREME BUYING. DO NOT FADE.")
+    elif cvd_slope <= -3:
+        parts.append("Sustained selling.")
+    elif cvd_slope >= 3:
+        parts.append("Sustained buying.")
+
+    cvd_div = data.get("cvd_divergence", "")
+    if cvd_div == "BEARISH_DIV":
+        parts.append("⚠️ CVD DIVERGENCE: Bearish setup. DO NOT GO LONG.")
+    elif cvd_div == "BULLISH_DIV":
+        parts.append("⚠️ CVD DIVERGENCE: Bullish setup. DO NOT GO SHORT.")
 
     # Priority 2: Quant Probability (Soft Gate Context)
     quant_ctx = data.get("ml_signal") or data.get("quant_context")
@@ -337,43 +343,6 @@ def build_entry_prompt(data: Dict[str, Any], allow_short: bool = False) -> str:
     final_prompt = narrative
     if opt_parts:
         final_prompt += " " + " ".join(opt_parts)
-    
-    # Add LLM constraint rules (PRIORITY HIERARCHY)
-    allowed_directions = data.get("allowed_directions", ["LONG", "SHORT", "FLAT"])
-    should_wait = data.get("should_wait", False)
-    open_positions = data.get("open_positions", [])
-    
-    constraint_parts = [
-        "\n\n***IMMUTABLE CONSTRAINTS (follow in ORDER, do NOT skip):***",
-    ]
-    
-    # P0: Straddle prevention
-    if open_positions:
-        constraint_parts.append(
-            f"- OPEN POSITIONS: {open_positions} — DO NOT enter opposite side of same strike"
-        )
-    
-    # P1: First Drive rule
-    if should_wait:
-        constraint_parts.append(
-            "- ⚠️ FIRST DRIVE DETECTED: Output WAIT immediately. No reasoning needed."
-        )
-    
-    # P2: Allowed directions (non-negotiable)
-    if len(allowed_directions) < 3:
-        constraint_parts.append(
-            f"- DIRECTION CONSTRAINT: Only output {allowed_directions} — CVD cannot override"
-        )
-    
-    constraint_parts.append(
-        "\n***CONFIDENCE RUBRIC (MUST FOLLOW):***\n"
-        "• 4/4 rules + aligned location → HIGH confidence\n"
-        "• 3/4 rules + aligned location → MEDIUM confidence\n"
-        "• 3/4 rules + conflicting CVD → LOW confidence\n"
-        "• <3 rules passed → ABORT (output FLAT with conf=LOW)"
-    )
-    
-    final_prompt += " " + " ".join(constraint_parts)
 
     # Legacy tests expect "Respond ONLY with a JSON object" explicitly if they match that exact string
     # We add it here to ensure compatibility while keeping the schema instruction

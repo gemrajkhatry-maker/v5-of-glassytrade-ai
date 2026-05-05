@@ -1,16 +1,30 @@
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
+import { beforeAll, afterAll, beforeEach } from 'vitest';
 
 // Mock fetch - must be done before any module imports
 const mockFetch = vi.fn(() => 
   Promise.resolve({
     ok: true,
     json: () => Promise.resolve({}),
-  })
+    headers: new Headers(),
+    redirected: false,
+    status: 200,
+    statusText: 'OK',
+    type: 'default' as ResponseType,
+    url: '',
+    clone: function() { return this; },
+    body: null,
+    bodyUsed: false,
+    arrayBuffer: () => Promise.resolve(new ArrayBuffer(0)),
+    blob: () => Promise.resolve(new Blob()),
+    formData: () => Promise.resolve(new FormData()),
+    text: () => Promise.resolve(''),
+  } as Response)
 );
 
 // Assign to global scope
-globalThis.fetch = mockFetch;
+globalThis.fetch = mockFetch as typeof globalThis.fetch;
 Object.defineProperty(global, 'fetch', {
   value: mockFetch,
   writable: true,

@@ -1,5 +1,9 @@
-"""
-Unified resilience primitives for GlassyTrade AI.
+"""Unified resilience primitives for GlassyTrade AI.
+
+This module contains the unified circuit breaker implementation that replaces the
+previously fragmented implementations. It provides a single interface that
+supports both synchronous (context manager) and asynchronous patterns, and
+manages multiple circuit breakers keyed by entity (e.g., trading symbols).
 """
 
 import time
@@ -23,27 +27,21 @@ class CircuitBreakerError(Exception):
 
 @dataclass
 class CircuitBreakerConfig:
-    """
-    Configuration for circuit breaker.
-    """
+    """Configuration for circuit breaker."""
     failure_threshold: int = 5
     success_threshold: int = 3
-    recovery_timeout: float = 60.0 # renamed from timeout for consistency
+    recovery_timeout: float = 60.0  # renamed from timeout for consistency
 
 class CircuitBreaker:
-    """
-    Unified circuit breaker supporting both sync and async patterns.
-    """
-    def __init__(
-        self,
-        failure_threshold: int = 5,
-        recovery_timeout: float = 60.0,
-        success_threshold: int = 3,
-    ):
+    """Unified circuit breaker supporting both sync and async patterns."""
+
+    def __init__(self,
+                 failure_threshold: int = 5,
+                 recovery_timeout: float = 60.0,
+                 success_threshold: int = 3):
         self.failure_threshold = failure_threshold
         self.recovery_timeout = recovery_timeout
         self.success_threshold = success_threshold
-        
         self._state = CircuitState.CLOSED
         self._failure_count = 0
         self._success_count = 0
@@ -69,7 +67,7 @@ class CircuitBreaker:
                 self._success_count += 1
                 if self._success_count >= self.success_threshold:
                     self._state = CircuitState.CLOSED
-                    self._failure_count = 0
+                self._failure_count = 0
             else:
                 self._failure_count = 0
 
@@ -107,12 +105,30 @@ class CircuitBreaker:
             self._check_and_transition()
             return self._state in (CircuitState.CLOSED, CircuitState.HALF_OPEN)
 
+    def reset(self) -> None:
+        """Reset circuit breaker to closed state."""
+        with self._sync_lock:
+            self._state = CircuitState.CLOSED
+            self._failure_count = 0
+            self._success_count = 0
+            self._last_failure_time = None
+
+    def get_metrics(self) -> dict:
+        """Return circuit breaker metrics for observability."""
+        with self._sync_lock:
+            return {
+                "state": self._state.value,
+                "failure_count": self._failure_count,
+                "success_count": self._success_count,
+                "last_failure_time": self._last_failure_time,
+            }
+
     def __enter__(self):
         with self._sync_lock:
             self._check_and_transition()
             if self._state == CircuitState.OPEN:
                 raise CircuitBreakerError("Circuit breaker is open")
-        return self
+            return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is None:
@@ -122,6 +138,7 @@ class CircuitBreaker:
         return False
 
     async def execute(self, operation: Callable[[], Awaitable[T]]) -> T:
+        """Execute an async operation with circuit breaker protection."""
         if self.state == CircuitState.OPEN:
             raise CircuitBreakerError("Circuit breaker is open")
         try:
@@ -133,10 +150,7 @@ class CircuitBreaker:
             raise
 
 class PerEntityCircuitBreaker:
-    """
-    Manages multiple circuit breakers keyed by entity (e.g., Symbol).
-    Consolidates logic from TradingEngine's SymbolCircuitBreaker.
-    """
+    """Manages multiple circuit breakers keyed by entity (e.g., Symbol)."""
     def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 60.0):
         self._failure_threshold = failure_threshold
         self._recovery_timeout = recovery_timeout
@@ -158,3 +172,21 @@ class PerEntityCircuitBreaker:
 
     def is_open(self, key: str) -> bool:
         return self._get_breaker(key).state == CircuitState.OPEN
+
+
+# Global circuit breakers for backward compatibility
+_session_circuit = CircuitBreaker(failure_threshold=3, recovery_timeout=300.0)
+_amt_circuit = CircuitBreaker(failure_threshold=5, recovery_timeout=120.0)
+_position_circuit = CircuitBreaker(failure_threshold=3, recovery_timeout=600.0)
+
+
+def get_session_circuit() -> CircuitBreaker:
+    return _session_circuit
+
+
+def get_amt_circuit() -> CircuitBreaker:
+    return _amt_circuit
+
+
+def get_position_circuit() -> CircuitBreaker:
+    return _position_circuit

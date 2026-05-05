@@ -15,7 +15,6 @@ import {
 import { OHLCData, ChartConfig, TradeSignal, TradePosition, AIAnalysis, AMTAnalysis, ChartMode, FootprintCandle, AggressivePrint, RangeBarData } from '../types';
 import { Brain, Cpu, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 import { sanitizeRationale } from '../utils/textSanitizer';
-import { IST_OFFSET_SECONDS, DEFAULT_BAR_SPACING } from '../constants';
 
 interface ChartSceneProps {
   data: OHLCData[];
@@ -188,8 +187,8 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     chartRef.current.applyOptions({
       timeScale: {
-        barSpacing: isFootprint ? DEFAULT_BAR_SPACING.FOOTPRINT : (isRange ? DEFAULT_BAR_SPACING.RANGE : DEFAULT_BAR_SPACING.STANDARD),
-        minBarSpacing: isFootprint ? DEFAULT_BAR_SPACING.MIN_FOOTPRINT : (isRange ? DEFAULT_BAR_SPACING.MIN_RANGE : DEFAULT_BAR_SPACING.MIN_STANDARD),
+        barSpacing: isFootprint ? 160 : (isRange ? 40 : 6),
+        minBarSpacing: isFootprint ? 100 : (isRange ? 20 : 2),
         // Allow free scrolling on both sides
         fixLeftEdge: false,
         fixRightEdge: false,
@@ -257,7 +256,8 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         color: b.close >= b.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
       })));
     } else {
-      const toIST = (timeStr: string) => (new Date(timeStr).getTime() / 1000 + IST_OFFSET_SECONDS) as any;
+      const IST_OFFSET = 19800;
+      const toIST = (timeStr: string) => (new Date(timeStr).getTime() / 1000 + IST_OFFSET) as any;
       
       // CRITICAL: Ensure data is sorted by time to prevent Lightweight Charts crash
       // Although the hook now sorts history, we keep this as a secondary safety layer.

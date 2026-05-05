@@ -56,36 +56,60 @@ import { InstrumentState, TradePosition, OHLCData, ChartConfig } from '../../typ
 
 describe('MarketSidebar to ChartScene Integration', () => {
   // Mock data helpers
-  const createMockInstrument = (symbol: string, ltp: number, data: OHLCData[]): InstrumentState => ({
+  const createMockInstrument = (symbol?: string, ltp: number = 25000, data: OHLCData[] = []): InstrumentState => ({
+    symbol: symbol || 'NIFTY 27 FEB 25500 CALL',
     ltp,
     data,
+    orderBook: null,
     portfolio: {
       positions: [] as TradePosition[],
       closedTrades: [],
       balance: 100000,
       equity: 100000,
-      unrealizedPnl: 0,
+      leverage: 10,
+      history: [],
       realizedPnl: 0,
     },
+    modelWeights: { trend: 0.2, momentum: 0.2, delta: 0.2, orderBook: 0.2, volatility: 0.2 },
+    generation: 0,
+    aiAnalysis: null,
+    genAIAnalysis: null,
     amtAnalysis: null,
-    activeSignal: null,
+    agentDecision: null,
+    llmHistory: [],
+    predictions: [],
+    overseerAction: '',
+    overseerReason: '',
+    stats: null,
+    depth20Active: false,
+    lastUpdate: Date.now(),
   });
 
   const mockDataNIFTY: OHLCData[] = [
-    { time: '2024-01-01T10:00:00Z', open: 24900, high: 25100, low: 24800, close: 25000, volume: 1000 },
-    { time: '2024-01-01T10:05:00Z', open: 25000, high: 25150, low: 24950, close: 25100, volume: 1200 },
+    { time: '2024-01-01T10:00:00Z', open: 24900, high: 25100, low: 24800, close: 25000, volume: 1000, vwap: 25000, takerBuyVolume: 600, delta: 200 },
+    { time: '2024-01-01T10:05:00Z', open: 25000, high: 25150, low: 24950, close: 25100, volume: 1200, vwap: 25100, takerBuyVolume: 700, delta: 300 },
   ];
 
   const mockDataBANKNIFTY: OHLCData[] = [
-    { time: '2024-01-01T10:00:00Z', open: 44000, high: 44500, low: 43800, close: 44200, volume: 800 },
-    { time: '2024-01-01T10:05:00Z', open: 44200, high: 44700, low: 44100, close: 44500, volume: 900 },
+    { time: '2024-01-01T10:00:00Z', open: 44000, high: 44500, low: 43800, close: 44200, volume: 800, vwap: 44200, takerBuyVolume: 500, delta: 150 },
+    { time: '2024-01-01T10:05:00Z', open: 44200, high: 44700, low: 44100, close: 44500, volume: 900, vwap: 44500, takerBuyVolume: 550, delta: 180 },
   ];
 
   const defaultConfig: ChartConfig = {
+    symbol: 'NIFTY',
+    interval: '5m',
+    dataSource: 'live',
     bullColor: '#22c55e',
     bearColor: '#ef4444',
     showVolumeProfile: true,
     vpMode: 'combined',
+    glassOpacity: 0.5,
+    roughness: 0.5,
+    transmission: 0.5,
+    showGrid: true,
+    autoRotate: false,
+    showPredictions: true,
+    trend: 'sideways',
   };
 
   // Shared state between tests
@@ -95,9 +119,9 @@ describe('MarketSidebar to ChartScene Integration', () => {
 
   beforeEach(() => {
     activeSymbol = 'NIFTY 27 FEB 25500 CALL';
-    onSelectCallback = vi.fn((symbol) => {
+    onSelectCallback = vi.fn().mockImplementation((symbol: string) => {
       activeSymbol = symbol;
-    });
+    }) as unknown as (symbol: string) => void;
 
     mockInstruments = {
       'NIFTY 27 FEB 25500 CALL': createMockInstrument('NIFTY', 25500, mockDataNIFTY),
@@ -168,7 +192,7 @@ describe('MarketSidebar to ChartScene Integration', () => {
     
     // Simulate state update by rerendering with new activeSymbol
     // The callback updates activeSymbol, so verify it was called
-    const callArgs = onSelectCallback.mock.calls[0][0];
+    const callArgs = (onSelectCallback as any).mock.calls[0][0];
     expect(callArgs).toBeDefined();
   });
 
