@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from app.domain.trading.model.value_objects import OHLC, OrderBook
 from app.domain.trading.model.aggregates import Portfolio
+from app.domain.trading.model.enums import PositionStatus
 
 if TYPE_CHECKING:
     from app.domain.trading.event_store import EventStore
@@ -102,7 +103,7 @@ class SessionStateManager:
         self._last_eviction_check = now
         to_evict = []
         for sym, session in self._sessions.items():
-            has_open = any(p.status == p.status.OPEN for p in session.portfolio.positions)
+            has_open = any(p.status == PositionStatus.OPEN for p in session.portfolio.positions)
             if not has_open and (now - session._last_tick_time) > self._idle_timeout:
                 to_evict.append(sym)
         for sym in to_evict:
@@ -125,3 +126,22 @@ class SessionStateManager:
 
     def get_all_sessions(self) -> dict[str, SessionState]:
         return dict(self._sessions)
+
+    def process_tick(self, symbol: str, tick, order_book=None) -> SessionState:
+        """Process incoming tick and update session state.
+        
+        Args:
+            symbol: Trading symbol (e.g., "CRUDEOIL")
+            tick: OHLC tick data
+            order_book: Optional order book snapshot
+            
+        Returns:
+            Updated SessionState with tick appended to data
+        """
+        session = self.get_or_create_session(symbol)
+        with session._lock:
+            session.data.append(tick)
+            session._last_tick_time = time.time()
+            if order_book is not None:
+                session.order_book = order_book
+        return session
