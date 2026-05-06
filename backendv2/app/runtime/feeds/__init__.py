@@ -47,8 +47,10 @@ class FeedSource(ABC):
 
 
 from .live import LiveFeed
+from .dhan_feed import DhanFeedSource
 
 __all__ = [
     "FeedSource",
     "LiveFeed",
+    "DhanFeedSource",
 ]
