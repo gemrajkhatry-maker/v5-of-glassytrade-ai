@@ -26,6 +26,9 @@ from app.config import settings
 from app.domain.trading.models.value_objects import OHLC
 from app.infrastructure.serialization.schemas import ohlc_to_dto
 from app.core.startup_telemetry import record_symbol_resolution
+from app.core.async_boundary import ensure_sync_adapter_result
+from app.shared.parsing import resolve_session_market
+from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +81,7 @@ class EngineLifecycle:
         self._stream_task: asyncio.Task | None = None
         self._watchdog_task: asyncio.Task | None = None
         self._stale_watchdog_task: asyncio.Task | None = None
+        self._reconciliation_task: asyncio.Task | None = None
         self._gc_task: asyncio.Task | None = None
 
         self._running = False
@@ -139,6 +143,9 @@ class EngineLifecycle:
         self._stale_watchdog_task = asyncio.create_task(
             self._watchdog_manager.stale_stream_watchdog()
         )
+        self._reconciliation_task = asyncio.create_task(
+            self._watchdog_manager.reconciliation_loop()
+        )
         self._gc_task = asyncio.create_task(self._watchdog_manager.gc_loop())
 
         logger.info(
@@ -162,6 +169,7 @@ class EngineLifecycle:
             self._stream_task,
             self._watchdog_task,
             self._stale_watchdog_task,
+            self._reconciliation_task,
             self._gc_task,
         ):
             if task and not task.done():
@@ -174,6 +182,7 @@ class EngineLifecycle:
                 self._stream_task,
                 self._watchdog_task,
                 self._stale_watchdog_task,
+                self._reconciliation_task,
                 self._gc_task,
             )
             if t
@@ -181,7 +190,58 @@ class EngineLifecycle:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
+        self._save_session_profiles_on_shutdown()
+
         logger.info("Trading engine stopped.")
+
+    def _save_session_profiles_on_shutdown(self) -> None:
+        """Persist session profile for all active sessions with cached AMT data.
+
+        This is a defensive fallback for non-Phase-5 shutdown paths.
+        """
+        storage = self._session_service._storage
+        state_manager = getattr(self._session_service, "_state_manager", None)
+        if not storage or not state_manager:
+            return
+
+        sessions = state_manager.get_all_sessions()
+        market = str(
+            getattr(self._session_service, "_exchange", settings.DEFAULT_EXCHANGE)
+        )
+        session_date = datetime.now(IST).strftime("%Y-%m-%d")
+        for symbol, session in sessions.items():
+            if getattr(session, "_profile_saved", False):
+                continue
+            if not session.last_amt:
+                continue
+
+            cache = self._session_service._get_cache(symbol)
+            if cache:
+                _agg_prints = cache.get_aggressive_prints()
+                data = cache.get_data()
+                last_amt = cache.get_latest_amt() or session.last_amt
+            else:
+                _agg_prints = []
+                data = []
+                last_amt = session.last_amt
+            if not last_amt:
+                continue
+
+            try:
+                from app.application.services.session_phase_manager import save_session_profile
+
+                save_session_profile(
+                    symbol,
+                    resolve_session_market(market, symbol),
+                    session_date,
+                    last_amt,
+                    _agg_prints,
+                    data,
+                    storage,
+                )
+                setattr(session, "_profile_saved", True)
+            except Exception:
+                logger.warning("Failed to save session profile for %s", symbol, exc_info=True)
 
     # ------------------------------------------------------------------
     # Health Check
@@ -200,6 +260,8 @@ class EngineLifecycle:
             "active_symbols": len(self._active_symbols),
             "stream_task_running": self._stream_task is not None and not self._stream_task.done(),
             "watchdog_task_running": self._watchdog_task is not None and not self._watchdog_task.done(),
+            "reconciliation_task_running": self._reconciliation_task is not None
+            and not self._reconciliation_task.done(),
         }
 
     @property
@@ -474,7 +536,12 @@ class EngineLifecycle:
         if not storage:
             return []
         try:
-            rows = storage.query_ticks(symbol, limit=limit * 20)
+            rows = ensure_sync_adapter_result(
+                "storage.query_ticks",
+                storage.query_ticks,
+                symbol,
+                limit=limit * 20,
+            )
             seen: dict[str, OHLC] = {}
             for row in rows:
                 t = row["time"]

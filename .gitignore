@@ -68,7 +68,6 @@ backend/.vite/
 !backend/tests/**/*.csv
 
 # Environment and large logs
-backend/venv/
 backend/rl_logs/
 *.tfevents.*
 node_modules/

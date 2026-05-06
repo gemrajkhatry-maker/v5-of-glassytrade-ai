@@ -64,6 +64,7 @@ class JournalEntry:
     # Position info
     position_id: str = ""
     side: str = ""
+    tick_trace_id: str = ""
     entry_price: float = 0.0
     exit_price: float = 0.0
     stop_loss: float = 0.0
@@ -283,6 +284,7 @@ class TradeJournal:
         self,
         *,
         symbol: str,
+        tick_trace_id: str = "",
         amt: dict | None = None,
         llm_direction: str = "",
         llm_confidence: str = "",
@@ -301,6 +303,7 @@ class TradeJournal:
             timestamp=self._now_ist(),
             event_type="SIGNAL_GENERATED",
             symbol=symbol,
+            tick_trace_id=tick_trace_id,
             llm_direction=llm_direction,
             llm_confidence=llm_confidence,
             llm_rationale=llm_rationale,
@@ -322,6 +325,7 @@ class TradeJournal:
         *,
         symbol: str,
         position_id: str,
+        tick_trace_id: str = "",
         side: str,
         entry_price: float,
         stop_loss: float,
@@ -344,6 +348,7 @@ class TradeJournal:
             event_type="ENTRY_EXECUTED",
             symbol=symbol,
             position_id=position_id,
+            tick_trace_id=tick_trace_id,
             side=side,
             entry_price=entry_price,
             stop_loss=stop_loss,
@@ -368,6 +373,7 @@ class TradeJournal:
         *,
         symbol: str,
         reason: str,
+        tick_trace_id: str = "",
         amt: dict | None = None,
         llm_direction: str = "",
         agent_direction: str = "",
@@ -382,6 +388,7 @@ class TradeJournal:
             timestamp=self._now_ist(),
             event_type="ENTRY_REJECTED",
             symbol=symbol,
+            tick_trace_id=tick_trace_id,
             llm_direction=llm_direction,
             agent_direction=agent_direction,
             agent_regime=agent_regime,
@@ -401,6 +408,7 @@ class TradeJournal:
         *,
         symbol: str,
         position_id: str,
+        tick_trace_id: str = "",
         side: str,
         entry_price: float,
         exit_price: float,
@@ -421,6 +429,7 @@ class TradeJournal:
             event_type="EXIT",
             symbol=symbol,
             position_id=position_id,
+            tick_trace_id=tick_trace_id,
             side=side,
             entry_price=entry_price,
             exit_price=exit_price,
@@ -443,6 +452,7 @@ class TradeJournal:
         *,
         symbol: str,
         position_id: str,
+        tick_trace_id: str = "",
         side: str,
         entry_price: float,
         exit_price: float,
@@ -461,6 +471,7 @@ class TradeJournal:
             event_type="PARTIAL_EXIT",
             symbol=symbol,
             position_id=position_id,
+            tick_trace_id=tick_trace_id,
             side=side,
             entry_price=entry_price,
             exit_price=exit_price,
@@ -509,6 +520,7 @@ class TradeJournal:
         symbol: str,
         position_id: str,
         side: str,
+        tick_trace_id: str = "",
         entry_price: float,
         stop_loss: float,
         pnl: float = 0.0,
@@ -534,6 +546,7 @@ class TradeJournal:
             event_type="BREAK_EVEN_TRIGGERED",
             symbol=symbol,
             position_id=position_id,
+            tick_trace_id=tick_trace_id,
             side=side,
             entry_price=entry_price,
             exit_price=stop_loss,

@@ -31,6 +31,7 @@ __all__ = [
 
 import logging
 import time
+from decimal import Decimal
 from datetime import datetime
 
 from app.config import settings
@@ -75,6 +76,7 @@ from app.domain.fabio_ai.services.option_selector import OptionSelector
 from app.application.services.entry_coordinator import EntryCoordinator
 from app.application.services.exit_coordinator import ExitCoordinator
 from app.domain.services.risk_sizing_engine import RiskSizingEngine
+from app.core.async_boundary import ensure_sync_adapter_result
 
 # Import delegated modules (SessionStateManager already imported at top)
 from app.application.services.session_risk_coordinator import (
@@ -90,6 +92,7 @@ from app.application.services.session_event_router import SessionEventRouter
 from app.application.services.amt_service import AMTService
 from app.application.services.phase_manager import PhaseManager
 from app.infrastructure.adapters.telegram_adapter import TelegramAdapter
+from app.application.services.session_orchestrator import SessionOrchestrator
 
 # Import safe parsing utilities
 from app.shared.parsing import extract_bar_minute
@@ -224,8 +227,17 @@ class TradingSessionService:
             if not self._storage or not hasattr(self._storage, "kv_set"):
                 return None
             if value is None:
-                return self._storage.kv_get(key)
-            self._storage.kv_set(key, value)
+                return ensure_sync_adapter_result(
+                    "storage.kv_get",
+                    self._storage.kv_get,
+                    key,
+                )
+            ensure_sync_adapter_result(
+                "storage.kv_set",
+                self._storage.kv_set,
+                key,
+                value,
+            )
             return None
 
         return TradeLifecycleHandler(
@@ -441,12 +453,15 @@ class TradingSessionService:
                 self._exit_coordinator.on_position_closed(
                     symbol=symbol,
                     position=pos,
+                    session=session,
                 )
             except (RuntimeError, ValueError) as e:
                 log.error("Exit check failed for %s: %s", symbol, e, exc_info=True)
             if self._storage:
                 try:
-                    self._storage.save_trade(
+                    ensure_sync_adapter_result(
+                        "storage.save_trade",
+                        self._storage.save_trade,
                         {
                             "position_id": pos.id,
                             "symbol": symbol,
@@ -463,7 +478,7 @@ class TradingSessionService:
                             "reason": pos.close_reason or "",
                             "opened_at": pos.entry_time,
                             "closed_at": pos.exit_time,
-                        }
+                        },
                     )
                 except (OSError, Exception) as e:
                     log.error(
@@ -479,7 +494,9 @@ class TradingSessionService:
             if self._storage:
                 try:
                     stats = session.portfolio.get_stats(Source.LLM)
-                    self._storage.save_performance_snapshot(
+                    ensure_sync_adapter_result(
+                        "storage.save_performance_snapshot",
+                        self._storage.save_performance_snapshot,
                         {
                             "symbol": symbol,
                             "equity": _snap_equity,
@@ -488,7 +505,7 @@ class TradingSessionService:
                             "open_positions": _snap_open_count,
                             "total_trades": stats.total_trades,
                             "win_rate": stats.win_rate,
-                        }
+                        },
                     )
                 except (ValueError, KeyError) as e:
                     log.debug("Performance snapshot error: %s", e, exc_info=True)
@@ -496,6 +513,14 @@ class TradingSessionService:
         # Event dispatch: publish TickReceived via event bus (when active)
         # or fall back to direct method call (backward compatibility)
         try:
+            _tick_sequence = cache.next_tick_sequence()
+            _tick_trace = SessionOrchestrator.build_tick_trace_contract(
+                symbol=symbol,
+                tick_time=tick.time,
+                sequence=_tick_sequence,
+                trace_token=str(tick.close),
+            )
+            cache.set_last_tick_trace_id(_tick_trace.trace_id)
             _agent_series: tuple = ()
             if cache.has_underlying_data(20):
                 _ud = cache.get_underlying_data()
@@ -507,6 +532,8 @@ class TradingSessionService:
                 order_book=order_book,
                 data=tuple(session.data),
                 agent_series=_agent_series,
+                tick_trace_id=_tick_trace.trace_id,
+                idempotency_key=_tick_trace.trace_id,
             )
             if self._event_bus is not None:
                 self._event_bus.publish(tick_event)
@@ -518,7 +545,7 @@ class TradingSessionService:
         return self._build_state_snapshot(session)
 
     def create_portfolio(self) -> Portfolio:
-        return Portfolio.create_default()
+        return Portfolio.create_default(Decimal(str(settings.CAPITAL)))
 
     # ----- event handlers -----
 
@@ -532,60 +559,44 @@ class TradingSessionService:
         trading_enabled: bool = True,
     ):
         """Resolve entry decision from agent or pending, return execution params."""
-        _allow_short = self._allow_short
-        _exec_decision = None
-        _exec_amt = None
-        _exec_tick = None
-
-        if (
-            agent_decision
-            and agent_decision.direction != "FLAT"
-            and agent_decision.probability >= AGENT_DECISION_THRESHOLD
-        ):
-            _exec_decision = agent_decision
-            if is_new_candle:
+        if is_new_candle:
+            if (
+                agent_decision
+                and agent_decision.direction != "FLAT"
+                and agent_decision.probability >= AGENT_DECISION_THRESHOLD
+            ):
                 log.info(
                     "ENTRY: New candle with valid decision: %s P=%.3f",
                     agent_decision.direction,
                     agent_decision.probability,
                 )
 
-        pending_decision, pending_amt, pending_tick = cache.get_pending_decision()
-        if _exec_decision is None and pending_decision:
+            pending_decision, _, _ = cache.get_pending_decision()
             if (
-                pending_decision.direction != "FLAT"
+                not (
+                    agent_decision
+                    and agent_decision.direction != "FLAT"
+                    and agent_decision.probability >= AGENT_DECISION_THRESHOLD
+                )
+                and pending_decision
+                and pending_decision.direction != "FLAT"
                 and pending_decision.probability >= AGENT_DECISION_THRESHOLD
             ):
-                _exec_decision = pending_decision
-                _exec_amt = pending_amt
-                _exec_tick = pending_tick
-                if is_new_candle:
-                    log.info(
-                        "ENTRY: Using pending decision on new candle: %s P=%.3f",
-                        pending_decision.direction,
-                        pending_decision.probability,
-                    )
+                log.info(
+                    "ENTRY: Using pending decision on new candle: %s P=%.3f",
+                    pending_decision.direction,
+                    pending_decision.probability,
+                )
 
-        if not trading_enabled:
-            _exec_decision = None
-            _exec_amt = None
-            _exec_tick = None
-            _exec_prob = 0
-            _exec_dir = "NONE"
-
-        _exec_dir = (
-            getattr(_exec_decision, "direction", "NONE") if _exec_decision else "NONE"
+        return SessionOrchestrator.resolve_entry_decision(
+            agent_decision=agent_decision,
+            cache=cache,
+            _is_new_candle=is_new_candle,
+            has_position=has_position,
+            in_cooldown=_in_cooldown,
+            allow_short=self._allow_short,
+            trading_enabled=trading_enabled,
         )
-        _exec_prob = getattr(_exec_decision, "probability", 0) if _exec_decision else 0
-        run_entry = (
-            not has_position
-            and not _in_cooldown
-            and _exec_decision is not None
-            and _exec_dir in ("LONG", "SHORT")
-            and (_exec_dir != "SHORT" or _allow_short)
-            and _exec_prob >= AGENT_DECISION_THRESHOLD
-        )
-        return _exec_decision, _exec_amt, _exec_tick, _exec_dir, _exec_prob, run_entry
 
     def _on_tick(self, event: TickReceived) -> None:
         _tick_start = time.monotonic()
@@ -689,17 +700,9 @@ class TradingSessionService:
         cache.set_agent_decision(agent_decision)
 
         # Extract stacked imbalances from footprint
-        _imbalances = None
-        _fp_domain = cache.get_fp_domain()
-        if _fp_domain:
-            try:
-                _latest_fp = list(_fp_domain.values())[-1] if _fp_domain else None
-                if _latest_fp and hasattr(_latest_fp, "levels"):
-                    _imbalances = [
-                        lv for lv in _latest_fp.levels if getattr(lv, "stacked", False)
-                    ]
-            except Exception:
-                log.debug("Stacked imbalance extraction failed", exc_info=True)
+        _imbalances = SessionOrchestrator.collect_stacked_imbalances(
+            cache.get_fp_domain()
+        )
 
         # 2. Trade Lifecycle + Overseer + Entry decisions
         with session._lock:
@@ -740,54 +743,53 @@ class TradingSessionService:
             _in_cooldown = self._lifecycle_handler.in_cooldown(event.symbol)
 
             # SAVE last good decision for execution on next candle
-            if trading_enabled:
-                if (
-                    agent_decision
-                    and agent_decision.direction != "FLAT"
-                    and agent_decision.probability >= AGENT_DECISION_THRESHOLD
-                ):
-                    cache.set_pending_decision(agent_decision, amt_result, event.tick)
-            else:
-                cache.clear_pending_decision()
+            SessionOrchestrator.update_pending_decision(
+                cache=cache,
+                trading_enabled=trading_enabled,
+                agent_decision=agent_decision,
+                amt_result=amt_result,
+                tick=event.tick,
+            )
 
             # Priority score for UI display only
-            _priority_score = 0.0
-            if agent_decision and agent_decision.direction != "FLAT":
-                _priority_score += agent_decision.probability * 10
-            if (
-                getattr(amt_result, "cvd_slope", 0) > 0.4
-                or getattr(amt_result, "cvd_slope", 0) < -0.4
-            ):
-                _priority_score += 2.0
-            _squeeze = self._llm_handler._get_regime_detector(
-                event.symbol
-            ).detect_squeeze(cache.get_data(), amt_result)
-            if _squeeze:
-                _priority_score += 3.0
+            _priority_score = SessionOrchestrator.compute_priority_score(
+                agent_decision=agent_decision,
+                amt_result=amt_result,
+                cache_data=cache.get_data(),
+                detect_squeeze_fn=self._llm_handler._get_regime_detector(
+                    event.symbol
+                ).detect_squeeze,
+            )
             cache.set_llm_priority_score(_priority_score)
 
+            _now = time.time()
+
             # UNIFIED ENTRY PATH — delegated to focused helper methods
-            _exec_decision, _exec_amt, _exec_tick, _exec_dir, _exec_prob, run_entry = (
-                self._resolve_entry_decision(
-                    agent_decision,
-                    cache,
-                    is_new_candle,
-                    has_position,
-                    _in_cooldown,
-                    trading_enabled=trading_enabled,
-                )
-            )
-            trigger_llm = (
-                trading_enabled
-                and self._event_router.should_trigger_llm(
-                session,
+            _decision_contract = self._resolve_entry_decision(
+                agent_decision,
+                cache,
+                is_new_candle,
                 has_position,
-                ai_running,
                 _in_cooldown,
-                amt_result,
-                event,
-                ai_time,
-                )
+                trading_enabled=trading_enabled,
+            )
+            _exec_dir = _decision_contract.exec_dir
+            _exec_prob = _decision_contract.exec_prob
+            run_entry = _decision_contract.run_entry
+
+            _llm_contract = SessionOrchestrator.resolve_llm_triggers(
+                should_trigger_llm_fn=self._event_router.should_trigger_llm,
+                session=session,
+                has_position=has_position,
+                ai_running=ai_running,
+                in_cooldown=_in_cooldown,
+                amt_result=amt_result,
+                event=event,
+                ai_time=ai_time,
+                market_state=amt_result.market_state,
+                last_monitoring_llm=session._last_monitoring_llm,
+                now_ts=_now,
+                trading_enabled=trading_enabled,
             )
 
         self._event_router.run_overseer_if_needed(session, event, amt_result, self._exchange)
@@ -800,17 +802,20 @@ class TradingSessionService:
         
         # 4b. Trigger LLM descriptor for UI
         # Monitoring-mode LLM: fire every 5 min in active market states for context
-        _monitoring_interval = 300
-        monitoring_trigger = (
-            amt_result.market_state in ("BALANCED", "IMBALANCED")
-            and (time.time() - session._last_monitoring_llm) > _monitoring_interval
-        )
+        monitoring_trigger = _llm_contract.monitoring_trigger
         
-        if trading_enabled and ((trigger_llm and is_new_candle) or monitoring_trigger):
+        _trigger_llm = _llm_contract.trigger_llm
+        if trading_enabled and ((_trigger_llm and is_new_candle) or monitoring_trigger):
             session._llm_status = "RUNNING"
-            self._event_router.trigger_llm_entry(session, event.symbol, event.tick, amt_result)
+            self._event_router.trigger_llm_entry(
+                session,
+                event.symbol,
+                event.tick,
+                amt_result,
+                tick_trace_id=getattr(event, "tick_trace_id", ""),
+            )
             if monitoring_trigger:
-                session._last_monitoring_llm = time.time()
+                session._last_monitoring_llm = _now
                 log.info(
                     "MONITORING LLM: Triggered context call for %s (state=%s)",
                     event.symbol,

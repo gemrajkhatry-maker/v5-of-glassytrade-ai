@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from app.core.async_boundary import ensure_sync_adapter_result
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,12 @@ class StartupReconciliation:
         db_positions = []
         if self._storage:
             try:
-                db_positions = self._storage.load_open_positions()
+                db_positions = ensure_sync_adapter_result(
+                    "storage.load_open_positions",
+                    self._storage.load_open_positions,
+                )
+                if db_positions is None:
+                    db_positions = []
             except Exception as e:
                 logger.error(
                     "Startup reconciliation: failed to load DB positions: %s", e
@@ -63,9 +69,15 @@ class StartupReconciliation:
         broker_positions = []
         try:
             if hasattr(self._broker, "get_positions"):
-                broker_positions = self._broker.get_positions() or []
+                broker_positions = ensure_sync_adapter_result(
+                    "broker.get_positions",
+                    self._broker.get_positions,
+                ) or []
             elif hasattr(self._broker, "get_account_positions"):
-                broker_positions = self._broker.get_account_positions() or []
+                broker_positions = ensure_sync_adapter_result(
+                    "broker.get_account_positions",
+                    self._broker.get_account_positions,
+                ) or []
         except Exception as e:
             logger.warning(
                 "Startup reconciliation: failed to query broker API: %s",
@@ -99,7 +111,11 @@ class StartupReconciliation:
                 )
                 if self._storage:
                     try:
-                        self._storage.delete_open_position(pos.get("id", ""))
+                        ensure_sync_adapter_result(
+                            "storage.delete_open_position",
+                            self._storage.delete_open_position,
+                            pos.get("id", ""),
+                        )
                     except (KeyError, TypeError):
                         logger.debug("Failed to delete stale open position: %s", pos.get("id"), exc_info=True)
 

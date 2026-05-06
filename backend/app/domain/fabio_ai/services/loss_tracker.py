@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Callable
 
 from app.domain.ports.storage import IKeyValueStorage
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,11 @@ class LossTracker:
         if not self._storage:
             return
         try:
-            raw = self._storage.load("daily_losses_v2")
+            raw = ensure_sync_adapter_result(
+                "storage.load",
+                self._storage.load,
+                "daily_losses_v2",
+            )
             if raw:
                 data = json.loads(raw)
                 today = datetime.now(IST).strftime("%Y-%m-%d")
@@ -163,7 +168,12 @@ class LossTracker:
                 "global_count": self._global_daily_losses,
                 "symbol_counts": self._symbol_daily_losses,
             }
-            self._storage.persist("daily_losses_v2", json.dumps(payload))
+            ensure_sync_adapter_result(
+                "storage.persist",
+                self._storage.persist,
+                "daily_losses_v2",
+                json.dumps(payload),
+            )
         except Exception:
             logger.debug("Failed to persist daily losses", exc_info=True)
 

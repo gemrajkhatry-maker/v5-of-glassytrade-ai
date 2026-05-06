@@ -67,6 +67,7 @@ def smooth_array(data: list[float], window: int) -> list[float]:
 
 def ema(values: list[float], period: int) -> float:
     """Exponential moving average, returns final value."""
+    values = [float(v) for v in values]
     if not values:
         return 0.0
     k = 2.0 / (period + 1)
@@ -79,6 +80,7 @@ def ema(values: list[float], period: int) -> float:
 
 def linreg_slope(ys: list[float]) -> float:
     """OLS slope for evenly-spaced y values."""
+    ys = [float(v) for v in ys]
     n = len(ys)
     if n < 2:
         return 0.0
@@ -95,6 +97,9 @@ def linreg_slope(ys: list[float]) -> float:
 
 def atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float:
     """Average True Range over period candles."""
+    highs = [float(v) for v in highs]
+    lows = [float(v) for v in lows]
+    closes = [float(v) for v in closes]
     n = len(highs)
     if n < 2:
         return (highs[0] - lows[0]) if n == 1 else 1.0
@@ -110,6 +115,8 @@ def atr(highs: list[float], lows: list[float], closes: list[float], period: int 
 
 def candle_overlap_pct(highs: list[float], lows: list[float], period: int = 10) -> float:
     """Mean overlap percentage between consecutive candles."""
+    highs = [float(v) for v in highs]
+    lows = [float(v) for v in lows]
     n = len(highs)
     if n < 2:
         return 100.0

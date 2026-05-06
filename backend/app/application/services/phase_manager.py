@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.shared.parsing import resolve_session_market
 from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints
 from app.domain.constants import RECENT_DATA_WINDOW
@@ -75,7 +76,9 @@ class PhaseManager:
                         event.symbol, float(realized_pnl), session.portfolio
                     )
                 if self._exit_coordinator:
-                    self._exit_coordinator.on_position_closed(event.symbol, None)
+                        self._exit_coordinator.on_position_closed(
+                            event.symbol, pos, session=session
+                        )
 
                 # Clear partition state for the closed position
                 if self._lifecycle_handler:
@@ -83,7 +86,11 @@ class PhaseManager:
                 
                 if self._storage:
                     try:
-                        self._storage.delete_open_position(pos.id)
+                        ensure_sync_adapter_result(
+                            "storage.delete_open_position",
+                            self._storage.delete_open_position,
+                            pos.id,
+                        )
                     except Exception as e:
                         log.error(
                             "Failed to delete open position %s: %s", pos.id, e
@@ -131,7 +138,11 @@ class PhaseManager:
                     ],
                     "is_underlying": cache.has_underlying_data(),
                 }
-                self._storage.save_session_profile(profile_data)
+                ensure_sync_adapter_result(
+                    "storage.save_session_profile",
+                    self._storage.save_session_profile,
+                    profile_data,
+                )
                 session._profile_saved = True
                 log.info(
                     "Saved session profile for %s on %s",
@@ -167,7 +178,9 @@ class PhaseManager:
                             event.symbol, float(_er_pnl), session.portfolio
                         )
                     if self._exit_coordinator:
-                        self._exit_coordinator.on_position_closed(event.symbol, None)
+                        self._exit_coordinator.on_position_closed(
+                            event.symbol, pos, session=session
+                        )
                 except Exception as close_err:
                     log.error(
                         "Failed to emergency close position %s: %s",

@@ -91,9 +91,24 @@ def build_entry_signal(
 ) -> "Signal":
     """Build Signal from AMT decision using Fabio Playbook SL/TP."""
 
-    if setup_type is None:
-        setup_type = ST.MEAN_REVERSION  # default: mean-reversion to POC
+    resolved_setup_type = setup_type or ST.MEAN_REVERSION
 
+    # Keep caller-provided setup_type as the authoritative source. AI setup hints
+    # are treated as optional metadata unless setup_type is omitted.
+    if setup_type is None and ai_result and isinstance(ai_result, dict):
+        raw_setup = ai_result.get("setup", "")
+        if isinstance(raw_setup, str):
+            normalized = raw_setup.replace("-", "_").lower()
+            if normalized in ("mean_rev", "mean_reversion_playbook", "mean_reversion"):
+                resolved_setup_type = ST.MEAN_REVERSION
+            elif normalized in ("trend_model_playbook", "trend", "trend_model"):
+                resolved_setup_type = ST.TREND_MODEL
+            elif normalized in ("responsive_fade_playbook", "fade", "responsive_fade"):
+                resolved_setup_type = ST.RESPONSIVE_FADE
+            else:
+                resolved_setup_type = ST.MEAN_REVERSION
+
+    setup_type = resolved_setup_type
     is_buy = direction == "LONG"
     sig_type = SignalType.BUY if is_buy else SignalType.SELL
     px = float(tick.close)
@@ -112,24 +127,6 @@ def build_entry_signal(
     # Fabio Gap #5: ALWAYS prefer aggressive print SL if available
     # This ensures stop is above institutional aggression, not above arbitrary level
 
-    # Normalize setup from LLM output (e.g., 'mean-reversion' → 'mean_reversion')
-    if ai_result and isinstance(ai_result, dict):
-        raw_setup = ai_result.get('setup', '')
-        if isinstance(raw_setup, str):
-            normalized = raw_setup.replace('-', '_').lower()
-            # Map common variants to enum members
-            if normalized in ('mean_rev', 'mean_reversion_playbook', 'mean_reversion'):
-                setup_type = ST.MEAN_REVERSION
-            elif normalized in ('trend_model_playbook', 'trend', 'trend_model'):
-                setup_type = ST.TREND_MODEL
-            elif normalized in ('responsive_fade_playbook', 'fade', 'responsive_fade'):
-                setup_type = ST.RESPONSIVE_FADE
-            else:
-                setup_type = ST.MEAN_REVERSION
-        else:
-            setup_type = ST.MEAN_REVERSION
-    else:
-        setup_type = ST.MEAN_REVERSION
 
     match setup_type:
         case ST.RESPONSIVE_FADE:

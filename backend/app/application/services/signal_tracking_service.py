@@ -26,6 +26,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from app.core.async_boundary import ensure_sync_adapter_result
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +69,7 @@ class SignalDecision:
     # Timing
     time_since_last_signal: float = 0.0
     candle_number: int = 0
+    tick_trace_id: str = ""
 
 
 class SignalTrackingService:
@@ -100,6 +103,7 @@ class SignalTrackingService:
         llm_confidence: str = "",
         time_since_last: float = 0.0,
         candle_number: int = 0,
+        tick_trace_id: str = "",
     ) -> SignalDecision:
         """Track a successfully generated signal."""
         decision = SignalDecision(
@@ -124,6 +128,7 @@ class SignalTrackingService:
             llm_confidence=llm_confidence,
             time_since_last_signal=time_since_last,
             candle_number=candle_number,
+            tick_trace_id=tick_trace_id,
         )
         self._record(symbol, decision)
         logger.info(
@@ -153,6 +158,7 @@ class SignalTrackingService:
         drive_number: int = 0,
         agent_direction: str = "",
         agent_probability: float = 0.0,
+        tick_trace_id: str = "",
     ) -> SignalDecision:
         """Track a gate block (signal NOT generated)."""
         decision = SignalDecision(
@@ -173,6 +179,7 @@ class SignalTrackingService:
             drive_number=drive_number,
             agent_direction=agent_direction,
             agent_probability=agent_probability,
+            tick_trace_id=tick_trace_id,
         )
         self._record(symbol, decision)
         logger.debug(
@@ -276,7 +283,9 @@ class SignalTrackingService:
         # Persist to storage
         if self._storage and hasattr(self._storage, "save_position_event"):
             try:
-                self._storage.save_position_event(
+                ensure_sync_adapter_result(
+                    "storage.save_position_event",
+                    self._storage.save_position_event,
                     {
                         "position_id": decision.decision_id,
                         "symbol": symbol,
@@ -287,10 +296,10 @@ class SignalTrackingService:
                         "gate_reason": decision.gate_reason,
                         "direction": decision.direction,
                         "confidence": decision.confidence,
-                    }
+                    },
                 )
             except Exception:
-                logger.warning("Failed to persist signal tracking record — replay data gap", exc_info=True)
+                logger.warning("Failed to persist signal tracking record", exc_info=True)
 
     def get_stats(self, symbol: str | None = None) -> dict:
         """Get signal generation statistics.

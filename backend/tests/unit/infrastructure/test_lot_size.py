@@ -1,6 +1,7 @@
 """Unit tests for get_lot_size functionality in Dhan broker and adapter."""
 from __future__ import annotations
 
+import asyncio
 import sys
 import os
 from unittest.mock import MagicMock, AsyncMock, patch
@@ -67,8 +68,12 @@ def test_dhan_broker_get_lot_size_logic():
     mock_instrument = MagicMock()
     mock_instrument.lot_size = 75
     
-    # Mock _run_async to just return what we want
-    broker._run_async = MagicMock(return_value=mock_instrument)
+    # Ensure get_lot_size consumes the async coroutine path and gets deterministic data.
+    async def _resolved(_symbol, _exchange=None):
+        return mock_instrument
+
+    broker.resolve_symbol = _resolved
+    broker._run_async = MagicMock(side_effect=lambda coro: asyncio.run(coro))
     
     # Since we mocked _run_async, it won't actually call resolve_symbol (async)
     # but we can check if it returns the right value

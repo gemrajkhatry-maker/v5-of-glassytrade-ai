@@ -45,7 +45,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from app.domain.trading.models.enums import MarketStateCodec
-from app.domain.probability.regime_classifier import RegimeHysteresis, RegimeState, classify_regime
 from app.domain.constants import (
     CVD_SLOPE_HARD_BLOCK,
     AGENT_DECISION_THRESHOLD,
@@ -84,9 +83,155 @@ class AgentDecision:
     tp_adjust: float  # Multiplier for TP distance (1.0 = default)
     latency_us: int  # Pipeline latency in microseconds
     rationale: str  # Human-readable summary
-    stop_loss: float | None = None
-    take_profit: float | None = None
     feature_drivers: tuple[str, ...] = ()  # Top auction/order-flow drivers
+
+
+# ---------------------------------------------------------------------------
+# Agent 1: Regime Classification (rule-based, ~0.05ms)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RegimeState:
+    regime: str  # TRENDING, BALANCED, VOLATILE, DEAD
+    allowed_long: bool
+    allowed_short: bool
+    risk_scale: float  # 0.0 = no risk, 1.0 = full risk
+
+
+class RegimeHysteresis:
+    """Adds hysteresis to regime classification to prevent rapid flipping.
+
+    Requires the new regime to persist for `min_persistence` consecutive
+    evaluations before switching. This prevents the model from oscillating
+    between BALANCED and TRENDING every minute on edge cases.
+    """
+
+    def __init__(self, min_persistence: int = 3) -> None:
+        self._min_persistence = min_persistence
+        self._current_regime: str = ""
+        self._candidate_regime: str = ""
+        self._candidate_count: int = 0
+
+    def apply(self, raw_regime: RegimeState) -> RegimeState:
+        """Apply hysteresis filter to the raw regime result.
+
+        If the raw regime matches the current stable regime, confirm immediately.
+        If different, count consecutive occurrences before switching.
+        DEAD regime always passes through immediately (safety).
+        """
+        # DEAD and VOLATILE always pass through immediately (safety)
+        if raw_regime.regime in ("DEAD", "VOLATILE"):
+            self._current_regime = raw_regime.regime
+            self._candidate_regime = ""
+            self._candidate_count = 0
+            return raw_regime
+
+        # First evaluation — accept immediately
+        if not self._current_regime:
+            self._current_regime = raw_regime.regime
+            self._candidate_regime = ""
+            self._candidate_count = 0
+            return raw_regime
+
+        # Same as current stable regime — confirm immediately
+        if raw_regime.regime == self._current_regime:
+            self._candidate_regime = ""
+            self._candidate_count = 0
+            return raw_regime
+
+        # Different from current — track persistence
+        if raw_regime.regime == self._candidate_regime:
+            self._candidate_count += 1
+        else:
+            self._candidate_regime = raw_regime.regime
+            self._candidate_count = 1
+
+        if self._candidate_count >= self._min_persistence:
+            # Candidate has persisted long enough — switch
+            logger.info(
+                "Regime hysteresis: %s → %s (persisted %d evaluations)",
+                self._current_regime, self._candidate_regime, self._candidate_count,
+            )
+            self._current_regime = self._candidate_regime
+            self._candidate_regime = ""
+            self._candidate_count = 0
+            return raw_regime
+
+        # Not yet stable — return current stable regime
+        return RegimeState(
+            regime=self._current_regime,
+            allowed_long=raw_regime.allowed_long if self._current_regime == raw_regime.regime else True,
+            allowed_short=raw_regime.allowed_short if self._current_regime == raw_regime.regime else True,
+            risk_scale=raw_regime.risk_scale,
+        )
+
+
+def classify_regime(
+    data: list[OHLC],
+    amt_result: AMTResult,
+    tick: OHLC,
+) -> RegimeState:
+    """Fast regime classification from AMT + price action.
+
+    Rules (Fabio methodology):
+    - DEAD: volume < 20% of EMA(20) → no edge, skip
+    - DEAD: symbol ATR percentile < 20th (stale/illiquid) → skip
+    - VOLATILE: ATR(5)/ATR(20) > 3.0 → whipsaw risk, reduce size to 0.5
+    - TRENDING: market_state=IMBALANCED + CVD confirms → trend trades only
+    - BALANCED: default → mean reversion trades
+    - ATR percentile gate: p20-p40 → risk_scale 0.6; p40+ → full risk
+    """
+    if len(data) < 20:
+        logger.info("Regime: DEAD — only %d candles (need 20)", len(data))
+        return RegimeState("DEAD", False, False, 0.0)
+
+    # Volume check — use the CANDLE volume from data (not the live tick which is mid-candle)
+    alpha = 2.0 / 21
+    ema_vol = data[-20].volume
+    for d in data[-19:]:
+        ema_vol = alpha * d.volume + (1 - alpha) * ema_vol
+    # Use the latest completed candle's volume, not the mid-candle tick
+    latest_vol = (
+        data[-1].volume
+        if data[-1].time != tick.time
+        else (data[-2].volume if len(data) >= 2 else tick.volume)
+    )
+    vol_ratio = latest_vol / ema_vol if ema_vol > 0 else 0
+
+    # Hard DEAD check: No price or no volume activity
+    # Relaxed from 0.05 to 0.01 for MCX markets where volume can be sparse.
+    if tick.close <= 0 or vol_ratio < 0.01:
+        logger.info(
+            "Regime: DEAD — ltp=%.2f, vol_ratio=%.3f (latest_vol=%.0f, ema=%.0f)",
+            tick.close,
+            vol_ratio,
+            latest_vol,
+            ema_vol,
+        )
+        return RegimeState("DEAD", False, False, 0.0)
+
+    # ATR percentile gate DISABLED for options — option ATR naturally varies
+    # with time decay, moneyness, and IV crush. Walk-forward results were on
+    # futures; for options the gate causes persistent false DEAD classification.
+    # Volume ratio check above is sufficient for filtering dead markets.
+    atr_pct_scale = 1.0
+
+    # Volatility check — only block extreme (>3x), reduce size on moderate
+    atr5 = sum(d.high - d.low for d in data[-5:]) / 5
+    atr20 = sum(d.high - d.low for d in data[-20:]) / 20
+    atr_ratio = atr5 / atr20 if atr20 > 0 else 1.0
+
+    if atr_ratio > 3.0:
+        return RegimeState("VOLATILE", True, True, 0.5 * atr_pct_scale)
+
+    # Trending vs balanced — for OPTIONS, allow both directions in all regimes.
+    # The probability model already accounts for direction edge.
+    # Regime agent's job: kill dead markets, reduce size in volatile, inform SL/TP.
+    if MarketStateCodec.is_imbalanced(amt_result.market_state):
+        return RegimeState("TRENDING", True, True, 1.0 * atr_pct_scale)
+
+    return RegimeState("BALANCED", True, True, 1.0 * atr_pct_scale)
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +393,7 @@ def assess_timing(
 
     # Use generic thresholds for scanner; actual execution gate is still the final decider
     # symbol and tick_age_seconds are now passed from the session service
-    gate_passed, gate_reason, gate_detail, _soft_gates_passed, _soft_gates_total = run_gate_pipeline(
+    gate_passed, gate_reason, gate_detail = run_gate_pipeline(
         data=data,
         amt_result=amt_result,
         tick=tick,

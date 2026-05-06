@@ -112,6 +112,15 @@ def extract_bubble_levels_from_footprint(fp_domain: dict | None, min_stacked_cou
     return bubble_levels
 
 
+def _to_float(value, default: float | None = None) -> float | None:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 from app.domain.fabio_ai.ports.three_align import ThreeAlignInput
 
 
@@ -263,7 +272,16 @@ def three_align_check(
         recent_touches = 0
         past_touches = 0
         for i, d in enumerate(reversed(history[-30:])):
-            dist = min(abs(d.high - active_level), abs(d.low - active_level), abs(d.close - active_level))
+            d_high = _to_float(getattr(d, "high", None), default=None)
+            d_low = _to_float(getattr(d, "low", None), default=None)
+            d_close = _to_float(getattr(d, "close", None), default=None)
+            if d_high is None or d_low is None or d_close is None:
+                continue
+            dist = min(
+                abs(d_high - active_level),
+                abs(d_low - active_level),
+                abs(d_close - active_level),
+            )
             if i < 3:
                 if dist < threshold:
                     recent_touches += 1

@@ -341,19 +341,19 @@ class EventSystem:
 class AuditTrailVerifier:
     """Audit trail verifier for deterministic State reconstruction.
 
-    Given a list of events, verifies that replaying them produces consistent
+    Given a list of events, verifies that applying them produces consistent
     state. This is for audit trail verification - NOT for backtest execution.
     """
 
     def __init__(self, event_store: EventStore):
         self._event_store = event_store
-        self._replay_handlers: dict[str, Callable[[DomainEvent], Any]] = {}
+        self._state_handlers: dict[str, Callable[[DomainEvent], Any]] = {}
 
     def register_handler(
         self, event_type: str, handler: Callable[[DomainEvent], Any]
     ) -> None:
         """Register a handler for event verification."""
-        self._replay_handlers[event_type] = handler
+        self._state_handlers[event_type] = handler
 
     def verify_to(
         self, timestamp: str | None = None, aggregate_id: str | None = None
@@ -382,8 +382,8 @@ class AuditTrailVerifier:
         # Apply each event to reconstruct state
         for event in events:
             event_type = event.__class__.__name__
-            if event_type in self._replay_handlers:
-                self._replay_handlers[event_type](event, state)
+            if event_type in self._state_handlers:
+                self._state_handlers[event_type](event, state)
 
         return state
 
@@ -402,6 +402,6 @@ class AuditTrailVerifier:
         state = {}
         for event in events:
             event_type = event.__class__.__name__
-            if event_type in self._replay_handlers:
-                state = self._replay_handlers[event_type](event, state)
+            if event_type in self._state_handlers:
+                state = self._state_handlers[event_type](event, state)
         return state

@@ -10,6 +10,7 @@ This module sets up the dependency injection graph and starts the FastAPI applic
 import faulthandler
 from contextlib import asynccontextmanager
 from pathlib import Path
+from types import MappingProxyType
 from typing import AsyncGenerator
 
 # Load .env BEFORE any other imports that read os.getenv()
@@ -40,16 +41,20 @@ from app.core.logging import setup_logging, get_logger
 from app.core.startup_telemetry import (
     begin_phase,
     end_phase,
+    record_startup_reconciliation,
     mark_startup_failed,
     mark_startup_finished,
     mark_startup_started,
 )
+from app.core.async_boundary import ensure_sync_adapter_result
+from app.application.services.startup_contracts import build_startup_contracts
 from config.consolidated import ConsolidatedConfig as Configuration
 from app.domain.ports.broker import IBroker
 from app.domain.ports.storage import IStorage
 from app.domain.ports.market_data import IMarketData
 from app.domain.ports.llm_inference import ILLMInference
 from app.application.services.trading_session import TradingSessionService
+from app.domain.services.startup_reconciliation import StartupReconciliation
 
 # Configure structured logging
 setup_logging()
@@ -172,6 +177,18 @@ def create_application() -> FastAPI:
             except Exception:
                 logger.error("Engine stop failed — resources may not be cleaned up", exc_info=True)
 
+        # Persist pending in-memory data and release storage resources
+        try:
+            storage = getattr(app.state, "storage", None)
+            if hasattr(storage, "flush"):
+                ensure_sync_adapter_result("storage.flush", storage.flush)
+                logger.info("Storage flushed")
+            if hasattr(storage, "close"):
+                ensure_sync_adapter_result("storage.close", storage.close)
+                logger.info("Storage closed")
+        except Exception:
+            logger.debug("Storage teardown failed — non-critical", exc_info=True)
+
         # Cleanup handler thread pools (LLMEntryHandler, LLMOverseerHandler)
         try:
             app.state.trading_session.cleanup()
@@ -234,12 +251,51 @@ def create_application() -> FastAPI:
         app.state.broker = broker
         app.state.storage = storage
 
+        # Startup reconciliation before readiness contract assembly
+        reconciliation_result = None
+        reconciliation_executed = True
+        try:
+            begin_phase("startup_reconciliation")
+            reconciliation = StartupReconciliation(broker, storage)
+            reconciliation_result = reconciliation.reconcile()
+            record_startup_reconciliation(reconciliation_result)
+            end_phase(
+                "startup_reconciliation",
+                "ok",
+                f"db={reconciliation_result.db_positions} broker={reconciliation_result.broker_positions}",
+            )
+        except Exception as e:
+            reconciliation_executed = False
+            logger.warning("Startup reconciliation failed: %s", e)
+            record_startup_reconciliation(None)
+            end_phase("startup_reconciliation", "failed", str(e))
+            mark_startup_failed("startup_reconciliation", str(e))
+
         # Get active symbols from service or config
-        active_symbols = list(getattr(config, "dhan_symbols", []))
+        active_symbols = list(getattr(app.state, "active_symbols", []))
+        if not active_symbols:
+            active_symbols = list(getattr(config, "dhan_symbols", []))
         if not active_symbols:
             from app.config import settings as _settings
+
             active_symbols = list(getattr(_settings, "DHAN_SYMBOLS", []))
-        app.state.active_symbols = active_symbols
+
+        app.state.startup_reconciliation = reconciliation_result
+        app.state.active_symbols = tuple(active_symbols)
+        app.state.startup_contracts = build_startup_contracts(
+            trading_session=trading_session,
+            active_symbols=active_symbols,
+            reconciliation_result=reconciliation_result,
+            reconciliation_executed=reconciliation_executed,
+        ).as_readiness_payload()
+        app.state.startup_dependency_refs = MappingProxyType(
+            {
+                "trading_session": trading_session,
+                "broker": broker,
+                "storage": storage,
+                "market_data": market_data,
+            }
+        )
 
         # Initialize singletons for FastAPI dependencies
         init_singletons(

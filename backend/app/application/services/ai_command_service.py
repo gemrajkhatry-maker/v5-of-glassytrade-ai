@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from app.core.async_boundary import ensure_sync_adapter_result
+
 
 _SYMBOL_KEYWORDS = {
     "nifty": "NIFTY",
@@ -109,13 +111,19 @@ class AiCommandService:
 
     def get_decision_history(self, storage, active_symbols: list[str], start: str | None, end: str | None, limit: int) -> dict:
         safe_limit = min(limit, 200)
-        llm_rows = storage.query_llm_decisions(
-            start=start, end=end, symbols=active_symbols if active_symbols else None
+        llm_rows = ensure_sync_adapter_result(
+            "storage.query_llm_decisions",
+            storage.query_llm_decisions,
+            start=start,
+            end=end,
+            symbols=active_symbols if active_symbols else None,
         )
         if len(llm_rows) > safe_limit:
             llm_rows = llm_rows[-safe_limit:]
 
-        signal_rows = storage.query_signal_decisions(
+        signal_rows = ensure_sync_adapter_result(
+            "storage.query_signal_decisions",
+            storage.query_signal_decisions,
             symbol=active_symbols[0] if active_symbols else None,
             limit=safe_limit,
         )

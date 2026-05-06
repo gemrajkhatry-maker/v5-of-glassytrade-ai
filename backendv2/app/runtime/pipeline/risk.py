@@ -22,6 +22,7 @@ from app.domain.trading.model.entities import Signal as DomainSignal
 from app.domain.trading.model.entities import Position
 from app.domain.trading.model.enums import SignalType, Source, SetupType, Side, PositionStatus
 from app.domain.risk.service import CircuitBreakers, RiskTierEngine
+from app.domain.risk.service import FlashCrashProtector, VelocityLevel, VelocityState
 from app.domain.exit.service import LossTracker
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,8 @@ class _SymbolRiskState:
     kill_switch: KillSwitch
     risk_manager: RiskManager
     portfolio: Portfolio
+    flash_crash: FlashCrashProtector
+    flash_state: VelocityState | None
 
 
 class RiskEvaluation:
@@ -55,6 +58,8 @@ class RiskEvaluation:
                 kill_switch=KillSwitch(),
                 risk_manager=RiskManager(),
                 portfolio=portfolio,
+                flash_crash=FlashCrashProtector(),
+                flash_state=None,
             )
             self._state[symbol].risk_manager._daily.reset(float(portfolio.equity))
             return self._state[symbol]
@@ -66,6 +71,23 @@ class RiskEvaluation:
         ):
             state.risk_manager._daily.reset(float(state.portfolio.equity))
         return state
+
+    @staticmethod
+    def _to_seconds(timestamp: float) -> float:
+        """Normalize timestamps to seconds for windowed velocity checks."""
+        if timestamp > 1_000_000_000_000:
+            return timestamp / 1_000_000_000
+        return timestamp
+
+    def observe_price(self, symbol: str, price: float, timestamp: float) -> None:
+        """Update flash crash protector state for a symbol with latest tick price."""
+        if not symbol or price <= 0:
+            return
+        state = self._state_for(symbol)
+        state.flash_state = state.flash_crash.update(
+            float(price),
+            self._to_seconds(float(timestamp)),
+        )
 
     def process(self, gate: GateResult) -> list[RiskResult]:
         try:
@@ -80,34 +102,74 @@ class RiskEvaluation:
             kill_switch_active = state.kill_switch.is_halted
             circuit_breaker_triggered = False
             remaining_buying_power = 0.0
+            if state.flash_state is not None and state.flash_state.is_halted:
+                approved = False
+                circuit_breaker_triggered = True
+                kill_switch_active = True
+                rejection_reason = (
+                    f"{rejection_reason} | Flash crash protection: {state.flash_state.reason}"
+                    if rejection_reason
+                    else f"Flash crash protection: {state.flash_state.reason}"
+                )
+                logger.warning(
+                    "Risk evaluation blocked by flash crash for %s: %s",
+                    symbol,
+                    state.flash_state.reason,
+                )
 
             if approved:
                 sig = gate.signal
-                approved_signal, reason = state.risk_manager.check_signal(_to_domain_signal(sig), state.portfolio)
+                approved_signal, reason = state.risk_manager.check_signal(
+                    _to_domain_signal(sig),
+                    state.portfolio,
+                )
                 if not approved_signal:
                     approved = False
                     rejection_reason = reason
                 else:
                     # Evaluate hard circuit breakers against today's realized PnL and loss streak.
-                    consecutive_losses = int(getattr(state.risk_manager._daily, "consecutive_losses", 0))
-                    session_pnl = float(getattr(state.risk_manager._daily, "realized_pnl", 0.0))
+                    consecutive_losses = int(
+                        getattr(state.risk_manager._daily, "consecutive_losses", 0)
+                    )
+                    session_pnl = float(
+                        getattr(state.risk_manager._daily, "realized_pnl", 0.0)
+                    )
+                    current_equity = float(
+                        getattr(
+                            state.risk_manager._daily,
+                            "current_equity",
+                            state.portfolio.equity,
+                        )
+                    )
+                    portfolio_balance = float(getattr(state.portfolio, "balance", 0))
                     breaker = self._circuit_breakers.evaluate(
                         consecutive_losses=consecutive_losses,
                         session_pnl=session_pnl,
-                        cumulative_account_pnl=float(
-                            getattr(state.risk_manager._daily, "current_equity", state.portfolio.equity) - getattr(state.portfolio, "balance", 0)
-                        ),
+                        cumulative_account_pnl=float(current_equity - portfolio_balance),
                     )
                     circuit_breaker_triggered = breaker.is_locked
                     if circuit_breaker_triggered:
                         approved = False
                         rejection_reason = breaker.detail
                         kill_switch_active = True
-                else:
-                    remaining_buying_power = float(state.portfolio.equity)
-                    # Initialize per-symbol risk tier if absent and advance tier on each accepted signal.
-                    if symbol not in self._risk_tiers:
-                        self._risk_tiers[symbol] = RiskTierEngine(capital=float(state.portfolio.equity))
+                    else:
+                        if (
+                            state.flash_state is not None
+                            and state.flash_state.level == VelocityLevel.ELEVATED
+                        ):
+                            notional_ok = False
+                            remaining_buying_power = float(state.portfolio.equity) * 0.5
+                            logger.info(
+                                "Flash-crash elevated velocity: reducing sizing signal for %s",
+                                symbol,
+                            )
+                        else:
+                            remaining_buying_power = float(state.portfolio.equity)
+                        # Initialize per-symbol risk tier if absent and advance tier on each accepted signal.
+                        if symbol not in self._risk_tiers:
+                            self._risk_tiers[symbol] = RiskTierEngine(
+                                capital=float(state.portfolio.equity)
+                            )
 
             self._metrics.record(0)
             return [RiskResult(
@@ -156,6 +218,22 @@ class RiskEvaluation:
                     "baseline_win_rate": state.risk_manager._baseline_win_rate,
                     "drift_alert": state.risk_manager._drift_alert,
                     "drift_message": state.risk_manager._drift_message,
+                },
+                "flash_crash": {
+                    "is_halted": bool(
+                        state.flash_state.is_halted if state.flash_state else False
+                    ),
+                    "level": (
+                        state.flash_state.level.value
+                        if state.flash_state is not None
+                        else VelocityLevel.NORMAL.value
+                    ),
+                    "velocity_pct_per_sec": (
+                        float(state.flash_state.velocity_pct_per_sec)
+                        if state.flash_state is not None
+                        else 0.0
+                    ),
+                    "reason": state.flash_state.reason if state.flash_state else "",
                 },
                 "portfolio": {
                     "balance": float(state.portfolio.balance),
@@ -273,6 +351,7 @@ class RiskEvaluation:
             kill_payload = state_payload.get("kill_switch", {})
             risk_payload = state_payload.get("risk_manager", {})
             portfolio_payload = state_payload.get("portfolio", {})
+            flash_payload = state_payload.get("flash_crash", {})
 
             portfolio = Portfolio.create_default()
             if "balance" in portfolio_payload:
@@ -337,7 +416,22 @@ class RiskEvaluation:
                 kill_switch=kill_switch,
                 risk_manager=risk_manager,
                 portfolio=portfolio,
+                flash_crash=FlashCrashProtector(),
+                flash_state=None,
             )
+            if isinstance(flash_payload, dict):
+                try:
+                    level = VelocityLevel(flash_payload.get("level", VelocityLevel.NORMAL))
+                except ValueError:
+                    level = VelocityLevel.NORMAL
+                self._state[symbol].flash_state = VelocityState(
+                    level=level,
+                    velocity_pct_per_sec=float(
+                        flash_payload.get("velocity_pct_per_sec", 0.0)
+                    ),
+                    is_halted=bool(flash_payload.get("is_halted", False)),
+                    reason=str(flash_payload.get("reason", "")),
+                )
 
 
 def _to_domain_signal(signal: Signal) -> DomainSignal:

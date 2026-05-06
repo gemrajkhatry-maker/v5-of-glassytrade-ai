@@ -37,6 +37,13 @@ logger = logging.getLogger(__name__)
 from app.shared.timezones import IST
 
 
+def _delta_proxy(
+    open_price: float, high: float, low: float, close: float, volume: float
+) -> float:
+    """Backward-compatible delta proxy used by legacy tests."""
+    return estimate_tick_delta(open_price, high, low, close, volume)
+
+
 # ---------------------------------------------------------------------------
 
 

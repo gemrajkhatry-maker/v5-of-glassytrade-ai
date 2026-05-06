@@ -160,6 +160,7 @@ class RiskManager:
 
         self._daily.total_trades += 1
         self._daily.realized_pnl += pnl
+        self._daily.current_equity += pnl
 
         if pnl > 0:
             self._daily.consecutive_losses = 0

@@ -68,6 +68,26 @@ _backend_startup_ready_gauge = metrics.gauge(
     "backend_startup_ready",
     "Backend readiness lifecycle state (1=ready,0=starting, -1=failed)",
 )
+_startup_reconciliation_db_positions = metrics.gauge(
+    "startup_reconciliation_db_positions",
+    "Open positions loaded from storage during startup reconciliation",
+)
+_startup_reconciliation_broker_positions = metrics.gauge(
+    "startup_reconciliation_broker_positions",
+    "Open positions reported by broker during startup reconciliation",
+)
+_startup_reconciliation_stale_removed = metrics.gauge(
+    "startup_reconciliation_stale_removed_total",
+    "Stale DB positions removed during startup reconciliation",
+)
+_startup_reconciliation_orphaned_registered = metrics.gauge(
+    "startup_reconciliation_orphaned_registered_total",
+    "Orphaned broker positions detected during startup reconciliation",
+)
+_startup_reconciliation_discrepancy_count = metrics.gauge(
+    "startup_reconciliation_discrepancies_total",
+    "Startup reconciliation discrepancies",
+)
 
 
 def mark_startup_started() -> None:
@@ -157,6 +177,31 @@ def unresolved_count() -> int:
     unresolved = unresolved_symbols()
     _startup_unresolved_symbol_gauge.set(float(len(unresolved)))
     return len(unresolved)
+
+
+def record_startup_reconciliation(result) -> None:
+    """Record startup reconciliation result counters for observability."""
+    if result is None:
+        _startup_reconciliation_db_positions.set(float(0))
+        _startup_reconciliation_broker_positions.set(float(0))
+        _startup_reconciliation_stale_removed.set(float(0))
+        _startup_reconciliation_orphaned_registered.set(float(0))
+        _startup_reconciliation_discrepancy_count.set(float(0))
+        return
+
+    _startup_reconciliation_db_positions.set(float(getattr(result, "db_positions", 0)))
+    _startup_reconciliation_broker_positions.set(
+        float(getattr(result, "broker_positions", 0))
+    )
+    _startup_reconciliation_stale_removed.set(
+        float(getattr(result, "stale_removed", 0))
+    )
+    _startup_reconciliation_orphaned_registered.set(
+        float(getattr(result, "orphaned_registered", 0))
+    )
+    _startup_reconciliation_discrepancy_count.set(
+        float(len(getattr(result, "discrepancies", [])))
+    )
 
 
 def crash_summary() -> list[dict[str, object]]:

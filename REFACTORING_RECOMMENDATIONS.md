@@ -94,10 +94,10 @@ cd frontend && npm run gen-types
 
 ---
 
-## Priority 4: Rename ReplayEngine - ✅ COMPLETED
+## Priority 4: Rename StateVerifierEngine - ✅ COMPLETED
 
 ### Problem
-`ReplayEngine` suggests backtesting, but it's for audit verification.
+`StateVerifierEngine` suggested backtest usage, but it's for audit verification.
 
 ### Solution
 ```python
@@ -170,7 +170,7 @@ class AMTAnalysis:
 | 1 | Move cumulativeDeltas to backend | 2 hrs | Low | ✅ COMPLETED |
 | 2 | Split trading_session.py | 8 hrs | Medium | ✅ COMPLETED |
 | 3 | Generate TypeScript types | 3 hrs | Low | ✅ COMPLETED |
-| 4 | Rename ReplayEngine | 1 hr | Low | ✅ COMPLETED |
+| 4 | Rename VerifierEngine | 1 hr | Low | ✅ COMPLETED |
 | 5 | Fix ChartScene | 2 hrs | Low | ⏳ TODO |
 | 6 | Consolidate AMT types | 4 hrs | Medium | ⏳ TODO |
 

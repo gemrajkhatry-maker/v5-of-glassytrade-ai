@@ -6,6 +6,7 @@ import logging
 import resource
 import sys
 import tracemalloc
+from app.core.async_boundary import ensure_sync_adapter_result
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ async def health_check(
 
     # Database check (critical)
     try:
-        storage.kv_set("_health_check", "1")
+        ensure_sync_adapter_result("storage.kv_set", storage.kv_set, "_health_check", "1")
         checks["database"] = "ok"
     except Exception as e:
         logger.warning("Health check: database failed: %s", e)
@@ -168,7 +169,12 @@ async def readiness_check(request: Request):
 
     # Database
     try:
-        storage.kv_set("_readiness_check", "1")
+        ensure_sync_adapter_result(
+            "storage.kv_set",
+            storage.kv_set,
+            "_readiness_check",
+            "1",
+        )
         checks["database"] = "ok"
     except Exception as e:
         checks["database"] = f"error: {e}"
@@ -221,12 +227,62 @@ async def readiness_check(request: Request):
     except Exception as e:
         checks["symbols"] = f"error: {e}"
 
+    # Startup runtime contracts
+    try:
+        startup_contracts = getattr(request.app.state, "startup_contracts", {})
+        checks["startup_contracts"] = startup_contracts.get("status", "unknown")
+        checks["startup_contract_id"] = startup_contracts.get("contract_id", "unknown")
+        checks["startup_broker"] = startup_contracts.get("broker_runtime", "unknown")
+        checks["startup_storage"] = startup_contracts.get("storage_runtime", "unknown")
+        checks["startup_reconciliation"] = startup_contracts.get("reconciliation", "unknown")
+        checks["startup_reconciliation_summary"] = startup_contracts.get(
+            "reconciliation_summary", "unknown"
+        )
+        checks["startup_reconciliation_discrepancies"] = startup_contracts.get(
+            "reconciliation_discrepancies", "unknown"
+        )
+        checks["startup_active_symbols"] = startup_contracts.get("active_symbols", "unknown")
+        checks["startup_scanner"] = startup_contracts.get("scanner_settings", "unknown")
+        checks["startup_strategy"] = startup_contracts.get("strategy_runtime", "unknown")
+        checks["startup_close_contract"] = startup_contracts.get(
+            "position_close_contract", "unknown"
+        )
+
+        # Backward-compatible aliases
+        checks["startup_broker_runtime"] = startup_contracts.get("broker_runtime", "unknown")
+        checks["startup_storage_runtime"] = startup_contracts.get("storage_runtime", "unknown")
+        checks["startup_reconciliation_contract"] = startup_contracts.get(
+            "reconciliation", "unknown"
+        )
+        checks["position_close_contract"] = startup_contracts.get(
+            "position_close_contract", "unknown"
+        )
+    except Exception as e:
+        checks["startup_contracts"] = f"error: {e}"
+
     # Overall: all checks must be ok
     all_ok = all(
-        ((v == "ok" or (isinstance(v, str) and v.startswith("ok")) or v == "degraded"))
+        (
+            v == "ok"
+            or (isinstance(v, str) and v.startswith("ok"))
+            or v == "degraded"
+        )
         for k, v in checks.items()
-        if k not in {"llm_state", "llm_state_reason"}
+        if k
+        not in {
+            "llm_state",
+            "llm_state_reason",
+            "startup_contract_id",
+            "startup_reconciliation_summary",
+            "startup_reconciliation_discrepancies",
+            "startup_broker_runtime",
+            "startup_storage_runtime",
+            "startup_reconciliation_contract",
+            "position_close_contract",
+        }
     )
+    if str(checks.get("startup_close_contract", "")).startswith("error"):
+        all_ok = False
     status = "ready" if all_ok else "not_ready"
 
     return {"status": status, "checks": checks}

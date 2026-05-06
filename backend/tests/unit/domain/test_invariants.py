@@ -6,7 +6,7 @@ These tests verify that the core invariants hold:
 3. Realized PnL equals sum of fill PnLs
 4. Events are append-only (immutability)
 5. Idempotency keys prevent duplicates
-6. Replay produces deterministic results
+6. State reconstruction yields deterministic results
 7. State derivation is consistent
 """
 
@@ -388,15 +388,15 @@ class TestIdempotencyInvariant:
 
 
 # =============================================================================
-# INVARIANT 6: Deterministic Replay
+# INVARIANT 6: Deterministic State Reconstruction
 # =============================================================================
 
 
 class TestDeterminismInvariant:
     """INVARIANT: Same events always produce same state"""
 
-    def test_replay_produces_same_result_twice(self):
-        """Replaying same events must produce identical state."""
+    def test_state_reconstruction_is_repeatable(self):
+        """Applying the same events twice must produce identical state."""
         store = InMemoryEventStore()
         engine = AuditTrailVerifier(store)
 

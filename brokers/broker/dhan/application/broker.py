@@ -378,7 +378,12 @@ class DhanBroker(IBrokerPort):
             DhanTimeoutError: If the coroutine exceeds the timeout.
         """
         self._ensure_loop()
-        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        try:
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        except Exception:
+            if hasattr(coro, "close"):
+                coro.close()
+            raise
         _timeout = timeout or (getattr(self._config, 'timeout', 30) + 5.0)
         try:
             return future.result(timeout=_timeout)

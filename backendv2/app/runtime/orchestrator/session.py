@@ -7,6 +7,7 @@ import logging
 
 from app.runtime.feeds import FeedSource
 from app.runtime.pipeline import StageMetrics
+from app.domain.shared.port.storage import IStorage
 from app.runtime.pipeline.candle_builder import CandlePipeline
 from app.runtime.pipeline.execution import ExecutionPipeline
 from app.runtime.pipeline.broker_sync import BrokerSynchronization
@@ -24,6 +25,7 @@ from app.runtime.pipeline.signal import SignalGeneration
 from app.runtime.pipeline.telemetry import TelemetryPipeline
 from app.runtime.pipeline.strategy import StrategyEvent, StrategyRuntime
 from app.runtime.pipeline.events import CandleTimeframe, OrderStatusEvent, PositionEvent, Signal, Tick
+from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
 
@@ -31,28 +33,32 @@ logger = logging.getLogger(__name__)
 class SessionRuntime:
     """Deterministic session-scoped pipeline runner."""
 
-    def __init__(self, feed: FeedSource, symbols: list[str]):
+    def __init__(self, feed: FeedSource, symbols: list[str], storage: IStorage | None = None):
         self._feed = feed
         self._symbols = symbols
+        self._storage = storage  # Store storage reference for injection
         self._sequencer = TickSequencer()
         self._normalizer = TickNormalizer(symbols=self._symbols, strict_symbol_mode=True)
         self._candles = CandlePipeline()
-        self._market_structure = MarketStructureAnalysis()
         self._orderflow = OrderFlowPipeline()
         self._microstructure = MicrostructureAnalysis()
         self._features = FeatureComputation()
         self._signal = SignalGeneration()
-        self._gates = GateEvaluation()
         self._risk = RiskEvaluation()
         self._position = PositionLifecycle()
         self._execution = ExecutionPipeline()
         self._broker_sync = BrokerSynchronization()
-        self._persistence = EventPersistence()
+        self._persistence = EventPersistence(storage=storage)
+        self._market_structure = MarketStructureAnalysis(storage=storage)  # Inject storage directly
         self._telemetry = TelemetryPipeline()
         self._strategy = StrategyRuntime()
+        self._gates = GateEvaluation(
+            equity_fn=lambda symbol: float(self._position.get_portfolio(symbol).equity)
+        )
         self._running = False
         self._metrics = StageMetrics(stage_name="SessionRuntime")
         self._event_count = 0
+        self._history: dict[str, list[dict[str, object]]] = {symbol: [] for symbol in symbols}
 
     @property
     def metrics(self) -> StageMetrics:
@@ -61,6 +67,62 @@ class SessionRuntime:
     @property
     def is_running(self) -> bool:
         return self._running
+
+    @property
+    def symbols(self) -> list[str]:
+        return list(self._symbols)
+
+    @property
+    def event_count(self) -> int:
+        return self._event_count
+
+    def get_history(self, symbol: str, max_points: int = 500) -> list[dict[str, object]]:
+        if not symbol:
+            return []
+        return list(self._history.get(symbol, []))[:max_points]
+
+    def snapshot(self, symbol: str | None = None) -> dict:
+        snapshot = {
+            "_event_count": self._event_count,
+            "_event_count_by_symbol": {sym: len(self._history.get(sym, [])) for sym in self._symbols},
+            "sequencer": self._sequencer.snapshot(),
+            "normalizer": self._normalizer.snapshot(),
+            "candles": self._candles.snapshot(),
+            "orderflow": self._orderflow.snapshot(),
+            "microstructure": self._microstructure.snapshot(),
+            "features": self._features.snapshot(),
+            "market_structure": self._market_structure.snapshot(),
+            "signal": self._signal.snapshot(),
+            "gates": self._gates.snapshot(),
+            "risk": self._risk.snapshot(),
+            "portfolio": self._position.snapshot(),
+            "execution": self._execution.snapshot(),
+            "broker_sync": self._broker_sync.snapshot(),
+            "persistence": self._persistence.snapshot(),
+            "telemetry": self._telemetry.snapshot(),
+            "strategy": self._strategy.snapshot(),
+        }
+
+        if symbol:
+            if symbol in self._position.snapshot():
+                snapshot["portfolio"] = {symbol: self._position.snapshot()[symbol]}
+            if symbol in self._risk.snapshot():
+                snapshot["risk"] = {symbol: self._risk.snapshot()[symbol]}
+            if symbol in self._gates.snapshot():
+                snapshot["gates"] = {symbol: self._gates.snapshot()[symbol]}
+            if symbol in self._orderflow.snapshot():
+                snapshot["orderflow"] = {symbol: self._orderflow.snapshot()[symbol]}
+            if symbol in self._microstructure.snapshot():
+                snapshot["microstructure"] = {symbol: self._microstructure.snapshot()[symbol]}
+            if symbol in self._normalizer.snapshot()["profiles"]:
+                snapshot["normalizer"] = {
+                    "profiles": {symbol: self._normalizer.snapshot()["profiles"].get(symbol, {})},
+                    "allowed_symbols": [symbol] if symbol in self._symbols else [],
+                    "strict_symbol_mode": self._normalizer.snapshot().get("strict_symbol_mode", False),
+                }
+            snapshot["_symbol"] = symbol
+
+        return snapshot
 
     def start(self) -> None:
         if self._running:
@@ -111,8 +173,20 @@ class SessionRuntime:
             if normalized is None:
                 return []
             stage_events.append(normalized)
+            self._risk.observe_price(
+                normalized.symbol,
+                normalized.price,
+                normalized.timestamp,
+            )
 
             candle_events = self._candles.process(normalized)
+            for candle in candle_events:
+                payload = asdict(candle)
+                payload["symbol"] = candle.symbol
+                payload["timeframe"] = candle.timeframe.value if hasattr(candle.timeframe, "value") else str(candle.timeframe)
+                self._history.setdefault(candle.symbol, []).append(payload)
+                if len(self._history[candle.symbol]) > 500:
+                    self._history[candle.symbol] = self._history[candle.symbol][-500:]
             orderflow_events = self._orderflow.process(normalized)
             micro_events = self._microstructure.process(normalized)
             market_events: list[object] = []

@@ -8,6 +8,7 @@ from collections import defaultdict
 
 from app.runtime.feeds import FeedSource
 from app.runtime.orchestrator.session import SessionRuntime
+from app.domain.shared.port.storage import IStorage
 
 logger = logging.getLogger(__name__)
 
@@ -15,15 +16,21 @@ logger = logging.getLogger(__name__)
 class RuntimeOrchestrator:
     """Manage deterministic sessions and symbol-scoped runtime lifecycles."""
 
-    def __init__(self):
+    def __init__(self, storage: IStorage | None = None):
         self._sessions: dict[str, SessionRuntime] = {}
+        self._storage = storage
         self._strategy_registry: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
         self._broker_registry: dict[str, object] = {}
+        self._generation = 0
+
+    @property
+    def generation(self) -> int:
+        return self._generation
 
     def create_live_session(
         self, session_id: str, feed: FeedSource, symbols: list[str],
     ) -> SessionRuntime:
-        session = SessionRuntime(feed=feed, symbols=symbols)
+        session = SessionRuntime(feed=feed, symbols=symbols, storage=self._storage)
         self._sessions[session_id] = session
         return session
 
@@ -86,7 +93,32 @@ class RuntimeOrchestrator:
         if session is None:
             return []
         session.start()
-        return session.run_once(max_ticks=max_ticks)
+        before = session.event_count
+        events = session.run_once(max_ticks=max_ticks)
+        after = session.event_count
+        if after > before:
+            self._generation += (after - before)
+        return events
+
+    def get_active_symbols(self) -> list[str]:
+        symbols = []
+        for session in self._sessions.values():
+            for symbol in session.symbols:
+                if symbol not in symbols:
+                    symbols.append(symbol)
+        return symbols
+
+    def get_history(self, sym: str) -> list[dict[str, object]] | None:
+        for session in self._sessions.values():
+            if sym in session.symbols:
+                return session.get_history(sym, max_points=500)
+        return None
+
+    def get_latest_state(self, sym: str) -> dict | None:
+        for session in self._sessions.values():
+            if sym in session.symbols:
+                return session.snapshot(symbol=sym)
+        return None
 
     def teardown_all(self) -> None:
         for session in list(self._sessions.values()):

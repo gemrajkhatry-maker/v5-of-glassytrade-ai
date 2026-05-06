@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from app.api.dependencies import get_storage, get_trading_session
 from app.domain.ports.storage import IStorage
 from app.application.services.trading_query_service import TradingQueryService
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.infrastructure.serialization.schemas import (
     StatsRequestDTO, portfolio_to_dto, position_event_to_dto,
 )
@@ -41,7 +42,12 @@ async def get_position_events(
     storage: IStorage = Depends(get_storage),
 ):
     """Return append-only lifecycle events for operator inspection & audit."""
-    events = storage.query_position_events(position_id=position_id, symbol=symbol)
+    events = ensure_sync_adapter_result(
+        "storage.query_position_events",
+        storage.query_position_events,
+        position_id=position_id,
+        symbol=symbol,
+    )
     return {
         "count": len(events),
         "events": [position_event_to_dto(event) for event in events],
@@ -54,7 +60,11 @@ async def get_position_lifecycle(
     storage: IStorage = Depends(get_storage),
 ):
     """Return the audit-friendly lifecycle view for a single position."""
-    events = storage.query_position_events(position_id=position_id)
+    events = ensure_sync_adapter_result(
+        "storage.query_position_events",
+        storage.query_position_events,
+        position_id=position_id,
+    )
     if not events:
         raise HTTPException(status_code=404, detail="Position lifecycle not found")
     return _trading_query_service.build_lifecycle_summary(events)

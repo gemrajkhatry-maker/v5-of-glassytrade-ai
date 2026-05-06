@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import GlassPanel from './GlassPanel';
 import { InstrumentState } from '../types';
 import { TrendingUp, TrendingDown, Search, BarChart3, History, Radio, Filter } from 'lucide-react';
@@ -65,24 +65,6 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const modeAbbr = (mode || 'BAL').substring(0, 3).toUpperCase();
     const actionLabel =
         timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing === 'SKIP' ? 'SKIP' : (timing || '—').slice(0, 6);
-    const amt = inst.amtAnalysis;
-    const aggressionBlocked = inst.aggressionBlocked === true;
-    const playbookChecks = useMemo(() => {
-        const vaHigh = amt?.valueAreaHigh || 0;
-        const vaLow = amt?.valueAreaLow || 0;
-        const sessionVwap = amt?.sessionVwap || 0;
-        const isStateGood = mode !== 'DEAD';
-        const locationTarget = price > (sessionVwap > 0 ? sessionVwap : price) ? vaHigh : vaLow;
-        const tickSize = amt?.tickSize || 0.05;
-        const isLocationGood = price > 0 && locationTarget > 0 && Math.abs(price - locationTarget) < (5 * tickSize);
-        const isAggressionGood = !aggressionBlocked && Math.abs(amt?.aggression || 0) > 0.02;
-        return [
-            { label: 'State', ok: isStateGood },
-            { label: 'Location', ok: isLocationGood },
-            { label: 'Agg', ok: isAggressionGood },
-            { label: 'Action', ok: actionLabel === 'ENTER' },
-        ];
-    }, [amt?.aggression, amt?.tickSize, amt?.sessionVwap, amt?.valueAreaHigh, amt?.valueAreaLow, mode, price, actionLabel, aggressionBlocked]);
 
     return (
         <button
@@ -130,38 +112,24 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 ) : !hasData ? (
                     <span className="h-4 w-full max-w-[5.5rem] rounded bg-white/10 animate-pulse" />
                 ) : (
-                    <div className="w-full flex flex-col gap-1">
-                        <span
-                            className={`inline-flex items-center gap-1 text-[8px] font-mono px-1 py-0.5 rounded border max-w-full ${
-                                mode === 'BALANCED' ? 'text-amber-500 bg-amber-500/10 border-amber-500/20' :
-                                mode === 'PROBING' ? 'text-blue-400 bg-blue-500/10 border-blue-500/20' :
-                                mode === 'TRENDING' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
-                                mode === 'BREAKING' ? 'text-red-400 bg-red-500/10 border-red-500/20' :
-                                'text-white/40 bg-white/5 border-white/10'
-                            }`}
-                        >
-                            <span className="shrink-0">{modeAbbr}</span>
-                            <span className="text-white/25">·</span>
-                            <span className={`shrink-0 inline-flex items-center gap-0.5 font-bold ${
-                                timing === 'ENTER_NOW' ? 'text-emerald-400' : timing === 'SKIP' ? 'text-red-400' : 'text-yellow-400'
-                            }`}>
-                                <span className={`w-1 h-1 rounded-full shrink-0 ${timing === 'ENTER_NOW' ? 'bg-emerald-400 animate-pulse' : timing === 'SKIP' ? 'bg-red-400' : 'bg-yellow-400'}`} />
-                                {actionLabel}
-                            </span>
+                    <span
+                        className={`inline-flex items-center gap-1 text-[8px] font-mono px-1 py-0.5 rounded border max-w-full ${
+                            mode === 'BALANCED' ? 'text-amber-500 bg-amber-500/10 border-amber-500/20' :
+                            mode === 'PROBING' ? 'text-blue-400 bg-blue-500/10 border-blue-500/20' :
+                            mode === 'TRENDING' ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' :
+                            mode === 'BREAKING' ? 'text-red-400 bg-red-500/10 border-red-500/20' :
+                            'text-white/40 bg-white/5 border-white/10'
+                        }`}
+                    >
+                        <span className="shrink-0">{modeAbbr}</span>
+                        <span className="text-white/25">·</span>
+                        <span className={`shrink-0 inline-flex items-center gap-0.5 font-bold ${
+                            timing === 'ENTER_NOW' ? 'text-emerald-400' : timing === 'SKIP' ? 'text-red-400' : 'text-yellow-400'
+                        }`}>
+                            <span className={`w-1 h-1 rounded-full shrink-0 ${timing === 'ENTER_NOW' ? 'bg-emerald-400 animate-pulse' : timing === 'SKIP' ? 'bg-red-400' : 'bg-yellow-400'}`} />
+                            {actionLabel}
                         </span>
-                        <div className="flex items-center gap-1 text-[7px] px-1">
-                            {playbookChecks.map((rule) => (
-                                <span
-                                    key={rule.label}
-                                    className={`px-1 py-0.5 rounded border ${rule.ok
-                                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
-                                        : 'bg-red-500/10 text-red-300 border-red-500/30'}`}
-                                >
-                                    {rule.ok ? '✓' : '✗'} {rule.label}
-                                </span>
-                            ))}
-                        </div>
-                    </div>
+                    </span>
                 )}
             </div>
 

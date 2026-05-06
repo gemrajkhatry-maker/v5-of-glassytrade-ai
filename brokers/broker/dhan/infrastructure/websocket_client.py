@@ -124,7 +124,7 @@ class DhanWebSocketClient(IWebSocketClient):
         self._subscriptions: Set[str] = set()
         self._current_feed_type: int = FEED_TYPE_FULL
         # Maps security_id string → exchange segment string (e.g. "NSE_FNO", "MCX_COMM").
-        # Persisted so reconnect replay can re-send the correct segment for each instrument.
+        # Persisted so reconnect can re-send the correct segment for each instrument.
         self._sid_to_segment: Dict[str, str] = {}
 
         # Maps WS-internal SecurityId (uint32) → REST API security_id string.
@@ -202,7 +202,7 @@ class DhanWebSocketClient(IWebSocketClient):
 
             if self._subscriptions:
                 logger.info(
-                    "Replaying %d subscriptions after reconnect (feed_type=%d)",
+                    "Re-sending %d subscriptions after reconnect (feed_type=%d)",
                     len(self._subscriptions),
                     self._current_feed_type,
                 )
@@ -211,7 +211,7 @@ class DhanWebSocketClient(IWebSocketClient):
                     segs = [self._sid_to_segment.get(sid, "NSE_EQ") for sid in sids]
                     await self._send_subscription(sids, self._current_feed_type, segs)
                 except Exception as e:
-                    logger.error("Failed to replay subscriptions after reconnect: %s", e)
+                    logger.error("Failed to re-send subscriptions after reconnect: %s", e)
                     # Don't fail the connection — caller can retry subscription
 
         except websockets.exceptions.InvalidStatus as e:
@@ -298,7 +298,7 @@ class DhanWebSocketClient(IWebSocketClient):
                 self._ws_sid_to_rest[int(sid_str)] = sid_str
             except (ValueError, TypeError):
                 pass
-        # Persist segment mapping so reconnect replay uses the correct segment per instrument
+        # Persist segment mapping so reconnect uses the correct segment per instrument
         if exchange_segments and len(exchange_segments) == len(security_ids):
             for sid, seg in zip(security_ids, exchange_segments):
                 self._sid_to_segment[sid] = seg

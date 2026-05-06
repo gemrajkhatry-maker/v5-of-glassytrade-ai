@@ -9,6 +9,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.shared.timezones import IST
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,11 @@ def load_episodic_memory(storage: Any) -> str:
 
     try:
         _today = datetime.now(IST).strftime("%Y-%m-%d")
-        recent_trades = storage.get_recent_trades(limit=10)
+        recent_trades = ensure_sync_adapter_result(
+            "storage.get_recent_trades",
+            storage.get_recent_trades,
+            limit=10,
+        )
         if not recent_trades:
             return ""
 

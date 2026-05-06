@@ -18,6 +18,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.domain.ports.storage import IStorage
 from app.domain.ports.broker import IBroker
 from app.domain.constants import MIN_GRADE_SCORE_THRESHOLD
@@ -78,7 +79,9 @@ class EntryCoordinator:
         # Each signal that has traversed an AMT analysis carries a grade_score
         # (0–6) in metadata.  Signals below the floor are blocked even if they
         # passed the earlier boolean gates.
-        meta = getattr(sig, "metadata", None) or {}
+        _raw_meta = getattr(sig, "metadata", None) or {}
+        meta = _raw_meta if isinstance(_raw_meta, dict) else {}
+        _tick_trace_id = str(meta.get("tick_trace_id", ""))
         grade_score = meta.get("grade_score")
         if grade_score is not None and grade_score < MIN_GRADE_SCORE_THRESHOLD:
             log.warning(
@@ -93,6 +96,7 @@ class EntryCoordinator:
             self._event_logger.log_rejection(
                 symbol=symbol,
                 reason=f"CONFLUENCE_GRADE_{grade_score}",
+                tick_trace_id=_tick_trace_id,
                 amt=session.last_amt,
                 llm_direction="BUY" if sig.is_buy else "SELL",
                 agent_direction=_ad.direction if _ad else "",
@@ -117,6 +121,7 @@ class EntryCoordinator:
             self._event_logger.log_rejection(
                 symbol=symbol,
                 reason=f"THESIS_{thesis_reason.upper()}",
+                tick_trace_id=_tick_trace_id,
                 amt=session.last_amt,
                 llm_direction="BUY" if sig.is_buy else "SELL",
                 agent_direction=_ad.direction if _ad else "",
@@ -157,6 +162,7 @@ class EntryCoordinator:
                 self._event_logger.log_rejection(
                     symbol=symbol,
                     reason="risk_manager",
+                    tick_trace_id=_tick_trace_id,
                     amt=session.last_amt,
                     llm_direction="BUY" if sig.is_buy else "SELL",
                     agent_direction=_ad.direction if _ad else "",
@@ -215,7 +221,13 @@ class EntryCoordinator:
             log.warning("Option selection failed — falling back to default strike", exc_info=True)
 
         # Execute order (network I/O — outside lock to avoid blocking all readers)
-        position = self._broker.execute_order(sig, session.portfolio, symbol)
+        position = ensure_sync_adapter_result(
+            "broker.execute_order",
+            self._broker.execute_order,
+            sig,
+            session.portfolio,
+            symbol,
+        )
 
         if position:
             # Mark entry time under lock (fast operation)
@@ -242,6 +254,7 @@ class EntryCoordinator:
                 position_id=position.id,
                 symbol=symbol,
                 event_type="OPENED",
+                tick_trace_id=_tick_trace_id,
                 event_time=position.entry_time,
                 side=position.side.value
                 if hasattr(position.side, "value")
@@ -262,12 +275,15 @@ class EntryCoordinator:
                 symbol=symbol,
                 position=position,
                 signal=sig,
+                tick_trace_id=_tick_trace_id,
                 agent_decision=_ad,
                 amt=session.last_amt,
             )
             if self._storage:
                 try:
-                    self._storage.save_open_position(
+                    ensure_sync_adapter_result(
+                        "storage.save_open_position",
+                        self._storage.save_open_position,
                         {
                             "id": position.id,
                             "symbol": symbol,
@@ -282,7 +298,8 @@ class EntryCoordinator:
                             if hasattr(position.source, "value")
                             else str(position.source),
                             "opened_at": position.entry_time,
-                        }
+                            "tick_trace_id": _tick_trace_id,
+                        },
                     )
                 except Exception:
                     log.warning("Failed to persist open position — position may be lost on restart", exc_info=True)

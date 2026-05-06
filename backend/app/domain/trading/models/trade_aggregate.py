@@ -10,7 +10,7 @@ Design Principles:
 1. Single Source of Truth: All state derived from immutable events
 2. No Mutable State: Position computed on-demand from fills
 3. Idempotency: Every event has a unique idempotency key
-4. Determinism: Same events → Same state (replay-able)
+4. Determinism: Same events → Same state
 """
 
 from __future__ import annotations
@@ -714,7 +714,7 @@ def create_trade(
 
 
 def create_trade_from_snapshot(snapshot: dict) -> Trade:
-    """Reconstruct trade from snapshot (for replay)."""
+    """Reconstruct trade from snapshot."""
     entry_signal = None
     if snapshot.get("entry_signal"):
         es = snapshot["entry_signal"]

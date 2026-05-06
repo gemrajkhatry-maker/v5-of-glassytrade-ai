@@ -69,6 +69,10 @@ class TradeLifecycleHandler:
         self._event_logger = event_logger
         self._on_trade_closed = on_trade_closed
 
+    @staticmethod
+    def _metadata_dict(metadata: object) -> dict:
+        return metadata if isinstance(metadata, dict) else {}
+
     @property
     def exit_engine(self) -> ExitEngine:
         """Expose exit engine for RR filter and daily limit checks."""
@@ -199,6 +203,7 @@ class TradeLifecycleHandler:
                         self._event_logger.log_break_even_triggered(
                             symbol=symbol or pos.symbol,
                             position=pos,
+                        tick_trace_id=self._metadata_dict(pos.metadata).get("tick_trace_id", ""),
                             pnl=float(pos.pnl or 0),
                             time_in_trade_s=time_in_trade,
                             reason=f"CVD slope {cvd_slope:.2f} confirmed {('LONG' if is_long else 'SHORT')}",
@@ -360,6 +365,10 @@ class TradeLifecycleHandler:
 
     def initialize_partition_state(self, position_id: str, symbol: str | None = None) -> None:
         """Initialize partition exit state for a newly opened position."""
+        if symbol is None:
+            tokenized = (position_id or "").split("-", 1)
+            if len(tokenized) > 1 and tokenized[0]:
+                symbol = tokenized[0]
         self._partition_states[position_id] = PartitionState()
         if symbol:
             self._partition_symbols[position_id] = symbol
@@ -375,21 +384,24 @@ class TradeLifecycleHandler:
         Since ExitEngine is stateless, we just check partition states.
         This is used by LLM handler to decide if overseer should run.
         """
-        if portfolio is not None:
-            return any(
-                p.is_open and getattr(p, "symbol", "") == symbol
-                for p in portfolio.positions
-            )
-
-        # Partition states track positions we're managing, but when portfolio
-        # is not supplied, fall back to recorded symbol ownership.
         if not symbol:
             return len(self._partition_states) > 0
 
-        return any(
-            pid.startswith(f"{symbol}:") or self._partition_symbols.get(pid) == symbol
-            for pid in self._partition_states
-        )
+        symbol_normalized = symbol.upper()
+
+        if portfolio is not None:
+            return any(
+                p.is_open and getattr(p, "symbol", "").upper() == symbol_normalized
+                for p in portfolio.positions
+            )
+
+        # Partition states track positions we're managing. Use explicit ownership map.
+        for pid in self._partition_states:
+            managed_symbol = self._partition_symbols.get(pid)
+            if managed_symbol and str(managed_symbol).upper() == symbol_normalized:
+                return True
+
+        return False
 
     def in_cooldown(self, symbol: str) -> bool:
         """Check if the symbol is in cooldown after an exit."""

@@ -44,6 +44,18 @@ class TestTripleASpecValidation:
                 strength=0.85
             )
         ]
+        bars.extend([
+            {
+                "open": 50020, "high": 50030, "low": 50010, "close": 50025,
+                "volume": 650, "buyVolume": 420, "sellVolume": 230,
+                "bar_index": 2
+            },
+            {
+                "open": 50025, "high": 50040, "low": 50015, "close": 50030,
+                "volume": 700, "buyVolume": 430, "sellVolume": 260,
+                "bar_index": 3
+            },
+        ])
         
         signal = generate_triple_a_signal(
             bars=bars,
@@ -89,6 +101,18 @@ class TestTripleASpecValidation:
                 strength=0.8
             )
         ]
+        bars.extend([
+            {
+                "open": 50080, "high": 50095, "low": 50060, "close": 50070,
+                "volume": 650, "buyVolume": 210, "sellVolume": 390,
+                "bar_index": 2
+            },
+            {
+                "open": 50070, "high": 50080, "low": 50045, "close": 50060,
+                "volume": 700, "buyVolume": 220, "sellVolume": 420,
+                "bar_index": 3
+            },
+        ])
         
         # Price below VWAP for SHORT
         vwap = 50100.0
@@ -149,6 +173,18 @@ class TestTripleASpecValidation:
                 strength=0.9
             )
         ]
+        bars.extend([
+            {
+                "open": 50020, "high": 50035, "low": 50015, "close": 50020,
+                "volume": 650, "buyVolume": 410, "sellVolume": 220,
+                "bar_index": 1
+            },
+            {
+                "open": 50020, "high": 50038, "low": 50010, "close": 50020,
+                "volume": 700, "buyVolume": 430, "sellVolume": 250,
+                "bar_index": 2
+            },
+        ])
         
         signal = generate_triple_a_signal(
             bars=bars,

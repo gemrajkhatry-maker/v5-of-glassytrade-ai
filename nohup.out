@@ -1,41 +1,0 @@
-=========================================
-Gemma 4 Robust Training Script
-=========================================
-Config: gemma4_26b_json_training_config.yaml
-Log: gemma4_training_robust.log
-Max Retries: 10
-
-[Thu Apr  9 23:24:21 IST 2026] Attempt 1 / 10
-[Thu Apr  9 23:24:21 IST 2026] Starting training...
-./train_robust.sh: line 17: 96370 Terminated: 15          backend/venv/bin/python -m mlx_lm lora --config "$CONFIG_FILE" >> "$LOG_FILE" 2>&1
-[Thu Apr  9 23:54:45 IST 2026] ✗ Training failed with exit code 143 (non-METAL error)
-Iter 360: Train loss 0.003, Learning Rate 1.000e-05, It/sec 0.465, Tokens/sec 5.350, Trained Tokens 4187, Peak mem 27.701 GB
-Iter 370: Train loss 0.097, Learning Rate 1.000e-05, It/sec 0.428, Tokens/sec 4.795, Trained Tokens 4299, Peak mem 27.701 GB
-Iter 380: Train loss 0.000, Learning Rate 1.000e-05, It/sec 0.487, Tokens/sec 5.549, Trained Tokens 4413, Peak mem 27.701 GB
-Iter 390: Train loss 0.085, Learning Rate 1.000e-05, It/sec 0.325, Tokens/sec 3.798, Trained Tokens 4530, Peak mem 27.701 GB
-Calculating loss...:   0%|          | 0/25 [00:00<?, ?it/s]Calculating loss...:   4%|▍         | 1/25 [00:01<00:26,  1.09s/it]Calculating loss...:   8%|▊         | 2/25 [00:02<00:24,  1.05s/it]Calculating loss...:  12%|█▏        | 3/25 [00:03<00:21,  1.01it/s]Calculating loss...:  16%|█▌        | 4/25 [00:03<00:19,  1.07it/s]Calculating loss...:  20%|██        | 5/25 [00:04<00:18,  1.10it/s]Calculating loss...:  24%|██▍       | 6/25 [00:05<00:17,  1.09it/s]Calculating loss...:  28%|██▊       | 7/25 [00:06<00:17,  1.01it/s]Calculating loss...:  32%|███▏      | 8/25 [00:09<00:26,  1.57s/it]Calculating loss...:  36%|███▌      | 9/25 [00:10<00:23,  1.46s/it]Calculating loss...:  40%|████      | 10/25 [00:11<00:19,  1.32s/it]Calculating loss...:  44%|████▍     | 11/25 [00:12<00:17,  1.22s/it]Calculating loss...:  48%|████▊     | 12/25 [00:13<00:14,  1.14s/it]Calculating loss...:  52%|█████▏    | 13/25 [00:14<00:13,  1.11s/it]Calculating loss...:  56%|█████▌    | 14/25 [00:15<00:11,  1.08s/it]Calculating loss...:  60%|██████    | 15/25 [00:16<00:10,  1.08s/it]Calculating loss...:  64%|██████▍   | 16/25 [00:19<00:14,  1.56s/it]Calculating loss...:  68%|██████▊   | 17/25 [00:20<00:11,  1.49s/it]Calculating loss...:  72%|███████▏  | 18/25 [00:22<00:09,  1.38s/it]Calculating loss...:  76%|███████▌  | 19/25 [00:23<00:07,  1.27s/it]Calculating loss...:  80%|████████  | 20/25 [00:24<00:06,  1.22s/it]Calculating loss...:  84%|████████▍ | 21/25 [00:25<00:04,  1.22s/it]Calculating loss...:  88%|████████▊ | 22/25 [00:26<00:03,  1.22s/it]Calculating loss...:  92%|█████████▏| 23/25 [00:27<00:02,  1.19s/it]Calculating loss...:  96%|█████████▌| 24/25 [00:28<00:01,  1.14s/it]Calculating loss...: 100%|██████████| 25/25 [00:29<00:00,  1.10s/it]Calculating loss...: 100%|██████████| 25/25 [00:29<00:00,  1.19s/it]
-Iter 400: Val loss 0.005, Val took 29.799s
-Iter 400: Train loss 0.057, Learning Rate 1.000e-05, It/sec 0.330, Tokens/sec 4.057, Trained Tokens 4653, Peak mem 27.701 GB
-Iter 400: Saved adapter weights to gemma4_26b_amt_adapter_json/adapters.safetensors and gemma4_26b_amt_adapter_json/0000400_adapters.safetensors.
-Iter 410: Train loss 0.024, Learning Rate 1.000e-05, It/sec 0.369, Tokens/sec 4.460, Trained Tokens 4774, Peak mem 27.701 GB
-Iter 420: Train loss 0.057, Learning Rate 1.000e-05, It/sec 0.354, Tokens/sec 4.392, Trained Tokens 4898, Peak mem 27.701 GB
-Iter 430: Train loss 0.003, Learning Rate 1.000e-05, It/sec 0.387, Tokens/sec 4.330, Trained Tokens 5010, Peak mem 27.701 GB
-Iter 440: Train loss 0.020, Learning Rate 1.000e-05, It/sec 0.407, Tokens/sec 4.644, Trained Tokens 5124, Peak mem 27.701 GB
-Iter 450: Train loss 0.014, Learning Rate 1.000e-05, It/sec 0.420, Tokens/sec 4.619, Trained Tokens 5234, Peak mem 27.701 GB
-Iter 450: Saved adapter weights to gemma4_26b_amt_adapter_json/adapters.safetensors and gemma4_26b_amt_adapter_json/0000450_adapters.safetensors.
-Iter 460: Train loss 0.113, Learning Rate 1.000e-05, It/sec 0.502, Tokens/sec 5.624, Trained Tokens 5346, Peak mem 27.701 GB
-Iter 470: Train loss 0.005, Learning Rate 1.000e-05, It/sec 0.572, Tokens/sec 6.754, Trained Tokens 5464, Peak mem 27.701 GB
-Iter 480: Train loss 0.026, Learning Rate 1.000e-05, It/sec 0.499, Tokens/sec 5.685, Trained Tokens 5578, Peak mem 27.701 GB
-Iter 490: Train loss 0.087, Learning Rate 1.000e-05, It/sec 0.417, Tokens/sec 4.920, Trained Tokens 5696, Peak mem 27.701 GB
-Iter 500: Train loss 0.047, Learning Rate 1.000e-05, It/sec 0.553, Tokens/sec 6.416, Trained Tokens 5812, Peak mem 27.701 GB
-Iter 500: Saved adapter weights to gemma4_26b_amt_adapter_json/adapters.safetensors and gemma4_26b_amt_adapter_json/0000500_adapters.safetensors.
-Iter 510: Train loss 0.012, Learning Rate 1.000e-05, It/sec 0.562, Tokens/sec 6.799, Trained Tokens 5933, Peak mem 27.701 GB
-Iter 520: Train loss 0.000, Learning Rate 1.000e-05, It/sec 0.605, Tokens/sec 7.141, Trained Tokens 6051, Peak mem 27.701 GB
-Iter 530: Train loss 0.011, Learning Rate 1.000e-05, It/sec 0.516, Tokens/sec 6.094, Trained Tokens 6169, Peak mem 27.701 GB
-Iter 540: Train loss 0.121, Learning Rate 1.000e-05, It/sec 0.448, Tokens/sec 5.379, Trained Tokens 6289, Peak mem 27.701 GB
-Iter 550: Train loss 0.041, Learning Rate 1.000e-05, It/sec 0.534, Tokens/sec 6.138, Trained Tokens 6404, Peak mem 27.701 GB
-Iter 550: Saved adapter weights to gemma4_26b_amt_adapter_json/adapters.safetensors and gemma4_26b_amt_adapter_json/0000550_adapters.safetensors.
-Iter 560: Train loss 0.017, Learning Rate 1.000e-05, It/sec 0.647, Tokens/sec 7.374, Trained Tokens 6518, Peak mem 27.701 GB
-Iter 570: Train loss 0.078, Learning Rate 1.000e-05, It/sec 0.439, Tokens/sec 5.394, Trained Tokens 6641, Peak mem 27.701 GB
-Iter 580: Train loss 0.029, Learning Rate 1.000e-05, It/sec 0.525, Tokens/sec 6.147, Trained Tokens 6758, Peak mem 27.701 GB
-[Thu Apr  9 23:54:45 IST 2026] ✗ Training failed with exit code 143 (non-METAL error)

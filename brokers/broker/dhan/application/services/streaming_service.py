@@ -433,7 +433,7 @@ class StreamingService(BaseDhanService):
 
         # Subscribe new instruments on the existing connection.
         # Skip if already subscribed — avoids double-subscribe on reconnect
-        # (the WS client's connect() replay already re-sends all subs).
+        # (the WS client's connect() re-sends all subscriptions).
         new_sids = [sid for sid in security_ids if sid not in ws.subscriptions]
         if new_sids:
             logger.info("Subscribing %d new instrument(s) on persistent WS", len(new_sids))

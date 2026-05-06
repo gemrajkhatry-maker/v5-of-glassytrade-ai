@@ -17,6 +17,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING
 
+from app.core.async_boundary import ensure_sync_adapter_result
+
 from app.domain.trading.services.risk_manager import RiskManager
 from app.domain.trading.services.kill_switch import KillSwitch
 from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager
@@ -107,8 +109,10 @@ class SessionRiskCoordinator:
                 # Try to restore from storage
                 if self._storage and hasattr(self._storage, "kv_get"):
                     try:
-                        saved = self._storage.kv_get(
-                            f"risk_state_{symbol}_{date.today().isoformat()}"
+                        saved = ensure_sync_adapter_result(
+                            "storage.kv_get",
+                            self._storage.kv_get,
+                            f"risk_state_{symbol}_{date.today().isoformat()}",
                         )
                         if saved:
                             srm.load_from_dict(json.loads(saved))
@@ -130,8 +134,10 @@ class SessionRiskCoordinator:
                     # Restore engine state if available
                     if self._storage and hasattr(self._storage, "kv_get"):
                         try:
-                            saved = self._storage.kv_get(
-                                f"rte_state_{symbol}_{date.today().isoformat()}"
+                            saved = ensure_sync_adapter_result(
+                                "storage.kv_get",
+                                self._storage.kv_get,
+                                f"rte_state_{symbol}_{date.today().isoformat()}",
                             )
                             if saved:
                                 engine.load_from_dict(json.loads(saved))
@@ -372,7 +378,9 @@ class SessionRiskCoordinator:
         try:
             srm = self._session_risk_managers.get(symbol)
             if srm:
-                self._storage.kv_set(
+                ensure_sync_adapter_result(
+                    "storage.kv_set",
+                    self._storage.kv_set,
                     f"risk_state_{symbol}_{date.today().isoformat()}",
                     json.dumps(srm.to_dict()),
                 )

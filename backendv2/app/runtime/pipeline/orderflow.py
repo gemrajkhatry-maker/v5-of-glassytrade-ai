@@ -9,6 +9,7 @@ from typing import Optional
 
 from app.domain.amt.service.cvd_tracker import CVDTracker
 from app.domain.amt.service.orderflow_detectors import BigTradeDetector, calculate_ofi
+from app.domain.amt.service.footprint_analyzer import TickFootprintAccumulator
 from app.runtime.pipeline import StageMetrics
 from app.runtime.pipeline.events import NormalizedTick, OrderFlowMetrics
 
@@ -20,6 +21,7 @@ class _OrderFlowState:
     cvd: CVDTracker
     big_trade: BigTradeDetector
     volumes: deque[float]
+    footprint: TickFootprintAccumulator
 
 
 class OrderFlowPipeline:
@@ -41,8 +43,16 @@ class OrderFlowPipeline:
                 cvd=CVDTracker(max_history=self._window),
                 big_trade=BigTradeDetector(),
                 volumes=deque(maxlen=self._window),
+                footprint=TickFootprintAccumulator(),
             )
         return self._states[symbol]
+
+    @staticmethod
+    def _candle_time_ns(timestamp: float) -> str:
+        ts = float(timestamp)
+        if ts < 1_000_000_000_000:
+            ts *= 1_000_000_000
+        return str(int(ts // 60_000_000_000))
 
     def process(self, tick: NormalizedTick) -> list[OrderFlowMetrics]:
         try:
@@ -82,6 +92,20 @@ class OrderFlowPipeline:
             }
             ofi = calculate_ofi(bar)
             big_trades = 1 if big_trade else 0
+            candle_time = self._candle_time_ns(tick.timestamp)
+            state.footprint.on_tick(
+                ltp=float(tick.price),
+                ltq=int(tick.volume),
+                best_bid=float(tick.bid),
+                best_ask=float(tick.ask),
+                candle_time=candle_time,
+            )
+            stacked_imbalance = False
+            latest_candle = state.footprint.get_all().get(candle_time)
+            if latest_candle is not None:
+                stacked_imbalance = any(
+                    level.stacked for level in latest_candle.levels
+                )
 
             self._metrics.record(0)
             return [OrderFlowMetrics(
@@ -96,6 +120,7 @@ class OrderFlowPipeline:
                 absorption_detected=absorption,
                 absorption_side=absorption_side,
                 absorption_strength=min(1.0, tick.volume / max(state.volumes) if state.volumes else 1.0),
+                stacked_imbalance=stacked_imbalance,
                 window_size=self._window,
             )]
         except Exception:
@@ -121,6 +146,7 @@ class OrderFlowPipeline:
                 "cvd": state.cvd.__dict__.copy(),
                 "big_trade": state.big_trade.__dict__.copy(),
                 "volumes": list(state.volumes),
+                "footprint": len(state.footprint.get_all()),
             }
         return {
             "states": states,
@@ -168,4 +194,9 @@ class OrderFlowPipeline:
                             volumes.append(float(raw_value))
                         except (TypeError, ValueError):
                             continue
-                self._states[symbol] = _OrderFlowState(cvd=cvd, big_trade=big, volumes=volumes)
+                self._states[symbol] = _OrderFlowState(
+                    cvd=cvd,
+                    big_trade=big,
+                    volumes=volumes,
+                    footprint=TickFootprintAccumulator(),
+                )

@@ -18,6 +18,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints, three_align_check
 from app.domain.trading.models.enums import MarketStateCodec
 
@@ -175,7 +176,11 @@ class PromptEngineeringService:
         try:
             
             _today = datetime.now(IST).strftime("%Y-%m-%d")
-            recent_trades = storage.get_recent_trades(limit=10)
+            recent_trades = ensure_sync_adapter_result(
+                "storage.get_recent_trades",
+                storage.get_recent_trades,
+                limit=10,
+            )
             if not recent_trades:
                 return ""
 

@@ -11,8 +11,11 @@ def calculate_position_size(
     stop_loss: float,
     point_value: float = 10.0,
     price_velocity: float = 0.0,
+    risk_pct: float = 0.005,
 ) -> tuple[int, float, bool]:
-    size = PositionSizer.calculate(equity, entry_price, stop_loss, point_value)
+    size = PositionSizer.calculate(
+        equity, entry_price, stop_loss, point_value, risk_pct=risk_pct
+    )
     if not size.valid or size.lots <= 0:
         return 0, 0.0, False
     if price_velocity > 0:

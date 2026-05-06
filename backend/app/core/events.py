@@ -1,4 +1,4 @@
-"""Event store for audit trail and replay capability."""
+"""Event store for audit trail."""
 
 import json
 import sqlite3
@@ -21,7 +21,7 @@ class Event:
 
 
 class EventStore:
-    """SQLite-based event store for audit and replay."""
+    """SQLite-based event store for audit and diagnostics."""
     
     _instance = None
     _conn: sqlite3.Connection | None = None

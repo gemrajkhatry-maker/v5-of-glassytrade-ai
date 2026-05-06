@@ -16,7 +16,23 @@ from app.domain.amt.service.market_state_engine import detect_market_state, Mark
 from app.domain.amt.service.mtf_analyzer import MultiTimeframeAMTAnalyzer, MTFState, MTFAlignment
 from app.domain.amt.service.profile_classifier import classify_profile, classify_shape, ProfileClassification, ProfileShape
 from app.domain.amt.service.orderflow_detectors import detect_absorptions
+from app.domain.amt.service.footprint_analyzer import FootprintAnalyzer
+from app.domain.amt.service.narrative_builder import _build_core_amt_narrative
+from app.domain.amt.service.composite_profile import CompositeProfile
+from app.domain.amt.service.market_structure_classifier import MarketStructureClassifier
+from app.domain.amt.service.npoc_tracker import NPOCTracker
+from app.domain.amt.service.order_book_analyzer import OrderBookAnalyzer
+from app.domain.amt.service.oi_analyzer import OIAnalyzer
+from app.domain.amt.service.opening_type_classifier import classify_opening_type
+from app.domain.amt.service.regime_detector import RegimeDetector
+from app.domain.amt.service.drive_decay import DriveDecay
+from app.domain.amt.service.trade_thesis import TradeThesis, build_trade_thesis, validate_trade_thesis
+from app.domain.amt.service.rr_validator import RRValidator
+from app.domain.amt.service.order_flow_service import OrderFlowService
 from app.domain.amt.service.vwap_service import VWAPConfig, VWAPState, VWAPResult, VWAPService
+from app.domain.amt.service.spread_normalizer import SpreadNormalizer, SpreadNormalizationResult
+from app.domain.amt.service.prediction_engine import PredictionEngine, PredictionResult
+from app.domain.amt.service.lvn_play_engine import LVNPlayEngine, LVNPlay
 from app.domain.amt.service.gate_pipeline import (
     GateContext,
     GatePipeline,
@@ -26,6 +42,7 @@ from app.domain.amt.service.gate_pipeline import (
     run_gate_pipeline,
 )
 from app.domain.amt.service.entry_gates import calculate_position_size, run_entry_gates
+from app.domain.amt.service.orb_breakout import ORBDetector, ORBResult, ORBBreakoutSignal
 
 __all__ = [
     "AMTAnalyzer",
@@ -72,10 +89,31 @@ __all__ = [
     "ProfileClassification",
     "ProfileShape",
     "detect_absorptions",
+    "FootprintAnalyzer",
+    "_build_core_amt_narrative",
+    "CompositeProfile",
+    "MarketStructureClassifier",
+    "NPOCTracker",
+    "OrderBookAnalyzer",
+    "OIAnalyzer",
+    "classify_opening_type",
+    "RegimeDetector",
+    "DriveDecay",
+    "TradeThesis",
+    "build_trade_thesis",
+    "validate_trade_thesis",
+    "RRValidator",
+    "OrderFlowService",
     "VWAPConfig",
     "VWAPState",
     "VWAPResult",
     "VWAPService",
+    "SpreadNormalizer",
+    "SpreadNormalizationResult",
+    "PredictionEngine",
+    "PredictionResult",
+    "LVNPlayEngine",
+    "LVNPlay",
     "run_gate_pipeline",
     "GateContext",
     "GatePipeline",
@@ -84,4 +122,7 @@ __all__ = [
     "GateType",
     "calculate_position_size",
     "run_entry_gates",
+    "ORBDetector",
+    "ORBResult",
+    "ORBBreakoutSignal",
 ]

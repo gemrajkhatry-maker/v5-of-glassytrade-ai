@@ -2,7 +2,8 @@
 import pytest
 from unittest.mock import Mock
 from app.application.handlers.update_tick_handler import UpdateTickHandler
-from app.application.handlers.evaluate_entry_handler import EvaluateEntryHandler, ISignalService
+from app.application.handlers.evaluate_entry_handler import EvaluateEntryHandler
+from app.domain.shared.port.signal import ISignalService
 from app.application.commands.trading_commands import UpdateTick, EvaluateEntry
 from app.domain.shared.event.domain_events import TickReceived, AMTAnalyzed, SignalGenerated
 from app.infrastructure.messaging.event_bus import EventBus

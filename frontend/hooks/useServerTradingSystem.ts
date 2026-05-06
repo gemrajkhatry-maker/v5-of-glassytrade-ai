@@ -47,7 +47,6 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
     overseerReason: '',
     stats: null,
     depth20Active: false,
-    aggressionBlocked: false,
     lastUpdate: Date.now(),
 });
 
@@ -553,8 +552,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.overseerAction !== undefined) merged.overseerAction = state.overseerAction;
                     if (state.overseerReason !== undefined) merged.overseerReason = state.overseerReason;
                     if (state.depth !== undefined) merged.orderBook = state.depth;
-                    if (state.aggressionBlocked !== undefined) merged.aggressionBlocked = state.aggressionBlocked;
-                    if (state.gateScore !== undefined) merged.gateScore = state.gateScore;
                     if (state.depth20Active !== undefined) merged.depth20Active = state.depth20Active;
                     if (state.stats !== undefined) merged.stats = { ...existing.stats, ...state.stats };
                     if (state.ltp !== undefined) merged.ltp = state.ltp;
@@ -668,8 +665,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         agentDecision: newAgentDecision,
                         overseerAction: newOverseerAction,
                         overseerReason: newOverseerReason,
-                        aggressionBlocked: state.aggressionBlocked ?? inst.aggressionBlocked,
-                        gateScore: state.gateScore ?? inst.gateScore,
                         orderBook: state.depth ?? inst.orderBook,
                         depth20Active: state.depth20Active ?? inst.depth20Active,
                         stats: newStats,

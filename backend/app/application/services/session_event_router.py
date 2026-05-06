@@ -20,6 +20,7 @@ from app.domain.constants import (
     AGENT_DECISION_THRESHOLD,
     CONFIDENCE_HIGH_THRESHOLD,
 )
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.shared.parsing import is_mcx_symbol
 from app.domain.probability.features import extract_features
 from app.domain.probability.agent_pipeline import run_agent_pipeline
@@ -327,6 +328,7 @@ class SessionEventRouter:
         symbol: str,
         tick: OHLC,
         amt_result: AMTResult,
+        tick_trace_id: str = "",
     ) -> None:
         """Trigger LLM entry handler.
 
@@ -336,7 +338,7 @@ class SessionEventRouter:
             tick: Current tick
             amt_result: AMT analysis result
         """
-        self._llm_handler.run_entry(session, symbol, tick, amt_result)
+        self._llm_handler.run_entry(session, symbol, tick, amt_result, tick_trace_id=tick_trace_id)
 
     # ----- Entry Path Execution -----
 
@@ -527,6 +529,11 @@ class SessionEventRouter:
                     srm,
                     list(event.data),
                 )
+                _tick_trace_id = getattr(event, "tick_trace_id", "")
+                if _tick_trace_id:
+                    _meta = signal.metadata if isinstance(signal.metadata, dict) else {}
+                    signal.metadata = _meta
+                    signal.metadata["tick_trace_id"] = _tick_trace_id
                 if signal:
                     session._last_entry_candle_time = event.tick.time
                     session._last_exec_mono = _time_mod.monotonic()
@@ -549,7 +556,11 @@ class SessionEventRouter:
                         exec_dir,
                         exec_prob,
                     )
-                    self._entry_coordinator.execute_signal(event.symbol, signal, session)
+                    self._entry_coordinator.execute_signal(
+                        event.symbol,
+                        signal,
+                        session,
+                    )
                     with session._lock:
                         session._pending_decision = None
                         session._pending_amt = None
@@ -579,6 +590,7 @@ class SessionEventRouter:
                 gate_passed,
                 gate_reason,
                 gate_detail,
+                tick_trace_id=getattr(event, "tick_trace_id", ""),
             )
         elif run_entry and not _can_execute:
             log.debug(
@@ -647,6 +659,7 @@ class SessionEventRouter:
         gate_passed: bool,
         gate_reason: str | None,
         gate_detail: str | None,
+        tick_trace_id: str = "",
     ) -> None:
         """Persist gate decision via injected signal tracker.
 
@@ -677,6 +690,7 @@ class SessionEventRouter:
                     vah=float(amt_result.value_area_high),
                     val=float(amt_result.value_area_low),
                     cvd_slope=float(amt_result.cvd_slope),
+                    tick_trace_id=tick_trace_id,
                 )
             else:
                 self._signal_tracker.track_gate_block(
@@ -691,6 +705,7 @@ class SessionEventRouter:
                     val=float(amt_result.value_area_low),
                     cvd_slope=float(amt_result.cvd_slope),
                     aggression_score=float(amt_result.aggression),
+                    tick_trace_id=tick_trace_id,
                 )
         except Exception:
             log.debug("AMT tracking failed (non-critical)", exc_info=True)
@@ -779,12 +794,16 @@ class SessionEventRouter:
             self._risk_coordinator.record_trade_result(
                 symbol, pnl, session.portfolio
             )
-        self._exit_coordinator.on_position_closed(symbol, pos_id)
+        self._exit_coordinator.on_position_closed(symbol, pos_id, session=session)
 
         # Delete from persistent storage
         if self._storage:
             try:
                 delete_id = pos_id or symbol
-                self._storage.delete_open_position(delete_id)
+                ensure_sync_adapter_result(
+                    "storage.delete_open_position",
+                    self._storage.delete_open_position,
+                    delete_id,
+                )
             except Exception as e:
                 log.error("Failed to delete closed position %s: %e", pos_id or symbol, e)

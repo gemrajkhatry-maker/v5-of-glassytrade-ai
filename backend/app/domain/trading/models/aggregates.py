@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Configuration (could be injected; kept as module-level for simplicity)
 # ---------------------------------------------------------------------------
 
-INITIAL_CAPITAL: Decimal = Decimal("1000000")  # 10 lakhs INR
+INITIAL_CAPITAL: Decimal = Decimal("5000000")  # 50 lakhs INR
 LEVERAGE: int = 1
 RISK_PER_TRADE: Decimal = Decimal("0.01")
 MAX_HISTORY: int = 1000
@@ -84,12 +84,20 @@ class Portfolio:
     # ----- factories -----
 
     @staticmethod
-    def create_default() -> "Portfolio":
+    def create_default(capital: Decimal | float | int | None = None) -> "Portfolio":
+        cap = (
+            capital
+            if capital is not None
+            else INITIAL_CAPITAL
+        )
+        cap = cap if isinstance(cap, Decimal) else Decimal(str(cap))
         return Portfolio(
-            balance=INITIAL_CAPITAL,
-            equity=INITIAL_CAPITAL,
+            balance=cap,
+            equity=cap,
             leverage=LEVERAGE,
-            config=PortfolioConfig(),
+            config=PortfolioConfig(
+                initial_capital=cap,
+            ),
         )
 
     def has_straddle_conflict(self, symbol: str, strike: float | int) -> bool:

@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import os
+from collections import deque
+import re
 from decimal import Decimal
+from types import MappingProxyType
 from types import SimpleNamespace
+from pathlib import Path
 from typing import Any, Callable
 from unittest.mock import Mock, call
 
@@ -58,6 +63,10 @@ class _FakeStorage:
     def __init__(self) -> None:
         self.flush_calls = 0
         self.close_calls = 0
+        self.last_kv_set = None
+        self.saved_open_positions: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.saved_trades: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+        self.open_positions_deleted: list[Any] = []
 
     def flush(self) -> None:
         self.flush_calls += 1
@@ -65,12 +74,57 @@ class _FakeStorage:
     def close(self) -> None:
         self.close_calls += 1
 
+    def load_open_positions(self) -> list[dict[str, str]]:
+        return []
+
+    def save_open_position(self, *args, **kwargs) -> None:
+        self.saved_open_positions.append((args, kwargs))
+
+    def delete_open_position(self, *args, **kwargs) -> None:
+        self.open_positions_deleted.append(args[0] if args else kwargs.get("position_id", ""))
+
+    def save_trade(self, *args, **kwargs) -> None:
+        self.saved_trades.append((args, kwargs))
+
+    def kv_set(self, *args, **kwargs) -> None:
+        self.last_kv_set = (args, kwargs)
+
+
+class _FakeBroker:
+    def __init__(self) -> None:
+        self.get_positions_calls = 0
+        self.get_account_positions_calls = 0
+        self.execute_order_calls = 0
+        self.cancel_order_calls = 0
+        self.get_positions_return: list[dict[str, str]] = []
+
+    def get_positions(self) -> list[dict[str, str]]:
+        self.get_positions_calls += 1
+        return list(self.get_positions_return)
+
+    def get_account_positions(self) -> list[dict[str, str]]:
+        self.get_account_positions_calls += 1
+        return []
+
+    def execute_order(self, *_args, **_kwargs):
+        self.execute_order_calls += 1
+        return None
+
+    def cancel_order(self, *_args, **_kwargs):
+        self.cancel_order_calls += 1
+        return None
+
 
 def _build_runtime_app_fixture(
     monkeypatch,
     selected_symbols: tuple[str, ...],
     startup_symbols: tuple[str, ...],
+    session_factory: callable | None = None,
+    broker_factory: callable | None = None,
+    storage_factory: callable | None = None,
 ) -> tuple[Any, _FakeContainer, _FakeStorage, _FakeTradingSession]:
+    if session_factory is None:
+        session_factory = _FakeTradingSession
     class _FakeScannerResult:
         def __init__(self, symbol: str, ltp: float) -> None:
             self.symbol = symbol
@@ -105,14 +159,24 @@ def _build_runtime_app_fixture(
         async def stop(self) -> None:
             self.stopped = True
 
-    fake_session = _FakeTradingSession()
+    fake_session = session_factory()
     fake_storage = _FakeStorage()
+    fake_broker = broker_factory() if broker_factory else _FakeBroker()
+    if storage_factory is not None:
+        fake_storage = storage_factory()
+        container_storage = fake_storage
+    else:
+        container_storage = fake_storage
 
+    if not hasattr(fake_session, "_broker"):
+        fake_session._broker = fake_broker
+    if not hasattr(fake_session, "_storage"):
+        fake_session._storage = fake_storage
     container = _FakeContainer(
         {
             TradingSessionService: lambda c: fake_session,
-            IBroker: lambda c: Mock(),
-            IStorage: lambda c: fake_storage,
+            IBroker: lambda c: fake_broker,
+            IStorage: lambda c: container_storage,
             IMarketData: lambda c: Mock(),
             ILLMInference: lambda c: Mock(),
             list: lambda c: list(startup_symbols),
@@ -301,3 +365,473 @@ def test_shutdown_contract_requires_storage_flush_and_close(monkeypatch):
 
     assert fake_storage.flush_calls >= 1
     assert fake_storage.close_calls >= 1
+
+
+def test_readiness_contract_detects_position_close_capability(monkeypatch):
+    class _ReadyCloseCoordinator:
+        def on_position_closed(self, *_args, **_kwargs):
+            return None
+
+        def _resolve_position(self, *_args, **_kwargs):
+            return None, ""
+
+    class _ReadyTradingSession(_FakeTradingSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self._event_router = Mock()
+            self._exit_coordinator = _ReadyCloseCoordinator()
+
+        def process_tick(self, *_args, **_kwargs) -> None:
+            return None
+
+    app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=("NIFTY",),
+        startup_symbols=("FALLBACK_X",),
+        session_factory=_ReadyTradingSession,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+
+    assert body["checks"]["startup_close_contract"] == "ok"
+    assert body["checks"]["startup_contracts"] == "ok"
+
+
+def test_readiness_contract_rejects_missing_position_close_capability(monkeypatch):
+    app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=("NIFTY",),
+        startup_symbols=("FALLBACK_X",),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+
+    assert body["checks"]["startup_close_contract"].startswith("error")
+    assert body["checks"]["startup_contracts"] != "ok"
+    assert body["status"] == "not_ready"
+
+
+def test_readiness_contract_rejects_missing_strategy_runtime(monkeypatch):
+    class _CloseCoordinator:
+        def on_position_closed(self, *_args, **_kwargs):
+            return None
+
+        def _resolve_position(self, *_args, **_kwargs):
+            return None, ""
+
+    class _ReadySession(_FakeTradingSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self._exit_coordinator = _CloseCoordinator()
+
+        def process_tick(self, *_args, **_kwargs) -> None:
+            return None
+
+    app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=("NIFTY",),
+        startup_symbols=("FALLBACK_X",),
+        session_factory=_ReadySession,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+
+    assert body["checks"]["startup_strategy"] == "error: missing runtime contracts"
+    assert body["checks"]["startup_close_contract"] == "ok"
+    assert body["checks"]["startup_contracts"] != "ok"
+    assert body["status"] == "not_ready"
+
+
+def test_readiness_contract_reports_broker_storage_and_reconciliation_keys(monkeypatch):
+    class _StrategyRouter:
+        def execute_entry_path(self, *_args, **_kwargs) -> None:
+            return None
+
+        def trigger_llm_entry(self, *_args, **_kwargs) -> None:
+            return None
+
+        def should_trigger_llm(self, *_args, **_kwargs) -> bool:
+            return False
+
+    class _CloseCoordinator:
+        def on_position_closed(self, *_args, **_kwargs):
+            return None
+
+        def _resolve_position(self, *_args, **_kwargs):
+            return None, ""
+
+    class _Session(_FakeTradingSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self._event_router = _StrategyRouter()
+            self._exit_coordinator = _CloseCoordinator()
+            self._event_router_ref = self._event_router
+
+        def process_tick(self, *_args, **_kwargs) -> None:
+            return None
+
+    app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=("NIFTY",),
+        startup_symbols=("FALLBACK_X",),
+        session_factory=_Session,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+
+    checks = body["checks"]
+    assert checks["startup_broker"] == "ok"
+    assert checks["startup_storage"] == "ok"
+    assert checks["startup_reconciliation"] == "ok"
+    assert "startup_broker_runtime" in checks
+    assert "startup_contract_id" in checks
+    assert "startup_reconciliation_summary" in checks
+    assert body["checks"]["startup_contracts"] == "ok"
+
+
+def test_readiness_contract_rejects_missing_broker_runtime(monkeypatch):
+    class _NoExecuteBroker:
+        def get_positions(self):
+            return []
+
+        def get_account_positions(self):
+            return []
+
+    class _StrategyRouter:
+        def execute_entry_path(self, *_args, **_kwargs) -> None:
+            return None
+
+        def trigger_llm_entry(self, *_args, **_kwargs) -> None:
+            return None
+
+        def should_trigger_llm(self, *_args, **_kwargs) -> bool:
+            return False
+
+    class _CloseCoordinator:
+        def on_position_closed(self, *_args, **_kwargs):
+            return None
+
+        def _resolve_position(self, *_args, **_kwargs):
+            return None, ""
+
+    class _Session(_FakeTradingSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self._event_router = _StrategyRouter()
+            self._exit_coordinator = _CloseCoordinator()
+
+        def process_tick(self, *_args, **_kwargs) -> None:
+            return None
+
+    app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=("NIFTY",),
+        startup_symbols=("FALLBACK_X",),
+        session_factory=_Session,
+        broker_factory=_NoExecuteBroker,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+
+    assert body["checks"]["startup_broker"].startswith("error")
+    assert body["status"] == "not_ready"
+
+
+def test_readiness_contract_rejects_missing_storage_runtime(monkeypatch):
+    class _StorageWithoutSaveTrade:
+        def __init__(self):
+            self.flush_calls = 0
+            self.close_calls = 0
+            self.last_kv_set = None
+
+        def flush(self) -> None:
+            self.flush_calls += 1
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        def load_open_positions(self):
+            return []
+
+        def save_open_position(self, *args, **kwargs):
+            return None
+
+        def delete_open_position(self, *args, **kwargs):
+            return None
+
+    class _StrategyRouter:
+        def execute_entry_path(self, *_args, **_kwargs) -> None:
+            return None
+
+        def trigger_llm_entry(self, *_args, **_kwargs) -> None:
+            return None
+
+        def should_trigger_llm(self, *_args, **_kwargs) -> bool:
+            return False
+
+    class _CloseCoordinator:
+        def on_position_closed(self, *_args, **_kwargs):
+            return None
+
+        def _resolve_position(self, *_args, **_kwargs):
+            return None, ""
+
+    class _Session(_FakeTradingSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self._event_router = _StrategyRouter()
+            self._exit_coordinator = _CloseCoordinator()
+            self._storage = _StorageWithoutSaveTrade()
+
+        def process_tick(self, *_args, **_kwargs) -> None:
+            return None
+
+    app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=("NIFTY",),
+        startup_symbols=("FALLBACK_X",),
+        session_factory=_Session,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+
+    assert body["checks"]["startup_storage"].startswith("error")
+    assert body["status"] == "not_ready"
+
+
+def test_readiness_contract_rejects_zero_active_symbols(monkeypatch):
+    monkeypatch.setattr("app.config.settings.DHAN_SYMBOLS", [], raising=False)
+    app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=(),
+        startup_symbols=(),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+
+    assert body["checks"]["startup_active_symbols"].startswith("error")
+    assert body["checks"]["startup_contracts"] == "degraded"
+    assert body["status"] == "not_ready"
+
+
+def test_readiness_contract_rejects_missing_broker_and_storage_runtime(monkeypatch):
+    class _NoExecuteBroker:
+        def get_positions(self):
+            return []
+
+        def get_account_positions(self):
+            return []
+
+    class _StorageWithoutTradePersistence:
+        def __init__(self):
+            self.flush_calls = 0
+            self.close_calls = 0
+
+        def flush(self) -> None:
+            self.flush_calls += 1
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+        def load_open_positions(self):
+            return []
+
+        def save_open_position(self, *args, **kwargs):
+            return None
+
+    class _StrategyRouter:
+        def execute_entry_path(self, *_args, **_kwargs) -> None:
+            return None
+
+        def trigger_llm_entry(self, *_args, **_kwargs) -> None:
+            return None
+
+        def should_trigger_llm(self, *_args, **_kwargs) -> bool:
+            return False
+
+    class _CloseCoordinator:
+        def on_position_closed(self, *_args, **_kwargs):
+            return None
+
+        def _resolve_position(self, *_args, **_kwargs):
+            return None, ""
+
+    class _Session(_FakeTradingSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self._event_router = _StrategyRouter()
+            self._exit_coordinator = _CloseCoordinator()
+            self._storage = _StorageWithoutTradePersistence()
+
+        def process_tick(self, *_args, **_kwargs) -> None:
+            return None
+
+    app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=("NIFTY",),
+        startup_symbols=("FALLBACK_X",),
+        session_factory=_Session,
+        broker_factory=_NoExecuteBroker,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+
+    assert body["checks"]["startup_broker"].startswith("error")
+    assert body["checks"]["startup_storage"].startswith("error")
+    assert body["checks"]["startup_contracts"] == "degraded"
+    assert body["status"] == "not_ready"
+
+
+def test_readiness_contract_rejects_reconciliation_execution_failure(monkeypatch):
+    class _BrokenReconciliation:
+        def __init__(self, *_, **__) -> None:
+            pass
+
+        def reconcile(self):
+            raise RuntimeError("reconciliation startup failure")
+
+    class _StrategyRouter:
+        def execute_entry_path(self, *_args, **_kwargs) -> None:
+            return None
+
+        def trigger_llm_entry(self, *_args, **_kwargs) -> None:
+            return None
+
+        def should_trigger_llm(self, *_args, **_kwargs) -> bool:
+            return False
+
+    class _CloseCoordinator:
+        def on_position_closed(self, *_args, **_kwargs):
+            return None
+
+        def _resolve_position(self, *_args, **_kwargs):
+            return None, ""
+
+    class _Session(_FakeTradingSession):
+        def __init__(self) -> None:
+            super().__init__()
+            self._event_router = _StrategyRouter()
+            self._exit_coordinator = _CloseCoordinator()
+
+        def process_tick(self, *_args, **_kwargs) -> None:
+            return None
+
+    monkeypatch.setattr(main, "StartupReconciliation", _BrokenReconciliation)
+
+    app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=("NIFTY",),
+        startup_symbols=("FALLBACK_X",),
+        session_factory=_Session,
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        body = response.json()
+
+    assert body["checks"]["startup_reconciliation"].startswith("error")
+    assert body["checks"]["startup_contracts"] == "degraded"
+    assert body["status"] == "not_ready"
+
+
+def test_startup_dependency_refs_are_immutable(monkeypatch):
+    app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=("NIFTY",),
+        startup_symbols=("FALLBACK_X",),
+    )
+
+    with TestClient(app) as client:
+        client.get("/health/ready")
+        startup_refs = getattr(app.state, "startup_dependency_refs", None)
+        assert startup_refs is not None
+        assert isinstance(startup_refs, MappingProxyType)
+        assert startup_refs["trading_session"] is _fake_session
+        assert "broker" in startup_refs
+        try:
+            startup_refs["broker"] = Mock()
+        except TypeError:
+            pass
+        else:  # pragma: no cover
+            assert False, "startup_dependency_refs should be immutable"
+
+
+def test_startup_lifecycle_does_not_emit_async_runtime_warnings(monkeypatch, capsys):
+    """Fail fast if startup lifecycle emits unawaited/unraisable coroutine signals."""
+    app, _, _, _ = _build_runtime_app_fixture(
+        monkeypatch,
+        selected_symbols=("NIFTY",),
+        startup_symbols=("FALLBACK_X",),
+    )
+
+    with TestClient(app) as client:
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+
+    captured = capsys.readouterr()
+    startup_output = captured.out + captured.err
+    bad_patterns = [
+        r"RuntimeWarning: coroutine '.*' was never awaited",
+        r"NameError: name 'count' is not defined",
+        r"unraisable",
+    ]
+
+    for pattern in bad_patterns:
+        assert not re.search(pattern, startup_output), f"Found startup warning pattern {pattern!r}"
+
+
+def test_startup_log_contract_file_is_clean():
+    """Fail when persisted startup logs contain known async/runtime signatures."""
+    log_path = Path(
+        os.getenv("BACKEND_RUNTIME_LOG_PATH")
+        or Path(__file__).resolve().parents[2] / "backend.log"
+    )
+    if not log_path.exists():
+        return
+
+    with log_path.open("r", encoding="utf-8", errors="replace") as fh:
+        log_text = "".join(deque(fh, maxlen=2000))
+
+    startup_marker = "Starting GlassyTrade AI application..."
+    marker_index = log_text.rfind(startup_marker)
+    if marker_index != -1:
+        log_text = log_text[marker_index:]
+
+    banned_patterns = (
+        (r"RuntimeWarning: coroutine '.*' was never awaited", 0),
+        (r"NameError: name 'count' is not defined", 0),
+        (r"unraisable", re.IGNORECASE),
+    )
+
+    for item in banned_patterns:
+        if isinstance(item, tuple):
+            pattern, flags = item
+        else:
+            pattern, flags = item, 0
+        if re.search(pattern, log_text, flags):
+            assert False, f"Startup log contract violation: {pattern!r} in {log_path}"

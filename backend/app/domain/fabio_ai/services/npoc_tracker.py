@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 
 from app.domain.ports.npoc import INPOC as NPOCPort, NPOCRecord, NPOCResult
+from app.core.async_boundary import ensure_sync_adapter_result
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,13 @@ class NPOCTracker(NPOCPort):
             return
 
         self._active_npocs[underlying].append(record)
-        self._storage.save_npoc(underlying, date, poc)
+        ensure_sync_adapter_result(
+            "storage.save_npoc",
+            self._storage.save_npoc,
+            underlying,
+            date,
+            poc,
+        )
         logger.info(
             "NPOC added: %s @ %.2f (session %s)",
             underlying, poc, date,
@@ -107,8 +114,12 @@ class NPOCTracker(NPOCPort):
             if abs(current_price - npoc.price) <= zone:
                 # Mark as filled
                 filled_dates.append(npoc.session_date)
-                self._storage.mark_npoc_filled(
-                    underlying, npoc.session_date, datetime.now().isoformat()
+                ensure_sync_adapter_result(
+                    "storage.mark_npoc_filled",
+                    self._storage.mark_npoc_filled,
+                    underlying,
+                    npoc.session_date,
+                    datetime.now().isoformat(),
                 )
                 logger.info(
                     "NPOC filled: %s @ %.2f (session %s) — price %.2f within %.4f zone",
@@ -163,7 +174,11 @@ class NPOCTracker(NPOCPort):
         Args:
             underlying: The underlying symbol to load NPOCs for.
         """
-        records = self._storage.get_active_npocs(underlying)
+        records = ensure_sync_adapter_result(
+            "storage.get_active_npocs",
+            self._storage.get_active_npocs,
+            underlying,
+        )
         if records:
             self._active_npocs[underlying] = [
                 NPOCRecord(

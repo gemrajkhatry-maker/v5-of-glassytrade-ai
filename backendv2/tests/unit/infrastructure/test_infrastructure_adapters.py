@@ -5,9 +5,13 @@ from app.infrastructure.adapters.infrastructure_adapters import (
     SQLiteStorage, SQLiteConfig, BinanceAdapter, BinanceMarketDataAdapter
 )
 from app.domain.trading.model.entities import Position
-from app.domain.trading.model.enums import Side, PositionStatus, CushionState, CushionState
+from app.domain.trading.model.enums import Side, PositionStatus
 import tempfile
 import os
+
+
+def _legacy_binance_enabled() -> bool:
+    return os.getenv("ENABLE_LEGACY_BINANCE_ADAPTERS", "").lower() in {"1", "true", "yes", "on"}
 
 
 class TestSQLiteStorage:
@@ -52,6 +56,7 @@ class TestSQLiteStorage:
         assert result is None
 
 
+@pytest.mark.skipif(not _legacy_binance_enabled(), reason="Legacy Binance adapters are disabled by default.")
 class TestBinanceAdapter:
     """Tests for Binance broker adapter."""
     
@@ -73,6 +78,7 @@ class TestBinanceAdapter:
         assert result["qty"] == 0.1
 
 
+@pytest.mark.skipif(not _legacy_binance_enabled(), reason="Legacy Binance adapters are disabled by default.")
 class TestBinanceMarketDataAdapter:
     """Tests for Binance market data adapter."""
     

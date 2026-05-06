@@ -18,7 +18,6 @@ class EventPersistence:
     """Persist selected events to storage without impacting hot-path latency."""
 
     def __init__(self, storage: IStorage | None = None, batch_size: int = 50, buffer_limit: int = 2048):
-        is_managed_storage = storage is not None
         self._storage: IStorage = storage or SQLiteStorageAdapter()
         self._buffer_limit = max(1, buffer_limit)
         self._batch_size = max(1, batch_size)
@@ -28,12 +27,6 @@ class EventPersistence:
         self._flush_failures = 0
         self._last_tick_written_ns = 0.0
         self._metrics = StageMetrics(stage_name="EventPersistence")
-        if hasattr(self._storage, "init") and not is_managed_storage:
-            # Database adapters in this codebase are initialized lazily.
-            try:
-                self._storage.init()
-            except Exception:
-                logger.debug("Storage already initialized or using custom adapter", exc_info=True)
         self._flush_interval_ns = 5_000_000_000
         self._last_flush_ns = time.perf_counter_ns()
 

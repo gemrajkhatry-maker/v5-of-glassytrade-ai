@@ -15,10 +15,13 @@ import time
 from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.config import settings
 from app.application.utils import is_market_open
 from app.domain.trading.models.utils import safe_side as _safe_side
+from app.domain.services.position_reconciliation import PositionReconciliationEngine, ReconciliationIssue
 from app.shared.timezones import IST
+from app.shared.mode import is_live_mode
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +39,18 @@ class WatchdogManager:
     source of truth for position protection and stream monitoring.
     """
 
-    def __init__(self, session_service, stream_manager: "StreamManager"):
+    def __init__(
+        self,
+        session_service,
+        stream_manager: "StreamManager",
+        state_broadcaster: "StateBroadcaster" | None = None,
+    ):
         self._session_service = session_service
         self._stream_manager = stream_manager
+        self._state_broadcaster = state_broadcaster
         self._running = False
         self._active_symbols: list[str] = []
+        self._reconciliation_engine = PositionReconciliationEngine()
 
     def set_active_symbols(self, symbols: list[str]) -> None:
         """Set active symbols for watchdog monitoring.
@@ -74,8 +84,11 @@ class WatchdogManager:
                     if not session:
                         continue
 
-                    # Get last known LTP from cached state
-                    cached_state = self._stream_manager._latest_states.get(sym, {}) if hasattr(self._stream_manager, '_latest_states') else {}
+                    cached_state = (
+                        self._state_broadcaster.get_latest_state(sym)
+                        if self._state_broadcaster
+                        else None
+                    ) or {}
                     ltp = cached_state.get("ltp", 0)
                     if ltp <= 0:
                         continue
@@ -102,9 +115,15 @@ class WatchdogManager:
                                 if closed:
                                     # Persist trade close
                                     if self._session_service._storage:
-                                        try:
-                                            self._session_service._storage.delete_open_position(pos.id)
-                                            self._session_service._storage.save_trade({
+                                        ensure_sync_adapter_result(
+                                            "storage.delete_open_position",
+                                            self._session_service._storage.delete_open_position,
+                                            pos.id,
+                                        )
+                                        ensure_sync_adapter_result(
+                                            "storage.save_trade",
+                                            self._session_service._storage.save_trade,
+                                            {
                                                 "position_id": pos.id,
                                                 "symbol": sym,
                                                 "side": _safe_side(pos.side),
@@ -112,18 +131,195 @@ class WatchdogManager:
                                                 "exit_price": ltp,
                                                 "size": pos.size,
                                                 "pnl": pos.pnl,
-                                                "source": pos.source.value if hasattr(pos.source, 'value') else str(pos.source),
+                                                "source": pos.source.value
+                                                if hasattr(pos.source, "value")
+                                                else str(pos.source),
                                                 "reason": f"WATCHDOG_{reason}",
                                                 "opened_at": pos.entry_time,
                                                 "closed_at": pos.exit_time,
-                                            })
-                                        except Exception:
-                                            logger.debug("Watchdog: persistence failed", exc_info=True)
+                                            },
+                                        )
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.error("SL watchdog error", exc_info=True)
         logger.info("Watchdog: SL watchdog stopped")
+
+    async def reconciliation_loop(self) -> None:
+        """Periodic position reconciliation loop (every 30 seconds in live mode)."""
+        logger.info("Watchdog: reconciliation loop started")
+        while self._running:
+            try:
+                await asyncio.sleep(30)
+                if not self._running or not is_live_mode():
+                    continue
+
+                broker = getattr(self._session_service, "_broker", None)
+                if not broker or not hasattr(broker, "get_positions"):
+                    continue
+
+                storage = getattr(self._session_service, "_storage", None)
+                state_manager = getattr(self._session_service, "_state_manager", None)
+                if not state_manager:
+                    continue
+
+                sessions = state_manager.get_all_sessions()
+                internal_positions = {}
+                internal_lookup: dict[str, str] = {}
+                for sym, session in sessions.items():
+                    for pos in session.portfolio.positions:
+                        if not pos.is_open:
+                            continue
+                        internal_positions[pos.id] = pos
+                        internal_lookup[pos.id] = sym
+
+                broker_positions = await asyncio.to_thread(
+                    broker.get_positions
+                )
+                normalized_broker = self._normalize_broker_positions(broker_positions)
+                results = self._reconciliation_engine.reconcile(
+                    internal_positions=internal_positions,
+                    broker_positions=normalized_broker,
+                )
+                for result in results:
+                    if result.issue == ReconciliationIssue.GHOST_POSITION:
+                        symbol = result.internal_symbol or internal_lookup.get(result.internal_id, "")
+                        if not symbol:
+                            continue
+                        session = sessions.get(symbol)
+                        if not session:
+                            continue
+                        self._handle_ghost_position(symbol, session, result.internal_id, storage)
+                    elif result.issue == ReconciliationIssue.MISSING_POSITION:
+                        logger.warning(
+                            "Reconciliation: missing broker position %s (broker qty=%.2f)",
+                            result.broker_symbol,
+                            result.broker_qty,
+                        )
+                    elif result.issue == ReconciliationIssue.QUANTITY_MISMATCH:
+                        logger.warning(
+                            "Reconciliation: qty mismatch internal=%s (%s) broker=%s (%s)",
+                            result.internal_symbol,
+                            result.internal_qty,
+                            result.broker_symbol,
+                            result.broker_qty,
+                        )
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.error("Position reconciliation error", exc_info=True)
+        logger.info("Watchdog: reconciliation loop stopped")
+
+    def _normalize_broker_positions(self, positions: list[object]) -> list[dict]:
+        """Normalize broker-specific position objects into dicts."""
+        normalized: list[dict] = []
+        for raw in positions or []:
+            if isinstance(raw, dict):
+                symbol = (
+                    raw.get("trading_symbol")
+                    or raw.get("symbol")
+                    or ""
+                )
+                net_qty = raw.get("netQty", raw.get("quantity", 0))
+                order_id = raw.get("orderId", "")
+            else:
+                symbol = (
+                    getattr(raw, "trading_symbol", "")
+                    or getattr(raw, "symbol", "")
+                    or getattr(getattr(raw, "instrument", None), "symbol", "")
+                )
+                net_qty = (
+                    getattr(raw, "netQty", None)
+                    if getattr(raw, "netQty", None) is not None
+                    else getattr(raw, "net_qty", None)
+                )
+                if net_qty is None:
+                    net_qty = getattr(raw, "quantity", 0)
+                order_id = getattr(raw, "orderId", "")
+            try:
+                net_qty_f = float(net_qty or 0)
+            except (TypeError, ValueError):
+                net_qty_f = 0.0
+            normalized.append(
+                {
+                    "trading_symbol": symbol,
+                    "netQty": net_qty_f,
+                    "quantity": net_qty_f,
+                    "orderId": str(order_id),
+                }
+            )
+        return normalized
+
+    def _get_ltp(self, symbol: str) -> float:
+        """Get latest LTP for symbol from state broadcaster."""
+        if not self._state_broadcaster:
+            return 0.0
+        state = self._state_broadcaster.get_latest_state(symbol) or {}
+        ltp = state.get("ltp", 0.0)
+        try:
+            return float(ltp)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _handle_ghost_position(
+        self,
+        symbol: str,
+        session,
+        position_id: str,
+        storage,
+    ) -> None:
+        """Auto-close internally when broker does not report an open position."""
+        ltp = self._get_ltp(symbol)
+        if ltp <= 0:
+            for pos in session.portfolio.positions:
+                if pos.id == position_id and getattr(pos, "entry_price", None) is not None:
+                    ltp = float(pos.entry_price)
+                    break
+            if ltp <= 0:
+                return
+        closed = session.portfolio.close_position(position_id, ltp, "RECONCILIATION_GHOST")
+        if not closed:
+            return
+
+        exit_coordinator = getattr(self._session_service, "_exit_coordinator", None)
+        if exit_coordinator:
+            try:
+                exit_coordinator.on_position_closed(symbol, closed, session=session)
+            except Exception:
+                logger.debug("Failed to run exit coordinator for ghost close", exc_info=True)
+
+        if storage is not None:
+            try:
+                ensure_sync_adapter_result(
+                    "storage.delete_open_position",
+                    storage.delete_open_position,
+                    position_id,
+                )
+                ensure_sync_adapter_result(
+                    "storage.save_trade",
+                    storage.save_trade,
+                    {
+                        "position_id": closed.id,
+                        "symbol": symbol,
+                        "side": _safe_side(closed.side),
+                        "entry_price": closed.entry_price,
+                        "exit_price": ltp,
+                        "size": closed.size,
+                        "pnl": closed.pnl,
+                        "source": closed.source.value
+                        if hasattr(closed.source, "value")
+                        else str(closed.source),
+                        "reason": "RECONCILIATION_GHOST",
+                        "opened_at": closed.entry_time,
+                        "closed_at": closed.exit_time,
+                    },
+                )
+                logger.info("Watchdog: reconciled ghost close for %s (%s)", symbol, position_id)
+            except Exception:
+                logger.error(
+                    "Watchdog: failed to persist reconciliation close for %s", position_id,
+                    exc_info=True,
+                )
 
     async def stale_stream_watchdog(self) -> None:
         """Detect hung market data streams and force reconnect or switch to polling.

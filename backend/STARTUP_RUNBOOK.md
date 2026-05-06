@@ -19,3 +19,4 @@ Use this mapping when startup telemetry or logs indicate a startup failure.
 2. Start with `backend/start.sh` or mode-specific launcher (`start_mcx.sh`, `start_nse.sh`).
 3. Confirm `/api/health/ready` returns `{ "status": "ready" }`.
 4. If ready is delayed, check `/api/metrics/startup` and `/api/metrics/summary` for phase durations and missing symbol list.
+5. (Optional) Enforce startup-log contract with `ENFORCE_STARTUP_LOG_CONTRACT=1` when using `backend/start.sh`, `backend/start_mcx.sh`, or `backend/start_nse.sh`; this blocks startup when the log tail matches banned async/runtime signatures.

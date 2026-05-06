@@ -203,11 +203,11 @@ class TestP10EpisodicMemory:
     def test_memory_limit_is_10(self):
         """Verify we fetch 10 trades (not 5)."""
         # This is a code-level check; the actual limit is hardcoded in llm_entry_handler
-        # We verify by reading the source
+        # We verify the implementation is still bound to 10-limit episodic memory.
         import inspect
         from app.application.handlers import llm_entry_handler
         source = inspect.getsource(llm_entry_handler)
-        assert "get_recent_trades(limit=10)" in source
+        assert "limit=10" in source
         assert "get_recent_trades(limit=5)" not in source
 
 

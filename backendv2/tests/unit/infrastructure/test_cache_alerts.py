@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.infrastructure.cache.redis_cache import RedisCache, RedisConfig
 from app.infrastructure.alerts.alert_manager import AlertManager, AlertType
-from app.core.core_components import FeatureFlags, Feature
+from app.core.feature_flags import FeatureFlags, Feature
 
 
 class TestRedisCache:

@@ -90,6 +90,8 @@ def test_tick_snapshot_mutations_are_stage_local() -> None:
         "signal",
         "persistence",
         "telemetry",
+        # risk changes on every tick because observe_price feeds FlashCrashProtector
+        "risk",
     }
 
 

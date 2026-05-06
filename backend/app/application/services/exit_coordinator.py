@@ -17,6 +17,7 @@ from app.domain.ports.storage import IStorage
 from app.domain.ports.broker import IBroker
 from app.domain.trading.events import PositionClosed
 from app.application.handlers.post_trade_analyst import PostTradeAnalyst
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.shared.timezones import IST
 from datetime import datetime
 
@@ -61,6 +62,42 @@ class ExitCoordinator:
         self._risk_coordinator = risk_coordinator
         self._post_trade_analyst = post_trade_analyst
 
+    @staticmethod
+    def _metadata_dict(metadata: object) -> dict:
+        """Normalize metadata to a dict to avoid RuntimeError in heterogeneous callers."""
+        return metadata if isinstance(metadata, dict) else {}
+
+    def _resolve_position(
+        self,
+        symbol: str,
+        position_or_id,
+        session=None,
+    ) -> tuple[object | None, str]:
+        """Resolve a Position either directly or by id from tracked sessions."""
+        if position_or_id is None:
+            return None, symbol
+
+        if hasattr(position_or_id, "id"):
+            return position_or_id, symbol or str(getattr(position_or_id, "symbol", ""))
+
+        if isinstance(position_or_id, str) and position_or_id:
+            target_id = position_or_id
+            sessions = []
+            if session is not None:
+                sessions = [session]
+            else:
+                sessions = list(self._state_manager.get_all_sessions().values())
+
+            for sess in sessions:
+                with sess._lock:
+                    positions_snapshot = list(sess.portfolio.positions)
+                for candidate in positions_snapshot:
+                    if str(getattr(candidate, "id", "")) == target_id:
+                        resolved_symbol = symbol or str(getattr(candidate, "symbol", ""))
+                        return candidate, resolved_symbol
+
+        return None, symbol
+
     def on_partial_exit(
         self,
         pos_id: str,
@@ -73,26 +110,24 @@ class ExitCoordinator:
         realized_pnl: float,
     ) -> None:
         """Handle partial exit — cancel broker SL and log."""
-        symbol = ""
-        position = None
-        for sym, sess in self._state_manager.get_all_sessions().items():
-            # Snapshot under lock to avoid RuntimeError during concurrent mutation
-            with sess._lock:
-                positions_snapshot = list(sess.portfolio.positions)
-            for p in positions_snapshot:
-                if p.id == pos_id:
-                    symbol = sym
-                    position = p
-                    break
-            if symbol:
-                break
+        position, symbol = self._resolve_position("", pos_id)
+
+        if not position:
+            log.warning("Partial exit received for missing position id=%s", pos_id)
+            return
 
         if position:
-            dhan_sl_id = (position.metadata or {}).get("dhan_sl_order_id")
+            _metadata = self._metadata_dict(position.metadata)
+            dhan_sl_id = _metadata.get("dhan_sl_order_id")
             if dhan_sl_id:
                 try:
-                    self._broker.cancel_order(dhan_sl_id)
-                    position.metadata.pop("dhan_sl_order_id", None)
+                    ensure_sync_adapter_result(
+                        "broker.cancel_order",
+                        self._broker.cancel_order,
+                        dhan_sl_id,
+                    )
+                    if isinstance(position.metadata, dict):
+                        position.metadata.pop("dhan_sl_order_id", None)
                     log.info(
                         "Scrubbed broker hardware SL %s for partially closed pos %s",
                         dhan_sl_id,
@@ -107,6 +142,7 @@ class ExitCoordinator:
             symbol=symbol,
             position_id=pos_id,
             side=side,
+            tick_trace_id=self._metadata_dict(position.metadata).get("tick_trace_id", ""),
             entry_price=entry_price,
             exit_price=exit_price,
             partial_pct=partial_pct,
@@ -140,21 +176,31 @@ class ExitCoordinator:
         phase_num = hash(si.phase) % 10
         self._llm_handler.record_stop_out(level, direction, phase_num, symbol=symbol)
 
-    def on_position_closed(self, symbol: str, position) -> None:
+    def on_position_closed(self, symbol: str, position, session=None) -> None:
         """Handle full position close — learning, risk, persistence.
 
         Called directly from trading_session with the Position object
         (avoids PositionClosed event serialization issues).
         """
-        if not position:
+        if not symbol and not position:
             return
-        pos = position
+        pos, resolved_symbol = self._resolve_position(symbol, position, session=session)
+        if not pos:
+            log.warning("Full close received for missing position: %s", position)
+            return
+        if resolved_symbol:
+            symbol = resolved_symbol
 
         # Cancel broker hardware SL
-        dhan_sl_id = (pos.metadata or {}).get("dhan_sl_order_id")
+        _metadata = self._metadata_dict(pos.metadata)
+        dhan_sl_id = _metadata.get("dhan_sl_order_id")
         if dhan_sl_id:
             try:
-                self._broker.cancel_order(dhan_sl_id)
+                ensure_sync_adapter_result(
+                    "broker.cancel_order",
+                    self._broker.cancel_order,
+                    dhan_sl_id,
+                )
                 log.info(
                     "Scrubbed broker hardware SL %s for fully closed pos %s",
                     dhan_sl_id,
@@ -163,10 +209,10 @@ class ExitCoordinator:
             except Exception as e:
                 log.error("Failed to scrub broker hardware SL %s: %s", dhan_sl_id, e)
 
-        session = self._state_manager.get_or_create_session(symbol)
+        state_session = session or self._state_manager.get_or_create_session(symbol)
 
         # Learning
-        session.learning.learn(pos)
+        state_session.learning.learn(pos)
         self._overseer_handler.reset_position_state()
 
         # Metrics from Position entity (ExitEngine is stateless)
@@ -188,11 +234,12 @@ class ExitCoordinator:
         self._event_logger.log_exit(
             symbol=symbol,
             position=pos,
+            tick_trace_id=self._metadata_dict(pos.metadata).get("tick_trace_id", ""),
             time_in_trade=time_in_trade,
             mfe=float(mp_metrics["mfe"]) if mp_metrics else 0,
             mae=float(mp_metrics["mae"]) if mp_metrics else 0,
             tick_count=int(mp_metrics["tick_count"]) if mp_metrics else 0,
-            amt=session.last_amt,
+            amt=state_session.last_amt,
         )
 
         # Post-trade LLM analysis (non-blocking)
@@ -232,6 +279,10 @@ class ExitCoordinator:
         # Persist
         if self._storage:
             try:
-                self._storage.delete_open_position(pos.id)
+                ensure_sync_adapter_result(
+                    "storage.delete_open_position",
+                    self._storage.delete_open_position,
+                    pos.id,
+                )
             except Exception:
                 log.warning("Failed to delete persisted position — stale position may appear on restart", exc_info=True)

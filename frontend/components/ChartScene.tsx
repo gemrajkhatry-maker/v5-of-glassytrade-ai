@@ -1979,15 +1979,6 @@ const DecisionCard: React.FC<DecisionCardProps> = ({ direction, setup, pLong, pS
           <span className={`text-xs font-black uppercase tracking-wider ${directionColor}`}>
             {directionIcon} {direction}{regime && direction !== 'FLAT' ? ` (${regime === 'TRENDING' ? 'Trend' : regime === 'BALANCED' ? 'Reversion' : regime})` : ''}
           </span>
-          <span className="text-[8px] mt-1 px-1.5 py-0.5 rounded border border-purple-500/30 bg-purple-500/10 text-purple-200 font-mono font-bold tracking-widest">
-            {setup === 'TREND_MODEL'
-              ? 'TREND MODEL'
-              : setup === 'MEAN_REVERSION'
-              ? 'MEAN REVERSION'
-              : setup === 'RESPONSIVE_FADE'
-              ? 'RESPONSIVE FADE'
-              : 'SETUP UNKNOWN'}
-          </span>
         </div>
         <div className="flex flex-col items-end">
           <span className="text-[9px] text-white/30 uppercase font-bold tracking-tighter italic">P({direction})</span>

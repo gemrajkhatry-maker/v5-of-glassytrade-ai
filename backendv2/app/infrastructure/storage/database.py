@@ -149,7 +149,7 @@ _TICK_FLUSH_INTERVAL = 5.0
 class SQLiteStorageAdapter(IStorage):
     """SQLite-backed persistent storage with WAL mode and tick batching."""
 
-    def init(self, db_path: str = "glassytrade.db") -> None:
+    def __init__(self, db_path: str = "glassytrade.db") -> None:
         self._db_path = db_path
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
@@ -158,6 +158,19 @@ class SQLiteStorageAdapter(IStorage):
         self._last_flush_time: float = time.time()
         self._flush_timer: threading.Timer | None = None
         self._init_db()
+
+    def init(self, db_path: str = "glassytrade.db") -> None:
+        """Compatibility helper for callers still using explicit init."""
+        if getattr(self, "_db_path", None) == db_path and getattr(self, "_conn", None):
+            self._init_db()
+            return
+        old_conn = getattr(self, "_conn", None)
+        if old_conn is not None:
+            try:
+                old_conn.close()
+            except Exception:
+                logger.debug("Failed to close previous SQLite connection before init()", exc_info=True)
+        self.__init__(db_path)
 
     def _init_db(self) -> None:
         with self._lock:
@@ -262,6 +275,30 @@ class SQLiteStorageAdapter(IStorage):
              json.dumps(profile_data.get("extra", {}))),
         )
 
+    def save_npoc(self, underlying: str, date: str, poc: float) -> None:
+        """Persist a naked POC candidate."""
+        self._execute_write(
+            "INSERT OR REPLACE INTO npoc_records (underlying, session_date, poc_price, is_filled) VALUES (?, ?, ?, 0)",
+            (str(underlying), str(date), float(poc)),
+        )
+
+    def mark_npoc_filled(self, underlying: str, session_date: str, filled_at: str) -> None:
+        """Mark an NPOC row as filled when price revisits it."""
+        self._execute_write(
+            "UPDATE npoc_records SET is_filled = 1, filled_at = ? WHERE underlying = ? AND session_date = ?",
+            (str(filled_at), str(underlying), str(session_date)),
+        )
+
+    def get_active_npocs(self, underlying: str) -> list[dict]:
+        """Return unfilled NPOC rows for an underlying."""
+        return [
+            dict(row)
+            for row in self._query(
+                "SELECT * FROM npoc_records WHERE underlying = ? AND is_filled = 0 ORDER BY session_date DESC",
+                (str(underlying),),
+            )
+        ]
+
     def get_previous_session_profile(self, symbol: str, market: str = "NSE") -> dict | None:
         rows = self._query(
             "SELECT * FROM session_profiles WHERE symbol = ? AND market = ? ORDER BY session_date DESC LIMIT 1",
@@ -283,7 +320,7 @@ class SQLiteStorageAdapter(IStorage):
         self._execute_write("DELETE FROM open_positions WHERE id = ?", (position_id,))
 
     def load_open_positions(self) -> list[dict]:
-        return [dict(row) for row in self._query("SELECT FROM open_positions")]
+        return [dict(row) for row in self._query("SELECT * FROM open_positions")]
 
     def clear_all_open_positions(self) -> int:
         with self._lock:
@@ -301,13 +338,13 @@ class SQLiteStorageAdapter(IStorage):
 
     def query_position_events(self, position_id: str | None = None, symbol: str | None = None) -> list[dict]:
         if position_id:
-            return [dict(row) for row in self._query("SELECT FROM position_events WHERE position_id = ? ORDER BY created_at DESC", (position_id,))]
+            return [dict(row) for row in self._query("SELECT * FROM position_events WHERE position_id = ? ORDER BY created_at DESC", (position_id,))]
         elif symbol:
-            return [dict(row) for row in self._query("SELECT FROM position_events WHERE symbol = ? ORDER BY created_at DESC", (symbol,))]
-        return [dict(row) for row in self._query("SELECT FROM position_events ORDER BY created_at DESC LIMIT 100")]
+            return [dict(row) for row in self._query("SELECT * FROM position_events WHERE symbol = ? ORDER BY created_at DESC", (symbol,))]
+        return [dict(row) for row in self._query("SELECT * FROM position_events ORDER BY created_at DESC LIMIT 100")]
 
     def query_ticks(self, symbol: str, start: str | None = None, end: str | None = None, limit: int = 1000) -> list[dict]:
-        query = "SELECT FROM ticks WHERE symbol = ?"
+        query = "SELECT * FROM ticks WHERE symbol = ?"
         params: list[Any] = [symbol]
         if start:
             query += " AND time >= ?"
@@ -320,19 +357,30 @@ class SQLiteStorageAdapter(IStorage):
         return [dict(row) for row in self._query(query, tuple(params))]
 
     def query_trades(self, start: str | None = None, end: str | None = None) -> list[dict]:
-        query = "SELECT FROM trades WHERE 1=1"
+        query = "SELECT * FROM trades WHERE 1=1"
         params: list[Any] = []
+
+        def _normalize_filter_value(raw: str, *, is_end: bool) -> str:
+            if (
+                len(raw) == 10
+                and raw[4] == "-"
+                and raw[7] == "-"
+                and "T" not in raw
+            ):
+                return f"{raw}T{'23:59:59.999999' if is_end else '00:00:00'}"
+            return raw
+
         if start:
             query += " AND closed_at >= ?"
-            params.append(start)
+            params.append(_normalize_filter_value(start, is_end=False))
         if end:
             query += " AND closed_at <= ?"
-            params.append(end)
+            params.append(_normalize_filter_value(end, is_end=True))
         query += " ORDER BY closed_at DESC"
         return [dict(row) for row in self._query(query, tuple(params))]
 
     def query_llm_decisions(self, symbol: str | None = None, start: str | None = None, end: str | None = None) -> list[dict]:
-        query = "SELECT FROM llm_decisions WHERE 1=1"
+        query = "SELECT * FROM llm_decisions WHERE 1=1"
         params: list[Any] = []
         if symbol:
             query += " AND symbol = ?"
@@ -347,7 +395,7 @@ class SQLiteStorageAdapter(IStorage):
         return [dict(row) for row in self._query(query, tuple(params))]
 
     def get_recent_trades(self, limit: int = 5) -> list[dict]:
-        return [dict(row) for row in self._query("SELECT FROM trades ORDER BY closed_at DESC LIMIT ?", (limit,))]
+        return [dict(row) for row in self._query("SELECT * FROM trades ORDER BY closed_at DESC LIMIT ?", (limit,))]
 
     def persist(self, key: str, value: str | None) -> None:
         if value is None:

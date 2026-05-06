@@ -8,6 +8,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.core.async_boundary import ensure_sync_adapter_result
+
 logger = logging.getLogger(__name__)
 
 
@@ -109,7 +111,9 @@ class LLMDecisionProcessor:
             return
 
         try:
-            storage.save_llm_decision(
+            ensure_sync_adapter_result(
+                "storage.save_llm_decision",
+                storage.save_llm_decision,
                 {
                     "symbol": symbol,
                     "direction": direction,
@@ -126,9 +130,9 @@ class LLMDecisionProcessor:
                     "delta": tick.delta,
                     "volume": tick.volume,
                     "profile_shape": profile_shape,
-                    "setup_type": setup_type.value if hasattr(setup_type, 'value') else str(setup_type),
+                    "setup_type": setup_type.value if hasattr(setup_type, "value") else str(setup_type),
                     "strategy_hint": strategy_hint,
-                }
+                },
             )
         except Exception:
             logger.warning("LLM decision persistence to storage failed", exc_info=True)

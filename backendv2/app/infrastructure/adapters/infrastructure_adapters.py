@@ -1,14 +1,31 @@
 """Infrastructure adapters for backendv2 - zero parity with existing backend."""
 from dataclasses import dataclass
-from typing import Optional, List, Protocol
+from typing import Optional, Protocol
 import asyncio
 import sqlite3
 from contextlib import contextmanager
+import os
 
 # Import domain models from backendv2
 from app.domain.trading.model.entities import Position
-from app.domain.trading.model.enums import Side, PositionStatus, CushionState
-from app.domain.shared.event.domain_events import PositionOpened, PositionClosed
+from app.domain.trading.model.enums import Side, PositionStatus
+
+
+_LEGACY_BINANCE_ENABLED = os.getenv("ENABLE_LEGACY_BINANCE_ADAPTERS", "").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+
+def _ensure_legacy_binance_enabled() -> None:
+    if _LEGACY_BINANCE_ENABLED:
+        return
+    raise NotImplementedError(
+        "Legacy Binance adapters are disabled by default. "
+        "Set ENABLE_LEGACY_BINANCE_ADAPTERS=true to opt into this shim."
+    )
 
 
 class IBroker(Protocol):
@@ -149,6 +166,7 @@ class BinanceAdapter:
     """Binance broker adapter."""
     
     def __init__(self, api_key: str, api_secret: str, testnet: bool = True):
+        _ensure_legacy_binance_enabled()
         self._api_key = api_key
         self._api_secret = api_secret
         self._testnet = testnet
@@ -156,6 +174,7 @@ class BinanceAdapter:
     
     async def place_order(self, symbol: str, side: str, qty: float, price: float) -> dict:
         """Place order via Binance API."""
+        _ensure_legacy_binance_enabled()
         # Placeholder - would use aiohttp for async HTTP
         return {
             "order_id": f"{symbol}_{asyncio.get_event_loop().time()}",
@@ -168,6 +187,7 @@ class BinanceAdapter:
     
     async def get_position(self, symbol: str) -> Optional[dict]:
         """Get position from Binance."""
+        _ensure_legacy_binance_enabled()
         return None  # Placeholder
 
 
@@ -175,10 +195,12 @@ class BinanceMarketDataAdapter:
     """Binance market data adapter."""
     
     def __init__(self, testnet: bool = True):
+        _ensure_legacy_binance_enabled()
         self._testnet = testnet
     
     async def get_ticker(self, symbol: str) -> dict:
         """Get ticker from Binance."""
+        _ensure_legacy_binance_enabled()
         return {
             "symbol": symbol,
             "price": 50000.0,
@@ -188,6 +210,7 @@ class BinanceMarketDataAdapter:
     
     async def get_orderbook(self, symbol: str, depth: int = 20) -> dict:
         """Get orderbook from Binance."""
+        _ensure_legacy_binance_enabled()
         return {
             "bids": [{"price": 49999.0 - i*0.5, "quantity": 1.0} for i in range(depth)],
             "asks": [{"price": 50001.0 + i*0.5, "quantity": 1.0} for i in range(depth)]
@@ -195,6 +218,7 @@ class BinanceMarketDataAdapter:
     
     async def stream_ticks(self, symbol: str):
         """Stream ticks via WebSocket."""
+        _ensure_legacy_binance_enabled()
         # Placeholder - would use websockets library
         while True:
             yield {"symbol": symbol, "price": 50000.0, "volume": 1.0}

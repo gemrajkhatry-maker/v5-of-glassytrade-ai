@@ -14,6 +14,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
+from app.core.async_boundary import ensure_sync_adapter_result
 
 logger = logging.getLogger(__name__)
 
@@ -139,11 +140,24 @@ class DBFallbackBuffer:
             item = self._buffer.popleft()
             try:
                 if item["key"] == "save_trade":
-                    storage.save_trade(item["data"])
+                    ensure_sync_adapter_result(
+                        "storage.save_trade",
+                        storage.save_trade,
+                        item["data"],
+                    )
                 elif item["key"] == "save_tick":
-                    storage.save_tick(item["data"].get("symbol", ""), item["data"])
+                    ensure_sync_adapter_result(
+                        "storage.save_tick",
+                        storage.save_tick,
+                        item["data"].get("symbol", ""),
+                        item["data"],
+                    )
                 elif item["key"] == "save_performance_snapshot":
-                    storage.save_performance_snapshot(item["data"])
+                    ensure_sync_adapter_result(
+                        "storage.save_performance_snapshot",
+                        storage.save_performance_snapshot,
+                        item["data"],
+                    )
                 flushed += 1
                 self._flush_successes += 1
             except (KeyError, TypeError):

@@ -6,7 +6,7 @@ Error contracts:
     - fetch_history(): returns [] for no data, raises for API failure
     - get_ltp(): returns 0.0 for no data, raises for API failure
     - fetch_order_book(): returns None for no depth, raises for API failure
-    - get_option_chain(): returns None by default (override for options support)
+    - get_option_chain(): must be implemented by option-capable adapters
     - stream_full(): async generator of dicts; raises on connection failure
 """
 
@@ -61,10 +61,12 @@ class IMarketData(ABC):
         """Stream 20-level market depth order book updates."""
         ...
 
+    @abstractmethod
     def get_option_chain(self, underlying: str, exchange: str = "NFO", expiry_index: int = 0):
-        """Fetch option chain. Override in adapters that support options."""
-        return None
+        """Fetch option chain. Implement in options-capable adapters."""
+        raise NotImplementedError
 
+    @abstractmethod
     def get_lot_size(self, symbol: str) -> int:
-        """Get the lot size for a specific symbol. Default 1 for equities."""
-        return 1
+        """Get the lot size for a specific symbol."""
+        raise NotImplementedError

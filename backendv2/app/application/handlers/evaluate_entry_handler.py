@@ -2,22 +2,8 @@
 from typing import Optional
 from app.application.commands.trading_commands import EvaluateEntry
 from app.domain.shared.event.domain_events import SignalGenerated
+from app.domain.shared.port.signal import ISignalService
 from app.infrastructure.messaging.event_bus import EventBus
-
-
-class ISignalService:
-    """Interface for signal generation service."""
-    def generate(
-        self,
-        phase1_result: dict,
-        phase2_result: dict,
-        phase3_result: dict,
-        absorptions: list,
-        current_price: float,
-        vwap: float
-    ) -> dict:
-        """Generate trading signal from analysis results."""
-        ...
 
 
 class EvaluateEntryHandler:

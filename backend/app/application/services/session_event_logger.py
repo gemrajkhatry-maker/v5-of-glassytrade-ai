@@ -13,6 +13,7 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.application.services.trade_journal import TradeJournal
 from app.application.services.experiment_context import build_experiment_context
 from app.domain.trading.models.utils import safe_side as _safe_side
@@ -52,8 +53,8 @@ class SessionEventLogger:
         event_time: str = "",
         **extra,
     ) -> None:
-        """Persist append-only lifecycle events for replay and audit.
-        
+        """Persist append-only lifecycle events for audit.
+
         Args:
             position_id: Position identifier
             symbol: Trading symbol
@@ -72,7 +73,11 @@ class SessionEventLogger:
                 "event_time": event_time,
             }
             payload.update(extra)
-            self._storage.save_position_event(payload)
+            ensure_sync_adapter_result(
+                "storage.save_position_event",
+                self._storage.save_position_event,
+                payload,
+            )
         except Exception:
             logger.debug("Failed to persist position event %s for %s", event_type, position_id, exc_info=True)
 
@@ -81,6 +86,7 @@ class SessionEventLogger:
         symbol: str,
         position: Position,
         signal: Signal,
+        tick_trace_id: str = "",
         agent_decision=None,
         amt: dict | None = None,
         **extra,
@@ -104,6 +110,7 @@ class SessionEventLogger:
         self._journal.log_entry(
             symbol=symbol,
             position_id=position.id,
+            tick_trace_id=tick_trace_id,
             side=_safe_side(position.side),
             entry_price=position.entry_price,
             stop_loss=signal.stop_loss,
@@ -125,6 +132,7 @@ class SessionEventLogger:
         self,
         symbol: str,
         position: Position,
+        tick_trace_id: str = "",
         time_in_trade: float = 0.0,
         mfe: float = 0.0,
         mae: float = 0.0,
@@ -147,6 +155,7 @@ class SessionEventLogger:
         self._journal.log_exit(
             symbol=symbol,
             position_id=position.id,
+            tick_trace_id=tick_trace_id,
             side=_safe_side(position.side),
             entry_price=position.entry_price,
             exit_price=position.exit_price or position.entry_price,
@@ -172,6 +181,7 @@ class SessionEventLogger:
         size_closed: float,
         size_remaining: float,
         realized_pnl: float,
+        tick_trace_id: str = "",
         **extra,
     ) -> None:
         """Log a partial exit.
@@ -191,6 +201,7 @@ class SessionEventLogger:
         self._journal.log_partial_exit(
             symbol=symbol,
             position_id=position_id,
+            tick_trace_id=tick_trace_id,
             side=side,
             entry_price=entry_price,
             exit_price=exit_price,
@@ -222,6 +233,7 @@ class SessionEventLogger:
         position: Position,
         pnl: float,
         time_in_trade_s: float,
+        tick_trace_id: str = "",
         reason: str = "",
         amt: dict | None = None,
     ) -> None:
@@ -229,6 +241,7 @@ class SessionEventLogger:
         self._journal.log_break_even_move(
             symbol=symbol,
             position_id=position.id,
+            tick_trace_id=tick_trace_id,
             side=_safe_side(position.side),
             entry_price=float(position.entry_price),
             stop_loss=float(position.stop_loss),

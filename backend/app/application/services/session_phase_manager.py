@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.shared.timezones import IST
 from app.shared.parsing import resolve_session_market
 from app.domain.trading.models.enums import Source
@@ -61,12 +62,16 @@ def check_session_phase(
                         event.symbol, float(realized_pnl), session.portfolio
                     )
                 
-                exit_coordinator.on_position_closed(event.symbol, None)
+                exit_coordinator.on_position_closed(event.symbol, pos, session=session)
                 lifecycle_handler.clear_partition_state(pos.id)
                 
                 if storage:
                     try:
-                        storage.delete_open_position(pos.id)
+                        ensure_sync_adapter_result(
+                            "storage.delete_open_position",
+                            storage.delete_open_position,
+                            pos.id,
+                        )
                     except Exception as e:
                         log.error(
                             "Failed to delete open position %s: %s", pos.id, e
@@ -150,7 +155,11 @@ def save_session_profile(
             ],
             "is_underlying": True,
         }
-        storage.save_session_profile(profile_data)
+        ensure_sync_adapter_result(
+            "storage.save_session_profile",
+            storage.save_session_profile,
+            profile_data,
+        )
         log.info("Saved session profile for %s on %s", symbol, session_date)
     except Exception as e:
         log.error("Failed to save session profile: %s", e, exc_info=True)

@@ -358,8 +358,6 @@ function App() {
                             portfolio={activeInstrument.portfolio}
                             riskState={activeInstrument.riskState}
                             agentDecision={activeInstrument.agentDecision}
-                            aggressionBlocked={activeInstrument.aggressionBlocked}
-                            gateScore={activeInstrument.gateScore}
                             llmHistory={activeInstrument.llmHistory}
                             orderBook={activeInstrument.orderBook}
                             depth20Active={activeInstrument.depth20Active}

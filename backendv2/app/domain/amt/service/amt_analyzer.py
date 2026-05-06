@@ -97,7 +97,7 @@ class AMTAnalyzer:
             return AMTResult()
 
         # Stage 1: Profile Building
-        vp = self._analyze_profile(bars)
+        vp, vwap_data = self._analyze_profile(bars)
         lvns, hvns = self._analyze_lvn_hvn(vp)
 
         # Stage 2: Market State
@@ -124,20 +124,17 @@ class AMTAnalyzer:
             lvns=tuple(l.price for l in lvns),
             hvns=tuple(h.price for h in hvns),
             aggression=order_flow.get("aggression", 0.0),
-            aggression_score=order_flow.get("aggression_score", 0.0),
-            aggression_confidence=order_flow.get("aggression_confidence", "LOW"),
             setup=market_state_result.get("setup"),
             profile_shape=profile_shape,
             cvd_slope=order_flow.get("cvd_slope", 0.0),
             cvd_divergence=order_flow.get("cvd_divergence", ""),
-            session_vwap=order_flow.get("session_vwap", 0.0),
-            vwap_upper_1=vp.vwap_upper_1,
-            vwap_lower_1=vp.vwap_lower_1,
-            vwap_upper_2=vp.vwap_upper_2,
-            vwap_lower_2=vp.vwap_lower_2,
+            session_vwap=vwap_data.get("vwap", 0.0),
+            vwap_upper_1=vwap_data.get("upper_1", 0.0),
+            vwap_lower_1=vwap_data.get("lower_1", 0.0),
+            vwap_upper_2=vwap_data.get("upper_2", 0.0),
+            vwap_lower_2=vwap_data.get("lower_2", 0.0),
             balance_ratio=market_state_result.get("balance_ratio", 0.0),
             has_displacement=market_state_result.get("has_displacement", False),
-            has_acceptance=market_state_result.get("has_acceptance", False),
             ib_high=session_context.get("ib_high", 0.0),
             ib_low=session_context.get("ib_low", 0.0),
             ib_complete=session_context.get("ib_complete", False),
@@ -178,18 +175,21 @@ class AMTAnalyzer:
     # Stage 1: Profile Building
     # ------------------------------------------------------------------
 
-    def _analyze_profile(self, bars: list[Bar]) -> VolumeProfile:
-        """Build volume profile from bars."""
+    def _analyze_profile(self, bars: list[Bar]) -> tuple[VolumeProfile, dict]:
+        """Build volume profile from bars. Returns (vp, vwap_data) where vwap_data
+        holds the VWAP bands that cannot be stored on the frozen VolumeProfile."""
         from app.domain.amt.service.volume_profile import build_volume_profile, calculate_vwap
         bucket_size = self._estimate_bucket_size(bars)
         vp = build_volume_profile(bars, bucket_size)
         vwap, upper1, lower1, upper2, lower2 = calculate_vwap(bars)
-        vp.vwap = vwap
-        vp.vwap_upper_1 = upper1
-        vp.vwap_lower_1 = lower1
-        vp.vwap_upper_2 = upper2
-        vp.vwap_lower_2 = lower2
-        return vp
+        vwap_data = {
+            "vwap": vwap,
+            "upper_1": upper1,
+            "lower_1": lower1,
+            "upper_2": upper2,
+            "lower_2": lower2,
+        }
+        return vp, vwap_data
 
     def _analyze_lvn_hvn(self, vp: VolumeProfile) -> tuple[list, list]:
         """Detect LVN/HVN from volume profile."""
@@ -205,15 +205,15 @@ class AMTAnalyzer:
         if not bars:
             return {"state": "BALANCED"}
 
-        has_displacement = self._detect_displacement(bars, vp)
+        has_displacement = self._detect_displacement(bars) is not None
         has_acceptance = self._detect_acceptance(bars, vp)
         balance_ratio = self._calculate_balance_ratio(bars, vp)
 
-        state = self._detect_market_state(
-            bars[-1]["close"] if bars else 0,
-            vp.poc, vp.vah, vp.val,
-            has_displacement, has_acceptance, balance_ratio,
+        ms_result = self._detect_market_state(
+            price=bars[-1]["close"] if bars else 0,
+            vp_levels={"poc": vp.poc, "vah": vp.vah, "val": vp.val},
         )
+        state = ms_result.state.value if hasattr(ms_result, "state") else str(ms_result)
 
         return {
             "state": state,
@@ -230,7 +230,8 @@ class AMTAnalyzer:
 
     def _analyze_profile_shape(self, vp: VolumeProfile, bars: list[Bar]) -> str:
         """Classify profile shape (P/b/D/B)."""
-        return self._classify_shape(vp, bars)
+        result = self._classify_shape(list(vp.levels))
+        return result.value if hasattr(result, "value") else str(result)
 
     # ------------------------------------------------------------------
     # Stage 4: Session Context
@@ -240,7 +241,14 @@ class AMTAnalyzer:
         self, bars: list[Bar], prior_profile: dict | None
     ) -> dict[str, Any]:
         """Analyze session context: IB, gap, day type, opening type."""
-        result = self._ib_engine.analyze(bars)
+        from app.domain.amt.service.initial_balance_engine import calculate_initial_balance
+        ib = calculate_initial_balance(bars)
+        result: dict[str, Any] = {
+            "ib_high": ib.high,
+            "ib_low": ib.low,
+            "ib_complete": ib.complete,
+            "opening_bias": "",
+        }
 
         if prior_profile:
             gap_type = self._classify_gap(bars, prior_profile)
@@ -265,7 +273,7 @@ class AMTAnalyzer:
 
         from app.domain.amt.service.mtf_analyzer import MultiTimeframeAMTAnalyzer
         mtf = MultiTimeframeAMTAnalyzer()
-        return mtf.analyze_alignment(daily_bars, hourly_bars)
+        return mtf.analyze(daily_bars, hourly_bars)
 
     # ------------------------------------------------------------------
     # Stage 6: Order Flow
@@ -273,28 +281,29 @@ class AMTAnalyzer:
 
     def _analyze_order_flow(self, bars: list[Bar], vp: VolumeProfile) -> dict[str, Any]:
         """Analyze order flow: CVD, aggression, absorption, breaks."""
-        result = {}
+        from app.domain.amt.service.orderflow_detectors import detect_absorptions, calculate_ofi
+        result: dict[str, Any] = {}
 
         # CVD tracking
         cvd_snapshot = self._update_cvd(bars)
         result["cvd_slope"] = cvd_snapshot.get("slope", 0.0)
         result["cvd_divergence"] = cvd_snapshot.get("divergence_type", "")
 
-        # Aggression scoring
-        aggression = self._aggression_scorer.score(bars, vp)
-        result["aggression"] = aggression.get("score", 0.0)
-        result["aggression_score"] = aggression.get("score", 0.0)
-        result["aggression_confidence"] = aggression.get("confidence", "LOW")
+        # Aggression scoring — use component-free call with defaults
+        aggression = self._aggression_scorer.score()
+        result["aggression"] = aggression.score
+        result["aggression_score"] = aggression.score
+        result["aggression_confidence"] = aggression.confidence
 
-        # Absorption detection
-        absorptions = self._absorption_detector.detect(bars, vp)
+        # Absorption detection — use standalone function
+        absorptions = detect_absorptions(bars)
         if absorptions:
             last_abs = absorptions[-1]
-            result["absorption_side"] = last_abs.get("side", "")
-            result["absorption_range_ratio"] = last_abs.get("range_ratio", 0.0)
-            result["absorption_vol_ratio"] = last_abs.get("vol_ratio", 0.0)
+            result["absorption_side"] = getattr(last_abs, "side", "")
+            result["absorption_range_ratio"] = 0.0
+            result["absorption_vol_ratio"] = 0.0
 
-        # Acceptance/Rejection
+        # Acceptance/Rejection — analyze(bars, vp) returns dict
         ar_result = self._ar_engine.analyze(bars, vp)
         result["acceptance_above"] = ar_result.get("accepted_above", False)
         result["acceptance_below"] = ar_result.get("accepted_below", False)
@@ -302,10 +311,11 @@ class AMTAnalyzer:
         result["rejection_at_low"] = ar_result.get("rejected_at_low", False)
         result["liquidity_sweep"] = ar_result.get("liquidity_sweep", "")
 
-        # Break detection
-        break_result = self._detect_break(bars, vp)
-        result["break_direction"] = break_result.get("direction", "")
-        result["break_type"] = break_result.get("type", "")
+        # Break detection — detect_break(bars, vp_levels_dict) returns BreakResult dataclass
+        vp_levels = {"poc": vp.poc, "vah": vp.vah, "val": vp.val}
+        break_result = self._detect_break(bars, vp_levels)
+        result["break_direction"] = getattr(break_result, "direction", "")
+        result["break_type"] = getattr(break_result, "type", "")
 
         # POC migration
         poc_signal = self._analyze_poc_migration(bars, vp)
@@ -315,15 +325,22 @@ class AMTAnalyzer:
         # LVN play
         result["lvn_play"] = self._detect_lvn_play(bars, vp)
 
-        # OFI
-        from app.domain.amt.service.orderflow_detectors import OFICalculator
-        ofi_calc = OFICalculator()
-        result["ofi"] = ofi_calc.calculate(bars)
+        # OFI — compute from last bar using standalone calculate_ofi
+        result["ofi"] = calculate_ofi(bars[-1]) if bars else 0.0
 
-        # Drive tracker
-        drive_state = self._drive_tracker.update(bars, vp)
-        result["drive_number"] = drive_state.get("drive_number", 0)
-        result["drive_entry_valid"] = drive_state.get("drive_entry_valid", False)
+        # Drive tracker — update(price, level, direction) returns DriveState dataclass
+        if bars:
+            price = bars[-1].get("close", 0.0)
+            drive_state = self._drive_tracker.update(
+                price=float(price),
+                level=float(vp.poc),
+                direction="UP" if float(price) >= float(vp.poc) else "DOWN",
+            )
+            result["drive_number"] = drive_state.drive_number
+            result["drive_entry_valid"] = not drive_state.is_exhausted
+        else:
+            result["drive_number"] = 0
+            result["drive_entry_valid"] = False
 
         return result
 
@@ -413,8 +430,8 @@ class AMTAnalyzer:
     def _detect_lvn_play(self, bars: list[Bar], vp: VolumeProfile) -> dict | None:
         """Detect LVN play pattern."""
         from app.domain.amt.service.lvn_detector import detect_lvn_play
-        lvns = [l for l in self._detect_lvn_hvn(vp) if getattr(l, "node_type", "") == "LVN"]
-        return detect_lvn_play(vp.levels, bars, tuple(lvns))
+        lvns_raw, _ = self._detect_lvn_hvn(vp.levels)
+        return detect_lvn_play(vp.levels, bars, tuple(lvns_raw))
 
     def _detect_acceptance(self, bars: list[Bar], vp: VolumeProfile) -> bool:
         """Detect acceptance (price staying in value area)."""

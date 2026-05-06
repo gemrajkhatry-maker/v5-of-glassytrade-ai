@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Any
 
 from app.runtime.pipeline import StageMetrics
 from app.runtime.pipeline.events import PositionEvent, OrderRequest, OrderStatusEvent
-from app.infrastructure.adapters.infrastructure_adapters import IBroker
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class ExecutionPipeline:
     """Submit orders to broker adapters and emit execution events."""
 
-    def __init__(self, broker: IBroker | None = None):
+    def __init__(self, broker: Any | None = None):
         self._broker = broker
         self._metrics = StageMetrics(stage_name="ExecutionPipeline")
 

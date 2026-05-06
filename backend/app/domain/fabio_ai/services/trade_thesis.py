@@ -18,6 +18,22 @@ from app.domain.trading.models.enums import SetupType
 from app.domain.trading.models.value_objects import AMTResult, OHLC
 
 
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _take_level_list(value: Any) -> list[float]:
+    """Return levels from iterable contracts; return empty list on invalid/missing."""
+    try:
+        raw_values = list(value) if value is not None else []
+    except TypeError:
+        return []
+    return [_to_float(level, default=0.0) for level in raw_values]
+
+
 @dataclass(frozen=True)
 class TradeThesis:
     market_state: str
@@ -63,28 +79,30 @@ def infer_location(price: float, amt_result: AMTResult) -> tuple[str, float]:
     If no specific level found, use VA boundary as default.
     """
     px = float(price)
-    va_range = abs(amt_result.value_area_high - amt_result.value_area_low)
+    value_area_high = _to_float(amt_result.value_area_high, default=0.0)
+    value_area_low = _to_float(amt_result.value_area_low, default=0.0)
+    va_range = abs(value_area_high - value_area_low)
     threshold = (
         min(max(va_range * 0.35, px * 0.0025), px * 0.015) if px > 0 else 0.0
     )
     levels: list[tuple[str, float]] = [
-        ("POC", amt_result.poc),
-        ("VAH", amt_result.value_area_high),
-        ("VAL", amt_result.value_area_low),
-        ("PRIOR_POC", amt_result.prior_poc),
-        ("PRIOR_VAH", amt_result.prior_vah),
-        ("PRIOR_VAL", amt_result.prior_val),
-        ("IB_HIGH", amt_result.ib_high),
-        ("IB_LOW", amt_result.ib_low),
-        ("DEV_POC", amt_result.dev_poc),
-        ("DEV_VAH", amt_result.dev_vah),
-        ("DEV_VAL", amt_result.dev_val),
-        ("LEG_POC", amt_result.leg_poc),
-        ("LEG_VAH", amt_result.leg_vah),
-        ("LEG_VAL", amt_result.leg_val),
+        ("POC", _to_float(amt_result.poc, default=0.0)),
+        ("VAH", value_area_high),
+        ("VAL", value_area_low),
+        ("PRIOR_POC", _to_float(amt_result.prior_poc, default=0.0)),
+        ("PRIOR_VAH", _to_float(amt_result.prior_vah, default=0.0)),
+        ("PRIOR_VAL", _to_float(amt_result.prior_val, default=0.0)),
+        ("IB_HIGH", _to_float(amt_result.ib_high, default=0.0)),
+        ("IB_LOW", _to_float(amt_result.ib_low, default=0.0)),
+        ("DEV_POC", _to_float(amt_result.dev_poc, default=0.0)),
+        ("DEV_VAH", _to_float(amt_result.dev_vah, default=0.0)),
+        ("DEV_VAL", _to_float(amt_result.dev_val, default=0.0)),
+        ("LEG_POC", _to_float(amt_result.leg_poc, default=0.0)),
+        ("LEG_VAH", _to_float(amt_result.leg_vah, default=0.0)),
+        ("LEG_VAL", _to_float(amt_result.leg_val, default=0.0)),
     ]
-    levels.extend([("LVN", level) for level in amt_result.lvns[:5]])
-    levels.extend([("HVN", level) for level in amt_result.hvns[:5]])
+    levels.extend([("LVN", level) for level in _take_level_list(amt_result.lvns)[:5]])
+    levels.extend([("HVN", level) for level in _take_level_list(amt_result.hvns)[:5]])
     
     location_type, location_level = _nearest_level(levels, px, threshold)
     
@@ -92,10 +110,10 @@ def infer_location(price: float, amt_result: AMTResult) -> tuple[str, float]:
     # This ensures we always have a valid location_type for thesis validation
     if location_type == "MID_RANGE" or location_level <= 0:
         # Use nearest VA boundary
-        if px > (amt_result.value_area_high + amt_result.value_area_low) / 2:
-            return "VAH", amt_result.value_area_high
+        if px > (value_area_high + value_area_low) / 2:
+            return "VAH", value_area_high
         else:
-            return "VAL", amt_result.value_area_low
+            return "VAL", value_area_low
     
     return location_type, location_level
 
@@ -106,7 +124,9 @@ def infer_aggression_trigger(tick: OHLC, amt_result: AMTResult) -> str:
     FABIO: "Aggression is the trigger" — we need SOME form of aggression signal.
     Never return empty string (would cause thesis validation to fail).
     """
-    delta_ratio = abs(tick.delta) / tick.volume if tick.volume > 0 else 0.0
+    tick_volume = _to_float(getattr(tick, "volume", 0), default=0.0)
+    tick_delta = _to_float(getattr(tick, "delta", 0), default=0.0)
+    delta_ratio = abs(tick_delta) / tick_volume if tick_volume > 0 else 0.0
     
     # High-confidence triggers (specific setups)
     if amt_result.liquidity_sweep:
@@ -127,13 +147,15 @@ def infer_aggression_trigger(tick: OHLC, amt_result: AMTResult) -> str:
         return "DELTA_PRESSURE"
     
     # Low-confidence fallbacks (always return SOMETHING)
-    if tick.volume > 100:
+    if tick_volume > 100:
         return "VOLUME_PRESENT"
-    if abs(tick.delta) > 0:
+    if abs(tick_delta) > 0:
         return "DELTA_ACTIVITY"
     
     # Final fallback — market is moving, that's aggression
-    if tick.high != tick.low:
+    tick_high = _to_float(getattr(tick, "high", 0), default=0.0)
+    tick_low = _to_float(getattr(tick, "low", 0), default=0.0)
+    if tick_high != tick_low:
         return "PRICE_MOVEMENT"
     
     return "MARKET_ACTIVE"  # Never return empty string

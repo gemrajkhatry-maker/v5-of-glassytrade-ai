@@ -13,10 +13,12 @@ that uses Volume Profile levels to find high-conviction entry zones.
 
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass, field
 from typing import FrozenSet
 
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.domain.trading.models.value_objects import OHLC
 
 logger = logging.getLogger(__name__)
@@ -248,13 +250,25 @@ class VPContractSelector:
             # Run async fetch_history in sync context
             loop = asyncio.new_event_loop()
             try:
-                data = loop.run_until_complete(
-                    self._broker.fetch_history(
+                broker_fetch = self._broker.fetch_history
+                if inspect.iscoroutinefunction(broker_fetch):
+                    data = loop.run_until_complete(
+                        broker_fetch(
+                            symbol=symbol,
+                            interval="5",
+                            limit=200,
+                        )
+                    )
+                else:
+                    data = broker_fetch(
                         symbol=symbol,
                         interval="5",
                         limit=200,
                     )
-                )
+                    if inspect.isawaitable(data):
+                        raise RuntimeError(
+                            "broker.fetch_history returned awaitable in sync context"
+                        )
             finally:
                 loop.close()
 
@@ -270,7 +284,7 @@ class VPContractSelector:
         """Fetch current price for an index."""
         try:
             # Try to get from broker's latest LTP (handled by adapter)
-            return self._broker.get_ltp(index)
+            return ensure_sync_adapter_result("broker.get_ltp", self._broker.get_ltp, index)
         except Exception:
             return 0.0
 

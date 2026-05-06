@@ -5,7 +5,8 @@ from enum import Enum
 from datetime import datetime
 import asyncio
 
-from app.core.core_components import Event, EventStore, FeatureFlags, Feature
+from app.core.event_store import Event, EventStore
+from app.core.feature_flags import FeatureFlags, Feature
 
 
 class AlertType(Enum):

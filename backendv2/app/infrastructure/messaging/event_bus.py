@@ -131,7 +131,3 @@ class EventBus:
         self._seen_event_ids.clear()
         self._event_history.clear()
         self._error_counts.clear()
-    
-    def clear_seen_ids(self) -> None:
-        """Clear the seen event IDs cache (for testing)."""
-        self._seen_event_ids.clear()

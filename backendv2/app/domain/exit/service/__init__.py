@@ -7,6 +7,7 @@ from app.domain.exit.service.partition_exit_manager import PartitionExitManager 
 from app.domain.exit.service.pyramid_manager import PyramidManager
 from app.domain.exit.service.position_sizer import PositionSizer, PositionSize
 from app.domain.exit.service.structural_stop_engine import compute_structural_stop
+from app.domain.exit.service.breakeven_engine import BreakevenEngine, BreakevenResult
 
 __all__ = [
     "ExitEngine",
@@ -21,4 +22,6 @@ __all__ = [
     "PositionSizer",
     "PositionSize",
     "compute_structural_stop",
+    "BreakevenEngine",
+    "BreakevenResult",
 ]

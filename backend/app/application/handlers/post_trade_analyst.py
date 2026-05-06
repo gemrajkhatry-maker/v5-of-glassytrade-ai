@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from app.core.async_boundary import ensure_sync_adapter_result
+
 if TYPE_CHECKING:
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
     from app.domain.ports.storage import IStorage
@@ -241,7 +243,9 @@ class PostTradeAnalyst:
             # Store result for learning system
             if self._storage:
                 try:
-                    self._storage.kv_set(
+                    ensure_sync_adapter_result(
+                        "storage.kv_set",
+                        self._storage.kv_set,
                         f"post_trade:{result.symbol}",
                         {
                             "quality_score": result.quality_score,

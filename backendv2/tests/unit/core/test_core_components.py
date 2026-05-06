@@ -1,10 +1,14 @@
-"""Tests for core infrastructure components."""
+"""Tests for core infrastructure components.
+
+Note: These tests now import from extracted modules.
+Kept for backward compatibility verification.
+"""
 import pytest
 import asyncio
-from app.core.core_components import (
-    CircuitBreaker, CircuitBreakerConfig, CircuitState,
-    EventStore, Event, MetricsRegistry, FeatureFlags, Feature
-)
+from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig, CircuitState
+from app.core.event_store import EventStore, Event
+from app.core.metrics import MetricsRegistry
+from app.core.feature_flags import FeatureFlags, Feature
 
 
 class TestCircuitBreaker:

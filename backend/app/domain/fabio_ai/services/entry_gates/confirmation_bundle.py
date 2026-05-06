@@ -23,6 +23,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _to_float(value, default: float | None = 0.0) -> float | None:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def check_confirmation_bundle(data: list, tick: OHLC, order_book=None) -> bool:
     """Confirmation Bundle (2/3): Volume Impulse + Delta Pressure + Spread Tightness.
 
@@ -33,9 +42,17 @@ def check_confirmation_bundle(data: list, tick: OHLC, order_book=None) -> bool:
         return False
 
     alpha = 2.0 / 21  # EMA(20)
-    ema_vol = data[-20].volume
-    for d in data[-19:]:
-        ema_vol = alpha * d.volume + (1.0 - alpha) * ema_vol
+    history = data[-20:]
+    vol_values: list[float] = [
+        _to_float(getattr(d, "volume", None), default=None) for d in history
+    ]
+    vol_values = [v for v in vol_values if v is not None]
+    if len(vol_values) < 2:
+        return False
+
+    ema_vol = vol_values[0]
+    for v in vol_values[1:]:
+        ema_vol = alpha * v + (1.0 - alpha) * ema_vol
 
     # FIX #7: Time-aware volume threshold for MCX afternoon lull (13:00-17:00 IST)
     multiplier = 1.5
@@ -51,16 +68,21 @@ def check_confirmation_bundle(data: list, tick: OHLC, order_book=None) -> bool:
     except (ValueError, TypeError):
         pass  # MCX lull detection failure — default multiplier used
 
-    vol_impulse = tick.volume > (ema_vol * multiplier)
+    tick_volume = _to_float(getattr(tick, "volume", 0), default=0.0)
+    tick_delta = _to_float(getattr(tick, "delta", 0), default=0.0)
+    if tick_volume <= 0:
+        return False
+
+    vol_impulse = tick_volume > (ema_vol * multiplier)
 
     if not vol_impulse:
         logger.debug(
-            "Confirmation bundle BLOCKED: no volume impulse (vol=%.0f, ema=%.0f, mult=%.1f)",
-            tick.volume, ema_vol, multiplier,
+        "Confirmation bundle BLOCKED: no volume impulse (vol=%.0f, ema=%.0f, mult=%.1f)",
+            tick_volume, ema_vol, multiplier,
         )
         return False
 
-    delta_ratio = abs(tick.delta) / tick.volume if tick.volume > 0 else 0
+    delta_ratio = abs(tick_delta) / tick_volume if tick_volume > 0 else 0.0
     delta_pressure = delta_ratio > 0.15
 
     spread_tight = False
@@ -80,7 +102,7 @@ def check_confirmation_bundle(data: list, tick: OHLC, order_book=None) -> bool:
     logger.debug(
         "Confirmation bundle: vol_impulse=%s (vol=%.0f ema=%.0f), "
         "delta_pressure=%s (ratio=%.3f), spread_tight=%s -> %d/3",
-        vol_impulse, tick.volume, ema_vol,
+        vol_impulse, tick_volume, ema_vol,
         delta_pressure, delta_ratio, spread_tight, score,
     )
     return score >= 2
@@ -92,30 +114,43 @@ def check_momentum_fade(data: list, tick: OHLC, direction: str) -> bool:
     Fabio Rule: Do not short a 2.5 sigma bullish impulse on the first touch
     if it has no meaningful rejection wick. (Same for long on bearish impulse).
     """
-    if not data or len(data) < 20 or tick.volume <= 0:
+    if not data or len(data) < 20 or _to_float(getattr(tick, "volume", 0), default=0.0) <= 0:
         return False
 
     alpha = 2.0 / 21  # EMA(20)
-    ema_vol = data[-20].volume
-    for d in data[-19:]:
-        ema_vol = alpha * d.volume + (1.0 - alpha) * ema_vol
+    history = data[-20:]
+    vol_values = [
+        _to_float(getattr(d, "volume", None), default=None) for d in history
+    ]
+    vol_values = [v for v in vol_values if v is not None]
+    if len(vol_values) < 2:
+        return False
+    ema_vol = vol_values[0]
+    for v in vol_values[1:]:
+        ema_vol = alpha * v + (1.0 - alpha) * ema_vol
 
     # Is it a massive volume spike?
-    if tick.volume < (ema_vol * 2.5):
+    tick_volume = _to_float(getattr(tick, "volume", 0), default=0.0)
+    if tick_volume < (ema_vol * 2.5):
         return False
 
-    body_size = calc_body(tick.open, tick.high, tick.low, tick.close)
-    candle_range = tick.high - tick.low
+    open_price = _to_float(getattr(tick, "open", 0.0), default=0.0)
+    high = _to_float(getattr(tick, "high", 0.0), default=0.0)
+    low = _to_float(getattr(tick, "low", 0.0), default=0.0)
+    close = _to_float(getattr(tick, "close", 0.0), default=0.0)
+
+    body_size = calc_body(open_price, high, low, close)
+    candle_range = high - low
 
     # Must be a strong directional candle (body is large part of range)
     if candle_range <= 0 or body_size < (candle_range * 0.70):
         return False
 
-    upper_wick = tick.high - max(tick.open, tick.close)
-    lower_wick = min(tick.open, tick.close) - tick.low
+    upper_wick = high - max(open_price, close)
+    lower_wick = min(open_price, close) - low
 
     # Block SHORT entries against strong BULLISH momentum
-    if direction == "SHORT" and tick.close > tick.open:
+    if direction == "SHORT" and close > open_price:
         if upper_wick < (body_size * 0.3):
             logger.warning(
                 "BLOCKED: Attempting to SHORT into 2.5σ bullish momentum without rejection!"
@@ -123,7 +158,7 @@ def check_momentum_fade(data: list, tick: OHLC, direction: str) -> bool:
             return True
 
     # Block LONG entries against strong BEARISH momentum
-    if direction == "LONG" and tick.close < tick.open:
+    if direction == "LONG" and close < open_price:
         if lower_wick < (body_size * 0.3):
             logger.warning(
                 "BLOCKED: Attempting to LONG into 2.5σ bearish momentum without rejection!"

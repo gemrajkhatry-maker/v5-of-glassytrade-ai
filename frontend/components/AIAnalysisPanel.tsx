@@ -4,83 +4,12 @@ import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Setting
 import { EquityPanel, RiskStateDisplay, ModelIOPanel, DecisionHistoryPanel } from './ai';
 import { sanitizeLlmText, sanitizeRationale, extractDecisionText } from '../utils/textSanitizer';
 
-type ParticipantBadge = { text: string; classes: string } | null;
-
-function participantLabelFromRecentExit(trade: any): ParticipantBadge {
-    const thesis = (trade?.metadata?.trade_thesis || {}) as {
-        setup_family?: string;
-        aggression_trigger?: string;
-    };
-    const directSetupFamily = (trade?.thesis_setup_family || '').toLowerCase?.() || '';
-    const directTrigger = (trade?.thesis_aggression_trigger || '').toLowerCase?.() || '';
-    const setupFamily = directSetupFamily || (thesis.setup_family || '').toLowerCase();
-    const trigger = directTrigger || (thesis.aggression_trigger || '').toLowerCase();
-
-    if (setupFamily === 'imbalance_continuation') {
-        return { text: 'INITIATIVE ↑', classes: 'bg-emerald-400/20 text-emerald-300' };
-    }
-    if (setupFamily === 'return_to_value') {
-        return { text: 'RESPONSIVE ↓', classes: 'bg-blue-400/20 text-blue-300' };
-    }
-
-    if (
-        trigger.includes('break_')
-        || trigger.includes('cvd')
-        || trigger.includes('expansion')
-        || trigger.includes('initiative')
-    ) {
-        return { text: 'INITIATIVE ↑', classes: 'bg-emerald-400/20 text-emerald-300' };
-    }
-    if (
-        trigger.includes('responsive')
-        || trigger.includes('neutral')
-        || trigger.includes('volume_present')
-        || trigger.includes('price_movement')
-    ) {
-        return { text: 'RESPONSIVE ↓', classes: 'bg-blue-400/20 text-blue-300' };
-    }
-
-    return null;
-}
-
-function normalizeRecentExitReason(closeReason: string, pnl: number): string {
-    if (!closeReason) return '-';
-    if (pnl < 0 && (closeReason === 'TAKE_PROFIT' || closeReason === 'PARTIAL_TAKE_PROFIT')) {
-        return 'ADVERSE_EXIT';
-    }
-    if (closeReason === 'BREAK_EVEN_TRIGGERED') return 'BE MOVE';
-    return closeReason;
-}
-
-function recentExitReasonClass(reason: string): string {
-    return reason === 'ADVERSE_EXIT'
-        ? 'bg-rose-500/20 text-rose-300'
-        : reason === 'TAKE_PROFIT' || reason === 'PARTIAL_TAKE_PROFIT'
-            ? 'bg-green-500/20 text-green-400'
-            : reason === 'STOP_LOSS'
-                ? 'bg-red-500/20 text-red-400'
-                : reason === 'SCRATCH'
-                    ? 'bg-yellow-500/20 text-yellow-400'
-                    : reason === 'TRAILING_STOP'
-                        ? 'bg-blue-500/20 text-blue-400'
-                        : reason === 'TIME_STOP'
-                            ? 'bg-purple-500/20 text-purple-400'
-                            : reason === 'BE MOVE'
-                                ? 'bg-yellow-500/20 text-yellow-300'
-                                : 'bg-white/10 text-white/40';
-}
-
 interface AIAnalysisPanelProps {
     analysis: GenAIAnalysis | null;
     amtResult: AMTAnalysis | null;
     portfolio: Portfolio;
     riskState?: RiskState | null;
     agentDecision?: AgentDecision | null;
-    aggressionBlocked?: boolean;
-    gateScore?: {
-        passed: number;
-        total: number;
-    };
     llmHistory?: LLMHistoryEntry[];
     orderBook?: OrderBook | null;
     depth20Active?: boolean;
@@ -91,7 +20,7 @@ interface AIAnalysisPanelProps {
     data?: any[];
 }
 
-const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, aggressionBlocked, gateScore, llmHistory = [], orderBook, depth20Active, overseerAction, overseerReason, symbol, underlyingPrice, data = [] }) => {
+const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, depth20Active, overseerAction, overseerReason, symbol, underlyingPrice, data = [] }) => {
     // Determine current best price proxy (LTP) with 3-tier fallback chain.
     // Tier 1: Order book mid-price (most accurate, requires depth data)
     // Tier 2: Last close price from history
@@ -150,60 +79,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
 
     // Per-symbol delta score from backend
     const deltaScore = amtResult?.deltaNormalizedOption ?? 0;
-    const isAggressionBlocked = aggressionBlocked === true;
-
-    const conflictState = useMemo(() => {
-        const delta = amtResult?.deltaNormalizedOption ?? 0;
-        const cvd = amtResult?.cvdSlope ?? 0;
-        const ofi = amtResult?.ofi ?? 0;
-        const ibBreak = amtResult?.breakDirection ?? '';
-        const bullCount = (delta > 0.02 ? 1 : 0) + (cvd > 0.01 ? 1 : 0) + (ofi > 0.1 ? 1 : 0);
-        const bearCount = (delta < -0.02 ? 1 : 0) + (cvd < -0.01 ? 1 : 0) + (ofi < -0.1 ? 1 : 0);
-        const cvdBullish = cvd > 0.01;
-        const cvdBearish = cvd < -0.01;
-        const ibBullish = ibBreak === 'UP';
-        const ibBearish = ibBreak === 'DOWN';
-        const cvdIbDivergence = (cvdBullish && ibBearish) || (cvdBearish && ibBullish);
-        const hasConflict = (bullCount > 0 && bearCount > 0) || cvdIbDivergence;
-        const hasConflictFromDivergence = cvdIbDivergence && !(bullCount > 0 && bearCount > 0);
-        const conflictMessage = hasConflictFromDivergence
-            ? `CVD/IB divergence — CVD ${cvdBullish ? 'Bullish' : 'Bearish'} vs IB ${ibBullish ? 'UP' : 'DOWN'}`
-            : hasConflict
-                ? 'Delta/CVD/OFI Divergence'
-                : '';
-        return {
-            delta,
-            cvd,
-            ofi,
-            bullCount,
-            bearCount,
-            hasConflict,
-            cvdIbDivergence,
-            hasConflictFromDivergence,
-            conflictMessage,
-        };
-    }, [amtResult?.deltaNormalizedOption, amtResult?.cvdSlope, amtResult?.ofi, amtResult?.breakDirection]);
-
-    const playbookChecks = useMemo(() => {
-        const sigmaV = amtResult?.vwapDeviationSigmas || 0;
-        const isExtremeMove = Math.abs(sigmaV) >= 3.0;
-        const tickSize = amtResult?.tickSize || 0.05;
-        const distThreshold = 5 * tickSize;
-        const locationTarget = currentLtp > (amtResult?.sessionVwap || 0)
-            ? (amtResult?.valueAreaHigh || 0)
-            : (amtResult?.valueAreaLow || 0);
-        const locationPass = currentLtp > 0 && locationTarget > 0
-            && (Math.abs(currentLtp - locationTarget) < distThreshold || isExtremeMove);
-        const aggressionPass = !isAggressionBlocked && Math.abs(aggScore) > 0.02;
-        const timingPass = Boolean(agentDecision?.timing === 'ENTER_NOW');
-        const statePass = (amtResult?.marketState || displayAnalysis.marketState || 'BALANCED') !== 'DEAD';
-        return [
-            { label: 'State', passed: statePass, detail: amtResult?.marketState || displayAnalysis.marketState || 'BALANCED' },
-            { label: 'Location', passed: locationPass, detail: currentLtp > 0 && locationTarget > 0 ? `${locationTarget.toFixed(2)}` : 'Waiting' },
-            { label: 'Aggression', passed: aggressionPass, detail: isAggressionBlocked ? 'Blocked' : (aggScore.toFixed(2) || '0.00') },
-            { label: 'Timing', passed: timingPass, detail: agentDecision?.timing || 'WAIT' },
-        ];
-    }, [amtResult?.vwapDeviationSigmas, amtResult?.tickSize, amtResult?.sessionVwap, amtResult?.valueAreaHigh, amtResult?.valueAreaLow, currentLtp, isAggressionBlocked, aggScore, agentDecision?.timing, amtResult?.marketState, displayAnalysis.marketState]);
 
     // Format CVD Slope for display: large raw values use K/M suffix + "lots" unit
     const formatCVD = (cvd: number): string => {
@@ -520,60 +395,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                 </div>
             </div>
 
-            {/* 02b. LVN / HVN MAP */}
-            <div className="flex flex-col gap-2">
-                <div className="p-3 rounded-lg bg-white/5 border border-white/10 relative">
-                    <span className="absolute -top-2 left-2 px-1 bg-[#131722] text-[10px] text-white/40 uppercase tracking-widest font-bold">LVN / HVN MAP</span>
-                    {currentLtp > 0 ? (() => {
-                        const lvnLevels = Array.from(
-                            new Set([...(amtResult?.lvns || []), ...(amtResult?.legLvns || [])].filter(
-                                (lvl): lvl is number => typeof lvl === 'number' && lvl > 0,
-                            )),
-                        ).sort((a, b) => Math.abs(a - currentLtp) - Math.abs(b - currentLtp));
-                        const hvnLevels = Array.from(
-                            new Set((amtResult?.hvns || []).filter((lvl): lvl is number => typeof lvl === 'number' && lvl > 0)),
-                        ).sort((a, b) => Math.abs(a - currentLtp) - Math.abs(b - currentLtp));
-                        const allLevels = Array.from(new Set([...lvnLevels, ...hvnLevels])).sort((a, b) => a - b);
-
-                        if (allLevels.length === 0) {
-                            return <div className="text-[10px] text-white/30 text-center py-1">No LVN/HVN levels available</div>;
-                        }
-
-                        const nearest = allLevels.reduce((closest, lvl) => (
-                            Math.abs(lvl - currentLtp) < Math.abs(closest - currentLtp) ? lvl : closest
-                        ), allLevels[0]);
-                        const nearestDist = (Math.abs(nearest - currentLtp) / currentLtp) * 100;
-                        const nearestArrow = nearest > currentLtp ? '↑' : nearest < currentLtp ? '↓' : '•';
-                        const getProximity = (lvl: number) => {
-                            const pct = Math.abs(lvl - currentLtp) / currentLtp;
-                            if (pct <= 0.001) return 'AT';
-                            if (pct <= 0.005) return 'APPROACHING';
-                            return lvl > currentLtp ? 'ABOVE' : 'BELOW';
-                        };
-
-                        return (
-                            <div className="space-y-1.5">
-                                <div className="text-[9px] font-mono text-white/70">
-                                    Nearest: {nearest.toFixed(1)} {nearestArrow} {nearestDist.toFixed(2)}% ({getProximity(nearest)})
-                                </div>
-                                <div className="space-y-1 max-h-36 overflow-y-auto">
-                                    {allLevels.map((lvl) => {
-                                        const isLVN = lvnLevels.includes(lvl);
-                                        const proximity = getProximity(lvl);
-                                        return (
-                                            <div key={lvl.toFixed(4)} className={`flex justify-between text-[8px] px-1.5 py-0.5 rounded border ${isLVN ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' : 'bg-gray-500/10 border-white/10 text-white/70'}`}>
-                                                <span className="font-mono">{isLVN ? 'LVN' : 'HVN'} {lvl.toFixed(1)}</span>
-                                                <span className="font-bold">{proximity}</span>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        );
-                    })() : <div className="text-[10px] text-white/30 text-center py-1">Waiting for live price</div>}
-                </div>
-            </div>
-
             {/* 03. AGGRESSION */}
             <div className="flex flex-col gap-2">
                 <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
@@ -762,10 +583,23 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     })()}
                     {/* Aggression Divergence Check */}
                     {(() => {
-                        const { cvd } = conflictState;
-                        const isCE = (symbol?.toUpperCase() || '').includes(' CE') || (symbol?.toUpperCase() || '').endsWith('CE');
-                        const isPE = (symbol?.toUpperCase() || '').includes(' PE') || (symbol?.toUpperCase() || '').endsWith('PE');
+                        const delta = amtResult?.deltaNormalizedOption ?? 0;
+                        const cvd = amtResult?.cvdSlope ?? 0;
+                        const ofi = amtResult?.ofi ?? 0;
+                        const ibBreak = amtResult?.breakDirection ?? '';
+                        // Lowered delta threshold from 0.1 to 0.02 to catch more divergence cases
+                        const bullCount = (delta > 0.02 ? 1 : 0) + (cvd > 0.01 ? 1 : 0) + (ofi > 0.1 ? 1 : 0);
+                        const bearCount = (delta < -0.02 ? 1 : 0) + (cvd < -0.01 ? 1 : 0) + (ofi < -0.1 ? 1 : 0);
+                        // Also detect CVD vs IB break divergence (e.g. bullish CVD but bearish IB break)
+                        const cvdBullish = cvd > 0.01;
+                        const cvdBearish = cvd < -0.01;
+                        const ibBullish = ibBreak === 'UP';
+                        const ibBearish = ibBreak === 'DOWN';
+                        const cvdIbDivergence = (cvdBullish && ibBearish) || (cvdBearish && ibBullish);
+                        const hasConflict = (bullCount > 0 && bearCount > 0) || cvdIbDivergence;
                         // CE/PE context: interpret option flow direction relative to underlying
+                        const isCE = symbol?.toUpperCase().includes(' CE') || symbol?.toUpperCase().endsWith('CE');
+                        const isPE = symbol?.toUpperCase().includes(' PE') || symbol?.toUpperCase().endsWith('PE');
                         const cvdDir = cvd > 0.01 ? 'bullish' : cvd < -0.01 ? 'bearish' : 'neutral';
                         const underlyingSignal = isCE
                             ? (cvdDir === 'bullish' ? '↗ Bullish flow on CE → underlying bullish signal' : cvdDir === 'bearish' ? '↘ Bearish flow on CE → underlying bearish signal' : '')
@@ -774,6 +608,13 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             : '';
                         return (
                             <>
+                                {hasConflict && (
+                                    <div className="mt-1.5 px-2 py-1 bg-yellow-500/10 border border-yellow-500/30 rounded text-[9px] font-bold text-yellow-400 text-center">
+                                        CONFLICTED AGGRESSION — {cvdIbDivergence && !(bullCount > 0 && bearCount > 0)
+                                            ? `CVD/IB Divergence — CVD ${cvdBullish ? 'Bullish' : 'Bearish'} vs IB ${ibBullish ? 'UP' : 'DOWN'}`
+                                            : 'Delta/CVD/OFI Divergence'}
+                                    </div>
+                                )}
                                 {underlyingSignal && (
                                     <div className="mt-1 px-2 py-0.5 bg-blue-500/10 border border-blue-500/20 rounded text-[8px] font-medium text-blue-400 text-center">
                                         OPTION CONTEXT: {underlyingSignal}
@@ -1523,15 +1364,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                 </div>
             )}
 
-            {(isAggressionBlocked || conflictState.hasConflict) && (
-                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-center text-[10px] font-black tracking-wide text-red-300">
-                    {isAggressionBlocked
-                        ? 'NO AGGRESSION — TRADE BLOCKED'
-                        : `CONFLICTED AGGRESSION — ${conflictState.conflictMessage}`
-                    }
-                </div>
-            )}
-
             {/* 04. PROBABILITY ENGINE */}
             <div className="flex flex-col gap-2">
                 <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
@@ -1542,32 +1374,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     {agentDecision ? (
                         <>
                             <div className={`absolute top-0 left-0 w-1 h-full ${agentDecision.timing === 'ENTER_NOW' ? 'bg-emerald-500' : 'bg-yellow-500/50'}`} />
-                            <div className="pl-2 flex flex-col gap-1 text-[8px]">
-                                <div className="flex justify-between items-center text-white/50">
-                                    <span className="text-[9px] uppercase tracking-[0.2em]">Playbook Counter</span>
-                                    <span className={`px-1.5 py-0.5 rounded ${playbookChecks.every(item => item.passed) ? 'bg-emerald-500/20 text-emerald-300' : 'bg-white/10 text-white/50'}`}>
-                                        {playbookChecks.filter(item => item.passed).length}/{playbookChecks.length}
-                                    </span>
-                                </div>
-                                <div className="flex flex-wrap gap-1">
-                                    {playbookChecks.map((rule) => (
-                                        <span
-                                            key={rule.label}
-                                            className={`px-1.5 py-0.5 rounded border text-[7px] ${rule.passed ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40' : 'bg-red-500/10 text-red-300 border-red-500/30'}`}
-                                        >
-                                            {rule.passed ? '✓ ' : '✗ '}{rule.label}: {rule.detail}
-                                        </span>
-                                    ))}
-                                </div>
-                            </div>
-                            {/* Drive Cycle before direction field */}
-                            {amtResult?.isSecondDrive !== undefined && (
-                                <div className="pl-2 pt-1">
-                                    <div className={`px-2 py-1 rounded border text-[9px] font-bold tracking-wide ${amtResult.isSecondDrive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'}`}>
-                                        {amtResult.isSecondDrive ? '✅ SECOND DRIVE — High probability re-test' : '⚠️ FIRST DRIVE — Wait for re-test if possible'}
-                                    </div>
-                                </div>
-                            )}
                             <div className="flex justify-between items-center pl-2">
                                 <span className="text-[10px] text-white/40">Direction</span>
                                 <span className={`text-xs font-bold ${agentDecision.direction === 'LONG' ? 'text-emerald-400' : agentDecision.direction === 'SHORT' ? 'text-red-400' : 'text-blue-300'}`}>
@@ -1593,16 +1399,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                 </span>
                             </div>
                             <div className="flex justify-between items-center pl-2">
-                                <span className="text-[10px] text-white/40">Setup Type</span>
-                                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded border border-purple-500/30 bg-purple-500/10 text-purple-200">
-                                    {amtResult?.setup === 'TREND_MODEL'
-                                        ? 'TREND MODEL'
-                                        : amtResult?.setup === 'MEAN_REVERSION'
-                                            ? 'MEAN REVERSION'
-                                            : 'UNKNOWN'}
-                                </span>
-                            </div>
-                            <div className="flex justify-between items-center pl-2">
                                 <span className="text-[10px] text-white/40">P(target)</span>
                                 <span className={`text-xs font-mono font-bold ${agentDecision.probability >= 0.6 ? 'text-emerald-400' : agentDecision.probability > 0.45 ? 'text-yellow-400' : agentDecision.probability > 0 ? 'text-red-400' : 'text-white/30'}`}>
                                     {(agentDecision.probability * 100).toFixed(1)}%
@@ -1618,12 +1414,30 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             <div className="flex justify-between items-center pl-2 pt-1">
                                 <span className="text-[10px] text-white/40">Timing / Size</span>
                                 <div className="flex items-center gap-2">
-                                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold tracking-wider ${isAggressionBlocked ? 'bg-red-500/20 text-red-400' : agentDecision.timing === 'ENTER_NOW' ? 'bg-emerald-500/20 text-emerald-400' : agentDecision.timing === 'SKIP' ? 'bg-white/10 text-white/30' : 'bg-yellow-500/20 text-yellow-400'}`}>
-                                        {isAggressionBlocked ? 'BLOCKED — No Aggression' : agentDecision.timing}
+                                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold tracking-wider ${agentDecision.timing === 'ENTER_NOW' ? 'bg-emerald-500/20 text-emerald-400' : agentDecision.timing === 'SKIP' ? 'bg-white/10 text-white/30' : 'bg-yellow-500/20 text-yellow-400'}`}>
+                                        {agentDecision.timing}
                                     </span>
                                     <span className="text-[10px] font-mono font-bold text-white/80">{(agentDecision.sizeFraction * 100).toFixed(1)}%</span>
                                 </div>
                             </div>
+                            
+                            {/* Fabio Playbook: Second Drive Indicator */}
+                            {amtResult?.isSecondDrive !== undefined && (
+                                <div className="flex justify-between items-center pl-2 pt-1">
+                                    <span className="text-[10px] text-white/40">Drive Cycle</span>
+                                    {amtResult.isSecondDrive ? (
+                                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                            <span>✅ SECOND DRIVE</span>
+                                            <span className="text-[8px] font-normal text-white/50">High probability re-test</span>
+                                        </div>
+                                    ) : (
+                                        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide bg-yellow-500/20 text-yellow-400 border border-yellow-500/30">
+                                            <span>⚠️ FIRST DRIVE</span>
+                                            <span className="text-[8px] font-normal text-white/50">Wait for re-test if possible</span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                             
                             {/* Fabio Playbook: LVN Play Indicator */}
                             {amtResult?.lvnPlay && (
@@ -1778,28 +1592,18 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                         {[...portfolio.closedTrades].reverse().slice(0, 5).map((t, i) => {
                             const partialPnl = t.partialRealizedPnl || 0;
                             const totalPnl = t.pnl;
-                            const resolvedReason = normalizeRecentExitReason(t.closeReason || '-', totalPnl);
-                            const reasonClass = recentExitReasonClass(resolvedReason);
                             const hadPartial = partialPnl > 0;
                             const duration = t.exitTime && t.entryTime
                                 ? Math.round((new Date(t.exitTime).getTime() - new Date(t.entryTime).getTime()) / 1000)
                                 : 0;
                             const dMins = Math.floor(duration / 60);
                             const dSecs = duration % 60;
-                            const participant = participantLabelFromRecentExit(t);
                             return (
                                 <div key={i} className="px-2 py-1.5 rounded bg-white/5 border border-white/5 space-y-1">
                                     <div className="flex justify-between items-center text-[9px]">
-                                        <div className="flex flex-col">
-                                            <span className={`font-bold ${t.side === 'LONG' ? 'text-green-400/80' : 'text-red-400/80'}`}>
-                                                {t.side} x{(t.originalSize || t.size).toFixed(0)}
-                                            </span>
-                                            {participant && (
-                                                <span className={`inline-flex mt-1 px-1 py-0.5 rounded text-[8px] ${participant.classes}`}>
-                                                    {participant.text}
-                                                </span>
-                                            )}
-                                        </div>
+                                        <span className={`font-bold ${t.side === 'LONG' ? 'text-green-400/80' : 'text-red-400/80'}`}>
+                                            {t.side} x{(t.originalSize || t.size).toFixed(0)}
+                                        </span>
                                         <span className={`font-mono font-bold ${totalPnl >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                                             {totalPnl >= 0 ? '+' : ''}₹{totalPnl.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                         </span>
@@ -1818,7 +1622,13 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                         ) : (
                                             <span className="text-white/20">Full exit</span>
                                         )}
-                                        <span className={`font-mono px-1 py-0.5 rounded text-[7px] ${reasonClass}`}>{(resolvedReason || '').replace(/_/g, ' ') || '—'}</span>
+                                        <span className={`font-mono px-1 py-0.5 rounded text-[7px] ${t.closeReason === 'TAKE_PROFIT' || t.closeReason === 'PARTIAL_TAKE_PROFIT' ? 'bg-green-500/20 text-green-400' :
+                                            t.closeReason === 'STOP_LOSS' ? 'bg-red-500/20 text-red-400' :
+                                                t.closeReason === 'SCRATCH' ? 'bg-yellow-500/20 text-yellow-400' :
+                                                    t.closeReason === 'TRAILING_STOP' ? 'bg-blue-500/20 text-blue-400' :
+                                                        t.closeReason === 'TIME_STOP' ? 'bg-purple-500/20 text-purple-400' :
+                                                            'bg-white/10 text-white/40'
+                                            }`}>{t.closeReason || '—'}</span>
                                     </div>
                                 </div>
                             );
@@ -1839,35 +1649,26 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     if (agentDecision?.timing === 'ENTER_NOW') passedCount++;
                     const totalRules = 4;
                     const sigmaV = amtResult?.vwapDeviationSigmas || 0;
-                    const backendGateScore = gateScore && gateScore.total > 0 ? gateScore : null;
-                    const effectivePassedCount = backendGateScore ? backendGateScore.passed : passedCount;
-                    const effectiveTotalRules = backendGateScore ? backendGateScore.total : totalRules;
-                    const gateQuorumMet = Math.abs(sigmaV) >= 3.0 ? true : effectivePassedCount >= 3;
                     const verdictText =
                         Math.abs(sigmaV) >= 3.0
                             ? 'RESPONSIVE FADE ACTIVE'
                             : agentDecision?.timing === 'ENTER_NOW'
                               ? 'ENTER_NOW'
-                              : gateQuorumMet
-                                ? 'MONITOR -> WAIT'
-                                : `SETUP INVALID — ${effectivePassedCount}/${effectiveTotalRules} rules`;
+                              : 'MONITOR -> WAIT';
                     const verdictClass =
                         Math.abs(sigmaV) >= 3.0
                             ? 'text-orange-400 border-orange-500/40 bg-orange-500/10'
-                            : gateQuorumMet
-                                ? 'text-blue-300 border-blue-500/30 bg-blue-500/10'
-                                : 'text-red-400 border-red-500/40 bg-red-500/10';
+                            : 'text-blue-300 border-blue-500/30 bg-blue-500/10';
 
                     return (
                         <details className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2 group cursor-pointer relative overflow-hidden">
-                            <div className={`absolute top-0 left-0 w-1 h-full ${effectivePassedCount === effectiveTotalRules ? 'bg-emerald-500' : gateQuorumMet ? 'bg-yellow-500' : 'bg-red-500'}`} />
+                            <div className={`absolute top-0 left-0 w-1 h-full ${passedCount === totalRules ? 'bg-emerald-500' : passedCount > 0 ? 'bg-yellow-500' : 'bg-white/10'}`} />
                             <summary className="list-none flex flex-col gap-2 pl-2 text-[10px] text-white/40 uppercase tracking-widest font-bold">
                                 <div className="flex justify-between items-center w-full">
                                     <div className="flex items-center gap-2">
                                         <span>05. Rule Checklist</span>
-                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${gateQuorumMet ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                                            {gateQuorumMet ? '\u2713 ' : ''}
-                                            {effectivePassedCount}/{effectiveTotalRules} Passed
+                                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-mono ${passedCount === totalRules ? 'bg-emerald-500/20 text-emerald-400' : passedCount > 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-white/10 text-white/40'}`}>
+                                            {passedCount === totalRules ? '\u2713 ' : ''}{passedCount}/{totalRules} Passed
                                         </span>
                                     </div>
                                     <span className="group-open:hidden">Show</span>

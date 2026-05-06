@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 
 from app.config import settings
 from app.domain.fabio_ai.services.exit_engine import ExitEngine, ExitReason
+from app.core.async_boundary import ensure_sync_adapter_result
 from app.domain.fabio_ai.services.prompt_builder import (
     OVERSEER_INSTRUCTION,
     OverseerAction,
@@ -123,16 +124,22 @@ class LLMOverseerHandler:
 
         # Gather position state directly from session portfolio
         with session._lock:
-            managed_position_ids = [
-                p.id for p in session.portfolio.positions 
+            _managed_positions = [
+                p for p in session.portfolio.positions
                 if p.is_open and p.symbol == symbol
             ]
-        if not managed_position_ids:
+
+        if not _managed_positions:
             with session._lock:
                 session._overseer_running = False
             return
 
-        position_id = managed_position_ids[0]
+        _managed_position = _managed_positions[0]
+        position_id = _managed_position.id
+        _managed_position_meta = _managed_position.metadata
+        if not isinstance(_managed_position_meta, dict):
+            _managed_position_meta = {}
+        _tick_trace_id = _managed_position_meta.get("tick_trace_id", "")
 
         # Ensure per-symbol queue and worker exist
         with self._workers_lock:
@@ -155,6 +162,7 @@ class LLMOverseerHandler:
             "session_info": session_info,
             "footprint_candle": footprint_candle,
             "position_id": position_id,
+            "tick_trace_id": _tick_trace_id,
             "enqueue_time": time.time(),
         }
         try:
@@ -193,6 +201,7 @@ class LLMOverseerHandler:
                 session_info = item["session_info"]
                 footprint_candle = item["footprint_candle"]
                 position_id = item["position_id"]
+                tick_trace_id = item.get("tick_trace_id", "")
 
                 # Staleness check: Drop if sitting in queue > 30 seconds
                 if time.time() - enqueue_time > 30.0:
@@ -380,6 +389,7 @@ class LLMOverseerHandler:
                     overseer_info["overseer_reason"] = decision.reason
                     overseer_info["input_prompt"] = prompt
                     overseer_info["raw_output"] = raw
+                    overseer_info["tick_trace_id"] = tick_trace_id
                     session.last_ai_analysis = overseer_info
 
                 # Push update to UI immediately (outside lock to avoid deadlock)
@@ -394,7 +404,9 @@ class LLMOverseerHandler:
 
                 if self._storage:
                     try:
-                        self._storage.save_llm_decision(
+                        ensure_sync_adapter_result(
+                            "storage.save_llm_decision",
+                            self._storage.save_llm_decision,
                             {
                                 "symbol": symbol,
                                 "direction": decision.action,
@@ -404,7 +416,8 @@ class LLMOverseerHandler:
                                 "raw_output": raw[:500],
                                 "market_state": pos_state.get("market_state", ""),
                                 "price": tick.close,
-                            }
+                                "tick_trace_id": tick_trace_id,
+                            },
                         )
                     except Exception:
                         logger.warning("LLM overseer decision persistence failed", exc_info=True)

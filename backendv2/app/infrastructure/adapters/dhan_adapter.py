@@ -8,15 +8,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
+import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, AsyncIterator
 
 import httpx
 
 from app.domain.shared.port.market_data import IMarketData
-from app.domain.shared.timezones import IST
+from app.shared.timezones import IST
 from app.domain.trading.model.value_objects import OHLC, OrderBook, OrderBookLevel
 
 logger = logging.getLogger(__name__)
@@ -57,6 +61,9 @@ class DhanAdapter(IMarketData):
         self._ltp_cache: dict[str, tuple[float, float]] = {}
         self._order_books: dict[str, OrderBook] = {}
         self._stream_offsets: deque[float] = deque(maxlen=1024)
+        self._option_chain_cache: dict[tuple[str, str, int], tuple[object, float]] = {}
+        self._option_chain_cache_ttl_sec = float(os.getenv("OPTION_CHAIN_CACHE_TTL_SEC", "30") or 30)
+        self._option_chain_cache_lock = threading.Lock()
 
     def ensure_initialized_sync(self, timeout: float = 120) -> None:
         self._is_ready = True
@@ -98,7 +105,7 @@ class DhanAdapter(IMarketData):
 
         response = await self._client.post("/v2/orders", json=payload)
         response.raise_for_status()
-        data = self._safe_json(response, {})
+        data = _safe_json(response, {})
         return {
             "order_id": data.get("orderId", f"{symbol}_{asyncio.get_event_loop().time()}"),
             "symbol": symbol,
@@ -123,7 +130,7 @@ class DhanAdapter(IMarketData):
             return None
         response = await self._client.get("/v2/holdings")
         response.raise_for_status()
-        holdings = self._safe_json(response, [])
+        holdings = _safe_json(response, [])
         for holding in holdings:
             if str(holding.get("tradingSymbol", "")).upper() == symbol.upper():
                 return {
@@ -141,7 +148,27 @@ class DhanAdapter(IMarketData):
     # IMarketData methods used by runtime
     # ------------------------------------------------------------------
     async def scan_candidates(self, limit: int = 6) -> list[str]:
-        return self._symbols[:limit]
+        from app.domain.fabio_ai.services.option_scanner import OptionScannerService
+
+        default_exchange = self._exchange or os.getenv("DEFAULT_EXCHANGE", "NSE")
+        default_underlyings = self._symbols or [u.strip() for u in os.getenv("SCANNER_UNDERLYINGS", "NIFTY,BANKNIFTY,FINNIFTY").split(",") if u.strip()]
+        try:
+            scanner = OptionScannerService(self, default_underlyings=default_underlyings)
+            top_n = max(1, int(os.getenv("SCANNER_TOP_N", "4")))
+            top_per_underlying = max(1, int(os.getenv("SCANNER_TOP_PER_UNDERLYING", "2")))
+            strikes_around_atm = max(1, int(os.getenv("SCANNER_STRIKES_AROUND_ATM", "1")))
+            results = await asyncio.to_thread(
+                scanner.scan_top_n,
+                n=top_n,
+                exchange=default_exchange,
+                underlyings=default_underlyings,
+                top_per_underlying=top_per_underlying,
+                strikes_around_atm=strikes_around_atm,
+            )
+            return [r.symbol for r in results[:limit]]
+        except Exception:
+            logger.exception("scan_candidates failed; falling back to configured symbols")
+            return self._symbols[:limit]
 
     async def fetch_history(self, symbol: str, interval: str = "5m", limit: int = 500) -> list[OHLC]:
         await self._ensure_initialized()
@@ -157,7 +184,7 @@ class DhanAdapter(IMarketData):
         response = await self._client.get("/api/charts/historical", params=params)
         if response.status_code != 200:
             return []
-        payload = self._safe_json(response, [])
+        payload = _safe_json(response, [])
         if not isinstance(payload, list):
             return []
         out: list[OHLC] = []
@@ -194,7 +221,7 @@ class DhanAdapter(IMarketData):
         )
         if response.status_code != 200:
             return None
-        payload = self._safe_json(response, {})
+        payload = _safe_json(response, {})
         if not isinstance(payload, dict):
             return None
         bids = [
@@ -227,7 +254,7 @@ class DhanAdapter(IMarketData):
         )
         if response.status_code != 200:
             return self._ltp_cache.get(symbol, (0.0, 0.0))[0]
-        payload = self._safe_json(response, {})
+        payload = _safe_json(response, {})
         try:
             ltp = float(payload.get("ltp", 0.0))
         except Exception:
@@ -286,12 +313,17 @@ class DhanAdapter(IMarketData):
     def get_option_chain(self, underlying: str, exchange: str = "NFO", expiry_index: int = 0):
         if not self._access_token:
             return None
-        try:
-            asyncio.get_running_loop()
-            return None
-        except RuntimeError:
-            pass
-        response = asyncio.get_event_loop().run_until_complete(
+        key = (underlying.upper(), exchange.upper(), int(expiry_index))
+        now = time.monotonic()
+        if self._option_chain_cache_ttl_sec > 0:
+            with self._option_chain_cache_lock:
+                hit = self._option_chain_cache.get(key)
+                if hit is not None:
+                    chain_obj, ts = hit
+                    if now - ts <= self._option_chain_cache_ttl_sec:
+                        return chain_obj
+
+        response = self._run_sync(
             self._client.get(
                 "/api/options/chain",
                 params={
@@ -301,12 +333,145 @@ class DhanAdapter(IMarketData):
                 },
             )
         )
-        if response.status_code != 200:
+        if response is None or response.status_code != 200:
             return None
-        return self._safe_json(response, None)
+        payload = _safe_json(response, None)
+        chain = _parse_option_chain(payload, underlying=underlying, exchange=exchange)
+        if chain is None:
+            return None
 
-    def _safe_json(self, response: Any, fallback: Any | None = None) -> Any:
+        if self._option_chain_cache_ttl_sec > 0:
+            with self._option_chain_cache_lock:
+                self._option_chain_cache[key] = (chain, now)
+                self._option_chain_cache = {
+                    k: v
+                    for k, v in self._option_chain_cache.items()
+                    if now - v[1] <= self._option_chain_cache_ttl_sec + 1
+                }
+        return chain
+
+    def _run_sync(self, awaitable: Any) -> Any:
         try:
-            return response.json()
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.get_event_loop().run_until_complete(awaitable)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(self._run_async_in_thread, awaitable)
+            return future.result()
+
+    def _run_async_in_thread(self, awaitable: Any) -> Any:
+        return asyncio.run(awaitable)
+
+
+@dataclass(frozen=True)
+class _OptionContract:
+    symbol: str
+    ltp: float
+    oi: int
+    volume: int
+    bid: float
+    ask: float
+    delta: float
+    iv: float
+
+
+@dataclass(frozen=True)
+class _OptionChain:
+    expiry: Any
+    spot_price: float
+    atm_strike: float
+    calls: dict[float, _OptionContract]
+    puts: dict[float, _OptionContract]
+
+
+def _parse_option_chain(payload: Any, *, underlying: str, exchange: str) -> _OptionChain | None:
+    if not isinstance(payload, dict):
+        return None
+
+    data = payload.get("data", payload)
+    expiry = data.get("expiry", data.get("expiryDate", ""))
+    if isinstance(expiry, str) and expiry:
+        try:
+            expiry = datetime.fromisoformat(expiry)
         except Exception:
-            return fallback if fallback is not None else {}
+            pass
+    spot_price = _safe_float(data, ("spot", "spotPrice", "spot_price"))
+    atm_strike = _safe_float(data, ("atm", "atmStrike", "atm_strike"))
+    calls = _coerce_option_map(data.get("calls") or data.get("call") or data.get("ce"), underlying=underlying, exchange=exchange)
+    puts = _coerce_option_map(data.get("puts") or data.get("put") or data.get("pe"), underlying=underlying, exchange=exchange)
+    if not calls or not puts:
+        if not calls and not puts:
+            return None
+    return _OptionChain(
+        expiry=expiry,
+        spot_price=float(spot_price),
+        atm_strike=float(atm_strike),
+        calls=calls,
+        puts=puts,
+    )
+
+
+def _coerce_option_map(value: Any, *, underlying: str, exchange: str) -> dict[float, _OptionContract]:
+    items: dict[float, _OptionContract] = {}
+    if isinstance(value, dict):
+        iterable = value.items()
+    elif isinstance(value, list):
+        iterable = []
+        for raw in value:
+            if isinstance(raw, dict):
+                iterable.append((raw.get("strike"), raw))
+    else:
+        return items
+
+    for strike_key, raw in iterable:
+        try:
+            strike = float(strike_key)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        contract = _OptionContract(
+            symbol=str(raw.get("symbol", _build_symbol_fallback(underlying, int(strike), exchange))),
+            ltp=_safe_float(raw, ("ltp", "lastPrice", "price")),
+            oi=_safe_int(raw, ("oi", "openInterest", "open_interest")),
+            volume=_safe_int(raw, ("volume", "tradedVolume")),
+            bid=_safe_float(raw, ("bid", "bestBid", "bidPrice", "bid_price")),
+            ask=_safe_float(raw, ("ask", "bestAsk", "askPrice", "ask_price")),
+            delta=_safe_float(raw, ("delta",), default=0.5),
+            iv=_safe_float(raw, ("iv", "impliedVolatility", "ivPercent"), default=0.0),
+        )
+        items[strike] = contract
+    return items
+
+
+def _build_symbol_fallback(underlying: str, strike: int, exchange: str) -> str:
+    return f"{underlying} {exchange[:3]} {strike}"
+
+
+def _safe_float(data: Any, keys: tuple[str, ...], default: float = 0.0) -> float:
+    if isinstance(data, dict):
+        for key in keys:
+            if key in data:
+                try:
+                    return float(data[key])
+                except (TypeError, ValueError):
+                    pass
+    return default
+
+
+def _safe_int(data: Any, keys: tuple[str, ...], default: int = 0) -> int:
+    if isinstance(data, dict):
+        for key in keys:
+            if key in data:
+                try:
+                    return int(float(data[key]))
+                except (TypeError, ValueError):
+                    pass
+    return default
+
+
+def _safe_json(response: Any, fallback: Any | None = None) -> Any:
+    try:
+        return response.json()
+    except Exception:
+        return fallback if fallback is not None else {}

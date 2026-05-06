@@ -10,15 +10,18 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from app.domain.trading.model.entities import Position
 from app.domain.trading.model.enums import CushionState
-from app.domain.exit.model.exit_models import ExitDecision, ExitReason
+from app.domain.exit.model.exit_models import ExitReason
 from app.domain.exit.service.exit_rules import (
-    classify_exit,
     check_time_stop,
     check_spread_blowout,
 )
+
+if TYPE_CHECKING:
+    from app.runtime.pipeline.events import ExitDecision
 
 logger = logging.getLogger(name=__name__)
 
@@ -38,6 +41,11 @@ class ExitEngine:
     def __init__(self, config: TradeManagerConfig | None = None):
         self._config = config or TradeManagerConfig()
 
+    @staticmethod
+    def _exit_decision(**kwargs: object):
+        from app.runtime.pipeline.events import ExitDecision
+        return ExitDecision(**kwargs)
+
     def evaluate(
         self, position: Position, current_price: float, tick_high: float, tick_low: float,
         hold_time_seconds: float = 0, session_phase: str = "MORNING",
@@ -53,7 +61,7 @@ class ExitEngine:
         # 1. Stop loss (use wick extremes)
         should_close, reason = self._check_sl_tp(position, current_price, tick_high, tick_low)
         if should_close:
-            return ExitDecision(
+            return self._exit_decision(
                 exit_type="FULL", size_pct=1.0, price=current_price,
                 reason=reason, new_stop=None,
             )
@@ -61,14 +69,18 @@ class ExitEngine:
         # 2. Time stop
         if self._config.time_stop_enabled:
             if check_time_stop(hold_time_seconds, session_phase, market_state, is_expiry):
-                return ExitDecision(
+                return self._exit_decision(
                     exit_type="FULL", size_pct=1.0, price=current_price,
                     reason=ExitReason.TIME_STOP, new_stop=None,
                 )
 
         # 3. Spread blowout
-        if check_spread_blowout(self._get_spread_pct(position, current_price)):
-            return ExitDecision(
+        try:
+            spread_pct = self._get_spread_pct(position, current_price)
+        except NotImplementedError:
+            spread_pct = None
+        if spread_pct is not None and check_spread_blowout(spread_pct):
+            return self._exit_decision(
                 exit_type="FULL", size_pct=1.0, price=current_price,
                 reason=ExitReason.SPREAD_BLOWOUT, new_stop=None,
             )
@@ -77,7 +89,7 @@ class ExitEngine:
         if self._config.trail_enabled:
             trail_sl = self._check_trail(position, current_price)
             if trail_sl and self._is_sl_hit(position, trail_sl, current_price, tick_high, tick_low):
-                return ExitDecision(
+                return self._exit_decision(
                     exit_type="FULL", size_pct=1.0, price=current_price,
                     reason=ExitReason.TRAILING_STOP, new_stop=trail_sl,
                 )
@@ -141,7 +153,7 @@ class ExitEngine:
 
         if not pos.partial_taken and r_multiple >= 1.0:
             pos.set_partial_taken(True)
-            return ExitDecision(
+            return self._exit_decision(
                 exit_type="PARTIAL", size_pct=0.3,
                 price=price, reason=ExitReason.PARTIAL_TAKE_PROFIT,
                 new_stop=float(pos.entry_price),
@@ -149,7 +161,7 @@ class ExitEngine:
         elif pos.partial_taken and not pos.runner_active and r_multiple >= 2.0:
             pos.runner_active = True
             pos.advance_cushion_state(CushionState.TRAILING)
-            return ExitDecision(
+            return self._exit_decision(
                 exit_type="PARTIAL", size_pct=0.4,
                 price=price, reason=ExitReason.PARTIAL_TAKE_PROFIT,
                 new_stop=float(pos.entry_price),
@@ -158,7 +170,7 @@ class ExitEngine:
         return None
 
     def _get_spread_pct(self, pos: Position, price: float) -> float:
-        return 0.0  # Override with real spread data
+        raise NotImplementedError("Spread is not wired yet for ExitEngine")
 
 
 class TrailEngine:
@@ -199,6 +211,11 @@ class PartitionExitManager:
     def __init__(self):
         self._states: dict[str, dict] = {}
 
+    @staticmethod
+    def _exit_decision(**kwargs: object):
+        from app.runtime.pipeline.events import ExitDecision
+        return ExitDecision(**kwargs)
+
     def check(self, pos: Position, current_price: float) -> ExitDecision | None:
         state = self._states.get(pos.id)
         if state is None:
@@ -216,10 +233,22 @@ class PartitionExitManager:
 
         if not state["p1"] and r >= self.P1_R:
             state["p1"] = True
-            return ExitDecision("PARTIAL", self.P1_SIZE, current_price, "P1 at 1R", float(pos.entry_price))
+            return self._exit_decision(
+                exit_type="PARTIAL",
+                size_pct=self.P1_SIZE,
+                price=current_price,
+                reason="P1 at 1R",
+                new_stop=float(pos.entry_price),
+            )
         if state["p1"] and not state["p2"] and r >= self.P2_R:
             state["p2"] = True
-            return ExitDecision("PARTIAL", self.P2_SIZE, current_price, "P2 at 2R", float(pos.entry_price))
+            return self._exit_decision(
+                exit_type="PARTIAL",
+                size_pct=self.P2_SIZE,
+                price=current_price,
+                reason="P2 at 2R",
+                new_stop=float(pos.entry_price),
+            )
         if state["p2"] and not state["p3"]:
             state["p3"] = True
 

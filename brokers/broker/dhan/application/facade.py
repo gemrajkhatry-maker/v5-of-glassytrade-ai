@@ -254,7 +254,12 @@ class DhanFacade:
 
         if not hasattr(self, "_loop") or self._loop is None or self._loop.is_closed():
             self._loop = asyncio.new_event_loop()
-        return self._loop.run_until_complete(coro)
+        try:
+            return self._loop.run_until_complete(coro)
+        except Exception:
+            if hasattr(coro, "close"):
+                coro.close()
+            raise
     
     # =========================================================================
     # Exchange and Symbol Resolution

@@ -7,12 +7,10 @@ from .settings import (
     RiskSettings,
     ScannerSettings,
     SettingsMode,
+    load_app_settings,
+    resolve_app_profile,
 )
-from .config_adapter import (
-    GlobalsImpl,
-    get_globals,
-    load_environment_config,
-)
+from .config_adapter import GlobalsImpl, get_globals, load_environment_config
 
 __all__ = [
     "AppSettings",
@@ -21,6 +19,8 @@ __all__ = [
     "RiskSettings",
     "ScannerSettings",
     "SettingsMode",
+    "load_app_settings",
+    "resolve_app_profile",
     "GlobalsImpl",
     "get_globals",
     "load_environment_config",

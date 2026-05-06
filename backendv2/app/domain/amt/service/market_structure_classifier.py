@@ -95,9 +95,11 @@ def _range_atr_ratio(candles: list[OHLC], period: int = 14) -> float:
     tail = candles[-period:]
     if not tail:
         return 1.0
-    overall_high = max(c.high for c in tail)
-    overall_low = min(c.low for c in tail)
-    atr = _atr(candles, period)
+    tail_highs = [float(c.high) for c in tail]
+    tail_lows = [float(c.low) for c in tail]
+    overall_high = max(tail_highs)
+    overall_low = min(tail_lows)
+    atr = float(_atr(candles, period))
     if atr == 0.0:
         return 1.0
     return (overall_high - overall_low) / atr
@@ -302,12 +304,12 @@ class MarketStructureClassifier:
             )
 
         # --- Compute features ------------------------------------------------
-        atr = _atr(candles)
-        ra = _range_atr_ratio(candles)
-        vs = _vwap_slope(vwap_history, atr)
-        ol = _candle_overlap_pct(candles)
-        va = _volume_acceleration(candles)
-        pm = _poc_migration(poc_history, atr)
+        atr = float(_atr(candles))
+        ra = float(_range_atr_ratio(candles))
+        vs = float(_vwap_slope(vwap_history, atr))
+        ol = float(_candle_overlap_pct(candles))
+        va = float(_volume_acceleration(candles))
+        pm = float(_poc_migration(poc_history, atr))
 
         features = {
             "range_atr": round(ra, 4),

@@ -15,6 +15,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
+from app.core.async_boundary import ensure_sync_adapter_result
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +205,9 @@ class OptionScannerService:
             _exchange = exchange or "MCX"
 
         effective_expiry_index = expiry_index
-        chain = self._broker.get_option_chain(
+        chain = ensure_sync_adapter_result(
+            "broker.get_option_chain",
+            self._broker.get_option_chain,
             underlying=u,
             exchange=_exchange,
             expiry_index=effective_expiry_index,
@@ -223,7 +226,9 @@ class OptionScannerService:
                     expiry_date,
                     effective_expiry_index,
                 )
-                chain = self._broker.get_option_chain(
+                chain = ensure_sync_adapter_result(
+                    "broker.get_option_chain",
+                    self._broker.get_option_chain,
                     underlying=u,
                     exchange=_exchange,
                     expiry_index=effective_expiry_index,
@@ -451,7 +456,9 @@ class OptionScannerService:
                     elif u_upper in self._SCAN_NSE_UNDERLYINGS:
                         _u_exchange = "NFO"
 
-                    chain = self._broker.get_option_chain(
+                    chain = ensure_sync_adapter_result(
+                        "broker.get_option_chain",
+                        self._broker.get_option_chain,
                         underlying=u,
                         exchange=_u_exchange,
                         expiry_index=expiry_index,

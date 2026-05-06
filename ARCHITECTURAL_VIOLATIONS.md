@@ -53,19 +53,19 @@ const cumulativeDeltas = useMemo(() => {
 
 ---
 
-## Violation 3: ReplayEngine Misnomer - ✅ RESOLVED
+## Violation 3: Verifier Naming Misnomer - ✅ RESOLVED
 
 **File:** `backend/app/domain/trading/event_store.py:341-408
 **Type:** Naming Violation
 
 Previous code:
 ```python
-class ReplayEngine:
-    """Replay engine for deterministic State reconstruction."""
-    def replay_to(self, timestamp: str | None = None, ...) -> dict[str, Any]:
+class AuditStateVerifier:
+    """Verifier for deterministic state reconstruction."""
+    def verify_to(self, timestamp: str | None = None, ...) -> dict[str, Any]:
 ```
 
-**Issue:** "Replay" suggests backtesting capability. This is actually an audit trail verifier for deterministic state reconstruction, NOT backtest execution.
+**Issue:** The previous naming suggested backtest behavior. This is actually an audit trail verifier for deterministic state reconstruction, NOT backtest execution.
 
 **Fix:** ✅ **COMPLETED** - Renamed to `AuditTrailVerifier` with updated docstrings: "For audit trail verification, NOT backtest execution."
 

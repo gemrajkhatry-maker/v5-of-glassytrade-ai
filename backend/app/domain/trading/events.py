@@ -44,7 +44,7 @@ class DomainEvent:
 
     All events are immutable (frozen=True) to ensure:
     - Thread safety
-    - Deterministic replay
+    - Deterministic state derivation
     - Audit trail integrity
     """
 
@@ -74,6 +74,7 @@ class TickReceived(DomainEvent):
     data: tuple[OHLC, ...] = ()  # full history window
     # Underlying futures candles for regime / volume features (when dual feed is active)
     agent_series: tuple[OHLC, ...] = ()
+    tick_trace_id: str = ""
     daily_data: tuple[OHLC, ...] = ()  # Daily timeframe for structural bias
     hourly_data: tuple[OHLC, ...] = ()  # Hourly timeframe for execution bias
 

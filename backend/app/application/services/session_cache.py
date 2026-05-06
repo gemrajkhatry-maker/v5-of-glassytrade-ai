@@ -13,6 +13,8 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from app.core.async_boundary import ensure_sync_adapter_result
+
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, OrderBook, AMTResult
 
@@ -96,6 +98,23 @@ class SessionCache:
         """Set the AI analysis result directly."""
         self._session.last_ai_analysis = analysis
 
+    # ----- Tick Trace Metadata -----
+
+    def next_tick_sequence(self) -> int:
+        """Advance and return the deterministic tick sequence for this session."""
+        with self._session._lock:
+            self._session._tick_trace_sequence += 1
+            return self._session._tick_trace_sequence
+
+    def set_last_tick_trace_id(self, trace_id: str) -> None:
+        """Store last produced tick trace id."""
+        with self._session._lock:
+            self._session._last_tick_trace_id = trace_id
+
+    def get_last_tick_trace_id(self) -> str:
+        """Get the last produced tick trace id."""
+        return getattr(self._session, "_last_tick_trace_id", "")
+
     # ----- Agent Decision Caching -----
 
     def set_agent_decision(self, decision: Any) -> None:
@@ -164,7 +183,9 @@ class SessionCache:
                 if storage and self._session.data:
                     closed = self._session.data[-1]
                     try:
-                        storage.save_tick(
+                        ensure_sync_adapter_result(
+                            "storage.save_tick",
+                            storage.save_tick,
                             symbol,
                             {
                                 "time": closed.time,

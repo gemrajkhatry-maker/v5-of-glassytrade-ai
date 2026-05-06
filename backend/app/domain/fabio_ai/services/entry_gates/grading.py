@@ -36,19 +36,24 @@ def check_vwap_bias(
 
     Returns {"warning": bool, "overextended": bool}.
     """
-    if vwap <= 0:
+    price_f = _to_float(price, default=0.0) or 0.0
+    vwap_f = _to_float(vwap, default=0.0) or 0.0
+    vwap_upper_2_f = _to_float(vwap_upper_2, default=0.0) or 0.0
+    vwap_lower_2_f = _to_float(vwap_lower_2, default=0.0) or 0.0
+
+    if vwap_f <= 0:
         return {"warning": False, "overextended": False}
     warning = False
     overextended = False
     if direction == "LONG":
-        if price < vwap:
+        if price_f < vwap_f:
             warning = True
-        if vwap_upper_2 > 0 and price >= vwap_upper_2:
+        if vwap_upper_2_f > 0 and price_f >= vwap_upper_2_f:
             overextended = True
     elif direction == "SHORT":
-        if price > vwap:
+        if price_f > vwap_f:
             warning = True
-        if vwap_lower_2 > 0 and price <= vwap_lower_2:
+        if vwap_lower_2_f > 0 and price_f <= vwap_lower_2_f:
             overextended = True
     return {"warning": warning, "overextended": overextended}
 
@@ -76,6 +81,15 @@ def check_imbalance_alignment(direction: str, imbalances: list) -> int:
     return 0
 
 
+def _to_float(value, default: float | None = 0.0) -> float | None:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def compute_grade_score(
     direction: str,
     tick: OHLC,
@@ -91,20 +105,25 @@ def compute_grade_score(
     score = 0
 
     # HARD GATE: Extreme CVD Opposition
-    if direction == "LONG" and amt_result.cvd_slope < -CVD_SLOPE_HARD_BLOCK:
+    cvd_slope = _to_float(amt_result.cvd_slope, default=None)
+    if cvd_slope is None:
+        cvd_slope = 0.0
+    if direction == "LONG" and cvd_slope < -CVD_SLOPE_HARD_BLOCK:
         logger.warning(
-            f"Grade score killed (CVD Hard Gate): LONG blocked due to extreme bearish CVD ({amt_result.cvd_slope})"
+            "Grade score killed (CVD Hard Gate): LONG blocked due to extreme bearish CVD (%s)",
+            cvd_slope,
         )
         return -10
-    if direction == "SHORT" and amt_result.cvd_slope > CVD_SLOPE_HARD_BLOCK:
+    if direction == "SHORT" and cvd_slope > CVD_SLOPE_HARD_BLOCK:
         logger.warning(
-            f"Grade score killed (CVD Hard Gate): SHORT blocked due to extreme bullish CVD ({amt_result.cvd_slope})"
+            "Grade score killed (CVD Hard Gate): SHORT blocked due to extreme bullish CVD (%s)",
+            cvd_slope,
         )
         return -10
 
     # CVD confirms direction
-    if (direction == "LONG" and amt_result.cvd_slope > 0.3) or (
-        direction == "SHORT" and amt_result.cvd_slope < -0.3
+    if (direction == "LONG" and cvd_slope > 0.3) or (
+        direction == "SHORT" and cvd_slope < -0.3
     ):
         score += 1
     # No CVD divergence against direction
@@ -135,17 +154,19 @@ def compute_grade_score(
         score -= 1
 
     # VWAP bias
-    vwap = (
-        amt_result.session_vwap
-        if amt_result.session_vwap > 0
-        else (tick.vwap if tick.vwap > 0 else 0)
-    )
+    tick_vwap = _to_float(getattr(tick, "vwap", 0), default=0.0)
+    session_vwap = _to_float(getattr(amt_result, "session_vwap", 0), default=0.0)
+    vwap = session_vwap if (session_vwap is not None and session_vwap > 0) else ((tick_vwap or 0.0) if (tick_vwap is not None and tick_vwap > 0) else 0.0)
+    vwap = _to_float(vwap, default=0.0) or 0.0
+    price = _to_float(tick.close, default=0.0) or 0.0
+    vwap_upper_2 = _to_float(getattr(amt_result, "vwap_upper_2", 0), default=0.0) or 0.0
+    vwap_lower_2 = _to_float(getattr(amt_result, "vwap_lower_2", 0), default=0.0) or 0.0
     vwap_check = check_vwap_bias(
         direction,
-        tick.close,
+        price,
         vwap,
-        getattr(amt_result, "vwap_upper_2", 0),
-        getattr(amt_result, "vwap_lower_2", 0),
+        vwap_upper_2,
+        vwap_lower_2,
     )
     if vwap_check.get("overextended"):
         score -= 2
