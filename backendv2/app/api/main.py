@@ -80,14 +80,31 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
     broker_cfg = runtime_config.get("broker", {}) if isinstance(runtime_config, dict) else {}
     client_id = os.getenv("DHAN_CLIENT_ID") or str(broker_cfg.get("client_id", ""))
     access_token = os.getenv("DHAN_ACCESS_TOKEN") or str(broker_cfg.get("access_token", ""))
+    
+    # Read strategy mode to determine exchange
+    strategy_mode = os.getenv("GLASSYTRADE_STRATEGY", "").lower()
     default_exchange_name = os.getenv("DEFAULT_EXCHANGE", "NSE").upper()
+    
+    # If MCX strategy, force MCX exchange
+    if "mcx" in strategy_mode:
+        default_exchange_name = "MCX"
+        logger.info(f"GLASSYTRADE_STRATEGY={strategy_mode}, forcing MCX exchange")
+    
     exchanges = runtime_config.get("exchanges", {}) if isinstance(runtime_config, dict) else {}
     selected_exchange = None
     for ex_name, ex_data in exchanges.items():
         if not isinstance(ex_data, dict) or not ex_data.get("enabled", True):
             continue
-        selected_exchange = str(ex_name).upper()
-        break
+        # If strategy specifies an exchange, prefer it
+        if "mcx" in strategy_mode and str(ex_name).upper() == "MCX":
+            selected_exchange = "MCX"
+            break
+        if "nse" in strategy_mode and str(ex_name).upper() == "NSE":
+            selected_exchange = "NSE"
+            break
+        # Otherwise use first enabled
+        if selected_exchange is None:
+            selected_exchange = str(ex_name).upper()
     if selected_exchange is None:
         selected_exchange = default_exchange_name
 
