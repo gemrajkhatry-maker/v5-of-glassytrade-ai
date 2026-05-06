@@ -6,6 +6,9 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from enum import Enum
 from typing import Any, Optional, Union
 
+# Re-export AMTResult from domain model for pipeline use
+from app.domain.trading.model.value_objects import AMTResult
+
 
 class CandleTimeframe(Enum):
     M1 = "1m"
@@ -89,6 +92,7 @@ class OrderFlowMetrics:
     absorption_detected: bool
     absorption_side: str  # "BUY", "SELL", "NONE"
     absorption_strength: float
+    stacked_imbalance: bool = False
     window_size: int = 100
 
 
@@ -120,6 +124,13 @@ class MarketStructureResult:
     market_zone: str = "NEAR_POC"
     confidence: float = 0.5
     is_extreme: bool = False
+    composite_poc: float = 0.0
+    composite_vah: float = 0.0
+    composite_val: float = 0.0
+    opening_type: str = ""
+    npoc_levels: tuple[float, ...] = field(default_factory=tuple)
+    ob_imbalance: float = 0.0
+    ms_classifier_state: str = ""
     break_detected: bool = False
     break_direction: str = ""
     break_type: str = ""
