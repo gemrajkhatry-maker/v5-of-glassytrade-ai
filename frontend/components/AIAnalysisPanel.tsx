@@ -284,8 +284,8 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
 
             {/* 02. LOCATION */}
             <div className="flex flex-col gap-2">
-                <div className="p-3 rounded-lg bg-white/5 border border-white/10 relative">
-                    <span className="absolute -top-2 left-2 px-1 bg-[#131722] text-[10px] text-white/40 uppercase tracking-widest font-bold">Location</span>
+                <div className="p-3 rounded-md bg-glassy-bg-elevated/50 border border-glassy-border-default relative">
+                    <span className="absolute -top-2 left-2 px-1 bg-glassy-bg-tertiary text-[10px] text-glassy-text-tertiary uppercase tracking-widest font-bold">Location</span>
                     
                     {currentLtp > 0 && (amtResult?.poc !== undefined && amtResult?.poc !== null) ? (
                         <>
@@ -299,33 +299,33 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                 return (
                                     <div className="w-full relative h-1">
                                         {/* Base Track */}
-                                        <div className="absolute top-0 left-0 w-full h-full bg-white/10 rounded-full"></div>
+                                        <div className="absolute top-0 left-0 w-full h-full bg-glassy-text-disabled/20 rounded-full"></div>
                                         
                                         {/* VA Fill (Session) */}
                                         {amtResult.valueAreaHigh > 0 && (
-                                            <div className="absolute top-0 h-full bg-blue-500/20" style={{ left: getPos(amtResult.valueAreaLow), width: `${((amtResult.valueAreaHigh - amtResult.valueAreaLow) / range) * 100}%` }}></div>
+                                            <div className="absolute top-0 h-full bg-glassy-ai-primary/20" style={{ left: getPos(amtResult.valueAreaLow), width: `${((amtResult.valueAreaHigh - amtResult.valueAreaLow) / range) * 100}%` }}></div>
                                         )}
                                         
                                         {/* VAH Marker */}
                                         {amtResult.valueAreaHigh > 0 && (
                                             <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: getPos(amtResult.valueAreaHigh) }}>
-                                                <div className="w-0.5 h-3 bg-blue-400"></div>
-                                                <span className="text-[8px] text-blue-400 mt-1 absolute top-3 whitespace-nowrap">VAH {amtResult.valueAreaHigh?.toFixed(1)}</span>
+                                                <div className="w-0.5 h-3 bg-glassy-ai-primary"></div>
+                                                <span className="text-[8px] text-glassy-ai-primary mt-1 absolute top-3 whitespace-nowrap tabular-nums">VAH {amtResult.valueAreaHigh?.toFixed(1)}</span>
                                             </div>
                                         )}
                                         {/* VAL Marker */}
                                         {amtResult.valueAreaLow > 0 && (
                                             <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: getPos(amtResult.valueAreaLow) }}>
-                                                <div className="w-0.5 h-3 bg-blue-400"></div>
-                                                <span className="text-[8px] text-blue-400 mt-1 absolute top-3 whitespace-nowrap">VAL {amtResult.valueAreaLow?.toFixed(1)}</span>
+                                                <div className="w-0.5 h-3 bg-glassy-ai-primary"></div>
+                                                <span className="text-[8px] text-glassy-ai-primary mt-1 absolute top-3 whitespace-nowrap tabular-nums">VAL {amtResult.valueAreaLow?.toFixed(1)}</span>
                                             </div>
                                         )}
                                         
-                                        {/* Hourly POC (Blue Dot) */}
+                                        {/* Hourly POC (AI Purple Dot) */}
                                         {amtResult.hourlyPoc > 0 && (
                                             <div className="absolute top-1/2 -translate-y-[150%] flex flex-col items-center z-5" style={{ left: getPos(amtResult.hourlyPoc) }}>
-                                                <div className="w-1.5 h-1.5 rounded-full bg-blue-500/60 border border-blue-400"></div>
-                                                <span className="text-[7px] text-blue-400 mb-1 absolute bottom-1 whitespace-nowrap">HPOC</span>
+                                                <div className="w-1.5 h-1.5 rounded-full bg-glassy-ai-primary/60 border border-glassy-ai-primary"></div>
+                                                <span className="text-[7px] text-glassy-ai-primary mb-1 absolute bottom-1 whitespace-nowrap">HPOC</span>
                                             </div>
                                         )}
 
@@ -388,27 +388,27 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                         })()}
                     </>
                 ) : (
-                    <div className="text-center text-[10px] text-white/30 py-4 font-mono">Building Volume Profile...</div>
+                    <div className="text-center text-[10px] text-glassy-text-disabled py-4 font-mono">Building Volume Profile...</div>
                 )}
                 </div>
             </div>
 
             {/* 03. AGGRESSION */}
             <div className="flex flex-col gap-2">
-                <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
+                <div className="flex justify-between items-center text-[10px] text-glassy-text-tertiary uppercase tracking-widest">
                     <span>03. Volume Aggression</span>
-                    <Activity className="w-3 h-3 hover:text-white/80 transition-colors" />
+                    <Activity className="w-3 h-3 hover:text-glassy-text-secondary transition-colors" />
                 </div>
-                <div className="p-3 rounded-lg bg-white/5 border border-white/5">
+                <div className="p-3 rounded-md bg-glassy-bg-elevated/50 border border-glassy-border-subtle">
                     <div className="flex justify-between items-end mb-2">
                         <div className="flex flex-col">
-                            <span className="text-[10px] text-white/60 mb-0.5">Delta Score <span className="text-[8px] text-white/25">(norm)</span></span>
-                            <span className={`text-[9px] font-bold tracking-wider ${Math.abs(deltaScore) > 0.05 && aggScore > 0.1 ? (deltaScore > 0 ? 'text-green-400' : 'text-red-400') : 'text-white/40'}`}>
+                            <span className="text-[10px] text-glassy-text-secondary mb-0.5">Delta Score <span className="text-[8px] text-glassy-text-disabled">(norm)</span></span>
+                            <span className={`text-[9px] font-bold tracking-wider ${Math.abs(deltaScore) > 0.05 && aggScore > 0.1 ? (deltaScore > 0 ? 'text-glassy-bull-primary' : 'text-glassy-bear-primary') : 'text-glassy-text-disabled'}`}>
                                 {Math.abs(deltaScore) > 0.05 && aggScore > 0.1 ? (deltaScore > 0 ? '[BULLS IN CONTROL]' : '[BEARS IN CONTROL]') : '[DELTA NEUTRAL / NEGLIGIBLE]'}
                             </span>
                         </div>
                         <div className="flex flex-col items-end gap-0.5">
-                            <span className={`text-xs font-mono font-bold ${deltaScore > 0 ? 'text-green-400' : deltaScore < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                            <span className={`text-xs font-mono font-bold tabular-nums ${deltaScore > 0 ? 'text-glassy-bull-primary' : deltaScore < 0 ? 'text-glassy-bear-primary' : 'text-glassy-text-disabled'}`}>
                                 {deltaScore > 0 ? '+' : ''}{deltaScore.toFixed(2)}
                             </span>
                             {agentDecision && (() => {
@@ -419,17 +419,17 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     ? 50 
                                     : Math.min(100, Math.abs(deltaScore) * 100);
                                 const confColor = isDeltaNeutral 
-                                    ? 'text-yellow-400' 
+                                    ? 'text-glassy-warning' 
                                     : agentDecision.probability >= 0.6 
-                                        ? 'text-emerald-400' 
+                                        ? 'text-glassy-bull-primary' 
                                         : agentDecision.probability > 0.45 
-                                            ? 'text-yellow-400' 
+                                            ? 'text-glassy-warning' 
                                             : agentDecision.probability > 0 
-                                                ? 'text-red-400' 
-                                                : 'text-white/30';
+                                                ? 'text-glassy-bear-primary' 
+                                                : 'text-glassy-text-disabled';
                                 
                                 return (
-                                    <span className={`text-[9px] font-mono font-bold ${confColor}`}>
+                                    <span className={`text-[9px] font-mono font-bold tabular-nums ${confColor}`}>
                                         {isDeltaNeutral ? '~50%' : `${deltaConfidence.toFixed(1)}%`}
                                     </span>
                                 );
@@ -437,19 +437,19 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                         </div>
                     </div>
                     {/* Progress Bar */}
-                    <div className="h-1 bg-white/10 rounded-full overflow-hidden flex relative">
-                        <div className="absolute top-0 left-1/2 w-px h-full bg-white/20 z-10" />
+                    <div className="h-1 bg-glassy-text-disabled/20 rounded-full overflow-hidden flex relative">
+                        <div className="absolute top-0 left-1/2 w-px h-full bg-glassy-text-disabled/30 z-10" />
                         {/* Visual bar moving left or right based on score */}
                         <div className={`h-full absolute transition-all duration-500 rounded-full`} style={{
                             width: `${Math.min(Math.abs(deltaScore) * 50, 50)}%`,
                             left: deltaScore > 0 ? '50%' : `${50 - Math.min(Math.abs(deltaScore) * 50, 50)}%`,
-                            backgroundColor: deltaScore > 0 ? '#4ade80' : '#f87171'
+                            backgroundColor: deltaScore > 0 ? '#00c896' : '#ff4757'
                         }}></div>
                     </div>
                     {/* Aggression indicator */}
-                    <div className="flex justify-between text-[9px] mt-1.5 pt-1 border-t border-white/5">
-                        <span className="text-white/40">Aggression</span>
-                        <span className={`font-mono font-bold ${aggScore > 0 ? 'text-green-400' : aggScore < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                    <div className="flex justify-between text-[9px] mt-1.5 pt-1 border-t border-glassy-border-subtle">
+                        <span className="text-glassy-text-tertiary">Aggression</span>
+                        <span className={`font-mono font-bold tabular-nums ${aggScore > 0 ? 'text-glassy-bull-primary' : aggScore < 0 ? 'text-glassy-bear-primary' : 'text-glassy-text-disabled'}`}>
                             {aggScore.toFixed(2)}{deltaScore < -0.05 ? ' (Bearish)' : deltaScore > 0.05 ? ' (Bullish)' : ''}
                         </span>
                     </div>
@@ -458,30 +458,30 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
 
             {/* 03b. MARKET METRICS — Verification Bars */}
             <div className="flex flex-col gap-2">
-                <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
+                <div className="flex justify-between items-center text-[10px] text-glassy-text-tertiary uppercase tracking-widest">
                     <span>03B. Market Metrics</span>
                 </div>
-                <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2">
+                <div className="p-3 rounded-md bg-glassy-bg-elevated/50 border border-glassy-border-subtle space-y-2">
                     {/* OFI Bar */}
                     <div>
                         <div className="flex justify-between mb-1">
-                            <span className="text-[10px] text-white/40">OFI <span className="text-[8px] text-white/25">(norm)</span></span>
+                            <span className="text-[10px] text-glassy-text-tertiary">OFI <span className="text-[8px] text-glassy-text-disabled">(norm)</span></span>
                             <div className="flex items-center gap-1.5">
-                                <span className={`text-[10px] ${(amtResult?.ofi ?? 0) > 0 ? 'text-green-400' : (amtResult?.ofi ?? 0) < 0 ? 'text-red-400' : 'text-white/40'}`}>
+                                <span className={`text-[10px] ${(amtResult?.ofi ?? 0) > 0 ? 'text-glassy-bull-primary' : (amtResult?.ofi ?? 0) < 0 ? 'text-glassy-bear-primary' : 'text-glassy-text-disabled'}`}>
                                     {(amtResult?.ofi ?? 0) > 0 ? '╱╲↗' : (amtResult?.ofi ?? 0) < 0 ? '╲╱↘' : '—'}
                                 </span>
-                                <span className={`text-[10px] font-mono font-bold ${(amtResult?.ofi ?? 0) > 0 ? 'text-green-400' : (amtResult?.ofi ?? 0) < 0 ? 'text-red-400' : 'text-white/40'}`}>
+                                <span className={`text-[10px] font-mono font-bold tabular-nums ${(amtResult?.ofi ?? 0) > 0 ? 'text-glassy-bull-primary' : (amtResult?.ofi ?? 0) < 0 ? 'text-glassy-bear-primary' : 'text-glassy-text-disabled'}`}>
                                     {(amtResult?.ofi ?? 0) > 0 ? '+' : ''}{(amtResult?.ofi ?? 0).toFixed(3)}
                                 </span>
                             </div>
                         </div>
-                        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden relative">
-                            <div className="absolute top-0 left-1/2 w-px h-full bg-white/20" />
+                        <div className="h-1.5 bg-glassy-text-disabled/20 rounded-full overflow-hidden relative">
+                            <div className="absolute top-0 left-1/2 w-px h-full bg-glassy-text-disabled/30" />
                             {(amtResult?.ofi ?? 0) !== 0 && (
                                 <div className="absolute top-0 h-full rounded-full transition-all duration-300" style={{
                                     left: (amtResult?.ofi ?? 0) > 0 ? '50%' : `${50 + (amtResult?.ofi ?? 0) * 50}%`,
                                     width: `${Math.min(Math.abs(amtResult?.ofi ?? 0) * 50, 50)}%`,
-                                    backgroundColor: (amtResult?.ofi ?? 0) > 0 ? '#4ade80' : '#f87171',
+                                    backgroundColor: (amtResult?.ofi ?? 0) > 0 ? '#00c896' : '#ff4757',
                                     opacity: 0.7,
                                 }} />
                             )}
@@ -490,20 +490,20 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     {/* CVD Slope Bar */}
                     <div>
                         <div className="flex justify-between mb-1">
-                            <span className="text-[10px] text-white/40">CVD Slope</span>
+                            <span className="text-[10px] text-glassy-text-tertiary">CVD Slope</span>
                             <div className="flex items-center gap-1.5">
-                                <span className={`text-[10px] ${(amtResult?.cvdSlope ?? 0) > 0 ? 'text-green-400' : (amtResult?.cvdSlope ?? 0) < 0 ? 'text-red-400' : 'text-white/40'}`}>
+                                <span className={`text-[10px] ${(amtResult?.cvdSlope ?? 0) > 0 ? 'text-glassy-bull-primary' : (amtResult?.cvdSlope ?? 0) < 0 ? 'text-glassy-bear-primary' : 'text-glassy-text-disabled'}`}>
                                     {(amtResult?.cvdSlope ?? 0) > 0 ? '╱╲↗' : (amtResult?.cvdSlope ?? 0) < 0 ? '╲╱↘' : '—'}
                                 </span>
-                                <span className={`text-[10px] font-mono font-bold ${(amtResult?.cvdSlope ?? 0) > 0 ? 'text-green-400' : (amtResult?.cvdSlope ?? 0) < 0 ? 'text-red-400' : 'text-white/40'}`}>
+                                <span className={`text-[10px] font-mono font-bold tabular-nums ${(amtResult?.cvdSlope ?? 0) > 0 ? 'text-glassy-bull-primary' : (amtResult?.cvdSlope ?? 0) < 0 ? 'text-glassy-bear-primary' : 'text-glassy-text-disabled'}`}>
                                     {(amtResult?.cvdSlope ?? 0) > 0 ? '+' : ''}{formatCVD(amtResult?.cvdSlope ?? 0)}
                                     {amtResult?.cvdDivergence ? ` (${amtResult.cvdDivergence.replace('_DIV', '')})` : ''}
                                     {(amtResult?.cvdSlope ?? 0) > 0.01 ? ' BULLISH' : (amtResult?.cvdSlope ?? 0) < -0.01 ? ' BEARISH' : ' FLAT'}
                                 </span>
                             </div>
                         </div>
-                        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden relative">
-                            <div className="absolute top-0 left-1/2 w-px h-full bg-white/20" />
+                        <div className="h-1.5 bg-glassy-text-disabled/20 rounded-full overflow-hidden relative">
+                            <div className="absolute top-0 left-1/2 w-px h-full bg-glassy-text-disabled/30" />
                             {(() => {
                                 const cvd = amtResult?.cvdSlope ?? 0;
                                 const norm = Math.min(Math.abs(cvd) / 100, 1);
