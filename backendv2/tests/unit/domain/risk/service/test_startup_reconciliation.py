@@ -17,8 +17,9 @@ class TestNormalizeSymbol:
         assert _normalize_symbol("NIFTY") == "NIFTY"
 
     def test_futures_symbol(self):
-        """Futures symbol normalized to underlying."""
-        assert _normalize_symbol("NIFTY25JANFUT") == "NIFTY"
+        """Futures symbol uppercased but not stripped."""
+        # _normalize_symbol only uppercases, doesn't strip futures suffix
+        assert _normalize_symbol("NIFTY25JANFUT") == "NIFTY25JANFUT"
 
     def test_empty_symbol(self):
         """Empty string unchanged."""

@@ -19,7 +19,8 @@ from brokersv2.observability.health import (
     HealthCheck,
     CheckType,
 )
-from brokersv2.core.resilience import CircuitBreaker, CircuitBreakerError
+from brokersv2.core.resilience import CircuitBreaker
+from brokersv2.core.errors import CircuitBreakerOpenError
 
 logger = logging.getLogger(__name__)
 
@@ -227,6 +228,8 @@ class AppState:
         self.health_checker = HealthChecker()
         self.config: Optional[GatewayConfig] = None
         self.startup_time: Optional[datetime] = None
+        self.circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=60)
+        self.dry_run_broker = DryRunBroker()
 
 
 def create_app(config: Optional[GatewayConfig] = None) -> FastAPI:
@@ -383,7 +386,11 @@ def _register_routes(app: FastAPI, state: AppState):
         """Get current quote for symbol."""
         state.metrics.increment("quote_requests", labels={"symbol": symbol})
         
-        # TODO: Wire to broker adapter
+        # DRY Run mode
+        if state.config.dry_run:
+            return state.dry_run_broker.get_quote_mock(symbol)
+        
+        # TODO: Wire to real broker adapter with circuit breaker
         return {
             "symbol": symbol,
             "ltp": 0.0,
@@ -414,7 +421,17 @@ def _register_routes(app: FastAPI, state: AppState):
             "interval": request.interval,
         })
         
-        # TODO: Wire to broker adapter historical method
+        # DRY Run mode
+        if state.config.dry_run:
+            return state.dry_run_broker.get_historical_mock(
+                symbol=request.symbol,
+                exchange=request.exchange,
+                from_date=request.from_date,
+                to_date=request.to_date,
+                interval=request.interval,
+            )
+        
+        # TODO: Wire to broker adapter historical method with circuit breaker
         return {
             "symbol": request.symbol,
             "exchange": request.exchange,
@@ -457,6 +474,17 @@ def _register_routes(app: FastAPI, state: AppState):
             "type": request.order_type,
         })
         
+        # DRY Run mode
+        if state.config.dry_run:
+            return state.dry_run_broker.place_order_mock(
+                symbol=request.symbol,
+                exchange=request.exchange,
+                quantity=request.quantity,
+                side=request.side,
+                order_type=request.order_type,
+                price=request.price,
+            )
+        
         return {
             "order_id": "ORD_TEMP",
             "status": "PENDING",
@@ -494,6 +522,10 @@ def _register_routes(app: FastAPI, state: AppState):
     async def cancel_order(order_id: str):
         """Cancel an order."""
         state.metrics.increment("order_cancellations")
+        
+        # DRY Run mode
+        if state.config.dry_run:
+            return state.dry_run_broker.cancel_order_mock(order_id)
         
         return {
             "order_id": order_id,
@@ -573,18 +605,30 @@ def _register_routes(app: FastAPI, state: AppState):
     async def broker_status():
         """Get broker connection status."""
         return {
-            "connected": False,
+            "connected": not state.config.dry_run,
             "broker_type": "dhan",
+            "dry_run": state.config.dry_run,
+            "circuit_breaker_state": state.circuit_breaker.state.value,
             "last_check": datetime.now(timezone.utc).isoformat(),
         }
 
     @app.get("/broker/health")
     async def broker_health():
         """Check broker health."""
+        cb_state = state.circuit_breaker.state
+        
+        if cb_state.value == "open":
+            return {
+                "healthy": False,
+                "circuit_breaker": "OPEN",
+                "message": "Circuit breaker open - broker unavailable",
+            }
+        
         return {
-            "healthy": False,
+            "healthy": True,
+            "circuit_breaker": cb_state.value,
             "latency_ms": 0,
-            "message": "Broker not connected",
+            "message": "Broker connected" if not state.config.dry_run else "DRY RUN mode active",
         }
 
     # ========================================================================
