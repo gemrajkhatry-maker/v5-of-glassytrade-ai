@@ -72,26 +72,26 @@ interface JournalEntry {
 }
 
 const EXIT_REASON_COLORS: Record<string, string> = {
-    STOP_LOSS: 'text-red-400 bg-red-500/10',
-    TAKE_PROFIT: 'text-emerald-400 bg-emerald-500/10',
-    EXIT_SIGNAL: 'text-cyan-300 bg-cyan-500/10',
-    ADVERSE_EXIT: 'text-rose-400 bg-rose-500/10',
-    TRAILING_STOP: 'text-amber-400 bg-amber-500/10',
-    TIME_STOP: 'text-orange-400 bg-orange-500/10',
-    OVERSEER_EXIT: 'text-cyan-400 bg-cyan-500/10',
-    OVERSEER_PARTIAL: 'text-cyan-400 bg-cyan-500/10',
-    SCRATCH: 'text-white/50 bg-white/5',
-    BREAK_EVEN: 'text-white/50 bg-white/5',
-    SPREAD_BLOWOUT: 'text-red-400 bg-red-500/10',
+    STOP_LOSS: 'text-glassy-bear-primary bg-glassy-bear-primary/10',
+    TAKE_PROFIT: 'text-glassy-bull-primary bg-glassy-bull-primary/10',
+    EXIT_SIGNAL: 'text-glassy-ai-primary bg-glassy-ai-primary/10',
+    ADVERSE_EXIT: 'text-glassy-danger bg-glassy-danger/10',
+    TRAILING_STOP: 'text-glassy-warning bg-glassy-warning/10',
+    TIME_STOP: 'text-glassy-warning bg-glassy-warning/10',
+    OVERSEER_EXIT: 'text-glassy-ai-primary bg-glassy-ai-primary/10',
+    OVERSEER_PARTIAL: 'text-glassy-ai-primary bg-glassy-ai-primary/10',
+    SCRATCH: 'text-glassy-text-disabled bg-glassy-bg-elevated',
+    BREAK_EVEN: 'text-glassy-text-disabled bg-glassy-bg-elevated',
+    SPREAD_BLOWOUT: 'text-glassy-bear-primary bg-glassy-bear-primary/10',
 };
 
 const EVENT_COLORS: Record<string, string> = {
-    SIGNAL_GENERATED: 'text-blue-400 bg-blue-500/10',
-    ENTRY_EXECUTED: 'text-emerald-400 bg-emerald-500/10',
-    ENTRY_REJECTED: 'text-orange-400 bg-orange-500/10',
-    EXIT: 'text-purple-400 bg-purple-500/10',
-    OVERSEER_ACTION: 'text-cyan-400 bg-cyan-500/10',
-    BREAK_EVEN_TRIGGERED: 'text-yellow-400 bg-yellow-500/10',
+    SIGNAL_GENERATED: 'text-glassy-ai-primary bg-glassy-ai-primary/10',
+    ENTRY_EXECUTED: 'text-glassy-bull-primary bg-glassy-bull-primary/10',
+    ENTRY_REJECTED: 'text-glassy-warning bg-glassy-warning/10',
+    EXIT: 'text-glassy-ai-primary bg-glassy-ai-primary/10',
+    OVERSEER_ACTION: 'text-glassy-ai-primary bg-glassy-ai-primary/10',
+    BREAK_EVEN_TRIGGERED: 'text-glassy-warning bg-glassy-warning/10',
 };
 
 function normalizedExitReason(exitReason: string, pnl: number): string {
@@ -167,24 +167,24 @@ export default function JournalPage({ onBack }: { onBack: () => void }) {
         .filter(e => !hideFlat || !(e.event_type === 'SIGNAL_GENERATED' && (!e.llm_direction || e.llm_direction === 'FLAT')));
 
     return (
-        <div className="w-screen h-screen bg-slate-900 text-white flex flex-col">
+        <div className="w-screen h-screen bg-glassy-bg-primary text-glassy-text-primary flex flex-col">
             {/* Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-900/80 backdrop-blur">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-glassy-border-default bg-glassy-bg-secondary/80 backdrop-blur">
                 <div className="flex items-center gap-4">
-                    <button onClick={onBack} className="p-2 rounded-lg hover:bg-white/10 transition-colors">
+                    <button onClick={onBack} className="p-2 rounded-md hover:bg-glassy-bg-hover transition-colors">
                         <ArrowLeft size={20} />
                     </button>
                     <h1 className="text-lg font-bold tracking-wide">Trade Journal</h1>
                 </div>
                 <div className="flex items-center gap-2">
-                    <button onClick={() => shiftDate(-1)} className="p-1.5 rounded hover:bg-white/10"><ChevronLeft size={18} /></button>
+                    <button onClick={() => shiftDate(-1)} className="p-1.5 rounded-md hover:bg-glassy-bg-hover"><ChevronLeft size={18} /></button>
                     <input
                         type="date"
                         value={date}
                         onChange={e => setDate(e.target.value)}
-                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white"
+                        className="bg-glassy-bg-elevated border border-glassy-border-default rounded-md px-3 py-1.5 text-sm text-glassy-text-primary outline-none focus:border-glassy-border-prominent"
                     />
-                    <button onClick={() => shiftDate(1)} className="p-1.5 rounded hover:bg-white/10"><ChevronRight size={18} /></button>
+                    <button onClick={() => shiftDate(1)} className="p-1.5 rounded-md hover:bg-glassy-bg-hover"><ChevronRight size={18} /></button>
                 </div>
             </div>
 
