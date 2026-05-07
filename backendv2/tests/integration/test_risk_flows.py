@@ -209,7 +209,8 @@ class TestLossTrackerIntegration:
         """Win and loss tracked."""
         self.tracker.record_win("NIFTY")
         self.tracker.record_loss("NIFTY", stop_price=22400.0)
-        assert True
+        assert self.tracker._global_daily_losses == 1
+        assert self.tracker._symbol_daily_losses.get("NIFTY") == 1
 
     def test_in_cooldown(self):
         """Check cooldown status."""

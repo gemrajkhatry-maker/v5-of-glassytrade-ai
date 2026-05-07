@@ -47,6 +47,23 @@ const hexToRgba = (hex: string, alpha: number) => {
   return `rgba(${r},${g},${b},${alpha})`;
 };
 
+/**
+ * Shallow array equality check
+ * Returns true if arrays have same length and all elements are strictly equal
+ * O(n) complexity vs JSON.stringify O(n²)
+ */
+function arraysShallowEqual<T>(a: T[] | undefined, b: T[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  
+  return true;
+}
+
 const ChartScene: React.FC<ChartSceneProps> = ({
   data,
   predictions,
@@ -84,12 +101,10 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     if (!prev) { prevAmtRef.current = amtAnalysis; return amtAnalysis; }
 
     // Compare fields that affect overlay drawing: profiles, levels, aggressive prints
-    const profileSame = prev.profile?.length === amtAnalysis.profile?.length &&
-      JSON.stringify(prev.profile) === JSON.stringify(amtAnalysis.profile);
-    const legSame = prev.legProfile?.length === amtAnalysis.legProfile?.length &&
-      JSON.stringify(prev.legProfile) === JSON.stringify(amtAnalysis.legProfile);
-    const printsSame = prev.aggressivePrints?.length === amtAnalysis.aggressivePrints?.length &&
-      JSON.stringify(prev.aggressivePrints) === JSON.stringify(amtAnalysis.aggressivePrints);
+    // OPTIMIZED: Use shallow comparison instead of JSON.stringify (O(n) vs O(n²))
+    const profileSame = arraysShallowEqual(prev.profile, amtAnalysis.profile);
+    const legSame = arraysShallowEqual(prev.legProfile, amtAnalysis.legProfile);
+    const printsSame = arraysShallowEqual(prev.aggressivePrints, amtAnalysis.aggressivePrints);
     const levelsSame = prev.poc === amtAnalysis.poc &&
       prev.valueAreaHigh === amtAnalysis.valueAreaHigh &&
       prev.valueAreaLow === amtAnalysis.valueAreaLow &&

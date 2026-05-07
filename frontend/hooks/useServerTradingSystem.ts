@@ -205,15 +205,26 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // Generation counter to prevent stale subscribe messages from racing with
     // rapid activeSymbol changes (e.g. user clicks multiple tabs quickly).
     const subscribeGenRef = useRef(0);
+    
+    // Message deduplication - track recent message IDs to skip duplicates
+    const recentMessageIdsRef = useRef<Set<string>>(new Set());
+    const maxMessageCacheSize = 1000;
 
     // --- RAF-batched state updates ---
     // Queue multiple WS messages into a single React render per animation frame.
     // Without this, 9 symbols × ~7 generations/sec = ~60 separate setState calls/sec.
     const pendingUpdatesRef = useRef<Array<(prev: Record<string, InstrumentState>) => Record<string, InstrumentState>>>([]);
     const batchRafRef = useRef(0);
+    const MAX_RAF_QUEUE_SIZE = 10; // Backpressure: drop updates if queue grows too large
 
     const batchedSetInstruments = useCallback(
         (updater: (prev: Record<string, InstrumentState>) => Record<string, InstrumentState>) => {
+            // Backpressure: drop intermediate updates if queue is too large
+            if (pendingUpdatesRef.current.length >= MAX_RAF_QUEUE_SIZE) {
+                // Remove oldest update, keep latest
+                pendingUpdatesRef.current.splice(0, pendingUpdatesRef.current.length - 1);
+            }
+            
             pendingUpdatesRef.current.push(updater);
             if (!batchRafRef.current) {
                 batchRafRef.current = requestAnimationFrame(() => {

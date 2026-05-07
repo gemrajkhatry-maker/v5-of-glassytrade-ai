@@ -103,9 +103,10 @@ class TestOpenPositionStorage:
 
 class TestPerformanceSnapshot:
     def test_save_and_query_snapshot(self, db):
-        db.save_performance_snapshot({"symbol": "BTCUSDT", "equity": 100000, "balance": 100000, "open_pnl": 0, "open_positions": 0, "total_trades": 0, "win_rate": 0})
-        # Snapshots queried within time range
-        assert True  # Schema created
+        snapshot = {"symbol": "BTCUSDT", "equity": 100000, "balance": 100000, "open_pnl": 0, "open_positions": 0, "total_trades": 0, "win_rate": 0}
+        db.save_performance_snapshot(snapshot)
+        # Verify snapshot was saved without error
+        assert db.get_latest_performance_snapshot("BTCUSDT") is not None
 
 
 class TestSessionProfile:

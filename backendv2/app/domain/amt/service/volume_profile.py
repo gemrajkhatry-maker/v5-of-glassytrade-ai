@@ -36,17 +36,29 @@ def build_volume_profile(bars: list[Bar], bucket_size: float) -> VolumeProfile:
         if bar_range == 0:
             continue
 
-        for price in [bar_low, bar_high]:
-            bucket_idx = int((price - price_min) / bucket_size)
+        # Distribute volume across ALL buckets in the bar's price range
+        low_bucket = int((bar_low - price_min) / bucket_size)
+        high_bucket = int((bar_high - price_min) / bucket_size)
+        num_buckets_in_range = max(1, high_bucket - low_bucket + 1)
+        
+        vol = bar.get("volume", 0)
+        buy_vol = bar.get("buyVolume", vol / 2)
+        sell_vol = bar.get("sellVolume", vol / 2)
+        
+        # Distribute volume proportionally across buckets
+        vol_per_bucket = vol / num_buckets_in_range
+        buy_per_bucket = buy_vol / num_buckets_in_range
+        sell_per_bucket = sell_vol / num_buckets_in_range
+        
+        for bucket_idx in range(low_bucket, high_bucket + 1):
             bucket_price = price_min + bucket_idx * bucket_size
-
+            
             if bucket_price not in buckets:
                 buckets[bucket_price] = {"volume": 0, "buy": 0, "sell": 0}
-
-            vol = bar.get("volume", 0)
-            buckets[bucket_price]["volume"] += vol
-            buckets[bucket_price]["buy"] += bar.get("buyVolume", vol / 2)
-            buckets[bucket_price]["sell"] += bar.get("sellVolume", vol / 2)
+            
+            buckets[bucket_price]["volume"] += vol_per_bucket
+            buckets[bucket_price]["buy"] += buy_per_bucket
+            buckets[bucket_price]["sell"] += sell_per_bucket
 
     levels = tuple(
         VolumeProfileLevel(

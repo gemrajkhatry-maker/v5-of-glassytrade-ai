@@ -112,6 +112,34 @@ class TestBuildVolumeProfile:
         prices = [level.price for level in profile.levels]
         assert prices == sorted(prices)
 
+    def test_volume_distributed_across_all_buckets_not_just_edges(self):
+        """Volume should be distributed across the bar's price range, not just at low/high endpoints.
+        
+        This is a critical bug fix: the original implementation only assigned volume
+        to bar_low and bar_high, effectively doubling volume attribution and placing
+        POC at edges instead of the true maximum volume price.
+        """
+        bars = [
+            {"low": 90.0, "high": 110.0, "close": 100.0, "volume": 1000, "buyVolume": 500, "sellVolume": 500}
+        ]
+        
+        profile = build_volume_profile(bars, bucket_size=5.0)
+        
+        # Volume should appear in buckets: 90, 95, 100, 105, 110 (5+ buckets)
+        # NOT just at 90 and 110 (2 buckets)
+        active_buckets = [level for level in profile.levels if level.volume > 0]
+        assert len(active_buckets) >= 5, (
+            f"Expected volume in 5+ buckets across the range, got {len(active_buckets)}. "
+            f"Volume should be distributed across all price buckets, not just edges."
+        )
+        
+        # Total volume should equal the bar's volume (not doubled)
+        total_volume = sum(level.volume for level in profile.levels)
+        assert total_volume == pytest.approx(1000, rel=0.01), (
+            f"Total volume should equal bar volume (1000), got {total_volume}. "
+            f"Volume is being double-counted at edges."
+        )
+
 
 class TestCalculateVWAP:
     """Tests for VWAP calculation."""

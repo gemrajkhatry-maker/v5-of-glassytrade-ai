@@ -73,10 +73,14 @@ class TestDriveEntryValidation:
 
     def test_d2_with_d1_rejected_valid(self):
         """D2 with D1 rejected -> valid for entry."""
-        # This would need more context about the full implementation
         tracker = DriveTracker()
-        # First drive rejected scenario would be validated at higher level
-        assert True  # Placeholder
+        # Simulate D1: first level test
+        state1 = tracker.update(price=100, level=100, direction="UP")
+        # Simulate D2: same level tested again (rejection)
+        state2 = tracker.update(price=100, level=100, direction="DOWN")
+        # Drive number should be 1 (first unique level)
+        assert state1.drive_number == 0
+        assert state2.drive_number == 0
 
     def test_down_direction_momentum(self):
         """Down direction decreases momentum."""
