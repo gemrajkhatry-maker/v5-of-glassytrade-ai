@@ -362,3 +362,92 @@ class TestAbsorptionDetection:
         assert hasattr(absorptions[0], 'volume')
         assert hasattr(absorptions[0], 'side')
         assert hasattr(absorptions[0], 'strength')
+
+
+class TestAbsorptionDetectorConfirmation:
+    """Test AbsorptionDetector class confirmation logic.
+    
+    This is a critical bug fix: the original implementation confirmed BUY_ABSORBED
+    with bearish displacement (price moving down) and SELL_ABSORBED with bullish
+    displacement (price moving up), which is backwards.
+    
+    Correct logic:
+    - BUY_ABSORBED: Buyers absorbed selling pressure → confirmation is price moving UP
+    - SELL_ABSORBED: Sellers absorbed buying pressure → confirmation is price moving DOWN
+    """
+
+    def test_buy_absorption_confirmed_by_bullish_displacement(self):
+        """BUY absorption should be confirmed when price moves UP (bullish displacement)."""
+        from app.domain.amt.service.orderflow_detectors import AbsorptionDetector
+        from decimal import Decimal
+        
+        detector = AbsorptionDetector()
+        
+        # First candle: absorption setup (high volume, tight range, negative delta = buying pressure)
+        absorption_candle = type('OHLC', (), {
+            'high': Decimal('100.3'),
+            'low': Decimal('99.7'),
+            'close': Decimal('100.1'),
+            'volume': Decimal('400'),
+            'delta': Decimal('-200'),  # More selling absorbed by buyers
+        })()
+        
+        # Trigger absorption detection
+        result1 = detector.detect(absorption_candle, atr=2.0, avg_vol=100)
+        assert result1.pending  # Should be pending confirmation
+        
+        # Next candle: bullish displacement (closes above absorption candle high)
+        confirmation_candle = type('OHLC', (), {
+            'high': Decimal('101.0'),
+            'low': Decimal('100.0'),
+            'close': Decimal('100.8'),  # Above 100.3 (absorption high)
+            'volume': Decimal('100'),
+            'delta': Decimal('50'),
+        })()
+        
+        result2 = detector.detect(confirmation_candle, atr=2.0, avg_vol=100)
+        
+        # Should confirm BUY_ABSORBED on bullish displacement
+        assert result2.confirmed, (
+            "BUY_ABSORBED should be confirmed when price moves UP (bullish displacement). "
+            "The original bug confirmed it on bearish displacement instead."
+        )
+        assert result2.side == "BUY_ABSORBED"
+
+    def test_sell_absorption_confirmed_by_bearish_displacement(self):
+        """SELL absorption should be confirmed when price moves DOWN (bearish displacement)."""
+        from app.domain.amt.service.orderflow_detectors import AbsorptionDetector
+        from decimal import Decimal
+        
+        detector = AbsorptionDetector()
+        
+        # First candle: absorption setup (high volume, tight range, positive delta = selling pressure)
+        absorption_candle = type('OHLC', (), {
+            'high': Decimal('100.3'),
+            'low': Decimal('99.7'),
+            'close': Decimal('100.1'),
+            'volume': Decimal('400'),
+            'delta': Decimal('200'),  # More buying absorbed by sellers
+        })()
+        
+        # Trigger absorption detection
+        result1 = detector.detect(absorption_candle, atr=2.0, avg_vol=100)
+        assert result1.pending  # Should be pending confirmation
+        
+        # Next candle: bearish displacement (closes below absorption candle low)
+        confirmation_candle = type('OHLC', (), {
+            'high': Decimal('100.0'),
+            'low': Decimal('99.0'),
+            'close': Decimal('99.2'),  # Below 99.7 (absorption low)
+            'volume': Decimal('100'),
+            'delta': Decimal('-50'),
+        })()
+        
+        result2 = detector.detect(confirmation_candle, atr=2.0, avg_vol=100)
+        
+        # Should confirm SELL_ABSORBED on bearish displacement
+        assert result2.confirmed, (
+            "SELL_ABSORBED should be confirmed when price moves DOWN (bearish displacement). "
+            "The original bug confirmed it on bullish displacement instead."
+        )
+        assert result2.side == "SELL_ABSORBED"
