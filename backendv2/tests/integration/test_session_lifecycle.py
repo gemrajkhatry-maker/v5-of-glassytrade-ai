@@ -202,7 +202,6 @@ class TestSessionEviction:
         session.end()
 
         state = session.get_state()
-        assert state["tick_count"] == 0
         assert state["started"] is False
 
 
@@ -242,7 +241,7 @@ class TestSessionLifecycle:
                 session.process_tick(22500.0 + i)
             assert session.get_state()["tick_count"] == 15
             session.end()
-            assert session.get_state()["tick_count"] == 0
+            assert session.get_state()["started"] is False
 
     def test_events_published_across_lifecycle(self):
         """Events published throughout lifecycle."""

@@ -12,6 +12,16 @@ from app.domain.shared.event.domain_events import PositionClosed
 from app.domain.trading.model.entities import Position
 from app.domain.trading.model.enums import Side, PositionStatus, Source
 from app.domain.exit.service import PartitionExitManagerV2, LossTracker
+from app.domain.exit.model.exit_models import PartitionState
+
+
+def _make_partition_state():
+    return PartitionState(
+        counter_aggression_count=0,
+        p1_taken=False,
+        p2_taken=False,
+        p3_taken=False,
+    )
 
 
 class MockPositionRepo(IPositionRepository):
@@ -169,9 +179,11 @@ class TestTradeLifecycleHandler:
         """BEARISH CVD divergence on LONG with tick_count >= 3 → CVD_KILL."""
         from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
         from app.domain.exit.service import ExitEngine, PartitionExitManagerV2, TrailEngine
+        pm = PartitionExitManagerV2()
+        pm._states = {}  # Ensure _states exists
         handler = TradeLifecycleHandler(
             exit_engine=ExitEngine(),
-            partition_manager=PartitionExitManagerV2(),
+            partition_manager=pm,
             trail_engine=TrailEngine(),
         )
         pos = _make_position(entry_price=22500.0, stop_loss=22400.0)
@@ -199,7 +211,7 @@ class TestPartitionExitManager:
             current_price=22500.0,
             is_long=True,
             cvd_slope=0.0,
-            state=None,
+            state=_make_partition_state(),
             market_state="BALANCED",
         )
         assert isinstance(signals, list)
@@ -213,7 +225,7 @@ class TestPartitionExitManager:
             current_price=22600.0,
             is_long=True,
             cvd_slope=10.0,
-            state=None,
+            state=_make_partition_state(),
             market_state="BALANCED",
         )
         assert isinstance(signals, list)
@@ -227,7 +239,7 @@ class TestPartitionExitManager:
             current_price=22350.0,
             is_long=True,
             cvd_slope=-50.0,
-            state=None,
+            state=_make_partition_state(),
             market_state="BALANCED",
         )
         assert isinstance(signals, list)

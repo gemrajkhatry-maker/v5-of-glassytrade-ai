@@ -151,28 +151,10 @@ function App() {
         ${rightSidebarOpen ? 'mr-[320px]' : 'mr-0'}
       `}>
 
-                {/* Chart Layer */}
+                {/* Chart Layer - Single instance with mode switching */}
                 <div className="absolute inset-0 z-0">
                     <ErrorBoundary name="Chart">
-                        {/* Instance 1: Standard Candles */}
                         <ChartScene
-                            key={`standard-${activeInstrument.symbol}`}
-                            data={activeInstrument.data} // Used for initial mount/history
-                            tickBus={tickBus}            // Realtime data feed without React renders
-                            symbol={activeInstrument.symbol}
-                            predictions={activeInstrument.predictions}
-                            config={effectiveConfig}
-                            positions={activeInstrument.portfolio.positions}
-                            closedTrades={activeInstrument.portfolio.closedTrades}
-                            amtAnalysis={activeInstrument.amtAnalysis}
-                            mode="STANDARD"
-                            isHidden={chartMode !== 'STANDARD'}
-                            footprintData={null}
-                            cumulativeDeltas={[]}
-                        />
-                        {/* Instance 2: Footprint */}
-                        <ChartScene
-                            key={`footprint-${activeInstrument.symbol}`}
                             data={activeInstrument.data}
                             tickBus={tickBus}
                             symbol={activeInstrument.symbol}
@@ -181,27 +163,10 @@ function App() {
                             positions={activeInstrument.portfolio.positions}
                             closedTrades={activeInstrument.portfolio.closedTrades}
                             amtAnalysis={activeInstrument.amtAnalysis}
-                            mode="FOOTPRINT"
-                            isHidden={chartMode !== 'FOOTPRINT'}
-                            footprintData={activeFootprint.data}
-                            cumulativeDeltas={activeFootprint.cumulativeDeltas}
-                        />
-                        {/* Instance 3: Range Bars */}
-                        <ChartScene
-                            key={`range-${activeInstrument.symbol}`}
-                            data={activeInstrument.data}
-                            tickBus={tickBus}
-                            symbol={activeInstrument.symbol}
-                            predictions={activeInstrument.predictions}
-                            config={effectiveConfig}
-                            positions={activeInstrument.portfolio.positions}
-                            closedTrades={activeInstrument.portfolio.closedTrades}
-                            amtAnalysis={activeInstrument.amtAnalysis}
-                            mode="RANGE"
-                            isHidden={chartMode !== 'RANGE'}
-                            footprintData={null}
-                            cumulativeDeltas={[]}
-                            rangeBarData={activeInstrument.rangeBars ?? null}
+                            mode={chartMode}
+                            footprintData={chartMode === 'FOOTPRINT' ? activeFootprint.data : null}
+                            cumulativeDeltas={chartMode === 'FOOTPRINT' ? activeFootprint.cumulativeDeltas : []}
+                            rangeBarData={chartMode === 'RANGE' ? (activeInstrument.rangeBars ?? null) : null}
                         />
                     </ErrorBoundary>
                 </div>

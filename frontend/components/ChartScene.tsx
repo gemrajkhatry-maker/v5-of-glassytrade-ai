@@ -25,7 +25,6 @@ interface ChartSceneProps {
   aiAnalysis?: AIAnalysis | null;
   amtAnalysis?: AMTAnalysis | null;
   mode?: ChartMode;
-  isHidden?: boolean;
   footprintData: Record<string, FootprintCandle> | null;
   cumulativeDeltas: number[];
   tickBus?: EventTarget;
@@ -57,7 +56,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   aiAnalysis,
   amtAnalysis,
   mode = 'STANDARD',
-  isHidden = false,
   footprintData,
   cumulativeDeltas,
   tickBus,
@@ -365,26 +363,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     };
   }, [tickBus, symbol, mode]);
 
-  const prevIsHiddenRef = useRef(isHidden);
-  useEffect(() => {
-    // Only fire when visibility actually changes (tab switch), NOT on every data tick.
-    const becameVisible = prevIsHiddenRef.current && !isHidden;
-    prevIsHiddenRef.current = isHidden;
-
-    if (becameVisible && chartRef.current && chartContainerRef.current) {
-      const { clientWidth, clientHeight } = chartContainerRef.current;
-      if (clientWidth > 0 && clientHeight > 0) {
-        chartRef.current.applyOptions({ width: clientWidth, height: clientHeight });
-        if (overlayRef.current) {
-          overlayRef.current.width = clientWidth;
-          overlayRef.current.height = clientHeight;
-        }
-        // Do NOT call scrollToPosition here — respect the user's current pan/zoom.
-        // Effect 4b will handle loading range bar data independently.
-      }
-    }
-  }, [isHidden]);
-
   // Handle mode switches dynamically without remount
   useEffect(() => {
     if (!candleSeriesRef.current || !predictionSeriesRef.current) return;
@@ -421,7 +399,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
   // 3. Canvas Overlay Drawing
   useEffect(() => {
-    if (!chartRef.current || !candleSeriesRef.current || !overlayRef.current || isHidden) return;
+    if (!chartRef.current || !candleSeriesRef.current || !overlayRef.current) return;
 
     const chart = chartRef.current;
     const series = candleSeriesRef.current;
@@ -429,7 +407,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     const ctx = canvas.getContext('2d');
 
     const drawOverlay = () => {
-      if (!ctx || isHidden) return;
+      if (!ctx) return;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       try {
@@ -481,7 +459,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRangeChange);
     };
 
-  }, [stableAmtAnalysis, stableData, footprintData, cumulativeDeltas, config, mode, isHidden]);
+  }, [stableAmtAnalysis, stableData, footprintData, cumulativeDeltas, config, mode]);
 
 
   // Helper: Draw Aggressive Bubbles
@@ -1894,7 +1872,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   }, [positions, closedTrades, stableAmtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
 
   return (
-    <div className="w-full h-full relative bg-[#0f172a] overflow-hidden" style={{ display: isHidden ? 'none' : 'block' }}>
+    <div className="w-full h-full relative bg-[#0f172a] overflow-hidden">
       <div ref={chartContainerRef} className="w-full h-full relative z-10" />
       <canvas ref={overlayRef} className="absolute inset-0 z-20 pointer-events-none" />
 
@@ -1995,7 +1973,6 @@ const DecisionCard: React.FC<DecisionCardProps> = ({ direction, setup, pLong, pS
 // changes but the visually-relevant data has not actually changed.
 function chartSceneAreEqual(prev: ChartSceneProps, next: ChartSceneProps): boolean {
     if (prev.mode !== next.mode) return false;
-    if (prev.isHidden !== next.isHidden) return false;
     if (prev.symbol !== next.symbol) return false;
     if (prev.config !== next.config) return false;
     if (prev.data.length !== next.data.length) return false;
