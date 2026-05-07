@@ -1,1 +1,238 @@
 @import "tailwindcss";
+
+/* ========================================
+   GlassyTrade AI — Institutional Theme
+   Professional Trading Terminal Design
+   Version: 1.0 (2026-05-07)
+   ======================================== */
+
+@theme {
+  /* Background Hierarchy */
+  --color-glassy-bg-primary: #0a0e17;
+  --color-glassy-bg-secondary: #0f1423;
+  --color-glassy-bg-tertiary: #141a2a;
+  --color-glassy-bg-elevated: #1a2235;
+  --color-glassy-bg-hover: #1e2740;
+  --color-glassy-bg-active: #243052;
+
+  /* Border System */
+  --color-glassy-border-subtle: #1e2740;
+  --color-glassy-border-default: #2a3550;
+  --color-glassy-border-prominent: #3a4a6b;
+  --color-glassy-border-focus: #4a6090;
+
+  /* Text Hierarchy */
+  --color-glassy-text-primary: #e8ecf4;
+  --color-glassy-text-secondary: #a8b4cc;
+  --color-glassy-text-tertiary: #6b7a99;
+  --color-glassy-text-disabled: #3d4a66;
+
+  /* Bullish / Positive */
+  --color-glassy-bull-primary: #00c896;
+  --color-glassy-bull-secondary: #00a87d;
+  --color-glassy-bull-muted: #008764;
+
+  /* Bearish / Negative */
+  --color-glassy-bear-primary: #ff4757;
+  --color-glassy-bear-secondary: #e63946;
+  --color-glassy-bear-muted: #c92a3a;
+
+  /* Neutral / Balanced */
+  --color-glassy-neutral-warm: #ffc066;
+  --color-glassy-neutral-cool: #66b3ff;
+  --color-glassy-neutral-gray: #8892a8;
+
+  /* Warning / Risk */
+  --color-glassy-warning: #ffa94d;
+  --color-glassy-danger: #ff3b5c;
+
+  /* AI / Intelligence */
+  --color-glassy-ai-primary: #7c5cfc;
+  --color-glassy-ai-secondary: #9b80ff;
+  --color-glassy-ai-muted: #6048d0;
+
+  /* Regime / Market State */
+  --color-glassy-regime-trending: #00c896;
+  --color-glassy-regime-balanced: #ffc066;
+  --color-glassy-regime-breaking: #ff4757;
+  --color-glassy-regime-probing: #66b3ff;
+  --color-glassy-regime-dead: #4a5568;
+
+  /* Structure / Profile */
+  --color-glassy-structure-poc: #ffa94d;
+  --color-glassy-structure-vah: #00c896;
+  --color-glassy-structure-val: #ff4757;
+  --color-glassy-structure-vwap: #66b3ff;
+
+  /* Typography */
+  --font-family-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Consolas', monospace;
+
+  /* Spacing System (base: 4px) */
+  --spacing-glassy-xs: 4px;
+  --spacing-glassy-sm: 8px;
+  --spacing-glassy-md: 12px;
+  --spacing-glassy-lg: 16px;
+  --spacing-glassy-xl: 24px;
+  --spacing-glassy-2xl: 32px;
+  --spacing-glassy-3xl: 48px;
+
+  /* Border Radius */
+  --radius-glassy-sm: 4px;
+  --radius-glassy-md: 6px;
+  --radius-glassy-lg: 8px;
+  --radius-glassy-xl: 12px;
+}
+
+/* ========================================
+   Global Styles
+   ======================================== */
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--color-glassy-bg-primary);
+  color: var(--color-glassy-text-primary);
+  font-family: var(--font-family-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ========================================
+   Utility Classes for Institutional Theme
+   ======================================== */
+
+/* Numeric values — always monospaced with tabular nums */
+.metric-value,
+.price-display,
+.pnl-display,
+.probability-display {
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Label styling */
+.label-institutional {
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-glassy-text-tertiary);
+}
+
+/* Section header */
+.section-header-institutional {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-glassy-text-secondary);
+}
+
+/* Panel base */
+.panel-institutional {
+  background-color: var(--color-glassy-bg-secondary);
+  border: 1px solid var(--color-glassy-border-default);
+  border-radius: var(--radius-glassy-md);
+}
+
+/* Card base */
+.card-institutional {
+  background-color: var(--color-glassy-bg-tertiary);
+  border: 1px solid var(--color-glassy-border-default);
+  border-radius: var(--radius-glassy-md);
+  padding: 16px;
+}
+
+/* Button variants */
+.btn-primary {
+  background-color: var(--color-glassy-bull-primary);
+  color: var(--color-glassy-bg-primary);
+  font-weight: 600;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: var(--radius-glassy-sm);
+  transition: background-color 150ms ease;
+}
+
+.btn-primary:hover {
+  background-color: var(--color-glassy-bull-secondary);
+}
+
+.btn-secondary {
+  background-color: var(--color-glassy-bg-elevated);
+  color: var(--color-glassy-text-primary);
+  border: 1px solid var(--color-glassy-border-default);
+  font-weight: 500;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: var(--radius-glassy-sm);
+  transition: all 150ms ease;
+}
+
+.btn-secondary:hover {
+  background-color: var(--color-glassy-bg-hover);
+  border-color: var(--color-glassy-border-prominent);
+}
+
+/* Badge variants */
+.badge-enter {
+  background-color: rgba(0, 200, 150, 0.1);
+  border: 1px solid rgba(0, 200, 150, 0.3);
+  color: var(--color-glassy-bull-primary);
+  font-weight: 700;
+  font-size: 9px;
+  text-transform: uppercase;
+  border-radius: var(--radius-glassy-sm);
+  padding: 2px 8px;
+}
+
+.badge-monitor {
+  background-color: rgba(255, 169, 77, 0.1);
+  border: 1px solid rgba(255, 169, 77, 0.3);
+  color: var(--color-glassy-warning);
+  font-weight: 700;
+  font-size: 9px;
+  text-transform: uppercase;
+  border-radius: var(--radius-glassy-sm);
+  padding: 2px 8px;
+}
+
+.badge-skip {
+  background-color: rgba(255, 71, 87, 0.1);
+  border: 1px solid rgba(255, 71, 87, 0.3);
+  color: var(--color-glassy-bear-primary);
+  font-weight: 700;
+  font-size: 9px;
+  text-transform: uppercase;
+  border-radius: var(--radius-glassy-sm);
+  padding: 2px 8px;
+}
+
+/* Scrollbar styling (institutional) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-glassy-bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-glassy-border-default);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-glassy-border-prominent);
+}

@@ -107,11 +107,11 @@ function App() {
 
     if (!activeInstrument) {
         return (
-            <div className="w-screen h-screen bg-slate-900 flex flex-col items-center justify-center text-white space-y-4">
-                <Loader2 className="w-12 h-12 animate-spin text-purple-500" />
+            <div className="w-screen h-screen bg-glassy-bg-primary flex flex-col items-center justify-center text-glassy-text-primary space-y-4">
+                <Loader2 className="w-12 h-12 animate-spin text-glassy-ai-primary" />
                 <div className="text-center max-w-md px-4">
                     <h2 className="text-xl font-bold">Connecting to Backend</h2>
-                    <p className="text-sm text-white/50 mt-2">
+                    <p className="text-sm text-glassy-text-secondary mt-2">
                         {connectionStatus ||
                             'Loading server config and symbols. Ensure the API is running (see Vite proxy / PORT).'}
                     </p>
@@ -121,11 +121,11 @@ function App() {
     }
 
     return (
-        <div className="relative w-screen h-screen overflow-hidden bg-slate-900 flex">
+        <div className="relative w-screen h-screen overflow-hidden bg-glassy-bg-primary flex">
 
             {/* Connection status banner */}
             {!connected && (
-                <div className="absolute top-0 left-0 right-0 z-50 bg-red-900/90 text-red-200 text-xs text-center py-1 px-4">
+                <div className="absolute top-0 left-0 right-0 z-50 bg-glassy-danger/90 text-glassy-text-primary text-xs text-center py-1 px-4">
                     {connectionStatus || 'Disconnected from server'}
                 </div>
             )}
@@ -227,18 +227,18 @@ function App() {
                         <div className="flex flex-col gap-2 items-start max-w-[min(100%,52rem)]">
                             <div className="flex items-start gap-2 flex-wrap">
                             {!sidebarOpen && (
-                                <button onClick={() => setSidebarOpen(true)} className="p-2 bg-white/5 backdrop-blur rounded-lg text-white hover:bg-white/10 transition-colors">
+                                <button onClick={() => setSidebarOpen(true)} className="p-2 bg-glassy-bg-elevated/50 backdrop-blur rounded-sm text-glassy-text-primary hover:bg-glassy-bg-hover transition-colors">
                                     <Activity size={20} />
                                 </button>
                             )}
 
                             {/* Chart view */}
                             <div className="flex flex-col gap-1">
-                                <span className="text-[9px] font-bold uppercase tracking-widest text-white/60 pl-1">Chart view</span>
-                                <div className="flex bg-white/10 backdrop-blur-md rounded-full p-1 gap-1 shadow-inner border border-white/10">
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-glassy-text-tertiary pl-1">Chart view</span>
+                                <div className="flex bg-glassy-bg-tertiary backdrop-blur-md rounded-sm p-1 gap-1 border border-glassy-border-default">
                                 <button
                                     onClick={() => setChartMode('STANDARD')}
-                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'STANDARD' ? 'bg-white text-black shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
+                                    className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${chartMode === 'STANDARD' ? 'bg-glassy-bg-active text-glassy-text-primary' : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'}`}
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <BarChart2 size={14} /> Candles
@@ -246,7 +246,7 @@ function App() {
                                 </button>
                                 <button
                                     onClick={() => setChartMode('FOOTPRINT')}
-                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'FOOTPRINT' ? 'bg-white text-black shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
+                                    className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${chartMode === 'FOOTPRINT' ? 'bg-glassy-bg-active text-glassy-text-primary' : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'}`}
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <Grid size={14} /> Footprint
@@ -254,7 +254,7 @@ function App() {
                                 </button>
                                 <button
                                     onClick={() => setChartMode('RANGE')}
-                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'RANGE' ? 'bg-white text-black shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
+                                    className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${chartMode === 'RANGE' ? 'bg-glassy-bg-active text-glassy-text-primary' : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'}`}
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <TrendingUp size={14} /> Range bars
@@ -265,8 +265,8 @@ function App() {
 
                             {/* Volume profile overlay */}
                             <div className="flex flex-col gap-1">
-                                <span className="text-[9px] font-bold uppercase tracking-widest text-white/60 pl-1">Profile overlay</span>
-                                <div className="flex bg-white/10 backdrop-blur-md rounded-full p-1 gap-1 shadow-inner border border-white/10">
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-glassy-text-tertiary pl-1">Profile overlay</span>
+                                <div className="flex bg-glassy-bg-tertiary backdrop-blur-md rounded-sm p-1 gap-1 border border-glassy-border-default">
                                 {([
                                     { key: 'session', label: 'Session' },
                                     { key: 'leg', label: 'Leg' },
@@ -276,9 +276,9 @@ function App() {
                                     <button
                                         key={key}
                                         onClick={() => setConfig(s => ({ ...s, vpMode: key, showVolumeProfile: key !== 'off' }))}
-                                        className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${config.vpMode === key
-                                            ? 'bg-blue-500 text-white shadow-md shadow-blue-500/20'
-                                            : 'text-white/70 hover:text-white hover:bg-white/10'
+                                        className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${config.vpMode === key
+                                            ? 'bg-glassy-neutral-cool/20 text-glassy-neutral-cool border border-glassy-neutral-cool/30'
+                                            : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'
                                             }`}
                                     >
                                         {label}
@@ -291,11 +291,11 @@ function App() {
 
                         {/* Right Toggle (Analysis) + Chat Toggle */}
                         <div className="flex items-start gap-3">
-                            <button onClick={() => setShowControls(!showControls)} className="h-10 w-10 bg-white/5 backdrop-blur-xl border border-white/10 rounded-xl text-white flex items-center justify-center hover:bg-white/10 transition-colors">
-                                {showControls ? <X size={18} /> : <Sparkles size={18} className="text-purple-400" />}
+                            <button onClick={() => setShowControls(!showControls)} className="h-10 w-10 bg-glassy-bg-elevated/50 backdrop-blur-xl border border-glassy-border-default rounded-sm text-glassy-text-primary hover:bg-glassy-bg-hover transition-colors">
+                                {showControls ? <X size={18} /> : <Sparkles size={18} className="text-glassy-ai-primary" />}
                             </button>
                             {!rightSidebarOpen && (
-                                <button onClick={() => setRightSidebarOpen(true)} className="p-2 bg-white/5 backdrop-blur rounded-lg text-white hover:bg-white/10 transition-colors">
+                                <button onClick={() => setRightSidebarOpen(true)} className="p-2 bg-glassy-bg-elevated/50 backdrop-blur rounded-sm text-glassy-text-primary hover:bg-glassy-bg-hover transition-colors">
                                     <PanelsTopLeft size={20} className="rotate-180" />
                                 </button>
                             )}
@@ -323,27 +323,27 @@ function App() {
             {/* Bottom Right: Journal Button */}
             <button
                 onClick={() => setCurrentPage('journal')}
-                className="absolute bottom-6 right-6 z-30 p-3 bg-purple-600 hover:bg-purple-500 rounded-full shadow-lg shadow-purple-500/25 transition-all hover:scale-105"
+                className="absolute bottom-6 right-6 z-30 p-3 bg-glassy-ai-primary hover:bg-glassy-ai-secondary rounded-sm transition-all hover:scale-105"
                 title="Trade Journal"
             >
-                <BookOpen size={20} className="text-white" />
+                <BookOpen size={20} className="text-glassy-bg-primary" />
             </button>
 
             {/* RIGHT: Sidebar (Analysis & AI) */}
             <div className={`
           absolute right-0 top-0 h-full w-80 z-20 transition-all duration-300
-          bg-slate-900/50 backdrop-blur-md border-l border-white/10 flex flex-col
+          bg-glassy-bg-secondary/80 backdrop-blur-md border-l border-glassy-border-default flex flex-col
           ${rightSidebarOpen ? 'translate-x-0' : 'translate-x-full'}
       `}>
                 {/* Header */}
-                <div className="p-4 border-b border-white/10 flex justify-between items-center">
-                    <div className="flex items-center gap-2 text-white/90">
-                        <Brain size={18} className="text-purple-400" />
+                <div className="p-4 border-b border-glassy-border-default flex justify-between items-center">
+                    <div className="flex items-center gap-2 text-glassy-text-primary">
+                        <Brain size={18} className="text-glassy-ai-primary" />
                         <span className="text-xs font-bold tracking-widest uppercase">Intelligence</span>
                     </div>
                     <button
                         onClick={() => setRightSidebarOpen(false)}
-                        className="text-white/70 hover:text-white transition-colors"
+                        className="text-glassy-text-secondary hover:text-glassy-text-primary transition-colors"
                     >
                         <X size={16} />
                     </button>

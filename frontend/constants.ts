@@ -18,8 +18,8 @@ export const DEFAULT_CONFIG: ChartConfig = {
   symbol: '',
   interval: '5m',
   dataSource: 'DHAN',
-  bullColor: '#10b981', // Emerald 500
-  bearColor: '#ef4444', // Red 500
+  bullColor: '#00c896', // Institutional green (85% saturation)
+  bearColor: '#ff4757', // Institutional red (85% saturation)
   glassOpacity: 1.0,
   roughness: 0.1, // Smooth glass
   transmission: 0.95, // High transmission

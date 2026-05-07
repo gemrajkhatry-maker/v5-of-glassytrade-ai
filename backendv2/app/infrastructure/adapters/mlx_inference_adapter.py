@@ -18,6 +18,12 @@ from dotenv import load_dotenv
 
 from app.domain.shared.port import ILLMInference, LLMNotReadyError
 
+try:
+    from app.core.cost_tracker import TokenUsage, get_cost_tracker
+    _HAS_COST_TRACKING = True
+except ImportError:
+    _HAS_COST_TRACKING = False
+
 try:  # pragma: no cover - optional cross-process lock dependency
     import fcntl
 except Exception:  # pragma: no cover
@@ -459,12 +465,33 @@ class MLXInferenceAdapter(ILLMInference):
                             continue
                         MLXInferenceAdapter._cloud_consecutive_429s = 0
                         MLXInferenceAdapter._cloud_last_working_model = model_id
+
+                        # Track cloud token usage
+                        if _HAS_COST_TRACKING:
+                            try:
+                                usage_data = result.get("usage", {})
+                                usage = TokenUsage(
+                                    prompt_tokens=usage_data.get("prompt_tokens", 0),
+                                    completion_tokens=usage_data.get("completion_tokens", 0),
+                                    total_tokens=usage_data.get("total_tokens", 0),
+                                    model=model_id,
+                                    is_cloud=True,
+                                )
+                                get_cost_tracker().record_llm_call(usage)
+                            except Exception:
+                                pass
+
                         return str(content)
 
                 except urllib.error.HTTPError as e:
                     last_error = e
                     if e.code == 429:
                         MLXInferenceAdapter._cloud_consecutive_429s += 1
+                        if _HAS_COST_TRACKING:
+                            try:
+                                get_cost_tracker().record_cloud_429()
+                            except Exception:
+                                pass
                         retry_after = e.headers.get("Retry-After")
                         if retry_after:
                             try:
@@ -617,6 +644,23 @@ class MLXInferenceAdapter(ILLMInference):
             logger.info("[%s] Generation complete in %.2fs.", target, duration)
 
         rendered = prefill + (response or "").strip()
+
+        # Track token usage for local inference (approximate)
+        if _HAS_COST_TRACKING:
+            try:
+                prompt_tokens = len(self.processor.tokenize(prompt))
+                completion_tokens = len(self.processor.tokenize(response or ""))
+                usage = TokenUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens,
+                    model=self._effective_model_path().split("/")[-1] or "mlx-local",
+                    is_cloud=False,
+                )
+                get_cost_tracker().record_llm_call(usage)
+            except Exception:
+                pass  # Don't let cost tracking break inference
+
         if is_overseer:
             return self._truncate_repetition(rendered)
         return self._extract_json_candidate(rendered)

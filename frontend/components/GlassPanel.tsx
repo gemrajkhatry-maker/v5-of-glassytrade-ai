@@ -3,24 +3,43 @@ import React from 'react';
 interface GlassPanelProps {
   children: React.ReactNode;
   className?: string;
+  variant?: 'default' | 'elevated' | 'active';
 }
 
-const GlassPanel: React.FC<GlassPanelProps> = ({ children, className = '' }) => {
+/**
+ * GlassPanel — Institutional redesign
+ * 
+ * BEFORE: Glassmorphism (bg-white/8, backdrop-blur-xl, rounded-2xl)
+ * AFTER: Solid backgrounds with professional borders
+ * 
+ * Usage:
+ * - default: Standard panels (scanner, sidebar)
+ * - elevated: Floating elements, modals
+ * - active: Selected/active state panels
+ */
+const GlassPanel: React.FC<GlassPanelProps> = ({ 
+  children, 
+  className = '',
+  variant = 'default' 
+}) => {
+  
+  const variantClasses = {
+    default: 'bg-glassy-bg-secondary border-glassy-border-default',
+    elevated: 'bg-glassy-bg-tertiary border-glassy-border-prominent shadow-lg',
+    active: 'bg-glassy-bg-active border-glassy-border-focus',
+  };
+
   return (
     <div className={`
       relative overflow-hidden
-      bg-white/8 
-      backdrop-blur-xl 
-      border border-white/15 
-      shadow-[0_8px_32px_0_rgba(0,0,0,0.5)] 
-      rounded-2xl 
-      text-white
+      ${variantClasses[variant]}
+      border
+      shadow-[0_4px_16px_rgba(0,0,0,0.4)]
+      rounded-md
+      text-glassy-text-primary
       transition-all duration-300
       ${className}
     `}>
-      {/* Glossy gradient overlay - increased contrast */}
-      <div className="absolute inset-0 bg-gradient-to-br from-white/15 to-transparent pointer-events-none" />
-      
       {/* Content */}
       <div className="relative z-10">
         {children}

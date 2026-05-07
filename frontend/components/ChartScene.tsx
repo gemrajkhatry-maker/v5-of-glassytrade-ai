@@ -119,11 +119,11 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
-        textColor: '#94a3b8',
+        textColor: '#6b7a99', // glassy-text-tertiary
       },
       grid: {
-        vertLines: { color: '#1e293b' },
-        horzLines: { color: '#1e293b' },
+        vertLines: { color: 'rgba(42, 53, 80, 0.2)' }, // glassy-border-default 20% opacity
+        horzLines: { color: 'rgba(42, 53, 80, 0.2)' },
       },
       width: chartContainerRef.current.clientWidth,
       height: chartContainerRef.current.clientHeight,
@@ -131,13 +131,13 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         mode: CrosshairMode.Normal,
       },
       timeScale: {
-        borderColor: '#1e293b',
+        borderColor: '#2a3550', // glassy-border-default
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 5,
       },
       rightPriceScale: {
-        borderColor: '#1e293b',
+        borderColor: '#2a3550', // glassy-border-default
         autoScale: true,
       },
     });
@@ -151,12 +151,12 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     });
 
     const predSeries = chart.addCandlestickSeries({
-      upColor: '#a855f7',
-      downColor: '#581c87',
+      upColor: '#7c5cfc', // glassy-ai-primary
+      downColor: '#6048d0', // glassy-ai-muted
       borderVisible: true,
-      borderColor: '#a855f7',
-      wickUpColor: '#a855f7',
-      wickDownColor: '#a855f7',
+      borderColor: '#7c5cfc',
+      wickUpColor: '#7c5cfc',
+      wickDownColor: '#7c5cfc',
     });
 
     const volumeSeries = chart.addHistogramSeries({
@@ -253,7 +253,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       volumeSeries.setData(rangeBarData.bars.map(b => ({
         time: b.time as any,
         value: b.volume,
-        color: b.close >= b.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+        color: b.close >= b.open ? 'rgba(0, 200, 150, 0.6)' : 'rgba(255, 71, 87, 0.6)', // Institutional colors
       })));
     } else {
       const IST_OFFSET = 19800;
@@ -269,7 +269,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       const volumeData = sortedData.map(d => ({
         time: toIST(d.time as string),
         value: d.volume,
-        color: d.close >= d.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
+        color: d.close >= d.open ? 'rgba(0, 200, 150, 0.6)' : 'rgba(255, 71, 87, 0.6)', // Institutional colors
       }));
       volumeSeries.setData(volumeData);
     }
@@ -1455,8 +1455,8 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         value: b.volume,
         // P2: Colour volume bars by delta sign for range bars too
         color: Math.abs(b.delta || 0) / Math.max(b.volume || 1, 1) > 0.02
-          ? (b.delta > 0 ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)')
-          : 'rgba(156,163,175,0.3)',
+          ? (b.delta > 0 ? 'rgba(0, 200, 150, 0.6)' : 'rgba(255, 71, 87, 0.6)') // Institutional colors
+          : 'rgba(107, 122, 153, 0.3)', // glassy-text-tertiary
       })));
     } else if (barCount > 0) {
       // Same bar count: only the forming bar changed — update() the last entry.

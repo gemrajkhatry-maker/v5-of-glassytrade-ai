@@ -24,6 +24,12 @@ from app.domain.shared.port.market_data import IMarketData
 from app.shared.timezones import IST
 from app.domain.trading.model.value_objects import OHLC, OrderBook, OrderBookLevel
 
+try:
+    from app.core.cost_tracker import get_cost_tracker
+    _HAS_COST_TRACKING = True
+except ImportError:
+    _HAS_COST_TRACKING = False
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_BASE_URL = "https://api.dhan.co"
@@ -251,23 +257,34 @@ class DhanAdapter(IMarketData):
             return self._cached_ltp(symbol)
         except RuntimeError:
             pass
-        response = asyncio.get_event_loop().run_until_complete(
-            self._client.get(
-                "/api/ltp",
-                params={"symbol": symbol, "exchange": self._exchange or "NSE"},
-            )
-        )
-        if response.status_code != 200:
-            return self._cached_ltp(symbol)
-        payload = _safe_json(response, {})
+        t0 = time.time()
         try:
-            ltp = float(payload.get("ltp", 0.0))
+            response = asyncio.get_event_loop().run_until_complete(
+                self._client.get(
+                    "/api/ltp",
+                    params={"symbol": symbol, "exchange": self._exchange or "NSE"},
+                )
+            )
+            latency = (time.time() - t0) * 1000
+            status = "ok" if response.status_code == 200 else "error"
+            if _HAS_COST_TRACKING:
+                get_cost_tracker().record_api_call("/api/ltp", symbol, latency, status)
+            if response.status_code != 200:
+                return self._cached_ltp(symbol)
+            payload = _safe_json(response, {})
+            try:
+                ltp = float(payload.get("ltp", 0.0))
+            except Exception:
+                ltp = 0.0
+            if ltp > 0:
+                self._ltp_cache[symbol] = (datetime.now(tz=IST).timestamp(), ltp)
+                return ltp
+            return self._cached_ltp(symbol)
         except Exception:
-            ltp = 0.0
-        if ltp > 0:
-            self._ltp_cache[symbol] = (datetime.now(tz=IST).timestamp(), ltp)
-            return ltp
-        return self._cached_ltp(symbol)
+            latency = (time.time() - t0) * 1000
+            if _HAS_COST_TRACKING:
+                get_cost_tracker().record_api_call("/api/ltp", symbol, latency, "error")
+            return self._cached_ltp(symbol)
 
     def _cached_ltp(self, symbol: str) -> float:
         first, second = self._ltp_cache.get(symbol, (0.0, 0.0))
@@ -338,8 +355,9 @@ class DhanAdapter(IMarketData):
                 if hit is not None:
                     chain_obj, ts = hit
                     if now - ts <= self._option_chain_cache_ttl_sec:
-                        return chain_obj
+                        return chain_obj  # Cache hit, no API call
 
+        t0 = time.monotonic()
         request_awaitable = self._client.get(
             "/api/options/chain",
             params={
@@ -349,10 +367,18 @@ class DhanAdapter(IMarketData):
             },
         )
         response = self._run_sync(request_awaitable)
+        latency = (time.monotonic() - t0) * 1000
         if inspect.iscoroutine(request_awaitable):
             request_awaitable.close()
         if response is None or response.status_code != 200:
+            if _HAS_COST_TRACKING:
+                get_cost_tracker().record_api_call(
+                    "/api/options/chain", underlying, latency,
+                    "error" if response and response.status_code != 200 else "error"
+                )
             return None
+        if _HAS_COST_TRACKING:
+            get_cost_tracker().record_api_call("/api/options/chain", underlying, latency, "ok")
         payload = _safe_json(response, None)
         chain = _parse_option_chain(payload, underlying=underlying, exchange=exchange)
         if chain is None:

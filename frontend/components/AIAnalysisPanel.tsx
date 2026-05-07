@@ -104,60 +104,60 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
     // 1. Fallback: If both are missing -> Initializing
     if (!analysis && !amtResult) {
         return (
-            <div className="bg-[#131722] border border-white/10 rounded-xl p-4 flex flex-col gap-4 font-sans text-slate-200 shadow-xl opacity-70">
+            <div className="bg-glassy-bg-tertiary border border-glassy-border-default rounded-md p-4 flex flex-col gap-4 font-sans text-glassy-text-secondary shadow-xl opacity-70">
                 <div className="flex justify-between items-start">
                     <div className="flex items-center gap-2">
-                        <Zap className="w-5 h-5 text-gray-500" />
+                        <Zap className="w-5 h-5 text-glassy-text-disabled" />
                         <div>
-                            <h2 className="text-sm font-bold tracking-wider text-white uppercase">Fabio Playbook</h2>
-                            <div className="text-[10px] text-white/40 font-mono tracking-widest uppercase">CONNECTING TO FEED...</div>
+                            <h2 className="text-sm font-bold tracking-wider text-glassy-text-primary uppercase">Fabio Playbook</h2>
+                            <div className="text-[9px] text-glassy-text-disabled font-mono tracking-widest uppercase">Connecting to feed...</div>
                         </div>
                     </div>
                 </div>
                 <div className="h-32 flex items-center justify-center">
-                    <div className="text-xs text-white/30 animate-pulse">Waiting for Market Data...</div>
+                    <div className="text-xs text-glassy-text-disabled animate-pulse">Waiting for Market Data...</div>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="bg-[#131722] border border-white/10 rounded-xl p-4 flex flex-col gap-4 font-sans text-slate-200 shadow-xl">
+        <div className="bg-glassy-bg-tertiary border border-glassy-border-default rounded-md p-4 flex flex-col gap-4 font-sans text-glassy-text-secondary shadow-xl">
 
             {/* 0. Header (Sticky Top Bar) */}
-            <div className="sticky top-0 z-20 bg-[#131722]/95 backdrop-blur-xl pb-3 mb-2 border-b border-white/10">
+            <div className="sticky top-0 z-20 bg-glassy-bg-tertiary/95 backdrop-blur-xl pb-3 mb-2 border-b border-glassy-border-default">
                 <div className="flex justify-between items-start mb-3 pt-2">
                     <div className="flex items-center gap-2">
-                        <Zap className="w-5 h-5 text-purple-400 fill-purple-400/20" />
+                        <Zap className="w-5 h-5 text-glassy-ai-primary fill-glassy-ai-primary/20" />
                         <div>
-                            <h2 className="text-sm font-bold tracking-wider text-white uppercase flex items-center gap-2">
+                            <h2 className="text-sm font-bold tracking-wider text-glassy-text-primary uppercase flex items-center gap-2">
                                 Fabio Playbook
-                                <span className="px-1.5 py-0.5 bg-blue-600/20 rounded border border-blue-500/30 text-[9px] text-blue-400 uppercase tracking-widest leading-none">
+                                <span className="px-1.5 py-0.5 bg-glassy-neutral-cool/20 rounded-sm border border-glassy-neutral-cool/30 text-[8px] text-glassy-neutral-cool uppercase tracking-widest leading-none">
                                     {portfolio.leverage}x
                                 </span>
                             </h2>
-                            <div className="text-[10px] text-white/40 font-mono tracking-widest uppercase">Execution Engine</div>
+                            <div className="text-[9px] text-glassy-text-tertiary font-mono tracking-wider uppercase">Execution Engine</div>
                         </div>
                     </div>
                 </div>
 
                 {/* Engine Bar */}
-                <div className="mb-3 px-3 py-2 bg-black/40 border-y border-white/5 flex flex-col justify-between items-center text-xs backdrop-blur-sm gap-2">
+                <div className="mb-3 px-3 py-2 bg-glassy-bg-elevated/50 border-y border-glassy-border-subtle flex flex-col justify-between items-center text-xs backdrop-blur-sm gap-2">
                     <div className="flex justify-between items-center w-full">
-                        <div className="flex items-center gap-2 px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 rounded">
-                            <Shield className="w-3 h-3 text-emerald-400" />
-                            <span className="text-emerald-400 font-bold tracking-widest text-[9px]">[ENGINE ARMED]</span>
+                        <div className="flex items-center gap-2 px-1.5 py-0.5 bg-glassy-bull-primary/10 border border-glassy-bull-primary/20 rounded-sm">
+                            <Shield className="w-3 h-3 text-glassy-bull-primary" />
+                            <span className="text-glassy-bull-primary font-bold tracking-wider text-[8px]">[ENGINE ARMED]</span>
                         </div>
-                        <span className="text-white/40 text-[9px] uppercase tracking-wider cursor-pointer hover:text-white/80 transition-colors">Target vs Circuit</span>
+                        <span className="text-glassy-text-tertiary text-[8px] uppercase tracking-wider cursor-pointer hover:text-glassy-text-secondary transition-colors">Target vs Circuit</span>
                     </div>
                     {/* Target / Circuit Mini Progress Bar */}
                     <div className="w-full">
-                        <div className="flex justify-between text-[8px] font-mono text-white/40 mb-1">
+                        <div className="flex justify-between text-[7px] font-mono text-glassy-text-tertiary mb-1">
                             <span>-₹30K (Circuit)</span>
                             <span>+₹15K (Target)</span>
                         </div>
-                        <div className="h-1 bg-white/10 rounded-full overflow-hidden flex relative">
-                            <div className="absolute top-0 left-1/2 w-px h-full bg-white/20 z-10" />
+                        <div className="h-1 bg-glassy-text-disabled/20 rounded-full overflow-hidden flex relative">
+                            <div className="absolute top-0 left-1/2 w-px h-full bg-glassy-text-disabled/30 z-10" />
                             {(() => {
                                 const maxAbs = 30000;
                                 const totalPartialPnl = (portfolio.positions as any[]).reduce(
@@ -165,8 +165,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                 );
                                 const closedPnl = (portfolio.closedTrades || []).reduce(
                                     (sum: number, t: any) => {
-                                        // For SL-hit exits, PnL may be stored directly on the position
-                                        // rather than in metadata
                                         const tradePnl = t.pnl || 0;
                                         return sum + tradePnl;
                                     }, 0
@@ -177,7 +175,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     <div className="h-full absolute transition-all duration-500 rounded-full" style={{
                                         width: `${norm * 50}%`,
                                         left: currentPnl > 0 ? '50%' : `${50 - norm * 50}%`,
-                                        backgroundColor: currentPnl > 0 ? '#4ade80' : '#f87171'
+                                        backgroundColor: currentPnl > 0 ? '#00c896' : '#ff4757'
                                     }} />
                                 );
                             })()}
@@ -190,12 +188,12 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
 
                 {/* P1-9: Underlying Index Panel */}
                 {underlyingPrice && underlyingPrice > 0 && (
-                    <div className="mt-2 px-3 py-1.5 bg-white/5 border border-white/10 rounded flex items-center justify-between">
+                    <div className="mt-2 px-3 py-1.5 bg-glassy-bg-elevated/50 border border-glassy-border-default rounded-sm flex items-center justify-between">
                         <div className="flex items-center gap-2">
-                            <Activity className="w-3.5 h-3.5 text-blue-400" />
-                            <span className="text-[10px] font-bold text-white/70 uppercase tracking-wider">Underlying Index</span>
+                            <Activity className="w-3.5 h-3.5 text-glassy-neutral-cool" />
+                            <span className="text-[9px] font-bold text-glassy-text-secondary uppercase tracking-wider">Underlying Index</span>
                         </div>
-                        <span className="text-xs font-mono font-bold text-blue-400">{underlyingPrice.toFixed(2)}</span>
+                        <span className="text-xs font-mono font-bold text-glassy-neutral-cool">{underlyingPrice.toFixed(2)}</span>
                     </div>
                 )}
 
@@ -204,9 +202,9 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
 
                 {/* LLM Timeout / Quant Only Banner */}
                 {!analysis && amtResult && (
-                    <div className="mt-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded flex items-center gap-2 animate-pulse">
-                        <Clock className="w-3.5 h-3.5 text-amber-400" />
-                        <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">
+                    <div className="mt-2 px-3 py-1.5 bg-glassy-warning/10 border border-glassy-warning/20 rounded-sm flex items-center gap-2 animate-pulse">
+                        <Clock className="w-3.5 h-3.5 text-glassy-warning" />
+                        <span className="text-[9px] font-bold text-glassy-warning uppercase tracking-wider">
                             LLM Timeout — Running on Quant Logic Only
                         </span>
                     </div>
@@ -215,35 +213,35 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
 
             {/* 01. STATE */}
             <div className="flex flex-col gap-2 relative">
-                <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest absolute -top-2 right-1 z-10 bg-[#131722] px-1">
-                    <Settings className="w-3 h-3 hover:text-white/80 transition-colors cursor-pointer" />
+                <div className="flex justify-between items-center text-[9px] text-glassy-text-tertiary uppercase tracking-wider absolute -top-2 right-1 z-10 bg-glassy-bg-tertiary px-1">
+                    <Settings className="w-3 h-3 hover:text-glassy-text-secondary transition-colors cursor-pointer" />
                 </div>
-                <div className={`p-3 rounded-lg bg-white/5 border border-white/10 relative overflow-hidden flex flex-col gap-2`}>
-                    <div className={`absolute top-0 left-0 w-1 h-full ${statusBg.replace('20', '50').replace('bg-', 'bg-')}`} />
+                <div className={`p-3 rounded-md bg-glassy-bg-elevated/50 border border-glassy-border-default relative overflow-hidden flex flex-col gap-2`}>
+                    <div className={`absolute top-0 left-0 w-0.5 h-full ${statusBg.replace('20', '50').replace('bg-', 'bg-')}`} />
                     
                     <div className="flex items-center justify-between ml-2">
-                        <span className="text-[10px] text-white/40 uppercase tracking-widest font-bold">Session & Leg</span>
+                        <span className="text-[9px] text-glassy-text-tertiary uppercase tracking-wider font-bold">Session & Leg</span>
                         <div className="flex items-center gap-2">
                             {liveMarketState === 'DEAD' ? (
-                                <div className="px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide flex items-center gap-1.5 bg-red-500/20 text-red-400 border border-red-500/30">
-                                    <span className="text-white/40 font-normal">SESSION</span>
-                                    <div className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                                <div className="px-2 py-0.5 rounded-sm text-[8px] font-bold tracking-wide flex items-center gap-1.5 bg-glassy-regime-dead/20 text-glassy-bear-primary border border-glassy-bear-primary/30">
+                                    <span className="text-glassy-text-tertiary font-normal">SESSION</span>
+                                    <div className="w-1.5 h-1.5 rounded-full bg-glassy-bear-primary animate-pulse" />
                                     DEAD MARKET
                                 </div>
                             ) : (
-                                <div className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide flex items-center gap-1.5 ${statusBg} ${statusColor}`}>
-                                    <span className="text-white/40 font-normal">SESSION</span>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${isImbalanced ? 'bg-orange-400' : liveMarketState === 'PROBING' ? 'bg-blue-400' : 'bg-yellow-400'}`} />
+                                <div className={`px-2 py-0.5 rounded-sm text-[8px] font-bold tracking-wide flex items-center gap-1.5 ${statusBg} ${statusColor}`}>
+                                    <span className="text-glassy-text-tertiary font-normal">SESSION</span>
+                                    <div className={`w-1.5 h-1.5 rounded-full ${isImbalanced ? 'bg-glassy-warning' : liveMarketState === 'PROBING' ? 'bg-glassy-neutral-cool' : 'bg-glassy-neutral-warm'}`} />
                                     {liveMarketState.toUpperCase()}
                                 </div>
                             )}
                             <div title={amtResult?.hasDisplacement ? "DISPLACEMENT — Strong directional move from value, new auction beginning" : "BALANCED — Price rotating within accepted value"} 
-                                 className={`px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide flex items-center gap-1.5 cursor-help ${amtResult?.hasDisplacement ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' : 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'}`}>
-                                <span className="text-white/40 font-normal">LEG</span>
-                                <div className={`w-1.5 h-1.5 rounded-full ${amtResult?.hasDisplacement ? 'bg-orange-400' : 'bg-yellow-400'}`} />
+                                 className={`px-2 py-0.5 rounded-sm text-[8px] font-bold tracking-wide flex items-center gap-1.5 cursor-help ${amtResult?.hasDisplacement ? 'bg-glassy-warning/20 text-glassy-warning border border-glassy-warning/30' : 'bg-glassy-neutral-warm/20 text-glassy-neutral-warm border border-glassy-neutral-warm/30'}`}>
+                                <span className="text-glassy-text-tertiary font-normal">LEG</span>
+                                <div className={`w-1.5 h-1.5 rounded-full ${amtResult?.hasDisplacement ? 'bg-glassy-warning' : 'bg-glassy-neutral-warm'}`} />
                                 {amtResult?.hasDisplacement ? 'DISPLACEMENT' : 'BALANCED'}
                                 {(amtResult?.legPoc ?? 0) > 0 && (
-                                    <span className="text-[8px] font-mono text-white/50 font-normal">
+                                    <span className="text-[7px] font-mono text-glassy-text-tertiary font-normal">
                                         POC {amtResult?.legPoc?.toFixed(1)}
                                         {(amtResult?.legVah ?? 0) > 0 && ` | ${amtResult?.legVal?.toFixed(1)}–${amtResult?.legVah?.toFixed(1)}`}
                                     </span>
@@ -259,21 +257,21 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                         if (!gapType && !openingBias) return null;
                         
                         return (
-                            <div className="flex items-center gap-2 px-2 pt-1 border-t border-white/5">
+                            <div className="flex items-center gap-2 px-2 pt-1 border-t border-glassy-border-subtle">
                                 {gapType && (
-                                    <div className={`px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wide ${
-                                        gapType.includes('UP') || gapType.includes('BULL') ? 'bg-green-500/15 text-green-400 border border-green-500/30' :
-                                        gapType.includes('DOWN') || gapType.includes('BEAR') ? 'bg-red-500/15 text-red-400 border border-red-500/30' :
-                                        'bg-white/5 text-white/50 border border-white/10'
+                                    <div className={`px-1.5 py-0.5 rounded-sm text-[7px] font-bold tracking-wide ${
+                                        gapType.includes('UP') || gapType.includes('BULL') ? 'bg-glassy-bull-primary/15 text-glassy-bull-primary border border-glassy-bull-primary/30' :
+                                        gapType.includes('DOWN') || gapType.includes('BEAR') ? 'bg-glassy-bear-primary/15 text-glassy-bear-primary border border-glassy-bear-primary/30' :
+                                        'bg-glassy-bg-elevated text-glassy-text-tertiary border border-glassy-border-subtle'
                                     }`}>
                                         GAP: {gapType}
                                     </div>
                                 )}
                                 {openingBias && (
-                                    <div className={`px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wide ${
-                                        openingBias.includes('BULL') || openingBias.includes('UP') ? 'bg-green-500/15 text-green-400 border border-green-500/30' :
-                                        openingBias.includes('BEAR') || openingBias.includes('DOWN') ? 'bg-red-500/15 text-red-400 border border-red-500/30' :
-                                        'bg-white/5 text-white/50 border border-white/10'
+                                    <div className={`px-1.5 py-0.5 rounded-sm text-[7px] font-bold tracking-wide ${
+                                        openingBias.includes('BULL') || openingBias.includes('UP') ? 'bg-glassy-bull-primary/15 text-glassy-bull-primary border border-glassy-bull-primary/30' :
+                                        openingBias.includes('BEAR') || openingBias.includes('DOWN') ? 'bg-glassy-bear-primary/15 text-glassy-bear-primary border border-glassy-bear-primary/30' :
+                                        'bg-glassy-bg-elevated text-glassy-text-tertiary border border-glassy-border-subtle'
                                     }`}>
                                         OPEN: {openingBias}
                                     </div>

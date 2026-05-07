@@ -57,7 +57,7 @@ export const createMarker = (params: {
 export const getCandleColor = (open: number, close: number): { bullColor: string; bearColor: string } => {
   const isBull = close >= open;
   return {
-    bullColor: isBull ? '#10b981' : '#ef4444',
-    bearColor: isBull ? '#10b981' : '#ef4444',
+    bullColor: isBull ? '#00c896' : '#ff4757', // Institutional colors
+    bearColor: isBull ? '#00c896' : '#ff4757',
   };
 };

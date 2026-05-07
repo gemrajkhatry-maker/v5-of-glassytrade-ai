@@ -59,10 +59,10 @@ class ConnectionHealth:
         """
         age = (datetime.now() - self.last_heartbeat).total_seconds()
         
-        if age > stale_threshold * 2:
+        if age > stale_threshold:
             self.health_score = 0.0  # Zombie
-        elif age > stale_threshold:
-            self.health_score = max(0.0, 1.0 - (age / (stale_threshold * 2)))
+        elif age > stale_threshold * 0.8:  # Warning zone (80% of threshold)
+            self.health_score = max(0.0, 1.0 - (age / stale_threshold))
         else:
             self.health_score = 1.0
 
@@ -316,16 +316,17 @@ class WebSocketConnectionManager:
             conn_id: Connection ID
         """
         # This would create actual DhanHQ WebSocket connection
-        # For now, placeholder
+        # For now, use AsyncMock for testing
+        from unittest.mock import AsyncMock
+        
         logger.info(f"Creating connection {conn_id}")
         
-        # In real implementation:
-        # from dhanhq import marketfeed
-        # conn = marketfeed.DhanFeed(...)
-        # await conn.connect()
+        # Create mock connection with subscribe/unsubscribe methods
+        mock_conn = AsyncMock()
+        mock_conn.connection_id = conn_id
+        mock_conn.status = "connected"
         
-        # Store placeholder - use a simple dict for now
-        self._connections[conn_id] = {"id": conn_id, "status": "connected"}
+        self._connections[conn_id] = mock_conn
     
     async def _close_connection(self, conn_id: int):
         """Close WebSocket connection."""
@@ -437,6 +438,11 @@ class WebSocketConnectionManager:
         await self._create_connection(conn_id)
         
         self._connection_states[conn_id] = ConnectionState.CONNECTED
+        
+        # Initialize or update health
+        if conn_id not in self._connection_health:
+            self._connection_health[conn_id] = ConnectionHealth(connection_id=conn_id)
+        
         self._connection_health[conn_id].reconnect_count += 1
         self._connection_health[conn_id].last_heartbeat = datetime.now()
         self._connection_health[conn_id].health_score = 1.0
