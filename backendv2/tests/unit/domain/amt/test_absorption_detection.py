@@ -384,23 +384,25 @@ class TestAbsorptionDetectorConfirmation:
         detector = AbsorptionDetector()
         
         # First candle: absorption setup (high volume, tight range, negative delta = buying pressure)
+        # range = 0.4, ATR = 2.0 → range_ratio = 0.2 (< 0.30 ✓)
+        # volume = 400, avg = 100 → vol_ratio = 4.0 (>= 2.0 ✓)
         absorption_candle = type('OHLC', (), {
-            'high': Decimal('100.3'),
-            'low': Decimal('99.7'),
-            'close': Decimal('100.1'),
+            'high': Decimal('100.2'),
+            'low': Decimal('99.8'),
+            'close': Decimal('100.0'),
             'volume': Decimal('400'),
             'delta': Decimal('-200'),  # More selling absorbed by buyers
         })()
         
-        # Trigger absorption detection
+        # Trigger absorption detection - should set pending state
         result1 = detector.detect(absorption_candle, atr=2.0, avg_vol=100)
-        assert result1.pending  # Should be pending confirmation
+        assert detector._pending_side == "BUY_ABSORBED", "Should set BUY_ABSORBED pending state"
         
         # Next candle: bullish displacement (closes above absorption candle high)
         confirmation_candle = type('OHLC', (), {
             'high': Decimal('101.0'),
             'low': Decimal('100.0'),
-            'close': Decimal('100.8'),  # Above 100.3 (absorption high)
+            'close': Decimal('100.5'),  # Above 100.2 (absorption high)
             'volume': Decimal('100'),
             'delta': Decimal('50'),
         })()
@@ -408,7 +410,7 @@ class TestAbsorptionDetectorConfirmation:
         result2 = detector.detect(confirmation_candle, atr=2.0, avg_vol=100)
         
         # Should confirm BUY_ABSORBED on bullish displacement
-        assert result2.confirmed, (
+        assert result2.detected, (
             "BUY_ABSORBED should be confirmed when price moves UP (bullish displacement). "
             "The original bug confirmed it on bearish displacement instead."
         )
@@ -422,23 +424,25 @@ class TestAbsorptionDetectorConfirmation:
         detector = AbsorptionDetector()
         
         # First candle: absorption setup (high volume, tight range, positive delta = selling pressure)
+        # range = 0.4, ATR = 2.0 → range_ratio = 0.2 (< 0.30 ✓)
+        # volume = 400, avg = 100 → vol_ratio = 4.0 (>= 2.0 ✓)
         absorption_candle = type('OHLC', (), {
-            'high': Decimal('100.3'),
-            'low': Decimal('99.7'),
-            'close': Decimal('100.1'),
+            'high': Decimal('100.2'),
+            'low': Decimal('99.8'),
+            'close': Decimal('100.0'),
             'volume': Decimal('400'),
             'delta': Decimal('200'),  # More buying absorbed by sellers
         })()
         
-        # Trigger absorption detection
+        # Trigger absorption detection - should set pending state
         result1 = detector.detect(absorption_candle, atr=2.0, avg_vol=100)
-        assert result1.pending  # Should be pending confirmation
+        assert detector._pending_side == "SELL_ABSORBED", "Should set SELL_ABSORBED pending state"
         
         # Next candle: bearish displacement (closes below absorption candle low)
         confirmation_candle = type('OHLC', (), {
             'high': Decimal('100.0'),
             'low': Decimal('99.0'),
-            'close': Decimal('99.2'),  # Below 99.7 (absorption low)
+            'close': Decimal('99.5'),  # Below 99.8 (absorption low)
             'volume': Decimal('100'),
             'delta': Decimal('-50'),
         })()
@@ -446,7 +450,7 @@ class TestAbsorptionDetectorConfirmation:
         result2 = detector.detect(confirmation_candle, atr=2.0, avg_vol=100)
         
         # Should confirm SELL_ABSORBED on bearish displacement
-        assert result2.confirmed, (
+        assert result2.detected, (
             "SELL_ABSORBED should be confirmed when price moves DOWN (bearish displacement). "
             "The original bug confirmed it on bullish displacement instead."
         )

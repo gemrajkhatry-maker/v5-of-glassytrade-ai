@@ -331,7 +331,7 @@ class AbsorptionDetector:
             self._candles_since_pending += 1
             displaced_bullish = float(candle.close) > float(self._pending_candle.high)
             displaced_bearish = float(candle.close) < float(self._pending_candle.low)
-            if self._pending_side == "SELL_ABSORBED" and displaced_bullish:
+            if self._pending_side == "SELL_ABSORBED" and displaced_bearish:
                 result = AbsorptionResult(
                     True,
                     "SELL_ABSORBED",
@@ -340,7 +340,7 @@ class AbsorptionDetector:
                 )
                 self._clear_pending()
                 return result
-            if self._pending_side == "BUY_ABSORBED" and displaced_bearish:
+            if self._pending_side == "BUY_ABSORBED" and displaced_bullish:
                 result = AbsorptionResult(
                     True,
                     "BUY_ABSORBED",
@@ -351,8 +351,8 @@ class AbsorptionDetector:
                 return result
             if (
                 self._candles_since_pending >= 2
-                or (self._pending_side == "SELL_ABSORBED" and displaced_bearish)
-                or (self._pending_side == "BUY_ABSORBED" and displaced_bullish)
+                or (self._pending_side == "SELL_ABSORBED" and displaced_bullish)
+                or (self._pending_side == "BUY_ABSORBED" and displaced_bearish)
             ):
                 self._clear_pending()
 
