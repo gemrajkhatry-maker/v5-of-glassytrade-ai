@@ -1,7 +1,7 @@
 """Deprecated: Use app.domain.fabio_ai.services.gate_pipeline instead.
 
-This module exists only for backward compatibility with legacy imports
-in service_graph.py and api/dependencies.py.
+This module exists only for backward compatibility with legacy imports.
+ServiceGraph has been eliminated (ADR-0003).
 """
 
 from app.domain.fabio_ai.services.gate_pipeline import (

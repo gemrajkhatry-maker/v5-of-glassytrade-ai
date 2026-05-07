@@ -1,8 +1,8 @@
 """Exchange enumeration with normalization utility.
 
 Centralizes exchange name normalization (e.g., NFO -> NSE mapping)
-to eliminate duplicated logic across service_graph.py, session_event_router.py,
-and llm_entry_handler.py.
+to eliminate duplicated logic across trading session services.
+ServiceGraph eliminated per ADR-0003.
 """
 
 from __future__ import annotations

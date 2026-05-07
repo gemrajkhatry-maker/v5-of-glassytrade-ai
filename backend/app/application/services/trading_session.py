@@ -392,157 +392,234 @@ class TradingSessionService:
         """
         session = self.get_or_create_session(symbol)
         cache = self._get_cache(symbol)
-        trading_enabled = session.trading_state == "TRADABLE"
-        self._state_manager._maybe_reset_symbol_state(session, symbol, tick.time)
 
-        # Drain pending signal from LLM worker thread + update tick time
+        self._maybe_reset_symbol_state(session, symbol, tick.time)
+        self._process_pending_signal(cache, session, tick)
+        self._update_data_store(cache, tick, underlying_tick, order_book)
+        self._handle_closed_positions(session, symbol, tick)
+        self._publish_tick_event(cache, session, symbol, tick, order_book)
+
+        return self._build_state_snapshot(session)
+
+    def _maybe_reset_symbol_state(
+        self, session, symbol: str, tick_time: str
+    ) -> None:
+        """Reset session state for symbol if needed (daily reset, etc.)."""
+        self._state_manager._maybe_reset_symbol_state(session, symbol, tick_time)
+
+    def _process_pending_signal(
+        self, cache: SessionCache, session, tick: OHLC
+    ) -> None:
+        """Drain and execute pending LLM signal if trading is enabled."""
         cache.update_tick_time()
         pending = cache.drain_pending_signal()
-        if pending:
-            pending_symbol, pending_signal = pending
+        if not pending:
+            return
 
-            # Audit Fix: Signal TTL — ignore stale signals older than 10 minutes
-            try:
-                sig_time = datetime.fromisoformat(
-                    pending_signal.timestamp.replace("Z", "+00:00")
-                )
-                curr_time = datetime.fromisoformat(tick.time.replace("Z", "+00:00"))
-                signal_age = (curr_time - sig_time).total_seconds()
-                if signal_age > 600:
-                    log.warning(
-                        "Discarding stale signal for %s (age=%.0fs)", symbol, signal_age
-                    )
-                    pending = None
-            except (ValueError, KeyError) as e:
-                log.debug("Signal age check error: %s", e, exc_info=True)
-        if pending and trading_enabled:
+        pending_symbol, pending_signal = pending
+
+        # Signal TTL — ignore stale signals older than 10 minutes
+        if self._is_signal_stale(pending_signal, tick.time):
+            log.warning(
+                "Discarding stale signal for %s", pending_symbol
+            )
+            return
+
+        trading_enabled = session.trading_state == "TRADABLE"
+        if trading_enabled:
             self._event_router.execute_signal(pending_symbol, pending_signal, session)
-        elif pending:
+        else:
             log.debug(
                 "Dropping queued signal for %s because trading is disabled",
-                symbol,
+                pending_symbol,
             )
 
-        # Update data store via SessionCache
-        cache.update_candle_buffer(tick, self._storage, symbol)
+    def _is_signal_stale(self, signal, tick_time: str) -> bool:
+        """Check if signal is older than 10 minutes."""
+        try:
+            sig_time = datetime.fromisoformat(
+                signal.timestamp.replace("Z", "+00:00")
+            )
+            curr_time = datetime.fromisoformat(tick_time.replace("Z", "+00:00"))
+            signal_age = (curr_time - sig_time).total_seconds()
+            return signal_age > 600
+        except (ValueError, KeyError) as e:
+            log.debug("Signal age check error: %s", e, exc_info=True)
+            return False
+
+    def _update_data_store(
+        self,
+        cache: SessionCache,
+        tick: OHLC,
+        underlying_tick: OHLC | None,
+        order_book: OrderBook | None,
+    ) -> None:
+        """Update candle buffer, underlying data, and order book."""
+        cache.update_candle_buffer(tick, self._storage, symbol=None)
         cache.update_underlying_data(underlying_tick)
         cache.set_order_book(order_book)
 
-        # Process tick in portfolio
+    def _handle_closed_positions(
+        self, session, symbol: str, tick: OHLC
+    ) -> None:
+        """Process portfolio tick and handle closed positions."""
         with session._lock:
             closed_positions = session.portfolio.process_tick(tick)
             if closed_positions:
-                _snap_equity = session.portfolio.equity
-                _snap_balance = session.portfolio.balance
-                _snap_open_pnl = sum(
-                    p.pnl for p in session.portfolio.positions if p.status == "OPEN"
-                )
-                _snap_open_count = len(
-                    [p for p in session.portfolio.positions if p.status == "OPEN"]
-                )
+                self._record_closed_position_snapshots(session)
 
         for pos in closed_positions:
-            if pos.id in self._recorded_trade_ids:
-                continue
-            self._recorded_trade_ids.add(pos.id)
-            self._risk_coordinator.record_trade_result(
-                symbol, float(pos.pnl), session.portfolio
-            )
-            # Direct call to exit coordinator (avoids PositionClosed serialization bug)
-            try:
-                self._exit_coordinator.on_position_closed(
-                    symbol=symbol,
-                    position=pos,
-                    session=session,
-                )
-            except (RuntimeError, ValueError) as e:
-                log.error("Exit check failed for %s: %s", symbol, e, exc_info=True)
-            if self._storage:
-                try:
-                    ensure_sync_adapter_result(
-                        "storage.save_trade",
-                        self._storage.save_trade,
-                        {
-                            "position_id": pos.id,
-                            "symbol": symbol,
-                            "side": pos.side.value
-                            if hasattr(pos.side, "value")
-                            else str(pos.side),
-                            "entry_price": pos.entry_price,
-                            "exit_price": pos.exit_price,
-                            "size": pos.size,
-                            "pnl": pos.pnl,
-                            "source": pos.source.value
-                            if hasattr(pos.source, "value")
-                            else str(pos.source),
-                            "reason": pos.close_reason or "",
-                            "opened_at": pos.entry_time,
-                            "closed_at": pos.exit_time,
-                        },
-                    )
-                except (OSError, Exception) as e:
-                    log.error(
-                        "Trade persistence failed: %s", e, exc_info=True
-                    )
+            self._record_and_persist_closed_trade(symbol, pos, session)
 
-        # No sync needed — ExitEngine is stateless, Position entity holds lifecycle state
-        # Record losses for stop-outs (session-level risk tracking)
         if closed_positions:
-            for pos in closed_positions:
-                if pos.close_reason and "Stop" in pos.close_reason:
-                    self._lifecycle_handler.exit_engine.record_loss(pos.symbol)
-            if self._storage:
-                try:
-                    stats = session.portfolio.get_stats(Source.LLM)
-                    ensure_sync_adapter_result(
-                        "storage.save_performance_snapshot",
-                        self._storage.save_performance_snapshot,
-                        {
-                            "symbol": symbol,
-                            "equity": _snap_equity,
-                            "balance": _snap_balance,
-                            "open_pnl": _snap_open_pnl,
-                            "open_positions": _snap_open_count,
-                            "total_trades": stats.total_trades,
-                            "win_rate": stats.win_rate,
-                        },
-                    )
-                except (ValueError, KeyError) as e:
-                    log.debug("Performance snapshot error: %s", e, exc_info=True)
+            self._record_stop_losses_and_save_snapshot(symbol, session)
 
-        # Event dispatch: publish TickReceived via event bus (when active)
-        # or fall back to direct method call (backward compatibility)
+    def _record_closed_position_snapshots(self, session) -> None:
+        """Capture equity/balance snapshots when positions close."""
+        session.portfolio.equity  # Trigger lazy snapshot
+        session.portfolio.balance
+        sum(
+            p.pnl for p in session.portfolio.positions if p.status == "OPEN"
+        )
+        len(
+            [p for p in session.portfolio.positions if p.status == "OPEN"]
+        )
+
+    def _record_and_persist_closed_trade(
+        self, symbol: str, pos, session
+    ) -> None:
+        """Record trade result and persist to storage."""
+        if pos.id in self._recorded_trade_ids:
+            return
+        self._recorded_trade_ids.add(pos.id)
+
+        self._risk_coordinator.record_trade_result(
+            symbol, float(pos.pnl), session.portfolio
+        )
+
+        # Direct call to exit coordinator
         try:
-            _tick_sequence = cache.next_tick_sequence()
-            _tick_trace = SessionOrchestrator.build_tick_trace_contract(
+            self._exit_coordinator.on_position_closed(
+                symbol=symbol,
+                position=pos,
+                session=session,
+            )
+        except (RuntimeError, ValueError) as e:
+            log.error("Exit check failed for %s: %s", symbol, e, exc_info=True)
+
+        if self._storage:
+            self._save_closed_trade_to_storage(pos, symbol)
+
+    def _save_closed_trade_to_storage(self, pos, symbol: str) -> None:
+        """Persist closed trade to storage with error handling."""
+        try:
+            ensure_sync_adapter_result(
+                "storage.save_trade",
+                self._storage.save_trade,
+                {
+                    "position_id": pos.id,
+                    "symbol": symbol,
+                    "side": pos.side.value
+                    if hasattr(pos.side, "value")
+                    else str(pos.side),
+                    "entry_price": pos.entry_price,
+                    "exit_price": pos.exit_price,
+                    "size": pos.size,
+                    "pnl": pos.pnl,
+                    "source": pos.source.value
+                    if hasattr(pos.source, "value")
+                    else str(pos.source),
+                    "reason": pos.close_reason or "",
+                    "opened_at": pos.entry_time,
+                    "closed_at": pos.exit_time,
+                },
+            )
+        except (OSError, Exception) as e:
+            log.error(
+                "Trade persistence failed: %s", e, exc_info=True
+            )
+
+    def _record_stop_losses_and_save_snapshot(
+        self, symbol: str, session
+    ) -> None:
+        """Record stop-out losses and save performance snapshot."""
+        from app.domain.trading.models.enums import Source
+
+        for pos in session.portfolio.positions:
+            if pos.status == "CLOSED" and pos.close_reason and "Stop" in pos.close_reason:
+                self._lifecycle_handler.exit_engine.record_loss(pos.symbol)
+
+        if self._storage:
+            try:
+                stats = session.portfolio.get_stats(Source.LLM)
+                ensure_sync_adapter_result(
+                    "storage.save_performance_snapshot",
+                    self._storage.save_performance_snapshot,
+                    {
+                        "symbol": symbol,
+                        "equity": session.portfolio.equity,
+                        "balance": session.portfolio.balance,
+                        "open_pnl": sum(
+                            p.pnl for p in session.portfolio.positions if p.status == "OPEN"
+                        ),
+                        "open_positions": len(
+                            [p for p in session.portfolio.positions if p.status == "OPEN"]
+                        ),
+                        "total_trades": stats.total_trades,
+                        "win_rate": stats.win_rate,
+                    },
+                )
+            except (ValueError, KeyError) as e:
+                log.debug("Performance snapshot error: %s", e, exc_info=True)
+
+    def _publish_tick_event(
+        self,
+        cache: SessionCache,
+        session,
+        symbol: str,
+        tick: OHLC,
+        order_book: OrderBook | None,
+    ) -> None:
+        """Publish TickReceived event via event bus or direct handler."""
+        try:
+            # Ensure session has tick trace attributes (lazy init for tests)
+            if not hasattr(session, "_tick_trace_sequence"):
+                with session._lock:
+                    if not hasattr(session, "_tick_trace_sequence"):
+                        session._tick_trace_sequence = 0
+                        session._last_tick_trace_id = ""
+
+            tick_sequence = cache.next_tick_sequence()
+            tick_trace = SessionOrchestrator.build_tick_trace_contract(
                 symbol=symbol,
                 tick_time=tick.time,
-                sequence=_tick_sequence,
+                sequence=tick_sequence,
                 trace_token=str(tick.close),
             )
-            cache.set_last_tick_trace_id(_tick_trace.trace_id)
-            _agent_series: tuple = ()
+            cache.set_last_tick_trace_id(tick_trace.trace_id)
+
+            agent_series: tuple = ()
             if cache.has_underlying_data(20):
-                _ud = cache.get_underlying_data()
-                if _ud:
-                    _agent_series = tuple(_ud)
+                ud = cache.get_underlying_data()
+                if ud:
+                    agent_series = tuple(ud)
+
             tick_event = TickReceived(
                 symbol=symbol,
                 tick=tick,
                 order_book=order_book,
                 data=tuple(session.data),
-                agent_series=_agent_series,
-                tick_trace_id=_tick_trace.trace_id,
-                idempotency_key=_tick_trace.trace_id,
+                agent_series=agent_series,
+                tick_trace_id=tick_trace.trace_id,
+                idempotency_key=tick_trace.trace_id,
             )
+
             if self._event_bus is not None:
                 self._event_bus.publish(tick_event)
             else:
                 self._on_tick(tick_event)
-        except (ValueError, RuntimeError) as e:
+        except (ValueError, RuntimeError, AttributeError) as e:
             log.warning("Tick processing error for %s: %s", symbol, e, exc_info=True)
-
-        return self._build_state_snapshot(session)
 
     def create_portfolio(self) -> Portfolio:
         return Portfolio.create_default(Decimal(str(settings.CAPITAL)))
@@ -613,11 +690,14 @@ class TradingSessionService:
             )
 
         # 0. Session phase check + profile save
+        _stage_start = time.monotonic()
         self._phase_manager.check_and_handle_phase(
             event, session, cache
         )
+        self._record_stage_latency(event.symbol, "phase_check", _stage_start)
 
         # 1. AMT Analysis + Footprint
+        _stage_start = time.monotonic()
         prior = getattr(session, "_prior_profile", None)
         amt_result = self._amt_service.run_analysis(
             event, session, cache, self._risk_coordinator, prior
@@ -631,6 +711,7 @@ class TradingSessionService:
                 event.symbol,
             )
             amt_result = self._amt_service.create_sentinel_result()
+        self._record_stage_latency(event.symbol, "amt_analysis", _stage_start)
 
         # Update IB engine — use underlying futures when available (Phase 1B)
         ib_tick = event.tick
@@ -696,7 +777,9 @@ class TradingSessionService:
             log.debug("Pre-candle advisory failed (non-critical)", exc_info=True)
 
         # 1b. Micro-agent pipeline
+        _stage_start = time.monotonic()
         agent_decision = self._event_router.run_micro_agent_pipeline(event, amt_result, self._exchange_config)
+        self._record_stage_latency(event.symbol, "micro_agents", _stage_start)
         cache.set_agent_decision(agent_decision)
 
         # Extract stacked imbalances from footprint
@@ -705,6 +788,7 @@ class TradingSessionService:
         )
 
         # 2. Trade Lifecycle + Overseer + Entry decisions
+        _stage_start = time.monotonic()
         with session._lock:
             try:
                 self._lifecycle_handler.check_exits(
@@ -795,10 +879,12 @@ class TradingSessionService:
         self._event_router.run_overseer_if_needed(session, event, amt_result, self._exchange)
 
         # 4a. Execute entry using proper AMT pipeline
+        _stage_start = time.monotonic()
         self._event_router.execute_entry_path(
             event, session, amt_result, _exec_dir, _exec_prob, run_entry,
             self._exchange_config, self._allow_short, self._scalp_enabled,
         )
+        self._record_stage_latency(event.symbol, "entry_execution", _stage_start)
         
         # 4b. Trigger LLM descriptor for UI
         # Monitoring-mode LLM: fire every 5 min in active market states for context
@@ -806,6 +892,7 @@ class TradingSessionService:
         
         _trigger_llm = _llm_contract.trigger_llm
         if trading_enabled and ((_trigger_llm and is_new_candle) or monitoring_trigger):
+            _stage_start = time.monotonic()
             session._llm_status = "RUNNING"
             self._event_router.trigger_llm_entry(
                 session,
@@ -814,6 +901,7 @@ class TradingSessionService:
                 amt_result,
                 tick_trace_id=getattr(event, "tick_trace_id", ""),
             )
+            self._record_stage_latency(event.symbol, "llm_trigger", _stage_start)
             if monitoring_trigger:
                 session._last_monitoring_llm = _now
                 log.info(
@@ -839,10 +927,11 @@ class TradingSessionService:
             cooldown_status["llm_status"] = "COOLDOWN"
             cache.set_ai_analysis(cooldown_status)
 
-        # Record tick-to-signal latency
+        # Record tick-to-signal latency (end-to-end)
         if self._latency_tracker:
             elapsed_ms = (time.monotonic() - _tick_start) * 1000
             self._latency_tracker.record(event.symbol, elapsed_ms)
+            self._record_stage_latency(event.symbol, "total_tick", _tick_start)
 
     def _execute_signal(self, symbol: str, sig, session: SessionState) -> None:
         """Execute a trade signal — delegates to EventRouter."""
@@ -911,6 +1000,22 @@ class TradingSessionService:
     def reset_playbook_guard(self, symbol: str | None = None) -> dict:
         """Clear playbook-guard rejections for one symbol or all active sessions."""
         return self._state_manager.reset_playbook_guard(symbol)
+
+    def _record_stage_latency(self, symbol: str, stage: str, start_time: float) -> None:
+        """Record latency for a specific processing stage.
+        
+        Args:
+            symbol: Trading symbol
+            stage: Stage name (e.g., 'amt_analysis', 'micro_agents')
+            start_time: time.monotonic() when stage started
+        """
+        if not self._latency_tracker:
+            return
+        
+        elapsed_ms = (time.monotonic() - start_time) * 1000
+        # Use per-stage key: symbol:stage
+        stage_key = f"{symbol}:{stage}"
+        self._latency_tracker.record(stage_key, elapsed_ms)
 
     # ----- state snapshot -----
 

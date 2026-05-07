@@ -1,7 +1,7 @@
 # ADR-0003: Eliminate ServiceGraph Service Locator
 
 Date: 2026-05-01
-Status: PROPOSED
+Status: ACCEPTED (2026-05-07)
 
 ## Context
 
@@ -125,6 +125,18 @@ def my_endpoint(session: TradingSessionDep):
 ### Phase 4: Delete ServiceGraph
 
 Once all callers are updated, delete `service_graph.py`.
+
+**Status: COMPLETE** - service_graph.py deleted, all references removed.
+
+## Results
+
+ServiceGraph was successfully eliminated on 2026-05-07:
+- ✅ service_graph.py deleted
+- ✅ All services use explicit constructor injection
+- ✅ FastAPI dependencies use module-level singletons
+- ✅ Routers use `Depends()` instead of `request.app.state.service_graph`
+- ✅ DIContainer replaced ServiceGraph with proper DI pattern
+- ✅ Comments referencing ServiceGraph updated to reflect current architecture
 
 ## References
 
