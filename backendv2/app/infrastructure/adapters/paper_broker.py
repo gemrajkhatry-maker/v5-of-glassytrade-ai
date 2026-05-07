@@ -52,6 +52,7 @@ class PaperBrokerAdapter(IBroker):
         self._cost_model_enabled = cost_model_enabled
         self._open_orders: set[str] = set()
         self._positions: dict[str, Position] = {}
+        self._order_counter: int = 0
 
     def submit_order(self, request: OrderRequest) -> OrderStatusEvent:
         """Runtime execution-port implementation for deterministic paper fills."""
@@ -69,7 +70,8 @@ class PaperBrokerAdapter(IBroker):
                 status=OrderLifecycleStatus.REJECTED.value,
                 reject_reason="Invalid paper order price",
             )
-        order_id = request.correlation_id or request.position_id or f"paper-{len(self._open_orders) + 1}"
+        self._order_counter += 1
+        order_id = request.correlation_id or request.position_id or f"paper-{self._order_counter}"
         self._open_orders.add(order_id)
         self._open_orders.discard(order_id)
         return OrderStatusEvent(

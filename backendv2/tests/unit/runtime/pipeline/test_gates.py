@@ -106,8 +106,8 @@ class TestRegimeGate:
         state = stage._get_state("CRUDEOIL")
         state.regime.record_failed_entry(level=6100.0, direction="LONG", session_phase=1)
 
-        # The gate always passes session_phase=1, so we test via
-        # recording in phase 2 to verify the detector logic directly
+        # The gate now computes actual session phase from timestamp, so we test
+        # via the detector directly
         state.regime.clear_failed_entries()
         state.regime.record_failed_entry(level=6100.0, direction="LONG", session_phase=2)
         # Phase 1 entry should not be blocked by a phase 2 failure
@@ -124,6 +124,63 @@ class TestRegimeGate:
             level=6100.0, direction="LONG", session_phase=1,
             squeeze_active=True, atr=50.0,
         ) is False
+
+
+class TestSessionPhaseComputation:
+    def test_phase1_opening(self):
+        """09:15-09:30 is phase 1 (opening auction)."""
+        # 09:20 IST = 09:20 UTC (IST is UTC+5:30, but _to_dt handles tz)
+        ts = datetime(2024, 1, 8, 9, 20, 0, tzinfo=IST).timestamp()
+        phase = GateEvaluation._compute_session_phase(ts)
+        assert phase == 1
+
+    def test_phase2_aaa_window(self):
+        """09:30-11:30 is phase 2 (AAA window)."""
+        ts = datetime(2024, 1, 8, 10, 0, 0, tzinfo=IST).timestamp()
+        phase = GateEvaluation._compute_session_phase(ts)
+        assert phase == 2
+
+    def test_phase3_midday(self):
+        """11:30-14:00 is phase 3 (midday)."""
+        ts = datetime(2024, 1, 8, 12, 30, 0, tzinfo=IST).timestamp()
+        phase = GateEvaluation._compute_session_phase(ts)
+        assert phase == 3
+
+    def test_phase4_power_hour(self):
+        """14:00-15:15 is phase 4 (power hour)."""
+        ts = datetime(2024, 1, 8, 14, 30, 0, tzinfo=IST).timestamp()
+        phase = GateEvaluation._compute_session_phase(ts)
+        assert phase == 4
+
+    def test_phase5_close_protection(self):
+        """15:15-15:30 is phase 5 (close protection)."""
+        ts = datetime(2024, 1, 8, 15, 20, 0, tzinfo=IST).timestamp()
+        phase = GateEvaluation._compute_session_phase(ts)
+        assert phase == 5
+
+    def test_after_hours_defaults_to_phase5(self):
+        """After 15:30 defaults to phase 5."""
+        ts = datetime(2024, 1, 8, 16, 0, 0, tzinfo=IST).timestamp()
+        phase = GateEvaluation._compute_session_phase(ts)
+        assert phase == 5
+
+    def test_gate_uses_computed_phase_from_timestamp(self):
+        """Gate should compute session phase from signal timestamp, not hardcode."""
+        from unittest.mock import patch
+
+        stage = _gate()
+        state = stage._get_state("CRUDEOIL")
+        state.regime.record_failed_entry(level=6100.0, direction="LONG", session_phase=2)
+
+        # Create signal at 10:00 IST (phase 2)
+        ts = datetime(2024, 1, 8, 10, 0, 0, tzinfo=IST).timestamp()
+        signal = _make_signal(entry=6100.0, sl=6050.0, tp=6200.0, ts=ts)
+        results = stage.process(signal)
+
+        # Should be blocked because phase 2 matches recorded failed entry
+        assert len(results) == 1
+        assert results[0].result is GateResultType.REJECTED
+        assert "Re-entry blocked" in results[0].rejection_reason
 
 
 # ---------------------------------------------------------------------------

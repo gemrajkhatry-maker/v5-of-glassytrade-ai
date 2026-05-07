@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook } from '../../types';
 import { AIAnalysisPanel } from '../AIAnalysisPanel';
 import AnalysisTabs from './AnalysisTabs';
+import { StateTab, LocationTab, AggressionTab, MetricsTab, DecisionTab } from './tabs';
 
 interface AIAnalysisPanelWithTabsProps {
   analysis: GenAIAnalysis | null;
@@ -30,9 +31,22 @@ interface AIAnalysisPanelWithTabsProps {
 const AIAnalysisPanelWithTabs: React.FC<AIAnalysisPanelWithTabsProps> = (props) => {
   const [activeTab, setActiveTab] = useState('state');
   
-  const { amtResult } = props;
+  const { amtResult, analysis, agentDecision, portfolio, overseerAction, overseerReason, llmHistory, orderBook, depth20Active, symbol } = props;
   const liveMarketState = amtResult?.marketState || 'BALANCED';
   const aggScore = amtResult?.aggression ?? 0;
+  
+  // Helper variables for tab components
+  const currentLtp = amtResult?.sessionVwap || 0;
+  const poc = amtResult?.poc || 0;
+  const vah = amtResult?.valueAreaHigh || 0;
+  const val = amtResult?.valueAreaLow || 0;
+  const deltaScore = amtResult?.deltaNormalizedOption ?? 0;
+  
+  // CVD formatter
+  const formatCVD = (cvd: number) => {
+    const abs = Math.abs(cvd);
+    return abs > 1000 ? `${(abs / 1000).toFixed(1)}K` : abs.toFixed(0);
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -47,36 +61,61 @@ const AIAnalysisPanelWithTabs: React.FC<AIAnalysisPanelWithTabsProps> = (props) 
         />
       </div>
 
-      {/* Full Panel Content */}
+      {/* Tab Content - Conditional Rendering */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        <AIAnalysisPanel {...props} />
-        
-        {/* Tab-specific quick reference hints */}
         {activeTab === 'state' && (
-          <div className="sticky bottom-4 mx-4 px-3 py-2 bg-glassy-bg-elevated/90 backdrop-blur-md border border-glassy-border-default rounded-md text-[10px] text-glassy-text-secondary">
-            <div className="font-bold text-glassy-text-primary uppercase tracking-wider mb-1">Quick Reference: State</div>
-            <div>• Session: Overall market condition</div>
-            <div>• Leg: Recent directional movement</div>
-            <div>• Displacement: Strong break from value</div>
-          </div>
+          <StateTab
+            marketState={liveMarketState}
+            hasDisplacement={amtResult?.hasDisplacement || false}
+            legPoc={amtResult?.legPoc}
+            legVah={amtResult?.legVah}
+            legVal={amtResult?.legVal}
+            gapType={amtResult?.gapType}
+            openingBias={amtResult?.openingBias}
+          />
         )}
         
         {activeTab === 'location' && (
-          <div className="sticky bottom-4 mx-4 px-3 py-2 bg-glassy-bg-elevated/90 backdrop-blur-md border border-glassy-border-default rounded-md text-[10px] text-glassy-text-secondary">
-            <div className="font-bold text-glassy-text-primary uppercase tracking-wider mb-1">Quick Reference: Location</div>
-            <div>• POC: Point of Control (highest volume)</div>
-            <div>• VAH/VAL: Value Area High/Low (70% volume)</div>
-            <div>• DPOC/HPOC: Daily/Hourly POC levels</div>
-          </div>
+          <LocationTab
+            currentLtp={currentLtp}
+            poc={poc}
+            vah={vah}
+            val={val}
+            amtResult={amtResult}
+          />
         )}
         
         {activeTab === 'aggression' && (
-          <div className="sticky bottom-4 mx-4 px-3 py-2 bg-glassy-bg-elevated/90 backdrop-blur-md border border-glassy-border-default rounded-md text-[10px] text-glassy-text-secondary">
-            <div className="font-bold text-glassy-text-primary uppercase tracking-wider mb-1">Quick Reference: Aggression</div>
-            <div>• Delta: Net buying/selling pressure</div>
-            <div>• CVD: Cumulative Volume Delta trend</div>
-            <div>• OFI: Order Flow Imbalance</div>
-          </div>
+          <AggressionTab
+            deltaScore={deltaScore}
+            aggScore={aggScore}
+            formatCVD={formatCVD}
+            agentDecision={agentDecision}
+            amtResult={amtResult}
+            symbol={symbol}
+            orderBook={orderBook}
+            depth20Active={depth20Active}
+          />
+        )}
+        
+        {activeTab === 'metrics' && (
+          <MetricsTab
+            agentDecision={agentDecision}
+            overseerAction={overseerAction}
+            overseerReason={overseerReason}
+            portfolio={portfolio}
+            amtResult={amtResult}
+            llmHistory={llmHistory}
+          />
+        )}
+        
+        {activeTab === 'decision' && (
+          <DecisionTab
+            analysis={analysis}
+            amtResult={amtResult}
+            agentDecision={agentDecision}
+            symbol={symbol}
+          />
         )}
       </div>
     </div>

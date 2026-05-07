@@ -600,7 +600,7 @@ class LLMEntryHandler:
             self._save_llm_decision(symbol, decision, amt_result, candles)
             self._save_session_block_decision(
                 symbol,
-                market_state=market_state,
+                market_state_str=market_state,
                 amt_result=amt_result,
                 tick=candles[-1] if candles else None,
                 tick_trace_id=tick_trace_id,

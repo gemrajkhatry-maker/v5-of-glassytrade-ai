@@ -55,6 +55,36 @@ class GateEvaluation:
         return datetime.fromtimestamp(timestamp, tz=IST)
 
     @staticmethod
+    def _compute_session_phase(timestamp: float) -> int:
+        """Compute NSE session phase (1-5) from signal timestamp.
+
+        Phase 1: Opening (09:15-09:30)
+        Phase 2: AAA Window (09:30-11:30)
+        Phase 3: Midday (11:30-14:00)
+        Phase 4: Power Hour (14:00-15:15)
+        Phase 5: Close Protection (15:15-15:30)
+        """
+        dt = GateEvaluation._to_dt(timestamp)
+        hour, minute = dt.hour, dt.minute
+        t = hour * 60 + minute  # minutes since midnight
+        p1_end = 9 * 60 + 30    # 09:30
+        p2_end = 11 * 60 + 30   # 11:30
+        p3_end = 14 * 60        # 14:00
+        p4_end = 15 * 60 + 15   # 15:15
+        p5_end = 15 * 60 + 30   # 15:30
+        if t < p1_end:
+            return 1
+        if t < p2_end:
+            return 2
+        if t < p3_end:
+            return 3
+        if t < p4_end:
+            return 4
+        if t < p5_end:
+            return 5
+        return 5  # After hours, treat as phase 5
+
+    @staticmethod
     def _reject_result(
         signal: Signal,
         reason: str,
@@ -142,10 +172,11 @@ class GateEvaluation:
                 )
 
             # 1. Regime-based re-entry block
+            session_phase = self._compute_session_phase(signal.timestamp)
             if state.regime.is_re_entry_blocked(
                 level=float(signal.entry),
                 direction=str(signal.type),
-                session_phase=1,
+                session_phase=session_phase,
                 squeeze_active=False,
                 atr=abs(signal.tp - signal.sl),
             ):
