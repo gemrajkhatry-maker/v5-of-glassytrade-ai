@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 
 from brokersv2.observability.metrics import MetricsCollector
 from brokersv2.observability.health import (
@@ -17,12 +19,54 @@ from brokersv2.observability.health import (
     HealthCheck,
     CheckType,
 )
+from brokersv2.core.resilience import CircuitBreaker, CircuitBreakerError
 
 logger = logging.getLogger(__name__)
 
 # Version
 __version__ = "1.0.0"
 
+
+# =============================================================================
+# Request/Response Models
+# =============================================================================
+
+class HistoricalRequest(BaseModel):
+    """Historical data request."""
+    symbol: str
+    exchange: str
+    from_date: str
+    to_date: str
+    interval: str = "1d"
+    include_oi: bool = False
+
+
+class QuoteBatchRequest(BaseModel):
+    """Batch quote request."""
+    symbols: List[str]
+
+
+class OrderRequest(BaseModel):
+    """Order placement request."""
+    symbol: str
+    exchange: str
+    quantity: int
+    side: str  # BUY/SELL
+    order_type: str  # MARKET/LIMIT/SL/SL-M
+    price: Optional[float] = None
+    trigger_price: Optional[float] = None
+
+
+class BrokerStatus(BaseModel):
+    """Broker connection status."""
+    connected: bool
+    broker_type: str
+    last_check: str
+
+
+# =============================================================================
+# Gateway Configuration
+# =============================================================================
 
 class GatewayConfig:
     """Gateway server configuration."""
@@ -33,11 +77,146 @@ class GatewayConfig:
         port: int = 9090,
         debug: bool = False,
         cors_origins: list[str] = None,
+        dry_run: bool = False,
     ):
         self.host = host
         self.port = port
         self.debug = debug
         self.cors_origins = cors_origins or ["*"]
+        self.dry_run = dry_run
+
+
+class DryRunBroker:
+    """
+    Mock broker for DRY run mode - simulates all operations without real execution.
+    
+    Features:
+    - Mock order placement with generated IDs
+    - Mock quotes with realistic prices
+    - Mock historical data
+    - Operation logging for audit
+    """
+
+    def __init__(self):
+        self.operation_log: List[Dict[str, Any]] = []
+        self._order_counter = 0
+
+    def place_order_mock(
+        self,
+        symbol: str,
+        exchange: str,
+        quantity: int,
+        side: str,
+        order_type: str,
+        price: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Simulate order placement."""
+        self._order_counter += 1
+        order_id = f"DRY_RUN_{self._order_counter}_{uuid.uuid4().hex[:8]}"
+
+        operation = {
+            "operation": "place_order",
+            "order_id": order_id,
+            "symbol": symbol,
+            "exchange": exchange,
+            "quantity": quantity,
+            "side": side,
+            "order_type": order_type,
+            "price": price,
+            "status": "COMPLETED",
+            "dry_run": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        self.operation_log.append(operation)
+        logger.info(f"[DRY RUN] Simulated order: {order_id} - {side} {quantity} {symbol}")
+
+        return operation
+
+    def cancel_order_mock(self, order_id: str) -> Dict[str, Any]:
+        """Simulate order cancellation."""
+        operation = {
+            "operation": "cancel_order",
+            "order_id": order_id,
+            "cancelled": True,
+            "dry_run": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        self.operation_log.append(operation)
+        logger.info(f"[DRY RUN] Simulated cancellation: {order_id}")
+
+        return operation
+
+    def get_quote_mock(self, symbol: str) -> Dict[str, Any]:
+        """Simulate quote retrieval."""
+        # Generate realistic mock prices based on symbol
+        base_price = {
+            "RELIANCE": 2500.0,
+            "TCS": 3500.0,
+            "INFY": 1500.0,
+            "HDFCBANK": 1600.0,
+            "NIFTY": 22000.0,
+            "BANKNIFTY": 48000.0,
+        }.get(symbol.split(":")[-1] if ":" in symbol else symbol, 1000.0)
+
+        import random
+        ltp = base_price * random.uniform(0.98, 1.02)
+
+        return {
+            "symbol": symbol,
+            "ltp": round(ltp, 2),
+            "open": round(base_price * 0.99, 2),
+            "high": round(base_price * 1.02, 2),
+            "low": round(base_price * 0.98, 2),
+            "close": round(base_price, 2),
+            "volume": random.randint(100000, 1000000),
+            "dry_run": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def get_historical_mock(
+        self,
+        symbol: str,
+        exchange: str,
+        from_date: str,
+        to_date: str,
+        interval: str = "1d",
+    ) -> Dict[str, Any]:
+        """Simulate historical data retrieval."""
+        # Generate mock candles
+        import random
+        base_price = 1000.0
+        candles = []
+
+        # Generate 30 candles as example
+        for i in range(30):
+            open_price = base_price * random.uniform(0.95, 1.05)
+            high_price = open_price * random.uniform(1.01, 1.03)
+            low_price = open_price * random.uniform(0.97, 0.99)
+            close_price = open_price * random.uniform(0.98, 1.02)
+
+            candles.append({
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "open": round(open_price, 2),
+                "high": round(high_price, 2),
+                "low": round(low_price, 2),
+                "close": round(close_price, 2),
+                "volume": random.randint(10000, 100000),
+            })
+
+            base_price = close_price  # Next candle starts from close
+
+        return {
+            "symbol": symbol,
+            "exchange": exchange,
+            "interval": interval,
+            "candles": candles,
+            "count": len(candles),
+            "from_date": from_date,
+            "to_date": to_date,
+            "dry_run": True,
+        }
 
 
 class AppState:
@@ -128,6 +307,10 @@ def create_app(config: Optional[GatewayConfig] = None) -> FastAPI:
 def _register_routes(app: FastAPI, state: AppState):
     """Register all routes."""
 
+    # ========================================================================
+    # Health & Observability Endpoints
+    # ========================================================================
+
     # Health endpoints
     @app.get("/health")
     async def health():
@@ -191,7 +374,149 @@ def _register_routes(app: FastAPI, state: AppState):
             },
         }
 
-    # Risk status
+    # ========================================================================
+    # Market Data Endpoints
+    # ========================================================================
+
+    @app.get("/quote/{symbol}")
+    async def get_quote(symbol: str):
+        """Get current quote for symbol."""
+        state.metrics.increment("quote_requests", labels={"symbol": symbol})
+        
+        # TODO: Wire to broker adapter
+        return {
+            "symbol": symbol,
+            "ltp": 0.0,
+            "open": 0.0,
+            "high": 0.0,
+            "low": 0.0,
+            "close": 0.0,
+            "volume": 0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @app.post("/quotes/batch")
+    async def get_quotes_batch(request: QuoteBatchRequest):
+        """Get quotes for multiple symbols."""
+        state.metrics.increment("batch_quote_requests")
+        
+        return {
+            "quotes": [],
+            "count": len(request.symbols),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @app.post("/historical")
+    async def get_historical(request: HistoricalRequest):
+        """Get historical OHLCV candle data."""
+        state.metrics.increment("historical_requests", labels={
+            "symbol": request.symbol,
+            "interval": request.interval,
+        })
+        
+        # TODO: Wire to broker adapter historical method
+        return {
+            "symbol": request.symbol,
+            "exchange": request.exchange,
+            "interval": request.interval,
+            "candles": [],
+            "count": 0,
+            "from_date": request.from_date,
+            "to_date": request.to_date,
+        }
+
+    @app.get("/candles/{symbol}")
+    async def get_candles(
+        symbol: str,
+        from_date: str = Query(..., description="Start date YYYY-MM-DD"),
+        to_date: str = Query(..., description="End date YYYY-MM-DD"),
+        interval: str = Query("1d", description="Candle interval"),
+    ):
+        """Get historical candles (GET variant)."""
+        state.metrics.increment("candle_requests", labels={
+            "symbol": symbol,
+            "interval": interval,
+        })
+        
+        return {
+            "symbol": symbol,
+            "interval": interval,
+            "candles": [],
+            "count": 0,
+        }
+
+    # ========================================================================
+    # Order Management Endpoints
+    # ========================================================================
+
+    @app.post("/orders")
+    async def place_order(request: OrderRequest):
+        """Place a new order."""
+        state.metrics.increment("order_placements", labels={
+            "side": request.side,
+            "type": request.order_type,
+        })
+        
+        return {
+            "order_id": "ORD_TEMP",
+            "status": "PENDING",
+            "symbol": request.symbol,
+            "exchange": request.exchange,
+            "quantity": request.quantity,
+            "side": request.side,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @app.get("/orders")
+    async def get_orders():
+        """Get current orders."""
+        state.metrics.increment("orders_requests", description="Orders API calls")
+
+        return {
+            "orders": [],
+            "total": 0,
+            "filters": {},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @app.get("/orders/{order_id}")
+    async def get_order_status(order_id: str):
+        """Get order status by ID."""
+        state.metrics.increment("order_status_checks")
+        
+        return {
+            "order_id": order_id,
+            "status": "UNKNOWN",
+            "message": "Order not found",
+        }
+
+    @app.delete("/orders/{order_id}")
+    async def cancel_order(order_id: str):
+        """Cancel an order."""
+        state.metrics.increment("order_cancellations")
+        
+        return {
+            "order_id": order_id,
+            "cancelled": True,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    # ========================================================================
+    # Positions & Risk Endpoints
+    # ========================================================================
+
+    @app.get("/positions")
+    async def positions():
+        """Current positions."""
+        state.metrics.increment("positions_requests", description="Positions API calls")
+
+        return {
+            "positions": [],
+            "total_exposure": 0,
+            "count": 0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
     @app.get("/risk/status")
     async def risk_status():
         """Current risk status."""
@@ -207,33 +532,102 @@ def _register_routes(app: FastAPI, state: AppState):
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    # Positions
-    @app.get("/positions")
-    async def positions():
-        """Current positions."""
-        state.metrics.increment("positions_requests", description="Positions API calls")
+    # ========================================================================
+    # Options Chain Endpoints
+    # ========================================================================
 
+    @app.get("/options/chain/{underlying}")
+    async def get_option_chain(underlying: str, exchange: str = Query("NSE")):
+        """Get option chain for underlying."""
+        state.metrics.increment("option_chain_requests", labels={
+            "underlying": underlying,
+            "exchange": exchange,
+        })
+        
         return {
-            "positions": [],
-            "total_exposure": 0,
+            "underlying": underlying,
+            "exchange": exchange,
+            "expiry": None,
+            "calls": [],
+            "puts": [],
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @app.get("/options/expiries/{underlying}")
+    async def get_expiry_list(underlying: str, exchange: str = Query("NSE")):
+        """Get expiry dates for underlying."""
+        state.metrics.increment("expiry_list_requests")
+        
+        return {
+            "underlying": underlying,
+            "exchange": exchange,
+            "expiries": [],
             "count": 0,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    # Orders
-    @app.get("/orders")
-    async def orders():
-        """Current orders."""
-        state.metrics.increment("orders_requests", description="Orders API calls")
+    # ========================================================================
+    # Broker Connection Management
+    # ========================================================================
 
+    @app.get("/broker/status")
+    async def broker_status():
+        """Get broker connection status."""
         return {
-            "orders": [],
-            "total": 0,
-            "filters": {},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "connected": False,
+            "broker_type": "dhan",
+            "last_check": datetime.now(timezone.utc).isoformat(),
         }
 
+    @app.get("/broker/health")
+    async def broker_health():
+        """Check broker health."""
+        return {
+            "healthy": False,
+            "latency_ms": 0,
+            "message": "Broker not connected",
+        }
+
+    # ========================================================================
+    # WebSocket Streaming Endpoints
+    # ========================================================================
+
+    @app.websocket("/ws/ticks")
+    async def stream_ticks(websocket: WebSocket):
+        """WebSocket endpoint for real-time tick streaming."""
+        await websocket.accept()
+        try:
+            while True:
+                # TODO: Stream ticks from broker adapter
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            logger.info("Tick streaming client disconnected")
+
+    @app.websocket("/ws/quotes")
+    async def stream_quotes(websocket: WebSocket):
+        """WebSocket endpoint for real-time quote streaming."""
+        await websocket.accept()
+        try:
+            while True:
+                # TODO: Stream quotes from broker adapter
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            logger.info("Quote streaming client disconnected")
+
+    @app.websocket("/ws/depth")
+    async def stream_depth(websocket: WebSocket):
+        """WebSocket endpoint for market depth streaming."""
+        await websocket.accept()
+        try:
+            while True:
+                # TODO: Stream depth from broker adapter
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            logger.info("Depth streaming client disconnected")
+
+    # ========================================================================
     # Middleware for request tracking
+    # ========================================================================
+
     @app.middleware("http")
     async def track_requests(request, call_next):
         """Track all requests with metrics."""

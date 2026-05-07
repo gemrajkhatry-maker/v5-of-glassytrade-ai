@@ -33,6 +33,19 @@ def _make_orderflow(ofi=0.0, timestamp=1000000000):
         big_trades=0,
         volume_bubble=False,
         absorption_detected=False,
+        absorption_side="",
+        absorption_strength=0.0,
+    )
+
+
+def _make_market_structure(market_state="BALANCED", timestamp=1000000000):
+    return MarketStructureResult(
+        symbol="TEST",
+        timestamp=timestamp,
+        poc=100.0,
+        vah=102.0,
+        val=98.0,
+        market_state=market_state,
     )
 
 
@@ -77,9 +90,7 @@ class TestSignalGenerationHardcodedThresholds:
     def test_short_signal_confidence_scales_with_negative_ofi(self):
         """Short signal confidence should scale with negative OFI magnitude."""
         stage = SignalGeneration()
-        stage.ingest_market_structure(MarketStructureResult(
-            symbol="TEST", market_state="BEARISH", session_phase="MORNING"
-        ))
+        stage.ingest_market_structure(_make_market_structure(market_state="BEARISH"))
         
         # Weak negative OFI
         stage.ingest_orderflow(_make_orderflow(ofi=-0.31))  # Just below -0.3
