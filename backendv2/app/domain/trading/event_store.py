@@ -85,7 +85,7 @@ class EventStore(ABC):
 class AuditTrailVerifier:
     """Verify deterministic state reconstruction from audit events.
 
-    NOT a backtest engine — this is for audit trail verification only.
+    NOT a simulation engine — this is for audit trail verification only.
     Ensures deterministic state re-application from recorded events.
     """
 

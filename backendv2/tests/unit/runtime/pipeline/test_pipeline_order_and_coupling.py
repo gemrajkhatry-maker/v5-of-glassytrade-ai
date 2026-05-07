@@ -11,6 +11,7 @@ from app.runtime.pipeline.events import (
 )
 from app.runtime.pipeline.strategy import StrategyEvent
 from app.runtime.orchestrator.session import SessionRuntime
+from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 
 
 def _make_data() -> list[dict]:
@@ -46,10 +47,12 @@ def _to_ticks(rows: list[dict]) -> list[Tick]:
 
 
 def _live_runtime(rows: list[dict], symbols: list[str]) -> SessionRuntime:
-    return SessionRuntime(
+    runtime = SessionRuntime(
         feed=LiveFeed(symbols=symbols, tick_source=_to_ticks(rows), strict_symbol_mode=True),
         symbols=symbols,
     )
+    runtime.bind_broker(PaperBrokerAdapter())
+    return runtime
 
 
 def _strategy_signal_from_feature(feature: object) -> Signal:

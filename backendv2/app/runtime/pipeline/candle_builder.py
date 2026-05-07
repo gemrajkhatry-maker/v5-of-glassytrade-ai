@@ -197,7 +197,7 @@ class CandlePipeline:
                 self._active[(symbol, timeframe)] = builder
 
     def build_candles(self, ticks: list[NormalizedTick]) -> dict[str, list[Candle]]:
-        """Build all completed candles from a list of ticks (for backtest)."""
+        """Build completed candles from a list of ticks for reuse and recovery."""
         result: dict[str, list[Candle]] = {}
         for tick in ticks:
             completed = self.process(tick)

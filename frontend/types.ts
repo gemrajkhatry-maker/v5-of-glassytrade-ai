@@ -72,6 +72,16 @@ export interface RiskState {
   driftMessage?: string;
 }
 
+export interface RuntimeSafetyState {
+  brokerBound: boolean;
+  feedStale: boolean;
+  unsafeToTrade: boolean;
+  feed?: Record<string, unknown>;
+  execution?: Record<string, unknown>;
+  stateDigest?: string;
+  readiness?: Record<string, unknown>;
+}
+
 export interface LLMHistoryEntry {
   timestamp: number;
   direction: 'LONG' | 'SHORT' | 'FLAT';
@@ -146,6 +156,7 @@ export interface InstrumentState {
   stats: StrategyStats | null;
   depth20Active: boolean;
   stale?: boolean;
+  runtimeSafety?: RuntimeSafetyState;
   ltp?: number;
   oi?: number;
   rangeBars?: RangeBarData;

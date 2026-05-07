@@ -66,7 +66,7 @@ class RiskManager:
 
         # Drift detection — rolling win rate vs historical baseline
         self._recent_outcomes: list[bool] = []  # True=win, False=loss (last 50 trades)
-        self._baseline_win_rate: float = 0.45  # Expected baseline from backtest
+        self._baseline_win_rate: float = 0.45  # Expected baseline from historical benchmark
         self._drift_alert: bool = False
         self._drift_message: str = ""
 

@@ -234,11 +234,11 @@ function App() {
 
                             {/* Chart view */}
                             <div className="flex flex-col gap-1">
-                                <span className="text-[9px] font-bold uppercase tracking-widest text-white/35 pl-1">Chart view</span>
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-white/60 pl-1">Chart view</span>
                                 <div className="flex bg-white/10 backdrop-blur-md rounded-full p-1 gap-1 shadow-inner border border-white/10">
                                 <button
                                     onClick={() => setChartMode('STANDARD')}
-                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'STANDARD' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'STANDARD' ? 'bg-white text-black shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <BarChart2 size={14} /> Candles
@@ -246,7 +246,7 @@ function App() {
                                 </button>
                                 <button
                                     onClick={() => setChartMode('FOOTPRINT')}
-                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'FOOTPRINT' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'FOOTPRINT' ? 'bg-white text-black shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <Grid size={14} /> Footprint
@@ -254,7 +254,7 @@ function App() {
                                 </button>
                                 <button
                                     onClick={() => setChartMode('RANGE')}
-                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'RANGE' ? 'bg-white text-black shadow-md' : 'text-white/40 hover:text-white hover:bg-white/5'}`}
+                                    className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${chartMode === 'RANGE' ? 'bg-white text-black shadow-md' : 'text-white/70 hover:text-white hover:bg-white/10'}`}
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <TrendingUp size={14} /> Range bars
@@ -265,7 +265,7 @@ function App() {
 
                             {/* Volume profile overlay */}
                             <div className="flex flex-col gap-1">
-                                <span className="text-[9px] font-bold uppercase tracking-widest text-white/35 pl-1">Profile overlay</span>
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-white/60 pl-1">Profile overlay</span>
                                 <div className="flex bg-white/10 backdrop-blur-md rounded-full p-1 gap-1 shadow-inner border border-white/10">
                                 {([
                                     { key: 'session', label: 'Session' },
@@ -278,7 +278,7 @@ function App() {
                                         onClick={() => setConfig(s => ({ ...s, vpMode: key, showVolumeProfile: key !== 'off' }))}
                                         className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${config.vpMode === key
                                             ? 'bg-blue-500 text-white shadow-md shadow-blue-500/20'
-                                            : 'text-white/40 hover:text-white hover:bg-white/5'
+                                            : 'text-white/70 hover:text-white hover:bg-white/10'
                                             }`}
                                     >
                                         {label}
@@ -337,13 +337,13 @@ function App() {
       `}>
                 {/* Header */}
                 <div className="p-4 border-b border-white/10 flex justify-between items-center">
-                    <div className="flex items-center gap-2 text-white/80">
+                    <div className="flex items-center gap-2 text-white/90">
                         <Brain size={18} className="text-purple-400" />
                         <span className="text-xs font-bold tracking-widest uppercase">Intelligence</span>
                     </div>
                     <button
                         onClick={() => setRightSidebarOpen(false)}
-                        className="text-white/40 hover:text-white transition-colors"
+                        className="text-white/70 hover:text-white transition-colors"
                     >
                         <X size={16} />
                     </button>

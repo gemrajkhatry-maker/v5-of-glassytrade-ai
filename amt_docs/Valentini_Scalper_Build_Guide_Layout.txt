@@ -769,11 +769,11 @@ WebSocket Stream Test:
   3. Verify data messages received within 60 seconds
   4. Stop stream: POST /api/live/stop
 
-7.3 Backtesting Validation
+7.3 Historical Validation
 Historical Data Test:
 
   1. Download 1 month of 1-minute klines from Binance
-  2. Run strategy on historical data
+  2. Run strategy in paper/live validation mode on historical data
   3. Record all generated signals
   4. Calculate:
           Win rate (% profitable trades)
@@ -788,7 +788,7 @@ Expected Performance (BTCUSDT, range=50):
                      Max Drawdown
                      Sharpe Ratio
 
-Table 3: Expected backtest performance metrics
+Table 3: Expected validation performance metrics
 
 7.4 UI/UX Testing
 Manual Tests:
@@ -913,7 +913,7 @@ vwapPosition: number; // (price - VWAP) / stdDev
 }
 Step 2: Collect Training Data
 
-Run backtest and export all absorptions with outcomes (did they lead
+Run historical validation and export all absorptions with outcomes (did they lead
 to profitable trade?).
 Step 3: Train Model (Python)
 

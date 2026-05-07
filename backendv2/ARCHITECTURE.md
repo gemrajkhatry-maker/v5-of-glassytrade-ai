@@ -551,7 +551,7 @@ class TestValentiniScalperE2E:
 **Total: 47 tests passing**
 - [ ] Test against historical data from amt_docs
 - [ ] Validate signal generation matches expected behavior
-- [ ] Run backtest and compare to expected metrics
+- [ ] Run historical validation compares against expected live-processing invariants
 - [ ] Test frontend state compatibility
 - [ ] Performance benchmarking
 

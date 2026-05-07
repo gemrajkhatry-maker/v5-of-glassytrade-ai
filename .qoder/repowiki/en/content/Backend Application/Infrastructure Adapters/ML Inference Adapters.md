@@ -13,15 +13,19 @@
 - [schemas.py](file://backend/app/infrastructure/serialization/schemas.py)
 - [main.py](file://backend/app/main.py)
 - [development.yaml](file://backend/config/environments/development.yaml)
+- [config.json](file://models/gemma4_26b_fused_75/config.json)
+- [adapter_config.json](file://gemma4_26b_amt_adapter_final/adapter_config.json)
+- [adapter_config.json](file://qwen4b_amt_adapters/adapter_config.json)
+- [adapter_config.json](file://poc3/models/deepseek-r1-amt/adapter_config.json)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added new GGUFInferenceAdapter for GGUF-format model support using llama-cpp-python
-- Enhanced MLXInferenceAdapter with improved environment variable loading and Metal GPU serialization
-- Updated architecture diagrams to include the new GGUF adapter
-- Added GGUF-specific configuration and environment variables
-- Improved error handling and model validation for both adapters
+- Enhanced MLXInferenceAdapter with automatic VLM architecture detection supporting Gemma4, Qwen, and DeepSeek variants
+- Added intelligent model loader selection between mlx_lm and mlx_vlm based on model architecture
+- Improved GPU memory management with enhanced Metal concurrency safety
+- Updated model format requirements to support multiple architectures including fused models
+- Enhanced error handling and fallback mechanisms for different inference backends
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -38,7 +42,7 @@
 ## Introduction
 This document describes the machine learning inference adapters used by GlassyTrade AI for AI-driven decision-making. It covers three main adapters:
 - **GGUFInferenceAdapter**: Llama.cpp-based GGUF inference adapter for high-capacity models like Gemopus-26B, supporting Metal GPU acceleration and global serialization locks.
-- **MLXInferenceAdapter**: Apple Silicon–optimized multimodal LLM inference using the MLX framework, including model loading, background initialization, GPU serialization, and cloud fallback.
+- **MLXInferenceAdapter**: Apple Silicon–optimized multimodal LLM inference using the MLX framework, including model loading, background initialization, GPU serialization, and cloud fallback. Now features automatic VLM architecture detection supporting multiple model families including Gemma4, Qwen, and DeepSeek variants.
 - **LGBMProbabilityAdapter**: Gradient boosting–based first-passage probability inference for directional bias and expected move forecasting, including model serialization, calibration, and optional dynamic TP modeling.
 
 The system now supports multiple inference backends with unified interfaces, enabling flexible deployment across different hardware configurations and model formats. It also documents adapter interfaces, model format requirements, inference pipelines, performance characteristics, and integration with the AI decision-making pipeline.
@@ -81,26 +85,26 @@ Main --> Env
 
 **Diagram sources**
 - [gguf_inference_adapter.py:15-139](file://backend/app/infrastructure/adapters/gguf_inference_adapter.py#L15-L139)
-- [mlx_inference_adapter.py:23-552](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L552)
+- [mlx_inference_adapter.py:23-751](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L751)
 - [lgbm_probability_adapter.py:24-167](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L24-L167)
 - [llm_inference.py:10-42](file://backend/app/domain/ports/llm_inference.py#L10-L42)
 - [probability_inference.py:19-44](file://backend/app/domain/ports/probability_inference.py#L19-L44)
 - [llm_contract.py:44-47](file://backend/app/domain/fabio_ai/services/llm_contract.py#L44-L47)
 - [features.py:21-71](file://backend/app/domain/probability/features.py#L21-L71)
-- [mlx_gpu_lock.py:18-18](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L18)
+- [mlx_gpu_lock.py:18-56](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L56)
 - [schemas.py:91-163](file://backend/app/infrastructure/serialization/schemas.py#L91-L163)
 - [main.py:83-127](file://backend/app/main.py#L83-L127)
 - [development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
 
 **Section sources**
 - [gguf_inference_adapter.py:15-139](file://backend/app/infrastructure/adapters/gguf_inference_adapter.py#L15-L139)
-- [mlx_inference_adapter.py:23-552](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L552)
+- [mlx_inference_adapter.py:23-751](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L751)
 - [lgbm_probability_adapter.py:24-167](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L24-L167)
 - [llm_inference.py:10-42](file://backend/app/domain/ports/llm_inference.py#L10-L42)
 - [probability_inference.py:19-44](file://backend/app/domain/ports/probability_inference.py#L19-L44)
 - [llm_contract.py:44-47](file://backend/app/domain/fabio_ai/services/llm_contract.py#L44-L47)
 - [features.py:21-71](file://backend/app/domain/probability/features.py#L21-L71)
-- [mlx_gpu_lock.py:18-18](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L18)
+- [mlx_gpu_lock.py:18-56](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L56)
 - [schemas.py:91-163](file://backend/app/infrastructure/serialization/schemas.py#L91-L163)
 - [main.py:83-127](file://backend/app/main.py#L83-L127)
 - [development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
@@ -113,7 +117,8 @@ Main --> Env
 - **MLXInferenceAdapter**
   - Implements ILLMInference for multimodal LLM inference on Apple Silicon.
   - Supports background model loading, enhanced GPU serialization with MLX_GPU_LOCK, JSON-prefill prompts, and cloud fallback.
-  - Provides improved environment variable loading and readiness checks.
+  - Provides automatic VLM architecture detection supporting multiple model families including Gemma4, Qwen, and DeepSeek variants.
+  - Enhanced environment variable loading and readiness checks with improved Metal GPU memory management.
 - **LGBMProbabilityAdapter**
   - Implements ProbabilityInferencePort for first-passage probability estimation.
   - Loads LightGBM models, applies optional Platt scaling calibration, and optionally predicts dynamic TP via MFE quantiles.
@@ -121,7 +126,7 @@ Main --> Env
 
 **Section sources**
 - [gguf_inference_adapter.py:15-139](file://backend/app/infrastructure/adapters/gguf_inference_adapter.py#L15-L139)
-- [mlx_inference_adapter.py:23-552](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L552)
+- [mlx_inference_adapter.py:23-751](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L751)
 - [lgbm_probability_adapter.py:24-167](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L24-L167)
 - [llm_inference.py:10-42](file://backend/app/domain/ports/llm_inference.py#L10-L42)
 - [probability_inference.py:19-44](file://backend/app/domain/ports/probability_inference.py#L19-L44)
@@ -158,11 +163,13 @@ class MLXInferenceAdapter {
 -_load_error : str
 -_temperature : float
 -_max_new_tokens : int
+-_use_vlm : bool
 +predict(...)
 +is_ready() bool
 +wait_until_ready(...)
 +validate() bool
--_load_model()
++_detect_vlm_architecture(model_path) bool
++_load_model()
 -_predict_cloud(...)
 }
 class ProbabilityInferencePort {
@@ -198,7 +205,7 @@ LGBMProbabilityAdapter --> ProbabilityEstimate : "returns"
 
 **Diagram sources**
 - [gguf_inference_adapter.py:15-139](file://backend/app/infrastructure/adapters/gguf_inference_adapter.py#L15-L139)
-- [mlx_inference_adapter.py:23-552](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L552)
+- [mlx_inference_adapter.py:23-751](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L751)
 - [llm_inference.py:10-42](file://backend/app/domain/ports/llm_inference.py#L10-L42)
 - [probability_inference.py:19-44](file://backend/app/domain/ports/probability_inference.py#L19-L44)
 - [lgbm_probability_adapter.py:24-167](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L24-L167)
@@ -216,7 +223,7 @@ LGBMProbabilityAdapter --> ProbabilityEstimate : "returns"
   - Uses GGUF_GPU_LOCK to serialize load() and generate() calls to avoid Metal command buffer concurrency issues.
   - Ensures thread-safe GPU resource access for llama-cpp-python operations.
 - **Prompting and Output Processing**
-  - Applies ChatML template with <|im_start|>/<|im_end|> delimiters for GGUF models.
+  - Applies ChatML template with 〈|im_start|〉/〈|im_end|〉 delimiters for GGUF models.
   - Enforces JSON output format using ENTRY_JSON_RUNTIME_REMINDER for canonical runtime contract.
   - Extracts first balanced JSON object from generated text to ensure proper parsing.
 - **Error Handling and Validation**
@@ -259,12 +266,19 @@ end
 - **Enhanced Environment Variable Loading**
   - Improved `_ensure_runtime_env_loaded()` method checks both backend directory and project root for .env files.
   - Prioritizes backend directory (.env) over project root for better deployment flexibility.
+- **Automatic VLM Architecture Detection**
+  - New `_detect_vlm_architecture()` method automatically detects Vision-Language Model (VLM) architectures from config.json.
+  - Supports multiple model families including Gemma4, Qwen, and DeepSeek variants with conditional loading logic.
+  - Verifies actual presence of vision/audio weights to prevent loading failures in fused production models.
+- **Intelligent Model Loader Selection**
+  - Automatically selects between `mlx_lm.load()` for text-only models and `mlx_vlm.load()` for VLM architectures.
+  - Prevents crashes by ensuring VLM models use appropriate loaders designed for multimodal inputs.
 - **Initialization and Background Loading**
   - Accepts model path, temperature, and max tokens; loads model synchronously in main thread to avoid OpenMP crashes.
   - Respects environment variables for model and adapter paths with enhanced path resolution.
-- **GPU Serialization and Concurrency**
-  - Uses MLX_GPU_LOCK to serialize load() and generate() calls to avoid Metal command buffer concurrency issues.
-  - Enhanced Metal GPU crash prevention through proper threading model.
+- **Enhanced GPU Memory Management**
+  - Uses SystemGPULock (enhanced MLX_GPU_LOCK) for Metal concurrency safety across processes.
+  - Improved Metal GPU crash prevention through proper threading model and system-wide GPU serialization.
 - **Prompting and Output Shaping**
   - Applies ChatML template with optional prefill to enforce JSON output for the canonical runtime contract.
   - Detects overseer prompts and truncates repetitive thinking blocks; otherwise extracts the first balanced JSON object.
@@ -280,37 +294,46 @@ end
 sequenceDiagram
 participant Client as "AI Handler"
 participant Adapter as "MLXInferenceAdapter"
-participant GPU as "MLX_GPU_LOCK"
-participant MLX as "mlx_lm/mlx_vlm"
+participant Detector as "_detect_vlm_architecture"
+participant GPU as "SystemGPULock"
+participant Loader as "Model Loader"
 participant Cloud as "OpenRouter"
 Client->>Adapter : predict(instruction, input_text, temperature, max_tokens, prefill)
-alt Model not ready
-Adapter-->>Client : raises LLMNotReadyError
-else Local model available
-Adapter->>GPU : acquire lock
-Adapter->>MLX : apply_chat_template + generate(prompt, max_tokens)
-MLX-->>Adapter : response
-Adapter->>GPU : release lock
-Adapter->>Adapter : _extract_json_candidate() or _truncate_repetition()
-Adapter-->>Client : JSON-prefixed response or truncated overseer text
-else Cloud fallback enabled
+alt Cloud fallback enabled
 Adapter->>Cloud : POST chat completion (with backoff)
 Cloud-->>Adapter : JSON result or error
 Adapter-->>Client : JSON result or fallback JSON
+else Local model available
+Adapter->>Detector : check model architecture
+Detector-->>Adapter : VLM or text-only
+Adapter->>GPU : acquire lock
+alt VLM architecture
+Adapter->>Loader : mlx_vlm.load(model_path, adapter_path?)
+else Text-only architecture
+Adapter->>Loader : mlx_lm.load(model_path, adapter_path?)
+end
+Loader-->>Adapter : model, processor
+Adapter->>GPU : release lock
+Adapter->>Adapter : _extract_json_candidate() or _truncate_repetition()
+Adapter-->>Client : JSON-prefixed response or truncated overseer text
+else Model loading failed
+Adapter-->>Client : raises LLMNotReadyError with error details
 end
 ```
 
 **Diagram sources**
 - [mlx_inference_adapter.py:336-425](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L336-L425)
 - [mlx_inference_adapter.py:206-334](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L206-L334)
-- [mlx_gpu_lock.py:18-18](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L18)
+- [mlx_inference_adapter.py:168-225](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L168-L225)
+- [mlx_gpu_lock.py:18-56](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L56)
 
 **Section sources**
 - [mlx_inference_adapter.py:23-54](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L54)
 - [mlx_inference_adapter.py:55-81](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L55-L81)
+- [mlx_inference_adapter.py:168-225](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L168-L225)
 - [mlx_inference_adapter.py:206-334](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L206-L334)
 - [mlx_inference_adapter.py:336-425](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L336-L425)
-- [mlx_gpu_lock.py:18-18](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L18)
+- [mlx_gpu_lock.py:18-56](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L56)
 
 ### LGBMProbabilityAdapter
 - **Model Loading and Readiness**
@@ -371,13 +394,18 @@ BuildOut --> End(["Return ProbabilityEstimate"])
 - [probability_inference.py:19-44](file://backend/app/domain/ports/probability_inference.py#L19-L44)
 - [llm_contract.py:44-47](file://backend/app/domain/fabio_ai/services/llm_contract.py#L44-L47)
 
-### Model Format Requirements and Feature Schema
+### Enhanced Model Format Requirements and Feature Schema
 - **GGUF Models**
   - Loaded via llama_cpp.Llama with Metal GPU acceleration; supports n_gpu_layers and n_ctx configuration.
   - Environment variable GGUF_MODEL_PATH controls model location; requires .gguf format files.
 - **MLX Models**
-  - Loaded via mlx_lm.load() or mlx_vlm.load(); supports optional adapter path. Environment variables control model path and adapter path.
+  - **Enhanced**: Now supports automatic architecture detection for multiple model families:
+    - **Gemma4**: VLM architecture with vision tokens (Gemma4ForConditionalGeneration)
+    - **Qwen**: Text-only architecture with LoRA adapters
+    - **DeepSeek**: Hybrid architecture with fused production models
+  - Intelligent loader selection between mlx_lm and mlx_vlm based on config.json analysis.
   - Enhanced path resolution with support for both absolute and relative paths.
+  - Automatic verification of actual weight presence to prevent loading failures in fused models.
 - **LightGBM Models**
   - Expected files: fp_long.txt, fp_short.txt; optional fp_long_calibrator.pkl, fp_short_calibrator.pkl; optional mfe_long_q50.txt, mfe_short_q50.txt.
   - Active feature schema is 42-dimensional; mismatches trigger warnings and neutral fallback behavior.
@@ -386,9 +414,14 @@ BuildOut --> End(["Return ProbabilityEstimate"])
 - [gguf_inference_adapter.py:26-35](file://backend/app/infrastructure/adapters/gguf_inference_adapter.py#L26-L35)
 - [gguf_inference_adapter.py:51-62](file://backend/app/infrastructure/adapters/gguf_inference_adapter.py#L51-L62)
 - [mlx_inference_adapter.py:55-81](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L55-L81)
+- [mlx_inference_adapter.py:168-225](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L168-L225)
 - [lgbm_probability_adapter.py:40-48](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L40-L48)
 - [lgbm_probability_adapter.py:65-74](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L65-L74)
 - [features.py:18-71](file://backend/app/domain/probability/features.py#L18-L71)
+- [config.json:1-800](file://models/gemma4_26b_fused_75/config.json#L1-L800)
+- [adapter_config.json:1-41](file://gemma4_26b_amt_adapter_final/adapter_config.json#L1-L41)
+- [adapter_config.json:1-42](file://qwen4b_amt_adapters/adapter_config.json#L1-L42)
+- [adapter_config.json:1-42](file://poc3/models/deepseek-r1-amt/adapter_config.json#L1-L42)
 
 ### Inference Pipelines and Integration
 - **Startup Readiness**
@@ -404,13 +437,13 @@ BuildOut --> End(["Return ProbabilityEstimate"])
 ## Dependency Analysis
 - **Coupling**
   - GGUFInferenceAdapter depends on llama_cpp and uses GGUF_GPU_LOCK for Metal concurrency.
-  - MLXInferenceAdapter depends on MLX_GPU_LOCK and mlx_lm/mlx_vlm; it also depends on the LLM runtime contract for prompt formatting.
+  - MLXInferenceAdapter depends on SystemGPULock (enhanced MLX_GPU_LOCK) and intelligent model loaders; it also depends on the LLM runtime contract for prompt formatting.
   - LGBMProbabilityAdapter depends on LightGBM and scikit-learn for calibration; it depends on the feature schema for input normalization.
 - **Cohesion**
   - All adapters encapsulate infrastructure concerns behind domain ports, maintaining high cohesion within each adapter.
 - **External Dependencies**
   - GGUF: llama_cpp-python with Metal support
-  - MLX: Apple Silicon MLX framework, mlx_lm/mlx_vlm
+  - MLX: Apple Silicon MLX framework, mlx_lm/mlx_vlm with automatic architecture detection
   - LightGBM: Gradient boosting library
   - scikit-learn: Calibration algorithms
   - OpenRouter: Cloud fallback service
@@ -419,9 +452,11 @@ BuildOut --> End(["Return ProbabilityEstimate"])
 graph LR
 GGUF["GGUFInferenceAdapter"] --> Llama["llama_cpp.Llama"]
 GGUF --> GGUFLock["GGUF_GPU_LOCK"]
-MLX["MLXInferenceAdapter"] --> Lock["MLX_GPU_LOCK"]
+MLX["MLXInferenceAdapter"] --> SystemLock["SystemGPULock"]
 MLX --> Contract["ENTRY_JSON_RUNTIME_REMINDER"]
 MLX --> Cloud["OpenRouter (fallback)"]
+MLX --> VLM["mlx_vlm (VLM detection)"]
+MLX --> LM["mlx_lm (text detection)"]
 LGBM["LGBMProbabilityAdapter"] --> GB["LightGBM Boosters"]
 LGBM --> SK["scikit-learn (LogisticRegression)"]
 LGBM --> Feat["Feature Schema (42 names)"]
@@ -432,18 +467,18 @@ Main --> LGBM
 
 **Diagram sources**
 - [gguf_inference_adapter.py:15-139](file://backend/app/infrastructure/adapters/gguf_inference_adapter.py#L15-L139)
-- [mlx_inference_adapter.py:23-552](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L552)
+- [mlx_inference_adapter.py:23-751](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L751)
 - [lgbm_probability_adapter.py:24-167](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L24-L167)
 - [llm_contract.py:44-47](file://backend/app/domain/fabio_ai/services/llm_contract.py#L44-L47)
-- [mlx_gpu_lock.py:18-18](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L18)
+- [mlx_gpu_lock.py:18-56](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L56)
 - [main.py:83-127](file://backend/app/main.py#L83-L127)
 
 **Section sources**
 - [gguf_inference_adapter.py:15-139](file://backend/app/infrastructure/adapters/gguf_inference_adapter.py#L15-L139)
-- [mlx_inference_adapter.py:23-552](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L552)
+- [mlx_inference_adapter.py:23-751](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L23-L751)
 - [lgbm_probability_adapter.py:24-167](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L24-L167)
 - [llm_contract.py:44-47](file://backend/app/domain/fabio_ai/services/llm_contract.py#L44-L47)
-- [mlx_gpu_lock.py:18-18](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L18)
+- [mlx_gpu_lock.py:18-56](file://backend/app/infrastructure/mlx_gpu_lock.py#L18-L56)
 - [main.py:83-127](file://backend/app/main.py#L83-L127)
 
 ## Performance Considerations
@@ -452,7 +487,9 @@ Main --> LGBM
   - Metal GPU acceleration provides efficient inference for large GGUF models.
   - Global lock ensures thread safety without blocking other operations.
 - **MLXInferenceAdapter**
-  - Enhanced environment variable loading reduces configuration overhead.
+  - **Enhanced**: Automatic VLM architecture detection eliminates manual configuration overhead.
+  - Intelligent model loader selection optimizes performance for each model family.
+  - Enhanced SystemGPULock provides improved Metal GPU memory management across processes.
   - Synchronous loading in main thread prevents OpenMP crashes on macOS.
   - Improved Metal GPU serialization with better error handling.
   - Prefill JSON reduces parsing overhead and improves reliability.
@@ -472,12 +509,16 @@ Main --> LGBM
     - Cause: Model path invalid or GGUF file corrupted.
     - Resolution: Verify GGUF file integrity; check model path configuration.
 - **MLXInferenceAdapter**
+  - **Enhanced**: Automatic VLM detection issues.
+    - Symptoms: Wrong loader selected for model type.
+    - Cause: Incorrect architecture detection in config.json.
+    - Resolution: Verify model config.json contains correct architectures; check for fused models without vision weights.
   - Symptoms: LLMNotReadyError during predict().
     - Cause: Model still loading or failed to load.
     - Resolution: Use wait_until_ready() before inference; check logs for load errors; configure MLX_MODEL_PATH and MLX_ADAPTER_PATH.
   - Symptoms: Metal concurrency crashes or hangs.
-    - Cause: Multiple generate() calls without MLX_GPU_LOCK.
-    - Resolution: Ensure all load/generate calls are guarded by MLX_GPU_LOCK.
+    - Cause: Multiple generate() calls without SystemGPULock.
+    - Resolution: Ensure all load/generate calls are guarded by SystemGPULock.
   - Symptoms: Empty or malformed cloud fallback response.
     - Cause: Missing OPENROUTER_API_KEY or malformed JSON.
     - Resolution: Set API key; review fallback logic and retry/backoff behavior.
@@ -497,12 +538,13 @@ Main --> LGBM
 - [gguf_inference_adapter.py:130-139](file://backend/app/infrastructure/adapters/gguf_inference_adapter.py#L130-L139)
 - [mlx_inference_adapter.py:354-365](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L354-L365)
 - [mlx_inference_adapter.py:511-517](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L511-L517)
+- [mlx_inference_adapter.py:168-225](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L168-L225)
 - [lgbm_probability_adapter.py:43-48](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L43-L48)
 - [lgbm_probability_adapter.py:58-63](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L58-L63)
 - [lgbm_probability_adapter.py:101-117](file://backend/app/infrastructure/adapters/lgbm_probability_adapter.py#L101-L117)
 
 ## Conclusion
-GlassyTrade AI's enhanced inference system now provides multiple backend options through unified adapter interfaces. The new GGUFInferenceAdapter enables high-capacity model deployment with Metal GPU acceleration, while the improved MLXInferenceAdapter offers robust Apple Silicon optimization with enhanced environment management. The LGBMProbabilityAdapter continues to deliver calibrated first-passage probabilities. Together, they provide flexible deployment options, strong reliability, performance, and maintainability across diverse hardware configurations.
+GlassyTrade AI's enhanced inference system now provides multiple backend options through unified adapter interfaces with significantly improved model architecture support. The new automatic VLM architecture detection in MLXInferenceAdapter enables seamless deployment across multiple model families including Gemma4, Qwen, and DeepSeek variants without manual configuration. The enhanced SystemGPULock provides superior Metal GPU memory management across processes, while the improved error handling and fallback mechanisms ensure robust operation. The GGUFInferenceAdapter continues to offer high-capacity model deployment with Metal acceleration, and the LGBMProbabilityAdapter maintains its role in delivering calibrated first-passage probabilities. Together, they provide flexible deployment options, strong reliability, enhanced performance, and comprehensive model architecture support across diverse hardware configurations.
 
 ## Appendices
 
@@ -511,7 +553,8 @@ GlassyTrade AI's enhanced inference system now provides multiple backend options
   - Set GGUF_MODEL_PATH to the GGUF model file location; configure n_gpu_layers for Metal acceleration.
   - Temperature and max tokens can be overridden per call; defaults are configured at initialization.
 - **MLX Model Configuration**
-  - Set MLX_MODEL_PATH to the model directory; optionally set MLX_ADAPTER_PATH for LoRA-style adapters.
+  - **Enhanced**: Set MLX_MODEL_PATH to the model directory; automatically detects architecture and selects appropriate loader.
+  - Optionally set MLX_ADAPTER_PATH for LoRA-style adapters; supported for Qwen and DeepSeek variants.
   - Enhanced environment variable loading supports both backend directory and project root .env files.
   - Temperature and max tokens can be overridden per call; defaults are configured at initialization.
 - **Cloud Fallback**
@@ -522,9 +565,14 @@ GlassyTrade AI's enhanced inference system now provides multiple backend options
 - **Environment Overrides**
   - Use development.yaml to tailor risk and broker behavior in development.
   - GGUF adapter supports n_ctx parameter for context window sizing.
+  - **New**: MLX adapter automatically handles fused models without vision weights by detecting architecture from config.json.
 
 **Section sources**
 - [gguf_inference_adapter.py:26-35](file://backend/app/infrastructure/adapters/gguf_inference_adapter.py#L26-L35)
 - [mlx_inference_adapter.py:35-53](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L35-L53)
 - [mlx_inference_adapter.py:184-204](file://backend/app/infrastructure/adapters/mlx_inference_adapter.py#L184-L204)
 - [development.yaml:1-33](file://backend/config/environments/development.yaml#L1-L33)
+- [config.json:1-800](file://models/gemma4_26b_fused_75/config.json#L1-L800)
+- [adapter_config.json:1-41](file://gemma4_26b_amt_adapter_final/adapter_config.json#L1-L41)
+- [adapter_config.json:1-42](file://qwen4b_amt_adapters/adapter_config.json#L1-L42)
+- [adapter_config.json:1-42](file://poc3/models/deepseek-r1-amt/adapter_config.json#L1-L42)

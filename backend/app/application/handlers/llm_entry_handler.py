@@ -49,6 +49,9 @@ from shared.error_handling import (
     SignalError,
 )
 
+# Import LLM circuit breaker
+from app.core.llm_circuit_breaker import LLMCircuitBreaker
+
 if TYPE_CHECKING:
     from app.domain.trading.models.value_objects import OHLC, AMTResult
     from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
@@ -69,6 +72,7 @@ class LLMEntryHandler:
         exchange: str = "MCX",
         allow_short: bool = False,
         llm_timeout: float = 15.0,
+        circuit_breaker: LLMCircuitBreaker | None = None,
     ) -> None:
         self._gen_ai_service = gen_ai_service
         self._storage = storage
@@ -77,6 +81,10 @@ class LLMEntryHandler:
         self._exchange = exchange
         self._allow_short = allow_short  # Use injected allow_short
         self._llm_timeout = llm_timeout
+        self._circuit_breaker = circuit_breaker or LLMCircuitBreaker(
+            failure_threshold=3,
+            recovery_timeout=60.0,
+        )
         self._regime_detectors: dict[str, RegimeDetector] = {}
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         self._predict_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -920,7 +928,14 @@ class LLMEntryHandler:
 
                 try:
                     predict_future = None
-                    if is_extreme_volatility and fallback_direction != "FLAT":
+                    
+                    # Circuit breaker check: fast-fail if LLM is failing
+                    if not self._circuit_breaker.should_allow_call():
+                        logger.warning(
+                            "LLM circuit breaker OPEN — using fallback decision"
+                        )
+                        ai_result = self._circuit_breaker.get_fallback_decision()
+                    elif is_extreme_volatility and fallback_direction != "FLAT":
                         logger.warning(
                             f"Extreme volatility detected. Bypassing LLM. Using: {fallback_direction}"
                         )
@@ -932,15 +947,18 @@ class LLMEntryHandler:
                             "raw_output": "QUANT_FALLBACK",
                             "market_state": market_state_str,
                         }
+                        self._circuit_breaker.record_success()  # Not a failure, just bypass
                     else:
                         predict_future = self._predict_executor.submit(
                             self._gen_ai_service.analyze_market,
                             market_data_ai,
                         )
                         ai_result = predict_future.result(timeout=self._llm_timeout)
+                        self._circuit_breaker.record_success()
                 except concurrent.futures.TimeoutError:
                     if predict_future is not None:
                         predict_future.cancel()
+                    self._circuit_breaker.record_failure(TimeoutError("LLM timeout"))
                     logger.warning(
                         "LLM timed out after %.0fs — using fallback",
                         self._llm_timeout,
@@ -960,6 +978,7 @@ class LLMEntryHandler:
                         worker_queue.task_done()
                         continue
                 except Exception as e:
+                    self._circuit_breaker.record_failure(e)
                     logger.error("LLM inference exception: %s", e, exc_info=True)
                     with session._lock:
                         session._ai_running = False

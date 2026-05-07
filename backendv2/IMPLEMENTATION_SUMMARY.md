@@ -89,7 +89,7 @@ Commands (write) and Queries (read) are separated for clear boundaries.
 
 ### Week 4: Integration & E2E
 - [ ] Historical data scenario tests
-- [ ] Backtest validation against amt_docs specs
+- [ ] Historical validation against amt_docs specifications
 - [ ] Frontend state simulation tests
 
 ## Running Tests

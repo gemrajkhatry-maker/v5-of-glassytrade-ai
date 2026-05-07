@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 import logging
 import os
 from typing import List
@@ -158,21 +158,31 @@ async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
             expiry_index,
             strikes_around_atm,
         )
-        symbols = [r.symbol for r in async_scan_result[:top_n]]
+        symbols = [r.symbol for r in async_scan_result]
         if symbols:
-            application.state.active_symbols = symbols
+            switch_decision = None
             if async_scan_result:
                 first = async_scan_result[0]
-                application.state.contract_guard.record_switch(first.symbol, first.score, now)
-            application.state.scanner_status["result_count"] = len(symbols)
-            application.state.scanner_status["last_scan_time"] = datetime.utcnow().isoformat()
+                switch_decision = application.state.contract_guard.evaluate_switch(
+                    first.symbol,
+                    first.score,
+                    now,
+                )
+                if switch_decision.accepted:
+                    application.state.contract_guard.apply_switch(switch_decision, now)
+            if switch_decision is None or switch_decision.accepted or switch_decision.reason == "same_contract":
+                application.state.active_symbols = symbols
+            application.state.scanner_status["result_count"] = len(application.state.active_symbols)
+            application.state.scanner_status["last_scan_time"] = datetime.now(UTC).isoformat()
+            if switch_decision is not None:
+                application.state.scanner_status["last_decision"] = switch_decision.as_dict()
     except Exception as exc:
         logger.warning(
             "scanner startup failed; keeping configured symbols from config. error=%s",
             exc,
             exc_info=True,
         )
-        application.state.scanner_status["last_scan_time"] = datetime.utcnow().isoformat()
+        application.state.scanner_status["last_scan_time"] = datetime.now(UTC).isoformat()
         application.state.scanner_status["error"] = str(exc)
 
     try:
@@ -257,7 +267,7 @@ async def stream_events(request: Request):
                 except asyncio.TimeoutError:
                     yield {
                         "event": "heartbeat",
-                        "data": json.dumps({"timestamp": datetime.utcnow().isoformat()}),
+                        "data": json.dumps({"timestamp": datetime.now(UTC).isoformat()}),
                     }
         finally:
             if queue in connected_clients:
@@ -273,7 +283,7 @@ async def process_tick(tick: OHLCDataDTO):
 
     cmd = UpdateTick(
         symbol=tick.symbol,
-        timestamp=float(tick.timestamp or datetime.utcnow().timestamp()),
+        timestamp=float(tick.timestamp or datetime.now(UTC).timestamp()),
         price=tick.close,
         volume=tick.volume,
     )
@@ -284,7 +294,7 @@ async def process_tick(tick: OHLCDataDTO):
         "type": "tick",
         "symbol": cmd.symbol,
         "price": cmd.price,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
     for queue in connected_clients:
         await queue.put(event_data)

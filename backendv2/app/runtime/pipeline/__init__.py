@@ -46,7 +46,7 @@ class PipelineStage(Protocol):
         ...
 
     def reset(self) -> None:
-        """Reset to initial state. Called between backtest runs."""
+        """Reset to initial state. Called before restarting deterministic processing."""
         ...
 
 
@@ -101,7 +101,7 @@ class SPSCQueue(Generic[T]):
         return item
 
     def drain(self) -> list[T]:
-        """Drain all items. Used at shutdown or between backtest runs."""
+        """Drain all items. Used at shutdown or to reset for reprocessing."""
         items: list[T] = []
         while not self.empty:
             item = self.pop()

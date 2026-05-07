@@ -145,7 +145,8 @@ class MLXInferenceAdapter(ILLMInference):
                         f"Loading MLX model from {model_path} with adapter {adapter_path}..."
                     )
                     self.model, self.processor = load(
-                        model_path, adapter_path=adapter_path
+                        model_path, 
+                        adapter_path=adapter_path
                     )
                 else:
                     logger.info("Loading MLX model from %s (no adapter)...", model_path)
@@ -156,6 +157,14 @@ class MLXInferenceAdapter(ILLMInference):
             self._use_vlm = use_vlm
             self._is_loading = False
             logger.info("MLX model loaded successfully!")
+            
+            # Warm-up inference to pre-heat Metal GPU caches
+            # This prevents latency spikes on first real inference
+            try:
+                logger.info("Running warm-up inference (pre-heats Metal GPU caches)...")
+                self._run_warmup()
+            except Exception as e:
+                logger.warning("Warm-up inference failed (non-critical): %s", e)
         except Exception as e:
             logger.error("Failed to load MLX model: %s", e)
             import traceback
@@ -242,6 +251,38 @@ class MLXInferenceAdapter(ILLMInference):
                 return str(candidate.resolve())
 
         return path_value
+
+    def _run_warmup(self) -> None:
+        """Run a minimal inference pass to pre-heat Metal GPU caches.
+        
+        This prevents latency spikes on the first real trading inference by:
+        1. Pre-compiling Metal GPU shaders
+        2. Allocating KV cache memory upfront
+        3. Warming up the tokenizer pipeline
+        """
+        if not self.model or not self.processor:
+            return
+            
+        warmup_prompt = "Ready"
+        try:
+            if self._use_vlm:
+                from mlx_vlm import generate
+            else:
+                from mlx_lm import generate
+
+            # Minimal warmup: 10 tokens only
+            generate(
+                self.model,
+                self.processor,
+                prompt=warmup_prompt,
+                max_tokens=10,
+                verbose=False,
+                temperature=0.0,  # Deterministic for warmup
+            )
+            logger.info("Metal GPU caches warmed successfully")
+        except Exception as e:
+            # Non-critical: main inference will still work
+            logger.debug("Warmup skipped: %s", e)
 
     @staticmethod
     def _resolve_model_dir(path_value: str) -> str:

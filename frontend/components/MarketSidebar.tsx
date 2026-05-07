@@ -59,11 +59,13 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const totalSize = openPositions.reduce((sum, p) => sum + (p.size || 0), 0);
 
     const isDead = inst.genAIAnalysis?.rationale?.includes('DEAD') || inst.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
+    const unsafeToTrade = Boolean(inst.runtimeSafety?.unsafeToTrade);
     const prob = inst.agentDecision?.probability || 0;
     const timing = inst.agentDecision?.timing || 'SKIP';
     const mode = inst.amtAnalysis?.marketState || 'BALANCED';
     const modeAbbr = (mode || 'BAL').substring(0, 3).toUpperCase();
     const actionLabel =
+        unsafeToTrade ? 'UNSAFE' :
         timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing === 'SKIP' ? 'SKIP' : (timing || '—').slice(0, 6);
 
     return (
@@ -100,7 +102,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                         </span>
                     )}
                 </div>
-                <span className="text-[8px] text-white/30 font-mono ml-3">{hasData || hasOpenPosition ? tag : '\u00A0'}</span>
+                <span className="text-[8px] text-white/60 font-mono ml-3">{hasData || hasOpenPosition ? tag : '\u00A0'}</span>
             </div>
 
             {/* Mode + action merged (28%) */}
@@ -122,11 +124,11 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                         }`}
                     >
                         <span className="shrink-0">{modeAbbr}</span>
-                        <span className="text-white/25">·</span>
+                        <span className="text-white/50">·</span>
                         <span className={`shrink-0 inline-flex items-center gap-0.5 font-bold ${
-                            timing === 'ENTER_NOW' ? 'text-emerald-400' : timing === 'SKIP' ? 'text-red-400' : 'text-yellow-400'
+                            unsafeToTrade ? 'text-red-400' : timing === 'ENTER_NOW' ? 'text-emerald-400' : timing === 'SKIP' ? 'text-red-400' : 'text-yellow-400'
                         }`}>
-                            <span className={`w-1 h-1 rounded-full shrink-0 ${timing === 'ENTER_NOW' ? 'bg-emerald-400 animate-pulse' : timing === 'SKIP' ? 'bg-red-400' : 'bg-yellow-400'}`} />
+                            <span className={`w-1 h-1 rounded-full shrink-0 ${unsafeToTrade ? 'bg-red-400 animate-pulse' : timing === 'ENTER_NOW' ? 'bg-emerald-400 animate-pulse' : timing === 'SKIP' ? 'bg-red-400' : 'bg-yellow-400'}`} />
                             {actionLabel}
                         </span>
                     </span>
@@ -257,9 +259,9 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                     <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                             <BarChart3 className="text-purple-400" size={18} />
-                            <h2 className="font-bold text-[13px] tracking-widest text-white/90">MARKET SCANNER</h2>
+                            <h2 className="font-bold text-[13px] tracking-widest text-white">MARKET SCANNER</h2>
                         </div>
-                        <span className="text-[10px] text-white/30 bg-black/20 px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
+                        <span className="text-[10px] text-white/60 bg-black/30 px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
                             <span className="w-1 h-1 rounded-full bg-white/30"></span> {filtered.length} of {symbols.length}
                         </span>
                     </div>
@@ -267,7 +269,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                     <div className="flex flex-col gap-2">
                         {/* Text Search */}
                         <div className="relative">
-                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" size={14} />
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/60" size={14} />
                             <input
                                 type="text"
                                 placeholder="Filter symbols..."
@@ -280,10 +282,10 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                         {/* Dropdown Filters */}
                         <div className="flex gap-2">
                             <div className="relative flex-1">
-                                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" size={10} />
+                                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 text-white/60" size={10} />
                                 <select 
                                     value={modeFilter} onChange={e => setModeFilter(e.target.value)}
-                                    className="w-full bg-black/30 border border-white/10 rounded py-1 pl-6 pr-2 text-[10px] text-white/70 appearance-none outline-none focus:border-white/20 cursor-pointer"
+                                    className="w-full bg-black/40 border border-white/15 rounded py-1 pl-6 pr-2 text-[10px] text-white/90 appearance-none outline-none focus:border-white/30 cursor-pointer"
                                 >
                                     <option value="ALL">All Modes</option>
                                     <option value="BALANCED">Balanced</option>
@@ -292,10 +294,10 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                                 </select>
                             </div>
                             <div className="relative flex-1">
-                                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 text-white/30" size={10} />
+                                <Filter className="absolute left-2 top-1/2 -translate-y-1/2 text-white/60" size={10} />
                                 <select 
                                     value={actionFilter} onChange={e => setActionFilter(e.target.value)}
-                                    className="w-full bg-black/30 border border-white/10 rounded py-1 pl-6 pr-2 text-[10px] text-white/70 appearance-none outline-none focus:border-white/20 cursor-pointer"
+                                    className="w-full bg-black/40 border border-white/15 rounded py-1 pl-6 pr-2 text-[10px] text-white/90 appearance-none outline-none focus:border-white/30 cursor-pointer"
                                 >
                                     <option value="ALL">All Actions</option>
                                     <option value="ENTER_NOW">Enter Now</option>

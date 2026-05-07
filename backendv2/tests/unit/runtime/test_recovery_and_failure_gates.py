@@ -4,6 +4,7 @@ from app.runtime.feeds import LiveFeed
 from app.runtime.orchestrator.session import SessionRuntime
 from app.runtime.pipeline import events
 from app.runtime.pipeline.events import FillEvent, OrderStatusEvent, PositionEvent, Signal, Tick
+from app.runtime.pipeline.execution import ExecutionPipeline
 
 
 class _FailingBroker:
@@ -108,3 +109,20 @@ def test_broker_failure_downgrades_to_rejected_without_fill() -> None:
 
     risk_snapshot = runtime._risk.snapshot()
     assert risk_snapshot["BANKNIFTY"]["portfolio"]["open_positions"] == []
+
+
+def test_unbound_execution_rejects_instead_of_synthetic_fill() -> None:
+    position_event = PositionEvent(
+        symbol="BANKNIFTY",
+        timestamp=1_000_000_000,
+        event_type="OPENED",
+        position_id="pos-1",
+        entry_price=45000.0,
+        size=1.0,
+        side="LONG",
+    )
+    statuses = ExecutionPipeline().process(position_event)
+    assert len(statuses) == 1
+    assert statuses[0].status == "REJECTED"
+    assert statuses[0].filled_quantity == 0.0
+    assert "not bound" in statuses[0].reject_reason

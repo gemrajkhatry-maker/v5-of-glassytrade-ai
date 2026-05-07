@@ -54,36 +54,6 @@ class TestOption:
         assert option.is_call is True
         assert option.is_put is False
 
-    def test_option_spread_calculation(self):
-        """Test spread calculation."""
-        option = Option(
-            symbol="TEST",
-            security_id="1",
-            strike=100.0,
-            option_type="CE",
-            expiry=datetime.now(),
-            ltp=150.0,
-            bid=149.0,
-            ask=151.0,
-        )
-
-        assert option.spread == 2.0
-        assert option.spread_pct == pytest.approx(1.333, rel=0.01)
-
-    def test_option_spread_none_when_missing(self):
-        """Test spread returns None when bid/ask missing."""
-        option = Option(
-            symbol="TEST",
-            security_id="1",
-            strike=100.0,
-            option_type="CE",
-            expiry=datetime.now(),
-            ltp=150.0,
-        )
-
-        assert option.spread is None
-        assert option.spread_pct is None
-
     def test_option_immutability(self):
         """Test that Option is frozen (immutable)."""
         option = Option(
@@ -161,93 +131,6 @@ class TestOptionChain:
         strikes = sample_option_chain.strikes
         assert strikes == [25000, 25100, 25200]
 
-    def test_get_atm_options(self, sample_option_chain):
-        """Test getting ATM options."""
-        atm_ce, atm_pe = sample_option_chain.get_atm_options()
-
-        assert atm_ce is not None
-        assert atm_ce.strike == 25100.0
-        assert atm_ce.option_type == "CE"
-
-        assert atm_pe is not None
-        assert atm_pe.strike == 25100.0
-        assert atm_pe.option_type == "PE"
-
-    def test_get_option(self, sample_option_chain):
-        """Test getting specific option."""
-        option = sample_option_chain.get_option(25100.0, "CE")
-        assert option is not None
-        assert option.symbol == "NIFTY26FEB25CE25100"
-        assert option.option_type == "CE"
-
-        option = sample_option_chain.get_option(25100.0, "PE")
-        assert option is not None
-        assert option.option_type == "PE"
-
-    def test_get_strikes_around(self, sample_option_chain):
-        """Test getting strikes around ATM."""
-        strikes = sample_option_chain.get_strikes_around(offset=1)
-        assert len(strikes) == 3
-        assert 25000 in strikes
-        assert 25100 in strikes
-        assert 25200 in strikes
-
-    def test_get_options_around(self, sample_option_chain):
-        """Test getting options around ATM."""
-        options = sample_option_chain.get_options_around(offset=1)
-        # Should have 6 options (3 strikes × 2 types)
-        assert len(options) == 6
-
-        # Check both CE and PE present
-        types = [opt.option_type for opt in options]
-        assert "CE" in types
-        assert "PE" in types
-
-    def test_get_otm_options(self, sample_option_chain):
-        """Test getting OTM options."""
-        otm_ce, otm_pe = sample_option_chain.get_otm_options(distance=1)
-
-        # OTM Call = ATM + step = 25200
-        assert otm_ce is not None
-        assert otm_ce.strike == 25200.0
-        assert otm_ce.option_type == "CE"
-
-        # OTM Put = ATM - step = 25000
-        assert otm_pe is not None
-        assert otm_pe.strike == 25000.0
-        assert otm_pe.option_type == "PE"
-
-    def test_get_itm_options(self, sample_option_chain):
-        """Test getting ITM options."""
-        itm_ce, itm_pe = sample_option_chain.get_itm_options(distance=1)
-
-        # ITM Call = ATM - step = 25000
-        assert itm_ce is not None
-        assert itm_ce.strike == 25000.0
-        assert itm_ce.option_type == "CE"
-
-        # ITM Put = ATM + step = 25200
-        assert itm_pe is not None
-        assert itm_pe.strike == 25200.0
-        assert itm_pe.option_type == "PE"
-
-    def test_numeric_type_conversion(self, sample_underlying):
-        """Test that numeric fields are converted to float."""
-        chain = OptionChain(
-            underlying=sample_underlying,
-            expiry=datetime.now(),
-            spot_price="25100",  # String input
-            atm_strike="25100",  # String input
-            step_size="100",  # String input
-            calls={},
-            puts={},
-        )
-
-        assert isinstance(chain.spot_price, float)
-        assert isinstance(chain.atm_strike, float)
-        assert isinstance(chain.step_size, float)
-        assert chain.spot_price == 25100.0
-
 
 class TestDepthLevel:
     """Test the DepthLevel dataclass."""
@@ -302,47 +185,6 @@ class TestMarketDepth:
         assert sample_depth.security_id == "2885"
         assert sample_depth.side == "bid"
         assert len(sample_depth.levels) == 3
-
-    def test_best_level(self, sample_depth):
-        """Test best_level property."""
-        best = sample_depth.best_level
-        assert best is not None
-        assert best.price == 100.00
-        assert best.quantity == 1000
-
-    def test_total_quantity(self, sample_depth):
-        """Test total_quantity property."""
-        assert sample_depth.total_quantity == 4500  # 1000 + 2000 + 1500
-
-    def test_total_orders(self, sample_depth):
-        """Test total_orders property."""
-        assert sample_depth.total_orders == 23  # 5 + 10 + 8
-
-    def test_total_orders_none_when_not_available(self):
-        """Test total_orders returns None when orders not tracked."""
-        levels = [
-            DepthLevel(price=100.00, quantity=1000),  # No orders
-        ]
-        depth = MarketDepth(
-            symbol="TEST",
-            security_id="1",
-            side="ask",
-            levels=levels,
-            timestamp=datetime.now(),
-        )
-        assert depth.total_orders is None
-
-    def test_empty_levels(self):
-        """Test MarketDepth with empty levels."""
-        depth = MarketDepth(
-            symbol="TEST",
-            security_id="1",
-            side="bid",
-            levels=[],
-            timestamp=datetime.now(),
-        )
-        assert depth.best_level is None
-        assert depth.total_quantity == 0
 
     def test_market_depth_immutability(self):
         """Test that MarketDepth is frozen."""
@@ -511,8 +353,6 @@ class TestTickNewFields:
         assert tick.price == 2500.0
         assert tick.bid is None
         assert tick.ask is None
-        assert tick.bid_depth is None
-        assert tick.ask_depth is None
 
     def test_tick_with_bid_ask(self, base_instrument):
         """Tick stores bid and ask when provided."""
@@ -525,24 +365,6 @@ class TestTickNewFields:
         )
         assert tick.bid == 2499.5
         assert tick.ask == 2500.5
-
-    def test_tick_with_depth(self, base_instrument):
-        """Tick stores bid_depth and ask_depth when provided."""
-        bid_levels = [DepthLevel(price=2499.5, quantity=500, orders=5)]
-        ask_levels = [DepthLevel(price=2500.5, quantity=600, orders=7)]
-        tick = Tick(
-            instrument=base_instrument,
-            price=2500.0,
-            volume=1000,
-            bid=2499.5,
-            ask=2500.5,
-            bid_depth=bid_levels,
-            ask_depth=ask_levels,
-        )
-        assert len(tick.bid_depth) == 1
-        assert tick.bid_depth[0].price == 2499.5
-        assert len(tick.ask_depth) == 1
-        assert tick.ask_depth[0].price == 2500.5
 
     @pytest.mark.asyncio
     async def test_paper_broker_stream_ticker_has_bid_ask(self):

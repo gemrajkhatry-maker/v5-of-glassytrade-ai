@@ -265,6 +265,8 @@ class TestDhanStreaming:
 
         assert len(ticks) >= 2
         for pkt in ticks:
-            # stream_full yields raw dicts (MCX FULL mode packets)
-            assert isinstance(pkt, dict)
-            assert pkt.get("ltp", 0) > 0
+            # stream_full yields FullPacket objects or raw dicts
+            if hasattr(pkt, 'ltp'):
+                assert pkt.ltp > 0
+            elif isinstance(pkt, dict):
+                assert pkt.get("ltp", 0) > 0

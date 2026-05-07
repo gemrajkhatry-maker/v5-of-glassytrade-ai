@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import threading
+import os
+import time
 
-
+from app.runtime.contracts import (
+    ReadinessCheck,
+    RuntimeHealth,
+    RuntimeReadiness,
+    RuntimeSessionState,
+)
 from app.runtime.feeds import FeedSource
 from app.runtime.pipeline import StageMetrics
 from app.domain.shared.port.storage import IStorage
@@ -37,6 +47,8 @@ class SessionRuntime:
         self._feed = feed
         self._symbols = symbols
         self._storage = storage  # Store storage reference for injection
+        self._state_lock = threading.Lock()
+        self._run_lock = threading.Lock()
         self._sequencer = TickSequencer()
         self._normalizer = TickNormalizer(symbols=self._symbols, strict_symbol_mode=True)
         self._candles = CandlePipeline()
@@ -59,6 +71,9 @@ class SessionRuntime:
         self._metrics = StageMetrics(stage_name="SessionRuntime")
         self._event_count = 0
         self._history: dict[str, list[dict[str, object]]] = {symbol: [] for symbol in symbols}
+        self._run_in_progress = False
+        self._session_state = RuntimeSessionState.NEW
+        self._startup_window_started_at: float | None = None
 
     @property
     def metrics(self) -> StageMetrics:
@@ -76,6 +91,153 @@ class SessionRuntime:
     def event_count(self) -> int:
         return self._event_count
 
+    def ready_readiness(self) -> RuntimeReadiness:
+        feed_snapshot = self._feed.snapshot() if hasattr(self._feed, "snapshot") else {}
+        execution_snapshot = self._execution.snapshot()
+        broker_bound = bool(execution_snapshot.get("broker_bound", False))
+        feed_running = bool(feed_snapshot.get("running", False))
+        ticks_seen = int(feed_snapshot.get("ticks_seen", 0) or 0)
+        state = str(feed_snapshot.get("state", "")).lower()
+        producer_error = str(feed_snapshot.get("producer_error", "") or "")
+        first_tick_age_sec = feed_snapshot.get("first_tick_age_sec")
+        last_tick_age_sec = feed_snapshot.get("last_tick_age_sec")
+        startup_window_sec = float(os.getenv("RUNTIME_STARTUP_TICK_WINDOW_SEC", "30"))
+        startup_window_elapsed = (
+            time.monotonic() - (self._startup_window_started_at or time.monotonic())
+        ) if self._startup_window_started_at is not None else None
+
+        checks: list[ReadinessCheck] = []
+        if self._session_state != RuntimeSessionState.RUNNING:
+            checks.append(
+                ReadinessCheck(
+                    name="session_state",
+                    status=RuntimeHealth.NOT_READY,
+                    reason=f"session_state={self._session_state.value}",
+                )
+            )
+        else:
+            checks.append(
+                ReadinessCheck(
+                    name="session_state",
+                    status=RuntimeHealth.HEALTHY,
+                    reason="session running",
+                )
+            )
+
+        if not broker_bound:
+            checks.append(
+                ReadinessCheck(
+                    name="broker",
+                    status=RuntimeHealth.UNSAFE_TO_TRADE,
+                    reason="broker_not_bound",
+                )
+            )
+        else:
+            checks.append(ReadinessCheck(name="broker", status=RuntimeHealth.HEALTHY, reason="broker_bound"))
+
+        if state == "drained":
+            checks.append(
+                ReadinessCheck(
+                    name="feed_state",
+                    status=RuntimeHealth.UNSAFE_TO_TRADE,
+                    reason="feed_drained",
+                )
+            )
+        elif state == "failed":
+            checks.append(
+                ReadinessCheck(
+                    name="feed_state",
+                    status=RuntimeHealth.UNSAFE_TO_TRADE,
+                    reason="feed_failed",
+                )
+            )
+        elif not feed_running:
+            checks.append(
+                ReadinessCheck(
+                    name="feed_running",
+                    status=RuntimeHealth.NOT_READY,
+                    reason="feed_not_running",
+                )
+            )
+        else:
+            checks.append(
+                ReadinessCheck(name="feed_running", status=RuntimeHealth.HEALTHY, reason="feed_running")
+            )
+
+        if producer_error:
+            checks.append(
+                ReadinessCheck(
+                    name="feed_error",
+                    status=RuntimeHealth.UNSAFE_TO_TRADE,
+                    reason=producer_error,
+                )
+            )
+
+        if ticks_seen <= 0:
+            if startup_window_elapsed is not None and startup_window_elapsed > startup_window_sec:
+                checks.append(
+                    ReadinessCheck(
+                        name="startup_window",
+                        status=RuntimeHealth.UNSAFE_TO_TRADE,
+                        reason="no_ticks_within_startup_window",
+                    )
+                )
+            checks.append(
+                ReadinessCheck(
+                    name="ticks_seen",
+                    status=RuntimeHealth.UNSAFE_TO_TRADE,
+                    reason="no_ticks_seen",
+                )
+            )
+
+        if isinstance(last_tick_age_sec, (int, float)) and last_tick_age_sec > 30:
+            checks.append(
+                ReadinessCheck(
+                    name="feed_stale",
+                    status=RuntimeHealth.DEGRADED,
+                    reason="last_tick_age_sec > 30",
+                )
+            )
+
+        status = RuntimeHealth.HEALTHY
+        for check in checks:
+            if check.status == RuntimeHealth.UNSAFE_TO_TRADE:
+                status = RuntimeHealth.UNSAFE_TO_TRADE
+                break
+            if check.status == RuntimeHealth.DEGRADED and status == RuntimeHealth.HEALTHY:
+                status = RuntimeHealth.DEGRADED
+
+        return RuntimeReadiness(
+            status=status,
+            checks=tuple(checks),
+            feed_present=len(self._symbols) > 0,
+            feed_running=feed_running,
+            broker_bound=broker_bound,
+            ticks_seen=ticks_seen,
+            first_tick_age_sec=(
+                float(first_tick_age_sec)
+                if isinstance(first_tick_age_sec, (int, float))
+                else None
+            ),
+            last_tick_age_sec=(
+                float(last_tick_age_sec)
+                if isinstance(last_tick_age_sec, (int, float))
+                else None
+            ),
+            last_feed_error=producer_error,
+            startup_ready=(
+                self._session_state == RuntimeSessionState.RUNNING
+                and broker_bound
+                and feed_running
+                and ticks_seen > 0
+                and not producer_error
+            ),
+        )
+
+    @property
+    def session_state(self) -> RuntimeSessionState:
+        return self._session_state
+
     def get_history(self, symbol: str, max_points: int = 500) -> list[dict[str, object]]:
         if not symbol:
             return []
@@ -83,8 +245,11 @@ class SessionRuntime:
 
     def snapshot(self, symbol: str | None = None) -> dict:
         snapshot = {
+            "session_state": self._session_state.value,
+            "run_in_progress": self._run_in_progress,
             "_event_count": self._event_count,
             "_event_count_by_symbol": {sym: len(self._history.get(sym, [])) for sym in self._symbols},
+            "feed": self._feed.snapshot(),
             "sequencer": self._sequencer.snapshot(),
             "normalizer": self._normalizer.snapshot(),
             "candles": self._candles.snapshot(),
@@ -102,6 +267,7 @@ class SessionRuntime:
             "telemetry": self._telemetry.snapshot(),
             "strategy": self._strategy.snapshot(),
         }
+        snapshot["state_digest"] = self.state_digest_payload(snapshot)
 
         if symbol:
             if symbol in self._position.snapshot():
@@ -124,39 +290,85 @@ class SessionRuntime:
 
         return snapshot
 
+    @staticmethod
+    def state_digest_payload(payload: dict) -> str:
+        digest_payload = dict(payload)
+        digest_payload.pop("state_digest", None)
+        encoded = json.dumps(digest_payload, sort_keys=True, default=str, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+    def state_digest(self, symbol: str | None = None) -> str:
+        """Stable digest used to compare runtime sessions."""
+        payload = self.snapshot(symbol=symbol)
+        return str(payload.get("state_digest", self.state_digest_payload(payload)))
+
     def start(self) -> None:
-        if self._running:
-            return
-        self._feed.start()
-        self._running = True
+        with self._state_lock:
+            if self._session_state == RuntimeSessionState.RUNNING:
+                return
+            if self._session_state in {
+                RuntimeSessionState.STOPPING,
+                RuntimeSessionState.FAILED,
+            }:
+                raise RuntimeError(f"invalid_start_state: {self._session_state.value}")
+            self._session_state = RuntimeSessionState.STARTING
+            self._startup_window_started_at = time.monotonic()
+            try:
+                self._feed.start()
+                self._running = True
+                self._session_state = RuntimeSessionState.RUNNING
+            except Exception:
+                self._session_state = RuntimeSessionState.FAILED
+                self._startup_window_started_at = None
+                raise
 
     def stop(self) -> None:
-        if not self._running:
-            return
-        self._running = False
+        with self._state_lock:
+            if self._session_state in {RuntimeSessionState.STOPPING, RuntimeSessionState.STOPPED}:
+                return
+            if self._session_state == RuntimeSessionState.NEW:
+                self._session_state = RuntimeSessionState.STOPPED
+                return
+            self._session_state = RuntimeSessionState.STOPPING
+            self._running = False
+            self._startup_window_started_at = None
         try:
             self._feed.stop()
         finally:
             self._persistence.flush()
+            with self._state_lock:
+                self._session_state = RuntimeSessionState.STOPPED
 
     def run_once(self, max_ticks: int | None = None) -> list[object]:
-        if not self._running:
-            raise RuntimeError("SessionRuntime not started")
+        if self._session_state != RuntimeSessionState.RUNNING:
+            raise RuntimeError(f"session_not_running: {self._session_state.value}")
+
+        if not self._run_lock.acquire(blocking=False):
+            raise RuntimeError("run_in_progress")
+
+        self._run_in_progress = True
         events = []
         i = 0
         feed_iter = iter(self._feed.stream())
-        while max_ticks is None or i < max_ticks:
-            try:
-                tick = next(feed_iter)
-            except StopIteration:
-                break
-            if max_ticks is not None and i >= max_ticks:
-                break
-            i += 1
-            events.extend(self._process_tick(tick))
-            if max_ticks is not None and len(events) > max_ticks * 20:
-                # guardrail: keep deterministic cap in hot path
-                break
+        try:
+            while max_ticks is None or i < max_ticks:
+                try:
+                    tick = next(feed_iter)
+                except StopIteration:
+                    break
+                if max_ticks is not None and i >= max_ticks:
+                    break
+                i += 1
+                events.extend(self._process_tick(tick))
+                if max_ticks is not None and len(events) > max_ticks * 20:
+                    # guardrail: keep deterministic cap in hot path
+                    break
+        except Exception:
+            self._session_state = RuntimeSessionState.FAILED
+            raise
+        finally:
+            self._run_in_progress = False
+            self._run_lock.release()
         return events
 
     def _process_tick(self, tick: Tick) -> list[object]:
@@ -325,7 +537,11 @@ class SessionRuntime:
         self._strategy.unregister(symbol=symbol, strategy_id=strategy_id)
 
     def bind_broker(self, broker) -> None:
-        self._execution._broker = broker
+        if self._session_state == RuntimeSessionState.STOPPING:
+            raise RuntimeError("cannot_bind_while_stopping")
+        if self._session_state == RuntimeSessionState.FAILED:
+            raise RuntimeError("cannot_bind_while_failed")
+        self._execution.bind(broker)
 
     def strategy_bindings(self) -> dict[str, dict]:
         return self._strategy.snapshot()

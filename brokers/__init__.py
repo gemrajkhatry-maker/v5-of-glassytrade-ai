@@ -103,7 +103,4 @@ __all__ = [
     'BrokerGateway',
     'create_paper_gateway',
     'create_dhan_gateway',
-    
-    # Reactive (lazy import to avoid rx dependency)
-    # Use: from brokers.reactive import ReactiveBroker
 ]

@@ -129,7 +129,7 @@ class TickSequencer:
         logger.info("TickSequencer teardown: %d ticks sequenced", self._counter)
 
     def reset(self) -> None:
-        """Reset for backtest reproducibility."""
+        """Reset for consistent runtime restart and state reinitialization."""
         self._counter = 0
         self._last_seen = {}
         self._out_of_order_count = 0

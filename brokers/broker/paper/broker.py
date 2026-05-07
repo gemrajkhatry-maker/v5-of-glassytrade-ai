@@ -13,7 +13,7 @@ import random
 from datetime import datetime, timedelta
 from typing import List, Dict, AsyncIterator
 
-from ..ports import IBrokerPort
+from ..ports import IBrokerPort, IOptionsProvider
 from ..entities import (
     Instrument,
     Quote,
@@ -48,7 +48,7 @@ DEFAULT_PRICES = {
 }
 
 
-class PaperBroker(IBrokerPort):
+class PaperBroker(IBrokerPort, IOptionsProvider):
     """
     Paper trading broker implementation.
 

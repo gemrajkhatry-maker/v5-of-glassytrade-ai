@@ -31,6 +31,8 @@ class EntryGateCoordinator:
         session_info=None,
         tick_size: float = 0.05,
     ) -> tuple[bool, str, bool]:
+        # Save tick_size before deleting unused params
+        _tick_size = float(tick_size or 1.0)
         del ib_high, ib_low, aggressive_levels, footprint_domain, session_info, tick_size
 
         tick_price = float(getattr(tick, "close", 0.0))
@@ -50,7 +52,7 @@ class EntryGateCoordinator:
             symbol=str(getattr(tick, "symbol", "")),
             is_risk_halted=False,
             halt_reason="",
-            tick_size=float(tick_size or 1.0),
+            tick_size=_tick_size,
             is_extreme_deviation=bool(getattr(amt_result, "is_extreme_deviation", False)),
         )
 

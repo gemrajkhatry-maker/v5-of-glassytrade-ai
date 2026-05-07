@@ -320,32 +320,44 @@ class BrokerGateway:
     def place_order(self, order: Optional[Order] = None, **kwargs) -> Order:
         if order is None:
             order = Order(**kwargs)
-        from app.config import settings
-        if settings.DRY_RUN:
-            logger.warning("[DRY_RUN] Intercepted place_order: %s", order)
-            order.status = OrderStatus.COMPLETED
-            order.order_id = f"mock_order_{datetime.now().timestamp()}"
-            return order
+        # DRY_RUN check (optional - only works when backend app.config is available)
+        try:
+            from app.config import settings
+            if settings.DRY_RUN:
+                logger.warning("[DRY_RUN] Intercepted place_order: %s", order)
+                order.status = OrderStatus.COMPLETED
+                order.order_id = f"mock_order_{datetime.now().timestamp()}"
+                return order
+        except ImportError:
+            pass  # app.config not available, proceed with actual broker call
         return self._broker.place_order(order)
 
     def cancel_order(self, order_id: str) -> bool:
-        from app.config import settings
-        if settings.DRY_RUN:
-            if order_id.startswith("mock_order_"):
-                logger.warning("[DRY_RUN] Intercepted cancel_order for mock ID %s", order_id)
-                return True
+        # DRY_RUN check (optional)
+        try:
+            from app.config import settings
+            if settings.DRY_RUN:
+                if order_id.startswith("mock_order_"):
+                    logger.warning("[DRY_RUN] Intercepted cancel_order for mock ID %s", order_id)
+                    return True
+        except ImportError:
+            pass
         return self._broker.cancel_order(order_id)
 
     def get_order_status(self, order_id: str) -> Order:
-        from app.config import settings
-        if settings.DRY_RUN:
-            if order_id.startswith("mock_order_"):
-                # Return a dummy completed order
-                return Order(
-                    symbol="MOCK", exchange=Exchange.NSE, 
-                    quantity=1, side="BUY", order_type="MARKET", 
-                    status=OrderStatus.COMPLETED, order_id=order_id
-                )
+        # DRY_RUN check (optional)
+        try:
+            from app.config import settings
+            if settings.DRY_RUN:
+                if order_id.startswith("mock_order_"):
+                    # Return a dummy completed order
+                    return Order(
+                        symbol="MOCK", exchange=Exchange.NSE, 
+                        quantity=1, side="BUY", order_type="MARKET", 
+                        status=OrderStatus.COMPLETED, order_id=order_id
+                    )
+        except ImportError:
+            pass
         return self._broker.get_order_status(order_id)
 
     def get_expiry_list(self, symbol: str, exchange: Exchange) -> List[datetime]:

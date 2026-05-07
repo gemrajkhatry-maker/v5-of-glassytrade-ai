@@ -29,7 +29,7 @@
 | **Telemetry** | TelemetryPipeline | ⬜ | ⬜ | Pending |
 | **Session** | SessionRuntime | ⬜ | ⬜ | Pending |
 | **Orchestrator** | RuntimeOrchestrator | ⬜ | ⬜ | Pending |
-| **Backtest** | BacktestRuntime | ⬜ | ⬜ | Pending |
+| **Historical Validation** | HistoricalValidationRuntime | ⬜ | ⬜ | Pending |
 | **Features** | FeatureComputation | ⬜ | ⬜ | Pending |
 | **Strategy** | StrategyRuntime | ⬜ | ⬜ | Pending |
 

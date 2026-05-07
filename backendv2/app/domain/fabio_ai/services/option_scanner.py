@@ -33,6 +33,34 @@ class ScanResult:
     iv: float = 0.0
 
 
+@dataclass(frozen=True)
+class ContractSwitchDecision:
+    """Auditable scanner contract-switch decision."""
+
+    accepted: bool
+    reason: str
+    current_contract: str | None
+    candidate_contract: str
+    current_score: float
+    candidate_score: float
+    score_delta: float
+    cooldown_remaining: float = 0.0
+    has_open_trade: bool = False
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "reason": self.reason,
+            "current_contract": self.current_contract,
+            "candidate_contract": self.candidate_contract,
+            "current_score": self.current_score,
+            "candidate_score": self.candidate_score,
+            "score_delta": self.score_delta,
+            "cooldown_remaining": self.cooldown_remaining,
+            "has_open_trade": self.has_open_trade,
+        }
+
+
 def _ensure_sync_result(label: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
     result = fn(*args, **kwargs)
     if hasattr(result, "__await__"):
@@ -71,7 +99,7 @@ class OptionScannerService:
     }
     _MIN_OI = {
         "NIFTY": 50_000,
-        "BANKNIFTY": 150_000,
+        "BANKNIFTY": 100_000,
         "FINNIFTY": 30_000,
         "CRUDEOIL": 10,
         "NATURALGAS": 500,
@@ -212,6 +240,18 @@ class OptionScannerService:
         is_mcx = u.upper() in (
             "CRUDEOIL", "CRUDEOILM", "GOLD", "GOLDM", "SILVER", "SILVERM", "NATURALGAS", "COPPER"
         )
+        atm_checks: list[bool] = []
+        for opt_type, option_map in [("CE", chain.calls), ("PE", chain.puts)]:
+            if option_map.get(float(atm)) is None:
+                continue
+            atm_checks.append(
+                self._process_contract(
+                    u, opt_type, int(atm), atm, interval, option_map,
+                    bullish_only, bias, bias_reason, chain, is_mcx=is_mcx
+                ) is not None
+            )
+        if atm_checks and not any(atm_checks):
+            return out
         for opt_type, option_map in [("CE", chain.calls), ("PE", chain.puts)]:
             for strike in strikes:
                 result = self._process_contract(
@@ -234,6 +274,7 @@ class OptionScannerService:
         bullish_only: bool = False,
     ) -> list[ScanResult]:
         results: list[ScanResult] = []
+        explicit_underlyings = underlyings is not None
         if underlyings is None:
             underlyings = self._default_underlyings or []
 
@@ -317,7 +358,7 @@ class OptionScannerService:
                 break
             round_idx += 1
 
-        if not final:
+        if not final and not explicit_underlyings:
             if not underlyings:
                 underlyings = ["NIFTY", "BANKNIFTY", "FINNIFTY"] if exchange != "MCX" else ["CRUDEOIL", "NATURALGAS"]
             _fb_exchange = exchange or ("MCX" if "MCX" in str(self._broker) else "NFO")
@@ -403,22 +444,90 @@ class ContractSwitchGuard:
     def set_open_trade(self, has_trade: bool):
         self._has_open_trade = has_trade
 
-    def should_switch(self, new_contract, new_score, current_time):
+    def evaluate_switch(self, new_contract, new_score, current_time) -> ContractSwitchDecision:
+        new_contract = str(new_contract)
+        new_score = float(new_score)
+        score_delta = abs(new_score - self._current_score)
         if self._has_open_trade:
-            return False
+            return ContractSwitchDecision(
+                accepted=False,
+                reason="open_trade_blocks_switch",
+                current_contract=self._current_contract,
+                candidate_contract=new_contract,
+                current_score=self._current_score,
+                candidate_score=new_score,
+                score_delta=score_delta,
+                has_open_trade=True,
+            )
         if self._current_contract is None:
-            self._current_contract = new_contract
-            self._current_score = new_score
-            self._last_score_time = current_time
-            return True
+            return ContractSwitchDecision(
+                accepted=True,
+                reason="initial_contract",
+                current_contract=None,
+                candidate_contract=new_contract,
+                current_score=self._current_score,
+                candidate_score=new_score,
+                score_delta=score_delta,
+            )
         if new_contract == self._current_contract:
+            return ContractSwitchDecision(
+                accepted=False,
+                reason="same_contract",
+                current_contract=self._current_contract,
+                candidate_contract=new_contract,
+                current_score=self._current_score,
+                candidate_score=new_score,
+                score_delta=score_delta,
+            )
+        cooldown_remaining = max(0.0, 300 - (float(current_time) - self._last_score_time))
+        if cooldown_remaining > 0:
+            return ContractSwitchDecision(
+                accepted=False,
+                reason="cooldown_active",
+                current_contract=self._current_contract,
+                candidate_contract=new_contract,
+                current_score=self._current_score,
+                candidate_score=new_score,
+                score_delta=score_delta,
+                cooldown_remaining=cooldown_remaining,
+            )
+        if score_delta > 15:
+            return ContractSwitchDecision(
+                accepted=True,
+                reason="score_delta_exceeded",
+                current_contract=self._current_contract,
+                candidate_contract=new_contract,
+                current_score=self._current_score,
+                candidate_score=new_score,
+                score_delta=score_delta,
+            )
+        return ContractSwitchDecision(
+            accepted=False,
+            reason="score_delta_too_small",
+            current_contract=self._current_contract,
+            candidate_contract=new_contract,
+            current_score=self._current_score,
+            candidate_score=new_score,
+            score_delta=score_delta,
+        )
+
+    def apply_switch(self, decision: ContractSwitchDecision, current_time: float) -> bool:
+        if not decision.accepted:
             return False
-        if current_time - self._last_score_time < 300:
-            return False
-        if abs(new_score - self._current_score) > 15:
-            self._current_contract = new_contract
-            self._current_score = new_score
-            self._last_score_time = current_time
-            return True
-        return False
+        self._current_contract = decision.candidate_contract
+        self._current_score = decision.candidate_score
+        self._last_score_time = float(current_time)
+        return True
+
+    def should_switch(self, new_contract, new_score, current_time):
+        decision = self.evaluate_switch(new_contract, new_score, current_time)
+        return self.apply_switch(decision, current_time)
+
+    def snapshot(self) -> dict[str, object]:
+        return {
+            "current_contract": self._current_contract,
+            "current_score": self._current_score,
+            "last_score_time": self._last_score_time,
+            "has_open_trade": self._has_open_trade,
+        }
 

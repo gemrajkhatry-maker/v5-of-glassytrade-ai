@@ -6,6 +6,7 @@ Implements both legacy broker order methods and the domain ``IMarketData`` port.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import threading
@@ -75,7 +76,11 @@ class DhanAdapter(IMarketData):
     def close_sync(self) -> None:
         if getattr(self._client, "is_closed", False):
             return
-        self._client.close()
+        close = getattr(self._client, "close", None)
+        if callable(close):
+            close()
+            return
+        self._run_sync(self._client.aclose())
 
     async def close(self):
         await self._client.aclose()
@@ -240,10 +245,10 @@ class DhanAdapter(IMarketData):
 
     def get_ltp(self, symbol: str) -> float:
         if not self._access_token:
-            return self._ltp_cache.get(symbol, (0.0, 0.0))[0]
+            return self._cached_ltp(symbol)
         try:
             asyncio.get_running_loop()
-            return self._ltp_cache.get(symbol, (0.0, 0.0))[0]
+            return self._cached_ltp(symbol)
         except RuntimeError:
             pass
         response = asyncio.get_event_loop().run_until_complete(
@@ -253,16 +258,24 @@ class DhanAdapter(IMarketData):
             )
         )
         if response.status_code != 200:
-            return self._ltp_cache.get(symbol, (0.0, 0.0))[0]
+            return self._cached_ltp(symbol)
         payload = _safe_json(response, {})
         try:
             ltp = float(payload.get("ltp", 0.0))
         except Exception:
             ltp = 0.0
         if ltp > 0:
-            self._ltp_cache[symbol] = (ltp, datetime.now(tz=IST).timestamp())
+            self._ltp_cache[symbol] = (datetime.now(tz=IST).timestamp(), ltp)
             return ltp
-        return self._ltp_cache.get(symbol, (0.0, 0.0))[0]
+        return self._cached_ltp(symbol)
+
+    def _cached_ltp(self, symbol: str) -> float:
+        first, second = self._ltp_cache.get(symbol, (0.0, 0.0))
+        if first > 1_000_000_000 and second >= 0:
+            return float(second)
+        if second > 1_000_000_000 and first >= 0:
+            return float(first)
+        return float(max(first, second))
 
     def get_lot_size(self, symbol: str) -> int:
         if cached := self._lot_cache.get(symbol):
@@ -273,10 +286,12 @@ class DhanAdapter(IMarketData):
         interval = float(os.getenv("DHAN_STREAM_INTERVAL", "1.5"))
         while True:
             now_ts = datetime.now(tz=IST).isoformat()
+            emitted = False
             for symbol in symbols:
                 ltp = self.get_ltp(symbol)
                 if ltp <= 0:
                     continue
+                emitted = True
                 self._stream_offsets.append(ltp)
                 yield {
                     "symbol": symbol,
@@ -290,6 +305,8 @@ class DhanAdapter(IMarketData):
                     "depth_bids": [],
                     "depth_asks": [],
                 }
+            if not emitted and not self._access_token:
+                return
             await asyncio.sleep(interval)
 
     async def stream_depth_20(self, symbols: list[str]) -> AsyncIterator[dict]:
@@ -323,16 +340,17 @@ class DhanAdapter(IMarketData):
                     if now - ts <= self._option_chain_cache_ttl_sec:
                         return chain_obj
 
-        response = self._run_sync(
-            self._client.get(
-                "/api/options/chain",
-                params={
-                    "underlying": underlying,
-                    "exchange": exchange,
-                    "expiry_index": expiry_index,
-                },
-            )
+        request_awaitable = self._client.get(
+            "/api/options/chain",
+            params={
+                "underlying": underlying,
+                "exchange": exchange,
+                "expiry_index": expiry_index,
+            },
         )
+        response = self._run_sync(request_awaitable)
+        if inspect.iscoroutine(request_awaitable):
+            request_awaitable.close()
         if response is None or response.status_code != 200:
             return None
         payload = _safe_json(response, None)
@@ -354,7 +372,11 @@ class DhanAdapter(IMarketData):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return asyncio.get_event_loop().run_until_complete(awaitable)
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                return asyncio.run(awaitable)
+            return loop.run_until_complete(awaitable)
         with ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(self._run_async_in_thread, awaitable)
             return future.result()

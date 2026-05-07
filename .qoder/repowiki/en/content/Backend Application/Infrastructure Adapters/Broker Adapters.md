@@ -2,18 +2,25 @@
 
 <cite>
 **Referenced Files in This Document**
+- [dhan_broker_adapter.py](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py)
+- [mcx_broker.py](file://backend/app/infrastructure/adapters/broker/mcx_broker.py)
 - [dhan_adapter.py](file://backend/app/infrastructure/adapters/dhan_adapter.py)
 - [paper_broker.py](file://backend/app/infrastructure/adapters/paper_broker.py)
-- [broker.py](file://backend/app/domain/ports/broker.py)
-- [market_data.py](file://backend/app/domain/ports/market_data.py)
-- [gateway.py](file://brokers/gateway.py)
-- [reactive.py](file://brokers/reactive.py)
 - [broker.py](file://brokers/broker/paper/broker.py)
 - [broker.py](file://brokers/broker/dhan/application/broker.py)
-- [types.py](file://brokers/broker/types.py)
-- [entities.py](file://brokers/broker/entities.py)
+- [ports.py](file://brokers/broker/ports.py)
+- [gateway.py](file://brokers/gateway.py)
+- [reactive.py](file://brokers/reactive.py)
 - [market_info.py](file://brokers/broker/market_info.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive DhanBrokerAdapter implementation for live order execution with lot size retrieval and API prefixing support
+- Introduced MCXBrokerAdapter for Multi-Commodity Exchange futures trading with HTTP-based API integration
+- Updated DhanMarketDataAdapter to include lot size retrieval functionality
+- Enhanced broker integration patterns with improved error handling and performance optimizations
+- Expanded adapter contract interfaces to support new brokerage capabilities
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -29,26 +36,31 @@
 
 ## Introduction
 This document describes the GlassyTrade AI broker adapters subsystem with a focus on:
-- DhanMarketDataAdapter for NSE/NFO/MCX market data integration (WebSocket streaming, historical data, order book depth, and option chain retrieval)
+- DhanBrokerAdapter for comprehensive live brokerage integration with lot size retrieval and API prefixing support
+- MCXBrokerAdapter for Multi-Commodity Exchange futures trading with HTTP-based API integration
+- Enhanced DhanMarketDataAdapter with lot size retrieval capabilities
 - PaperBroker adapter for simulated trading environments
 - Adapter contract interfaces, initialization patterns, error handling, and performance optimizations
 - Practical configuration, symbol resolution, exchange mapping, and fallback mechanisms
 - Threading-safe initialization, async/sync compatibility, and integration with the broader trading pipeline
 
 ## Project Structure
-The broker adapters subsystem spans two primary layers:
+The broker adapters subsystem spans three primary layers:
+- Backend adapters: Live brokerage adapters (DhanBrokerAdapter, MCXBrokerAdapter) and market data adapters (DhanMarketDataAdapter)
 - Backend adapters: MarketDataPort and BrokerPort implementations for Dhan and Paper
 - Brokers library: A reusable, reactive, and resilient broker abstraction with Dhan and Paper implementations
 
 ```mermaid
 graph TB
 subgraph "Backend Adapters"
-DM["DhanMarketDataAdapter<br/>implements MarketDataPort"]
-PB["PaperBrokerAdapter<br/>implements BrokerPort"]
+DBA["DhanBrokerAdapter<br/>Live order execution with lot size"]
+MCXA["McxBrokerAdapter<br/>MCX futures HTTP API"]
+DMA["DhanMarketDataAdapter<br/>Enhanced market data with lot size"]
+PB["PaperBrokerAdapter<br/>Simulated trading"]
 end
 subgraph "Domain Ports"
-MD["MarketDataPort"]
-BR["BrokerPort"]
+MD["IMarketData"]
+BR["IBroker"]
 end
 subgraph "Brokers Library"
 GW["BrokerGateway"]
@@ -56,63 +68,71 @@ RB["ReactiveBroker"]
 DB["DhanBroker"]
 PBR["PaperBroker"]
 end
-DM --> GW
-PB --> PBR
+DBA --> BR
+MCXA --> BR
+DMA --> MD
+DB --> DBA
+PBR --> PB
 GW --> DB
 GW --> PBR
 RB --> DB
 RB --> PBR
-DM --> MD
-PB --> BR
 ```
 
 **Diagram sources**
-- [dhan_adapter.py:66-457](file://backend/app/infrastructure/adapters/dhan_adapter.py#L66-L457)
-- [paper_broker.py:118-199](file://backend/app/infrastructure/adapters/paper_broker.py#L118-L199)
-- [market_data.py:19-112](file://backend/app/domain/ports/market_data.py#L19-L112)
-- [broker.py:11-27](file://backend/app/domain/ports/broker.py#L11-L27)
-- [gateway.py:154-423](file://brokers/gateway.py#L154-L423)
+- [dhan_broker_adapter.py:77-500](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py#L77-L500)
+- [mcx_broker.py:54-218](file://backend/app/infrastructure/adapters/broker/mcx_broker.py#L54-L218)
+- [dhan_adapter.py:67-507](file://backend/app/infrastructure/adapters/dhan_adapter.py#L67-L507)
+- [paper_broker.py:39-130](file://backend/app/infrastructure/adapters/paper_broker.py#L39-L130)
+- [ports.py:87-418](file://brokers/broker/ports.py#L87-L418)
+- [gateway.py:155-424](file://brokers/gateway.py#L155-L424)
 - [reactive.py:61-800](file://brokers/reactive.py#L61-L800)
-- [broker.py:76-823](file://brokers/broker/dhan/application/broker.py#L76-L823)
 - [broker.py:51-397](file://brokers/broker/paper/broker.py#L51-L397)
+- [broker.py:76-823](file://brokers/broker/dhan/application/broker.py#L76-L823)
 
 **Section sources**
-- [dhan_adapter.py:1-457](file://backend/app/infrastructure/adapters/dhan_adapter.py#L1-L457)
-- [paper_broker.py:1-199](file://backend/app/infrastructure/adapters/paper_broker.py#L1-L199)
-- [market_data.py:1-112](file://backend/app/domain/ports/market_data.py#L1-L112)
-- [broker.py:1-27](file://backend/app/domain/ports/broker.py#L1-L27)
-- [gateway.py:1-423](file://brokers/gateway.py#L1-L423)
+- [dhan_broker_adapter.py:1-500](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py#L1-L500)
+- [mcx_broker.py:1-218](file://backend/app/infrastructure/adapters/broker/mcx_broker.py#L1-L218)
+- [dhan_adapter.py:1-507](file://backend/app/infrastructure/adapters/dhan_adapter.py#L1-L507)
+- [paper_broker.py:1-130](file://backend/app/infrastructure/adapters/paper_broker.py#L1-L130)
+- [ports.py:1-805](file://brokers/broker/ports.py#L1-L805)
+- [gateway.py:1-424](file://brokers/gateway.py#L1-L424)
 - [reactive.py:1-800](file://brokers/reactive.py#L1-L800)
-- [broker.py:1-823](file://brokers/broker/dhan/application/broker.py#L1-L823)
 - [broker.py:1-397](file://brokers/broker/paper/broker.py#L1-L397)
+- [broker.py:1-823](file://brokers/broker/dhan/application/broker.py#L1-L823)
 
 ## Core Components
-- DhanMarketDataAdapter: Implements MarketDataPort using the brokers/ DhanBroker. Provides historical data, quotes, full packets, 20-level depth, and option chain retrieval. Includes a thread-safe initialization guard and fallback REST polling for MCX OPTFUT.
-- PaperBrokerAdapter: Implements BrokerPort with a realistic cost model for simulated trading, including slippage, STT, exchange fees, brokerage, GST, and SEBI charges.
-- Domain contracts: MarketDataPort and BrokerPort define the abstract interfaces for market data providers and order executors respectively.
-- Brokers library: BrokerGateway and ReactiveBroker provide unified APIs, circuit breakers, and reactive streams over Dhan and Paper brokers.
+- **DhanBrokerAdapter**: Comprehensive live brokerage adapter implementing IBroker with order execution, cancellation, position management, and lot size retrieval. Features include automatic order sizing with lot multiples, configurable poll intervals, and robust error handling.
+- **McxBrokerAdapter**: HTTP-based adapter for Multi-Commodity Exchange futures trading with signature-based authentication, retry logic, and order lifecycle management.
+- **Enhanced DhanMarketDataAdapter**: Improved market data adapter with lot size retrieval functionality, option chain caching, and comprehensive symbol resolution.
+- **PaperBrokerAdapter**: Realistic simulated trading adapter with detailed cost modeling including slippage, STT, exchange fees, brokerage, GST, and SEBI charges.
+- **Domain contracts**: IMarketData and IBroker define abstract interfaces for market data providers and order executors respectively.
+- **Brokers library**: BrokerGateway and ReactiveBroker provide unified APIs, circuit breakers, and reactive streams over Dhan and Paper brokers.
 
 Key capabilities:
 - Exchange mapping and symbol detection for NSE/NFO/MCX
 - Option chain retrieval with expiry and strike handling
 - Streaming via WebSocket with fallback polling
 - Cost-aware paper trading execution
+- Lot size retrieval and API prefixing support
+- Comprehensive order lifecycle management
 
 **Section sources**
-- [dhan_adapter.py:66-457](file://backend/app/infrastructure/adapters/dhan_adapter.py#L66-L457)
-- [paper_broker.py:118-199](file://backend/app/infrastructure/adapters/paper_broker.py#L118-L199)
-- [market_data.py:19-112](file://backend/app/domain/ports/market_data.py#L19-L112)
-- [broker.py:11-27](file://backend/app/domain/ports/broker.py#L11-L27)
-- [gateway.py:154-423](file://brokers/gateway.py#L154-L423)
+- [dhan_broker_adapter.py:77-500](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py#L77-L500)
+- [mcx_broker.py:54-218](file://backend/app/infrastructure/adapters/broker/mcx_broker.py#L54-L218)
+- [dhan_adapter.py:67-507](file://backend/app/infrastructure/adapters/dhan_adapter.py#L67-L507)
+- [paper_broker.py:39-130](file://backend/app/infrastructure/adapters/paper_broker.py#L39-L130)
+- [ports.py:87-418](file://brokers/broker/ports.py#L87-L418)
+- [gateway.py:155-424](file://brokers/gateway.py#L155-L424)
 - [reactive.py:61-800](file://brokers/reactive.py#L61-L800)
 
 ## Architecture Overview
-The adapters integrate with the broader trading pipeline through standardized ports and the brokers library.
+The adapters integrate with the broader trading pipeline through standardized ports and the brokers library, featuring enhanced brokerage capabilities.
 
 ```mermaid
 sequenceDiagram
 participant App as "Trading Engine"
-participant PortMD as "MarketDataPort"
+participant PortMD as "IMarketData"
 participant Adapter as "DhanMarketDataAdapter"
 participant BrokerGW as "BrokerGateway"
 participant Broker as "DhanBroker"
@@ -127,51 +147,159 @@ Broker->>Stream : build request
 Stream-->>Broker : DataFrame
 Broker-->>Adapter : DataFrame
 Adapter-->>App : list[OHLC]
+Note over Adapter,Broker : Enhanced with lot size retrieval
+Adapter->>Broker : get_lot_size(instrument.symbol, instrument.exchange)
+Broker-->>Adapter : int
 ```
 
 **Diagram sources**
-- [dhan_adapter.py:214-318](file://backend/app/infrastructure/adapters/dhan_adapter.py#L214-L318)
-- [gateway.py:230-247](file://brokers/gateway.py#L230-L247)
-- [broker.py:510-522](file://brokers/broker/dhan/application/broker.py#L510-L522)
+- [dhan_adapter.py:253-357](file://backend/app/infrastructure/adapters/dhan_adapter.py#L253-L357)
+- [gateway.py:232-242](file://brokers/gateway.py#L232-L242)
+- [broker.py:494-501](file://brokers/broker/dhan/application/broker.py#L494-L501)
 
 ## Detailed Component Analysis
 
-### DhanMarketDataAdapter
-Implements MarketDataPort and adapts the brokers/ DhanBroker for GlassyTrade’s needs.
+### DhanBrokerAdapter
+**New Implementation** - Comprehensive live brokerage adapter with advanced features.
 
-- Initialization patterns
-  - Thread-safe guard using a lock to ensure exactly one initialization runs concurrently across sync and async contexts.
-  - Synchronous path creates a temporary event loop to run async initialize() with a configurable timeout.
-  - Asynchronous path calls initialize() directly within an event loop.
+Implements IBroker and provides complete order execution lifecycle with lot size awareness and API prefixing support.
 
-- Exchange mapping and symbol resolution
-  - Converts exchange strings to brokers.Exchange enums with fallback to NSE.
-  - Auto-detects options by symbol suffixes or CALL/PUT keywords and routes to NFO or MCX depending on the underlying.
-  - Builds Instrument objects with option_type for downstream routing.
+- **Initialization patterns**
+  - Thread-safe broker creation with lock-based synchronization
+  - Environment variable configuration for client credentials
+  - Automatic broker recreation on failure
+  - Configurable poll intervals and timeouts for order status checking
 
-- Market data retrieval
-  - Historical: maps common intervals to Dhan-specific intervals, computes delta proxy when taker_buy_volume is unavailable, and returns OHLC with VWAP.
-  - LTP: synchronous wrapper around broker.get_ltp().
-  - Order book: constructs OrderBook from bid/ask depths returned by broker.get_quote().
-  - Option chain: converts exchange string to enum and delegates to broker.get_option_chain().
+- **Order execution capabilities**
+  - Automatic quantity calculation with lot size constraints
+  - Support for various order types (MARKET, LIMIT, SL, SLM)
+  - Product type resolution (INTRADAY, DELIVERY, etc.)
+  - Comprehensive order metadata preservation
+  - Automatic order cancellation on timeout
 
-- Streaming
-  - stream_full: yields FullPacket dicts converted to dictionaries for compatibility.
-  - stream_depth_20: yields MarketDepth objects for 20-level depth.
-  - stream_poll: REST fallback polling for MCX OPTFUT where WebSocket may be limited.
+- **Lot size integration**
+  - Automatic detection of commodity underlyings (GOLD, SILVER, CRUDEOIL, etc.)
+  - Proper exchange routing based on underlying type
+  - Lot size-based quantity rounding and validation
+  - Option-specific lot size handling
 
-- Shutdown
-  - close_sync: closes the underlying DhanBroker and disconnects its WebSocket.
+- **Error handling and resilience**
+  - DhanError exception mapping
+  - Graceful fallback for missing filled quantities
+  - Comprehensive logging for debugging
+  - Timeout handling with automatic cancellation
 
 ```mermaid
 classDiagram
-class MarketDataPort {
+class IBroker {
++execute_order(signal, portfolio, symbol) Position
++cancel_order(order_id) bool
++get_positions() list[Position]
+}
+class DhanBrokerAdapter {
+-_config : Configuration
+-_broker : DhanBroker
+-_broker_lock : Lock
+-_order_poll_interval : float
+-_order_poll_timeout : float
++_execute_order(signal, portfolio, symbol) Position
++_cancel_order(order_id) bool
++_get_positions() list[Position]
++_get_lot_size(symbol, exchange) int
++_resolve_quantity(signal, portfolio) int
+}
+IBroker <|.. DhanBrokerAdapter
+```
+
+**Diagram sources**
+- [ports.py:87-418](file://brokers/broker/ports.py#L87-L418)
+- [dhan_broker_adapter.py:77-500](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py#L77-L500)
+
+**Section sources**
+- [dhan_broker_adapter.py:77-500](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py#L77-L500)
+
+### McxBrokerAdapter
+**New Implementation** - HTTP-based adapter for Multi-Commodity Exchange futures trading.
+
+Provides comprehensive futures trading capabilities with secure API integration.
+
+- **HTTP API Integration**
+  - HMAC signature-based authentication
+  - Configurable base URLs and API keys
+  - Retry logic with exponential backoff
+  - Structured error handling and response validation
+
+- **Order Management**
+  - Complete order lifecycle (create, cancel, status)
+  - Signature verification for request integrity
+  - Terminal state monitoring with polling
+  - Position materialization from fill responses
+
+- **Security Features**
+  - HMAC SHA256 signature generation
+  - Configurable API credentials
+  - Request/response logging with sensitive data masking
+  - Production safety with explicit enable flags
+
+```mermaid
+classDiagram
+class IBroker {
++execute_order(signal, portfolio, symbol) Position
++cancel_order(order_id) bool
+}
+class McxBrokerAdapter {
+-_base_url : str
+-_live_enabled : bool
+-_pending_orders : dict
++_execute_order(signal, portfolio, symbol) Position
++_cancel_order(order_id) bool
++_build_order_payload(signal, symbol) dict
++_post_create_order(payload) Response
++_await_terminal(order_id) tuple
+}
+IBroker <|.. McxBrokerAdapter
+```
+
+**Diagram sources**
+- [ports.py:87-418](file://brokers/broker/ports.py#L87-L418)
+- [mcx_broker.py:54-218](file://backend/app/infrastructure/adapters/broker/mcx_broker.py#L54-L218)
+
+**Section sources**
+- [mcx_broker.py:54-218](file://backend/app/infrastructure/adapters/broker/mcx_broker.py#L54-L218)
+
+### Enhanced DhanMarketDataAdapter
+**Updated Implementation** - Improved market data adapter with lot size retrieval.
+
+Extends the original DhanMarketDataAdapter with comprehensive lot size integration and enhanced functionality.
+
+- **Lot Size Retrieval**
+  - New `get_lot_size()` method for symbol lot size lookup
+  - Integration with DhanBroker's instrument resolution
+  - Default fallback to 1 for unknown symbols
+  - Comprehensive error handling and logging
+
+- **Enhanced Symbol Resolution**
+  - Improved exchange detection for commodity derivatives
+  - Better option symbol identification (CALL/PUT, CE/PE)
+  - Automatic exchange routing based on underlying type
+  - Support for API prefixing in symbol resolution
+
+- **Performance Optimizations**
+  - Enhanced option chain caching with TTL controls
+  - Serializable option chain fetches for thread safety
+  - Improved initialization synchronization
+  - Memory-efficient cache management
+
+```mermaid
+classDiagram
+class IMarketData {
 +ensure_initialized_sync(timeout)
 +close_sync()
 +scan_candidates(limit)
 +fetch_history(symbol, interval, limit)
 +fetch_order_book(symbol)
 +get_ltp(symbol)
++get_lot_size(symbol) int
 +stream_full(symbols)
 +stream_depth_20(symbols)
 +get_option_chain(underlying, exchange, expiry_index)
@@ -184,32 +312,24 @@ class DhanMarketDataAdapter {
 -_broker
 -_init_lock : Lock
 -_initialized : bool
-+ensure_initialized_sync(timeout)
-+get_broker()
-+get_option_chain(underlying, exchange, expiry_index)
-+scan_candidates(limit)
-+fetch_history(symbol, interval, limit)
-+fetch_order_book(symbol)
-+get_ltp(symbol)
-+stream_full(symbols)
-+stream_poll(symbols, poll_interval)
-+stream_depth_20(symbols)
-+close_sync()
++_get_lot_size(symbol) int
++_ensure_initialized()
++_get_broker()
 }
-MarketDataPort <|.. DhanMarketDataAdapter
+IMarketData <|.. DhanMarketDataAdapter
 ```
 
 **Diagram sources**
-- [market_data.py:19-112](file://backend/app/domain/ports/market_data.py#L19-L112)
-- [dhan_adapter.py:66-457](file://backend/app/infrastructure/adapters/dhan_adapter.py#L66-L457)
+- [ports.py:44-81](file://brokers/broker/ports.py#L44-L81)
+- [dhan_adapter.py:67-507](file://backend/app/infrastructure/adapters/dhan_adapter.py#L67-L507)
 
 **Section sources**
-- [dhan_adapter.py:66-457](file://backend/app/infrastructure/adapters/dhan_adapter.py#L66-L457)
+- [dhan_adapter.py:67-507](file://backend/app/infrastructure/adapters/dhan_adapter.py#L67-L507)
 
 ### PaperBrokerAdapter
-Implements BrokerPort for realistic simulated trading with a comprehensive cost model.
+Implements IBroker for realistic simulated trading with comprehensive cost modeling.
 
-- Cost computation
+- **Cost computation**
   - Slippage: directional slippage on notional
   - STT: applicable on sell side for options
   - Exchange fee: applied on both sides
@@ -217,16 +337,16 @@ Implements BrokerPort for realistic simulated trading with a comprehensive cost 
   - GST: on brokerage only
   - SEBI: turnover charge on both sides
 
-- Execution behavior
+- **Execution behavior**
   - Opens positions with optional scale-in support
   - Applies cost model on entry and exit
   - Returns None if order rejected (not implemented in adapter)
 
 ```mermaid
 classDiagram
-class BrokerPort {
-+execute_order(signal, portfolio, symbol)
-+cancel_order(order_id)
+class IBroker {
++execute_order(signal, portfolio, symbol) Position
++cancel_order(order_id) bool
 }
 class PaperBrokerAdapter {
 -_slippage_bps : float
@@ -236,33 +356,34 @@ class PaperBrokerAdapter {
 -_gst_pct : float
 -_sebi_pct : float
 -_cost_model_enabled : bool
-+execute_order(signal, portfolio, symbol)
-+cancel_order(order_id)
-+compute_exit_costs(entry_price, exit_price, size)
++_execute_order(signal, portfolio, symbol) Position
++_cancel_order(order_id) bool
++_compute_exit_costs(entry_price, exit_price, size) TradeCosts
 }
-BrokerPort <|.. PaperBrokerAdapter
+IBroker <|.. PaperBrokerAdapter
 ```
 
 **Diagram sources**
-- [broker.py:11-27](file://backend/app/domain/ports/broker.py#L11-L27)
-- [paper_broker.py:118-199](file://backend/app/infrastructure/adapters/paper_broker.py#L118-L199)
+- [ports.py:87-418](file://brokers/broker/ports.py#L87-L418)
+- [paper_broker.py:39-130](file://backend/app/infrastructure/adapters/paper_broker.py#L39-L130)
 
 **Section sources**
-- [paper_broker.py:1-199](file://backend/app/infrastructure/adapters/paper_broker.py#L1-L199)
+- [paper_broker.py:39-130](file://backend/app/infrastructure/adapters/paper_broker.py#L39-L130)
 
 ### Adapter Contracts and Interfaces
-- MarketDataPort defines the contract for market data providers, including lifecycle hooks, historical queries, order book retrieval, LTP, streaming endpoints, and optional option chain support.
-- BrokerPort defines the contract for order execution, including order placement and cancellation.
+- **IMarketData**: Defines contract for market data providers including lifecycle hooks, historical queries, order book retrieval, LTP, lot size retrieval, streaming endpoints, and option chain support.
+- **IBroker**: Defines contract for order execution with order placement, cancellation, position management, and portfolio queries.
+- **IReactiveBroker**: Provides reactive programming interfaces with Observable streams for market data and order updates.
 
-These contracts enable swapping implementations (Dhan vs Paper) without changing the rest of the system.
+These contracts enable seamless swapping between implementations (Dhan, Paper, MCX) without changing the rest of the system.
 
 **Section sources**
-- [market_data.py:1-112](file://backend/app/domain/ports/market_data.py#L1-L112)
-- [broker.py:1-27](file://backend/app/domain/ports/broker.py#L1-L27)
+- [ports.py:87-418](file://brokers/broker/ports.py#L87-L418)
+- [ports.py:420-620](file://brokers/broker/ports.py#L420-L620)
 
 ### Brokers Library Integration
-- BrokerGateway provides a unified API over Dhan and Paper brokers, with circuit breaker protection and convenience methods for quotes, historical data, streaming, and option chains.
-- ReactiveBroker wraps any IBrokerPort with RxPY Observables, enabling functional reactive programming patterns and operators.
+- **BrokerGateway**: Provides unified API over Dhan and Paper brokers with circuit breaker protection and convenience methods for quotes, historical data, streaming, and option chains.
+- **ReactiveBroker**: Wraps any IBrokerPort with RxPY Observables enabling functional reactive programming patterns and operators.
 
 ```mermaid
 sequenceDiagram
@@ -281,37 +402,54 @@ RB-->>Client : Observable[Tick]
 ```
 
 **Diagram sources**
-- [gateway.py:389-394](file://brokers/gateway.py#L389-L394)
-- [reactive.py:219-251](file://brokers/reactive.py#L219-L251)
-- [broker.py:652-662](file://brokers/broker/dhan/application/broker.py#L652-L662)
+- [gateway.py:390-395](file://brokers/gateway.py#L390-L395)
+- [reactive.py:248-251](file://brokers/reactive.py#L248-L251)
+- [broker.py:674-684](file://brokers/broker/dhan/application/broker.py#L674-L684)
 
 **Section sources**
-- [gateway.py:154-423](file://brokers/gateway.py#L154-L423)
+- [gateway.py:155-424](file://brokers/gateway.py#L155-L424)
 - [reactive.py:61-800](file://brokers/reactive.py#L61-L800)
 - [broker.py:1-823](file://brokers/broker/dhan/application/broker.py#L1-L823)
 
 ## Dependency Analysis
-- DhanMarketDataAdapter depends on:
+- **DhanBrokerAdapter** depends on:
+  - brokers.broker.dhan.application.DhanBroker for order execution and position management
+  - brokers.broker.entities for Instrument, Order, Position, etc.
+  - brokers.broker.types for Exchange and OrderType
+  - app.config.Configuration for credential management
+
+- **McxBrokerAdapter** depends on:
+  - httpx for HTTP communication
+  - tenacity for retry logic
+  - app.config.settings for API configuration
+  - brokers.broker.types for Exchange enumeration
+
+- **Enhanced DhanMarketDataAdapter** depends on:
   - brokers.broker.dhan.application.DhanBroker for market data, historical, streaming, and options
   - brokers.broker.entities for Instrument, OptionType, OrderBook, etc.
   - brokers.broker.types for Exchange and OptionType
   - shared.timezones for IST conversions
 
-- PaperBrokerAdapter depends on:
-  - app.domain.ports.broker.BrokerPort
+- **PaperBrokerAdapter** depends on:
+  - app.domain.ports.broker.IBroker
   - app.domain.trading.models for Position, Signal, Portfolio
-  - TradeCosts computation for realistic cost modeling
+  - app.domain.services.trade_costs for realistic cost modeling
 
-- Brokers library provides:
+- **Brokers library** provides:
   - BrokerGateway and ReactiveBroker abstractions
   - DhanBroker and PaperBroker implementations
   - Entities and types re-exported from shared layers
 
 ```mermaid
 graph LR
-DM["DhanMarketDataAdapter"] --> DB["DhanBroker"]
-DM --> ENT["brokers.broker.entities"]
-DM --> TYP["brokers.broker.types"]
+DBA["DhanBrokerAdapter"] --> DB["DhanBroker"]
+DBA --> ENT["brokers.broker.entities"]
+DBA --> TYP["brokers.broker.types"]
+MCXA["McxBrokerAdapter"] --> HTTPX["httpx"]
+MCXA --> TEN["tenacity"]
+DMA["DhanMarketDataAdapter"] --> DB
+DMA --> ENT
+DMA --> TYP
 PB["PaperBrokerAdapter"] --> BRP["PaperBroker"]
 GW["BrokerGateway"] --> DB
 GW --> BRP
@@ -320,100 +458,117 @@ RB --> BRP
 ```
 
 **Diagram sources**
-- [dhan_adapter.py:29-34](file://backend/app/infrastructure/adapters/dhan_adapter.py#L29-L34)
-- [entities.py:8-25](file://brokers/broker/entities.py#L8-L25)
-- [types.py:5-11](file://brokers/broker/types.py#L5-L11)
+- [dhan_broker_adapter.py:24-37](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py#L24-L37)
+- [mcx_broker.py:21-28](file://backend/app/infrastructure/adapters/broker/mcx_broker.py#L21-L28)
+- [dhan_adapter.py:31-37](file://backend/app/infrastructure/adapters/dhan_adapter.py#L31-L37)
 - [gateway.py:111-133](file://brokers/gateway.py#L111-L133)
 - [reactive.py:115-133](file://brokers/reactive.py#L115-L133)
 - [broker.py:76-136](file://brokers/broker/dhan/application/broker.py#L76-L136)
 - [broker.py:51-74](file://brokers/broker/paper/broker.py#L51-L74)
 
 **Section sources**
-- [dhan_adapter.py:1-457](file://backend/app/infrastructure/adapters/dhan_adapter.py#L1-L457)
-- [paper_broker.py:1-199](file://backend/app/infrastructure/adapters/paper_broker.py#L1-L199)
-- [gateway.py:1-423](file://brokers/gateway.py#L1-L423)
+- [dhan_broker_adapter.py:1-500](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py#L1-L500)
+- [mcx_broker.py:1-218](file://backend/app/infrastructure/adapters/broker/mcx_broker.py#L1-L218)
+- [dhan_adapter.py:1-507](file://backend/app/infrastructure/adapters/dhan_adapter.py#L1-L507)
+- [paper_broker.py:1-130](file://backend/app/infrastructure/adapters/paper_broker.py#L1-L130)
+- [gateway.py:1-424](file://brokers/gateway.py#L1-L424)
 - [reactive.py:1-800](file://brokers/reactive.py#L1-L800)
-- [entities.py:1-47](file://brokers/broker/entities.py#L1-L47)
-- [types.py:1-20](file://brokers/broker/types.py#L1-L20)
-- [broker.py:1-823](file://brokers/broker/dhan/application/broker.py#L1-L823)
 - [broker.py:1-397](file://brokers/broker/paper/broker.py#L1-L397)
+- [broker.py:1-823](file://brokers/broker/dhan/application/broker.py#L1-L823)
 
 ## Performance Considerations
-- Threading-safe initialization
-  - Uses a lock to prevent redundant initialization and race conditions across sync and async callers.
-  - Synchronous path spins up a temporary event loop only when needed.
+- **Threading-safe initialization**
+  - DhanBrokerAdapter uses lock-based synchronization for broker creation
+  - Enhanced DhanMarketDataAdapter maintains thread-safe option chain caching
+  - McxBrokerAdapter implements production safety with explicit enable flags
 
-- Streaming efficiency
-  - stream_full yields FullPacket dicts to minimize conversion overhead.
-  - stream_depth_20 leverages dedicated depth feeds for up to 50 NSE instruments.
-  - stream_poll provides a lightweight fallback for MCX OPTFUT where WebSocket is constrained.
+- **Streaming efficiency**
+  - Enhanced DhanMarketDataAdapter includes lot size retrieval optimization
+  - Stream polling with configurable intervals for MCX OPTFUT fallback
+  - ReactiveBroker isolates async streams with proper cancellation handling
 
-- Data transformations
-  - Historical OHLC construction avoids unnecessary copies and uses efficient iteration.
-  - Delta approximation avoids dependency on unavailable taker_buy_volume for NSE.
+- **Lot size optimization**
+  - DhanBrokerAdapter automatically detects commodity underlyings for proper lot sizing
+  - Enhanced symbol resolution reduces API calls through intelligent caching
+  - Automatic quantity rounding to nearest lot multiple prevents order rejections
 
-- Circuit breaking and resilience
-  - BrokerGateway integrates a circuit breaker to protect upstream services.
-  - ReactiveBroker isolates async streams and manages subscriptions with proper cancellation.
-
-[No sources needed since this section provides general guidance]
+- **Circuit breaking and resilience**
+  - BrokerGateway integrates circuit breaker protection for all operations
+  - McxBrokerAdapter implements retry logic with exponential backoff
+  - DhanBrokerAdapter provides timeout handling with automatic order cancellation
 
 ## Troubleshooting Guide
 Common issues and remedies:
-- Initialization failures
-  - Symptom: DhanBroker initialization fails in ensure_initialized_sync.
-  - Action: Verify credentials and network connectivity; check logs for detailed exceptions.
+- **DhanBrokerAdapter initialization failures**
+  - Symptom: DhanBroker creation fails with missing credentials
+  - Action: Verify DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN environment variables; check configuration precedence
 
-- No data returned
-  - Symptom: fetch_history returns empty list; fetch_order_book returns None; get_ltp returns 0.0.
-  - Action: Confirm symbol resolution and exchange mapping; ensure broker is initialized; validate instrument cache.
+- **Order execution timeouts**
+  - Symptom: Orders don't reach terminal state within timeout period
+  - Action: Adjust DHAN_ORDER_POLL_TIMEOUT_SEC environment variable; verify order status manually
 
-- WebSocket limitations for MCX OPTFUT
-  - Symptom: stream_full yields no data for certain MCX options.
-  - Action: Use stream_poll fallback to REST LTP polling.
+- **Lot size calculation errors**
+  - Symptom: Quantity not aligned to lot multiples causing order rejection
+  - Action: Ensure option_lot_size metadata is provided for options; verify commodity underlyings
 
-- Option chain unavailable
-  - Symptom: get_option_chain returns None.
-  - Action: Verify exchange mapping and underlying type; confirm the instrument supports options.
+- **MCXBrokerAdapter disabled for production**
+  - Symptom: NotImplementedError when attempting live execution
+  - Action: Set MCX_LIVE_ENABLED or settings.mcx.enabled to True; verify API credentials
 
-- Cost model discrepancies in paper trading
-  - Symptom: unexpected entry/exit costs.
-  - Action: Review cost parameters and slippage basis points; ensure cost_model_enabled is set appropriately.
+- **HTTP API authentication failures**
+  - Symptom: 401 Unauthorized responses from MCX API
+  - Action: Verify HMAC signature generation; check API key and secret configuration
+
+- **Option chain unavailable**
+  - Symptom: get_option_chain returns None for MCX commodities
+  - Action: Verify commodity options support; check exchange mapping and underlying type
+
+- **Cost model discrepancies in paper trading**
+  - Symptom: Unexpected entry/exit costs in simulated environment
+  - Action: Review cost parameters and slippage basis points; ensure cost_model_enabled is set appropriately
 
 **Section sources**
-- [dhan_adapter.py:102-147](file://backend/app/infrastructure/adapters/dhan_adapter.py#L102-L147)
-- [dhan_adapter.py:214-318](file://backend/app/infrastructure/adapters/dhan_adapter.py#L214-L318)
-- [dhan_adapter.py:364-434](file://backend/app/infrastructure/adapters/dhan_adapter.py#L364-L434)
-- [paper_broker.py:139-199](file://backend/app/infrastructure/adapters/paper_broker.py#L139-L199)
+- [dhan_broker_adapter.py:121-133](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py#L121-L133)
+- [dhan_broker_adapter.py:436-463](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py#L436-L463)
+- [mcx_broker.py:80-83](file://backend/app/infrastructure/adapters/broker/mcx_broker.py#L80-L83)
+- [dhan_adapter.py:201-248](file://backend/app/infrastructure/adapters/dhan_adapter.py#L201-L248)
+- [paper_broker.py:70-76](file://backend/app/infrastructure/adapters/paper_broker.py#L70-L76)
 
 ## Conclusion
-The GlassyTrade broker adapters subsystem cleanly separates concerns through domain contracts and leverages the brokers library for robust, reactive, and resilient market data and order execution. DhanMarketDataAdapter provides comprehensive coverage for NSE/NFO/MCX with thread-safe initialization, streaming, and fallbacks. PaperBrokerAdapter enables realistic simulation with a detailed cost model. Together, they integrate seamlessly with the broader trading pipeline and support scalable, maintainable trading systems.
-
-[No sources needed since this section summarizes without analyzing specific files]
+The GlassyTrade broker adapters subsystem has been comprehensively enhanced with new brokerage capabilities. The DhanBrokerAdapter provides robust live order execution with lot size awareness and API prefixing support. The McxBrokerAdapter enables Multi-Commodity Exchange futures trading through secure HTTP integration. Enhanced DhanMarketDataAdapter now includes lot size retrieval functionality for improved trading accuracy. Together with the existing PaperBrokerAdapter and expanded domain contracts, the system provides a complete brokerage solution supporting multiple markets, exchanges, and trading styles while maintaining scalability and maintainability.
 
 ## Appendices
 
 ### Practical Examples
 
-- Broker configuration
-  - DhanMarketDataAdapter: Provide client_id and access_token during instantiation; initialization is lazy and guarded.
-  - PaperBrokerAdapter: Configure cost parameters and enable/disable cost model as needed.
+- **Broker configuration**
+  - DhanBrokerAdapter: Configure DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN environment variables; adjust poll intervals via DHAN_ORDER_POLL_INTERVAL_SEC and DHAN_ORDER_POLL_TIMEOUT_SEC
+  - McxBrokerAdapter: Set MCX_LIVE_ENABLED to True for production use; configure API credentials in settings.mcx
+  - Enhanced DhanMarketDataAdapter: Provide client_id and access_token during instantiation; lot size retrieval is automatic
 
-- Symbol resolution and exchange mapping
-  - DhanMarketDataAdapter auto-detects options and routes to NFO or MCX based on underlying; fallback to NSE for unknown exchanges.
-  - MarketInfo utilities provide lot sizes, step sizes, and expiry information for downstream logic.
+- **Symbol resolution and exchange mapping**
+  - DhanBrokerAdapter: Automatic detection of commodity underlyings (GOLD, SILVER, CRUDEOIL, etc.) for proper exchange routing
+  - Enhanced DhanMarketDataAdapter: Auto-detection of options and routing to NFO or MCX based on underlying; fallback to NSE for unknown exchanges
+  - MarketInfo utilities provide lot sizes, step sizes, and expiry information for downstream logic
 
-- Fallback mechanisms
-  - stream_poll REST polling for MCX OPTFUT when WebSocket is limited.
-  - Option chain retrieval falls back to None if unavailable.
+- **Lot size integration**
+  - DhanBrokerAdapter: Automatic lot size detection for commodity derivatives; proper quantity rounding to lot multiples
+  - Enhanced DhanMarketDataAdapter: New get_lot_size() method for symbol lot size lookup; integration with DhanBroker's instrument resolution
+  - Manual override available through option_lot_size metadata parameter
 
-- Integration with trading pipeline
-  - MarketDataPort implementations plug into the trading engine for historical and streaming data.
-  - BrokerPort implementations integrate with order lifecycle services.
+- **Fallback mechanisms**
+  - Enhanced DhanMarketDataAdapter: stream_poll REST polling for MCX OPTFUT when WebSocket is limited
+  - Option chain retrieval falls back to None if unavailable; enhanced caching reduces API load
+  - McxBrokerAdapter: Production safety with explicit enable flags prevents accidental live trading
+
+- **Integration with trading pipeline**
+  - IMarketData implementations plug into the trading engine for historical and streaming data with lot size support
+  - IBroker implementations integrate with order lifecycle services including comprehensive error handling
+  - ReactiveBroker provides functional reactive programming patterns for complex trading strategies
 
 **Section sources**
-- [dhan_adapter.py:49-63](file://backend/app/infrastructure/adapters/dhan_adapter.py#L49-L63)
-- [dhan_adapter.py:167-189](file://backend/app/infrastructure/adapters/dhan_adapter.py#L167-L189)
-- [dhan_adapter.py:383-434](file://backend/app/infrastructure/adapters/dhan_adapter.py#L383-L434)
-- [market_info.py:28-115](file://brokers/broker/market_info.py#L28-L115)
-- [gateway.py:230-247](file://brokers/gateway.py#L230-L247)
+- [dhan_broker_adapter.py:103-133](file://backend/app/infrastructure/adapters/dhan_broker_adapter.py#L103-L133)
+- [mcx_broker.py:65-71](file://backend/app/infrastructure/adapters/broker/mcx_broker.py#L65-L71)
+- [dhan_adapter.py:403-412](file://backend/app/infrastructure/adapters/dhan_adapter.py#L403-L412)
+- [dhan_adapter.py:177-200](file://backend/app/infrastructure/adapters/dhan_adapter.py#L177-L200)
+- [gateway.py:232-242](file://brokers/gateway.py#L232-L242)

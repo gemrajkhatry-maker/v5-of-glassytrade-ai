@@ -81,6 +81,10 @@ class Instrument:
     def is_option(self) -> bool:
         return self.option_type is not None
 
+    def is_index(self) -> bool:
+        from brokers.broker.types import Exchange
+        return self.exchange == Exchange.INDEX
+
 # =============================================================================
 # Market Data
 # =============================================================================

@@ -14,6 +14,7 @@ def _run_scanner_snapshot(runtime_path: Path):
     script = """
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
+import json
 
 from app.domain.fabio_ai.services.option_scanner import OptionScannerService
 
@@ -82,6 +83,7 @@ print(
 def _run_guard_snapshot(runtime_path: Path):
     script = """
 from app.domain.fabio_ai.services.option_scanner import ContractSwitchGuard
+import json
 
 guard = ContractSwitchGuard()
 events = []
@@ -92,7 +94,8 @@ guard.set_open_trade(True)
 events.append(guard.should_switch("FINNIFTY 20 MAR 23000 CE", 140.0, 500.0))
 guard.set_open_trade(False)
 events.append(guard.should_switch("FINNIFTY 20 MAR 23000 CE", 200.0, 900.0))
-print(json.dumps(events + [guard.current_contract]))
+current_contract = getattr(guard, "current_contract", getattr(guard, "_current_contract", None))
+print(json.dumps(events + [current_contract]))
 """
     env = os.environ.copy()
     env["PYTHONPATH"] = str(runtime_path)

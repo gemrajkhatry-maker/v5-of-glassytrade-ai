@@ -65,9 +65,9 @@ class AuditStateVerifier:
     def verify_to(self, timestamp: str | None = None, ...) -> dict[str, Any]:
 ```
 
-**Issue:** The previous naming suggested backtest behavior. This is actually an audit trail verifier for deterministic state reconstruction, NOT backtest execution.
+**Issue:** The previous naming suggested historical reconstruction-style behavior. This is actually an audit trail verifier for deterministic state reconstruction, NOT simulation execution.
 
-**Fix:** ✅ **COMPLETED** - Renamed to `AuditTrailVerifier` with updated docstrings: "For audit trail verification, NOT backtest execution."
+**Fix:** ✅ **COMPLETED** - Renamed to `AuditTrailVerifier` with updated docstrings: "For audit trail verification, not for simulation execution."
 
 ---
 

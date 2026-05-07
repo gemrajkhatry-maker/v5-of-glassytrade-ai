@@ -124,13 +124,16 @@ def extract_features(
     f["atr_20"] = atr_20
     f["atr_ratio"] = atr_5 / atr_20 if atr_20 > 0 else 1.0
 
-    bar_range = tick.high - tick.low
+    tick_high = _to_float(tick.high)
+    tick_low = _to_float(tick.low)
+    tick_open = _to_float(tick.open)
+    bar_range = tick_high - tick_low
     f["bar_range_pct"] = bar_range / close if close > 0 else 0.0
-    f["body_pct"] = abs(tick.close - tick.open) / close
+    f["body_pct"] = abs(close - tick_open) / close
     if bar_range > 0:
-        f["upper_wick_ratio"] = (tick.high - max(tick.open, tick.close)) / bar_range
-        f["lower_wick_ratio"] = (min(tick.open, tick.close) - tick.low) / bar_range
-        f["close_position_in_range"] = (tick.close - tick.low) / bar_range
+        f["upper_wick_ratio"] = (tick_high - max(tick_open, close)) / bar_range
+        f["lower_wick_ratio"] = (min(tick_open, close) - tick_low) / bar_range
+        f["close_position_in_range"] = (close - tick_low) / bar_range
     else:
         f["upper_wick_ratio"] = 0.0
         f["lower_wick_ratio"] = 0.0
@@ -138,8 +141,10 @@ def extract_features(
 
     # --- Group B: Order Flow ---
     _flow = data[-1] if align_volume_with_data and data else tick
+    _flow_vol = _to_float(_flow.volume)
+    _flow_delta = _to_float(_flow.delta)
     f["delta_normalized"] = (
-        _flow.delta / _flow.volume if _flow.volume > 0 else 0.0
+        _flow_delta / _flow_vol if _flow_vol > 0 else 0.0
     )
     f["cvd_slope"] = amt_result.cvd_slope
     div = amt_result.cvd_divergence
@@ -149,11 +154,11 @@ def extract_features(
     # Volume vs EMA(20)
     if len(data) >= 20:
         alpha = 2.0 / 21
-        ema = data[-20].volume
+        ema = _to_float(data[-20].volume)
         for d in data[-19:]:
-            ema = alpha * d.volume + (1 - alpha) * ema
-        _vol_ref = _to_float(_flow.volume) if align_volume_with_data else _to_float(tick.volume)
-    f["volume_vs_ema20"] = _to_float(_vol_ref) / ema if ema > 0 else 1.0
+            ema = alpha * _to_float(d.volume) + (1 - alpha) * ema
+        _vol_ref = _to_float(tick.volume)
+        f["volume_vs_ema20"] = _vol_ref / ema if ema > 0 else 1.0
     else:
         f["volume_vs_ema20"] = 1.0
 
@@ -237,7 +242,7 @@ def extract_features(
     
     # Calculate underlying_return_5bar from data array as a proxy
     if len(data) >= 5:
-        past_close = data[-5].close
+        past_close = _to_float(data[-5].close)
         ur_5 = (close - past_close) / past_close if past_close > 0 else 0.0
     else:
         ur_5 = 0.0

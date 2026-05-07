@@ -116,20 +116,6 @@ class TestValentiniScalperE2E:
             assert signal.confidence > 0
             assert signal.rr >= 1.5
             
-    def test_backtest_simulation(self):
-        """
-        Simulate a backtest scenario matching amt_docs expected metrics.
-        
-        Based on expected performance in amt_docs section 7.3:
-        - Win Rate: 55-60%
-        - Average R:R: 2.0-2.5
-        - Max Drawdown: <20%
-        """
-        # This would typically use historical data from Binance
-        # For unit testing, we simulate with known patterns
-        pass
-
-
 class TestExpectedFrontEndBehavior:
     """
     Tests validating frontend expectations from types.ts.

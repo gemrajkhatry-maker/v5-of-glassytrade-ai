@@ -47,8 +47,53 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
     overseerReason: '',
     stats: null,
     depth20Active: false,
+    stale: false,
+    runtimeSafety: {
+        brokerBound: false,
+        feedStale: false,
+        unsafeToTrade: true,
+    },
     lastUpdate: Date.now(),
 });
+
+const runtimeSafetyFromState = (
+    state: any,
+    existing?: InstrumentState['runtimeSafety'],
+): InstrumentState['runtimeSafety'] => {
+    const feed = state.feed !== undefined ? state.feed : existing?.feed;
+    const execution = state.execution !== undefined ? state.execution : existing?.execution;
+    const readiness = state.readiness !== undefined ? state.readiness : existing?.readiness;
+    if (readiness?.safe_to_trade !== undefined) {
+        const readyState = readiness?.safe_to_trade === true;
+        return {
+            brokerBound: Boolean((execution as any)?.broker_bound ?? existing?.brokerBound ?? false),
+            feedStale: !readyState,
+            unsafeToTrade: !readyState,
+            feed,
+            execution,
+            stateDigest: state.state_digest ?? existing?.stateDigest,
+            readiness,
+        };
+    }
+    const brokerBound = Boolean((execution as any)?.broker_bound ?? existing?.brokerBound ?? false);
+    const age = Number((feed as any)?.last_tick_age_sec ?? 0);
+    const ticksSeen = Number((feed as any)?.ticks_seen ?? 0);
+    const stateValue = String((feed as any)?.state ?? "").toLowerCase();
+    const producerError = Boolean((feed as any)?.producer_error);
+    const feedStale = producerError
+        || (Number.isFinite(age) && age > 30)
+        || ticksSeen <= 0
+        || stateValue === "drained"
+        || stateValue === "failed";
+    return {
+        brokerBound,
+        feedStale,
+        unsafeToTrade: !brokerBound || feedStale,
+        feed,
+        execution,
+        stateDigest: state.state_digest ?? existing?.stateDigest,
+    };
+};
 
 /**
  * Merge historical candles into existing candle data.
@@ -512,7 +557,10 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     state.depth20Active !== undefined ||
                     state.stats !== undefined ||
                     state.ltp !== undefined ||
-                    state.oi !== undefined;
+                    state.oi !== undefined ||
+                    state.feed !== undefined ||
+                    state.execution !== undefined ||
+                    state.state_digest !== undefined;
 
                 if (!hasAnalytics) {
                     return;
@@ -557,6 +605,10 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.ltp !== undefined) merged.ltp = state.ltp;
                     if (state.oi !== undefined) merged.oi = state.oi;
                     if (state.rangeBars !== undefined) merged.rangeBars = state.rangeBars;
+                    if (state.feed !== undefined || state.execution !== undefined || state.state_digest !== undefined) {
+                        merged.runtimeSafety = runtimeSafetyFromState(state, existing.runtimeSafety);
+                        merged.stale = merged.runtimeSafety.feedStale;
+                    }
 
                     // History tracking: Listen for both standard generative AI and the new reasoning worker
                     const newAi = state.genAIAnalysis;
@@ -629,6 +681,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 const newModelWeights = state.modelWeights ?? inst.modelWeights;
                 const newGeneration = state.generation ?? inst.generation;
                 const newRiskState = state.riskState ?? inst.riskState;
+                const newRuntimeSafety = runtimeSafetyFromState(state, inst.runtimeSafety);
                 const newAgentDecision = state.agentDecision ?? inst.agentDecision;
                 const newOverseerAction = state.overseerAction ?? inst.overseerAction;
                 const newOverseerReason = state.overseerReason ?? inst.overseerReason;
@@ -669,6 +722,8 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         depth20Active: state.depth20Active ?? inst.depth20Active,
                         stats: newStats,
                         rangeBars: state.rangeBars ?? inst.rangeBars,
+                        runtimeSafety: newRuntimeSafety,
+                        stale: newRuntimeSafety.feedStale,
                         lastUpdate: Date.now(),
                     },
                 };

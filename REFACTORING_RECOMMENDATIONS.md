@@ -97,18 +97,18 @@ cd frontend && npm run gen-types
 ## Priority 4: Rename StateVerifierEngine - ✅ COMPLETED
 
 ### Problem
-`StateVerifierEngine` suggested backtest usage, but it's for audit verification.
+`StateVerifierEngine` suggested historical reconstruction usage, but it's for audit verification.
 
 ### Solution
 ```python
 # Renamed in backend/app/domain/trading/event_store.py
 class AuditTrailVerifier:
-    """Verify deterministic state reconstruction from audit events — NOT backtesting."""
+    """Verify deterministic state reconstruction from audit events — NOT simulation."""
     def verify_determinism(self, events: list[DomainEvent]) -> bool:
         ...
 ```
 
-Update docstring: "For audit trail verification, NOT backtest execution."
+Update docstring: "For audit trail verification, NOT simulation execution."
 
 ---
 

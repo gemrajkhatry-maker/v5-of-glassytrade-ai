@@ -4,6 +4,7 @@ from app.runtime.feeds import LiveFeed
 from app.runtime.orchestrator.session import SessionRuntime
 from app.runtime.pipeline.events import Tick
 from app.runtime.pipeline.events import PositionEvent, Signal
+from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 
 
 def _make_data() -> list[dict]:
@@ -58,6 +59,7 @@ def test_session_executes_registered_strategy_signals():
         feed=LiveFeed(symbols=["BANKNIFTY"], tick_source=_to_ticks(_make_data()), strict_symbol_mode=True),
         symbols=["BANKNIFTY"],
     )
+    runtime.bind_broker(PaperBrokerAdapter())
     runtime.register_strategy(
         symbol="BANKNIFTY",
         strategy_id="test_strategy",

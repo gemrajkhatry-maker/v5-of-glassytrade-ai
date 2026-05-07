@@ -10,6 +10,8 @@ import logging
 from app.domain.shared.port.broker import IBroker
 from app.domain.trading.model.aggregates import Portfolio
 from app.domain.trading.model.entities import Position, Signal
+from app.runtime.contracts import OrderLifecycleStatus
+from app.runtime.pipeline.events import OrderRequest, OrderStatusEvent
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,34 @@ class PaperBrokerAdapter(IBroker):
         self._cost_model_enabled = cost_model_enabled
         self._open_orders: set[str] = set()
         self._positions: dict[str, Position] = {}
+
+    def submit_order(self, request: OrderRequest) -> OrderStatusEvent:
+        """Runtime execution-port implementation for deterministic paper fills."""
+        if request.quantity <= 0:
+            return OrderStatusEvent(
+                order_id=request.correlation_id or request.position_id,
+                symbol=request.symbol,
+                status=OrderLifecycleStatus.REJECTED.value,
+                reject_reason="Invalid paper order quantity",
+            )
+        if request.price <= 0:
+            return OrderStatusEvent(
+                order_id=request.correlation_id or request.position_id,
+                symbol=request.symbol,
+                status=OrderLifecycleStatus.REJECTED.value,
+                reject_reason="Invalid paper order price",
+            )
+        order_id = request.correlation_id or request.position_id or f"paper-{len(self._open_orders) + 1}"
+        self._open_orders.add(order_id)
+        self._open_orders.discard(order_id)
+        return OrderStatusEvent(
+            order_id=order_id,
+            symbol=request.symbol,
+            status=OrderLifecycleStatus.FILLED.value,
+            filled_quantity=float(request.quantity),
+            filled_price=float(request.price),
+            remaining_quantity=0.0,
+        )
 
     def execute_order(
         self, signal: Signal, portfolio: Portfolio, symbol: str

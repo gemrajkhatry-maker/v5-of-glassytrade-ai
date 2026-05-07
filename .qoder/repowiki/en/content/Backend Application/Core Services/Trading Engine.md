@@ -2,49 +2,26 @@
 
 <cite>
 **Referenced Files in This Document**
-- [trading_engine.py](file://appv2/backend/appv2/application/trading_engine.py)
-- [tick_throttle.py](file://appv2/backend/appv2/domain/services/tick_throttle.py)
-- [footprint_accumulator.py](file://appv2/backend/appv2/domain/services/footprint_accumulator.py)
-- [structural_stop_engine.py](file://appv2/backend/appv2/domain/services/structural_stop_engine.py)
-- [market_structure_classifier.py](file://appv2/backend/appv2/domain/services/market_structure_classifier.py)
-- [regime_detector.py](file://appv2/backend/appv2/domain/services/regime_detector.py)
-- [opening_classifier.py](file://appv2/backend/appv2/domain/services/opening_classifier.py)
-- [partition_exit_manager.py](file://appv2/backend/appv2/domain/services/partition_exit_manager.py)
-- [playbook_guard.py](file://appv2/backend/appv2/domain/services/playbook_guard.py)
-- [session_risk_tiers.py](file://appv2/backend/appv2/domain/services/session_risk_tiers.py)
-- [capital_ladder.py](file://appv2/backend/appv2/domain/services/capital_ladder.py)
-- [drive_decay.py](file://appv2/backend/appv2/domain/services/drive_decay.py)
-- [latency_tracker.py](file://appv2/backend/appv2/domain/services/latency_tracker.py)
-- [gate_rejection_tracker.py](file://appv2/backend/appv2/domain/services/gate_rejection_tracker.py)
-- [volatility_features.py](file://appv2/backend/appv2/domain/services/volatility_features.py)
-- [state_snapshot_builder.py](file://appv2/backend/appv2/domain/services/state_snapshot_builder.py)
-- [stream_manager.py](file://appv2/backend/appv2/infrastructure/stream_manager.py)
-- [tick_processor.py](file://appv2/backend/appv2/infrastructure/tick_processor.py)
-- [strategy_orchestrator.py](file://appv2/backend/appv2/application/strategy_orchestrator.py)
-- [trade_lifecycle.py](file://appv2/backend/appv2/application/trade_lifecycle.py)
-- [risk_orchestrator.py](file://appv2/backend/appv2/application/risk_orchestrator.py)
-- [session_state_manager.py](file://appv2/backend/appv2/application/session_state_manager.py)
-- [entry_coordinator.py](file://appv2/backend/appv2/application/entry_coordinator.py)
-- [exit_coordinator.py](file://appv2/backend/appv2/application/exit_coordinator.py)
-- [trade_journal.py](file://appv2/backend/appv2/domain/services/trade_journal.py)
-- [position_reconciliation.py](file://appv2/backend/appv2/domain/services/position_reconciliation.py)
-- [mobile_alerts.py](file://appv2/backend/appv2/domain/services/mobile_alerts.py)
-- [game_state_broadcaster.py](file://appv2/backend/appv2/api/state_broadcaster.py)
-- [settings.py](file://appv2/backend/appv2/config/settings.py)
+- [trading_session.py](file://backend/app/application/services/trading_session.py)
+- [service_graph.py](file://backend/app/application/service_graph.py)
+- [option_scanner.py](file://backend/app/domain/fabio_ai/services/option_scanner.py)
+- [health.py](file://backend/app/api/routers/health.py)
+- [main.py](file://backend/app/main.py)
+- [test_trading_session_unit.py](file://backend/tests/unit/application/test_trading_session_unit.py)
+- [test_trading_session_unit.md](file://backend/tests/unit/application/test_trading_session_unit.md)
+- [useServerTradingSystem.ts](file://frontend/hooks/useServerTradingSystem.ts)
+- [useServerTradingSystem.test.tsx](file://frontend/tests/hooks/useServerTradingSystem.test.tsx)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Complete rewrite of TradingEngine to v2 with 575 lines of new functionality
-- Added comprehensive throttle mechanisms (500ms per symbol)
-- Implemented footprint accumulation with delta-colored profiles
-- Integrated structural stop engines with order flow-based SL placement
-- Added market structure classification (5-state model)
-- Introduced regime detection for volatility and trend analysis
-- Enhanced exit management with partition exit strategies
-- Added session risk management and capital ladder systems
-- Implemented comprehensive observability with latency tracking and gate rejection analysis
-- Integrated advanced AMT classification and playbook guards
+- Complete architectural shift from TradingEngine v2 to TradingSessionService as the core trading coordinator
+- Removed documentation for scanner service, trade manager, and pipeline processors as they're now consolidated
+- Updated architecture to reflect unified event-driven processing through TradingSessionService
+- Added new dual-feed mechanism for underlying futures processing
+- Enhanced mid-trade recovery functionality for position restoration
+- Integrated comprehensive observability with latency tracking and gate rejection analysis
+- Added circuit breaker pattern implementation and resilience strategies
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -62,428 +39,306 @@
 13. [Appendices](#appendices)
 
 ## Introduction
-TradingEngine v2 is a comprehensive trading system that represents a major evolution from the original backend implementation. This standalone trading loop operates independently of frontend WebSocket connections and incorporates advanced features for sophisticated market analysis and execution. The engine delegates to specialized modules while implementing a rich ecosystem of trading services including throttle mechanisms, footprint accumulation, structural stop engines, and comprehensive risk management systems.
+TradingSessionService represents a fundamental evolution from the original TradingEngine v2, consolidating previously separate components into a unified, event-driven trading coordinator. This standalone trading loop operates independently of frontend WebSocket connections while providing comprehensive trading automation capabilities through a streamlined architecture.
 
 Key enhancements include:
-- **Throttle Mechanisms**: 500ms processing throttle per symbol to optimize performance
-- **Footprint Accumulation**: Delta-colored volume profiles for order flow analysis
-- **Structural Stop Engines**: Order flow-based stop-loss placement beyond aggressive prints
-- **Market Structure Classification**: 5-state model with hysteresis for trend analysis
-- **Regime Detection**: Volatility and trend regime classification
-- **Partition Exit Management**: Staged exit strategies with scale-out targets
-- **Session Risk Management**: Dynamic risk tiers and capital ladder systems
-- **Comprehensive Observability**: Latency tracking and gate rejection analysis
+- **Unified Event-Driven Processing**: Single coordinator managing all trading activities
+- **Dual-Feed Architecture**: Underlying futures and options data processing
+- **Enhanced Mid-Trade Recovery**: Comprehensive position restoration and management
+- **Integrated Observability**: Built-in latency tracking and performance monitoring
+- **Circuit Breaker Resilience**: Comprehensive safety mechanisms and error handling
+- **Modular Handler System**: Focused components for AMT analysis, trade lifecycle, and risk management
 
 ## Project Structure
-TradingEngine v2 is organized into distinct layers with clear separation of concerns:
+TradingSessionService architecture emphasizes modularity and separation of concerns:
 
 ```mermaid
 graph TB
-subgraph "Application Layer"
-TE["TradingEngine v2<br/>trading_engine.py"]
-SO["StrategyOrchestrator<br/>strategy_orchestrator.py"]
-TLH["TradeLifecycleHandler<br/>trade_lifecycle.py"]
-RO["RiskOrchestrator<br/>risk_orchestrator.py"]
-SSM["SessionStateManager<br/>session_state_manager.py"]
-EC["EntryCoordinator<br/>entry_coordinator.py"]
-XC["ExitCoordinator<br/>exit_coordinator.py"]
+subgraph "Core Trading Service"
+TS["TradingSessionService<br/>trading_session.py"]
+SM["SessionStateManager<br/>session_state_manager.py"]
+SRC["SessionRiskCoordinator<br/>session_risk_coordinator.py"]
+SEL["SessionEventLogger<br/>session_event_logger.py"]
 end
-subgraph "Infrastructure Layer"
-SM["StreamManager<br/>stream_manager.py"]
-TP["TickProcessor<br/>tick_processor.py"]
+subgraph "Focused Handlers"
+AMTH["AMTHandler<br/>amt_handler.py"]
+LLMH["LLMEntryHandler<br/>llm_entry_handler.py"]
+RLH["RLHandler<br/>rl_handler.py"]
+OVER["LLMOverseerHandler<br/>llm_overseer_handler.py"]
 end
-subgraph "Domain Services"
-TT["TickThrottle<br/>tick_throttle.py"]
-FA["FootprintAccumulator<br/>footprint_accumulator.py"]
-SSE["StructuralStopEngine<br/>structural_stop_engine.py"]
-MSC["MarketStructureClassifier<br/>market_structure_classifier.py"]
-RD["RegimeDetector<br/>regime_detector.py"]
-OC["OpeningClassifier<br/>opening_classifier.py"]
-PEM["PartitionExitManager<br/>partition_exit_manager.py"]
-PG["PlaybookGuard<br/>playbook_guard.py"]
-SRT["SessionRiskTiers<br/>session_risk_tiers.py"]
-CL["CapitalLadder<br/>capital_ladder.py"]
-DD["DriveDecayTracker<br/>drive_decay.py"]
-LT["LatencyTracker<br/>latency_tracker.py"]
-GRT["GateRejectionTracker<br/>gate_rejection_tracker.py"]
-VF["VolatilityFeatures<br/>volatility_features.py"]
+subgraph "Execution Coordinators"
+ENTRY["EntryCoordinator<br/>entry_coordinator.py"]
+EXIT["ExitCoordinator<br/>exit_coordinator.py"]
+end
+subgraph "Support Services"
 SSB["StateSnapshotBuilder<br/>state_snapshot_builder.py"]
+SCR["SessionCache<br/>session_cache.py"]
+ER["SessionEventRouter<br/>session_event_router.py"]
 end
-subgraph "External"
-Broker["Broker Interface"]
-Storage["Storage Interface"]
-Telegram["Mobile Alerts"]
+subgraph "External Integration"
+SG["ServiceGraph<br/>service_graph.py"]
+OS["OptionScannerService<br/>option_scanner.py"]
 end
-TE --> SO
-TE --> TLH
-TE --> RO
-TE --> SSM
-TE --> EC
-TE --> XC
-TE --> SM
-TE --> TP
-TE --> TT
-TE --> FA
-TE --> SSE
-TE --> MSC
-TE --> RD
-TE --> OC
-TE --> PEM
-TE --> PG
-TE --> SRT
-TE --> CL
-TE --> DD
-TE --> LT
-TE --> GRT
-TE --> VF
-TE --> SSB
-SM --> Broker
-TE --> Storage
-TE --> Telegram
+TS --> SM
+TS --> SRC
+TS --> SEL
+TS --> AMTH
+TS --> LLMH
+TS --> RLH
+TS --> OVER
+TS --> ENTRY
+TS --> EXIT
+TS --> SSB
+TS --> SCR
+TS --> ER
+SG --> OS
 ```
 
 **Diagram sources**
-- [trading_engine.py:77-180](file://appv2/backend/appv2/application/trading_engine.py#L77-L180)
-- [strategy_orchestrator.py](file://appv2/backend/appv2/application/strategy_orchestrator.py)
-- [trade_lifecycle.py](file://appv2/backend/appv2/application/trade_lifecycle.py)
-- [risk_orchestrator.py](file://appv2/backend/appv2/application/risk_orchestrator.py)
-- [session_state_manager.py](file://appv2/backend/appv2/application/session_state_manager.py)
-- [entry_coordinator.py](file://appv2/backend/appv2/application/entry_coordinator.py)
-- [exit_coordinator.py](file://appv2/backend/appv2/application/exit_coordinator.py)
-- [stream_manager.py](file://appv2/backend/appv2/infrastructure/stream_manager.py)
-- [tick_processor.py](file://appv2/backend/appv2/infrastructure/tick_processor.py)
-- [tick_throttle.py](file://appv2/backend/appv2/domain/services/tick_throttle.py)
-- [footprint_accumulator.py](file://appv2/backend/appv2/domain/services/footprint_accumulator.py)
-- [structural_stop_engine.py](file://appv2/backend/appv2/domain/services/structural_stop_engine.py)
-- [market_structure_classifier.py](file://appv2/backend/appv2/domain/services/market_structure_classifier.py)
-- [regime_detector.py](file://appv2/backend/appv2/domain/services/regime_detector.py)
-- [opening_classifier.py](file://appv2/backend/appv2/domain/services/opening_classifier.py)
-- [partition_exit_manager.py](file://appv2/backend/appv2/domain/services/partition_exit_manager.py)
-- [playbook_guard.py](file://appv2/backend/appv2/domain/services/playbook_guard.py)
-- [session_risk_tiers.py](file://appv2/backend/appv2/domain/services/session_risk_tiers.py)
-- [capital_ladder.py](file://appv2/backend/appv2/domain/services/capital_ladder.py)
-- [drive_decay.py](file://appv2/backend/appv2/domain/services/drive_decay.py)
-- [latency_tracker.py](file://appv2/backend/appv2/domain/services/latency_tracker.py)
-- [gate_rejection_tracker.py](file://appv2/backend/appv2/domain/services/gate_rejection_tracker.py)
-- [volatility_features.py](file://appv2/backend/appv2/domain/services/volatility_features.py)
-- [state_snapshot_builder.py](file://appv2/backend/appv2/domain/services/state_snapshot_builder.py)
+- [trading_session.py:107-273](file://backend/app/application/services/trading_session.py#L107-L273)
+- [service_graph.py:244-300](file://backend/app/application/service_graph.py#L244-L300)
+- [option_scanner.py:40-561](file://backend/app/domain/fabio_ai/services/option_scanner.py#L40-L561)
 
 **Section sources**
-- [trading_engine.py:77-180](file://appv2/backend/appv2/application/trading_engine.py#L77-L180)
+- [trading_session.py:107-273](file://backend/app/application/services/trading_session.py#L107-L273)
 
 ## Core Components
-TradingEngine v2 consists of several interconnected components working together to provide comprehensive trading automation:
+TradingSessionService consists of several specialized components working together to provide comprehensive trading automation:
 
-### TradingEngine v2
-The central orchestrator managing the complete trading pipeline with advanced features:
-- **Symbol Registration**: Dynamic symbol addition with underlying mapping
-- **Throttle Management**: 500ms processing throttle per symbol
-- **Footprint Processing**: Delta-colored volume profile accumulation
-- **Advanced Analysis**: Market structure, regime detection, and AMT classification
-- **Exit Management**: Structured partition exit strategies
-- **Risk Control**: Comprehensive session risk management
-- **Observability**: Latency tracking and gate rejection analysis
+### TradingSessionService
+The central coordinator managing the complete trading pipeline with unified event-driven processing:
+- **Per-Symbol Session Management**: Dynamic session creation and state tracking
+- **Dual-Feed Data Processing**: Underlying futures and options data integration
+- **Event-Driven Architecture**: Comprehensive event subscription and routing
+- **Execution Coordination**: Unified entry and exit management
+- **Risk Integration**: Session-level risk management and monitoring
+- **Observability**: Built-in performance tracking and error handling
 
-### StrategyOrchestrator
-Coordinates trading strategies with comprehensive analysis:
-- **AMT Analysis**: Advanced Market Theory observations and signals
-- **Gate Evaluation**: Multi-layered entry gating system
-- **Signal Generation**: Structured entry and exit signals
-- **Position Management**: Integration with trade lifecycle
+### Focused Handlers
+Specialized components handling specific trading functions:
+- **AMTHandler**: Advanced Market Theory analysis and pattern recognition
+- **LLMEntryHandler**: AI-powered entry decision making with confidence scoring
+- **RLHandler**: Reinforcement learning status and performance tracking
+- **LLMOverseerHandler**: AI supervision and trade monitoring
 
-### Infrastructure Components
-- **StreamManager**: Real-time market data streaming with broker integration
-- **TickProcessor**: Advanced tick processing with OI tracking and range bars
-- **GameStateBroadcaster**: WebSocket state broadcasting with delta compression
+### Execution Coordinators
+Streamlined components for trade execution:
+- **EntryCoordinator**: Signal processing and position entry management
+- **ExitCoordinator**: Position exit strategies and profit-taking execution
 
 **Section sources**
-- [trading_engine.py:77-180](file://appv2/backend/appv2/application/trading_engine.py#L77-L180)
-- [strategy_orchestrator.py](file://appv2/backend/appv2/application/strategy_orchestrator.py)
-- [stream_manager.py](file://appv2/backend/appv2/infrastructure/stream_manager.py)
-- [tick_processor.py](file://appv2/backend/appv2/infrastructure/tick_processor.py)
+- [trading_session.py:107-273](file://backend/app/application/services/trading_session.py#L107-L273)
+- [trading_session.py:160-232](file://backend/app/application/services/trading_session.py#L160-L232)
 
 ## Architecture Overview
-TradingEngine v2 implements a sophisticated trading architecture with clear separation of concerns and advanced analytical capabilities:
+TradingSessionService implements a sophisticated event-driven architecture with clear separation of concerns:
 
 ```mermaid
 sequenceDiagram
-participant TE as "TradingEngine v2"
-participant SM as "StreamManager"
-participant TP as "TickProcessor"
-participant CA as "CandleAggregator"
-participant ORCH as "StrategyOrchestrator"
-participant SSE as "StructuralStopEngine"
-participant SSM as "SessionStateManager"
-TE->>SM : start_streaming()
-SM-->>TE : tick_packets
-TE->>TP : process_tick(tick)
-TP-->>TE : processed_data
-TE->>CA : add_tick(tick)
-CA-->>TE : completed_candles
-TE->>ORCH : process_candle(candle)
-ORCH-->>TE : strategy_signals
-TE->>SSE : calculate_stop(signal, footprint)
-SSE-->>TE : structural_stops
-TE->>SSM : update_session_state(state)
-SSM-->>TE : session_updates
-TE->>TE : broadcast_state()
+participant TS as "TradingSessionService"
+participant SG as "ServiceGraph"
+participant OS as "OptionScannerService"
+participant AMT as "AMTHandler"
+participant EC as "EntryCoordinator"
+participant XC as "ExitCoordinator"
+TS->>SG : get TradingSessionService
+SG-->>TS : service instance
+TS->>OS : scan_top_n()
+OS-->>TS : active_symbols
+TS->>TS : process_tick()
+TS->>AMT : analyze()
+AMT-->>TS : amt_result
+TS->>EC : execute_entry_path()
+EC-->>TS : position_opened
+TS->>XC : check_exits()
+XC-->>TS : position_closed
+TS->>TS : _build_state_snapshot()
 ```
 
 **Diagram sources**
-- [trading_engine.py:219-487](file://appv2/backend/appv2/application/trading_engine.py#L219-L487)
-- [stream_manager.py](file://appv2/backend/appv2/infrastructure/stream_manager.py)
-- [tick_processor.py](file://appv2/backend/appv2/infrastructure/tick_processor.py)
-- [strategy_orchestrator.py](file://appv2/backend/appv2/application/strategy_orchestrator.py)
-- [structural_stop_engine.py](file://appv2/backend/appv2/domain/services/structural_stop_engine.py)
-- [session_state_manager.py](file://appv2/backend/appv2/application/session_state_manager.py)
+- [trading_session.py:326-471](file://backend/app/application/services/trading_session.py#L326-L471)
+- [service_graph.py:244-300](file://backend/app/application/service_graph.py#L244-L300)
+- [option_scanner.py:200-350](file://backend/app/domain/fabio_ai/services/option_scanner.py#L200-L350)
 
 The architecture emphasizes:
-- **Real-time Processing**: Asynchronous tick processing with throttling
-- **Advanced Analytics**: Multiple concurrent analysis streams
-- **Structured Exits**: Order flow-based stop-loss placement
-- **Dynamic Risk Management**: Session-level risk adjustment
-- **Comprehensive Monitoring**: Multi-dimensional observability
+- **Event-Driven Processing**: Asynchronous event handling with comprehensive routing
+- **Dual-Feed Integration**: Seamless underlying futures and options data processing
+- **Unified Execution**: Single point of control for all trading decisions
+- **Resilient Design**: Built-in error handling and recovery mechanisms
+- **Observability**: Comprehensive performance monitoring and debugging capabilities
 
 ## Detailed Component Analysis
 
-### TradingEngine v2 Core
-The TradingEngine v2 serves as the central orchestrator with comprehensive trading capabilities:
+### TradingSessionService Core
+The TradingSessionService serves as the central orchestrator with comprehensive trading capabilities:
 
 #### Key Responsibilities:
-- **Symbol Management**: Dynamic registration with underlying mapping
-- **Processing Pipeline**: Throttled tick processing with advanced analysis
-- **State Management**: Complete session state tracking and broadcasting
-- **Risk Coordination**: Integration of multiple risk management systems
-- **Exit Management**: Structured exit strategies with partition management
+- **Session Management**: Dynamic per-symbol session creation and state tracking
+- **Event Routing**: Comprehensive event subscription and handler delegation
+- **Data Integration**: Dual-feed processing for underlying futures and options
+- **Execution Coordination**: Unified entry and exit management through focused coordinators
+- **Risk Integration**: Session-level risk management and monitoring
+- **State Building**: Complete state snapshot generation for frontend consumption
 
 #### Advanced Features:
-- **500ms Throttle**: Per-symbol processing throttle for performance optimization
-- **Footprint Analysis**: Delta-colored volume profiles for order flow insights
-- **Structural Stops**: Order flow-based stop-loss placement beyond aggressive prints
-- **Market Structure**: 5-state classification with hysteresis
-- **Regime Detection**: Volatility and trend regime analysis
-- **Partition Exits**: Staged exit strategies with scale-out targets
+- **Per-Symbol Handlers**: Dynamic AMT handler creation for each trading symbol
+- **Session Caching**: Efficient per-symbol data caching and state management
+- **Dual-Feed Support**: Automatic underlying futures data integration for options
+- **Pending Signal Management**: Stale signal detection and processing
+- **Session Phase Management**: Automatic position closure during trading session phases
 
 ```mermaid
 classDiagram
-class TradingEngine {
-<<v2>>
-- _broker
-- _storage
-- _option_chain_fetcher
-- _symbol_symbols : dict
-- _orchestrators : dict
-- _candle_aggs : dict
-- _tick_processors : dict
-- _throttle : TickThrottle
-- _footprint : FootprintAccumulator
-- _structural_stops : StructuralStopEngine
-- _regime_detectors : dict
-- _structure_classifiers : dict
-- _partition_exits : PartitionExitManager
-- _session_risk_tiers : dict
-- _capital_ladder : CapitalLadder
-- _latency : LatencyTracker
-- _running : bool
-- _tasks : list
-- _tick_count : int
-+ add_symbol(symbol, underlying)
-+ on_tick(symbol, tick)
-+ _on_candle(symbol, candle, interval)
-+ _on_signal_generated(symbol, signal)
-+ _broadcast_update(symbol)
-+ start()
-+ stop()
-+ _reconciliation_loop()
+class TradingSessionService {
+<<Core Trading Coordinator>>
+- _broker : IBroker
+- _storage : IStorage
+- _probability_engine : IProbabilityInference
+- _amt_handlers : dict[str, AMTHandler]
+- _lifecycle_handler : TradeLifecycleHandler
+- _llm_handler : LLMEntryHandler
+- _overseer_handler : LLMOverseerHandler
+- _entry_coordinator : EntryCoordinator
+- _exit_coordinator : ExitCoordinator
+- _risk_coordinator : SessionRiskCoordinator
+- _state_manager : SessionStateManager
+- _event_router : SessionEventRouter
+- _session_caches : dict[str, SessionCache]
+- _fut_to_options : dict[str, list[str]]
++ process_tick()
++ get_or_create_session()
++ set_futures_option_map()
++ on_underlying_futures_candle()
++ _on_tick()
++ _build_state_snapshot()
 }
 ```
 
 **Diagram sources**
-- [trading_engine.py:77-180](file://appv2/backend/appv2/application/trading_engine.py#L77-L180)
-- [trading_engine.py:186-218](file://appv2/backend/appv2/application/trading_engine.py#L186-L218)
-- [trading_engine.py:219-487](file://appv2/backend/appv2/application/trading_engine.py#L219-L487)
+- [trading_session.py:107-273](file://backend/app/application/services/trading_session.py#L107-L273)
+- [trading_session.py:291-325](file://backend/app/application/services/trading_session.py#L291-L325)
 
 **Section sources**
-- [trading_engine.py:77-180](file://appv2/backend/appv2/application/trading_engine.py#L77-L180)
-- [trading_engine.py:186-218](file://appv2/backend/appv2/application/trading_engine.py#L186-L218)
-- [trading_engine.py:219-487](file://appv2/backend/appv2/application/trading_engine.py#L219-L487)
+- [trading_session.py:107-273](file://backend/app/application/services/trading_session.py#L107-L273)
+- [trading_session.py:291-325](file://backend/app/application/services/trading_session.py#L291-L325)
 
-### StrategyOrchestrator
-Coordinates comprehensive trading strategies with advanced market analysis:
+### ServiceGraph Integration
+Centralized dependency injection and service management:
 
 #### Responsibilities:
-- **AMT Analysis**: Advanced Market Theory observations and pattern recognition
-- **Gate Evaluation**: Multi-layered entry gating with rejection tracking
-- **Signal Generation**: Structured entry and exit signals with risk parameters
-- **Integration**: Seamless coordination with risk management and execution systems
+- **Service Creation**: TradingSessionService instantiation with all dependencies
+- **Configuration Management**: Exchange-specific configuration and settings
+- **Symbol Management**: Active symbol tracking and futures-options mapping
+- **Scanner Integration**: Option scanning service coordination
+- **Adapter Management**: External service adapter registration and resolution
+
+#### Key Features:
+- **Lazy Initialization**: Services created on-demand to optimize startup time
+- **Live Mode Validation**: Critical service validation for production environments
+- **Configuration Injection**: Exchange-specific settings and tick size management
+- **Symbol Routing**: Automatic futures-options relationship mapping
+
+**Section sources**
+- [service_graph.py:244-300](file://backend/app/application/service_graph.py#L244-L300)
+- [service_graph.py:225-239](file://backend/app/application/service_graph.py#L225-L239)
+
+### OptionScannerService
+Contract selection and symbol management:
+
+#### Responsibilities:
+- **Contract Scanning**: Momentum-based option contract selection
+- **Underlying Management**: Support for multiple underlying assets (NIFTY, BANKNIFTY, CRUDEOIL)
+- **Liquidity Filtering**: OI and volume-based contract quality assessment
+- **Bias Detection**: Bullish/bearish momentum identification
+- **ATM Proximity**: Gamma optimization through at-the-money strike selection
 
 #### Advanced Features:
-- **Session Phase Detection**: Market session phase analysis
-- **Volume Profile Analysis**: POCA, VAH, VAL calculations
-- **Aggression Scoring**: Market participation intensity measurement
-- **Cross-Index Correlation**: Multi-market correlation tracking
+- **Multi-Exchange Support**: MCX and NSE option chains
+- **Thread Pool Execution**: Concurrent contract processing for performance
+- **Spread Penalty**: Liquidity cost consideration in scoring algorithm
+- **Dynamic Strike Intervals**: Exchange-specific strike interval optimization
 
 **Section sources**
-- [strategy_orchestrator.py](file://appv2/backend/appv2/application/strategy_orchestrator.py)
-
-### Infrastructure Components
-
-#### StreamManager
-Real-time market data streaming with broker integration:
-- **WebSocket Streaming**: Direct broker connection for tick data
-- **Fallback Mechanisms**: REST polling for symbols without WS data
-- **Connection Management**: Automatic reconnection with exponential backoff
-- **Symbol Subscription**: Dynamic symbol subscription management
-
-#### TickProcessor
-Advanced tick processing with comprehensive analysis:
-- **OI Tracking**: Open interest monitoring and analysis
-- **Depth Processing**: Order book reconstruction and analysis
-- **Range Bar Builder**: Price-range based technical analysis
-- **Footprint Accumulation**: Volume profile construction
-
-**Section sources**
-- [stream_manager.py](file://appv2/backend/appv2/infrastructure/stream_manager.py)
-- [tick_processor.py](file://appv2/backend/appv2/infrastructure/tick_processor.py)
+- [option_scanner.py:40-200](file://backend/app/domain/fabio_ai/services/option_scanner.py#L40-L200)
+- [health.py:207-230](file://backend/app/api/routers/health.py#L207-L230)
 
 ## Advanced Trading Features
 
-### Tick Throttle System
-Implements precise processing control to optimize performance:
-
-```mermaid
-flowchart TD
-Start(["Tick arrives"]) --> CheckThrottle["Check TickThrottle.should_process()"]
-CheckThrottle --> |True| FullProcess["Full processing pipeline"]
-CheckThrottle --> |False| ThrottledUpdate["Lightweight state update"]
-FullProcess --> UpdateState["Update full state"]
-ThrottledUpdate --> UpdateCache["Update cached analysis"]
-UpdateState --> Broadcast["Broadcast state"]
-UpdateCache --> Broadcast
-Broadcast --> End(["Complete"])
-```
-
-**Diagram sources**
-- [tick_throttle.py:24-42](file://appv2/backend/appv2/domain/services/tick_throttle.py#L24-L42)
-
-#### Key Features:
-- **Per-Symbol Throttling**: 500ms minimum interval per symbol
-- **Time-Based Control**: Monotonic time tracking for accuracy
-- **Reset Functionality**: Individual symbol and global reset options
-- **Performance Optimization**: Reduces CPU load during high-frequency markets
-
-**Section sources**
-- [tick_throttle.py:12-53](file://appv2/backend/appv2/domain/services/tick_throttle.py#L12-L53)
-
-### Footprint Accumulator
-Advanced volume profile analysis with delta coloring:
+### Dual-Feed Architecture
+Seamless integration of underlying futures and options data:
 
 #### Core Functionality:
-- **Delta Classification**: Buy/sell aggressive print identification
-- **Imbalance Detection**: Stacked imbalance level finding
-- **Volume Profile Construction**: Complete footprint candle building
-- **Real-time Analysis**: Continuous accumulation during trading hours
+- **Futures-Options Mapping**: Automatic relationship detection and data sharing
+- **Data Source Selection**: Intelligent switching between underlying and option data
+- **Shared Market State**: Consistent market state across CE/PE options on same underlying
+- **Historical Data Seeding**: Warm-up of underlying buffers for new options
 
 #### Advanced Features:
-- **Stacked Imbalance Detection**: 3+ consecutive imbalances
-- **Confidence Scoring**: Imbalance strength assessment
-- **Level Analysis**: Bid/ask volume distribution per price level
-- **Historical Tracking**: Persistent footprint data management
+- **Minimum Candle Threshold**: 5-candle minimum for reliable underlying data
+- **State Synchronization**: Market state consistency across related options
+- **TTL Management**: Cached underlying state expiration and refresh
+- **Performance Optimization**: Reduced computational overhead through data sharing
 
 **Section sources**
-- [footprint_accumulator.py:45-205](file://appv2/backend/appv2/domain/services/footprint_accumulator.py#L45-L205)
+- [trading_session.py:306-325](file://backend/app/application/services/trading_session.py#L306-L325)
+- [trading_session.py:607-686](file://backend/app/application/services/trading_session.py#L607-L686)
 
-### Structural Stop Engine
-Order flow-based stop-loss placement beyond aggressive prints:
+### Mid-Trade Recovery
+Comprehensive position restoration and management:
 
-#### Priority System:
-1. **Footprint Analysis**: Aggressive print levels from order flow
-2. **Known Aggressive Levels**: Predefined print locations
-3. **LVN Detection**: Low Volume Node acceleration zones
-4. **Value Area Protection**: Traditional VAH/VAL support/resistance
-
-#### Key Features:
-- **Directional SL Placement**: Long/short specific stop calculation
-- **Confidence Scoring**: Stop quality assessment
-- **Buffer Management**: 1-2 tick protection from aggressive prints
-- **Distance Calculation**: Risk-per-unit measurement
-
-**Section sources**
-- [structural_stop_engine.py:27-220](file://appv2/backend/appv2/domain/services/structural_stop_engine.py#L27-L220)
-
-### Market Structure Classification
-5-state market structure with hysteresis for trend analysis:
-
-#### Structure States:
-1. **BALANCED**: Price rotating around POC, 70%+ inside VA
-2. **INITIATIVE_IMBALANCE**: Breakout with acceptance - trending
-3. **RESPONSIVE_IMBALANCE**: Failed breakout, snapping back
-4. **EXCESS**: Extreme move, climactic volume - exhaustion
-5. **TRANSITION**: Between states - wait for clarity
-
-#### Hysteresis Benefits:
-- **Stability**: Prevents rapid state flipping
-- **Trend Confirmation**: Requires sustained patterns
-- **Reduced Whipsaws**: Filters false signals
-- **Confidence Scoring**: State transition probability
-
-**Section sources**
-- [market_structure_classifier.py:36-144](file://appv2/backend/appv2/domain/services/market_structure_classifier.py#L36-L144)
-
-### Regime Detection
-Multi-dimensional market regime classification:
-
-#### Regime Categories:
-- **LOW_VOLATILITY**: Tight range, low volume - avoid breakouts
-- **NORMAL**: Standard conditions - all setups valid
-- **HIGH_VOLATILITY**: Wide range, high volume - wider stops, smaller size
-- **TRENDING**: Sustained directional movement - trend following
-- **CHOPPY**: Directionless, overlapping candles - mean reversion only
-- **TRANSITION**: Regime changing - reduced size, wait for clarity
-
-#### Analytical Framework:
-- **ATR Percentage**: Volatility relative to price
-- **Trend Strength**: Linear regression slope (-1 to 1)
-- **Volume Ratio**: Current vs average volume
-- **Efficiency Ratio**: Net move vs total distance
-
-**Section sources**
-- [regime_detector.py:37-213](file://appv2/backend/appv2/domain/services/regime_detector.py#L37-L213)
-
-### Opening Classifier
-30-minute opening pattern recognition:
-
-#### Opening Types:
-1. **Open Drive (OD)**: Strong directional move from open, holds
-2. **Open Test & Rejection (OTR)**: Tests one side, rejects back
-3. **Open Rejection Both Sides (ORB)**: Tests both sides, stays in middle
-4. **Open Auction (OA)**: Wide range, finds balance through rotation
-
-#### Analytical Approach:
-- **Wick Analysis**: Upper/lower wick percentage calculation
-- **Bullish/Bearish Count**: Directional bar counting
-- **Net Movement**: Final close vs open comparison
-- **Confidence Scoring**: Pattern recognition reliability
-
-**Section sources**
-- [opening_classifier.py:38-206](file://appv2/backend/appv2/domain/services/opening_classifier.py#L38-L206)
-
-### Partition Exit Management
-Structured exit strategies with staged scaling:
-
-#### Exit Tranches:
-1. **+1R Target**: 40% partial exit at first profit target
-2. **+1.5R Target**: 30% partial exit at second profit target
-3. **Full Exit**: Remaining position exit at take profit or VWAP trail
+#### Recovery Mechanisms:
+- **Position State Persistence**: Crash-safe position state storage and retrieval
+- **Partial Exit Management**: Progressive position reduction and profit-taking
+- **Stop-Out Handling**: Automatic position closure on margin requirements
+- **Session Phase Enforcement**: Forced position closure during trading session phases
 
 #### Advanced Features:
-- **Opposition Signal Trigger**: Early exit on order-flow reversal
-- **VWAP Trail Management**: Dynamic trailing stops
-- **Profit Realization**: Progressive profit capture
-- **Risk Management**: Maintains position discipline
+- **Persistent Storage Integration**: KV store for crash recovery scenarios
+- **Realized PnL Calculation**: Accurate profit and loss tracking during closures
+- **Partition State Management**: Exit strategy state preservation and restoration
+- **Emergency Protocols**: Critical failure handling with position closure
 
 **Section sources**
-- [partition_exit_manager.py:49-178](file://appv2/backend/appv2/domain/services/partition_exit_manager.py#L49-L178)
+- [trading_session.py:173-180](file://backend/app/application/services/trading_session.py#L173-L180)
+- [trading_session.py:478-604](file://backend/app/application/services/trading_session.py#L478-L604)
+
+### Event-Driven Processing
+Unified event handling and routing system:
+
+#### Event Flow:
+- **TickReceived Events**: Real-time market data processing
+- **SignalGenerated Events**: AI-generated trade signals
+- **PositionClosed Events**: Trade completion and performance recording
+- **Custom Event Routing**: Flexible event handling through SessionEventRouter
+
+#### Advanced Features:
+- **Event Bus Integration**: Optional pub/sub event distribution
+- **Backward Compatibility**: Direct method call fallback for non-event systems
+- **Pending Signal Drain**: Stale signal detection and processing
+- **Signal TTL Management**: 10-minute signal age validation
+
+**Section sources**
+- [trading_session.py:449-471](file://backend/app/application/services/trading_session.py#L449-L471)
+- [trading_session.py:347-370](file://backend/app/application/services/trading_session.py#L347-L370)
+
+### Circuit Breaker Pattern
+Comprehensive safety mechanisms and error handling:
+
+#### Safety Features:
+- **Global Emergency Kill Switch**: System-wide trading halt capability
+- **Risk State Monitoring**: Aggregated system risk assessment
+- **Error Containment**: Graceful degradation during component failures
+- **Self-Healing Mechanisms**: Automatic recovery from common failure modes
+
+#### Advanced Features:
+- **Playbook Guard Reset**: Manual intervention capability for trading discipline
+- **System Risk State**: Comprehensive risk exposure monitoring
+- **Component Health Checks**: Automatic detection of service availability
+- **Graceful Degradation**: Partial functionality during partial outages
+
+**Section sources**
+- [trading_session.py:1028-1042](file://backend/app/application/services/trading_session.py#L1028-L1042)
+- [trading_session.py:1036-1038](file://backend/app/application/services/trading_session.py#L1036-L1038)
 
 ## Performance and Observability
 
@@ -491,355 +346,286 @@ Structured exit strategies with staged scaling:
 Comprehensive performance monitoring with percentile analysis:
 
 #### Metrics Collection:
-- **p50 (Median)**: Typical processing latency
-- **p95 (95th Percentile)**: Near-worst case performance
-- **p99 (99th Percentile)**: Worst-case scenario latency
-- **Max**: Absolute maximum observed latency
-- **Sample Count**: Total measurements collected
+- **Per-Symbol Latency**: Individual symbol processing time tracking
+- **Percentile Analysis**: p50, p95, p99 latency percentiles for performance profiling
+- **Threshold Alerts**: Automated warnings for performance degradation
+- **Statistical Reporting**: Comprehensive latency statistics and trends
 
-#### Threshold Alerts:
-- **Warning Level**: p95 > 50ms
-- **Critical Level**: p99 > 100ms
-- **Automatic Monitoring**: Continuous performance tracking
-
-**Section sources**
-- [latency_tracker.py:29-98](file://appv2/backend/appv2/domain/services/latency_tracker.py#L29-L98)
-
-### Gate Rejection Tracker
-Advanced analytics for entry gating performance:
-
-#### Tracking Capabilities:
-- **Total Evaluation Count**: Signals evaluated
-- **Rejection Statistics**: Rejection reasons and frequencies
-- **Per-Gate Analysis**: Individual gate performance metrics
-- **Symbol-Specific Tracking**: Performance by trading symbol
-- **Trend Analysis**: Recent rejection pattern trends
-
-#### Statistical Analysis:
-- **Overall Rejection Rate**: Percentage of rejected signals
-- **Recent Trend Detection**: Increasing/decreasing rejection patterns
-- **Top Gate Analysis**: Most common rejection reasons
-- **Session Duration**: Trading session timing
+#### Performance Optimization:
+- **Event Timing**: Precise tick-to-signal latency measurement
+- **Processing Bottleneck Detection**: Identifies slowest processing components
+- **Resource Utilization**: CPU and memory usage monitoring
+- **Throughput Analysis**: Transactions per second and processing capacity
 
 **Section sources**
-- [gate_rejection_tracker.py:28-117](file://appv2/backend/appv2/domain/services/gate_rejection_tracker.py#L28-L117)
+- [trading_session.py:985-989](file://backend/app/application/services/trading_session.py#L985-L989)
 
-### Drive Decay Tracker
-Exhaustion pattern detection for trend continuation analysis:
+### Session State Management
+Efficient per-symbol state tracking and persistence:
 
-#### Drive Analysis:
-- **Consecutive Push Tracking**: Same-direction movement counting
-- **Volume Decay Measurement**: Successive drive volume comparison
-- **Range Contraction Analysis**: Price range reduction over drives
-- **Exhaustion Detection**: D3+ pattern recognition
+#### State Features:
+- **Thread Safety**: Lock-based access control for concurrent operations
+- **Session Caching**: In-memory state caching for performance optimization
+- **Idle Session Eviction**: Automatic cleanup of inactive trading sessions
+- **State Snapshot Building**: Comprehensive state export for frontend consumption
 
-#### Decision Framework:
-- **D3+ Exhaustion**: 3+ drives with >50% volume decay
-- **Reversal Probability**: Calculated based on decay metrics
-- **Recommendation System**: CONTINUE/REDUCE/REVERSE decisions
-- **Timing Signals**: Optimal entry/exit points based on decay
+#### Advanced Features:
+- **MAX_CANDLES_PER_SYMBOL**: Memory management with candle history limits
+- **Session Reset Logic**: Automatic state reset based on trading session phases
+- **Priority Score Tracking**: AI decision priority and confidence scoring
+- **Cache Management**: Efficient memory usage with automatic cleanup
 
 **Section sources**
-- [drive_decay.py:25-119](file://appv2/backend/appv2/domain/services/drive_decay.py#L25-L119)
+- [trading_session.py:291-304](file://backend/app/application/services/trading_session.py#L291-L304)
+- [trading_session.py:1046-1052](file://backend/app/application/services/trading_session.py#L1046-L1052)
+
+### Frontend Integration
+Real-time state synchronization and WebSocket communication:
+
+#### Integration Features:
+- **Multi-Symbol Support**: Dynamic symbol switching and management
+- **State Delta Compression**: Efficient state change transmission
+- **Connection Management**: Automatic reconnection and error recovery
+- **Instrument State Tracking**: Comprehensive market data and analysis state
+
+#### Advanced Features:
+- **Server Mode Initialization**: Multi-symbol trading session setup
+- **Symbol Purging**: Automatic cleanup of inactive trading symbols
+- **Connection Status Monitoring**: Real-time connection health tracking
+- **Tick Bus Communication**: Real-time market data streaming
+
+**Section sources**
+- [useServerTradingSystem.ts:397-425](file://frontend/hooks/useServerTradingSystem.ts#L397-L425)
+- [useServerTradingSystem.test.tsx:113-126](file://frontend/tests/hooks/useServerTradingSystem.test.tsx#L113-L126)
 
 ## Risk Management Systems
 
-### Session Risk Tiers
-Dynamic risk adjustment based on session performance:
+### Session Risk Coordinator
+Dynamic risk management with session-level oversight:
 
-#### Risk Tiers:
-1. **GREEN**: No losses, all gates passing - full size
-2. **YELLOW**: 1 loss - reduced size (75%)
-3. **ORANGE**: 2 losses or 1 big loss - minimal size (50%)
-4. **RED**: Daily stop hit - no new entries
-5. **BLACK**: Circuit breaker open - system halt
+#### Risk Features:
+- **Per-Symbol Risk Managers**: Individual risk management for each trading symbol
+- **Session Performance Tracking**: Real-time profit and loss monitoring
+- **Risk Tier Integration**: Dynamic position sizing based on session performance
+- **Loss Recording**: Comprehensive loss tracking and reporting
 
-#### Tier Calculation:
-- **Circuit Breaker**: System-wide protection override
-- **Daily Drawdown**: Portfolio value decline monitoring
-- **Consecutive Losses**: Recent performance impact
-- **Win Rate Analysis**: Success rate influence on size
-
-**Section sources**
-- [session_risk_tiers.py:39-158](file://appv2/backend/appv2/domain/services/session_risk_tiers.py#L39-L158)
-
-### Capital Ladder System
-Cumulative position sizing based on session performance:
-
-#### Ladder Rungs:
-- **Rung 1**: Base size (100% capital)
-- **Rung 2**: After 1R profit - add 25% to base
-- **Rung 3**: After 2R profit - add 50% to base
-- **Rung 4**: After 3R profit - add 100% to base (double down)
-- **Reset**: After any loss - back to Rung 1
-
-#### Performance Tracking:
-- **Cumulative PnL**: Total session profitability
-- **R-run Profits**: Total profit in risk units
-- **Session Count**: Ladder progression tracking
-- **Size Multiplier**: Dynamic position sizing
+#### Advanced Features:
+- **System Risk State**: Aggregated risk exposure across all trading sessions
+- **Emergency Halt**: Global trading suspension capability
+- **Resume Trading**: Controlled resumption of trading activities
+- **Playbook Guard Reset**: Manual intervention for trading discipline
 
 **Section sources**
-- [capital_ladder.py:29-113](file://appv2/backend/appv2/domain/services/capital_ladder.py#L29-L113)
+- [trading_session.py:153-158](file://backend/app/application/services/trading_session.py#L153-L158)
+- [trading_session.py:1028-1042](file://backend/app/application/services/trading_session.py#L1028-L1042)
 
-### Playbook Guard
-Preventive trading discipline with rejection tracking:
+### Entry and Exit Coordination
+Unified trade execution management:
 
-#### Guard System:
-- **Maximum Rejections**: 3 rejections per session threshold
-- **Violation State**: Playbook breached - trading pause
-- **Warning State**: Near violation - increased caution
-- **Active State**: Normal trading conditions
+#### Coordination Features:
+- **Entry Decision Management**: Signal processing and position entry execution
+- **Exit Strategy Implementation**: Profit-taking and stop-loss execution
+- **Risk Integration**: Position sizing and risk management integration
+- **Performance Tracking**: Real-time trade performance monitoring
 
-#### Discipline Features:
-- **Rejection Counting**: Gate rejection tracking
-- **Reason Logging**: Rejection cause documentation
-- **Session Reset**: Automatic reset at session start
-- **Performance Impact**: Trading discipline enforcement
-
-**Section sources**
-- [playbook_guard.py:29-113](file://appv2/backend/appv2/domain/services/playbook_guard.py#L29-L113)
-
-### Volatility Features
-ATR-based volatility analysis and position sizing:
-
-#### Volatility Regimes:
-- **LOW**: ATR < 0.5% of price - full size
-- **NORMAL**: 0.5% ≤ ATR < 1.5% - full size
-- **HIGH**: 1.5% ≤ ATR < 3.0% - half size
-- **EXTREME**: ATR ≥ 3.0% - quarter size
-
-#### Risk Management:
-- **ATR Calculation**: Adaptive true range measurement
-- **Regime Classification**: Volatility state determination
-- **Trailing Stops**: ATR-based dynamic stops
-- **Size Adjustment**: Inverse volatility position sizing
+#### Advanced Features:
+- **Pending Signal Management**: Stale signal detection and processing
+- **AI Decision Integration**: Machine learning signal processing and execution
+- **Monitoring Mode**: Context-only AI calls for non-trading states
+- **Cooldown Management**: Entry delay mechanisms for disciplined trading
 
 **Section sources**
-- [volatility_features.py:24-116](file://appv2/backend/appv2/domain/services/volatility_features.py#L24-L116)
+- [trading_session.py:932-954](file://backend/app/application/services/trading_session.py#L932-L954)
+- [trading_session.py:956-983](file://backend/app/application/services/trading_session.py#L956-L983)
 
 ## Dependency Analysis
-TradingEngine v2 maintains clear dependency relationships with specialized services:
+TradingSessionService maintains clear dependency relationships with specialized services:
 
 ```mermaid
 graph LR
-TE["TradingEngine v2"] --> SO["StrategyOrchestrator"]
-TE --> TLH["TradeLifecycleHandler"]
-TE --> RO["RiskOrchestrator"]
-TE --> SSM["SessionStateManager"]
-TE --> EC["EntryCoordinator"]
-TE --> XC["ExitCoordinator"]
-TE --> SM["StreamManager"]
-TE --> TP["TickProcessor"]
-SO --> TT["TickThrottle"]
-SO --> FA["FootprintAccumulator"]
-SO --> SSE["StructuralStopEngine"]
-SO --> MSC["MarketStructureClassifier"]
-SO --> RD["RegimeDetector"]
-SO --> OC["OpeningClassifier"]
-SO --> VF["VolatilityFeatures"]
-TE --> SRT["SessionRiskTiers"]
-TE --> CL["CapitalLadder"]
-TE --> PG["PlaybookGuard"]
-TE --> PEM["PartitionExitManager"]
-TE --> LT["LatencyTracker"]
-TE --> GRT["GateRejectionTracker"]
-TE --> DD["DriveDecayTracker"]
-TE --> SSB["StateSnapshotBuilder"]
+TS["TradingSessionService"] --> SM["SessionStateManager"]
+TS --> SRC["SessionRiskCoordinator"]
+TS --> SEL["SessionEventLogger"]
+TS --> AMTH["AMTHandler"]
+TS --> LLMH["LLMEntryHandler"]
+TS --> RLH["RLHandler"]
+TS --> OVER["LLMOverseerHandler"]
+TS --> ENTRY["EntryCoordinator"]
+TS --> EXIT["ExitCoordinator"]
+TS --> SSB["StateSnapshotBuilder"]
+TS --> SCR["SessionCache"]
+TS --> ER["SessionEventRouter"]
+SG["ServiceGraph"] --> TS
+OS["OptionScannerService"] --> SG
 ```
 
 **Diagram sources**
-- [trading_engine.py:77-180](file://appv2/backend/appv2/application/trading_engine.py#L77-L180)
-- [strategy_orchestrator.py](file://appv2/backend/appv2/application/strategy_orchestrator.py)
-- [tick_throttle.py](file://appv2/backend/appv2/domain/services/tick_throttle.py)
-- [footprint_accumulator.py](file://appv2/backend/appv2/domain/services/footprint_accumulator.py)
-- [structural_stop_engine.py](file://appv2/backend/appv2/domain/services/structural_stop_engine.py)
-- [market_structure_classifier.py](file://appv2/backend/appv2/domain/services/market_structure_classifier.py)
-- [regime_detector.py](file://appv2/backend/appv2/domain/services/regime_detector.py)
-- [opening_classifier.py](file://appv2/backend/appv2/domain/services/opening_classifier.py)
-- [volatility_features.py](file://appv2/backend/appv2/domain/services/volatility_features.py)
-- [session_risk_tiers.py](file://appv2/backend/appv2/domain/services/session_risk_tiers.py)
-- [capital_ladder.py](file://appv2/backend/appv2/domain/services/capital_ladder.py)
-- [playbook_guard.py](file://appv2/backend/appv2/domain/services/playbook_guard.py)
-- [partition_exit_manager.py](file://appv2/backend/appv2/domain/services/partition_exit_manager.py)
-- [latency_tracker.py](file://appv2/backend/appv2/domain/services/latency_tracker.py)
-- [gate_rejection_tracker.py](file://appv2/backend/appv2/domain/services/gate_rejection_tracker.py)
-- [drive_decay.py](file://appv2/backend/appv2/domain/services/drive_decay.py)
-- [state_snapshot_builder.py](file://appv2/backend/appv2/domain/services/state_snapshot_builder.py)
+- [trading_session.py:107-273](file://backend/app/application/services/trading_session.py#L107-L273)
+- [service_graph.py:244-300](file://backend/app/application/service_graph.py#L244-L300)
 
 ## Performance Considerations
-TradingEngine v2 implements multiple optimization strategies:
+TradingSessionService implements multiple optimization strategies:
 
 ### Processing Optimization
-- **500ms Throttle**: Reduces CPU usage by limiting full processing frequency
-- **Selective Broadcasting**: Only broadcasts when state changes significantly
-- **Asynchronous Operations**: Non-blocking processing for better responsiveness
-- **Memory Management**: Efficient state cleanup and garbage collection
+- **Event-Driven Architecture**: Asynchronous processing reduces blocking operations
+- **Session Caching**: Efficient per-symbol data caching minimizes computation
+- **Dual-Feed Optimization**: Shared underlying data reduces redundant processing
+- **Pending Signal Management**: Stale signal detection prevents unnecessary processing
+
+### Memory Management
+- **MAX_CANDLES_PER_SYMBOL**: 2000 candle limit prevents memory bloat
+- **Session Cleanup**: Automatic idle session eviction after 24 hours
+- **Cache Management**: Efficient memory usage with automatic cleanup
+- **Thread Safety**: Lock-based access prevents race conditions
 
 ### Network Optimization
+- **Service Graph Integration**: Centralized service management reduces overhead
+- **Event Bus Integration**: Optional pub/sub reduces direct coupling
+- **Symbol Routing**: Efficient futures-options relationship management
 - **Connection Pooling**: Reuses broker connections for efficiency
-- **Fallback Mechanisms**: REST polling for symbols without WebSocket data
-- **Error Recovery**: Automatic retry with exponential backoff
-- **Bandwidth Management**: Optimized data transmission protocols
-
-### Data Management
-- **Delta Compression**: Only transmits changed state portions
-- **Generation Tracking**: Efficient state synchronization
-- **Cache Management**: Strategic caching of frequently accessed data
-- **Cleanup Procedures**: Regular data pruning and memory optimization
 
 ## Troubleshooting Guide
 
-### Engine Initialization Issues
-- **Symbol Registration**: Ensure proper symbol and underlying mapping
-- **Broker Connection**: Verify broker credentials and connectivity
-- **Storage Setup**: Confirm storage interface configuration
-- **Service Dependencies**: Check all required services are initialized
+### Service Initialization Issues
+- **TradingSessionService Creation**: Verify ServiceGraph initialization and dependencies
+- **Option Scanner Integration**: Check scanner service availability and configuration
+- **Active Symbols Configuration**: Ensure proper symbol list and futures-options mapping
+- **Exchange Configuration**: Verify exchange-specific settings and tick sizes
 
 ### Performance Problems
-- **Latency Monitoring**: Use LatencyTracker to identify bottlenecks
-- **Throttle Configuration**: Adjust TickThrottle settings if needed
-- **Resource Limits**: Monitor CPU and memory usage
-- **Network Connectivity**: Check broker connection stability
+- **Latency Monitoring**: Use built-in latency tracking to identify bottlenecks
+- **Event Processing**: Check event bus configuration and processing throughput
+- **Session State**: Monitor session count and memory usage
+- **Cache Performance**: Verify cache hit rates and cleanup efficiency
 
 ### Risk Management Issues
-- **Session Risk Tiers**: Verify tier calculations and adjustments
-- **Capital Ladder**: Check ladder progression and position sizing
-- **Playbook Guard**: Monitor rejection tracking and discipline enforcement
-- **Structural Stops**: Validate stop-loss placement accuracy
+- **Session Risk Coordinator**: Verify risk manager creation and configuration
+- **Risk State Monitoring**: Check system-wide risk exposure and thresholds
+- **Emergency Halt**: Test global trading suspension and resume functionality
+- **Playbook Guard**: Monitor trading discipline enforcement
 
-### Advanced Feature Troubleshooting
-- **Footprint Analysis**: Verify delta classification accuracy
-- **Market Structure**: Check state transitions and hysteresis
-- **Regime Detection**: Validate volatility and trend classification
-- **Partition Exits**: Monitor exit trigger accuracy and timing
+### Event-Driven Processing Issues
+- **Event Subscription**: Verify proper event bus setup and subscription
+- **Handler Registration**: Check handler creation and registration for each symbol
+- **Signal Processing**: Monitor signal generation and execution
+- **State Management**: Verify session state consistency and persistence
 
 **Section sources**
-- [trading_engine.py:489-518](file://appv2/backend/appv2/application/trading_engine.py#L489-L518)
-- [latency_tracker.py:61-86](file://appv2/backend/appv2/domain/services/latency_tracker.py#L61-L86)
-- [session_risk_tiers.py:81-94](file://appv2/backend/appv2/domain/services/session_risk_tiers.py#L81-L94)
-- [capital_ladder.py:95-105](file://appv2/backend/appv2/domain/services/capital_ladder.py#L95-L105)
+- [trading_session.py:1028-1042](file://backend/app/application/services/trading_session.py#L1028-L1042)
+- [service_graph.py:288-300](file://backend/app/application/service_graph.py#L288-L300)
 
 ## Conclusion
-TradingEngine v2 represents a comprehensive evolution in automated trading systems, incorporating advanced analytical capabilities, sophisticated risk management, and extensive observability features. The 575 lines of new functionality introduce powerful features including throttle mechanisms, footprint accumulation, structural stop engines, and comprehensive market structure analysis.
+TradingSessionService represents a comprehensive evolution in automated trading systems, consolidating previously separate components into a unified, event-driven architecture. The service provides sophisticated trading automation capabilities while maintaining independence from frontend connections.
 
 Key strengths include:
-- **Performance Optimization**: 500ms processing throttle reduces resource usage
-- **Advanced Analysis**: Multiple concurrent analytical streams for comprehensive market insight
-- **Risk Management**: Dynamic risk adjustment and capital ladder systems
-- **Exit Management**: Structured partition exits with progressive profit capture
-- **Observability**: Comprehensive performance and gate rejection tracking
-- **Discipline**: Playbook guards and session risk tiers enforce trading discipline
+- **Unified Architecture**: Single coordinator managing all trading activities
+- **Dual-Feed Processing**: Seamless underlying futures and options data integration
+- **Enhanced Resilience**: Comprehensive safety mechanisms and error handling
+- **Integrated Observability**: Built-in performance monitoring and debugging
+- **Modular Design**: Specialized components for focused functionality
+- **Scalable Performance**: Efficient memory management and processing optimization
 
-The engine maintains independence from frontend connections while providing rich state information and comprehensive trading automation capabilities.
+The architecture maintains backward compatibility while providing enhanced functionality through centralized service management and comprehensive event-driven processing.
 
 ## Appendices
 
 ### Practical Implementation Examples
 
-#### Engine Initialization and Symbol Registration
+#### ServiceGraph Initialization and TradingSession Creation
 ```python
-# Initialize TradingEngine v2
-engine = TradingEngine()
+# Initialize ServiceGraph with all dependencies
+graph = ServiceGraph(config)
 
-# Register symbols with underlying mapping
-engine.add_symbol("NIFTY", underlying="NIFTY", tick_size=5.0)
-engine.add_symbol("BANKNIFTY", underlying="BANKNIFTY", tick_size=10.0)
-engine.add_symbol("CRUDEOIL", underlying="CRUDEOIL", tick_size=100.0)
+# Access TradingSessionService
+trading_session = graph.trading_session
 
-# Start the engine
-await engine.start()
+# Configure active symbols and futures-options mapping
+graph.active_symbols = ["NIFTY 28 MAR 22000 CALL", "NIFTY 28 MAR 21000 PUT"]
 ```
 
 **Section sources**
-- [trading_engine.py:186-218](file://appv2/backend/appv2/application/trading_engine.py#L186-L218)
-- [trading_engine.py:489-508](file://appv2/backend/appv2/application/trading_engine.py#L489-L508)
+- [service_graph.py:244-300](file://backend/app/application/service_graph.py#L244-L300)
+- [service_graph.py:232-239](file://backend/app/application/service_graph.py#L232-L239)
 
-#### Advanced Throttle Usage
+#### TradingSessionService Processing Workflow
 ```python
-# Check if symbol is ready for full processing
-if engine._throttle.should_process(symbol):
-    # Perform full processing
-    await engine._on_candle(symbol, candle, interval)
-else:
-    # Lightweight state update only
-    await engine._broadcast_update(symbol)
-```
-
-**Section sources**
-- [trading_engine.py:256-261](file://appv2/backend/appv2/application/trading_engine.py#L256-L261)
-- [tick_throttle.py:24-35](file://appv2/backend/appv2/domain/services/tick_throttle.py#L24-L35)
-
-#### Footprint Analysis Integration
-```python
-# Access footprint data for analysis
-footprint = engine._footprint.get_current_footprint(symbol)
-if footprint:
-    # Find stacked imbalances
-    imbalances = engine._footprint.get_stacked_imbalances(symbol, min_stack=3)
-    # Use imbalances for structural stop calculation
-```
-
-**Section sources**
-- [footprint_accumulator.py:160-195](file://appv2/backend/appv2/domain/services/footprint_accumulator.py#L160-L195)
-
-#### Risk Management Integration
-```python
-# Get session risk state
-risk_state = engine._session_risk_tiers[symbol].get_state()
-size_multiplier = risk_state.size_multiplier
-
-# Calculate position size with risk adjustment
-adjusted_size = base_size * size_multiplier
-
-# Check if trading is permitted
-if not risk_state.can_enter_trade:
-    logger.warning(f"Trading blocked: {risk_state.reason}")
-```
-
-**Section sources**
-- [session_risk_tiers.py:81-94](file://appv2/backend/appv2/domain/services/session_risk_tiers.py#L81-L94)
-
-#### Observability and Monitoring
-```python
-# Get latency statistics
-latency_stats = engine._latency.get_stats(symbol)
-if latency_stats.critical:
-    logger.warning(f"Critical latency: {latency_stats}")
-
-# Get gate rejection statistics
-gate_stats = engine._gate_rejections.get_stats()
-logger.info(f"Rejection rate: {gate_stats.overall_rejection_rate}")
-```
-
-**Section sources**
-- [latency_tracker.py:61-86](file://appv2/backend/appv2/domain/services/latency_tracker.py#L61-L86)
-- [gate_rejection_tracker.py:68-107](file://appv2/backend/appv2/domain/services/gate_rejection_tracker.py#L68-L107)
-
-#### Structural Stop Implementation
-```python
-# Calculate structural stop-loss
-structural_stop = engine._structural_stops.calculate_stop(
-    direction=signal.direction,
-    entry_price=signal.entry_price,
-    footprint=footprint,
-    aggressive_levels=aggressive_prints,
-    lvn_levels=lvn_levels,
-    vah=observation.vah,
-    val=observation.val,
-    poc=observation.poc
+# Process market data tick
+state_snapshot = trading_session.process_tick(
+    symbol="NIFTY 28 MAR 22000 CALL",
+    tick=OHLC(...),
+    order_book=OrderBook(...),
+    underlying_tick=OHLC(...)  # Underlying futures data
 )
 
-# Use structural stop for position management
-await engine._exit.check_exits(
-    symbol=symbol,
-    current_price=current_price,
-    atr=atr,
-    force_exit=False,
-    structural_stop=structural_stop
-)
+# Access session state
+session = trading_session.get_or_create_session("NIFTY 28 MAR 22000 CALL")
 ```
 
 **Section sources**
-- [structural_stop_engine.py:44-96](file://appv2/backend/appv2/domain/services/structural_stop_engine.py#L44-L96)
-- [trading_engine.py:244-254](file://appv2/backend/appv2/application/trading_engine.py#L244-L254)
+- [trading_session.py:326-471](file://backend/app/application/services/trading_session.py#L326-L471)
+- [trading_session.py:291-297](file://backend/app/application/services/trading_session.py#L291-L297)
+
+#### Option Scanner Integration
+```python
+# Initialize option scanner
+scanner = OptionScannerService(graph.market_data)
+
+# Scan for top options
+results = scanner.scan_top_n(
+    n=settings.SCANNER_TOP_N,
+    underlyings=settings.SCANNER_UNDERLYINGS,
+    preferred_option_type=settings.SCANNER_OPTION_TYPE,
+    exchange=settings.DEFAULT_EXCHANGE,
+    expiry_index=settings.SCANNER_EXPIRY_INDEX,
+    strikes_around_atm=settings.STRIKES_AROUND_ATM
+)
+
+# Update active symbols
+graph.active_symbols = [result.symbol for result in results]
+```
+
+**Section sources**
+- [option_scanner.py:200-350](file://backend/app/domain/fabio_ai/services/option_scanner.py#L200-L350)
+- [health.py:207-230](file://backend/app/api/routers/health.py#L207-L230)
+
+#### Circuit Breaker and Risk Management
+```python
+# Check system risk state
+system_risk = trading_session.get_system_risk_state()
+if system_risk.halted:
+    logger.warning("Trading suspended: System risk state exceeded thresholds")
+
+# Resume trading if needed
+if system_risk.halted:
+    trading_session.resume_trading()
+
+# Reset playbook guard for troubleshooting
+trading_session.reset_playbook_guard()
+```
+
+**Section sources**
+- [trading_session.py:1036-1042](file://backend/app/application/services/trading_session.py#L1036-L1042)
+- [trading_session.py:1028-1035](file://backend/app/application/services/trading_session.py#L1028-L1035)
+
+#### Frontend Integration and State Management
+```typescript
+// Initialize trading system hook
+const { instruments, activeSymbol, setActiveSymbol, connected } = useServerTradingSystem(config);
+
+// Handle symbol switching
+const handleSymbolChange = (newSymbol: string) => {
+    setActiveSymbol(newSymbol);
+    // Frontend automatically handles state updates and re-rendering
+};
+
+// Monitor connection status
+useEffect(() => {
+    if (connected) {
+        console.log("Trading system connected successfully");
+    }
+}, [connected]);
+```
+
+**Section sources**
+- [useServerTradingSystem.ts:397-425](file://frontend/hooks/useServerTradingSystem.ts#L397-L425)
+- [useServerTradingSystem.test.tsx:113-126](file://frontend/tests/hooks/useServerTradingSystem.test.tsx#L113-L126)

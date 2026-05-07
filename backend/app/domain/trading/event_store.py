@@ -342,7 +342,7 @@ class AuditTrailVerifier:
     """Audit trail verifier for deterministic State reconstruction.
 
     Given a list of events, verifies that applying them produces consistent
-    state. This is for audit trail verification - NOT for backtest execution.
+    state. This is for audit trail verification, not for simulation execution.
     """
 
     def __init__(self, event_store: EventStore):
@@ -360,7 +360,7 @@ class AuditTrailVerifier:
     ) -> dict[str, Any]:
         """Verify events up to timestamp/aggregate and return reconstructed state.
 
-        For audit trail verification - NOT for backtest execution.
+        For audit trail verification, not for simulation execution.
 
         Returns a dict with:
         - trades: dict of trade_id -> trade state

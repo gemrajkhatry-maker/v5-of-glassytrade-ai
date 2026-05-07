@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 import asyncio
 
 from fastapi import APIRouter, HTTPException, Request
@@ -17,10 +17,12 @@ async def scanner_status(request: Request):
     state = request.app.state
     guard = getattr(state, "contract_guard", None)
     current_contract = guard.current_contract if isinstance(guard, ContractSwitchGuard) else None
+    guard_snapshot = guard.snapshot() if isinstance(guard, ContractSwitchGuard) else {}
     return {
         "active_symbols": list(getattr(state, "active_symbols", [])),
         "contract_guard": {
             "current_contract": current_contract,
+            **guard_snapshot,
         },
         "scanner": getattr(state, "scanner_status", {}),
     }
@@ -43,7 +45,7 @@ async def rescan(request: Request, n: int = 6):
         raise HTTPException(status_code=503, detail="No symbols configured for scanning")
 
     scanner = OptionScannerService(adapter, default_underlyings=configured)
-    top_n = int(getattr(scanner_cfg, "top_n", n))
+    top_n = int(n or getattr(scanner_cfg, "top_n", 6))
     top_per_underlying = int(getattr(scanner_cfg, "top_per_underlying", 2))
     strikes_around_atm = int(getattr(scanner_cfg, "strikes_around_atm", 2))
     expiry_index = int(getattr(scanner_cfg, "expiry_index", 0))
@@ -62,14 +64,26 @@ async def rescan(request: Request, n: int = 6):
         strikes_around_atm,
     )
     symbols = [r.symbol for r in scanned[:top_n]]
-    state.active_symbols = symbols
+    switch_decision = None
     if scanned:
         guard = getattr(state, "contract_guard", None)
         if isinstance(guard, ContractSwitchGuard):
             top = scanned[0]
-            guard.record_switch(top.symbol, top.score, datetime.utcnow().timestamp())
+            now = datetime.now(UTC).timestamp()
+            switch_decision = guard.evaluate_switch(top.symbol, top.score, now)
+            if switch_decision.accepted:
+                guard.apply_switch(switch_decision, now)
+
+    if switch_decision is None or switch_decision.accepted or switch_decision.reason == "same_contract":
+        state.active_symbols = symbols
 
     scanner_status = getattr(state, "scanner_status", {})
-    scanner_status["last_scan_time"] = datetime.utcnow().isoformat()
-    scanner_status["result_count"] = len(symbols)
-    return {"active_symbols": symbols, "scan_count": len(scanned)}
+    scanner_status["last_scan_time"] = datetime.now(UTC).isoformat()
+    scanner_status["result_count"] = len(getattr(state, "active_symbols", []))
+    if switch_decision is not None:
+        scanner_status["last_decision"] = switch_decision.as_dict()
+    return {
+        "active_symbols": list(getattr(state, "active_symbols", [])),
+        "scan_count": len(scanned),
+        "decision": switch_decision.as_dict() if switch_decision is not None else None,
+    }
