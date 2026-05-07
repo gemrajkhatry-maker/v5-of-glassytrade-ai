@@ -11,17 +11,31 @@ import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, Grid, 
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
 import JournalPage from './components/JournalPage';
 import ModelStateBanner from './components/ModelStateBanner';
+import { useKeyboardNavigation, getDefaultTradingHotkeys } from './hooks/useKeyboardNavigation';
+import { useUIStore, selectChartMode, selectSidebarOpen, selectRightSidebarOpen, selectVpMode } from './stores/ui';
+import { useInstrumentsStore, selectAllSymbols } from './stores/instruments';
 
 const simpleId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
 function App() {
-    // 1. UI State
+    // 1. UI State - Using Zustand for persistence
     const [config, setConfig] = useState<ChartConfig>(DEFAULT_CONFIG);
-    const [chartMode, setChartMode] = useState<ChartMode>('STANDARD');
-    const [showControls, setShowControls] = useState(false);
-    const [sidebarOpen, setSidebarOpen] = useState(true);
-    const [rightSidebarOpen, setRightSidebarOpen] = useState(true);
-    const [currentPage, setCurrentPage] = useState<'trading' | 'journal'>('trading');
+    const chartMode = useUIStore(selectChartMode);
+    const setChartMode = useUIStore(s => s.setChartMode);
+    const showControls = useUIStore(s => s.showControls);
+    const setShowControls = useUIStore(s => s.setShowControls);
+    const sidebarOpen = useUIStore(selectSidebarOpen);
+    const setSidebarOpen = useUIStore(s => s.setSidebarOpen);
+    const rightSidebarOpen = useUIStore(selectRightSidebarOpen);
+    const setRightSidebarOpen = useUIStore(s => s.setRightSidebarOpen);
+    const currentPage = useUIStore(s => s.currentPage);
+    const setCurrentPage = useUIStore(s => s.setCurrentPage);
+    const vpMode = useUIStore(selectVpMode) as 'session' | 'leg' | 'combined' | 'off';
+    const setVpMode = useUIStore(s => s.setVpMode);
+    
+    // Get symbols for navigation
+    const allSymbols = useInstrumentsStore(selectAllSymbols);
+    const currentSymbolIndex = useRef(0);
     // Draggable overseer box
     const [overseerPos, setOverseerPos] = useState({ x: -1, y: 16 }); // -1 = auto right
     const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -71,6 +85,46 @@ function App() {
         connectionStatus,
         tickBus,
     } = useTradingSystem(config);
+
+    // 3. Keyboard Navigation
+    const handleNextSymbol = useCallback(() => {
+        if (allSymbols.length === 0) return;
+        currentSymbolIndex.current = (currentSymbolIndex.current + 1) % allSymbols.length;
+        setActiveSymbol(allSymbols[currentSymbolIndex.current]);
+    }, [allSymbols, setActiveSymbol]);
+
+    const handlePrevSymbol = useCallback(() => {
+        if (allSymbols.length === 0) return;
+        currentSymbolIndex.current = (currentSymbolIndex.current - 1 + allSymbols.length) % allSymbols.length;
+        setActiveSymbol(allSymbols[currentSymbolIndex.current]);
+    }, [allSymbols, setActiveSymbol]);
+
+    const handleClosePanels = useCallback(() => {
+        setShowControls(false);
+    }, [setShowControls]);
+
+    const handleSaveWorkspace = useCallback(() => {
+        // Workspace auto-saves via Zustand persist middleware
+        console.log('[Keyboard] Workspace saved to localStorage');
+    }, []);
+
+    const handleOpenJournal = useCallback(() => {
+        setCurrentPage('journal');
+    }, [setCurrentPage]);
+
+    // Setup keyboard hotkeys
+    useKeyboardNavigation(getDefaultTradingHotkeys({
+        onChartModeChange: setChartMode,
+        onVpModeChange: setVpMode,
+        onToggleSidebar: () => setSidebarOpen(!sidebarOpen),
+        onToggleRightSidebar: () => setRightSidebarOpen(!rightSidebarOpen),
+        onToggleControls: () => setShowControls(!showControls),
+        onNextSymbol: handleNextSymbol,
+        onPrevSymbol: handlePrevSymbol,
+        onSaveWorkspace: handleSaveWorkspace,
+        onOpenJournal: handleOpenJournal,
+        onClosePanels: handleClosePanels,
+    }));
 
     // --- Handlers ---
 

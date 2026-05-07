@@ -275,14 +275,18 @@ class TestLossTracker:
     def test_record_loss(self):
         """Record a loss → tracked."""
         self.tracker.record_loss("NIFTY", stop_price=22400.0)
-        assert True
+        assert self.tracker._global_daily_losses == 1
+        assert self.tracker._symbol_daily_losses.get("NIFTY") == 1
+        assert self.tracker._symbol_consecutive_losses.get("NIFTY", 0) >= 1
 
     def test_record_win(self):
         """Record a win → tracked."""
         self.tracker.record_win("NIFTY")
-        assert True
+        assert self.tracker._global_daily_losses == 0
+        assert self.tracker._symbol_consecutive_losses.get("NIFTY", 0) == 0
 
     def test_record_exit_time(self):
         """Record exit time for symbol."""
         self.tracker.record_exit_time("NIFTY")
-        assert True
+        assert "NIFTY" in self.tracker._last_exit_time
+        assert self.tracker._last_exit_time["NIFTY"] > 0
