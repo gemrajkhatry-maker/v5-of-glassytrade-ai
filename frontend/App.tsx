@@ -147,8 +147,8 @@ function App() {
             {/* CENTER: Main Content */}
             <div className={`
         flex-1 relative h-full transition-all duration-300 flex flex-col
-        ${sidebarOpen ? 'ml-[360px]' : 'ml-0'}
-        ${rightSidebarOpen ? 'mr-80' : 'mr-0'}
+        ${sidebarOpen ? 'ml-[280px]' : 'ml-0'}
+        ${rightSidebarOpen ? 'mr-[320px]' : 'mr-0'}
       `}>
 
                 {/* Chart Layer */}
@@ -219,13 +219,13 @@ function App() {
                         />
                     </div>
 
-                    <div className="flex-1 flex flex-col justify-between p-4 pointer-events-none min-h-0">
+                    <div className="flex-1 flex flex-col justify-between p-3 pointer-events-none min-h-0">
 
                     {/* Top Bar Area */}
                     <div className="flex justify-between items-start pointer-events-auto">
                         {/* Left Toggle (Scanner) & Chart Controls */}
-                        <div className="flex flex-col gap-2 items-start max-w-[min(100%,52rem)]">
-                            <div className="flex items-start gap-2 flex-wrap">
+                        <div className="flex flex-col gap-1.5 items-start max-w-[min(100%,52rem)]">
+                            <div className="flex items-start gap-1.5 flex-wrap">
                             {!sidebarOpen && (
                                 <button onClick={() => setSidebarOpen(true)} className="p-2 bg-glassy-bg-elevated/50 backdrop-blur rounded-sm text-glassy-text-primary hover:bg-glassy-bg-hover transition-colors">
                                     <Activity size={20} />
@@ -290,7 +290,7 @@ function App() {
                         </div>
 
                         {/* Right Toggle (Analysis) + Chat Toggle */}
-                        <div className="flex items-start gap-3">
+                        <div className="flex items-start gap-1.5">
                             <button onClick={() => setShowControls(!showControls)} className="h-10 w-10 bg-glassy-bg-elevated/50 backdrop-blur-xl border border-glassy-border-default rounded-sm text-glassy-text-primary hover:bg-glassy-bg-hover transition-colors">
                                 {showControls ? <X size={18} /> : <Sparkles size={18} className="text-glassy-ai-primary" />}
                             </button>
@@ -331,7 +331,7 @@ function App() {
 
             {/* RIGHT: Sidebar (Analysis & AI) */}
             <div className={`
-          absolute right-0 top-0 h-full w-80 z-20 transition-all duration-300
+          absolute right-0 top-0 h-full w-[320px] z-20 transition-all duration-300
           bg-glassy-bg-secondary/80 backdrop-blur-md border-l border-glassy-border-default flex flex-col
           ${rightSidebarOpen ? 'translate-x-0' : 'translate-x-full'}
       `}>

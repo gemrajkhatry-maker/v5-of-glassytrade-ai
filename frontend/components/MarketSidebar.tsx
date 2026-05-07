@@ -250,7 +250,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
     }, [instruments, activeSymbol]);
 
     return (
-        <GlassPanel className="h-full w-[360px] flex flex-col border-r border-glassy-border-default rounded-none rounded-r-md bg-glassy-bg-secondary shadow-xl z-50">
+        <GlassPanel className="h-full w-[280px] flex flex-col border-r border-glassy-border-default rounded-none rounded-r-md bg-glassy-bg-secondary shadow-xl z-50">
 
             {/* --- MARKET SCANNER (Top Section) --- */}
             <div className="flex-1 flex flex-col min-h-0">
