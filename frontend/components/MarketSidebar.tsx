@@ -97,7 +97,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                     {!hasData && !hasOpenPosition ? (
                         <span className="h-2.5 flex-1 max-w-[80%] rounded bg-glassy-text-disabled/20 animate-pulse" />
                     ) : (
-                        <span className="font-bold text-[10px] text-glassy-text-primary truncate">
+                        <span className="font-bold text-[10px] text-glassy-text-primary truncate tabular-nums">
                             {name}
                         </span>
                     )}
@@ -138,7 +138,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
             {/* Probability & Bar (20%) */}
             <div className="w-[20%] flex flex-col gap-0.5 pr-2">
                 {hasOpenPosition ? (
-                    <span className={`text-[10px] font-mono font-bold ${totalPnl >= 0 ? 'text-glassy-bull-primary' : 'text-glassy-bear-primary'}`}>
+                    <span className={`text-[10px] font-mono font-bold tabular-nums ${totalPnl >= 0 ? 'text-glassy-bull-primary' : 'text-glassy-bear-primary'}`}>
                         {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(0)}
                     </span>
                 ) : !hasData ? (
@@ -150,7 +150,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                     </>
                 ) : (
                     <>
-                        <span className={`text-[9px] font-mono font-bold ${prob >= 0.6 ? 'text-glassy-bull-primary' : prob >= 0.5 ? 'text-glassy-warning' : 'text-glassy-bear-primary'}`}>
+                        <span className={`text-[9px] font-mono font-bold tabular-nums ${prob >= 0.6 ? 'text-glassy-bull-primary' : prob >= 0.5 ? 'text-glassy-warning' : 'text-glassy-bear-primary'}`}>
                             {Math.round(prob * 100)}%
                         </span>
                         <div className="w-full h-0.5 bg-glassy-text-disabled/20 rounded-full overflow-hidden">
@@ -169,7 +169,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 ) : !hasData && !hasOpenPosition ? (
                     <span className="h-2.5 w-10 rounded bg-glassy-text-disabled/20 animate-pulse" />
                 ) : (
-                    <span className="font-mono text-[10px] text-glassy-text-secondary font-bold">
+                    <span className="font-mono text-[10px] text-glassy-text-secondary font-bold tabular-nums">
                         {price > 0 ? price.toFixed(1) : '—'}
                     </span>
                 )}
@@ -184,7 +184,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 ) : !hasData ? (
                     <span className="inline-block h-2 w-8 rounded bg-glassy-text-disabled/20 animate-pulse ml-auto" />
                 ) : (
-                    <span className={`text-[9px] font-mono whitespace-nowrap ${isUp ? 'text-glassy-bull-primary/80' : 'text-glassy-bear-primary/80'}`}>
+                    <span className={`text-[9px] font-mono tabular-nums whitespace-nowrap ${isUp ? 'text-glassy-bull-primary/80' : 'text-glassy-bear-primary/80'}`}>
                         {isUp ? '+' : ''}{percentChange.toFixed(1)}%
                     </span>
                 )}

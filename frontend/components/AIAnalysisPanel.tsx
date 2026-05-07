@@ -193,7 +193,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             <Activity className="w-3.5 h-3.5 text-glassy-neutral-cool" />
                             <span className="text-[9px] font-bold text-glassy-text-secondary uppercase tracking-wider">Underlying Index</span>
                         </div>
-                        <span className="text-xs font-mono font-bold text-glassy-neutral-cool">{underlyingPrice.toFixed(2)}</span>
+                        <span className="text-xs font-mono font-bold tabular-nums text-glassy-neutral-cool">{underlyingPrice.toFixed(2)}</span>
                     </div>
                 )}
 

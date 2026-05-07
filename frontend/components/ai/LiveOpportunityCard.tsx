@@ -57,7 +57,7 @@ export const LiveOpportunityCard: React.FC<LiveOpportunityCardProps> = ({ symbol
             <div className="bg-glassy-bg-elevated/50 rounded-sm p-3 border border-glassy-border-subtle mb-3">
                 <div className="flex justify-between items-end mb-2">
                     <span className="text-lg font-bold text-glassy-text-primary">{symbol}</span>
-                    <span className="text-xs font-mono text-glassy-text-secondary">LTP: {ltp.toFixed(2)}</span>
+                    <span className="text-xs font-mono tabular-nums text-glassy-text-secondary">LTP: {ltp.toFixed(2)}</span>
                 </div>
                 <div className="flex items-center justify-between">
                     <div className={`px-2 py-1 rounded-sm text-xs font-bold ${isLong ? 'bg-glassy-bull-primary/20 text-glassy-bull-primary' : 'bg-glassy-bear-primary/20 text-glassy-bear-primary'}`}>
@@ -65,7 +65,7 @@ export const LiveOpportunityCard: React.FC<LiveOpportunityCardProps> = ({ symbol
                     </div>
                     <div className="flex items-center gap-2">
                         <span className="text-[9px] text-glassy-text-tertiary">Prob</span>
-                        <span className={`text-sm font-bold font-mono ${agentDecision.probability >= 0.6 ? 'text-glassy-bull-primary' : 'text-glassy-warning'}`}>
+                        <span className={`text-sm font-bold font-mono tabular-nums ${agentDecision.probability >= 0.6 ? 'text-glassy-bull-primary' : 'text-glassy-warning'}`}>
                             {prob}%
                         </span>
                     </div>
@@ -75,13 +75,13 @@ export const LiveOpportunityCard: React.FC<LiveOpportunityCardProps> = ({ symbol
             <div className="grid grid-cols-2 gap-2 mb-3">
                 <div className="bg-glassy-bg-elevated/50 rounded-sm p-2 text-center border border-glassy-border-subtle">
                     <span className="block text-[8px] text-glassy-text-tertiary uppercase mb-0.5">Structural Stop</span>
-                    <span className="text-xs font-mono font-bold text-glassy-bear-primary/80">
+                    <span className="text-xs font-mono font-bold tabular-nums text-glassy-bear-primary/80">
                         {hasStructuralStop ? structuralStop.toFixed(2) : '-'}
                     </span>
                 </div>
                 <div className="bg-glassy-bg-elevated/50 rounded-sm p-2 text-center border border-glassy-border-subtle">
                     <span className="block text-[8px] text-glassy-text-tertiary uppercase mb-0.5">Est. TP</span>
-                    <span className="text-xs font-mono font-bold text-glassy-bull-primary/80">{estTP.toFixed(2)}</span>
+                    <span className="text-xs font-mono font-bold tabular-nums text-glassy-bull-primary/80">{estTP.toFixed(2)}</span>
                 </div>
             </div>
 
