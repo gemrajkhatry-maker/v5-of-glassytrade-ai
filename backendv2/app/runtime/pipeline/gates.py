@@ -250,7 +250,7 @@ class GateEvaluation:
                 cvd_confirms=signal.confidence >= 0.5,
                 big_trade_cluster=False,
                 absorption=(signal.type in ("LONG", "SHORT")),
-                ofi=0.25 if signal.type == "LONG" else -0.25,
+                ofi=signal.ofi,
                 lvn_near_level=True,
                 volume_bubble=signal.confidence >= 0.6,
                 side=signal.type,

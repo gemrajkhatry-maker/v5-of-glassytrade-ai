@@ -180,6 +180,7 @@ class Signal:
     confidence: float
     reason: str
     source: str = "pipeline"  # pipeline, strategy_llm, strategy_rl, strategy_rule
+    ofi: float = 0.0  # Order Flow Imbalance from upstream pipeline stage
 
 
 class GateResultType(Enum):

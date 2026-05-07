@@ -46,6 +46,7 @@ from app.infrastructure.adapters.dhan_adapter import DhanAdapter
 from app.domain.fabio_ai.services.option_scanner import ContractSwitchGuard, OptionScannerService
 from app.domain.models.exchange_config import ExchangeConfig
 from app.application.service.session_state_manager import SessionStateManager
+from app.application.event_subscribers import wire_event_bus_subscribers
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +232,7 @@ app.add_middleware(
 )
 
 event_bus = EventBus()
+wire_event_bus_subscribers(event_bus)
 connected_clients: List[asyncio.Queue] = []
 app.state.connected_clients = connected_clients
 

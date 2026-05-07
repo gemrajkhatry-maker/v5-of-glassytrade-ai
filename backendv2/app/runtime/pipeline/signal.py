@@ -88,7 +88,7 @@ class SignalGeneration:
                         return Signal(
                             symbol=symbol, timestamp=feature.timestamp, type="SHORT", entry=entry,
                             sl=stop, tp=target, rr=rr, confidence=confidence, reason="Microstructure short",
-                            source="pipeline"
+                            source="pipeline", ofi=ofi.ofi if ofi else 0.0,
                         )
 
             # fallback: evaluate simplified long setup
@@ -106,14 +106,14 @@ class SignalGeneration:
                 return Signal(
                     symbol=symbol, timestamp=feature.timestamp, type="LONG", entry=entry,
                     sl=stop, tp=target, rr=rr, confidence=confidence, reason="Momentum long",
-                    source="pipeline"
+                    source="pipeline", ofi=ofi.ofi,
                 )
 
             self._metrics.record(0)
             return Signal(
                 symbol=symbol, timestamp=feature.timestamp, type="NO_TRADE", entry=0.0,
                 sl=0.0, tp=0.0, rr=0.0, confidence=0.0, reason="No edge",
-                source="pipeline"
+                source="pipeline", ofi=0.0,
             )
         except Exception:
             self._metrics.record_error()

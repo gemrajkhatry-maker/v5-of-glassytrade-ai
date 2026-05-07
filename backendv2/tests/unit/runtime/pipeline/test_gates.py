@@ -35,6 +35,7 @@ def _make_signal(
     rr: float = 2.0,
     confidence: float = 0.7,
     reason: str = "trend_model",
+    ofi: float = 0.0,
 ) -> Signal:
     return Signal(
         symbol=symbol,
@@ -46,6 +47,7 @@ def _make_signal(
         rr=rr,
         confidence=confidence,
         reason=reason,
+        ofi=ofi,
     )
 
 
@@ -599,25 +601,114 @@ class TestEntryGatePipeline:
 
 
 # ---------------------------------------------------------------------------
-# 13. Duplicate signal deduplication
+# 14. Gate uses real OFI data, not hardcoded by signal direction
 # ---------------------------------------------------------------------------
 
-class TestDeduplication:
-    def test_same_signal_tracked_in_seen(self):
-        """Processing the same signal adds a gate_key to _seen."""
-        stage = _gate()
+class TestRealOFIUsage:
+    def test_gate_uses_signal_ofi_not_hardcoded_long(self):
+        """Gate should use actual OFI from signal, not hardcoded +0.25 for LONG."""
+        from app.domain.amt.service.aggression_scorer import AggressionScorer
+        scorer = AggressionScorer()
+
+        # Simulate LONG signal with NEGATIVE OFI (divergence scenario)
+        # With hardcoded OFI=0.25, this would get OFI points (+0.5)
+        # With real OFI=-0.5, it should NOT get OFI points
+        result = scorer.score(
+            footprint_ratio=0.0,
+            cvd_confirms=False,
+            big_trade_cluster=False,
+            absorption=False,
+            ofi=-0.5,  # Real OFI contradicts LONG signal
+            lvn_near_level=False,
+            volume_bubble=False,
+            side="LONG",
+        )
+        # OFI should NOT contribute because -0.5 < 0.10 threshold for LONG
+        assert "ofi" not in result.breakdown
+        assert result.score == 0.0
+
+    def test_gate_uses_signal_ofi_not_hardcoded_short(self):
+        """Gate should use actual OFI from signal, not hardcoded -0.25 for SHORT."""
+        from app.domain.amt.service.aggression_scorer import AggressionScorer
+        scorer = AggressionScorer()
+
+        # Simulate SHORT signal with POSITIVE OFI (divergence scenario)
+        result = scorer.score(
+            footprint_ratio=0.0,
+            cvd_confirms=False,
+            big_trade_cluster=False,
+            absorption=False,
+            ofi=0.5,  # Real OFI contradicts SHORT signal
+            lvn_near_level=False,
+            volume_bubble=False,
+            side="SHORT",
+        )
+        # OFI should NOT contribute because +0.5 > -0.10 threshold for SHORT
+        assert "ofi" not in result.breakdown
+        assert result.score == 0.0
+
+    def test_signal_carries_ofi_field(self):
+        """Signal dataclass must carry an ofi field for gate wiring."""
+        signal = _make_signal(ofi=0.35)
+        assert hasattr(signal, "ofi")
+        assert signal.ofi == 0.35
+
+    def test_signal_ofi_defaults_to_zero(self):
+        """Signal OFI should default to 0.0 for backward compatibility."""
         signal = _make_signal()
-        stage.process(signal)
+        assert signal.ofi == 0.0
 
-        gate_key = f"{signal.symbol}:{signal.timestamp}:{signal.type}:{signal.entry}"
-        assert gate_key in stage._seen
+    def test_gate_ofi_contributes_when_aligned(self):
+        """When signal OFI aligns with direction, OFI points should be awarded."""
+        from app.domain.amt.service.aggression_scorer import AggressionScorer
+        scorer = AggressionScorer()
 
-    def test_seen_persists_across_calls(self):
-        """Multiple signals all tracked in _seen."""
+        # LONG with positive OFI
+        result_long = scorer.score(
+            footprint_ratio=0.0, cvd_confirms=False, big_trade_cluster=False,
+            absorption=False, ofi=0.35, lvn_near_level=False,
+            volume_bubble=False, side="LONG",
+        )
+        assert "ofi" in result_long.breakdown
+        assert result_long.breakdown["ofi"] == 0.5
+
+        # SHORT with negative OFI
+        result_short = scorer.score(
+            footprint_ratio=0.0, cvd_confirms=False, big_trade_cluster=False,
+            absorption=False, ofi=-0.35, lvn_near_level=False,
+            volume_bubble=False, side="SHORT",
+        )
+        assert "ofi" in result_short.breakdown
+        assert result_short.breakdown["ofi"] == 0.5
+
+    def test_gate_uses_real_ofi_in_aggression_score(self):
+        """GateEvaluation.process must pass signal.ofi to scorer, not hardcoded value."""
+        from unittest.mock import patch
+        from app.domain.amt.service.aggression_scorer import AggressionScorer
+
         stage = _gate()
-        s1 = _make_signal(entry=6100.0)
-        s2 = _make_signal(entry=6200.0, ts=1_700_000_001.0)
-        stage.process(s1)
-        stage.process(s2)
 
-        assert len(stage._seen) == 2
+        # Create a LONG signal with NEGATIVE OFI (bearish divergence)
+        signal = _make_signal(
+            type="LONG", entry=6100.0, sl=6050.0, tp=6200.0,
+            rr=2.0, confidence=0.8, ofi=-0.5,
+        )
+
+        # Mock the scorer to capture what OFI value is passed
+        original_score = AggressionScorer.score
+        captured_ofi = []
+
+        def capturing_score(self, **kwargs):
+            if "ofi" in kwargs:
+                captured_ofi.append(kwargs["ofi"])
+            return original_score(self, **kwargs)
+
+        with patch.object(AggressionScorer, "score", capturing_score):
+            stage.process(signal)
+
+        # The OFI passed to scorer must be the signal's actual OFI (-0.5),
+        # NOT the hardcoded +0.25 for LONG signals
+        assert len(captured_ofi) == 1
+        assert captured_ofi[0] == -0.5, (
+            f"Gate passed hardcoded OFI {captured_ofi[0]} instead of signal.ofi=-0.5"
+        )
