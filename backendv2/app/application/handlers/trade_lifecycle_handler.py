@@ -314,7 +314,7 @@ class TradeLifecycleHandler:
             current_price=current_price,
             is_long=bool(pos.is_long),
             aggression_score=aggression_score,
-            add_count=0,
+            add_count=len(entry_lvns),
             entry_lvns=entry_lvns,
             current_lvn=current_lvn,
             current_sl=float(pos.stop_loss),
