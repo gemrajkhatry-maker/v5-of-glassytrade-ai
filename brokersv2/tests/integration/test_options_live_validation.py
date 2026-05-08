@@ -181,7 +181,7 @@ class TestOptionChainEngineWithLiveData:
         from brokersv2.analytics.options.chain import OptionChainEngine
         from brokersv2.analytics.options.events import OptionContract, OptionType
         from brokersv2.core.types import Exchange
-        from datetime import datetime
+        from brokersv2.domain.options.models import OptionChainData
         
         # Fetch live chain
         chain = await live_options_adapter.get_option_chain(
@@ -191,53 +191,32 @@ class TestOptionChainEngineWithLiveData:
         )
         
         assert chain is not None
+        assert isinstance(chain, OptionChainData)
         
         # Build engine
         engine = OptionChainEngine(option_symbols["underlying"])
         
-        strikes = chain.strikes if hasattr(chain, 'strikes') else chain['strikes']
-        expiry = chain.expiry if hasattr(chain, 'expiry') else datetime.now(timezone.utc)
-        underlying_price = chain.underlying_price if hasattr(chain, 'underlying_price') else chain.get('underlying_price', 0)
+        # New API: strikes is List[float], use get_strike_level() to get data
+        strikes = chain.strikes
+        expiry = chain.expiry_date
+        underlying_price = chain.underlying_price
         
         # Add options from live data
         options_added = 0
-        for strike_data in strikes:
-            strike_price = strike_data.strike_price if hasattr(strike_data, 'strike_price') else strike_data['strike_price']
+        for strike_price in strikes:
+            # Get strike level data
+            strike_level = chain.get_strike_level(strike_price)
+            if not strike_level:
+                continue
             
             # Add call
-            call_data = strike_data.call if hasattr(strike_data, 'call') else strike_data.get('call')
-            if call_data:
-                call = OptionContract(
-                    symbol=f"{option_symbols['underlying']}{int(strike_price)}CE",
-                    underlying=option_symbols["underlying"],
-                    strike=strike_price,
-                    expiry=expiry if isinstance(expiry, datetime) else datetime.now(),
-                    option_type=OptionType.CALL,
-                    ltp=call_data.ltp if hasattr(call_data, 'ltp') else call_data.get('ltp', 0),
-                    bid=call_data.bid if hasattr(call_data, 'bid') else call_data.get('bid', 0),
-                    ask=call_data.ask if hasattr(call_data, 'ask') else call_data.get('ask', 0),
-                    volume=call_data.volume if hasattr(call_data, 'volume') else call_data.get('volume', 0),
-                    open_interest=call_data.oi if hasattr(call_data, 'oi') else call_data.get('oi', 0),
-                )
-                engine.add_option(call)
+            if strike_level.call:
+                engine.add_option(strike_level.call)
                 options_added += 1
             
             # Add put
-            put_data = strike_data.put if hasattr(strike_data, 'put') else strike_data.get('put')
-            if put_data:
-                put = OptionContract(
-                    symbol=f"{option_symbols['underlying']}{int(strike_price)}PE",
-                    underlying=option_symbols["underlying"],
-                    strike=strike_price,
-                    expiry=expiry if isinstance(expiry, datetime) else datetime.now(),
-                    option_type=OptionType.PUT,
-                    ltp=put_data.ltp if hasattr(put_data, 'ltp') else put_data.get('ltp', 0),
-                    bid=put_data.bid if hasattr(put_data, 'bid') else put_data.get('bid', 0),
-                    ask=put_data.ask if hasattr(put_data, 'ask') else put_data.get('ask', 0),
-                    volume=put_data.volume if hasattr(put_data, 'volume') else put_data.get('volume', 0),
-                    open_interest=put_data.oi if hasattr(put_data, 'oi') else put_data.get('oi', 0),
-                )
-                engine.add_option(put)
+            if strike_level.put:
+                engine.add_option(strike_level.put)
                 options_added += 1
         
         assert options_added > 0, "No options added to engine"
@@ -260,7 +239,7 @@ class TestOptionChainEngineWithLiveData:
         from brokersv2.analytics.options.chain import OptionChainEngine
         from brokersv2.analytics.options.events import OptionContract, OptionType
         from brokersv2.core.types import Exchange
-        from datetime import datetime
+        from brokersv2.domain.options.models import OptionChainData
         
         # Fetch chain
         chain = await live_options_adapter.get_option_chain(
@@ -269,41 +248,26 @@ class TestOptionChainEngineWithLiveData:
             expiry_index=0,
         )
         
+        assert isinstance(chain, OptionChainData)
+        
         # Build engine
         engine = OptionChainEngine(option_symbols["underlying"])
-        strikes = chain.strikes if hasattr(chain, 'strikes') else chain['strikes']
-        expiry = chain.expiry if hasattr(chain, 'expiry') else datetime.now(timezone.utc)
         
-        for strike_data in strikes:
-            strike_price = strike_data.strike_price if hasattr(strike_data, 'strike_price') else strike_data['strike_price']
+        # New API: iterate over strikes (List[float])
+        for strike_price in chain.strikes:
+            strike_level = chain.get_strike_level(strike_price)
+            if not strike_level:
+                continue
             
-            # Extract OI data
-            call_data = strike_data.call if hasattr(strike_data, 'call') else strike_data.get('call')
-            put_data = strike_data.put if hasattr(strike_data, 'put') else strike_data.get('put')
+            # Add call with OI
+            if strike_level.call:
+                engine.add_option(strike_level.call)
             
-            if call_data:
-                call_oi = call_data.oi if hasattr(call_data, 'oi') else call_data.get('oi', 0)
-                engine.add_option(OptionContract(
-                    symbol="TEMP_CE",
-                    underlying=option_symbols["underlying"],
-                    strike=strike_price,
-                    expiry=expiry if isinstance(expiry, datetime) else datetime.now(),
-                    option_type=OptionType.CALL,
-                    open_interest=call_oi,
-                ))
-            
-            if put_data:
-                put_oi = put_data.oi if hasattr(put_data, 'oi') else put_data.get('oi', 0)
-                engine.add_option(OptionContract(
-                    symbol="TEMP_PE",
-                    underlying=option_symbols["underlying"],
-                    strike=strike_price,
-                    expiry=expiry if isinstance(expiry, datetime) else datetime.now(),
-                    option_type=OptionType.PUT,
-                    open_interest=put_oi,
-                ))
+            # Add put with OI
+            if strike_level.put:
+                engine.add_option(strike_level.put)
         
-        underlying_price = chain.underlying_price if hasattr(chain, 'underlying_price') else chain.get('underlying_price', 22000)
+        underlying_price = chain.underlying_price
         engine.build_chain(underlying_price=underlying_price)
         
         # Validate PCR
@@ -323,6 +287,7 @@ class TestGreeksWithMarketData:
         from brokersv2.analytics.options.greeks import GreeksCalculator
         from brokersv2.analytics.options.events import OptionType
         from brokersv2.core.types import Exchange
+        from brokersv2.domain.options.models import OptionChainData
         
         # Fetch chain
         chain = await live_options_adapter.get_option_chain(
@@ -331,18 +296,16 @@ class TestGreeksWithMarketData:
             expiry_index=0,
         )
         
-        strikes = chain.strikes if hasattr(chain, 'strikes') else chain['strikes']
-        underlying_price = chain.underlying_price if hasattr(chain, 'underlying_price') else chain.get('underlying_price', 0)
+        assert isinstance(chain, OptionChainData)
+        underlying_price = chain.underlying_price
         
         if underlying_price == 0:
             pytest.skip("No underlying price available")
         
-        # Find ATM strike
-        atm_strike_data = min(strikes, key=lambda s: abs(
-            (s.strike_price if hasattr(s, 'strike_price') else s['strike_price']) - underlying_price
-        ))
-        
-        atm_strike = atm_strike_data.strike_price if hasattr(atm_strike_data, 'strike_price') else atm_strike_data['strike_price']
+        # Find ATM strike using chain helper
+        atm_strike = chain.atm_strike
+        if atm_strike == 0:
+            pytest.skip("No ATM strike available")
         
         # Calculate Greeks (30 days to expiry, 15% IV)
         calc = GreeksCalculator()
@@ -369,6 +332,7 @@ class TestGreeksWithMarketData:
         """Compare Greeks for OTM vs ITM options."""
         from brokersv2.analytics.options.greeks import GreeksCalculator
         from brokersv2.analytics.options.events import OptionType
+        from brokersv2.domain.options.models import OptionChainData
         
         chain = await live_options_adapter.get_option_chain(
             symbol=option_symbols["underlying"],
@@ -376,18 +340,16 @@ class TestGreeksWithMarketData:
             expiry_index=0,
         )
         
-        underlying_price = chain.underlying_price if hasattr(chain, 'underlying_price') else chain.get('underlying_price', 0)
-        strikes = chain.strikes if hasattr(chain, 'strikes') else chain['strikes']
+        assert isinstance(chain, OptionChainData)
+        underlying_price = chain.underlying_price
+        strikes = chain.strikes  # List[float]
         
         if underlying_price == 0 or len(strikes) < 5:
             pytest.skip("Insufficient data")
         
-        # Find OTM and ITM strikes
+        # Find OTM and ITM strikes (strikes is now List[float])
         otm_strike = strikes[-2]  # 2nd OTM call
         itm_strike = strikes[1]   # 2nd ITM call
-        
-        otm_price = otm_strike.strike_price if hasattr(otm_strike, 'strike_price') else otm_strike['strike_price']
-        itm_price = itm_strike.strike_price if hasattr(itm_strike, 'strike_price') else itm_strike['strike_price']
         
         calc = GreeksCalculator()
         
@@ -395,7 +357,7 @@ class TestGreeksWithMarketData:
         otm_greeks = calc.calculate_all_greeks(
             symbol="OTM_CE",
             underlying_price=underlying_price,
-            strike=otm_price,
+            strike=otm_strike,
             time_to_expiry=30.0,
             volatility=0.15,
             option_type=OptionType.CALL,
@@ -405,7 +367,7 @@ class TestGreeksWithMarketData:
         itm_greeks = calc.calculate_all_greeks(
             symbol="ITM_CE",
             underlying_price=underlying_price,
-            strike=itm_price,
+            strike=itm_strike,
             time_to_expiry=30.0,
             volatility=0.15,
             option_type=OptionType.CALL,
@@ -471,6 +433,7 @@ class TestOIAnalyticsWithLiveData:
         from brokersv2.analytics.options.oi_analytics import OIAnalyzer
         from brokersv2.analytics.options.events import OptionType
         from brokersv2.core.types import Exchange
+        from brokersv2.domain.options.models import OptionChainData
         
         chain = await live_options_adapter.get_option_chain(
             symbol=option_symbols["underlying"],
@@ -478,29 +441,25 @@ class TestOIAnalyticsWithLiveData:
             expiry_index=0,
         )
         
+        assert isinstance(chain, OptionChainData)
         analyzer = OIAnalyzer(option_symbols["underlying"])
-        strikes = chain.strikes if hasattr(chain, 'strikes') else chain['strikes']
         
-        # Load OI data
-        for strike_data in strikes:
-            strike_price = strike_data.strike_price if hasattr(strike_data, 'strike_price') else strike_data['strike_price']
+        # New API: iterate over strikes (List[float])
+        for strike_price in chain.strikes:
+            strike_level = chain.get_strike_level(strike_price)
+            if not strike_level:
+                continue
             
-            call_data = strike_data.call if hasattr(strike_data, 'call') else strike_data.get('call')
-            put_data = strike_data.put if hasattr(strike_data, 'put') else strike_data.get('put')
+            if strike_level.call:
+                analyzer.update_oi(strike_price, OptionType.CALL, strike_level.call_oi)
             
-            if call_data:
-                call_oi = call_data.oi if hasattr(call_data, 'oi') else call_data.get('oi', 0)
-                analyzer.update_oi(strike_price, OptionType.CALL, call_oi)
-            
-            if put_data:
-                put_oi = put_data.oi if hasattr(put_data, 'oi') else put_data.get('oi', 0)
-                analyzer.update_oi(strike_price, OptionType.PUT, put_oi)
+            if strike_level.put:
+                analyzer.update_oi(strike_price, OptionType.PUT, strike_level.put_oi)
         
         # Validate PCR at multiple strikes
-        test_strikes = [strikes[0], strikes[len(strikes)//2], strikes[-1]]
+        test_strikes = [chain.strikes[0], chain.strikes[len(chain.strikes)//2], chain.strikes[-1]]
         
-        for strike_data in test_strikes:
-            strike_price = strike_data.strike_price if hasattr(strike_data, 'strike_price') else strike_data['strike_price']
+        for strike_price in test_strikes:
             pcr = analyzer.get_pcr(strike_price)
             
             # PCR should be reasonable
@@ -512,6 +471,7 @@ class TestOIAnalyticsWithLiveData:
         from brokersv2.analytics.options.oi_analytics import OIAnalyzer
         from brokersv2.analytics.options.events import OptionType
         from brokersv2.core.types import Exchange
+        from brokersv2.domain.options.models import OptionChainData
         
         chain = await live_options_adapter.get_option_chain(
             symbol=option_symbols["underlying"],
@@ -519,22 +479,19 @@ class TestOIAnalyticsWithLiveData:
             expiry_index=0,
         )
         
+        assert isinstance(chain, OptionChainData)
         analyzer = OIAnalyzer(option_symbols["underlying"])
-        strikes = chain.strikes if hasattr(chain, 'strikes') else chain['strikes']
         
-        for strike_data in strikes:
-            strike_price = strike_data.strike_price if hasattr(strike_data, 'strike_price') else strike_data['strike_price']
+        for strike_price in chain.strikes:
+            strike_level = chain.get_strike_level(strike_price)
+            if not strike_level:
+                continue
             
-            call_data = strike_data.call if hasattr(strike_data, 'call') else strike_data.get('call')
-            put_data = strike_data.put if hasattr(strike_data, 'put') else strike_data.get('put')
+            if strike_level.call:
+                analyzer.update_oi(strike_price, OptionType.CALL, strike_level.call_oi)
             
-            if call_data:
-                call_oi = call_data.oi if hasattr(call_data, 'oi') else call_data.get('oi', 0)
-                analyzer.update_oi(strike_price, OptionType.CALL, call_oi)
-            
-            if put_data:
-                put_oi = put_data.oi if hasattr(put_data, 'oi') else put_data.get('oi', 0)
-                analyzer.update_oi(strike_price, OptionType.PUT, put_oi)
+            if strike_level.put:
+                analyzer.update_oi(strike_price, OptionType.PUT, strike_level.put_oi)
         
         # Find max OI strikes
         max_call_strike = analyzer.get_max_oi_strike(OptionType.CALL)
@@ -556,6 +513,7 @@ class TestOptionsDataQuality:
     async def test_strike_spacing(self, live_options_adapter, option_symbols):
         """Test strikes are properly spaced."""
         from brokersv2.core.types import Exchange
+        from brokersv2.domain.options.models import OptionChainData
         
         chain = await live_options_adapter.get_option_chain(
             symbol=option_symbols["underlying"],
@@ -563,11 +521,8 @@ class TestOptionsDataQuality:
             expiry_index=0,
         )
         
-        strikes = chain.strikes if hasattr(chain, 'strikes') else chain['strikes']
-        strike_prices = [
-            s.strike_price if hasattr(s, 'strike_price') else s['strike_price']
-            for s in strikes
-        ]
+        assert isinstance(chain, OptionChainData)
+        strike_prices = chain.strikes  # Already List[float], sorted
         
         # Should be sorted
         assert strike_prices == sorted(strike_prices), "Strikes not sorted"
@@ -581,6 +536,7 @@ class TestOptionsDataQuality:
     async def test_option_prices_positive(self, live_options_adapter, option_symbols):
         """Test all option prices are positive."""
         from brokersv2.core.types import Exchange
+        from brokersv2.domain.options.models import OptionChainData
         
         chain = await live_options_adapter.get_option_chain(
             symbol=option_symbols["underlying"],
@@ -588,22 +544,19 @@ class TestOptionsDataQuality:
             expiry_index=0,
         )
         
-        strikes = chain.strikes if hasattr(chain, 'strikes') else chain['strikes']
+        assert isinstance(chain, OptionChainData)
         
         negative_prices = 0
-        for strike_data in strikes:
-            call_data = strike_data.call if hasattr(strike_data, 'call') else strike_data.get('call')
-            put_data = strike_data.put if hasattr(strike_data, 'put') else strike_data.get('put')
+        for strike_price in chain.strikes:
+            strike_level = chain.get_strike_level(strike_price)
+            if not strike_level:
+                continue
             
-            if call_data:
-                ltp = call_data.ltp if hasattr(call_data, 'ltp') else call_data.get('ltp', 0)
-                if ltp < 0:
-                    negative_prices += 1
+            if strike_level.call and strike_level.call.ltp < 0:
+                negative_prices += 1
             
-            if put_data:
-                ltp = put_data.ltp if hasattr(put_data, 'ltp') else put_data.get('ltp', 0)
-                if ltp < 0:
-                    negative_prices += 1
+            if strike_level.put and strike_level.put.ltp < 0:
+                negative_prices += 1
         
         assert negative_prices == 0, f"Found {negative_prices} negative option prices"
 
@@ -611,6 +564,7 @@ class TestOptionsDataQuality:
     async def test_oi_non_negative(self, live_options_adapter, option_symbols):
         """Test all OI values are non-negative."""
         from brokersv2.core.types import Exchange
+        from brokersv2.domain.options.models import OptionChainData
         
         chain = await live_options_adapter.get_option_chain(
             symbol=option_symbols["underlying"],
@@ -618,21 +572,18 @@ class TestOptionsDataQuality:
             expiry_index=0,
         )
         
-        strikes = chain.strikes if hasattr(chain, 'strikes') else chain['strikes']
+        assert isinstance(chain, OptionChainData)
         
         negative_oi = 0
-        for strike_data in strikes:
-            call_data = strike_data.call if hasattr(strike_data, 'call') else strike_data.get('call')
-            put_data = strike_data.put if hasattr(strike_data, 'put') else strike_data.get('put')
+        for strike_price in chain.strikes:
+            strike_level = chain.get_strike_level(strike_price)
+            if not strike_level:
+                continue
             
-            if call_data:
-                oi = call_data.oi if hasattr(call_data, 'oi') else call_data.get('oi', 0)
-                if oi < 0:
-                    negative_oi += 1
+            if strike_level.call_oi < 0:
+                negative_oi += 1
             
-            if put_data:
-                oi = put_data.oi if hasattr(put_data, 'oi') else put_data.get('oi', 0)
-                if oi < 0:
-                    negative_oi += 1
+            if strike_level.put_oi < 0:
+                negative_oi += 1
         
         assert negative_oi == 0, f"Found {negative_oi} negative OI values"

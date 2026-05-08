@@ -112,8 +112,13 @@ class DriveDecay:
         """
         from app.domain.services.tick_utils import round_to_tick
 
-        bucket = round_to_tick(level, 0.05)
-        record = self._drive_1_records.get(bucket)
+        # Try to find matching record using multiple tick sizes for robustness
+        record = None
+        for tick_size in [0.05, 0.1, 0.5, 1.0]:
+            bucket = round_to_tick(level, tick_size)
+            if bucket in self._drive_1_records:
+                record = self._drive_1_records[bucket]
+                break
 
         if record is None:
             return DriveDecayResult(
