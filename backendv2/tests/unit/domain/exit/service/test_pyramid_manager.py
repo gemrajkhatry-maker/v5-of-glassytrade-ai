@@ -127,3 +127,23 @@ class TestPyramidManager:
         assert signal.size_multiplier == 1.0
         # SL should be min(101.0, 98.0 * 1.005) = 98.49
         assert signal.unified_sl < 100.0
+
+    def test_serialize_deserialize_position_state_roundtrip(self):
+        """Serialization and deserialization should preserve state."""
+        original = self.manager.serialize_position_state(
+            position_id="pos-123",
+            add_count=1,
+            entry_lvns=[99.5, 101.0],
+        )
+        position_id, add_count, entry_lvns = self.manager.deserialize_position_state(original)
+        assert position_id == "pos-123"
+        assert add_count == 1
+        assert entry_lvns == [99.5, 101.0]
+
+    def test_deserialize_handles_missing_fields_gracefully(self):
+        """Deserialization should handle missing fields with defaults."""
+        data = {"position_id": "pos-456"}
+        position_id, add_count, entry_lvns = self.manager.deserialize_position_state(data)
+        assert position_id == "pos-456"
+        assert add_count == 0
+        assert entry_lvns == []

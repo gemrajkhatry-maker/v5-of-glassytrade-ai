@@ -28,7 +28,9 @@ async def analyze_market(data: list[OHLCDataDTO]):
         for i, d in enumerate(data)
     ]
 
-    vp = build_volume_profile(bars, bucket_size=50.0)
+    vp = build_volume_profile(
+        bars, bucket_size=50.0, value_area_pct=0.70, tick_size=0.05,
+    )
     vwap, _, _, _, _ = calculate_vwap(bars)
     absorptions = detect_absorptions(bars)
     signal = generate_triple_a_signal(bars, absorptions, vp, vwap)

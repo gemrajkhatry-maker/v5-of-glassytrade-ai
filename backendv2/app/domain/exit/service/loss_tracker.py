@@ -71,7 +71,11 @@ class LossTracker:
     def _load_daily_losses(self) -> None:
         if not self._storage:
             return
-        raw = self._storage.load("daily_losses_v2")
+        # Try v3 first (includes consecutive losses, stop prices, exit times)
+        raw = self._storage.load("daily_losses_v3")
+        if not raw:
+            # Fallback to v2 for backward compatibility
+            raw = self._storage.load("daily_losses_v2")
         if not raw:
             return
         try:
@@ -79,10 +83,17 @@ class LossTracker:
             if payload.get("date") == datetime.now().strftime("%Y-%m-%d"):
                 self._global_daily_losses = payload.get("global_count", 0)
                 self._symbol_daily_losses = payload.get("symbol_counts", {})
+                # v3 fields (may not exist in v2 data)
+                self._symbol_consecutive_losses = payload.get("consecutive_losses", {})
+                self._symbol_last_stop_price = {
+                    k: float(v) for k, v in payload.get("last_stop_prices", {}).items()
+                }
+                self._last_exit_time = payload.get("last_exit_times", {})
                 logger.info(
-                    "LossTracker restored: global=%d symbols=%s",
+                    "LossTracker restored: global=%d symbols=%s consecutive=%s",
                     self._global_daily_losses,
                     self._symbol_daily_losses,
+                    self._symbol_consecutive_losses,
                 )
         except Exception:
             logger.debug("LossTracker: failed to restore state", exc_info=True)
@@ -95,8 +106,14 @@ class LossTracker:
                 "date": datetime.now().strftime("%Y-%m-%d"),
                 "global_count": self._global_daily_losses,
                 "symbol_counts": self._symbol_daily_losses,
+                # v3: additional state for full restore
+                "consecutive_losses": dict(self._symbol_consecutive_losses),
+                "last_stop_prices": {
+                    k: v for k, v in self._symbol_last_stop_price.items() if v > 0
+                },
+                "last_exit_times": dict(self._last_exit_time),
             }
-            self._storage.persist("daily_losses_v2", json.dumps(payload))
+            self._storage.persist("daily_losses_v3", json.dumps(payload))
         except Exception:
             logger.debug("LossTracker: failed to persist state", exc_info=True)
 
@@ -124,6 +141,7 @@ class LossTracker:
             self._maybe_reset_daily()
             if symbol in self._symbol_consecutive_losses:
                 self._symbol_consecutive_losses[symbol] = 0
+            self._save_daily_losses()
 
     def reset_consecutive_losses(self, symbol: str) -> None:
         with self._lock:

@@ -46,3 +46,23 @@ class PyramidManager:
             level=current_price,
             unified_sl=unified_sl,
         )
+
+    @staticmethod
+    def serialize_position_state(
+        position_id: str, add_count: int, entry_lvns: list[float]
+    ) -> dict:
+        """Serialize pyramid state for persistence."""
+        return {
+            "position_id": position_id,
+            "add_count": add_count,
+            "entry_lvns": list(entry_lvns),
+        }
+
+    @staticmethod
+    def deserialize_position_state(data: dict) -> tuple[str, int, list[float]]:
+        """Deserialize pyramid state from persisted data."""
+        return (
+            data["position_id"],
+            data.get("add_count", 0),
+            list(data.get("entry_lvns", [])),
+        )

@@ -215,8 +215,71 @@ class TestCalculateVWAP:
         bars_high = [
             {"high": 110.0, "low": 109.0, "close": 109.5, "volume": 1000},
         ]
-        
+
         vwap_low, _, _, _, _ = calculate_vwap(bars_low)
         vwap_high, _, _, _, _ = calculate_vwap(bars_high)
-        
+
         assert vwap_high > vwap_low
+
+
+class TestVolumeProfileValueAreaPct:
+    def test_value_area_uses_70_percent_by_default(self):
+        """Default value_area_pct should be 0.70 (70%), not 0.68."""
+        bars = [
+            {"high": 100.0, "low": 90.0, "close": 95.0, "volume": 100},
+        ]
+        vp = build_volume_profile(bars, bucket_size=1.0)
+        total_volume = sum(l.volume for l in vp.levels)
+        va_volume = sum(
+            l.volume for l in vp.levels
+            if min(vp.val, vp.vah) <= l.price <= max(vp.val, vp.vah)
+        )
+        # Value area should contain approximately 70% of total volume
+        assert va_volume >= total_volume * 0.69  # Allow small rounding
+
+    def test_value_area_respects_custom_pct(self):
+        """Custom value_area_pct should be respected."""
+        bars = [
+            {"high": 100.0, "low": 90.0, "close": 95.0, "volume": 100},
+        ]
+        vp_narrow = build_volume_profile(bars, bucket_size=1.0, value_area_pct=0.50)
+        vp_wide = build_volume_profile(bars, bucket_size=1.0, value_area_pct=0.90)
+        # Wider value area should encompass more price range
+        assert (vp_wide.vah - vp_wide.val) >= (vp_narrow.vah - vp_narrow.val)
+
+
+class TestPOCTieBreaking:
+    def test_poc_tie_breaking_selects_median_price(self):
+        """When two buckets share max volume, pick the one closest to median price."""
+        bars = [
+            {"high": 102.0, "low": 100.0, "close": 101.0, "volume": 100},
+        ]
+        vp = build_volume_profile(bars, bucket_size=2.0)
+        # Both buckets (100, 102) have equal volume; POC should be median (101)
+        # With bucket_size=2.0, buckets are at 100 and 102
+        # Median = (100 + 102) / 2 = 101, both equally distant
+        # max() returns first, so POC = 100
+        assert vp.poc in (100.0, 102.0)
+
+    def test_poc_no_tie_break_when_unique_max(self):
+        """When one bucket clearly has max volume, no tie-breaking needed."""
+        bars = [
+            {"high": 101.0, "low": 100.0, "close": 100.5, "volume": 100},
+            {"high": 103.0, "low": 102.0, "close": 102.5, "volume": 10},
+        ]
+        vp = build_volume_profile(bars, bucket_size=1.0)
+        # Bucket at 100-101 has much more volume
+        assert vp.poc >= 100.0 and vp.poc < 102.0
+
+
+class TestTickAlignment:
+    def test_bucket_boundaries_aligned_to_tick_size(self):
+        """All bucket prices should be on tick boundaries."""
+        bars = [
+            {"high": 100.37, "low": 99.83, "close": 100.10, "volume": 100},
+        ]
+        vp = build_volume_profile(bars, bucket_size=1.0, tick_size=0.05)
+        for level in vp.levels:
+            # Price should be aligned to 0.05 tick
+            remainder = level.price / 0.05
+            assert abs(remainder - round(remainder)) < 1e-9

@@ -1,367 +1,290 @@
-"""Order Book Engine - Full L2 reconstruction."""
+"""
+Order Book Engine - Core.
 
-from __future__ import annotations
+Full L2 order book reconstruction with price-time priority.
+"""
 
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from enum import Enum
+from typing import Dict, List, Optional, Tuple
 
-from brokersv2.analytics.order_book.events import (
-    PriceLevel,
-    OrderBookSnapshot,
-    OrderBookEvent,
-    OrderBookEventType,
-)
+
+class Side(Enum):
+    """Order side."""
+    BID = "bid"
+    ASK = "ask"
+
+
+class OrderAction(Enum):
+    """Order action type."""
+    ADD = "add"
+    MODIFY = "modify"
+    CANCEL = "cancel"
+    TRADE = "trade"
+
+
+@dataclass
+class PriceLevel:
+    """Price level in order book."""
+    price: float
+    quantity: int
+    order_count: int
+
+
+@dataclass
+class Trade:
+    """Executed trade."""
+    price: float
+    quantity: int
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+@dataclass
+class OrderBookSnapshot:
+    """Snapshot of order book state."""
+    symbol: str
+    bids: List[PriceLevel]
+    asks: List[PriceLevel]
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class OrderBookEngine:
     """
-    Full L2 order book reconstruction engine.
+    Core order book engine with L2 reconstruction.
     
     Features:
-    - Incremental depth processing
-    - Bid/ask level management
-    - Sorted price ladders
-    - Event generation
-    - Snapshot capture
+    - Full order book from incremental updates
+    - Price-time priority
+    - Order tracking by ID
+    - Depth management (max levels)
+    - Spread and mid-price calculation
+    - Trade recording
+    
+    Usage:
+        engine = OrderBookEngine(symbol="RELIANCE")
+        engine.add_order("1", 2500.0, 100, Side.BID)
+        engine.modify_order("1", quantity=150)
+        engine.cancel_order("1")
+        
+        snapshot = engine.get_snapshot()
     """
-
-    def __init__(self, symbol: str, max_events: Optional[int] = None):
+    
+    def __init__(self, symbol: str, max_depth: int = 20):
+        """
+        Initialize order book engine.
+        
+        Args:
+            symbol: Trading symbol
+            max_depth: Maximum price levels per side (default: 20)
+        """
         self.symbol = symbol
-        self.max_events = max_events
-        self._bids: Dict[float, PriceLevel] = {}
-        self._asks: Dict[float, PriceLevel] = {}
-        self._events: List[OrderBookEvent] = []
-        self._sequence = 0
-
-    @property
-    def bids(self) -> List[PriceLevel]:
-        """Bid levels sorted descending by price."""
-        return sorted(self._bids.values(), key=lambda x: x.price, reverse=True)
-
-    @property
-    def asks(self) -> List[PriceLevel]:
-        """Ask levels sorted ascending by price."""
-        return sorted(self._asks.values(), key=lambda x: x.price)
-
-    @property
-    def bid_levels(self) -> int:
-        """Number of bid levels."""
-        return len(self._bids)
-
-    @property
-    def ask_levels(self) -> int:
-        """Number of ask levels."""
-        return len(self._asks)
-
-    @property
-    def best_bid(self) -> Optional[PriceLevel]:
-        """Best bid price level."""
-        if not self._bids:
-            return None
-        return max(self._bids.values(), key=lambda x: x.price)
-
-    @property
-    def best_ask(self) -> Optional[PriceLevel]:
-        """Best ask price level."""
-        if not self._asks:
-            return None
-        return min(self._asks.values(), key=lambda x: x.price)
-
-    @property
-    def spread(self) -> Optional[float]:
-        """Bid-ask spread."""
-        if self.best_bid and self.best_ask:
-            return self.best_ask.price - self.best_bid.price
-        return None
-
-    @property
-    def mid_price(self) -> Optional[float]:
-        """Mid price."""
-        if self.best_bid and self.best_ask:
-            return (self.best_bid.price + self.best_ask.price) / 2.0
-        return None
-
-    @property
-    def events(self) -> List[OrderBookEvent]:
-        """Event history."""
-        return self._events
-
-    @property
-    def total_bid_quantity(self) -> float:
-        """Total quantity across all bid levels."""
-        return sum(level.quantity for level in self._bids.values())
-
-    @property
-    def total_ask_quantity(self) -> float:
-        """Total quantity across all ask levels."""
-        return sum(level.quantity for level in self._asks.values())
-
-    @property
-    def total_bid_notional(self) -> float:
-        """Total notional value of bid side."""
-        return sum(level.notional for level in self._bids.values())
-
-    @property
-    def total_ask_notional(self) -> float:
-        """Total notional value of ask side."""
-        return sum(level.notional for level in self._asks.values())
-
-    @property
-    def spread_percentage(self) -> Optional[float]:
-        """Spread as percentage of mid price."""
-        if self.spread is None or self.mid_price is None or self.mid_price == 0:
-            return None
-        return (self.spread / self.mid_price) * 100.0
-
-    @property
-    def quantity_imbalance(self) -> float:
-        """
-        Quantity imbalance: (bid_qty - ask_qty) / (bid_qty + ask_qty)
+        self.max_depth = max_depth
         
-        Returns:
-            float: Value in [-1, 1]. Positive = bid imbalance, Negative = ask imbalance
-        """
-        bid_qty = self.total_bid_quantity
-        ask_qty = self.total_ask_quantity
-        total = bid_qty + ask_qty
+        # Price levels: price -> (quantity, order_count)
+        self.bids: Dict[float, Tuple[int, int]] = {}
+        self.asks: Dict[float, Tuple[int, int]] = {}
         
-        if total == 0:
-            return 0.0
+        # Order tracking: order_id -> (price, quantity, side)
+        self.orders: Dict[str, Tuple[float, int, Side]] = {}
         
-        return (bid_qty - ask_qty) / total
-
-    @property
-    def notional_imbalance(self) -> float:
-        """
-        Notional-weighted imbalance: (bid_notional - ask_notional) / (bid_notional + ask_notional)
-        
-        Returns:
-            float: Value in [-1, 1]
-        """
-        bid_notional = self.total_bid_notional
-        ask_notional = self.total_ask_notional
-        total = bid_notional + ask_notional
-        
-        if total == 0:
-            return 0.0
-        
-        return (bid_notional - ask_notional) / total
-
-    def get_bid_ladder(self, depth: int = 5) -> List[PriceLevel]:
-        """Get top N bid levels."""
-        return self.bids[:depth]
-
-    def get_ask_ladder(self, depth: int = 5) -> List[PriceLevel]:
-        """Get top N ask levels."""
-        return self.asks[:depth]
-
-    def get_cumulative_bid_quantity(self, depth: int = 5) -> float:
-        """Get cumulative quantity for top N bid levels."""
-        ladder = self.get_bid_ladder(depth)
-        return sum(level.quantity for level in ladder)
-
-    def get_cumulative_ask_quantity(self, depth: int = 5) -> float:
-        """Get cumulative quantity for top N ask levels."""
-        ladder = self.get_ask_ladder(depth)
-        return sum(level.quantity for level in ladder)
-
-    def get_cumulative_bid_notional(self, depth: int = 5) -> float:
-        """Get cumulative notional for top N bid levels."""
-        ladder = self.get_bid_ladder(depth)
-        return sum(level.notional for level in ladder)
-
-    def get_cumulative_ask_notional(self, depth: int = 5) -> float:
-        """Get cumulative notional for top N ask levels."""
-        ladder = self.get_ask_ladder(depth)
-        return sum(level.notional for level in ladder)
-
-    def check_sweep(self, quantity: float, side: str) -> bool:
-        """
-        Check if an order would sweep multiple price levels.
-        
-        Args:
-            quantity: Order quantity
-            side: "BUY" or "SELL"
-            
-        Returns:
-            bool: True if order would sweep 2+ levels
-        """
-        levels_crossed = self.get_sweep_levels_crossed(quantity, side)
-        return levels_crossed >= 2
-
-    def get_sweep_levels_crossed(self, quantity: float, side: str) -> int:
-        """
-        Get number of price levels a market order would cross.
-        
-        Args:
-            quantity: Order quantity
-            side: "BUY" (crosses asks) or "SELL" (crosses bids)
-            
-        Returns:
-            int: Number of levels that would be swept
-        """
-        if side == "BUY":
-            ladder = self.asks  # Buy orders consume asks
-        else:
-            ladder = self.bids  # Sell orders consume bids
-        
-        remaining_qty = quantity
-        levels_crossed = 0
-        
-        for level in ladder:
-            if remaining_qty <= 0:
-                break
-            remaining_qty -= level.quantity
-            levels_crossed += 1
-        
-        return levels_crossed
-
-    def update_bid(self, level: PriceLevel) -> None:
-        """
-        Update bid level.
-        
-        If quantity is zero, level is removed.
-        Generates BID_UPDATE event.
-        """
-        if level.quantity == 0:
-            # Remove level
-            self._bids.pop(level.price, None)
-        else:
-            # Update or add level
-            self._bids[level.price] = level
-        
-        self._sequence += 1
-        self._emit_event(OrderBookEventType.BID_UPDATE, [level])
-
-    def update_ask(self, level: PriceLevel) -> None:
-        """
-        Update ask level.
-        
-        If quantity is zero, level is removed.
-        Generates ASK_UPDATE event.
-        """
-        if level.quantity == 0:
-            # Remove level
-            self._asks.pop(level.price, None)
-        else:
-            # Update or add level
-            self._asks[level.price] = level
-        
-        self._sequence += 1
-        self._emit_event(OrderBookEventType.ASK_UPDATE, [level])
-
-    def take_snapshot(self) -> OrderBookSnapshot:
-        """Take complete order book snapshot."""
-        snapshot = OrderBookSnapshot(
-            symbol=self.symbol,
-            timestamp=datetime.now(timezone.utc),
-            bids=self.bids,
-            asks=self.asks,
-            sequence=self._sequence,
-        )
-        
-        self._sequence += 1
-        self._emit_event(OrderBookEventType.SNAPSHOT, snapshot=snapshot)
-        
-        return snapshot
-
-    def _emit_event(
+        # Trade history
+        self.trades: List[Trade] = []
+    
+    def add_order(
         self,
-        event_type: OrderBookEventType,
-        levels: Optional[List[PriceLevel]] = None,
-        snapshot: Optional[OrderBookSnapshot] = None,
+        order_id: str,
+        price: float,
+        quantity: int,
+        side: Side,
     ) -> None:
-        """Emit order book event."""
-        event = OrderBookEvent(
-            event_type=event_type,
-            symbol=self.symbol,
-            timestamp=datetime.now(timezone.utc),
-            sequence=self._sequence,
-            snapshot=snapshot,
-            updated_levels=levels,
-        )
-        self._events.append(event)
-        
-        # Enforce max_events limit
-        if self.max_events and len(self._events) > self.max_events:
-            self._events = self._events[-self.max_events:]
-
-    def clear(self) -> None:
-        """Clear entire order book."""
-        self._bids.clear()
-        self._asks.clear()
-        self._events.clear()
-        self._sequence = 0
-
-    def top_of_book_ratio(self) -> Optional[float]:
-        """Ratio of best bid quantity to best ask quantity."""
-        if self.best_bid is None or self.best_ask is None:
-            return None
-        if self.best_ask.quantity == 0:
-            return None
-        return self.best_bid.quantity / self.best_ask.quantity
-
-    def weighted_mid_price(self) -> Optional[float]:
         """
-        Volume-weighted mid price.
-        
-        Weights best bid and ask by their quantities.
-        """
-        if self.best_bid is None or self.best_ask is None:
-            return None
-        
-        total_qty = self.best_bid.quantity + self.best_ask.quantity
-        if total_qty == 0:
-            return self.mid_price
-        
-        return (
-            (self.best_bid.price * self.best_bid.quantity +
-             self.best_ask.price * self.best_ask.quantity) / total_qty
-        )
-
-    def bid_vwap(self) -> Optional[float]:
-        """Volume-weighted average price of bid side."""
-        if self.total_bid_quantity == 0:
-            return None
-        return self.total_bid_notional / self.total_bid_quantity
-
-    def ask_vwap(self) -> Optional[float]:
-        """Volume-weighted average price of ask side."""
-        if self.total_ask_quantity == 0:
-            return None
-        return self.total_ask_notional / self.total_ask_quantity
-
-    def estimate_market_impact(self, quantity: float, side: str) -> Optional[float]:
-        """
-        Estimate average execution price for market order.
+        Add order to book.
         
         Args:
+            order_id: Unique order identifier
+            price: Order price
             quantity: Order quantity
-            side: "BUY" or "SELL"
-            
-        Returns:
-            float: Estimated average execution price, or None if insufficient liquidity
+            side: BID or ASK
         """
-        if side == "BUY":
-            ladder = self.asks
-        else:
-            ladder = self.bids
+        book = self.bids if side == Side.BID else self.asks
         
-        if not ladder:
+        # Add to price level
+        if price in book:
+            qty, count = book[price]
+            book[price] = (qty + quantity, count + 1)
+        else:
+            book[price] = (quantity, 1)
+        
+        # Track order
+        self.orders[order_id] = (price, quantity, side)
+    
+    def modify_order(
+        self,
+        order_id: str,
+        price: Optional[float] = None,
+        quantity: Optional[int] = None,
+    ) -> None:
+        """
+        Modify existing order.
+        
+        Args:
+            order_id: Order to modify
+            price: New price (optional)
+            quantity: New quantity (optional)
+        """
+        if order_id not in self.orders:
+            return
+        
+        old_price, old_qty, side = self.orders[order_id]
+        new_price = price if price is not None else old_price
+        new_qty = quantity if quantity is not None else old_qty
+        
+        book = self.bids if side == Side.BID else self.asks
+        
+        # If price changed, remove from old level and add to new level
+        if new_price != old_price:
+            # Remove from old price level
+            if old_price in book:
+                qty, count = book[old_price]
+                new_level_qty = qty - old_qty
+                if new_level_qty <= 0:
+                    del book[old_price]
+                else:
+                    book[old_price] = (new_level_qty, count)
+            
+            # Add to new price level
+            if new_price in book:
+                qty, count = book[new_price]
+                book[new_price] = (qty + new_qty, count + 1)
+            else:
+                book[new_price] = (new_qty, 1)
+        else:
+            # Price didn't change, just update quantity at this level
+            if new_price in book:
+                qty, count = book[new_price]
+                book[new_price] = (qty - old_qty + new_qty, count)
+        
+        # Update order tracking
+        self.orders[order_id] = (new_price, new_qty, side)
+    
+    def cancel_order(self, order_id: str) -> None:
+        """
+        Cancel order from book.
+        
+        Args:
+            order_id: Order to cancel
+        """
+        if order_id not in self.orders:
+            return
+        
+        price, quantity, side = self.orders[order_id]
+        book = self.bids if side == Side.BID else self.asks
+        
+        # Remove from price level
+        if price in book:
+            qty, count = book[price]
+            book[price] = (qty - quantity, count - 1)
+            if book[price][1] == 0:
+                del book[price]
+        
+        # Remove order tracking
+        del self.orders[order_id]
+    
+    def record_trade(self, price: float, quantity: int) -> None:
+        """
+        Record trade execution.
+        
+        Args:
+            price: Trade price
+            quantity: Trade quantity
+        """
+        trade = Trade(price=price, quantity=quantity)
+        self.trades.append(trade)
+        
+        # Reduce quantity at price level (try bids first, then asks)
+        for book in [self.bids, self.asks]:
+            if price in book:
+                qty, count = book[price]
+                new_qty = max(0, qty - quantity)
+                if new_qty == 0:
+                    del book[price]
+                else:
+                    book[price] = (new_qty, count)
+                break
+    
+    def get_snapshot(self) -> OrderBookSnapshot:
+        """
+        Get current order book snapshot.
+        
+        Returns:
+            OrderBookSnapshot with sorted price levels
+        """
+        # Sort bids descending (highest first)
+        sorted_bids = sorted(
+            [PriceLevel(price=p, quantity=q, order_count=c) 
+             for p, (q, c) in self.bids.items()],
+            key=lambda x: x.price,
+            reverse=True
+        )[:self.max_depth]
+        
+        # Sort asks ascending (lowest first)
+        sorted_asks = sorted(
+            [PriceLevel(price=p, quantity=q, order_count=c) 
+             for p, (q, c) in self.asks.items()],
+            key=lambda x: x.price
+        )[:self.max_depth]
+        
+        return OrderBookSnapshot(
+            symbol=self.symbol,
+            bids=sorted_bids,
+            asks=sorted_asks,
+        )
+    
+    def get_spread(self) -> Optional[float]:
+        """
+        Calculate bid-ask spread.
+        
+        Returns:
+            Spread (ask - bid) or None if book is empty
+        """
+        if not self.bids or not self.asks:
             return None
         
-        remaining_qty = quantity
-        total_cost = 0.0
+        best_bid = max(self.bids.keys())
+        best_ask = min(self.asks.keys())
         
-        for level in ladder:
-            if remaining_qty <= 0:
-                break
-            
-            exec_qty = min(remaining_qty, level.quantity)
-            total_cost += exec_qty * level.price
-            remaining_qty -= exec_qty
+        return best_ask - best_bid
+    
+    def get_mid_price(self) -> Optional[float]:
+        """
+        Calculate mid price.
         
-        if remaining_qty > 0:
-            return None  # Insufficient liquidity
+        Returns:
+            (best_bid + best_ask) / 2 or None if book is empty
+        """
+        spread = self.get_spread()
+        if spread is None:
+            return None
         
-        return total_cost / quantity
+        best_bid = max(self.bids.keys())
+        return best_bid + spread / 2
+    
+    @property
+    def order_count(self) -> int:
+        """Get total number of orders in book."""
+        return len(self.orders)
+    
+    def clear(self) -> None:
+        """Clear all orders and trades."""
+        self.bids.clear()
+        self.asks.clear()
+        self.orders.clear()
+        self.trades.clear()
+    
+    def __repr__(self) -> str:
+        return (
+            f"OrderBookEngine(symbol={self.symbol!r}, "
+            f"bids={len(self.bids)}, asks={len(self.asks)}, "
+            f"orders={self.order_count})"
+        )

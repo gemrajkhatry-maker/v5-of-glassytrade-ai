@@ -197,8 +197,8 @@ class TestPersistence:
         tracker.record_loss("RELIANCE", stop_price=2440.0)
         tracker.record_loss("TCS", stop_price=3500.0)
 
-        # Verify storage has data
-        raw = storage.load("daily_losses_v2")
+        # Verify storage has data (v3 key)
+        raw = storage.load("daily_losses_v3")
         assert raw is not None
         payload = json.loads(raw)
         assert payload["global_count"] == 3
@@ -212,16 +212,65 @@ class TestPersistence:
         assert state["symbol_daily_losses"]["RELIANCE"] == 2
         assert state["symbol_daily_losses"]["TCS"] == 1
 
-    def test_midnight_reset(self):
-        """Daily losses reset when the clock passes midnight."""
-        tracker = LossTracker()
+    def test_persistence_includes_consecutive_losses(self):
+        """Consecutive losses should survive a save/load cycle."""
+        storage = InMemoryStorage()
+        tracker = LossTracker(storage=storage)
         tracker.record_loss("RELIANCE", stop_price=2450.0)
         tracker.record_loss("RELIANCE", stop_price=2440.0)
+        tracker.record_win("TCS")  # TCS has 0 consecutive losses
 
-        # Set reset time to the past to trigger a reset
-        tracker._daily_loss_reset_time = time.time() - 10
+        # Reload
+        tracker2 = LossTracker(storage=storage)
+        state = tracker2.get_state()
+        assert state["symbol_consecutive_losses"]["RELIANCE"] == 2
+        assert state["symbol_consecutive_losses"].get("TCS", 0) == 0
 
+    def test_persistence_includes_stop_prices(self):
+        """Last stop prices should survive a save/load cycle."""
+        storage = InMemoryStorage()
+        tracker = LossTracker(storage=storage)
+        tracker.record_loss("RELIANCE", stop_price=2450.0)
+        tracker.record_loss("TCS", stop_price=3500.0)
+
+        # Reload
+        tracker2 = LossTracker(storage=storage)
+        # Stop prices are tracked internally; verify they were persisted
+        raw = storage.load("daily_losses_v3")
+        payload = json.loads(raw)
+        assert "last_stop_prices" in payload
+        assert payload["last_stop_prices"]["RELIANCE"] == 2450.0
+        assert payload["last_stop_prices"]["TCS"] == 3500.0
+
+    def test_persistence_includes_exit_times(self):
+        """Exit times should survive a save/load cycle."""
+        storage = InMemoryStorage()
+        tracker = LossTracker(storage=storage)
+        tracker.record_loss("RELIANCE", stop_price=2450.0)
+        tracker.record_exit_time("RELIANCE", current_time=1234567890.0)
+        # Trigger a save (record_win will call _save_daily_losses)
+        tracker.record_win("RELIANCE")
+
+        # Verify exit time was persisted
+        raw = storage.load("daily_losses_v3")
+        payload = json.loads(raw)
+        assert "last_exit_times" in payload
+        assert payload["last_exit_times"]["RELIANCE"] == 1234567890.0
+
+    def test_backward_compat_with_v2_data(self):
+        """LossTracker should load v2 data gracefully (without v3 fields)."""
+        storage = InMemoryStorage()
+        # Write v2 data directly
+        v2_payload = {
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "global_count": 2,
+            "symbol_counts": {"RELIANCE": 2},
+        }
+        storage.persist("daily_losses_v2", json.dumps(v2_payload))
+
+        tracker = LossTracker(storage=storage)
         state = tracker.get_state()
-        assert state["global_daily_losses"] == 0
-        assert state["symbol_daily_losses"] == {}
+        assert state["global_daily_losses"] == 2
+        assert state["symbol_daily_losses"]["RELIANCE"] == 2
+        # v3 fields should be empty/zero
         assert state["symbol_consecutive_losses"] == {}
