@@ -34,7 +34,7 @@ class DhanConfig:
     """DhanHQ configuration."""
     client_id: str
     access_token: str
-    base_url: str = "https://api.dhan.co"
+    base_url: str = "https://api.dhan.co/v2"  # Dhan v2 API
     ws_url: str = "wss://api.dhan.co/ws"
     timeout: int = 30
 
@@ -87,8 +87,10 @@ class DhanHttpClient:
         Returns:
             JSON response as dict
         """
-        # Wait for rate limit token
-        await self._rate_limiter.wait_for_token(bucket)
+        # Wait for rate limit token (synchronous check with timeout)
+        if not self._rate_limiter.wait_for_token(bucket):
+            logger.warning(f"Rate limit timeout for bucket: {bucket}")
+            raise TimeoutError(f"Rate limit exceeded for {bucket}")
         
         session = await self._get_session()
         url = f"{self.config.base_url}{endpoint}"
@@ -208,3 +210,113 @@ class DhanHttpClient:
             ))
         
         return candles
+    
+    async def get_option_chain(
+        self,
+        symbol: str,
+        exchange: str = "NSE",
+        expiry_index: int = 0,
+        mapper: Optional[InstrumentMapper] = None,
+    ) -> Dict[str, Any]:
+        """
+        Fetch option chain from DhanHQ API.
+        
+        API: POST /optionchain
+        Body: {
+            "UnderlyingScrip": <security_id>,
+            "UnderlyingSeg": <segment>,
+            "Expiry": <expiry_date>
+        }
+        
+        Args:
+            symbol: Underlying symbol (e.g., "NIFTY", "BANKNIFTY")
+            exchange: Exchange code (default: "NSE")
+            expiry_index: Expiry selection (0=current, 1=near, 2=far)
+            mapper: Instrument mapper to resolve security ID
+        
+        Returns:
+            Dict with option chain data
+        """
+        # Index underlyings that use IDX_I segment
+        INDEX_UNDERLYINGS = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "SENSEX", "BANKEX"}
+        
+        # Determine API segment
+        if symbol.upper() in INDEX_UNDERLYINGS:
+            api_segment = "IDX_I"
+            # Index security IDs (hardcoded for common indices)
+            index_security_ids = {
+                "NIFTY": "13",
+                "BANKNIFTY": "14",
+                "FINNIFTY": "23",
+                "MIDCPNIFTY": "26",
+            }
+            security_id = index_security_ids.get(symbol.upper(), "")
+        else:
+            # For stocks, use mapper if available
+            if mapper:
+                from brokersv2.domain.instrument.models import CanonicalInstrument
+                
+                canonical = CanonicalInstrument.create_equity(
+                    symbol=symbol.upper(),
+                    exchange=Exchange.NSE if exchange == "NSE" else Exchange.BSE,
+                )
+                mapping = mapper.canonical_to_broker_mapping(canonical)
+                if mapping:
+                    security_id = mapping.security_id
+                    api_segment = mapping.exchange_segment
+                else:
+                    security_id = ""
+                    api_segment = "NSE_FNO" if exchange == "NSE" else "BSE_FNO"
+            else:
+                security_id = ""
+                api_segment = "NSE_FNO" if exchange == "NSE" else "BSE_FNO"
+        
+        if not security_id:
+            raise ValueError(f"Cannot resolve security_id for {symbol}. Please register instrument in mapper.")
+        
+        # Step 1: Fetch expiry list
+        logger.info(f"Fetching expiry list for {symbol} (security_id={security_id}, segment={api_segment})")
+        expiry_payload = {
+            "UnderlyingScrip": int(security_id) if security_id.isdigit() else security_id,
+            "UnderlyingSeg": api_segment,
+        }
+        
+        expiry_data = await self._request(
+            "POST",
+            "/optionchain/expirylist",
+            bucket="non_trading",
+            json=expiry_payload,
+        )
+        
+        # Parse expiry list
+        expiries = expiry_data.get("data", [])
+        if isinstance(expiries, dict):
+            expiries = expiries.get("data", [])
+        
+        if not expiries or expiry_index >= len(expiries):
+            raise ValueError(f"No expiry found at index {expiry_index} for {symbol}")
+        
+        expiry_date = expiries[expiry_index]
+        logger.info(f"Selected expiry: {expiry_date} (index={expiry_index})")
+        
+        # Step 2: Fetch option chain for selected expiry
+        chain_payload = {
+            "UnderlyingScrip": int(security_id) if security_id.isdigit() else security_id,
+            "UnderlyingSeg": api_segment,
+            "Expiry": expiry_date,
+        }
+        
+        logger.info(f"Fetching option chain: {symbol} expiry={expiry_date}")
+        data = await self._request(
+            "POST",
+            "/optionchain",
+            bucket="option_chain",  # Use specific bucket for rate limiting
+            json=chain_payload,
+        )
+        
+        logger.info(f"Option chain received for {symbol} expiry={expiry_date}")
+        
+        # Add expiry date to response for adapter to use
+        data['expiry'] = expiry_date
+        
+        return data

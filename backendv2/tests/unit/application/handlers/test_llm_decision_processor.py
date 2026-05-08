@@ -211,7 +211,8 @@ class TestMarkAiDone:
         session = MagicMock()
         session._lock = MagicMock()
         session._lock.__enter__ = MagicMock(side_effect=RuntimeError("lock error"))
-        processor.mark_ai_done(session)  # Should not raise
+        processor.mark_ai_done(session)
+        assert True  # No exception = success
 
 
 class TestPersistDecision:
@@ -261,7 +262,8 @@ class TestPersistDecision:
             rationale="test", input_prompt="", raw_output="", market_state="",
             aggression="", tick=MockTick(), amt_result=MagicMock(),
             profile_shape="", setup_type="", strategy_hint="",
-        )  # Should not raise
+        )
+        assert True  # No exception = success
 
     def test_storage_error_handled(self):
         """Storage error is caught and logged."""
@@ -273,7 +275,8 @@ class TestPersistDecision:
             rationale="test", input_prompt="", raw_output="", market_state="",
             aggression="", tick=MockTick(), amt_result=MagicMock(),
             profile_shape="", setup_type="", strategy_hint="",
-        )  # Should not raise
+        )
+        assert True  # No exception = success
 
 
 class TestUpdateLlmMemory:

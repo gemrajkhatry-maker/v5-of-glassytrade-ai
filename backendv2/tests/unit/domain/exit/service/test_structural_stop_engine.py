@@ -192,3 +192,107 @@ class TestStructuralStopEngine:
         assert stop.distance_pct == pytest.approx(
             abs(stop.price - 100.0) / 100.0, abs=0.001
         )
+
+    def test_lvn_long_no_candidates_below_entry(self):
+        """When all LVNs are above entry for LONG, fallback to 1.5% stop."""
+        stop = compute_structural_stop(
+            entry_price=100.0,
+            direction="LONG",
+            setup_type="AAA",
+            lvns=(105.0, 110.0),  # All above entry
+            tick_size=0.05,
+        )
+
+        assert stop.reason == StopReason.FALLBACK.value
+        assert stop.price == pytest.approx(98.5, abs=0.1)
+
+    def test_lvn_short_no_candidates_above_entry(self):
+        """When all LVNs are below entry for SHORT, fallback to 1.5% stop."""
+        stop = compute_structural_stop(
+            entry_price=100.0,
+            direction="SHORT",
+            setup_type="AAA",
+            lvns=(95.0, 90.0),  # All below entry
+            tick_size=0.05,
+        )
+
+        assert stop.reason == StopReason.FALLBACK.value
+        assert stop.price == pytest.approx(101.5, abs=0.1)
+
+    def test_momentum_long_no_ib_low_no_val(self):
+        """Momentum LONG with no IB low and no VAL falls back."""
+        stop = compute_structural_stop(
+            entry_price=100.0,
+            direction="LONG",
+            setup_type="MOMENTUM",
+            ib_high=105.0,
+            ib_low=0.0,
+            vah=110.0,
+            val=0.0,
+            tick_size=0.05,
+        )
+
+        assert stop.reason == StopReason.FALLBACK.value
+
+    def test_momentum_short_no_ib_high_no_vah(self):
+        """Momentum SHORT with no IB high and no VAH falls back."""
+        stop = compute_structural_stop(
+            entry_price=100.0,
+            direction="SHORT",
+            setup_type="MOMENTUM",
+            ib_high=0.0,
+            ib_low=95.0,
+            vah=0.0,
+            val=90.0,
+            tick_size=0.05,
+        )
+
+        assert stop.reason == StopReason.FALLBACK.value
+
+    def test_nearest_level_short_uses_vah_and_ib_high(self):
+        """Default fallback for SHORT uses VAH and IB high levels."""
+        stop = compute_structural_stop(
+            entry_price=100.0,
+            direction="SHORT",
+            setup_type="",
+            lvns=(95.0,),
+            hvns=(96.0,),
+            vah=105.0,
+            val=90.0,
+            ib_high=103.0,
+            ib_low=97.0,
+            tick_size=0.05,
+        )
+
+        # Should use nearest level above entry (103.0 from ib_high)
+        assert stop.price > 100.0
+
+    def test_nearest_level_fallback_no_levels(self):
+        """Default fallback with no levels uses 1.5% stop."""
+        stop = compute_structural_stop(
+            entry_price=100.0,
+            direction="LONG",
+            setup_type="",
+            lvns=(),
+            hvns=(),
+            vah=0.0,
+            val=0.0,
+            ib_high=0.0,
+            ib_low=0.0,
+            tick_size=0.05,
+        )
+
+        assert stop.reason == StopReason.FALLBACK.value
+        assert stop.price == pytest.approx(98.5, abs=0.1)
+
+    def test_zero_tick_size_no_rounding(self):
+        """Zero tick size returns price without rounding."""
+        stop = compute_structural_stop(
+            entry_price=100.0,
+            direction="LONG",
+            setup_type="",
+            tick_size=0.0,
+        )
+
+        # Should still compute fallback, just no rounding
+        assert stop.price > 0

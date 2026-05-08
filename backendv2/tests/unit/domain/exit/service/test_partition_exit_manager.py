@@ -77,6 +77,7 @@ class TestPartitionStateFields:
             state=state,
             market_state="IMBALANCED",
         )
+        assert True  # No AttributeError = success
 
 
 # ---------------------------------------------------------------------------

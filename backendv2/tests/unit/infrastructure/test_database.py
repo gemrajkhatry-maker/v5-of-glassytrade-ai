@@ -126,9 +126,17 @@ class TestSessionProfile:
 
 class TestKVStore:
     def test_persist_and_load(self, db):
-        self = db
-        # KV store via raw SQL
-        pass
+        """KV store persists and retrieves values."""
+        db.persist("test_key", "test_value")
+        result = db.load("test_key")
+        assert result == "test_value"
+
+    def test_persist_and_delete(self, db):
+        """KV store deletes values."""
+        db.persist("test_key", "test_value")
+        db.persist("test_key", None)
+        result = db.load("test_key")
+        assert result is None
 
 
 class TestBatchWrites:

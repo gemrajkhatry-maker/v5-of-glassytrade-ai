@@ -67,7 +67,12 @@ class TestFullPipelineChain:
         # All ticks in same period → single active candle with 10 ticks processed internally
         snapshot = builder.snapshot()
         assert snapshot is not None
-        assert len(snapshot.get("active", [])) >= 1
+        active_candles = snapshot.get("active", [])
+        assert len(active_candles) >= 1
+        # Verify candle dict has accumulated volume from all ticks
+        candle = active_candles[0]
+        assert isinstance(candle, dict)
+        assert candle.get("volume", 0) > 0  # Each tick has volume=100
 
     def test_signal_generation_produces_signal(self):
         """SignalGeneration produces Signal from FeatureVector."""
@@ -89,6 +94,9 @@ class TestFullPipelineChain:
         assert len(signals) == 1
         assert isinstance(signals[0], Signal)
         assert signals[0].type in ("LONG", "SHORT", "NO_TRADE")
+        # Verify signal has valid structure
+        assert signals[0].symbol == "NIFTY"
+        assert 0.0 <= signals[0].confidence <= 1.0
 
     def test_gate_evaluation(self):
         """GateEvaluation evaluates a signal through gates."""
@@ -102,6 +110,9 @@ class TestFullPipelineChain:
         results = ge.process(signal)
         assert len(results) == 1
         assert isinstance(results[0], GateResult)
+        # Verify gate result has meaningful fields
+        assert results[0].symbol == "NIFTY"
+        assert results[0].result in (GateResultType.APPROVED, GateResultType.REJECTED)
 
     def test_risk_evaluation(self):
         """RiskEvaluation evaluates a gate result."""
@@ -119,6 +130,9 @@ class TestFullPipelineChain:
         results = re.process(gate)
         assert len(results) == 1
         assert isinstance(results[0], RiskResult)
+        # Verify risk result has expected fields
+        assert results[0].symbol == "NIFTY"
+        assert hasattr(results[0], "passed") or hasattr(results[0], "approved")
 
     def test_100_ticks_processed_sequentially(self):
         """100 ticks processed through core stages without errors."""
@@ -193,14 +207,16 @@ class TestStatePropagation:
     """Test state propagates correctly through pipeline stages."""
 
     def test_telemetry_records_stages(self):
-        """TelemetryPipeline records stage metrics."""
+        """TelemetryPipeline records stage metrics via start_span/end_span."""
         tel = TelemetryPipeline()
         tel.warmup()
-        # TelemetryPipeline accepts dict payloads
-        tel.process({"stage": "TickSequencer", "latency_ns": 100})
-        # Verify telemetry accepts the payload without error
-        stats = tel.get_stats() if hasattr(tel, "get_stats") else None
-        assert stats is not None or True  # Telemetry may not expose stats
+        # Use the correct API: start_span and end_span
+        tel.start_span(1)
+        time.sleep(0.001)  # Small delay
+        tel.end_span("TickSequencer", 1)
+        # Verify telemetry recorded latency
+        assert "TickSequencer" in tel._latencies_ns
+        assert len(tel._latencies_ns["TickSequencer"]) >= 1
 
     def test_warmup_resets_all_stages(self):
         """Warmup resets all stages to initial state."""

@@ -1,0 +1,64 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, stable_*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          cd backendv2
+          pip install -e .
+          pip install pytest pytest-cov pytest-asyncio pytest-timeout
+
+      - name: Run unit tests
+        run: |
+          cd backendv2
+          PYTHONPATH=. python -m pytest tests/unit/ -v --tb=line --cov=app --cov-report=xml
+
+      - name: Run integration tests
+        run: |
+          cd backendv2
+          PYTHONPATH=. python -m pytest tests/integration/ -v --tb=line --timeout=300
+        if: ${{ matrix.python-version == '3.12' }}
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: backendv2/coverage.xml
+          fail_ci_if_error: false
+        if: ${{ matrix.python-version == '3.12' }}
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff
+        run: |
+          cd backendv2
+          ruff check app/ tests/

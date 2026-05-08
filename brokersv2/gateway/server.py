@@ -569,21 +569,62 @@ def _register_routes(app: FastAPI, state: AppState):
     # ========================================================================
 
     @app.get("/options/chain/{underlying}")
-    async def get_option_chain(underlying: str, exchange: str = Query("NSE")):
+    async def get_option_chain(underlying: str, exchange: str = Query("NSE"), expiry_index: int = Query(0)):
         """Get option chain for underlying."""
         state.metrics.increment("option_chain_requests", labels={
             "underlying": underlying,
             "exchange": exchange,
         })
         
-        return {
-            "underlying": underlying,
-            "exchange": exchange,
-            "expiry": None,
-            "calls": [],
-            "puts": [],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+        # DRY run mode - return mock data
+        if state.config.dry_run:
+            return {
+                "underlying": underlying,
+                "exchange": exchange,
+                "expiry_index": expiry_index,
+                "expiry": None,
+                "underlying_price": 0,
+                "atm_strike": 0,
+                "strikes": [],
+                "total_call_oi": 0,
+                "total_put_oi": 0,
+                "pcr_oi": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        
+        # Circuit breaker protection
+        try:
+            with state.circuit_breaker():
+                from brokersv2.core.types import Exchange
+                
+                # Map exchange string to enum
+                try:
+                    exchange_enum = Exchange(exchange.upper())
+                except ValueError:
+                    exchange_enum = Exchange.NSE
+                
+                # Fetch option chain from broker adapter
+                chain_data = await state.broker_adapter.get_option_chain(
+                    symbol=underlying,
+                    exchange=exchange_enum,
+                    expiry_index=expiry_index,
+                )
+                
+                # Convert to dict for JSON response
+                return chain_data.to_dict()
+                
+        except Exception as e:
+            logger.error(f"Error fetching option chain for {underlying}: {e}")
+            state.metrics.increment("option_chain_errors", labels={
+                "underlying": underlying,
+                "error": str(type(e).__name__),
+            })
+            return {
+                "underlying": underlying,
+                "exchange": exchange,
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
     @app.get("/options/expiries/{underlying}")
     async def get_expiry_list(underlying: str, exchange: str = Query("NSE")):

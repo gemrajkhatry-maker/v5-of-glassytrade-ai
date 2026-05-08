@@ -86,11 +86,15 @@ class TestSubscriberRegistration:
 class TestHandlerExecution:
     def test_tick_received_handler_executes(self):
         event = TickReceived(symbol="NIFTY", price=22000.0, volume=500.0)
-        _on_tick_received(event)  # Should not raise
+        with patch("app.application.event_subscribers.logger.debug") as mock_debug:
+            _on_tick_received(event)
+            mock_debug.assert_called_once()
 
     def test_amt_analyzed_handler_executes(self):
         event = AMTAnalyzed(symbol="NIFTY", phase1_result={"setup": "trend"})
-        _on_amt_analyzed(event)
+        with patch("app.application.event_subscribers.logger.debug") as mock_debug:
+            _on_amt_analyzed(event)
+            mock_debug.assert_called_once()
 
     def test_signal_generated_handler_executes(self):
         event = SignalGenerated(
@@ -98,7 +102,9 @@ class TestHandlerExecution:
             stop_loss=21950.0, take_profit=22100.0,
             risk_reward=2.0, confidence=0.7, reason="trend_model",
         )
-        _on_signal_generated(event)
+        with patch("app.application.event_subscribers.logger.info") as mock_info:
+            _on_signal_generated(event)
+            mock_info.assert_called_once()
 
     def test_signal_no_trade_is_ignored(self):
         """NO_TRADE signals should not log."""
@@ -112,24 +118,32 @@ class TestHandlerExecution:
             position_id="P1", symbol="NIFTY", side="LONG",
             entry_price=22000.0, size=1.0,
         )
-        _on_position_opened(event)
+        with patch("app.application.event_subscribers.logger.info") as mock_info:
+            _on_position_opened(event)
+            mock_info.assert_called_once()
 
     def test_position_closed_handler_executes(self):
         event = PositionClosed(
             position_id="P1", exit_price=22050.0, pnl=50.0, reason="take_profit",
         )
-        _on_position_closed(event)
+        with patch("app.application.event_subscribers.logger.info") as mock_info:
+            _on_position_closed(event)
+            mock_info.assert_called_once()
 
     def test_risk_halt_handler_logs_warning(self):
         event = RiskStateChanged(
             halted=True, reason="daily_loss_limit", daily_pnl=-5000.0,
             consecutive_losses=5,
         )
-        _on_risk_state_changed(event)
+        with patch("app.application.event_subscribers.logger.warning") as mock_warning:
+            _on_risk_state_changed(event)
+            mock_warning.assert_called_once()
 
     def test_risk_resume_handler_logs_info(self):
         event = RiskStateChanged(halted=False)
-        _on_risk_state_changed(event)
+        with patch("app.application.event_subscribers.logger.info") as mock_info:
+            _on_risk_state_changed(event)
+            mock_info.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

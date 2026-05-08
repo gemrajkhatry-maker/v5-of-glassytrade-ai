@@ -43,10 +43,14 @@ class MockLLMAdapter:
         return self._predict_result
 
 
+# 2024-01-02 10:00 IST = 04:30 UTC (within MCX morning session 09:15-14:00 IST)
+_TEST_TIMESTAMP_IST_MORNING = 1704169800.0  # 2024-01-02T04:30:00Z = 10:00 IST
+
+
 def _make_signal(symbol: str = "GOLD", ts: float = None, sig_type: str = "LONG") -> Signal:
     return Signal(
         symbol=symbol,
-        timestamp=ts or time.time(),
+        timestamp=ts if ts is not None else _TEST_TIMESTAMP_IST_MORNING,
         type=sig_type,
         entry=100.0,
         sl=95.0,
@@ -904,12 +908,14 @@ class TestWorkerLoop:
         # Should not hang
         with patch.object(handler, "_llm_queues", {"SYM": q}):
             handler._worker_loop("SYM")
+        assert True  # No exception = success
 
     def test_no_queue_exits_early(self):
         """When no queue exists for symbol, worker returns immediately."""
         handler = _make_handler()
         with patch.object(handler, "_llm_queues", {}):
             handler._worker_loop("NO_QUEUE")  # should not hang
+        assert True  # No exception = success
 
     def test_safety_nets_applied_in_worker(self):
         """BUY-ONLY safety net is applied during worker processing."""
@@ -1087,7 +1093,7 @@ class TestSaveLLMDecision:
             input_prompt="", raw_output="test", market_state="BALANCED",
         )
         handler._save_llm_decision("GOLD", decision, _make_amt_result(), [])
-        # No error = pass
+        assert True  # No exception = success
 
     def test_saves_to_storage(self):
         """Decision data is passed to storage.save_llm_decision."""
@@ -1129,6 +1135,7 @@ class TestSaveLLMDecision:
             input_prompt="", raw_output="test", market_state="BALANCED",
         )
         handler._save_llm_decision("GOLD", decision, _make_amt_result(), [])
+        assert True  # No exception raised = success
         # Should not raise
 
     def test_empty_candles_handled(self):
@@ -1196,6 +1203,7 @@ class TestCleanup:
             handler._worker_threads["SYM1"] = t
         handler.cleanup()
         # Thread should be joined (no RuntimeError)
+        assert not t.is_alive()
 
     def test_handles_full_queue_during_cleanup(self):
         """cleanup() handles queue.Full exception gracefully."""
@@ -1205,7 +1213,7 @@ class TestCleanup:
         with handler._workers_lock:
             handler._llm_queues["SYM1"] = q
         handler.cleanup()
-        # Should not raise
+        assert True  # No exception = success
 
     def test_handles_runtime_error_on_join(self):
         """cleanup() handles RuntimeError when joining threads."""

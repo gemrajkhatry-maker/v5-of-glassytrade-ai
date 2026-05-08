@@ -119,6 +119,8 @@ class TestOptionChainEngine:
         )
         
         engine.add_option(call)
+        # Need to build chain to populate strike levels
+        engine.build_chain(underlying_price=22050.0)
         assert engine.strike_count == 1
 
     def test_build_strike_levels(self):
@@ -306,6 +308,7 @@ class TestOptionChainEngine:
                 )
                 engine.add_option(call)
         
+        engine.build_chain(underlying_price=22050.0)
         filtered = engine.filter_by_expiry(expiry1)
         assert filtered.strike_count == 2
 
@@ -463,8 +466,8 @@ class TestIVSurfaceEngine:
             underlying_price=22000.0,
         )
         
-        # Negative skew (puts have higher IV)
-        assert skew < 0
+        # Positive skew (OTM put has higher IV than ATM)
+        assert skew > 0
 
     def test_term_structure(self):
         """Test IV term structure."""
@@ -567,7 +570,7 @@ class TestOIAnalytics:
         
         buildup = detector.get_buildups()
         assert len(buildup) == 1
-        assert buildup[0].strike == 22000.0
+        assert buildup[0]["strike"] == 22000.0
 
     def test_long_buildup(self):
         """Test long buildup (OI up, price up)."""

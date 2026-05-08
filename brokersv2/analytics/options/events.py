@@ -67,7 +67,7 @@ class OptionContract:
         return 0.0
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class StrikeLevel:
     """Single strike level with call and put."""
     strike: float

@@ -270,6 +270,147 @@ class DhanBrokerAdapter(IBrokerAdapter):
         
         return candles
     
+    async def get_option_chain(
+        self,
+        symbol: str,
+        exchange: "Exchange",
+        expiry_index: int = 0,
+    ) -> "OptionChainData":
+        """
+        Get option chain and normalize to domain model.
+        
+        FULLY ASYNC - NO asyncio.run()
+        
+        Args:
+            symbol: Underlying symbol (e.g., "NIFTY", "BANKNIFTY")
+            exchange: Exchange enum (NSE, BSE, etc.)
+            expiry_index: Expiry selection (0=current, 1=near, 2=far)
+            
+        Returns:
+            OptionChainData domain object with normalized option contracts
+        """
+        from brokersv2.analytics.options.events import (
+            OptionContract,
+            OptionType,
+            StrikeLevel,
+            OptionChainEvent,
+        )
+        from brokersv2.domain.options.models import OptionChainData
+        from datetime import datetime, timezone
+        
+        # Fetch raw option chain from DhanHQ
+        if self._circuit_breaker:
+            with self._circuit_breaker:
+                raw_data = await self._client.get_option_chain(
+                    symbol=symbol,
+                    exchange=exchange.value if hasattr(exchange, 'value') else str(exchange),
+                    expiry_index=expiry_index,
+                    mapper=self._mapper,
+                )
+        else:
+            raw_data = await self._client.get_option_chain(
+                symbol=symbol,
+                exchange=exchange.value if hasattr(exchange, 'value') else str(exchange),
+                expiry_index=expiry_index,
+                mapper=self._mapper,
+            )
+        
+        # Parse and normalize to domain models
+        option_chain_data = OptionChainData(
+            underlying=symbol,
+            exchange=exchange,
+            expiry_index=expiry_index,
+            raw_data=raw_data,
+        )
+        
+        # Extract expiry date from raw data
+        # DhanHQ returns expiry as string in response
+        expiry_str = raw_data.get("expiry") or raw_data.get("expiryDate")
+        if expiry_str:
+            try:
+                option_chain_data.expiry_date = datetime.fromisoformat(expiry_str.replace('Z', '+00:00'))
+            except (ValueError, AttributeError):
+                # Try YYYY-MM-DD format
+                try:
+                    from datetime import date
+                    date_obj = date.fromisoformat(expiry_str)
+                    option_chain_data.expiry_date = datetime.combine(date_obj, datetime.min.time(), tzinfo=timezone.utc)
+                except (ValueError, AttributeError):
+                    logger.warning(f"Could not parse expiry date: {expiry_str}")
+        
+        # Extract option chain data
+        # DhanHQ response structure: {"data": {"oc": {strike: {ce: {...}, pe: {...}}}, "last_price": ...}}
+        data_section = raw_data.get("data", {})
+        if isinstance(data_section, list):
+            data_section = data_section[0] if data_section else {}
+        
+        oc_data = data_section.get("oc", {})
+        
+        # Set underlying price (spot price)
+        underlying_price = float(data_section.get("last_price", 0) or 0)
+        option_chain_data.underlying_price = underlying_price
+        
+        # Parse each strike
+        for strike_str, opt_data in oc_data.items():
+            try:
+                strike_price = float(strike_str)
+            except (ValueError, TypeError):
+                continue
+            
+            ce_data = opt_data.get("ce", {}) if isinstance(opt_data, dict) else {}
+            pe_data = opt_data.get("pe", {}) if isinstance(opt_data, dict) else {}
+            
+            # Parse Call option
+            if ce_data and ce_data.get("security_id"):
+                call_contract = OptionContract(
+                    symbol=ce_data.get("symbol", f"{symbol}{int(strike_price)}CE"),
+                    underlying=symbol,
+                    strike=strike_price,
+                    expiry=option_chain_data.expiry_date or datetime.now(timezone.utc),
+                    option_type=OptionType.CALL,
+                    ltp=float(ce_data.get("last_price", 0) or 0),
+                    bid=float(ce_data.get("top_bid_price", 0) or 0),
+                    ask=float(ce_data.get("top_ask_price", 0) or 0),
+                    volume=int(ce_data.get("volume", 0) or 0),
+                    open_interest=int(ce_data.get("oi", 0) or 0),
+                    implied_volatility=float(ce_data.get("implied_volatility", 0) or 0),
+                    delta=float((ce_data.get("greeks") or {}).get("delta", 0) or 0),
+                    gamma=float((ce_data.get("greeks") or {}).get("gamma", 0) or 0),
+                    theta=float((ce_data.get("greeks") or {}).get("theta", 0) or 0),
+                    vega=float((ce_data.get("greeks") or {}).get("vega", 0) or 0),
+                )
+                option_chain_data.add_option(call_contract)
+            
+            # Parse Put option
+            if pe_data and pe_data.get("security_id"):
+                put_contract = OptionContract(
+                    symbol=pe_data.get("symbol", f"{symbol}{int(strike_price)}PE"),
+                    underlying=symbol,
+                    strike=strike_price,
+                    expiry=option_chain_data.expiry_date or datetime.now(timezone.utc),
+                    option_type=OptionType.PUT,
+                    ltp=float(pe_data.get("last_price", 0) or 0),
+                    bid=float(pe_data.get("top_bid_price", 0) or 0),
+                    ask=float(pe_data.get("top_ask_price", 0) or 0),
+                    volume=int(pe_data.get("volume", 0) or 0),
+                    open_interest=int(pe_data.get("oi", 0) or 0),
+                    implied_volatility=float(pe_data.get("implied_volatility", 0) or 0),
+                    delta=float((pe_data.get("greeks") or {}).get("delta", 0) or 0),
+                    gamma=float((pe_data.get("greeks") or {}).get("gamma", 0) or 0),
+                    theta=float((pe_data.get("greeks") or {}).get("theta", 0) or 0),
+                    vega=float((pe_data.get("greeks") or {}).get("vega", 0) or 0),
+                )
+                option_chain_data.add_option(put_contract)
+        
+        logger.info(
+            f"Option chain loaded: {symbol} "
+            f"expiry={option_chain_data.expiry_date} "
+            f"strikes={len(option_chain_data.strikes)} "
+            f"underlying_price={underlying_price}"
+        )
+        
+        return option_chain_data
+    
     async def get_positions(self) -> List[dict]:
         """
         Get current positions.

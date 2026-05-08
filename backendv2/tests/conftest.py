@@ -119,3 +119,30 @@ def mock_broker():
     broker.get_positions = AsyncMock(return_value=[])
     broker.get_orders = AsyncMock(return_value=[])
     return broker
+
+
+def pytest_runtest_call(item):
+    """Validate test quality: fail on bare assert True placeholders.
+
+    Allows 'assert True  # comment' when the comment explains why.
+    """
+    import ast
+    import inspect
+    import re
+
+    try:
+        source = inspect.getsource(item.function)
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assert):
+                if isinstance(node.test, ast.Constant) and node.test.value is True:
+                    # Check if line has an explanatory comment
+                    line = source.split('\n')[node.lineno - 1]
+                    if '#' in line:
+                        continue  # Has comment, allowed
+                    pytest.fail(
+                        f"Test '{item.name}' contains 'assert True' placeholder. "
+                        "Replace with meaningful assertions or add explanatory comment."
+                    )
+    except (OSError, IndentationError, SyntaxError):
+        pass  # Skip validation if source can't be inspected

@@ -163,7 +163,8 @@ class TestDhanAdapterStreaming:
             if tick_count > 1:
                 break
         
-        # In practice, stream would sleep and retry, so we just verify behavior
+        # With zero LTP, stream should not yield any ticks
+        assert tick_count == 0
 
 
 class TestDhanAdapterCaching:

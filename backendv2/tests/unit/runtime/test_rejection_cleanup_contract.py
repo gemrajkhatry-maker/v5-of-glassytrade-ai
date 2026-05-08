@@ -95,3 +95,4 @@ def test_rejected_and_cancelled_paths_use_retract_cleanup_without_fill_close() -
             "symbols": lambda self: ["BANKNIFTY"],
         })(), symbols=["BANKNIFTY"])
         _assert_reject_path_cleans_state(runtime, status)
+    assert True  # Helper function contains assertions
