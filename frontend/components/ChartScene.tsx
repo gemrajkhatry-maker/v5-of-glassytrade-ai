@@ -17,6 +17,45 @@ import { Brain, Cpu, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react'
 import { sanitizeRationale } from '../utils/textSanitizer';
 import DecisionCard from './chart/DecisionCard';
 
+// Extracted chart components (Phase 3)
+import {
+  generateAMTPriceLines,
+  PriceLineConfig,
+  AMTLevelsOverlayOptions,
+} from './chart/AMTLevelsOverlay';
+import {
+  generateAllExecutionMarkers,
+  ChartMarker,
+  ExecutionMarkersOptions,
+} from './chart/ExecutionMarkersManager';
+import {
+  transformToCandleData,
+  validateCandleData,
+  CandleDataPoint,
+} from './chart/CandleSeriesManager';
+import {
+  transformToVolumeData,
+  validateVolumeData,
+  getVolumeSeriesConfig,
+  VolumeDataPoint,
+} from './chart/VolumeSeriesManager';
+import {
+  generateProfileConfig,
+  validateProfileData,
+  ProfileLevel,
+  ProfileRenderOptions,
+} from './chart/ProfileHistogram';
+import {
+  calculateAllSessionZones,
+  DEFAULT_SESSION_PHASES,
+  SessionZoneConfig,
+} from './chart/SessionPhaseMarkers';
+import {
+  buildCrosshairTooltip,
+  validateCrosshairData,
+  CrosshairData,
+} from './chart/CrosshairManager';
+
 interface ChartSceneProps {
   data: OHLCData[];
   predictions: OHLCData[];
@@ -270,22 +309,21 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         color: b.close >= b.open ? 'rgba(0, 200, 150, 0.6)' : 'rgba(255, 71, 87, 0.6)', // Institutional colors
       })));
     } else {
-      const IST_OFFSET = 19800;
-      const toIST = (timeStr: string) => (new Date(timeStr).getTime() / 1000 + IST_OFFSET) as any;
-      
-      // CRITICAL: Ensure data is sorted by time to prevent Lightweight Charts crash
-      // Although the hook now sorts history, we keep this as a secondary safety layer.
-      const sortedData = [...data].sort((a, b) => 
-        new Date(a.time as string).getTime() - new Date(b.time as string).getTime()
-      );
+      // Use extracted CandleSeriesManager for data transformation
+      const validation = validateCandleData(data as any);
+      if (!validation.isValid) {
+        console.error('Invalid candle data:', validation.errors);
+      }
 
-      candleSeries.setData(sortedData.map(d => ({ ...d, time: toIST(d.time as string) })));
-      const volumeData = sortedData.map(d => ({
-        time: toIST(d.time as string),
-        value: d.volume,
-        color: d.close >= d.open ? 'rgba(0, 200, 150, 0.6)' : 'rgba(255, 71, 87, 0.6)', // Institutional colors
-      }));
-      volumeSeries.setData(volumeData);
+      const candleData = transformToCandleData(data);
+      candleSeries.setData(candleData.map(d => ({ ...d, time: d.time as any })));
+
+      // Use extracted VolumeSeriesManager for volume data
+      const volumeData = transformToVolumeData(data);
+      const volumeValidation = validateVolumeData(volumeData);
+      if (!volumeValidation.length) {
+        volumeSeries.setData(volumeData.map(d => ({ ...d, time: d.time as any })));
+      }
     }
 
     return () => {
@@ -1480,363 +1518,56 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     // Only add lightweight-chart pricelines if NOT in footprint mode
     const vpMode = config.vpMode || 'combined';
     if (stableAmtAnalysis && config.showVolumeProfile && mode !== 'FOOTPRINT') {
-      // Session levels (shown in session + combined modes)
-      if (vpMode === 'session' || vpMode === 'combined') {
-        amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-          price: stableAmtAnalysis.poc,
-          color: '#facc15',
-          lineWidth: 2,
-          lineStyle: LineStyle.Solid,
-          axisLabelVisible: true,
-          title: 'S-POC',
+      // Use extracted AMTLevelsOverlay component for price line generation
+      const amtOptions: AMTLevelsOverlayOptions = {
+        mode: mode as any,
+        showVolumeProfile: config.showVolumeProfile,
+        vpMode: vpMode as any,
+      };
+
+      const priceLines = generateAMTPriceLines(stableAmtAnalysis, amtOptions, stableData);
+
+      // Create price lines in chart
+      priceLines.forEach(lineConfig => {
+        amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
+          price: lineConfig.price,
+          color: lineConfig.color,
+          lineWidth: lineConfig.lineWidth as any,
+          lineStyle: lineConfig.lineStyle === 'Solid' ? LineStyle.Solid :
+                     lineConfig.lineStyle === 'Dashed' ? LineStyle.Dashed : LineStyle.Dotted,
+          axisLabelVisible: lineConfig.axisLabelVisible,
+          title: lineConfig.title,
         }));
-        amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-          price: stableAmtAnalysis.valueAreaHigh,
-          color: '#3b82f6',
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: 'S-VAH',
-        }));
-        amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-          price: stableAmtAnalysis.valueAreaLow,
-          color: '#3b82f6',
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: 'S-VAL',
-        }));
-
-        // LVN lines (amber dotted — thin, low-volume gaps)
-        stableAmtAnalysis.lvns?.forEach((lvn: number) => {
-          amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
-            price: lvn,
-            color: '#fb923c',
-            lineWidth: 1,
-            lineStyle: LineStyle.Dotted,
-            axisLabelVisible: true,
-            title: 'LVN',
-          }));
-        });
-
-        // HVN lines (emerald dashed — high-volume support/resistance)
-        stableAmtAnalysis.hvns?.forEach((hvn: number) => {
-          amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
-            price: hvn,
-            color: '#34d399',
-            lineWidth: 2,
-            lineStyle: LineStyle.Dashed,
-            axisLabelVisible: true,
-            title: 'HVN',
-          }));
-        });
-
-        // === P1-3: IB High / IB Low lines ===
-        if (stableAmtAnalysis.ibHigh && stableAmtAnalysis.ibHigh > 0) {
-          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: stableAmtAnalysis.ibHigh,
-            color: '#fb923c',
-            lineWidth: 2,
-            lineStyle: LineStyle.Solid,
-            axisLabelVisible: true,
-            title: stableAmtAnalysis.breakDirection === 'UP' ? 'IB HIGH [BROKEN ↑]' : 'IB HIGH',
-          }));
-        }
-        if (stableAmtAnalysis.ibLow && stableAmtAnalysis.ibLow > 0) {
-          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: stableAmtAnalysis.ibLow,
-            color: '#fb923c',
-            lineWidth: 2,
-            lineStyle: LineStyle.Solid,
-            axisLabelVisible: true,
-            title: stableAmtAnalysis.breakDirection === 'DOWN' ? 'IB LOW [BROKEN ↓]' : 'IB LOW',
-          }));
-        }
-
-        // === P1-2: VWAP line + ±1σ/±2σ bands ===
-        if (stableAmtAnalysis.sessionVwap && stableAmtAnalysis.sessionVwap > 0) {
-          // P2: Compute VWAP slope from recent candles to determine directional colour
-          let vwapColour = '#06b6d4'; // Default cyan
-          const recentVwaps = stableData.slice(-10).map(d => d.vwap).filter(v => v > 0);
-          if (recentVwaps.length >= 3) {
-            const firstHalf = recentVwaps.slice(0, Math.floor(recentVwaps.length / 2));
-            const secondHalf = recentVwaps.slice(Math.floor(recentVwaps.length / 2));
-            const avgFirst = firstHalf.reduce((a, b) => a + b, 0) / firstHalf.length;
-            const avgSecond = secondHalf.reduce((a, b) => a + b, 0) / secondHalf.length;
-            const slope = avgSecond - avgFirst;
-            const threshold = avgFirst * 0.001; // 0.1% change threshold
-            if (slope > threshold) {
-              vwapColour = '#22c55e'; // Green: rising VWAP (bullish institutional drift)
-            } else if (slope < -threshold) {
-              vwapColour = '#ef4444'; // Red: declining VWAP (bearish institutional drift)
-            }
-          }
-          
-          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: stableAmtAnalysis.sessionVwap,
-            color: vwapColour,
-            lineWidth: 2,
-            lineStyle: LineStyle.Solid,
-            axisLabelVisible: true,
-            title: vwapColour === '#22c55e' ? 'VWAP ↑' : vwapColour === '#ef4444' ? 'VWAP ↓' : 'VWAP',
-          }));
-          // ±1σ bands
-          if (stableAmtAnalysis.vwapUpper1 && stableAmtAnalysis.vwapUpper1 > 0) {
-            amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-              price: stableAmtAnalysis.vwapUpper1,
-              color: '#06b6d4',
-              lineWidth: 1,
-              lineStyle: LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: '+1σ',
-            }));
-          }
-          if (stableAmtAnalysis.vwapLower1 && stableAmtAnalysis.vwapLower1 > 0) {
-            amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-              price: stableAmtAnalysis.vwapLower1,
-              color: '#06b6d4',
-              lineWidth: 1,
-              lineStyle: LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: '-1σ',
-            }));
-          }
-          // ±2σ bands (extreme fade zones)
-          if (stableAmtAnalysis.vwapUpper2 && stableAmtAnalysis.vwapUpper2 > 0) {
-            amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-              price: stableAmtAnalysis.vwapUpper2,
-              color: '#0891b2',
-              lineWidth: 1,
-              lineStyle: LineStyle.Dotted,
-              axisLabelVisible: true,
-              title: '+2σ FADE',
-            }));
-          }
-          if (stableAmtAnalysis.vwapLower2 && stableAmtAnalysis.vwapLower2 > 0) {
-            amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-              price: stableAmtAnalysis.vwapLower2,
-              color: '#0891b2',
-              lineWidth: 1,
-              lineStyle: LineStyle.Dotted,
-              axisLabelVisible: true,
-              title: '-2σ FADE',
-            }));
-          }
-        }
-
-        // === P1-5: Prior Day VAH/VAL/POC dashed lines ===
-        if (stableAmtAnalysis.priorVah && stableAmtAnalysis.priorVah > 0) {
-          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: stableAmtAnalysis.priorVah,
-            color: '#6b7280',
-            lineWidth: 1,
-            lineStyle: LineStyle.Dashed,
-            axisLabelVisible: true,
-            title: 'Prior VAH',
-          }));
-        }
-        if (stableAmtAnalysis.priorVal && stableAmtAnalysis.priorVal > 0) {
-          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: stableAmtAnalysis.priorVal,
-            color: '#6b7280',
-            lineWidth: 1,
-            lineStyle: LineStyle.Dashed,
-            axisLabelVisible: true,
-            title: 'Prior VAL',
-          }));
-        }
-        if (stableAmtAnalysis.priorPoc && stableAmtAnalysis.priorPoc > 0) {
-          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: stableAmtAnalysis.priorPoc,
-            color: '#9ca3af',
-            lineWidth: 1,
-            lineStyle: LineStyle.Dashed,
-            axisLabelVisible: true,
-            title: 'Prior POC',
-          }));
-        }
-      }
-
-      // Leg levels (shown in leg + combined modes when leg profile exists)
-      if ((vpMode === 'leg' || vpMode === 'combined') && stableAmtAnalysis.legProfile && stableAmtAnalysis.legProfile.length > 0) {
-        if (stableAmtAnalysis.legPoc > 0) {
-          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: stableAmtAnalysis.legPoc,
-            color: '#FF9900',
-            lineWidth: 2,
-            lineStyle: LineStyle.Solid,
-            axisLabelVisible: true,
-            title: 'LEG-POC',
-          }));
-        }
-        if (stableAmtAnalysis.legVah > 0) {
-          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: stableAmtAnalysis.legVah,
-            color: '#FF6600',
-            lineWidth: 1,
-            lineStyle: LineStyle.Dashed,
-            axisLabelVisible: true,
-            title: 'LEG-VAH',
-          }));
-        }
-        if (stableAmtAnalysis.legVal > 0) {
-          amtLinesRef.current.push(candleSeriesRef.current.createPriceLine({
-            price: stableAmtAnalysis.legVal,
-            color: '#FF6600',
-            lineWidth: 1,
-            lineStyle: LineStyle.Dashed,
-            axisLabelVisible: true,
-            title: 'LEG-VAL',
-          }));
-        }
-        // Leg LVN lines (warm yellow dotted)
-        stableAmtAnalysis.legLvns?.forEach((lvn: number) => {
-          amtLinesRef.current.push(candleSeriesRef.current!.createPriceLine({
-            price: lvn,
-            color: '#fbbf24',
-            lineWidth: 1,
-            lineStyle: LineStyle.Dotted,
-            axisLabelVisible: true,
-            title: 'Leg LVN',
-          }));
-        });
-      }
+      });
     }
 
     if (mode === 'STANDARD') {
-      const markers: SeriesMarker<UTCTimestamp>[] = [];
+      // Use extracted ExecutionMarkersManager for all marker generation
+      const markerOptions: ExecutionMarkersOptions = {
+        mode: mode as any,
+        maxMarkers: 100,
+      };
 
-      // Entry markers from open positions
-      const allPositions = positions.length > 0 ? positions : [];
+      const allMarkers = generateAllExecutionMarkers(
+        positions,
+        closedTrades || [],
+        stableData,
+        stableAmtAnalysis,
+        markerOptions
+      );
 
-      allPositions.forEach(pos => {
-        markers.push({
-          time: (new Date(pos.entryTime).getTime() / 1000 + 19800) as UTCTimestamp,
-          position: pos.side === 'LONG' ? 'belowBar' : 'aboveBar',
-          color: pos.side === 'LONG' ? '#10b981' : '#ef4444',
-          shape: pos.side === 'LONG' ? 'arrowUp' : 'arrowDown',
-          text: `${pos.side} @${pos.entryPrice.toFixed(2)}`,
-          size: 2,
-        });
-      });
+      // Convert to TradingView format and set markers
+      const tvMarkers = allMarkers.map(m => ({
+        time: m.time as any,
+        position: m.position,
+        color: m.color,
+        shape: m.shape === 'diamond' ? 'square' : m.shape, // TradingView doesn't support diamond
+        text: m.text,
+        size: m.size as any,
+      }));
 
-      // Entry + exit markers from closed trades
-      (closedTrades || []).forEach(trade => {
-        markers.push({
-          time: (new Date(trade.entryTime).getTime() / 1000 + 19800) as UTCTimestamp,
-          position: trade.side === 'LONG' ? 'belowBar' : 'aboveBar',
-          color: trade.side === 'LONG' ? '#10b981' : '#ef4444',
-          shape: trade.side === 'LONG' ? 'arrowUp' : 'arrowDown',
-          text: `${trade.side} @${trade.entryPrice.toFixed(2)}`,
-          size: 1,
-        });
-        if (trade.exitTime && trade.exitPrice) {
-          const reason = trade.closeReason || 'EXIT';
-          const pnlStr = trade.pnl >= 0 ? `+${trade.pnl.toFixed(2)}` : trade.pnl.toFixed(2);
-          markers.push({
-            time: (new Date(trade.exitTime).getTime() / 1000 + 19800) as UTCTimestamp,
-            position: trade.side === 'LONG' ? 'aboveBar' : 'belowBar',
-            color: trade.pnl >= 0 ? '#10b981' : '#ef4444',
-            shape: 'circle',
-            text: `${reason} ${pnlStr}`,
-            size: 1,
-          });
-        }
-      });
-
-      // P1-4: IB Break marker on the breaking candle
-      if (stableAmtAnalysis?.breakDirection && stableAmtAnalysis.breakLevel && stableAmtAnalysis.breakLevel > 0) {
-        // Find the candle that first broke IB — scan from start for the candle that crossed the break level
-        const breakDir = stableAmtAnalysis.breakDirection;
-        const breakLevel = stableAmtAnalysis.breakLevel;
-        for (let i = 1; i < stableData.length; i++) {
-          const prev = stableData[i - 1];
-          const curr = stableData[i];
-          const crossedUp = breakDir === 'UP' && prev.close <= breakLevel && curr.close > breakLevel;
-          const crossedDown = breakDir === 'DOWN' && prev.close >= breakLevel && curr.close < breakLevel;
-          if (crossedUp || crossedDown) {
-            markers.push({
-              time: (new Date(curr.time).getTime() / 1000 + 19800) as UTCTimestamp,
-              position: breakDir === 'UP' ? 'belowBar' : 'aboveBar',
-              color: breakDir === 'UP' ? '#10b981' : '#ef4444',
-              shape: breakDir === 'UP' ? 'arrowUp' : 'arrowDown',
-              text: `IB BREAK ${breakDir} @${breakLevel.toFixed(2)}`,
-              size: 2,
-            });
-            break; // Only mark the first break
-          }
-        }
-      }
-
-      // P2: CVD Divergence markers on recent candles
-      if (stableAmtAnalysis?.cvdDivergence && stableData.length > 0) {
-        // Add marker on the last 3 candles to indicate active divergence zone
-        const recentCount = Math.min(3, stableData.length);
-        for (let i = stableData.length - recentCount; i < stableData.length; i++) {
-          const candle = stableData[i];
-          const isBearishDiv = stableAmtAnalysis.cvdDivergence.includes('BEARISH');
-          const isInitial = i === (stableData.length - recentCount);
-          
-          markers.push({
-            time: (new Date(candle.time).getTime() / 1000 + 19800) as UTCTimestamp,
-            position: isBearishDiv ? 'aboveBar' : 'belowBar',
-            color: isInitial ? '#f97316' : 'rgba(249, 115, 22, 0.4)', // Filled vs faint
-            shape: 'circle',
-            text: isInitial ? '⚡CVD DIV' : 'div',
-            size: 1,
-          });
-        }
-      }
-
-      // P2: Acceptance/Rejection annotations at key levels
-      if (stableData.length > 0 && stableAmtAnalysis) {
-        const lastCandle = stableData[stableData.length - 1];
-        
-        if (stableAmtAnalysis.acceptanceAbove) {
-          markers.push({
-            time: (new Date(lastCandle.time).getTime() / 1000 + 19800) as UTCTimestamp,
-            position: 'aboveBar',
-            color: '#10b981',
-            shape: 'arrowUp',
-            text: '✅ ACC ↑',
-            size: 1,
-          });
-        }
-        if (stableAmtAnalysis.acceptanceBelow) {
-          markers.push({
-            time: (new Date(lastCandle.time).getTime() / 1000 + 19800) as UTCTimestamp,
-            position: 'belowBar',
-            color: '#ef4444',
-            shape: 'arrowDown',
-            text: '✅ ACC ↓',
-            size: 1,
-          });
-        }
-        if (stableAmtAnalysis.rejectionAtHigh) {
-          markers.push({
-            time: (new Date(lastCandle.time).getTime() / 1000 + 19800) as UTCTimestamp,
-            position: 'aboveBar',
-            color: '#f59e0b',
-            shape: 'arrowDown',
-            text: '↓ REJ',
-            size: 1,
-          });
-        }
-        if (stableAmtAnalysis.rejectionAtLow) {
-          markers.push({
-            time: (new Date(lastCandle.time).getTime() / 1000 + 19800) as UTCTimestamp,
-            position: 'belowBar',
-            color: '#f59e0b',
-            shape: 'arrowUp',
-            text: '↑ REJ',
-            size: 1,
-          });
-        }
-      }
-
-      // Sort markers by time (required by lightweight-charts)
-      markers.sort((a, b) => (a.time as number) - (b.time as number));
-      candleSeriesRef.current.setMarkers(markers);
+      tvMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+      candleSeriesRef.current.setMarkers(tvMarkers);
     } else {
       candleSeriesRef.current.setMarkers([]);
     }
