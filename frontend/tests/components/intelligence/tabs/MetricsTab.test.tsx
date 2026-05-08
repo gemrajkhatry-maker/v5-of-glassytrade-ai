@@ -85,12 +85,14 @@ describe('MetricsTab', () => {
 
   it('shows SECOND DRIVE indicator', () => {
     render(<MetricsTab {...defaultProps} amtResult={{ ...defaultProps.amtResult!, isSecondDrive: true }} />);
-    expect(screen.getByText('SECOND DRIVE')).toBeInTheDocument();
+    // Text includes emoji, use regex
+    expect(screen.getByText(/SECOND DRIVE/)).toBeInTheDocument();
   });
 
   it('shows FIRST DRIVE indicator', () => {
     render(<MetricsTab {...defaultProps} amtResult={{ ...defaultProps.amtResult!, isSecondDrive: false }} />);
-    expect(screen.getByText('FIRST DRIVE')).toBeInTheDocument();
+    // Text includes emoji, use regex
+    expect(screen.getByText(/FIRST DRIVE/)).toBeInTheDocument();
   });
 
   it('shows LVN PLAY indicator when present', () => {
@@ -99,8 +101,9 @@ describe('MetricsTab', () => {
       direction: 'LONG' as const,
       rationale: 'LVN retest',
     };
-    render(<MetricsTab {...defaultProps} amtResult={{ ...defaultProps.amtResult!, lvnPlay }} />);
-    expect(screen.getByText('LVN PLAY')).toBeInTheDocument();
+    render(<MetricsTab {...(defaultProps as any)} amtResult={{ ...defaultProps.amtResult, lvnPlay }} />);
+    // Text includes emoji, use regex
+    expect(screen.getByText(/LVN PLAY/)).toBeInTheDocument();
     expect(screen.getByText(/@ 50100\.0/)).toBeInTheDocument();
   });
 
