@@ -41,6 +41,10 @@ from app.domain.risk.service.intraday_compounding import (
     IntradayCompoundingEngine,
     CompoundingResult,
 )
+from app.domain.risk.service.consecutive_loss_tracker import (
+    ConsecutiveLossTracker,
+    LossCounterState,
+)
 
 __all__ = [
     "PositionSize",
@@ -66,6 +70,8 @@ __all__ = [
     "MaxDrawdownTracker",
     "IntradayCompoundingEngine",
     "CompoundingResult",
+    "ConsecutiveLossTracker",
+    "LossCounterState",
 ]
 
 # Backward-compatible export for existing imports.

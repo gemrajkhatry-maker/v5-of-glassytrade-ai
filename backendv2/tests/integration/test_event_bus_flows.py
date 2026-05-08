@@ -44,12 +44,12 @@ class TestEventBusPublishSubscribe:
             received.append(event)
 
         self.bus.subscribe(AMTAnalyzed, handler)
-        event = AMTAnalyzed(symbol="NIFTY", phase1_result={"market_state": "BALANCED"})
+        event = AMTAnalyzed(symbol="NIFTY", market_state="BALANCED", setup="RANGE")
         count = self.bus.publish(event)
 
         assert count == 1
         assert len(received) == 1
-        assert received[0].phase1_result["market_state"] == "BALANCED"
+        assert received[0].market_state == "BALANCED"
 
     def test_publish_signal_generated_to_subscriber(self):
         """SignalGenerated published → subscriber receives signal dict."""

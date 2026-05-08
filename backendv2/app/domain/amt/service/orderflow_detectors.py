@@ -307,7 +307,11 @@ class OFICalculator:
 
         total_delta = sum(self._deltas)
         ofi = max(-1.0, min(1.0, total_delta / total_vol))
-        if abs(ofi) > 0.001 and abs(ofi % 1.0) < 0.001:
+        # Check for suspiciously round OFI values (multiples of 0.1)
+        # which may indicate calculation issues or insufficient data
+        rounded = round(ofi, 2)
+        if abs(ofi - rounded) < 1e-6 and abs(rounded) > 0.001:
+            # OFI is suspiciously round to 2 decimal places
             logger.warning("OFI suspiciously round: %.3f — possible calc issue", ofi)
         return OFIResult(ofi=ofi, window=len(self._deltas))
 

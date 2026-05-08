@@ -10,7 +10,7 @@ from app.domain.shared.event.position import (
     PositionOpened,
     PositionClosed,
 )
-from app.domain.shared.event.risk import RiskCheckFailed, DailyLossLimitReached
+from app.domain.shared.event.risk import RiskCheckFailed, DailyLossLimitReached, RiskStateChanged
 
 __all__ = [
     "DomainEvent",
@@ -27,6 +27,7 @@ __all__ = [
     "PositionClosed",
     "RiskCheckFailed",
     "DailyLossLimitReached",
+    "RiskStateChanged",
 ]
 
 # Registry for serialization/deserialization
@@ -45,4 +46,5 @@ EVENT_TYPES = {
     "PositionClosed": PositionClosed,
     "RiskCheckFailed": RiskCheckFailed,
     "DailyLossLimitReached": DailyLossLimitReached,
+    "RiskStateChanged": RiskStateChanged,
 }

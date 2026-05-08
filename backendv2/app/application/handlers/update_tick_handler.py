@@ -51,14 +51,17 @@ class UpdateTickHandler:
         if self._amt_service:
             result = self._amt_service.analyze(symbol=cmd.symbol, price=cmd.price)
             
-            # 3. Publish AMT analyzed event
+            # 3. Publish AMT analyzed event using new field structure
             amt_event = AMTAnalyzed(
                 symbol=cmd.symbol,
-                phase1_result=result.get("phase1", {}),
-                phase2_result=result.get("phase2", {}),
-                phase3_result=result.get("phase3", {}),
-                phase4_result=result.get("phase4", {}),
+                market_state=result.get("market_state", "BALANCED"),
+                poc=result.get("poc", 0.0),
+                value_area_high=result.get("vah", 0.0),
+                value_area_low=result.get("val", 0.0),
+                session_vwap=result.get("vwap", 0.0),
                 absorptions_count=result.get("absorptions_count", 0),
-                vwap=result.get("vwap", 0.0)
+                aggression=result.get("aggression", 0.0),
+                setup=result.get("setup", ""),
+                profile_shape=result.get("profile_shape", ""),
             )
             self._event_bus.publish(amt_event)

@@ -91,7 +91,7 @@ class TestHandlerExecution:
             mock_debug.assert_called_once()
 
     def test_amt_analyzed_handler_executes(self):
-        event = AMTAnalyzed(symbol="NIFTY", phase1_result={"setup": "trend"})
+        event = AMTAnalyzed(symbol="NIFTY", market_state="TRENDING", setup="trend")
         with patch("app.application.event_subscribers.logger.debug") as mock_debug:
             _on_amt_analyzed(event)
             mock_debug.assert_called_once()
@@ -100,7 +100,7 @@ class TestHandlerExecution:
         event = SignalGenerated(
             symbol="NIFTY", direction="LONG", entry_price=22000.0,
             stop_loss=21950.0, take_profit=22100.0,
-            risk_reward=2.0, confidence=0.7, reason="trend_model",
+            position_size=1.0, confidence="0.7", setup_type="trend_model",
         )
         with patch("app.application.event_subscribers.logger.info") as mock_info:
             _on_signal_generated(event)
@@ -108,15 +108,15 @@ class TestHandlerExecution:
 
     def test_signal_no_trade_is_ignored(self):
         """NO_TRADE signals should not log."""
-        event = SignalGenerated(direction="NO_TRADE")
+        event = SignalGenerated(direction="FLAT")
         with patch.object(logging.getLogger("app.application.event_subscribers"), "info") as mock_info:
             _on_signal_generated(event)
             assert mock_info.call_count == 0
 
     def test_position_opened_handler_executes(self):
         event = PositionOpened(
-            position_id="P1", symbol="NIFTY", side="LONG",
-            entry_price=22000.0, size=1.0,
+            trade_id="P1", symbol="NIFTY", side="LONG",
+            entry_price=22000.0, quantity=1.0,
         )
         with patch("app.application.event_subscribers.logger.info") as mock_info:
             _on_position_opened(event)
@@ -124,7 +124,7 @@ class TestHandlerExecution:
 
     def test_position_closed_handler_executes(self):
         event = PositionClosed(
-            position_id="P1", exit_price=22050.0, pnl=50.0, reason="take_profit",
+            trade_id="P1", exit_price=22050.0, realized_pnl=50.0, close_reason="TAKE_PROFIT",
         )
         with patch("app.application.event_subscribers.logger.info") as mock_info:
             _on_position_closed(event)

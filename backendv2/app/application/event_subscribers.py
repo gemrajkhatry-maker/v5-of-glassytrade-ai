@@ -39,33 +39,34 @@ def _on_tick_received(event: TickReceived) -> None:
 
 def _on_amt_analyzed(event: AMTAnalyzed) -> None:
     logger.debug(
-        "AMTAnalyzed: symbol=%s setup=%s",
+        "AMTAnalyzed: symbol=%s setup=%s market_state=%s",
         event.symbol,
-        event.phase1_result.get("setup", "unknown") if event.phase1_result else "unknown",
+        event.setup or "unknown",
+        event.market_state,
     )
 
 
 def _on_signal_generated(event: SignalGenerated) -> None:
-    if event.direction == "NO_TRADE":
+    if event.direction in ("NO_TRADE", "FLAT"):
         return
     logger.info(
-        "SignalGenerated: symbol=%s direction=%s entry=%.2f sl=%.2f tp=%.2f rr=%.2f confidence=%.2f reason=%s",
+        "SignalGenerated: symbol=%s direction=%s entry=%.2f sl=%.2f tp=%.2f source=%s setup=%s",
         event.symbol, event.direction, event.entry_price, event.stop_loss,
-        event.take_profit, event.risk_reward, event.confidence, event.reason,
+        event.take_profit, event.source, event.setup_type,
     )
 
 
 def _on_position_opened(event: PositionOpened) -> None:
     logger.info(
-        "PositionOpened: position_id=%s symbol=%s side=%s entry=%.2f size=%.0f",
-        event.position_id, event.symbol, event.side, event.entry_price, event.size,
+        "PositionOpened: trade_id=%s symbol=%s side=%s entry=%.2f qty=%.0f",
+        event.trade_id, event.symbol, event.side, event.entry_price, event.quantity,
     )
 
 
 def _on_position_closed(event: PositionClosed) -> None:
     logger.info(
-        "PositionClosed: position_id=%s exit=%.2f pnl=%.2f reason=%s",
-        event.position_id, event.exit_price, event.pnl, event.reason,
+        "PositionClosed: trade_id=%s exit=%.2f pnl=%.2f reason=%s",
+        event.trade_id, event.exit_price, event.realized_pnl, event.close_reason,
     )
 
 

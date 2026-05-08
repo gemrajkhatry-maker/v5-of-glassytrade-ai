@@ -72,10 +72,11 @@ class CheckExitHandler:
             pnl = self._calculate_pnl(position, cmd.current_price)
             
             exit_event = PositionClosed(
-                position_id=position.id,
+                trade_id=position.id,
+                symbol=position.symbol,
+                close_reason=exit_reason,
+                realized_pnl=pnl,
                 exit_price=cmd.current_price,
-                pnl=pnl,
-                reason=exit_reason
             )
             self._event_bus.publish(exit_event)
     

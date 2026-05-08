@@ -19,15 +19,17 @@ class TestIntegration:
         amt_service = Mock()
         signal_service = Mock()
         
-        # Mock AMT analysis result with absorption
+        # Mock AMT analysis result with absorption using new field structure
         amt_service.analyze.return_value = {
-            "phase1": {"high": 50100, "low": 49900},
-            "phase2": {"accepted_above": True},
-            "phase3": {"direction": "UP", "type": "INITIATIVE"},
-            "phase4": {"poc_signal": "RISING"},
-            "absorptions_count": 1,
+            "market_state": "IMBALANCED",
+            "poc": 50000.0,
+            "vah": 50100.0,
+            "val": 49900.0,
             "vwap": 50000.0,
-            "absorptions": [{"side": "BUY", "strength": 0.8}]
+            "absorptions_count": 1,
+            "aggression": 0.8,
+            "setup": "TRENDING",
+            "profile_shape": "BULDA",
         }
         
         # Mock signal service
@@ -94,3 +96,4 @@ class TestIntegration:
         assert isinstance(events[2], SignalGenerated)
         assert events[2].direction == "LONG"
         assert events[2].entry_price == 50050.0
+        assert events[2].source == "AMT"

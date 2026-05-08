@@ -69,7 +69,7 @@ class TestCheckExitHandler:
         
         assert isinstance(event, PositionClosed)
         assert event.exit_price == 49400.0
-        assert event.pnl < 0  # Loss
+        assert event.realized_pnl < 0  # Loss
         
     def test_publishes_position_closed_on_take_profit(self):
         """Test that PositionClosed event is published when TP hit."""
@@ -98,7 +98,7 @@ class TestCheckExitHandler:
         
         assert isinstance(event, PositionClosed)
         assert event.exit_price == 51100.0
-        assert event.pnl > 0  # Profit
+        assert event.realized_pnl > 0  # Profit
         
     def test_no_exit_when_within_bounds(self):
         """Test that no exit when price is within SL/TP range."""
@@ -148,4 +148,4 @@ class TestCheckExitHandler:
         event = call_args[0][0]
         
         # PNL = (exit - entry) * size = (51000 - 50000) * 0.1 = 100
-        assert event.pnl == pytest.approx(100.0, rel=0.01)
+        assert event.realized_pnl == pytest.approx(100.0, rel=0.01)

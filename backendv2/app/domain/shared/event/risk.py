@@ -85,3 +85,32 @@ class TradingResumed(DomainEvent):
 
     symbol: str = ""
     reason: str = ""
+
+
+@dataclass(frozen=True)
+class RiskStateChanged(DomainEvent):
+    """Risk state changed (halt/unhalt).
+
+    Published by RiskManager or CircuitBreaker when trading state changes.
+    Consumed by alert manager and session orchestrator.
+    """
+
+    halted: bool = False
+    reason: str = ""
+    daily_pnl: float = 0.0
+    consecutive_losses: int = 0
+
+    @staticmethod
+    def create(
+        halted: bool, reason: str, daily_pnl: float = 0.0, consecutive_losses: int = 0
+    ) -> "RiskStateChanged":
+        idempotency_key = _generate_idempotency_key(
+            "risk_state", "halted" if halted else "resumed", str(int(daily_pnl))
+        )
+        return RiskStateChanged(
+            idempotency_key=idempotency_key,
+            halted=halted,
+            reason=reason,
+            daily_pnl=daily_pnl,
+            consecutive_losses=consecutive_losses,
+        )

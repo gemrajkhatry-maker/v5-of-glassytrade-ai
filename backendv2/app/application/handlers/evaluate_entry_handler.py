@@ -51,16 +51,18 @@ class EvaluateEntryHandler:
                 vwap=cmd.vwap
             )
             
-            # 4. Publish signal event
+            # 4. Publish signal event using new field structure
             signal_event = SignalGenerated(
                 symbol=cmd.symbol,
-                direction=signal_result.get("type", "NO_TRADE"),
+                signal_id=f"{cmd.symbol}_{int(cmd.current_price)}",
+                direction=signal_result.get("type", "FLAT"),
                 entry_price=signal_result.get("entry", 0.0),
                 stop_loss=signal_result.get("sl", 0.0),
                 take_profit=signal_result.get("tp", 0.0),
-                risk_reward=signal_result.get("rr", 0.0),
-                confidence=signal_result.get("confidence", 0.0),
-                reason=signal_result.get("reason", "")
+                position_size=signal_result.get("size", 0.0),
+                confidence=str(signal_result.get("confidence", "Medium")),
+                setup_type=signal_result.get("reason", ""),
+                source="AMT",
             )
             self._event_bus.publish(signal_event)
     

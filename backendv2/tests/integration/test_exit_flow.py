@@ -75,9 +75,9 @@ class TestCheckExitHandler:
         cmd = CheckExit(position_id="pos-1", current_price=22350.0)
         self.handler.handle(cmd)
         assert len(received) == 1
-        assert received[0].position_id == "pos-1"
-        assert received[0].reason == "STOP_LOSS"
-        assert received[0].pnl < 0
+        assert received[0].trade_id == "pos-1"
+        assert received[0].close_reason == "STOP_LOSS"
+        assert received[0].realized_pnl < 0
 
     def test_long_position_tp_hit_triggers_exit(self):
         """LONG position with price >= take_profit → exit triggered."""
@@ -88,8 +88,8 @@ class TestCheckExitHandler:
         cmd = CheckExit(position_id="pos-1", current_price=22750.0)
         self.handler.handle(cmd)
         assert len(received) == 1
-        assert received[0].reason == "TAKE_PROFIT"
-        assert received[0].pnl > 0
+        assert received[0].close_reason == "TAKE_PROFIT"
+        assert received[0].realized_pnl > 0
 
     def test_long_position_no_exit_condition(self):
         """LONG position between SL and TP → no exit."""
@@ -110,7 +110,7 @@ class TestCheckExitHandler:
         cmd = CheckExit(position_id="pos-1", current_price=22650.0)
         self.handler.handle(cmd)
         assert len(received) == 1
-        assert received[0].reason == "STOP_LOSS"
+        assert received[0].close_reason == "STOP_LOSS"
 
     def test_short_position_tp_hit_triggers_exit(self):
         """SHORT position with price <= take_profit → exit triggered."""
@@ -121,7 +121,7 @@ class TestCheckExitHandler:
         cmd = CheckExit(position_id="pos-1", current_price=22250.0)
         self.handler.handle(cmd)
         assert len(received) == 1
-        assert received[0].reason == "TAKE_PROFIT"
+        assert received[0].close_reason == "TAKE_PROFIT"
 
     def test_already_closed_position_ignored(self):
         """Closed position → no exit triggered."""
@@ -155,7 +155,7 @@ class TestCheckExitHandler:
         self.event_bus.subscribe(PositionClosed, lambda e: received.append(e))
         cmd = CheckExit(position_id="pos-1", current_price=22750.0)
         self.handler.handle(cmd)
-        assert received[0].pnl > 0
+        assert received[0].realized_pnl > 0
 
 
 class TestTradeLifecycleHandler:
