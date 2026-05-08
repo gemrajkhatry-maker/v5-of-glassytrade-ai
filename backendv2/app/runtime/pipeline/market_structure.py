@@ -89,8 +89,12 @@ class MarketStructureAnalysis:
         bars = state.bars
 
         # 1. Volume Profile
+        from app.domain.constants import VALUE_AREA_PCT
         bucket_size = 1.0
-        vp = build_volume_profile(bars, bucket_size=bucket_size)
+        vp = build_volume_profile(
+            bars, bucket_size=bucket_size,
+            value_area_pct=VALUE_AREA_PCT, tick_size=0.05,
+        )
         vah = vp.vah if vp else 0
         val = vp.val if vp else 0
         poc = vp.poc if vp else 0

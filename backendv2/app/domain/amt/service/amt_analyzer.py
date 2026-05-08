@@ -179,8 +179,12 @@ class AMTAnalyzer:
         """Build volume profile from bars. Returns (vp, vwap_data) where vwap_data
         holds the VWAP bands that cannot be stored on the frozen VolumeProfile."""
         from app.domain.amt.service.volume_profile import build_volume_profile, calculate_vwap
+        from app.domain.constants import VALUE_AREA_PCT
         bucket_size = self._estimate_bucket_size(bars)
-        vp = build_volume_profile(bars, bucket_size)
+        vp = build_volume_profile(
+            bars, bucket_size=bucket_size,
+            value_area_pct=VALUE_AREA_PCT, tick_size=0.05,
+        )
         vwap, upper1, lower1, upper2, lower2 = calculate_vwap(bars)
         vwap_data = {
             "vwap": vwap,

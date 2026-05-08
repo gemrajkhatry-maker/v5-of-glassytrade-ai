@@ -2,19 +2,32 @@
 
 from __future__ import annotations
 
+import math
+
 from app.domain.amt.model.amt_models import VolumeProfile, VolumeProfileLevel
 
 Bar = dict
 
 
-def build_volume_profile(bars: list[Bar], bucket_size: float) -> VolumeProfile:
+def build_volume_profile(
+    bars: list[Bar],
+    bucket_size: float,
+    value_area_pct: float = 0.70,
+    tick_size: float = 0.05,
+) -> VolumeProfile:
     """
     Build volume profile from range bars.
 
     Based on amt_docs section 2.2:
-    1. Divide price range into buckets
+    1. Divide price range into buckets (aligned to tick_size)
     2. Allocate volume to buckets
-    3. Calculate POC, VAH, VAL
+    3. Calculate POC (with tie-breaking), VAH, VAL
+
+    Args:
+        bars: List of bar dicts with high, low, volume, buyVolume, sellVolume
+        bucket_size: Price range per bucket
+        value_area_pct: Percentage of total volume for value area (default 0.70 = 70%)
+        tick_size: Instrument tick size for bucket alignment (default 0.05)
     """
     if not bars:
         return VolumeProfile(levels=(), poc=0.0, vah=0.0, val=0.0, step=bucket_size)
@@ -25,6 +38,9 @@ def build_volume_profile(bars: list[Bar], bucket_size: float) -> VolumeProfile:
 
     price_min = min(all_prices)
     price_max = max(all_prices)
+
+    # Align price_min down to nearest tick boundary
+    price_min = math.floor(price_min / tick_size) * tick_size
 
     num_buckets = max(1, int((price_max - price_min) / bucket_size) + 1)
     buckets: dict[float, dict[str, float]] = {}
@@ -40,22 +56,22 @@ def build_volume_profile(bars: list[Bar], bucket_size: float) -> VolumeProfile:
         low_bucket = int((bar_low - price_min) / bucket_size)
         high_bucket = int((bar_high - price_min) / bucket_size)
         num_buckets_in_range = max(1, high_bucket - low_bucket + 1)
-        
+
         vol = bar.get("volume", 0)
         buy_vol = bar.get("buyVolume", vol / 2)
         sell_vol = bar.get("sellVolume", vol / 2)
-        
+
         # Distribute volume proportionally across buckets
         vol_per_bucket = vol / num_buckets_in_range
         buy_per_bucket = buy_vol / num_buckets_in_range
         sell_per_bucket = sell_vol / num_buckets_in_range
-        
+
         for bucket_idx in range(low_bucket, high_bucket + 1):
             bucket_price = price_min + bucket_idx * bucket_size
-            
+
             if bucket_price not in buckets:
                 buckets[bucket_price] = {"volume": 0, "buy": 0, "sell": 0}
-            
+
             buckets[bucket_price]["volume"] += vol_per_bucket
             buckets[bucket_price]["buy"] += buy_per_bucket
             buckets[bucket_price]["sell"] += sell_per_bucket
@@ -73,12 +89,19 @@ def build_volume_profile(bars: list[Bar], bucket_size: float) -> VolumeProfile:
     if not levels:
         return VolumeProfile(levels=(), poc=0.0, vah=0.0, val=0.0, step=bucket_size)
 
-    poc_level = max(levels, key=lambda l: l.volume)
+    # POC with tie-breaking: if multiple buckets share max volume, pick closest to median
+    max_vol = max(l.volume for l in levels)
+    top_levels = [l for l in levels if l.volume == max_vol]
+    if len(top_levels) > 1:
+        median_price = (min(l.price for l in levels) + max(l.price for l in levels)) / 2
+        poc_level = min(top_levels, key=lambda l: abs(l.price - median_price))
+    else:
+        poc_level = top_levels[0]
     poc = poc_level.price
 
-    # Value Area: 68% of volume
+    # Value Area: configurable percentage of volume (default 70%)
     total_volume = sum(l.volume for l in levels)
-    target_volume = total_volume * 0.68
+    target_volume = total_volume * value_area_pct
 
     sorted_levels = sorted(levels, key=lambda l: abs(l.price - poc))
     va_volume = 0
