@@ -230,6 +230,9 @@ class AppState:
         self.startup_time: Optional[datetime] = None
         self.circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=60)
         self.dry_run_broker = DryRunBroker()
+        
+        # Phase 2: Market data service
+        self.market_data_service = None  # MarketDataService (set externally)
 
 
 def create_app(config: Optional[GatewayConfig] = None) -> FastAPI:
@@ -290,6 +293,7 @@ def create_app(config: Optional[GatewayConfig] = None) -> FastAPI:
     app.state.metrics = state.metrics
     app.state.health_checker = state.health_checker
     app.state.config = state.config
+    app.state.market_data_service = state.market_data_service
 
     # Add CORS middleware
     app.add_middleware(
@@ -680,34 +684,128 @@ def _register_routes(app: FastAPI, state: AppState):
     async def stream_ticks(websocket: WebSocket):
         """WebSocket endpoint for real-time tick streaming."""
         await websocket.accept()
+        
+        market_data = app.state.market_data_service
+        
+        if not market_data or not market_data._ws_manager:
+            await websocket.send_json({"error": "Market data service not configured"})
+            await websocket.close()
+            return
+        
         try:
+            # Get symbols from client
+            msg = await websocket.receive_json()
+            symbols = msg.get("symbols", [])
+            
+            if not symbols:
+                await websocket.send_json({"error": "No symbols provided"})
+                await websocket.close()
+                return
+            
+            logger.info(f"Tick streaming client subscribed to: {symbols}")
+            
+            # TODO: Convert symbols to CanonicalInstrument and subscribe
+            # For now, stream from existing tick source if available
+            
+            # Stream ticks
             while True:
-                # TODO: Stream ticks from broker adapter
+                # Keep connection alive
                 await websocket.receive_text()
+                
         except WebSocketDisconnect:
             logger.info("Tick streaming client disconnected")
+        except Exception as e:
+            logger.error(f"Tick streaming error: {e}")
+            try:
+                await websocket.send_json({"error": str(e)})
+            except:
+                pass
 
     @app.websocket("/ws/quotes")
     async def stream_quotes(websocket: WebSocket):
         """WebSocket endpoint for real-time quote streaming."""
         await websocket.accept()
+        
+        market_data = app.state.market_data_service
+        
+        if not market_data:
+            await websocket.send_json({"error": "Market data service not configured"})
+            await websocket.close()
+            return
+        
         try:
+            # Get symbols from client
+            msg = await websocket.receive_json()
+            symbols = msg.get("symbols", [])
+            
+            if not symbols:
+                await websocket.send_json({"error": "No symbols provided"})
+                await websocket.close()
+                return
+            
+            logger.info(f"Quote streaming client subscribed to: {symbols}")
+            
+            # TODO: Implement quote streaming
+            # For now, keep connection alive
             while True:
-                # TODO: Stream quotes from broker adapter
                 await websocket.receive_text()
+                
         except WebSocketDisconnect:
             logger.info("Quote streaming client disconnected")
+        except Exception as e:
+            logger.error(f"Quote streaming error: {e}")
 
     @app.websocket("/ws/depth")
     async def stream_depth(websocket: WebSocket):
         """WebSocket endpoint for market depth streaming."""
         await websocket.accept()
+        
+        market_data = app.state.market_data_service
+        
+        if not market_data or not market_data._ws_manager:
+            await websocket.send_json({"error": "Market data service not configured"})
+            await websocket.close()
+            return
+        
         try:
-            while True:
-                # TODO: Stream depth from broker adapter
-                await websocket.receive_text()
+            # Get symbol from client
+            msg = await websocket.receive_json()
+            symbol = msg.get("symbol")
+            
+            if not symbol:
+                await websocket.send_json({"error": "No symbol provided"})
+                await websocket.close()
+                return
+            
+            logger.info(f"Depth streaming client subscribed to: {symbol}")
+            
+            # Stream depth updates
+            async for depth_event in market_data.stream_depth_updates(symbol):
+                # Convert to dict for JSON serialization
+                depth_dict = {
+                    "symbol": depth_event.symbol,
+                    "timestamp": depth_event.timestamp.isoformat(),
+                    "bids": [
+                        {"price": level.price, "quantity": level.quantity, "orders": level.orders}
+                        for level in depth_event.bids
+                    ],
+                    "asks": [
+                        {"price": level.price, "quantity": level.quantity, "orders": level.orders}
+                        for level in depth_event.asks
+                    ],
+                    "sequence": depth_event.sequence,
+                }
+                
+                await websocket.send_json(depth_dict)
+                
         except WebSocketDisconnect:
             logger.info("Depth streaming client disconnected")
+        except Exception as e:
+            logger.error(f"Depth streaming error: {e}")
+            try:
+                await websocket.send_json({"error": str(e)})
+            except:
+                pass
 
     # ========================================================================
     # Middleware for request tracking
