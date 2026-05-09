@@ -8,6 +8,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional, Set, Type
 
 from brokersv2.core.events import Event
@@ -16,6 +17,13 @@ if TYPE_CHECKING:
     pass
 
 logger = logging.getLogger(__name__)
+
+
+class BackpressureStrategy(Enum):
+    """Strategy for handling full queues."""
+    DROP_OLDEST = "drop_oldest"
+    BLOCK_PRODUCER = "block"
+    DROP_NEWEST = "drop_newest"
 
 
 @dataclass
@@ -38,12 +46,29 @@ class EventBus:
     - Async and sync handler support
     """
     
-    def __init__(self):
+    def __init__(
+        self,
+        max_queue_size: int = 10000,
+        strategy: BackpressureStrategy = BackpressureStrategy.DROP_OLDEST,
+        max_dlq_size: int = 10000,
+    ):
+        """
+        Initialize event bus with backpressure handling.
+        
+        Args:
+            max_queue_size: Maximum queue size (default: 10,000)
+            strategy: Backpressure strategy when queue full
+            max_dlq_size: Maximum dead-letter queue size (default: 10,000)
+        """
         self._subscriptions: Dict[Type[Event], List[Subscription]] = defaultdict(list)
         self._dlq: List[tuple] = []  # (event, error, subscription)
+        self._dlq_max_size = max_dlq_size
         self._running = False
-        self._event_queue: asyncio.Queue = asyncio.Queue()
+        self._event_queue: asyncio.Queue = asyncio.Queue(maxsize=max_queue_size)
         self._dispatcher_task: Optional[asyncio.Task] = None
+        self._max_queue_size = max_queue_size
+        self._strategy = strategy
+        self._dropped_events = 0
     
     def subscribe(
         self,
@@ -85,12 +110,30 @@ class EventBus:
     
     async def publish(self, event: Event) -> int:
         """
-        Publish an event.
+        Publish an event with backpressure handling.
         
         Returns number of handlers called.
         """
         if self._running:
-            await self._event_queue.put(event)
+            # Apply backpressure strategy if queue full
+            if self._event_queue.full():
+                if self._strategy == BackpressureStrategy.DROP_OLDEST:
+                    # Drop oldest event
+                    try:
+                        self._event_queue.get_nowait()
+                        self._dropped_events += 1
+                    except asyncio.QueueEmpty:
+                        pass
+                    await self._event_queue.put(event)
+                elif self._strategy == BackpressureStrategy.DROP_NEWEST:
+                    # Drop this event
+                    self._dropped_events += 1
+                    return 0
+                elif self._strategy == BackpressureStrategy.BLOCK_PRODUCER:
+                    # Block until space available
+                    await self._event_queue.put(event)
+            else:
+                await self._event_queue.put(event)
             return len(self._subscriptions.get(type(event), []))
         else:
             # Direct dispatch if not running
@@ -129,6 +172,12 @@ class EventBus:
         except Exception as e:
             logger.error(f"Handler {sub.handler_id} failed for {type(event).__name__}: {e}")
             self._dlq.append((event, e, sub))
+            
+            # Trim DLQ if it exceeds max size (keep most recent entries)
+            if len(self._dlq) > self._dlq_max_size:
+                trim_count = len(self._dlq) - self._dlq_max_size
+                self._dlq = self._dlq[trim_count:]
+                logger.warning(f"DLQ trimmed {trim_count} entries, current size: {len(self._dlq)}")
     
     async def start(self) -> None:
         """Start the event bus dispatcher."""
@@ -167,3 +216,23 @@ class EventBus:
     def clear_dlq(self) -> None:
         """Clear dead-letter queue."""
         self._dlq.clear()
+    
+    @property
+    def queue_depth(self) -> int:
+        """Get current queue depth."""
+        return self._event_queue.qsize()
+    
+    @property
+    def queue_depths(self) -> Dict[str, int]:
+        """Get queue depth metrics."""
+        return {
+            "event_queue": self._event_queue.qsize(),
+            "dlq_size": len(self._dlq),
+            "max_size": self._max_queue_size,
+            "dropped_events": self._dropped_events,
+        }
+    
+    @property
+    def is_queue_full(self) -> bool:
+        """Check if event queue is full."""
+        return self._event_queue.full()

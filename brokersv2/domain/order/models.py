@@ -90,6 +90,18 @@ class Order:
             self.status = OrderStatus.PARTIALLY_FILLED
         
         self.updated_at = datetime.now()
+    
+    def update_status(self, new_status: OrderStatus) -> bool:
+        """
+        Update order status with validation.
+        
+        Args:
+            new_status: New status to transition to
+            
+        Returns:
+            True if transition was successful, False otherwise
+        """
+        return OrderStateMachine.transition(self, new_status)
 
 
 class OrderStateMachine:

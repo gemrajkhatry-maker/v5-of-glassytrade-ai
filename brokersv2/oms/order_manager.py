@@ -98,7 +98,7 @@ class OrderManager:
                 await self._event_bus.publish(
                     RiskEvent(
                         violation_type=violation.violation_type,
-                        message=violation.message,
+                        details={"message": violation.message},
                     )
                 )
             return order
@@ -113,6 +113,8 @@ class OrderManager:
             order.broker_order_id = broker_order_id
             self._broker_to_internal[broker_order_id] = order_id
             
+            # Follow state machine: NEW → VALIDATED → SENT
+            order.update_status(OrderStatus.VALIDATED)
             order.update_status(OrderStatus.SENT)
             await self._add_audit_entry(order_id, OrderStatus.NEW, OrderStatus.SENT, "Sent to broker")
             
