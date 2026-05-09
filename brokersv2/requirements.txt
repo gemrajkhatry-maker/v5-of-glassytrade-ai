@@ -20,4 +20,7 @@ pytest>=7.0.0
 pytest-asyncio>=0.23.0
 hypothesis>=6.90.0
 
+# OpenChart (historical data fallback)
+opencart>=0.1.0
+
 # All other dependencies are in Python standard library
