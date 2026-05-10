@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/infrastructure/dhan_adapter/client.py
+# hypothesis_version: 6.147.0
+
+[200, '/historical', '/optionchain', '/orders', '0', '13', '14', '1d', '23', '26', 'BANKEX', 'BANKNIFTY', 'BSE_FNO', 'CanonicalInstrument', 'Content-Type', 'DELETE', 'Expiry', 'FINNIFTY', 'GET', 'IDX_I', 'INTRADAY', 'LTP', 'MIDCPNIFTY', 'NIFTY', 'NSE', 'NSE_FNO', 'OI', 'POST', 'SENSEX', 'UNKNOWN', 'UnderlyingScrip', 'UnderlyingSeg', 'access-token', 'application/json', 'ask', 'bid', 'client-id', 'close', 'data', 'date', 'default', 'exchange_segment', 'expiry', 'from_date', 'high', 'historical', 'interval', 'low', 'non_trading', 'open', 'option_chain', 'order_id', 'order_type', 'orders', 'price', 'product_type', 'quantity', 'quotes', 'security_id', 'status', 'to_date', 'transaction_type', 'trigger_price', 'volume', 'wss://api.dhan.co/ws']

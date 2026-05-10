@@ -153,9 +153,9 @@ class DhanWebSocketManager:
             # Translate canonical instruments to broker format
             broker_instruments = []
             for instrument in batch:
-                broker_inst = self._mapper.to_broker(instrument)
-                if broker_inst:
-                    broker_instruments.append(broker_inst)
+                broker_mapping = self._mapper.canonical_to_broker_mapping(instrument)
+                if broker_mapping and broker_mapping.get('broker_symbol'):
+                    broker_instruments.append(broker_mapping['broker_symbol'])
             
             if not broker_instruments:
                 logger.warning(f"Batch {i+1}: No valid instruments after mapping")
@@ -280,7 +280,7 @@ class DhanWebSocketManager:
             security_id = str(raw_data.get("security_id", ""))
             
             # Look up canonical instrument
-            instrument = self._mapper.from_security_id(security_id)
+            instrument = self._mapper.security_id_to_canonical(security_id)
             if not instrument:
                 logger.debug(f"Unknown security_id: {security_id}")
                 return None

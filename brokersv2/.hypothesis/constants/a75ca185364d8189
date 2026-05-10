@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/infrastructure/rate_limiter/token_bucket.py
+# hypothesis_version: 6.147.0
+
+[0.0, 0.01, 0.33, 1.0, 5.0, 10.0, 20.0, 250, 600, 3600, 10000, 'bucket', 'callback', 'default', 'historical', 'id', 'non_trading', 'option_chain', 'orders', 'priority', 'quotes']

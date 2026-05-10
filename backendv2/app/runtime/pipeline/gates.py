@@ -32,6 +32,9 @@ class _SymbolState:
         self.drive_decay = DriveDecay()
         self.oi_analyzer = OIAnalyzer()
         self.rr_validator = RRValidator()
+        self._candles: list[OHLC] = []
+        self._amt_result: SimpleNamespace | None = None
+        self._orderflow: SimpleNamespace | None = None
 
 
 class GateEvaluation:
@@ -47,6 +50,39 @@ class GateEvaluation:
         if symbol not in self._states:
             self._states[symbol] = _SymbolState()
         return self._states[symbol]
+
+    def ingest_market_structure(self, symbol: str, market_result) -> None:
+        """Ingest market structure result (contains AMT data) for squeeze detection.
+
+        Wiring: SessionRuntime calls this when market structure is updated.
+        """
+        state = self._get_state(symbol)
+        if market_result and hasattr(market_result, 'value_area_low'):
+            state._amt_result = market_result
+
+    def ingest_orderflow(self, symbol: str, orderflow_data) -> None:
+        """Ingest orderflow data for gate evaluation.
+
+        Also updates RegimeDetector absorption state when absorption is detected.
+        Wiring: SessionRuntime calls this when orderflow metrics are available.
+        """
+        state = self._get_state(symbol)
+        state._orderflow = orderflow_data
+        if orderflow_data and getattr(orderflow_data, 'absorption_detected', False):
+            absorption_side = getattr(orderflow_data, 'absorption_side', 'NONE')
+            if absorption_side in ('BUY', 'SELL'):
+                state.regime.set_absorption(detected=True, side=absorption_side)
+
+    def ingest_candle(self, symbol: str, candle: OHLC) -> None:
+        """Ingest a candle for squeeze detection.
+
+        Stores up to 100 recent candles per symbol.
+        Wiring: SessionRuntime calls this when new candles are available.
+        """
+        state = self._get_state(symbol)
+        state._candles.append(candle)
+        if len(state._candles) > 100:
+            state._candles = state._candles[-100:]
 
     @staticmethod
     def _to_dt(timestamp: float) -> datetime:
@@ -173,11 +209,16 @@ class GateEvaluation:
 
             # 1. Regime-based re-entry block
             session_phase = self._compute_session_phase(signal.timestamp)
+            squeeze_active = (
+                len(state._candles) >= 20
+                and state._amt_result is not None
+                and state.regime.detect_squeeze(state._candles, state._amt_result) is not None
+            )
             if state.regime.is_re_entry_blocked(
                 level=float(signal.entry),
                 direction=str(signal.type),
                 session_phase=session_phase,
-                squeeze_active=False,
+                squeeze_active=squeeze_active,
                 atr=abs(signal.tp - signal.sl),
             ):
                 return self._reject_result(

@@ -109,8 +109,8 @@ AGGRESSIVE_PRINT_SIGMA = _get("aggressive_print_sigma", 2.5)
 # ============================================================================
 # Structure
 # ============================================================================
-STRUCTURE_DWELL_TICKS = 3
-STRUCTURE_COOLDOWN_TICKS = 3
+STRUCTURE_DWELL_TICKS = 1
+STRUCTURE_COOLDOWN_TICKS = 2
 STRUCTURE_CONFIDENCE_GATE = 60
 STRUCTURE_BYPASS_CONFIDENCE = 70
 

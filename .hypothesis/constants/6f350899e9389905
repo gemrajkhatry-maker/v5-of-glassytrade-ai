@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/domain/instrument/parser.py
+# hypothesis_version: 6.147.0
+
+[2000, 'APR', 'AUG', 'CE', 'DEC', 'FEB', 'JAN', 'JUL', 'JUN', 'MAR', 'MAY', 'NOV', 'OCT', 'SEP', '^[A-Z]{2,20}$']

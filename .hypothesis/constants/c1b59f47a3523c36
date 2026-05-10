@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/domain/order/models.py
+# hypothesis_version: 6.147.0
+
+['0', 'CanonicalInstrument', 'UNKNOWN', 'price', 'quantity', 'timestamp']

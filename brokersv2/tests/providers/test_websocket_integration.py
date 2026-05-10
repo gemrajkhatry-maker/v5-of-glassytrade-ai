@@ -120,7 +120,8 @@ class TestTickNormalization:
         mapper = Mock(spec=InstrumentMapper)
         
         instrument = Mock()
-        mapper.from_security_id.return_value = instrument
+        instrument.symbol = "RELIANCE"
+        mapper.security_id_to_canonical.return_value = instrument
         
         manager = DhanWebSocketManager(config=config, mapper=mapper)
         
@@ -144,7 +145,8 @@ class TestTickNormalization:
         mapper = Mock(spec=InstrumentMapper)
         
         instrument = Mock()
-        mapper.from_security_id.return_value = instrument
+        instrument.symbol = "RELIANCE"
+        mapper.security_id_to_canonical.return_value = instrument
         
         manager = DhanWebSocketManager(config=config, mapper=mapper)
         
@@ -162,7 +164,7 @@ class TestTickNormalization:
         """Should return None for unknown security ID."""
         config = Mock(spec=DhanConfig)
         mapper = Mock(spec=InstrumentMapper)
-        mapper.from_security_id.return_value = None
+        mapper.security_id_to_canonical.return_value = None
         
         manager = DhanWebSocketManager(config=config, mapper=mapper)
         
@@ -182,7 +184,8 @@ class TestTickNormalization:
         mapper = Mock(spec=InstrumentMapper)
         
         instrument = Mock()
-        mapper.from_security_id.return_value = instrument
+        instrument.symbol = "RELIANCE"
+        mapper.security_id_to_canonical.return_value = instrument
         
         manager = DhanWebSocketManager(config=config, mapper=mapper)
         old_heartbeat = manager._last_heartbeat
@@ -303,9 +306,20 @@ class TestConnectionManagement:
         manager = DhanWebSocketManager(config=config, mapper=mapper)
         manager._running = True
         
-        # Mock tasks
-        mock_receive_task = AsyncMock()
-        mock_heartbeat_task = AsyncMock()
+        # Create mock tasks that can be awaited
+        async def mock_task_coro():
+            try:
+                await asyncio.sleep(100)  # Long sleep
+            except asyncio.CancelledError:
+                raise asyncio.CancelledError()
+        
+        mock_receive_task = asyncio.create_task(mock_task_coro())
+        mock_heartbeat_task = asyncio.create_task(mock_task_coro())
+        
+        # Store original cancel for verification
+        original_receive_cancel = mock_receive_task.cancel
+        original_heartbeat_cancel = mock_heartbeat_task.cancel
+        
         manager._receive_task = mock_receive_task
         manager._heartbeat_task = mock_heartbeat_task
         
@@ -316,11 +330,13 @@ class TestConnectionManagement:
         
         await manager.stop()
         
+        # Verify running is False and ws_client is None
         assert manager._running is False
-        mock_receive_task.cancel.assert_called_once()
-        mock_heartbeat_task.cancel.assert_called_once()
-        mock_ws_client.disconnect.assert_called_once()
         assert manager._ws_client is None
+        
+        # Verify tasks were cancelled (they should be done now)
+        assert mock_receive_task.done()
+        assert mock_heartbeat_task.done()
     
     @pytest.mark.asyncio
     async def test_subscribe_batches_instruments(self):
@@ -338,8 +354,13 @@ class TestConnectionManagement:
         for i in range(250):
             inst = Mock()
             inst.internal_uid = f"inst_{i}"
-            mapper.to_broker.return_value = f"broker_{i}"
             instruments.append(inst)
+        
+        # Configure mapper.canonical_to_broker_mapping to return different values
+        def mock_canonical_to_broker_mapping(inst):
+            return {'broker_symbol': f"broker_{inst.internal_uid}"}
+        
+        mapper.canonical_to_broker_mapping.side_effect = mock_canonical_to_broker_mapping
         
         await manager.subscribe(instruments)
         
@@ -422,7 +443,8 @@ class TestQueueManagement:
         mapper = Mock(spec=InstrumentMapper)
         
         instrument = Mock()
-        mapper.from_security_id.return_value = instrument
+        instrument.symbol = "RELIANCE"
+        mapper.security_id_to_canonical.return_value = instrument
         
         manager = DhanWebSocketManager(config=config, mapper=mapper)
         

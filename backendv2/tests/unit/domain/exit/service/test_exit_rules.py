@@ -211,7 +211,7 @@ class TestCheckSpreadBlowout:
         assert not check_spread_blowout(0.01)
 
     def test_above_threshold_is_blowout(self):
-        assert check_spread_blowout(0.011)
+        assert check_spread_blowout(0.031)  # 3.1% > 3% threshold
 
     def test_zero_spread_not_blowout(self):
         assert not check_spread_blowout(0.0)

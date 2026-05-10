@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/risk/kill_switch.py
+# hypothesis_version: 6.147.0
+
+['BUY', 'Kill switch DISARMED', 'MARKET', 'SELL', 'armed', 'disarmed', 'errors', 'orders_cancelled', 'positions_squared', 'reason', 'triggered']

@@ -75,6 +75,6 @@ def is_valid_rr(entry: float, sl: float, tp: float, direction: str, min_rr: floa
     return rr >= min_rr
 
 
-def check_spread_blowout(spread_pct: float, threshold: float = 0.01) -> bool:
+def check_spread_blowout(spread_pct: float, threshold: float = 0.03) -> bool:
     """Check if bid-ask spread has blown out."""
     return spread_pct > threshold

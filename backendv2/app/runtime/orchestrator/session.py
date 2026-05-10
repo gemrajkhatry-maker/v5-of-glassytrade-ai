@@ -411,6 +411,7 @@ class SessionRuntime:
             for metric in orderflow_events:
                 self._features.ingest_orderflow(metric)
                 self._signal.ingest_orderflow(metric)
+                self._gates.ingest_orderflow(getattr(metric, 'symbol', 'UNKNOWN'), metric)
             for metric in micro_events:
                 self._features.ingest_microstructure(metric)
                 self._signal.ingest_microstructure(metric)
@@ -425,6 +426,8 @@ class SessionRuntime:
             for candle in candle_events:
                 self._features.ingest_market_structure(self._market_structure.get_result(candle.symbol))
                 self._signal.ingest_market_structure(self._market_structure.get_result(candle.symbol))
+                self._gates.ingest_candle(candle.symbol, candle)
+                self._gates.ingest_market_structure(candle.symbol, self._market_structure.get_result(candle.symbol))
 
                 # strategy stage kept explicit for future branching
                 features = self._features.process(candle)

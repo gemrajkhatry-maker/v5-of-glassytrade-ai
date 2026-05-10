@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/analytics/options/events.py
+# hypothesis_version: 6.147.0
+
+[0.0, 0.7, 1.0, 2.0, 100.0, 'C', 'CALL', 'CE', 'P', 'PE', 'PUT', 'at_the_money', 'atm_strike', 'call', 'in_the_money', 'long_buildup', 'long_unwinding', 'oi', 'out_of_the_money', 'put', 'short_buildup', 'short_covering', 'strike', 'type', 'volume']
