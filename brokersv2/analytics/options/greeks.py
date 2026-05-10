@@ -13,6 +13,7 @@ class GreeksResult:
     theta: float
     vega: float
     rho: float
+    implied_vol: float = 0.0
 
 
 def _norm_cdf(x: float) -> float:

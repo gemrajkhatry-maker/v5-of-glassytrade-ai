@@ -69,6 +69,55 @@ class SweepDetector:
         self._threshold_levels = min_levels
         self._threshold_volume = min_volume
     
+    def detect_bid_sweep(
+        self,
+        before_bids: List[PriceLevel],
+        after_bids: List[PriceLevel],
+        asks: Optional[List[PriceLevel]] = None,
+        symbol: str = "",
+    ) -> Optional[SweepEvent]:
+        """
+        Detect sweep on bid side.
+        
+        Args:
+            before_bids: Bid levels before event
+            after_bids: Bid levels after event
+            asks: Current ask levels (for context)
+            symbol: Instrument symbol
+            
+        Returns:
+            SweepEvent if detected, None otherwise
+        """
+        return self._check_side_sweep(
+            before_bids, after_bids, symbol, SweepDirection.BID, descending=True
+        )
+    
+    def detect_ask_sweep(
+        self,
+        bids: Optional[List[PriceLevel]] = None,
+        before_asks: List[PriceLevel] = None,
+        after_asks: List[PriceLevel] = None,
+        symbol: str = "",
+    ) -> Optional[SweepEvent]:
+        """
+        Detect sweep on ask side.
+        
+        Args:
+            bids: Current bid levels (for context)
+            before_asks: Ask levels before event
+            after_asks: Ask levels after event
+            symbol: Instrument symbol
+            
+        Returns:
+            SweepEvent if detected, None otherwise
+        """
+        if before_asks is None or after_asks is None:
+            return None
+            
+        return self._check_side_sweep(
+            before_asks, after_asks, symbol, SweepDirection.ASK, descending=False
+        )
+    
     def check_sweep(
         self,
         old_book: List[PriceLevel],
@@ -158,15 +207,12 @@ class SweepDetector:
             
             old_idx += 1
         
-        # Check if sweep thresholds met
-        if levels_consumed < self._threshold_levels and volume_swept < self._threshold_volume:
+        # Check if sweep thresholds met (BOTH must be met)
+        if levels_consumed < self._threshold_levels or volume_swept < self._threshold_volume:
             return None
         
-        # Calculate price impact
-        if start_price > 0:
-            price_impact = abs(start_price - end_price) / start_price * 100.0
-        else:
-            price_impact = 0.0
+        # Calculate price impact (absolute price difference)
+        price_impact = abs(start_price - end_price)
         
         sweep = SweepEvent(
             timestamp=datetime.now(timezone.utc),
