@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/models/signal.py
+# hypothesis_version: 6.152.4
+
+[0.0, 600, 'age_seconds', 'confidence', 'direction', 'entry_price', 'expiry_date', 'is_expired', 'market_state', 'option_type', 'poc', 'risk_reward_ratio', 'session_phase', 'setup_type', 'stop_loss', 'symbol', 'take_profit', 'timestamp', 'underlying_symbol', 'vah', 'val', 'vwap']

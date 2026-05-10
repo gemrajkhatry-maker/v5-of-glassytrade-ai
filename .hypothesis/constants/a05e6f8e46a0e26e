@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/latency_tracker.py
+# hypothesis_version: 6.152.4
+
+[0.5, 0.95, 0.99, 200, 1000, 'critical', 'max', 'p50', 'p95', 'p99', 'samples', 'warning']

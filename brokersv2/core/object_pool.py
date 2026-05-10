@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, List, Set
 
+from brokersv2.core.constants import ObjectPool as PoolConstants
+
 
 class ObjectPool:
     """
@@ -26,7 +28,7 @@ class ObjectPool:
         pool.release(tick)
     """
     
-    def __init__(self, factory: Callable[[], Any], pool_size: int = 1000):
+    def __init__(self, factory: Callable[[], Any], pool_size: int = None):
         """
         Initialize object pool.
         
@@ -34,7 +36,8 @@ class ObjectPool:
             factory: Callable that creates new instances
             pool_size: Number of objects to pre-allocate
         """
-        if pool_size <= 0:
+        self._pool_size = pool_size or PoolConstants.DEFAULT_POOL_SIZE
+        if self._pool_size <= 0:
             raise ValueError("Pool size must be positive")
         
         self._factory = factory
@@ -42,7 +45,7 @@ class ObjectPool:
         self._active: Set[int] = set()  # Track by id()
         
         # Pre-allocate
-        for _ in range(pool_size):
+        for _ in range(self._pool_size):
             self._pool.append(factory())
     
     def acquire(self) -> Any:

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/state_bus.py
+# hypothesis_version: 6.152.4
+
+[100, 1000, 5000, 'INVARIANT_VIOLATION', 'SESSION_CHANGE', 'SESSION_MISMATCH', 'STALE_DATA', 'anomaly_type', 'computedAt', 'detail', 'poc', 'sessionId', 'sessionVwap', 'symbol', 'timestamp', 'vah', 'val', 'vwapDeviationSigmas', 'vwapUpper1']

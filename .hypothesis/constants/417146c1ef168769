@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/validation.py
+# hypothesis_version: 6.152.4
+
+['DataFrame is empty', 'Sorted by timestamp', 'candle_count', 'close', 'error_count', 'errors', 'first', 'high', 'low', 'open', 'symbol', 'timestamp', 'validation', 'volume']

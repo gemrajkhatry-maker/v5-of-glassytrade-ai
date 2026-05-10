@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/core/metrics.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, '+Inf', ',', 'MetricsRegistry', 'Signals generated', 'Total errors', '_initialized', 'errors_total', 'inf', 'positions_active']

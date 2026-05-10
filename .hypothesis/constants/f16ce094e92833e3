@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/symbol_registry.py
+# hypothesis_version: 6.152.4
+
+['-', 'ALUMINIUM', 'BANKNIFTY', 'CALL', 'COPPER', 'COTTONCANDY', 'CRUDEOIL', 'CRUDEOILM', 'FINNIFTY', 'GOLD', 'GOLDM', 'LEAD', 'MCX', 'MCX:', 'NATURALGAS', 'NICKEL', 'NIFTY', 'NSE', 'NSE:', 'PUT', 'SILVER', 'SILVERM', 'ZINC']

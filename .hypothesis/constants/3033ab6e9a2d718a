@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/acceptance_rejection.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.5, 0.8, 1.0, 'ABOVE_VAH', 'BELOW_VAL']

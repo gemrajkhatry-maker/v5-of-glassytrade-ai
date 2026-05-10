@@ -8,6 +8,8 @@ from typing import Any, Optional, Union
 
 # Re-export AMTResult from domain model for pipeline use
 from app.domain.trading.model.value_objects import AMTResult
+# ExitDecision from domain model (moved)
+from app.domain.exit.model.exit_decision import ExitDecision as DomainExitDecision
 
 
 class CandleTimeframe(Enum):
@@ -280,14 +282,8 @@ class FillEvent:
     exchange: str = ""
 
 
-@dataclass(frozen=True)
-class ExitDecision:
-    """Decision to exit a position."""
-    exit_type: str  # FULL, PARTIAL
-    size_pct: float  # 0.0 to 1.0
-    price: float
-    reason: str
-    new_stop: Optional[float] = None
+# ExitDecision is provided by domain layer
+ExitDecision = DomainExitDecision
 
 
 PipelineEvent = Union[

@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
+from brokersv2.domain.market.hours import MarketHoursGate, MarketClosedError
 from brokersv2.observability.metrics import MetricsCollector
 from brokersv2.observability.health import (
     HealthChecker,
@@ -56,6 +57,17 @@ class OrderRequest(BaseModel):
     order_type: str  # MARKET/LIMIT/SL/SL-M
     price: Optional[float] = None
     trigger_price: Optional[float] = None
+    after_market_order: bool = False
+
+
+class ModifyOrderRequest(BaseModel):
+    """Order modification request — all fields are optional."""
+    price: Optional[float] = None
+    quantity: Optional[int] = None
+    order_type: Optional[str] = None      # MARKET/LIMIT/SL/SL-M
+    validity: Optional[str] = None        # DAY/IOC
+    trigger_price: Optional[float] = None
+    disclosed_quantity: Optional[int] = None
 
 
 class BrokerStatus(BaseModel):
@@ -87,152 +99,36 @@ class GatewayConfig:
         self.dry_run = dry_run
 
 
-class DryRunBroker:
-    """
-    Mock broker for DRY run mode - simulates all operations without real execution.
-    
-    Features:
-    - Mock order placement with generated IDs
-    - Mock quotes with realistic prices
-    - Mock historical data
-    - Operation logging for audit
-    """
+# Import DryRunBroker from testing module
+from brokersv2.testing.mocks import DryRunBroker  # noqa: F401
 
-    def __init__(self):
-        self.operation_log: List[Dict[str, Any]] = []
-        self._order_counter = 0
 
-    def place_order_mock(
-        self,
-        symbol: str,
-        exchange: str,
-        quantity: int,
-        side: str,
-        order_type: str,
-        price: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """Simulate order placement."""
-        self._order_counter += 1
-        order_id = f"DRY_RUN_{self._order_counter}_{uuid.uuid4().hex[:8]}"
-
-        operation = {
-            "operation": "place_order",
-            "order_id": order_id,
-            "symbol": symbol,
-            "exchange": exchange,
-            "quantity": quantity,
-            "side": side,
-            "order_type": order_type,
-            "price": price,
-            "status": "COMPLETED",
-            "dry_run": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-        self.operation_log.append(operation)
-        logger.info(f"[DRY RUN] Simulated order: {order_id} - {side} {quantity} {symbol}")
-
-        return operation
-
-    def cancel_order_mock(self, order_id: str) -> Dict[str, Any]:
-        """Simulate order cancellation."""
-        operation = {
-            "operation": "cancel_order",
-            "order_id": order_id,
-            "cancelled": True,
-            "dry_run": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-        self.operation_log.append(operation)
-        logger.info(f"[DRY RUN] Simulated cancellation: {order_id}")
-
-        return operation
-
-    def get_quote_mock(self, symbol: str) -> Dict[str, Any]:
-        """Simulate quote retrieval."""
-        # Generate realistic mock prices based on symbol
-        base_price = {
-            "RELIANCE": 2500.0,
-            "TCS": 3500.0,
-            "INFY": 1500.0,
-            "HDFCBANK": 1600.0,
-            "NIFTY": 22000.0,
-            "BANKNIFTY": 48000.0,
-        }.get(symbol.split(":")[-1] if ":" in symbol else symbol, 1000.0)
-
-        import random
-        ltp = base_price * random.uniform(0.98, 1.02)
-
-        return {
-            "symbol": symbol,
-            "ltp": round(ltp, 2),
-            "open": round(base_price * 0.99, 2),
-            "high": round(base_price * 1.02, 2),
-            "low": round(base_price * 0.98, 2),
-            "close": round(base_price, 2),
-            "volume": random.randint(100000, 1000000),
-            "dry_run": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def get_historical_mock(
-        self,
-        symbol: str,
-        exchange: str,
-        from_date: str,
-        to_date: str,
-        interval: str = "1d",
-    ) -> Dict[str, Any]:
-        """Simulate historical data retrieval."""
-        # Generate mock candles
-        import random
-        base_price = 1000.0
-        candles = []
-
-        # Generate 30 candles as example
-        for i in range(30):
-            open_price = base_price * random.uniform(0.95, 1.05)
-            high_price = open_price * random.uniform(1.01, 1.03)
-            low_price = open_price * random.uniform(0.97, 0.99)
-            close_price = open_price * random.uniform(0.98, 1.02)
-
-            candles.append({
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "open": round(open_price, 2),
-                "high": round(high_price, 2),
-                "low": round(low_price, 2),
-                "close": round(close_price, 2),
-                "volume": random.randint(10000, 100000),
-            })
-
-            base_price = close_price  # Next candle starts from close
-
-        return {
-            "symbol": symbol,
-            "exchange": exchange,
-            "interval": interval,
-            "candles": candles,
-            "count": len(candles),
-            "from_date": from_date,
-            "to_date": to_date,
-            "dry_run": True,
-        }
-
+# Note: DryRunBroker class removed - use brokersv2.testing.mocks.DryRunBroker
 
 class AppState:
     """Application state holder."""
 
     def __init__(self):
+        from brokersv2.core.constants import CircuitBreaker as CBConstants
         self.metrics = MetricsCollector()
         self.health_checker = HealthChecker()
         self.config: Optional[GatewayConfig] = None
         self.startup_time: Optional[datetime] = None
-        self.circuit_breaker = CircuitBreaker(failure_threshold=5, recovery_timeout=60)
+        self.circuit_breaker = CircuitBreaker(
+            failure_threshold=CBConstants.FAILURE_THRESHOLD,
+            recovery_timeout=CBConstants.RECOVERY_TIMEOUT,
+        )
         self.dry_run_broker = DryRunBroker()
-        
+        self.market_hours_gate: Optional[MarketHoursGate] = None  # Shared instance (set post-init)
+
         # Phase 2: Market data service
         self.market_data_service = None  # MarketDataService (set externally)
+
+        # Wired by bootstrap.create_gateway_app() / lifespan; default to None so
+        # endpoints fall through to dry-run mode when the adapter is not configured.
+        self.broker = None          # IBrokerAdapter | None
+        self.market_data = None     # MarketDataService | None
+        self.order_manager = None   # OrderManager | None
 
 
 def create_app(config: Optional[GatewayConfig] = None) -> FastAPI:
@@ -268,18 +164,73 @@ def create_app(config: Optional[GatewayConfig] = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         """Application lifespan - startup and shutdown."""
-        # Startup
-        logger.info(f"Starting GlassyTrade Gateway v{__version__}")
-        logger.info(f"Listening on {config.host}:{config.port}")
+        import asyncio as _asyncio
 
-        # Record metrics
+        # Startup
+        logger.info("Starting GlassyTrade Gateway v%s", __version__)
+        logger.info("Listening on %s:%s", config.host, config.port)
         state.metrics.increment("gateway_starts", description="Gateway startup count")
+
+        # Broker is wired by bootstrap.create_gateway_app() and stored in app.state
+        # before the lifespan runs.  Expose it on state as well for route closures.
+        state.broker = getattr(app.state, "broker", None)
+        state.market_data = getattr(app.state, "market_data", None)
+        state.order_manager = getattr(app.state, "order_manager", None)
+
+        if state.broker and not config.dry_run:
+            logger.info("Live broker adapter connected (dry_run=False)")
+        else:
+            logger.info("Gateway running in DRY RUN mode — no real orders will be placed")
+
+        # Run any startup callbacks registered by bootstrap (replaces @on_event)
+        _startup_tasks: list = getattr(app.state, "_startup_tasks", [])
+        _background_tasks: list = []
+        for startup_fn in _startup_tasks:
+            try:
+                result = await startup_fn(app)
+                if result is not None:
+                    # startup_fn returned a coroutine to run as a background task
+                    _background_tasks.append(_asyncio.ensure_future(result))
+            except Exception as exc:
+                logger.error("Startup task %s failed: %s", getattr(startup_fn, "__name__", startup_fn), exc)
 
         yield
 
-        # Shutdown
-        logger.info("Shutting down GlassyTrade Gateway")
+        # Graceful shutdown sequence:
+        # 1. Stop accepting new orders (mark state as shutting down)
+        logger.info("Shutting down GlassyTrade Gateway — stopping order acceptance")
         state.metrics.increment("gateway_stops", description="Gateway shutdown count")
+
+        # 2. Cancel background tasks (reconciler, scheduler, token refresh)
+        for task in _background_tasks:
+            task.cancel()
+            try:
+                await task
+            except (_asyncio.CancelledError, Exception):
+                pass
+
+        # 3. Stop market data WebSocket
+        if state.market_data and hasattr(state.market_data, 'ws_manager'):
+            try:
+                await state.market_data.ws_manager.stop()
+            except Exception as exc:
+                logger.warning("Error stopping WebSocket: %s", exc)
+
+        # 4. Close broker adapter HTTP session
+        if state.broker:
+            try:
+                await state.broker.close()
+            except Exception as exc:
+                logger.warning("Error closing broker adapter: %s", exc)
+
+        # 5. Stop event bus
+        if hasattr(state, 'event_bus') and state.event_bus:
+            try:
+                await state.event_bus.stop()
+            except Exception as exc:
+                logger.warning("Error stopping event bus: %s", exc)
+
+        logger.info("GlassyTrade Gateway shutdown complete")
 
     # Create FastAPI app
     app = FastAPI(
@@ -386,25 +337,27 @@ def _register_routes(app: FastAPI, state: AppState):
     # ========================================================================
 
     @app.get("/quote/{symbol}")
-    async def get_quote(symbol: str):
+    async def get_quote(symbol: str, exchange: str = Query("NSE")):
         """Get current quote for symbol."""
         state.metrics.increment("quote_requests", labels={"symbol": symbol})
-        
-        # DRY Run mode
-        if state.config.dry_run:
+
+        if state.config.dry_run or state.broker is None:
             return state.dry_run_broker.get_quote_mock(symbol)
-        
-        # TODO: Wire to real broker adapter with circuit breaker
-        return {
-            "symbol": symbol,
-            "ltp": 0.0,
-            "open": 0.0,
-            "high": 0.0,
-            "low": 0.0,
-            "close": 0.0,
-            "volume": 0,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+
+        try:
+            from brokersv2.domain.instrument.models import CanonicalInstrument
+            instrument = CanonicalInstrument.from_symbol(f"{exchange.upper()}:{symbol}")
+            quote = await state.broker.get_quote(instrument)
+            return {
+                "symbol": symbol,
+                "exchange": exchange,
+                "ltp": float(quote.ltp) if hasattr(quote, "ltp") else quote.get("ltp", 0.0),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as exc:
+            logger.error("Quote error for %s: %s", symbol, exc)
+            state.metrics.increment("quote_errors", labels={"symbol": symbol})
+            raise HTTPException(status_code=502, detail=str(exc))
 
     @app.post("/quotes/batch")
     async def get_quotes_batch(request: QuoteBatchRequest):
@@ -424,9 +377,8 @@ def _register_routes(app: FastAPI, state: AppState):
             "symbol": request.symbol,
             "interval": request.interval,
         })
-        
-        # DRY Run mode
-        if state.config.dry_run:
+
+        if state.config.dry_run or state.broker is None:
             return state.dry_run_broker.get_historical_mock(
                 symbol=request.symbol,
                 exchange=request.exchange,
@@ -434,17 +386,42 @@ def _register_routes(app: FastAPI, state: AppState):
                 to_date=request.to_date,
                 interval=request.interval,
             )
-        
-        # TODO: Wire to broker adapter historical method with circuit breaker
-        return {
-            "symbol": request.symbol,
-            "exchange": request.exchange,
-            "interval": request.interval,
-            "candles": [],
-            "count": 0,
-            "from_date": request.from_date,
-            "to_date": request.to_date,
-        }
+
+        try:
+            from brokersv2.domain.instrument.models import CanonicalInstrument
+            instrument = CanonicalInstrument.from_symbol(
+                f"{request.exchange.upper()}:{request.symbol}"
+            )
+            candles = await state.broker.get_historical(
+                instrument=instrument,
+                from_date=request.from_date,
+                to_date=request.to_date,
+                interval=request.interval,
+            )
+            serialised = [
+                {
+                    "timestamp": c.timestamp.isoformat() if hasattr(c, "timestamp") else str(c),
+                    "open": float(c.open),
+                    "high": float(c.high),
+                    "low": float(c.low),
+                    "close": float(c.close),
+                    "volume": float(c.volume),
+                }
+                for c in candles
+            ]
+            return {
+                "symbol": request.symbol,
+                "exchange": request.exchange,
+                "interval": request.interval,
+                "candles": serialised,
+                "count": len(serialised),
+                "from_date": request.from_date,
+                "to_date": request.to_date,
+            }
+        except Exception as exc:
+            logger.error("Historical data error for %s: %s", request.symbol, exc)
+            state.metrics.increment("historical_errors", labels={"symbol": request.symbol})
+            raise HTTPException(status_code=502, detail=str(exc))
 
     @app.get("/candles/{symbol}")
     async def get_candles(
@@ -477,9 +454,19 @@ def _register_routes(app: FastAPI, state: AppState):
             "side": request.side,
             "type": request.order_type,
         })
-        
-        # DRY Run mode
-        if state.config.dry_run:
+
+        # Hard-reject orders outside market hours at the gateway layer.
+        # AMO orders bypass this check (after_market_order flag handled downstream).
+        after_market = getattr(request, "after_market_order", False)
+        if not after_market and not getattr(state.config, "dry_run", True):
+            _gate = state.market_hours_gate or MarketHoursGate()
+            exchange_segment = f"{request.exchange.upper()}_EQ"
+            try:
+                _gate.check(exchange_segment)
+            except MarketClosedError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+
+        if state.config.dry_run or state.broker is None:
             return state.dry_run_broker.place_order_mock(
                 symbol=request.symbol,
                 exchange=request.exchange,
@@ -488,16 +475,72 @@ def _register_routes(app: FastAPI, state: AppState):
                 order_type=request.order_type,
                 price=request.price,
             )
-        
-        return {
-            "order_id": "ORD_TEMP",
-            "status": "PENDING",
-            "symbol": request.symbol,
-            "exchange": request.exchange,
-            "quantity": request.quantity,
-            "side": request.side,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+
+        try:
+            from decimal import Decimal
+            from brokersv2.domain.instrument.models import CanonicalInstrument
+            from brokersv2.domain.order.models import Order
+            from brokersv2.core.types import OrderSide, OrderType, OrderStatus
+            import uuid
+
+            instrument = CanonicalInstrument.from_symbol(
+                f"{request.exchange.upper()}:{request.symbol}"
+            )
+            order = Order(
+                order_id=str(uuid.uuid4()),
+                instrument=instrument,
+                side=OrderSide(request.side.upper()),
+                quantity=Decimal(str(request.quantity)),
+                order_type=OrderType(request.order_type.upper()),
+                price=Decimal(str(request.price)) if request.price else None,
+                trigger_price=Decimal(str(request.trigger_price)) if request.trigger_price else None,
+            )
+            broker_order_id = await state.broker.place_order(order)
+            return {
+                "order_id": order.order_id,
+                "broker_order_id": broker_order_id,
+                "status": order.status.value,
+                "symbol": request.symbol,
+                "exchange": request.exchange,
+                "quantity": request.quantity,
+                "side": request.side,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as exc:
+            logger.error("Order placement error for %s: %s", request.symbol, exc)
+            state.metrics.increment("order_errors", labels={"symbol": request.symbol})
+            raise HTTPException(status_code=502, detail=str(exc))
+
+    @app.put("/orders/{order_id}")
+    async def modify_order(order_id: str, request: ModifyOrderRequest):
+        """
+        Modify a pending order.
+
+        All fields are optional — only supplied fields are forwarded to the
+        broker.  At least one field must be provided.
+        """
+        if state.broker is None:
+            raise HTTPException(status_code=503, detail="Broker not configured")
+
+        if all(v is None for v in request.model_dump().values()):
+            raise HTTPException(
+                status_code=422, detail="At least one field must be provided for modification"
+            )
+
+        try:
+            success = await state.broker.modify_order(
+                broker_order_id=order_id,
+                price=request.price,
+                quantity=request.quantity,
+                order_type=request.order_type,
+                validity=request.validity,
+                trigger_price=request.trigger_price,
+                disclosed_quantity=request.disclosed_quantity,
+            )
+            return {"order_id": order_id, "modified": success}
+        except Exception as exc:
+            logger.error("Order modify error for %s: %s", order_id, exc)
+            raise HTTPException(status_code=502, detail=str(exc))
 
     @app.get("/orders")
     async def get_orders():
@@ -526,16 +569,20 @@ def _register_routes(app: FastAPI, state: AppState):
     async def cancel_order(order_id: str):
         """Cancel an order."""
         state.metrics.increment("order_cancellations")
-        
-        # DRY Run mode
-        if state.config.dry_run:
+
+        if state.config.dry_run or state.broker is None:
             return state.dry_run_broker.cancel_order_mock(order_id)
-        
-        return {
-            "order_id": order_id,
-            "cancelled": True,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+
+        try:
+            cancelled = await state.broker.cancel_order(order_id)
+            return {
+                "order_id": order_id,
+                "cancelled": cancelled,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as exc:
+            logger.error("Cancel order error for %s: %s", order_id, exc)
+            raise HTTPException(status_code=502, detail=str(exc))
 
     # ========================================================================
     # Positions & Risk Endpoints
@@ -546,12 +593,26 @@ def _register_routes(app: FastAPI, state: AppState):
         """Current positions."""
         state.metrics.increment("positions_requests", description="Positions API calls")
 
-        return {
-            "positions": [],
-            "total_exposure": 0,
-            "count": 0,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+        if state.config.dry_run or state.broker is None:
+            return {
+                "positions": [],
+                "total_exposure": 0,
+                "count": 0,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "dry_run": True,
+            }
+
+        try:
+            pos_list = await state.broker.get_positions()
+            return {
+                "positions": pos_list,
+                "total_exposure": 0,
+                "count": len(pos_list),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as exc:
+            logger.error("Positions fetch error: %s", exc)
+            raise HTTPException(status_code=502, detail=str(exc))
 
     @app.get("/risk/status")
     async def risk_status():
@@ -682,109 +743,139 @@ def _register_routes(app: FastAPI, state: AppState):
 
     @app.websocket("/ws/ticks")
     async def stream_ticks(websocket: WebSocket):
-        """WebSocket endpoint for real-time tick streaming."""
+        """WebSocket endpoint for real-time tick streaming via DhanWebSocketManager."""
         await websocket.accept()
-        
-        market_data = app.state.market_data_service
-        
-        if not market_data or not market_data._ws_manager:
+
+        market_data = state.market_data
+
+        if market_data is None or state.broker is None:
             await websocket.send_json({"error": "Market data service not configured"})
             await websocket.close()
             return
-        
+
         try:
-            # Get symbols from client
             msg = await websocket.receive_json()
             symbols = msg.get("symbols", [])
-            
+            exchange = msg.get("exchange", "NSE").upper()
+
             if not symbols:
                 await websocket.send_json({"error": "No symbols provided"})
                 await websocket.close()
                 return
-            
-            logger.info(f"Tick streaming client subscribed to: {symbols}")
-            
-            # TODO: Convert symbols to CanonicalInstrument and subscribe
-            # For now, stream from existing tick source if available
-            
-            # Stream ticks
-            while True:
-                # Keep connection alive
-                await websocket.receive_text()
-                
+
+            from brokersv2.domain.instrument.models import CanonicalInstrument
+            instruments = [
+                CanonicalInstrument.from_symbol(f"{exchange}:{sym}")
+                for sym in symbols
+            ]
+
+            logger.info("Tick streaming: subscribing to %s", symbols)
+
+            async for tick in state.broker.stream_ticks(instruments):
+                await websocket.send_json({
+                    "symbol": tick.instrument.symbol if hasattr(tick.instrument, "symbol") else str(tick.instrument),
+                    "ltp": float(tick.ltp),
+                    "volume": int(tick.volume),
+                    "timestamp": tick.timestamp.isoformat(),
+                })
+
         except WebSocketDisconnect:
             logger.info("Tick streaming client disconnected")
-        except Exception as e:
-            logger.error(f"Tick streaming error: {e}")
+        except Exception as exc:
+            logger.error("Tick streaming error: %s", exc)
             try:
-                await websocket.send_json({"error": str(e)})
-            except:
+                await websocket.send_json({"error": str(exc)})
+            except Exception:
                 pass
 
     @app.websocket("/ws/quotes")
     async def stream_quotes(websocket: WebSocket):
-        """WebSocket endpoint for real-time quote streaming."""
+        """
+        WebSocket endpoint for real-time tick streaming via DhanHQ market feed.
+
+        Consumes the broker's WebSocket stream (stream_ticks) instead of
+        polling REST.  Ticks are forwarded to the client as they arrive.
+
+        Message format from client:
+            {"symbols": ["NIFTY", "BANKNIFTY"], "exchange": "NSE"}
+        """
         await websocket.accept()
-        
-        market_data = app.state.market_data_service
-        
-        if not market_data:
-            await websocket.send_json({"error": "Market data service not configured"})
+
+        if state.broker is None:
+            await websocket.send_json({"error": "Broker not configured"})
             await websocket.close()
             return
-        
+
         try:
-            # Get symbols from client
             msg = await websocket.receive_json()
             symbols = msg.get("symbols", [])
-            
+            exchange = msg.get("exchange", "NSE").upper()
+
             if not symbols:
                 await websocket.send_json({"error": "No symbols provided"})
                 await websocket.close()
                 return
-            
-            logger.info(f"Quote streaming client subscribed to: {symbols}")
-            
-            # TODO: Implement quote streaming
-            # For now, keep connection alive
-            while True:
-                await websocket.receive_text()
-                
+
+            if len(symbols) > 100:
+                await websocket.send_json({"error": "Maximum 100 symbols per subscription"})
+                await websocket.close()
+                return
+
+            from brokersv2.domain.instrument.models import CanonicalInstrument
+            instruments = [
+                CanonicalInstrument.from_symbol(f"{exchange}:{sym}")
+                for sym in symbols
+            ]
+
+            logger.info("Quote streaming: subscribing to %s via WebSocket feed", symbols)
+
+            async for tick in state.broker.stream_ticks(instruments):
+                try:
+                    await websocket.send_json({
+                        "symbol": getattr(tick, "symbol", str(tick)),
+                        "ltp": float(getattr(tick, "ltp", getattr(tick, "price", 0))),
+                        "volume": int(getattr(tick, "volume", 0)),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                except Exception as send_exc:
+                    logger.warning("Failed to send tick to client: %s", send_exc)
+                    break
+
         except WebSocketDisconnect:
             logger.info("Quote streaming client disconnected")
-        except Exception as e:
-            logger.error(f"Quote streaming error: {e}")
+        except Exception as exc:
+            logger.error("Quote streaming error: %s", exc)
+            try:
+                await websocket.send_json({"error": str(exc)})
+            except Exception:
+                pass
 
     @app.websocket("/ws/depth")
     async def stream_depth(websocket: WebSocket):
         """WebSocket endpoint for market depth streaming."""
         await websocket.accept()
-        
-        market_data = app.state.market_data_service
-        
-        if not market_data or not market_data._ws_manager:
+
+        if state.market_data is None or state.broker is None:
             await websocket.send_json({"error": "Market data service not configured"})
             await websocket.close()
             return
-        
+
         try:
-            # Get symbol from client
             msg = await websocket.receive_json()
             symbol = msg.get("symbol")
-            
+            exchange = msg.get("exchange", "NSE").upper()
+
             if not symbol:
                 await websocket.send_json({"error": "No symbol provided"})
                 await websocket.close()
                 return
-            
-            logger.info(f"Depth streaming client subscribed to: {symbol}")
-            
-            # Stream depth updates
-            async for depth_event in market_data.stream_depth_updates(symbol):
-                # Convert to dict for JSON serialization
-                depth_dict = {
-                    "symbol": depth_event.symbol,
-                    "timestamp": depth_event.timestamp.isoformat(),
+
+            logger.info("Depth streaming: subscribed to %s", symbol)
+
+            async for depth_event in state.market_data.stream_depth_updates(symbol):
+                await websocket.send_json({
+                    "symbol": depth_event.symbol if hasattr(depth_event, "symbol") else symbol,
+                    "timestamp": depth_event.timestamp.isoformat() if hasattr(depth_event, "timestamp") else datetime.now(timezone.utc).isoformat(),
                     "bids": [
                         {"price": level.price, "quantity": level.quantity, "orders": level.orders}
                         for level in depth_event.bids
@@ -793,18 +884,16 @@ def _register_routes(app: FastAPI, state: AppState):
                         {"price": level.price, "quantity": level.quantity, "orders": level.orders}
                         for level in depth_event.asks
                     ],
-                    "sequence": depth_event.sequence,
-                }
-                
-                await websocket.send_json(depth_dict)
-                
+                    "sequence": getattr(depth_event, "sequence", 0),
+                })
+
         except WebSocketDisconnect:
             logger.info("Depth streaming client disconnected")
-        except Exception as e:
-            logger.error(f"Depth streaming error: {e}")
+        except Exception as exc:
+            logger.error("Depth streaming error: %s", exc)
             try:
-                await websocket.send_json({"error": str(e)})
-            except:
+                await websocket.send_json({"error": str(exc)})
+            except Exception:
                 pass
 
     # ========================================================================

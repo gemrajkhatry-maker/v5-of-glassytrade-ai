@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/config_models/__init__.py
+# hypothesis_version: 6.152.4
+
+[0.0, 1e-06, 0.000495, 0.000625, 0.005, 0.01, 0.02, 0.03, 0.05, 0.15, 0.18, 0.2, 0.25, 0.3, 0.4, 0.51, 0.55, 0.58, 0.6, 0.7, 1.5, 2.0, 2.5, 3.0, 10.0, 15.0, 20.0, 30.0, 50.0, 100.0, 5000000.0, 120, 200, 300, 500, 600, 500000, '09:15', '15:15', '2.0.0', 'Asia/Kolkata', 'GlassyTrade AI', 'INFO', 'NFO', 'NSE', 'OPT', 'development', 'glassytrade.db', 'live', 'paper']

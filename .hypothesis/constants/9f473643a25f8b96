@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/infrastructure/validators.py
+# hypothesis_version: 6.152.4
+
+['; ', 'BREAKOUT', 'BUY', 'CONTINUATION', 'FAILURE', 'INTRADAY_REVERSAL', 'LONG', 'REJECTION', 'SELL', 'SHORT', 'SQUEEZE', 'THROWBACK', 'VA_BOUNCE', 'acceptable', 'atp', 'best_ask', 'best_ask_qty', 'best_bid', 'best_bid_qty', 'direction', 'entry_price', 'excellent', 'invalid', 'ltp', 'ltp must be positive', 'ltq', 'ltt', 'poor', 'setup_type', 'symbol', 'volume']

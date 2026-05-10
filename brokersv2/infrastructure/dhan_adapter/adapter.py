@@ -47,6 +47,7 @@ class DhanBrokerAdapter(IBrokerAdapter):
         rate_limiter: Optional[RateLimiter] = None,
         circuit_breaker: Optional[CircuitBreaker] = None,
         dry_run: bool = False,
+        auth_provider=None,  # Optional DhanAuthProvider for token lifecycle
     ):
         """
         Initialize Dhan broker adapter.
@@ -57,17 +58,22 @@ class DhanBrokerAdapter(IBrokerAdapter):
             rate_limiter: Rate limiter for API calls
             circuit_breaker: Circuit breaker for fault tolerance
             dry_run: If True, don't actually send orders to broker
+            auth_provider: Optional auth provider for token lifecycle management
         """
         self._config = config
         self._mapper = mapper
-        self._client = DhanHttpClient(config, rate_limiter)
+        self._client = DhanHttpClient(config, rate_limiter, auth_provider=auth_provider)
         self._rate_limiter = rate_limiter or RateLimiter()
         self._circuit_breaker = circuit_breaker
         self._dry_run = dry_run
-        
-        logger.info(
-            f"DhanBrokerAdapter initialized (dry_run={dry_run})"
-        )
+        self._auth_provider = auth_provider
+
+        # Single shared WebSocket manager — created once, reused across calls
+        from brokersv2.infrastructure.dhan_adapter.websocket import DhanWebSocketManager
+        self._ws_manager = DhanWebSocketManager(config=self._config, mapper=self._mapper)
+        self._ws_started: bool = False
+
+        logger.info("DhanBrokerAdapter initialized (dry_run=%s)", dry_run)
     
     @classmethod
     def create(
@@ -95,7 +101,13 @@ class DhanBrokerAdapter(IBrokerAdapter):
         )
     
     async def close(self) -> None:
-        """Close the broker connection."""
+        """Close the broker connection and shared WebSocket manager."""
+        if self._ws_started:
+            try:
+                await self._ws_manager.stop()
+            except Exception as exc:
+                logger.warning("Error stopping WebSocket manager during close: %s", exc)
+            self._ws_started = False
         await self._client.close()
         logger.info("DhanBrokerAdapter closed")
     
@@ -201,42 +213,92 @@ class DhanBrokerAdapter(IBrokerAdapter):
         instruments: List["CanonicalInstrument"],
     ) -> AsyncIterator[Tick]:
         """
-        Stream real-time ticks via WebSocket.
-        
-        FULLY ASYNC - Uses WebSocket connection for live data.
-        
-        Args:
-            instruments: List of instruments to stream
-            
-        Yields:
-            Tick data as it arrives
+        Stream real-time ticks via the shared DhanWebSocketManager.
+
+        Reconnects automatically on connection drops using exponential backoff
+        (1 s, 2 s, 4 s … capped at 60 s).  The stream resumes subscriptions
+        after each reconnect.
+
+        Raises:
+            ValueError: If more than 100 instruments are requested.
         """
-        # Import WebSocket manager
-        from brokersv2.websocket.manager import WebSocketManager
-        
-        # Create WebSocket manager
-        ws_manager = WebSocketManager(
-            config=self._config,
-            mapper=self._mapper,
-        )
-        
-        try:
-            # Start WebSocket connection
-            await ws_manager.start()
-            
-            # Subscribe to instruments
-            await ws_manager.subscribe(instruments)
-            
-            # Stream ticks
-            async for tick in ws_manager.stream_ticks():
-                yield tick
-                
-        except Exception as e:
-            logger.error(f"WebSocket streaming error: {e}")
-            raise
-        finally:
-            await ws_manager.stop()
+        import asyncio as _asyncio
+        from brokersv2.infrastructure.dhan_adapter.websocket import DhanWebSocketManager
+
+        if len(instruments) > 100:
+            raise ValueError(
+                f"DhanHQ allows max 100 instruments per subscription, got {len(instruments)}"
+            )
+
+        _MAX_BACKOFF = 60.0
+        _backoff = 1.0
+
+        while True:
+            try:
+                if not self._ws_started:
+                    await self._ws_manager.start()
+                    self._ws_started = True
+
+                await self._ws_manager.subscribe(instruments)
+                _backoff = 1.0  # Reset on successful connect
+
+                async for tick in self._ws_manager.stream_ticks():
+                    yield tick
+
+                # stream_ticks() returned cleanly — connection closed gracefully
+                logger.info("DhanWebSocketManager stream ended — reconnecting in %.0fs", _backoff)
+
+            except Exception as exc:
+                logger.error(
+                    "DhanWebSocketManager connection error: %s — reconnecting in %.0fs",
+                    exc, _backoff,
+                )
+
+            # Mark manager as stopped so it restarts on next attempt
+            self._ws_started = False
+            try:
+                await self._ws_manager.stop()
+            except Exception:
+                pass
+
+            # Recreate the manager for a clean reconnect
+            self._ws_manager = DhanWebSocketManager(
+                config=self._config,
+                mapper=self._mapper,
+            )
+
+            await _asyncio.sleep(_backoff)
+            _backoff = min(_backoff * 2, _MAX_BACKOFF)
     
+    async def modify_order(
+        self,
+        broker_order_id: str,
+        price: Optional[float] = None,
+        quantity: Optional[int] = None,
+        order_type: Optional[str] = None,
+        validity: Optional[str] = None,
+        trigger_price: Optional[float] = None,
+        disclosed_quantity: Optional[int] = None,
+    ) -> bool:
+        """Modify a pending order via DhanHQ PUT /orders/{order-id}."""
+        if self._dry_run:
+            logger.info("[DRY_RUN] Would modify order: %s", broker_order_id)
+            return True
+
+        if self._circuit_breaker:
+            with self._circuit_breaker:
+                result = await self._client.modify_order(
+                    broker_order_id, price, quantity, order_type, validity,
+                    trigger_price, disclosed_quantity,
+                )
+        else:
+            result = await self._client.modify_order(
+                broker_order_id, price, quantity, order_type, validity,
+                trigger_price, disclosed_quantity,
+            )
+        logger.info("Order modified: %s", broker_order_id)
+        return result
+
     async def get_historical(
         self,
         instrument: "CanonicalInstrument",

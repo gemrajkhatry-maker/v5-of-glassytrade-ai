@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/oms/reconciliation.py
+# hypothesis_version: 6.152.4
+
+[0.0, '0', '0.01', 'HIGH', 'MEDIUM', 'MISSING_IN_BROKER', 'MISSING_IN_INTERNAL', 'OrderSnapshot', 'PRICE_MISMATCH', 'QUANTITY_MISMATCH', 'STATE_MISMATCH']

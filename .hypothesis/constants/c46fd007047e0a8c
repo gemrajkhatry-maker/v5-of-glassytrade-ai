@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/handlers/trade_lifecycle_handler.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.5, 3.0, 100, '+00:00', '-', 'BALANCED', 'COUNTER_AGGRESSION', 'LONG', 'OPEN', 'PARTITION_1', 'PARTITION_2', 'PARTITION_3', 'SHORT', 'TRAIL', 'Z', 'aggression_score', 'bids', 'current_lvn', 'entry_lvns', 'initial_stop', 'market_state', 'pnl', 'session_vwap', 'stop_loss', 'symbol', 'take_profit', 'tick_trace_id', 'value', 'vwap_lower_1', 'vwap_lower_2', 'vwap_upper_1', 'vwap_upper_2']

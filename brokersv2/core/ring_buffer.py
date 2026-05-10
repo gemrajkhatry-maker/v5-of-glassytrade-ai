@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any, List, Optional
 
+from brokersv2.core.constants import RingBuffer as RingBufferConstants
+
 
 class RingBuffer:
     """
@@ -29,18 +31,18 @@ class RingBuffer:
         tick = buffer.get()
     """
     
-    def __init__(self, capacity: int = 10000):
+    def __init__(self, capacity: int = None):
         """
         Initialize ring buffer.
         
         Args:
             capacity: Maximum number of items
         """
-        if capacity <= 0:
+        self._capacity = capacity or RingBufferConstants.DEFAULT_CAPACITY
+        if self._capacity <= 0:
             raise ValueError("Capacity must be positive")
         
-        self._capacity = capacity
-        self._buffer: List[Optional[Any]] = [None] * capacity
+        self._buffer: List[Optional[Any]] = [None] * self._capacity
         self._read_idx = 0
         self._write_idx = 0
         self._count = 0

@@ -69,6 +69,7 @@ class EventBus:
         self._max_queue_size = max_queue_size
         self._strategy = strategy
         self._dropped_events = 0
+        self._queue_lock = asyncio.Lock()  # Protects atomic queue operations
     
     def subscribe(
         self,
@@ -118,13 +119,14 @@ class EventBus:
             # Apply backpressure strategy if queue full
             if self._event_queue.full():
                 if self._strategy == BackpressureStrategy.DROP_OLDEST:
-                    # Drop oldest event
-                    try:
-                        self._event_queue.get_nowait()
-                        self._dropped_events += 1
-                    except asyncio.QueueEmpty:
-                        pass
-                    await self._event_queue.put(event)
+                    async with self._queue_lock:
+                        # Drop oldest event atomically
+                        try:
+                            self._event_queue.get_nowait()
+                            self._dropped_events += 1
+                        except asyncio.QueueEmpty:
+                            pass
+                        self._event_queue.put_nowait(event)
                 elif self._strategy == BackpressureStrategy.DROP_NEWEST:
                     # Drop this event
                     self._dropped_events += 1

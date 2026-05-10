@@ -1,26 +1,36 @@
-"""Broker Factory - Automatic broker initialization.
-
-Creates broker instances automatically using credentials from .env.
-Follows the same pattern as brokers/ infrastructure.
-
-Usage:
-    from brokersv2.broker_factory import get_broker
-    
-    # Automatically uses DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN from .env
-    broker = get_broker()
-    
-    # Use broker (same API as brokers/)
-    df = broker.historical("CRUDEOIL", "2026-04-01", "2026-05-08", "5m")
-    chain = broker.option_chain("NIFTY")
-    quote = broker.quote("GOLDM")
 """
+Broker Factory — DEPRECATED.
 
+This module is kept for backward compatibility only.
+Use brokersv2.app.bootstrap instead:
+
+    # For CLI / async use (high-level string-based API):
+    from brokersv2.app.bootstrap import create_dhan_gateway
+    gateway = create_dhan_gateway()
+
+    # For adapters / OMS (protocol-based, IBrokerAdapter):
+    from brokersv2.app.bootstrap import create_dhan_adapter
+    adapter = create_dhan_adapter()
+
+The legacy get_broker() function still works but requires the external
+brokers/ directory to be present on the file system next to this project,
+mutates sys.path, and will be removed in a future release.
+"""
 from __future__ import annotations
 
 import os
 import sys
+import warnings
 from pathlib import Path
 from typing import Optional
+
+warnings.warn(
+    "brokersv2.broker_factory is deprecated. "
+    "Import from brokersv2.app.bootstrap instead: "
+    "create_dhan_gateway() or create_dhan_adapter().",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 # Add brokers/ directory to Python path
 project_root = Path(__file__).resolve().parent.parent

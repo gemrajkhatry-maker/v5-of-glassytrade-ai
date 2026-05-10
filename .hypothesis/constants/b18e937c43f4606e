@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/signal_tracking_service.py
+# hypothesis_version: 6.152.4
+
+[0.0, 100, 1000, 'BLOCKED', 'COOLDOWN', 'GENERATED', 'WAITING', 'agent_direction', 'agent_probability', 'aggression_score', 'block_rate', 'blocked', 'confidence', 'cooldown', 'decision_id', 'direction', 'event_time', 'event_type', 'gate_blocks', 'gate_name', 'gate_reason', 'generated', 'generation_rate', 'last_blocked', 'last_generated', 'market_state', 'position_id', 'save_position_event', 'symbol', 'timestamp', 'type', 'waiting']

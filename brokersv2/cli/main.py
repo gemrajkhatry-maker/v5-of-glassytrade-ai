@@ -20,31 +20,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, List
 
-# Add project root and brokers to path
+# Add project root to Python path (brokersv2 package resolution only —
+# no external brokers/ directory is added).
 project_root = Path(__file__).resolve().parent.parent.parent
 brokersv2_root = Path(__file__).resolve().parent.parent
-brokers_root = project_root / "brokers"
 
-for path in [str(project_root), str(brokers_root)]:
-    if path not in sys.path:
-        sys.path.insert(0, path)
-
-# Load .env files automatically (like brokers does)
-try:
-    from dotenv import load_dotenv
-    
-    # Try project root .env first
-    project_env = project_root / ".env"
-    if project_env.exists():
-        load_dotenv(project_env, override=True)
-    
-    # Try backend .env as fallback
-    backend_env = project_root / "backend" / ".env"
-    if backend_env.exists():
-        load_dotenv(backend_env, override=True)
-        
-except ImportError:
-    pass  # python-dotenv not installed, will use system env
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
 
 from rich.console import Console
 from rich.panel import Panel
@@ -67,10 +49,10 @@ from brokersv2.analytics.options import (
 from brokersv2.analytics.order_book import (
     SweepDetector,
 )
-from brokersv2.infrastructure.rate_limiter.token_bucket import RateLimiter
+from brokersv2.resilience.policies.rate_limit import BrokerRateLimiter
 
 # Global rate limiter for CLI
-rate_limiter = RateLimiter()
+rate_limiter = BrokerRateLimiter()
 
 # MCX Symbols
 MCX_SYMBOLS = ["CRUDEOIL", "NATURALGAS", "GOLDM", "SILVERM", "COPPER"]
@@ -82,16 +64,25 @@ NSE_SYMBOLS = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
 # ============================================================================
 
 class DhanBrokerCLI:
-    """Direct Dhan broker operations - NO backend needed."""
-    
+    """Direct Dhan broker operations — backed by internal v2 adapter stack."""
+
     @staticmethod
     def get_broker():
-        """Get Dhan broker instance using factory."""
+        """
+        Return a DhanGateway instance built via the composition root.
+
+        Uses brokersv2.app.bootstrap.create_dhan_gateway() which reads
+        credentials from the environment without any sys.path manipulation
+        or dependency on the legacy brokers/ project.
+
+        Returns:
+            DhanGateway with async historical/quote/option_chain methods.
+        """
         try:
-            from brokersv2.broker_factory import get_broker
-            return get_broker()
+            from brokersv2.app.bootstrap import create_dhan_gateway
+            return create_dhan_gateway()
         except Exception as e:
-            console.print(f"[red]✗ {str(e)}[/]")
+            console.print(f"[red]✗ Failed to create broker: {e}[/]")
             return None
     
     @staticmethod
@@ -107,7 +98,7 @@ class DhanBrokerCLI:
         
         symbol = Prompt.ask("\nSymbol", default="CRUDEOIL")
         exchange = Prompt.ask("Exchange", choices=["MCX", "NSE", "NFO"], default="MCX")
-        interval = Prompt.ask("Interval", choices=["1m", "3m", "5m", "15m", "1h", "1d"], default="5m")
+        interval = Prompt.ask("Interval", choices=["1m", "5m", "15m", "25m", "1h", "1d"], default="5m")
         limit = IntPrompt.ask("Number of candles", default=100)
         
         console.print(f"\n[yellow]Fetching {limit} {interval} candles for {symbol} from Dhan...[/]\n")
@@ -120,14 +111,16 @@ class DhanBrokerCLI:
             # Calculate date range
             end_date = datetime.now()
             start_date = end_date - timedelta(days=30)
-            
-            # Fetch from Dhan (synchronous, returns DataFrame)
-            df = broker.historical(
+
+            # Fetch from Dhan gateway (async)
+            raw = await broker.historical(
                 symbol=symbol,
                 from_date=start_date.strftime("%Y-%m-%d"),
                 to_date=end_date.strftime("%Y-%m-%d"),
-                interval=interval
+                interval=interval,
             )
+            # Normalise: DhanGateway returns a list of dicts/candles; wrap in DataFrame.
+            df = pd.DataFrame(raw) if raw else pd.DataFrame()
             
             if df is not None and not df.empty:
                 # Display last N candles
@@ -187,8 +180,8 @@ class DhanBrokerCLI:
             return
         
         try:
-            # Fetch options chain (returns OptionChain object)
-            chain = broker.option_chain(underlying)
+            # Fetch options chain (async, returns dict with 'calls'/'puts' keys or OptionChainData)
+            chain = await broker.option_chain(underlying)
             
             if chain and len(chain.calls) > 0:
                 table = Table(title=f"{underlying} Options Chain - LIVE DATA")
@@ -258,28 +251,39 @@ class DhanBrokerCLI:
             return
         
         try:
-            # Get depth/quote (returns Quote object)
-            quote = broker.quote(symbol)
-            
+            # Get depth/quote (async, returns dict or Quote-like object)
+            quote = await broker.quote(symbol)
+
             if quote:
+                def _get(q, *keys):
+                    """Safely read from dict or object."""
+                    for k in keys:
+                        if isinstance(q, dict):
+                            v = q.get(k, 0)
+                        else:
+                            v = getattr(q, k, 0)
+                        if v:
+                            return v
+                    return 0
+
                 table = Table(title=f"{symbol} - Market Depth - LIVE DATA")
                 table.add_column("Metric", style="cyan")
                 table.add_column("Value", justify="right", style="white")
-                
-                table.add_row("Last Price", f"₹{getattr(quote, 'ltp', 0):,.2f}")
-                table.add_row("Bid Price", f"₹{getattr(quote, 'bid_price', 0):,.2f}")
-                table.add_row("Ask Price", f"₹{getattr(quote, 'ask_price', 0):,.2f}")
-                table.add_row("Bid Qty", f"{getattr(quote, 'bid_qty', 0):,}")
-                table.add_row("Ask Qty", f"{getattr(quote, 'ask_qty', 0):,}")
-                table.add_row("Volume", f"{getattr(quote, 'volume', 0):,}")
-                table.add_row("High", f"₹{getattr(quote, 'high', 0):,.2f}")
-                table.add_row("Low", f"₹{getattr(quote, 'low', 0):,.2f}")
-                
+
+                table.add_row("Last Price", f"₹{_get(quote, 'ltp', 'last_price'):,.2f}")
+                table.add_row("Bid Price", f"₹{_get(quote, 'bid_price', 'bid'):,.2f}")
+                table.add_row("Ask Price", f"₹{_get(quote, 'ask_price', 'ask'):,.2f}")
+                table.add_row("Bid Qty", f"{_get(quote, 'bid_qty', 'bid_quantity'):,}")
+                table.add_row("Ask Qty", f"{_get(quote, 'ask_qty', 'ask_quantity'):,}")
+                table.add_row("Volume", f"{_get(quote, 'volume'):,}")
+                table.add_row("High", f"₹{_get(quote, 'high'):,.2f}")
+                table.add_row("Low", f"₹{_get(quote, 'low'):,.2f}")
+
                 console.print(table)
-                
+
                 # Calculate spread
-                bid = getattr(quote, "bid_price", 0)
-                ask = getattr(quote, "ask_price", 0)
+                bid = _get(quote, "bid_price", "bid")
+                ask = _get(quote, "ask_price", "ask")
                 if bid and ask:
                     spread = ask - bid
                     spread_pct = (spread / bid) * 100
@@ -323,22 +327,29 @@ class DhanBrokerCLI:
                         console.print(f"[red]✗ {symbol}: Rate limit timeout[/]")
                         continue
                     
-                    quote = broker.quote(symbol)
-                    
+                    quote = await broker.quote(symbol)
+
                     if quote:
-                        ltp = getattr(quote, 'ltp', 0)
-                        prev_close = getattr(quote, 'prev_close', ltp)
+                        _q = quote if not isinstance(quote, dict) else None
+                        ltp = quote.get('ltp', 0) if isinstance(quote, dict) else getattr(quote, 'ltp', 0)
+                        prev_close_val = quote.get('prev_close', ltp) if isinstance(quote, dict) else getattr(quote, 'prev_close', ltp)
                         change = ltp - prev_close
                         change_pct = (change / prev_close * 100) if prev_close else 0
                         change_style = "green" if change >= 0 else "red"
                         
+                        _vol = quote.get('volume', 0) if isinstance(quote, dict) else getattr(quote, 'volume', 0)
+                        _high = quote.get('high', 0) if isinstance(quote, dict) else getattr(quote, 'high', 0)
+                        _low = quote.get('low', 0) if isinstance(quote, dict) else getattr(quote, 'low', 0)
+                        change = ltp - prev_close_val
+                        change_pct = (change / prev_close_val * 100) if prev_close_val else 0
+                        change_style = "green" if change >= 0 else "red"
                         table.add_row(
                             symbol,
                             f"₹{ltp:,.2f}",
                             f"[{change_style}]{change:+.2f} ({change_pct:+.2f}%)[/]",
-                            f"{getattr(quote, 'volume', 0):,}",
-                            f"₹{getattr(quote, 'high', 0):,.2f}",
-                            f"₹{getattr(quote, 'low', 0):,.2f}"
+                            f"{_vol:,}",
+                            f"₹{_high:,.2f}",
+                            f"₹{_low:,.2f}",
                         )
                 except Exception as e:
                     # Show error details for debugging
@@ -367,16 +378,17 @@ class DhanBrokerCLI:
             return
         
         try:
-            # Fetch intraday data (synchronous, returns DataFrame)
+            # Fetch intraday data (async)
             end_date = datetime.now()
             start_date = end_date - timedelta(days=1)
-            
-            df = broker.historical(
+
+            raw = await broker.historical(
                 symbol=symbol,
                 from_date=start_date.strftime("%Y-%m-%d"),
                 to_date=end_date.strftime("%Y-%m-%d"),
-                interval="5m"
+                interval="5m",
             )
+            df = pd.DataFrame(raw) if raw else pd.DataFrame()
             
             if df is None or df.empty:
                 console.print("[yellow]⚠ No data available[/]")
@@ -449,9 +461,9 @@ class DhanBrokerCLI:
             return
         
         try:
-            # Get options chain to find real spot price
+            # Get options chain to find real spot price (async)
             time.sleep(1)  # Rate limiting
-            chain_obj = broker.option_chain(underlying)
+            chain_obj = await broker.option_chain(underlying)
             
             if not chain_obj:
                 console.print("[yellow]⚠ No options data available[/]")

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/absorption_validator.py
+# hypothesis_version: 6.152.4
+
+['LONG', 'SHORT', 'candles_waited', 'close', 'direction', 'high', 'low', 'time']

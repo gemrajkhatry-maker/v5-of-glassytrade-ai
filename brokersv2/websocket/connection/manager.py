@@ -1,22 +1,35 @@
 """
-WebSocket Connection Manager.
+WebSocket Connection Manager — DEPRECATED PLACEHOLDER.
 
-Manages multiple WebSocket connections with:
-- Max 5 concurrent connections
-- Connection pooling with health scoring
-- Instrument sharding (5000 instruments/connection)
-- Zombie socket detection (stale heartbeat > 20s)
-- Graceful reconnect with subscription recovery
+This module is a legacy placeholder that does not create real network
+connections.  It must NOT be used in production trading workflows.
+
+Use brokersv2.infrastructure.dhan_adapter.websocket.DhanWebSocketManager
+for all live market data streaming.
+
+The _create_connection method raises RuntimeError to prevent silent
+execution of placeholder logic.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Set
+
+from brokersv2.core.constants import WebSocket as WSConstants, WSManager
+
+warnings.warn(
+    "brokersv2.websocket.connection.manager (WebSocketConnectionManager) is a deprecated "
+    "placeholder. Use brokersv2.infrastructure.dhan_adapter.websocket.DhanWebSocketManager "
+    "instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from brokersv2.core.errors import BrokerConnectionError
 
@@ -50,13 +63,14 @@ class ConnectionHealth:
         """Check if connection is healthy (score > 0.5)."""
         return self.health_score > 0.5
     
-    def update_health_score(self, stale_threshold: int = 20):
+    def update_health_score(self, stale_threshold: int = None):
         """
         Update health score based on heartbeat freshness.
         
         Args:
             stale_threshold: Seconds before heartbeat considered stale
         """
+        threshold = stale_threshold or WSManager.STALE_THRESHOLD
         age = (datetime.now() - self.last_heartbeat).total_seconds()
         
         if age > stale_threshold:
@@ -90,13 +104,13 @@ class WebSocketConnectionManager:
             process(tick)
     """
     
-    MAX_CONNECTIONS = 5  # DhanHQ limit
-    MAX_INSTRUMENTS_PER_CONNECTION = 5000
+    MAX_CONNECTIONS = WSConstants.MAX_CONNECTIONS
+    MAX_INSTRUMENTS_PER_CONNECTION = WSConstants.MAX_INSTRUMENTS_PER_CONNECTION
     
     def __init__(
         self,
         max_connections: int = 3,
-        stale_threshold: int = 20,
+        stale_threshold: int = None,
     ):
         """
         Initialize connection manager.
@@ -111,7 +125,7 @@ class WebSocketConnectionManager:
             )
         
         self._max_connections = max_connections
-        self._stale_threshold = stale_threshold
+        self._stale_threshold = stale_threshold or WSManager.STALE_THRESHOLD
         self._running = False
         
         # Connection storage
@@ -310,23 +324,22 @@ class WebSocketConnectionManager:
     
     async def _create_connection(self, conn_id: int):
         """
-        Create WebSocket connection.
+        Create WebSocket connection via DhanWebSocketManager.
         
         Args:
             conn_id: Connection ID
         """
-        # This would create actual DhanHQ WebSocket connection
-        # For now, use AsyncMock for testing
-        from unittest.mock import AsyncMock
+        from brokersv2.infrastructure.dhan_adapter.websocket import DhanWebSocketManager
+        from brokersv2.infrastructure.dhan_adapter.client import DhanConfig
         
-        logger.info(f"Creating connection {conn_id}")
-        
-        # Create mock connection with subscribe/unsubscribe methods
-        mock_conn = AsyncMock()
-        mock_conn.connection_id = conn_id
-        mock_conn.status = "connected"
-        
-        self._connections[conn_id] = mock_conn
+        config = DhanConfig(
+            client_id=getattr(self, 'client_id', ''),
+            access_token=getattr(self, 'access_token', ''),
+        )
+        ws = DhanWebSocketManager(config=config, mapper=None)
+        await ws.start()
+        self._connections[conn_id] = ws
+        logger.info(f"Connection {conn_id} created via DhanWebSocketManager")
     
     async def _close_connection(self, conn_id: int):
         """Close WebSocket connection."""
@@ -390,7 +403,7 @@ class WebSocketConnectionManager:
         
         return best_conn
     
-    def _detect_zombies(self, stale_threshold: int = 20) -> Set[int]:
+    def _detect_zombies(self, stale_threshold: int = None) -> Set[int]:
         """
         Detect zombie connections (stale heartbeat).
         
@@ -400,10 +413,11 @@ class WebSocketConnectionManager:
         Returns:
             Set of zombie connection IDs
         """
+        threshold = stale_threshold or self._stale_threshold
         zombies = set()
         
         for conn_id, health in self._connection_health.items():
-            health.update_health_score(stale_threshold)
+            health.update_health_score(threshold)
             
             if health.health_score == 0.0:
                 zombies.add(conn_id)
@@ -493,5 +507,3 @@ class WebSocketConnectionManager:
             raise
 
 
-# Import for placeholder
-from unittest.mock import Mock

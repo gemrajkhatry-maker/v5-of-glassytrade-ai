@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/shared/entities/models.py
+# hypothesis_version: 6.152.4
+
+[0.0, 100, 'BALANCE', 'BALANCED', 'BFO', 'BSE', 'BUY', 'CANCELLED', 'CE', 'CLOSED', 'FILLED', 'IMBALANCED', 'INDEX', 'INITIATIVE', 'INTRADAY', 'LIMIT', 'MARKET', 'MCX', 'NFO', 'NSE', 'OPEN', 'Outside Market Hours', 'PE', 'PENDING', 'REJECTED', 'SELL', 'SL', 'SLM', 'UNKNOWN', 'avg_price', 'commission', 'entry_price', 'entry_time', 'exchange', 'filled_quantity', 'fills', 'id', 'instrument', 'order_id', 'order_type', 'product_type', 'side', 'status', 'symbol', 'timestamp']

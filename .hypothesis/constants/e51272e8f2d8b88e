@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/theta_decay.py
+# hypothesis_version: 6.152.4
+
+[0.0, 1.0, 20.0, 24.0, 100]

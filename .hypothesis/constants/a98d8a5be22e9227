@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/trading/models/enums.py
+# hypothesis_version: 6.152.4
+
+[-1.0, 0.0, 1.0, 'AGENT', 'AMT', 'B', 'BALANCE', 'BALANCED', 'BEARISH', 'BULLISH', 'BUY', 'CHOP', 'CLOSED', 'CUSHIONED', 'D', 'DOWN', 'EXPANSION', 'FLAT', 'IMBALANCE', 'IMBALANCED', 'LLM', 'LONG', 'MARKETSTATE.BALANCED', 'MEAN_REVERSION', 'NEUTRAL', 'OPEN', 'P', 'PREDICTION', 'PREDICTION_ENTRY', 'RESPONSIVE_FADE', 'RL', 'RL_ENTRY', 'SELL', 'SHORT', 'SIDEWAYS', 'TRAILING', 'TRANSITION', 'TREND_MODEL', 'UP', 'accumulation', 'assistant', 'b', 'b-shape', 'balanced', 'bell', 'bimodal', 'bottom-heavy', 'd-shape', 'distribution', 'double', 'normal', 'p-shape', 'system', 'top-heavy', 'user', 'value']

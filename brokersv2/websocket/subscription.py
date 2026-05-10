@@ -9,16 +9,18 @@ from dataclasses import dataclass, field
 from typing import List, Set, Dict, Optional, TYPE_CHECKING
 import uuid
 
+from brokersv2.core.constants import WebSocket as WSConstants
+
 if TYPE_CHECKING:
     from brokersv2.domain.instrument.models import CanonicalInstrument
 
 logger = logging.getLogger(__name__)
 
 
-# DhanHQ v2 WebSocket limits
-MAX_INSTRUMENTS_PER_SUBSCRIBE = 100
-MAX_CONNECTIONS = 5
-MAX_INSTRUMENTS_PER_CONNECTION = 5000
+# DhanHQ v2 WebSocket limits - imported from centralized constants
+MAX_INSTRUMENTS_PER_SUBSCRIBE = WSConstants.MAX_INSTRUMENTS_PER_SUBSCRIBE
+MAX_CONNECTIONS = WSConstants.MAX_CONNECTIONS
+MAX_INSTRUMENTS_PER_CONNECTION = WSConstants.MAX_INSTRUMENTS_PER_CONNECTION
 
 
 @dataclass

@@ -251,6 +251,11 @@ class TestMarketQuotes:
             except Exception as e:
                 print(f"⚠ {symbol}: {str(e)}")
     
+    @pytest.mark.live
+    @pytest.mark.skipif(
+        not os.environ.get("DHAN_ACCESS_TOKEN"),
+        reason="Requires live DhanHQ credentials"
+    )
     def test_get_nse_quote(self, broker):
         """Get REAL NSE quote."""
         quote = broker.quote("NIFTY")
@@ -271,6 +276,11 @@ class TestMarketQuotes:
 class TestOptionsChain:
     """Test fetching REAL options chain data."""
     
+    @pytest.mark.live
+    @pytest.mark.skipif(
+        not os.environ.get("DHAN_ACCESS_TOKEN"),
+        reason="Requires live DhanHQ credentials"
+    )
     def test_get_nifty_options(self, broker):
         """Get REAL NIFTY options chain."""
         chain = broker.option_chain("NIFTY")
@@ -313,6 +323,11 @@ class TestOptionsChain:
         
         api_delay(2)  # Respect rate limits before next test
     
+    @pytest.mark.live
+    @pytest.mark.skipif(
+        not os.environ.get("DHAN_ACCESS_TOKEN"),
+        reason="Requires live DhanHQ credentials"
+    )
     def test_get_banknifty_options(self, broker):
         """Get REAL BANKNIFTY options chain."""
         chain = broker.option_chain("BANKNIFTY")
@@ -335,6 +350,11 @@ class TestOptionsChain:
 class TestDataQuality:
     """Validate quality of REAL market data."""
     
+    @pytest.mark.live
+    @pytest.mark.skipif(
+        not os.environ.get("DHAN_ACCESS_TOKEN"),
+        reason="Requires live DhanHQ credentials"
+    )
     def test_historical_data_continuity(self, broker):
         """Test historical data has no gaps."""
         end_date = datetime.now()
@@ -359,6 +379,11 @@ class TestDataQuality:
         
         print(f"✓ Data quality: No NaN or zero values in {len(df)} candles")
     
+    @pytest.mark.live
+    @pytest.mark.skipif(
+        not os.environ.get("DHAN_ACCESS_TOKEN"),
+        reason="Requires live DhanHQ credentials"
+    )
     def test_quote_freshness(self, broker):
         """Test quote data is current."""
         quote = broker.quote("CRUDEOIL")
@@ -433,6 +458,11 @@ class TestErrorHandling:
 class TestPerformance:
     """Test performance with REAL broker."""
     
+    @pytest.mark.live
+    @pytest.mark.skipif(
+        not os.environ.get("DHAN_ACCESS_TOKEN"),
+        reason="Requires live DhanHQ credentials"
+    )
     def test_historical_fetch_time(self, broker):
         """Test historical data fetch time."""
         import time
@@ -455,6 +485,11 @@ class TestPerformance:
         print(f"✓ Fetched {len(df)} candles in {elapsed:.2f}s")
         print(f"  Speed: {len(df)/elapsed:.1f} candles/sec")
     
+    @pytest.mark.live
+    @pytest.mark.skipif(
+        not os.environ.get("DHAN_ACCESS_TOKEN"),
+        reason="Requires live DhanHQ credentials"
+    )
     def test_quote_fetch_time(self, broker):
         """Test quote fetch time."""
         import time

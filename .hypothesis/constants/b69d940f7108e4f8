@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/rl/trainer.py
+# hypothesis_version: 6.152.4
+
+[0.0, 1e-08, 0.0003, 0.01, 0.2, 0.5, 0.95, 0.99, 1.0, 100000.0, 1000, 1024, 2048, 10000, 100000, '.zip', 'MlpPolicy', 'completed', 'episode', 'error', 'idle', 'infos', 'modified', 'name', 'path', 'r', 'rl_logs', 'rl_models', 'size_mb', 'training', 'valentini_final']

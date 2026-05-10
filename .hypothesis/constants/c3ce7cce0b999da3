@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/websocket/gameloop.py
+# hypothesis_version: 6.152.4
+
+[5.0, -500, 1003, 1006, 1011, 1048576, '/trading', '/ws/gameloop', 'Invalid JSON format', '_', '_symbol', '_type', 'activeSymbols', 'amt', 'app', 'asks', 'bids', 'close', 'count', 'delta', 'engine', 'error', 'exchange', 'full', 'high', 'history', 'history_loaded', 'interval', 'low', 'open', 'orderBook', 'pong', 'portfolio', 'price', 'quantity', 'server_mode', 'status', 'subscribe', 'symbol', 'takerBuyVolume', 'tick', 'time', 'trading', 'trading_session', 'unsubscribe', 'volume', 'vwap']

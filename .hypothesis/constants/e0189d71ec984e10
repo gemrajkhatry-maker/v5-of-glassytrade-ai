@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/state_broadcaster.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.15, 5.0, '_last_oi', '_last_price', '_symbol', 'amt', 'book', 'depth', 'genAIAnalysis', 'last_ai_analysis', 'last_amt', 'ltp', 'oi', 'portfolio', 'rangeBars', 'tick']

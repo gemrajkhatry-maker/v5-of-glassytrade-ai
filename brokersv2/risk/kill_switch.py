@@ -1,10 +1,11 @@
 """Kill Switch Engine - Emergency shutdown and risk limit enforcement."""
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,8 @@ class KillSwitchEngine:
         # Tracking state
         self._current_pnl: float = 0.0
         self._total_position_size: int = 0
-        self._order_count: int = 0
+        self._order_timestamps: List[datetime] = []  # Time-windowed order tracking
+        self._order_window: timedelta = timedelta(hours=1)  # 1-hour sliding window
         self._positions: Dict[str, int] = {}
         
         # Alerts
@@ -165,22 +167,144 @@ class KillSwitchEngine:
             self.activate(KillSwitchReason.MAX_POSITION_EXCEEDED)
     
     def record_order(self) -> None:
-        """Record order and check rate limits."""
-        self._order_count += 1
+        """Record order and check rate limits (time-windowed)."""
+        now = datetime.now(timezone.utc)
+        self._order_timestamps.append(now)
+        
+        # Prune timestamps outside the window
+        cutoff = now - self._order_window
+        self._order_timestamps = [t for t in self._order_timestamps if t > cutoff]
+        
+        windowed_count = len(self._order_timestamps)
         
         # Check if approaching limit (90%)
-        if self._order_count >= 0.9 * self._config.max_order_rate:
-            self._alerts.append(f"Order rate approaching limit: {self._order_count}")
+        if windowed_count >= 0.9 * self._config.max_order_rate:
+            self._alerts.append(f"Order rate approaching limit: {windowed_count}")
         
         # Auto-activate if limit exceeded
-        if self._order_count >= self._config.max_order_rate:
+        if windowed_count >= self._config.max_order_rate:
             self.activate(KillSwitchReason.MAX_ORDER_RATE_EXCEEDED)
     
     def emergency_shutdown(self, reason: str) -> None:
         """Emergency shutdown with custom reason."""
         self.activate(KillSwitchReason.MANUAL_TRIGGER)
         self._last_reason = reason  # Override with custom reason
-        logger.critical(f"Emergency shutdown: {reason}")
+        logger.critical("Emergency shutdown: %s", reason)
+
+    async def liquidate_all_positions(
+        self,
+        broker_adapter,
+        position_book,
+        mapper=None,
+        timeout_per_order: float = 10.0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Place offsetting MARKET orders for every open INTRADAY position.
+
+        Called by emergency_shutdown() when real liquidation is required.
+        Logs a LiquidationEvent audit record for each order attempted.
+
+        Args:
+            broker_adapter: IBrokerAdapter implementation.
+            position_book: PositionBook instance from PositionReconciler.
+            timeout_per_order: Maximum seconds to wait for each order ack.
+
+        Returns:
+            List of LiquidationEvent dicts.
+        """
+        from brokersv2.core.types import OrderSide, OrderType, ProductType, OrderId, SecurityId
+        from brokersv2.domain.order.models import Order
+        from decimal import Decimal
+        import uuid
+
+        intraday = [
+            p for p in position_book.all()
+            if p.get("productType", "").upper() in ("INTRADAY", "MIS", "MARGIN")
+            and int(p.get("netQty", 0)) != 0
+        ]
+
+        if not intraday:
+            logger.warning("KillSwitch.liquidate_all_positions: no INTRADAY positions to liquidate")
+            return []
+
+        logger.critical(
+            "KillSwitch: liquidating %d INTRADAY position(s) — EMERGENCY", len(intraday)
+        )
+        audit: List[Dict[str, Any]] = []
+
+        for pos in intraday:
+            net_qty = int(pos.get("netQty", 0))
+            seg = pos.get("exchangeSegment", "NSE_EQ")
+            sec = str(pos.get("securityId", ""))
+            product_type_str = pos.get("productType", "INTRADAY")
+
+            side = OrderSide.SELL if net_qty > 0 else OrderSide.BUY
+            quantity = abs(net_qty)
+
+            # Resolve instrument via mapper — skip if not found to avoid bad orders
+            instrument = None
+            if mapper is not None:
+                instrument = mapper.security_id_to_canonical(SecurityId(sec))
+            if instrument is None:
+                logger.critical(
+                    "KillSwitch: CANNOT resolve security_id=%s seg=%s — "
+                    "SKIPPING liquidation for this position. MANUAL ACTION REQUIRED.",
+                    sec, seg,
+                )
+                audit.append({
+                    "security_id": sec, "exchange_segment": seg,
+                    "status": "SKIPPED", "error": "Instrument not in mapper registry",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+                continue
+
+            try:
+                product_type = ProductType(product_type_str.upper())
+            except ValueError:
+                product_type = ProductType.INTRADAY
+
+            order = Order(
+                order_id=OrderId(str(uuid.uuid4())),
+                instrument=instrument,
+                side=side,
+                quantity=Decimal(str(quantity)),
+                order_type=OrderType.MARKET,
+                product_type=product_type,
+            )
+
+            event: Dict[str, Any] = {
+                "security_id": sec,
+                "exchange_segment": seg,
+                "side": side.value,
+                "quantity": quantity,
+                "product_type": product_type.value,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "status": "PENDING",
+            }
+            try:
+                broker_order_id = await asyncio.wait_for(
+                    broker_adapter.place_order(order),
+                    timeout=timeout_per_order,
+                )
+                event["broker_order_id"] = broker_order_id
+                event["status"] = "SENT"
+                logger.critical(
+                    "KillSwitch liquidated %s/%s qty=%d side=%s → %s",
+                    seg, sec, quantity, side.value, broker_order_id,
+                )
+            except asyncio.TimeoutError:
+                event["status"] = "TIMEOUT"
+                event["error"] = "Order placement timed out"
+                logger.error("KillSwitch: liquidation timed out for %s/%s", seg, sec)
+            except Exception as exc:
+                event["status"] = "FAILED"
+                event["error"] = str(exc)
+                logger.error("KillSwitch: liquidation FAILED for %s/%s: %s", seg, sec, exc)
+
+            audit.append(event)
+            self._alerts.append(f"Liquidated {seg}/{sec} qty={quantity} side={side.value}")
+
+        return audit
     
     def reset(self) -> None:
         """Reset all state."""
@@ -203,7 +327,7 @@ class KillSwitchEngine:
             "activated_at": self._activation_timestamp.isoformat() if self._activation_timestamp else None,
             "current_pnl": self._current_pnl,
             "total_position_size": self._total_position_size,
-            "order_count": self._order_count,
+            "order_count": len(self._order_timestamps),
         }
     
     def deserialize_state(self, state: dict) -> None:

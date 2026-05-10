@@ -3,6 +3,9 @@ Market Data Events - Immutable typed models for market microstructure.
 
 Uses msgspec for zero-copy deserialization and maximum performance.
 All events are immutable and frozen for thread safety.
+
+Domain enums (Exchange, InstrumentType, OptionType) are imported from
+brokersv2.core.types which is the single canonical source.
 """
 
 from __future__ import annotations
@@ -11,37 +14,10 @@ from decimal import Decimal
 from datetime import datetime
 from typing import Optional
 from dataclasses import dataclass
-from enum import Enum
 
 import msgspec
 
-
-# =============================================================================
-# Exchange & Instrument Types
-# =============================================================================
-
-class Exchange(str, Enum):
-    """Supported exchanges."""
-    NSE = "NSE"
-    NFO = "NFO"  # NSE F&O
-    BSE = "BSE"
-    BFO = "BFO"  # BSE F&O
-    MCX = "MCX"
-    CDS = "CDS"  # Currency
-
-
-class InstrumentType(str, Enum):
-    """Instrument types."""
-    EQUITY = "EQ"
-    FUTURES = "FUT"
-    OPTIONS = "OPT"
-    INDEX = "IDX"
-
-
-class OptionType(str, Enum):
-    """Option types."""
-    CALL = "CE"
-    PUT = "PE"
+from brokersv2.core.types import Exchange, InstrumentType, OptionType  # noqa: F401 (re-exported)
 
 
 # =============================================================================

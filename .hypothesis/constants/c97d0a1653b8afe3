@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/infrastructure/adapters/lgbm_probability_adapter.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.5, 1.0, 'fp_long.txt', 'fp_short.txt', 'long', 'mfe_long_q50.txt', 'mfe_short_q50.txt', 'rb', 'short', 'wb']

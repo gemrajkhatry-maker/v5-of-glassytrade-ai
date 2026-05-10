@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/entry_gates/signal_builder.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.001, 0.002, 0.005, 0.01, 0.015, 0.02, 0.03, 0.05, 0.5, 0.75, 0.98, 0.99, 0.995, 1.0, 1.005, 1.01, 1.02, 1.25, 200, '-', 'AMTResult', 'BUY', 'High', 'LONG', 'MeanRev', 'Medium', 'OHLC', 'SELL', 'SHORT', 'SetupType', 'Signal', 'Trend', 'Unknown', '_', 'allow_trail', 'confidence', 'direction', 'entry_lvn', 'fade', 'grade_score', 'llm_entry', 'lvn_play_boost', 'market_state', 'market_state_model', 'mean_rev', 'mean_reversion', 'npoc', 'poc', 'price', 'prior_poc', 'quantity', 'raw_output', 'responsive_fade', 'scale_in', 'session_risk_pct', 'setup', 'size', 'tp_source', 'trade_thesis', 'trend', 'trend_model', 'trend_model_playbook', 'va_extension']

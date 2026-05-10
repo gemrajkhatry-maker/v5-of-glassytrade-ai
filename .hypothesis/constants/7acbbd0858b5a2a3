@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/infrastructure/adapters/paper_broker.py
+# hypothesis_version: 6.152.4
+
+[1e-06, 0.000495, 0.000625, 0.18, 0.4, 1.0, 15.0, 20.0, 'price', 'scale_in']

@@ -56,10 +56,11 @@ class TestOrderBookCore:
         engine.update_bid(PriceLevel(price=2498.0, quantity=200))
         
         assert engine.bid_levels == 3
-        # Bids should be sorted: highest price first
-        assert engine.bids[0].price == 2502.0
-        assert engine.bids[1].price == 2500.0
-        assert engine.bids[2].price == 2498.0
+        # Bids should be sorted: highest price first (use ladder API)
+        ladder = engine.get_bid_ladder(depth=3)
+        assert ladder[0].price == 2502.0
+        assert ladder[1].price == 2500.0
+        assert ladder[2].price == 2498.0
 
     def test_multiple_ask_levels_sorted(self):
         """Test ask levels are sorted ascending by price."""
@@ -70,10 +71,11 @@ class TestOrderBookCore:
         engine.update_ask(PriceLevel(price=2507.0, quantity=200))
         
         assert engine.ask_levels == 3
-        # Asks should be sorted: lowest price first
-        assert engine.asks[0].price == 2503.0
-        assert engine.asks[1].price == 2505.0
-        assert engine.asks[2].price == 2507.0
+        # Asks should be sorted: lowest price first (use ladder API)
+        ladder = engine.get_ask_ladder(depth=3)
+        assert ladder[0].price == 2503.0
+        assert ladder[1].price == 2505.0
+        assert ladder[2].price == 2507.0
 
     def test_update_existing_level(self):
         """Test updating existing price level replaces quantity."""

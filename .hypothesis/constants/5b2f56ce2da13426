@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/rl/valentini_env.py
+# hypothesis_version: 6.152.4
+
+[-1.0, 0.0, 0.01, 0.33, 0.5, 0.66, 0.7, 0.95, 0.98, 0.99, 1.0, 1.01, 1.02, 1.05, 2.0, 2.5, 3.0, 100.0, 100000.0, 100, 200, 'ALIGNED_LONG', 'ALIGNED_SHORT', 'ASIA', 'BUY_ABSORBED', 'CONFLICTED', 'D', 'DECAYING', 'EXHAUSTED', 'FALLING', 'FRESH', 'HOLD', 'IN_BALANCE', 'LONDON', 'LONG', 'MATURING', 'NEUTRAL', 'NEW_YORK', 'OUT_ABOVE', 'OUT_BELOW', 'OVERLAP', 'P', 'REVERT_BUY', 'REVERT_SELL', 'RISING', 'SCALE_IN', 'SCALE_OUT', 'SELL_ABSORBED', 'SHORT', 'STABLE', 'TREND_BUY', 'TREND_SELL', 'b', 'bars', 'entry', 'episode_reward', 'equity', 'exit', 'hit_target', 'human', 'pnl', 'position', 'render_modes', 'reward', 'side', 'step', 'trades']

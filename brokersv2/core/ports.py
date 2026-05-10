@@ -23,22 +23,22 @@ class IBrokerAdapter(Protocol):
     """
     
     @abstractmethod
-    def place_order(self, order: Order) -> str:
+    async def place_order(self, order: Order) -> str:
         """Place order and return broker order ID."""
         ...
     
     @abstractmethod
-    def cancel_order(self, broker_order_id: str) -> bool:
+    async def cancel_order(self, broker_order_id: str) -> bool:
         """Cancel order by broker order ID."""
         ...
     
     @abstractmethod
-    def get_order_status(self, broker_order_id: str) -> Order:
+    async def get_order_status(self, broker_order_id: str) -> Order:
         """Get order status."""
         ...
     
     @abstractmethod
-    def get_quote(self, instrument: "CanonicalInstrument") -> Quote:
+    async def get_quote(self, instrument: "CanonicalInstrument") -> Quote:
         """Get current quote."""
         ...
     
@@ -51,7 +51,7 @@ class IBrokerAdapter(Protocol):
         ...
     
     @abstractmethod
-    def get_historical(
+    async def get_historical(
         self,
         instrument: "CanonicalInstrument",
         from_date: str,
@@ -60,6 +60,19 @@ class IBrokerAdapter(Protocol):
     ) -> List[Candle]:
         """Get historical data."""
         ...
+
+    @abstractmethod
+    async def modify_order(
+        self,
+        broker_order_id: str,
+        price: Optional[float] = None,
+        quantity: Optional[int] = None,
+        order_type: Optional[str] = None,
+        validity: Optional[str] = None,
+        trigger_price: Optional[float] = None,
+        disclosed_quantity: Optional[int] = None,
+    ) -> bool:
+        """Modify a pending order.  Returns True on success."""
 
 
 class ITokenManager(ABC):

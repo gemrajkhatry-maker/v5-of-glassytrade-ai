@@ -7,7 +7,6 @@ import logging
 import time
 
 from app.domain.shared.port.storage import IStorage
-from app.infrastructure.storage.database import SQLiteStorageAdapter
 from app.runtime.pipeline import StageMetrics
 from app.runtime.pipeline.events import PipelineEvent, as_pipeline_payload
 
@@ -18,7 +17,7 @@ class EventPersistence:
     """Persist selected events to storage without impacting hot-path latency."""
 
     def __init__(self, storage: IStorage | None = None, batch_size: int = 50, buffer_limit: int = 2048):
-        self._storage: IStorage = storage or SQLiteStorageAdapter()
+        self._storage: IStorage | None = storage
         self._buffer_limit = max(1, buffer_limit)
         self._batch_size = max(1, batch_size)
         self._buffer: deque[dict] = deque(maxlen=self._buffer_limit)

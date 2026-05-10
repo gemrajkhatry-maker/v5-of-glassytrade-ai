@@ -23,11 +23,16 @@ class RiskLimits:
     max_orders_per_second: int = 10
     max_open_orders: int = 50
     max_positions: int = 100
-    
+
     # Order constraints
     min_price: Decimal = Decimal("0.01")
     max_price: Decimal = Decimal("1000000")
-    price_deviation_pct: Decimal = Decimal("10")  # Max deviation from LTP
+
+    # Price deviation bands
+    # NSE index derivatives (F&O): ±5% intraday band per SEBI circular
+    price_deviation_pct: Decimal = Decimal("5")
+    # Equity cash segment: ±10% circuit breaker applies
+    equity_price_deviation_pct: Decimal = Decimal("10")
 
 
 @dataclass

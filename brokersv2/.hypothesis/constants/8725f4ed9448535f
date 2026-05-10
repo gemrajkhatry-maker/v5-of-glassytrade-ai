@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/providers/health_monitor.py
+# hypothesis_version: 6.152.4
+
+[0.0, 50.0, 100.0, '%Y-%m-%d', '1m', 'RELIANCE', 'consecutive_failures', 'degraded', 'get_candles', 'health_score', 'healthy', 'last_check', 'status', 'unhealthy']

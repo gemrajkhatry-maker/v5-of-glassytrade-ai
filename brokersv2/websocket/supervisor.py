@@ -7,9 +7,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+
+from brokersv2.core.constants import WebSocket as WSConstants
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +44,10 @@ class ConnectionSupervisor:
     - Connection state management
     """
     
-    HEARTBEAT_INTERVAL = 10.0  # seconds
-    MAX_RECONNECT_ATTEMPTS = 10
-    INITIAL_BACKOFF = 1.0  # seconds
-    MAX_BACKOFF = 60.0  # seconds
+    HEARTBEAT_INTERVAL = WSConstants.HEARTBEAT_INTERVAL
+    MAX_RECONNECT_ATTEMPTS = WSConstants.MAX_RECONNECT_ATTEMPTS
+    INITIAL_BACKOFF = WSConstants.INITIAL_BACKOFF
+    MAX_BACKOFF = WSConstants.MAX_BACKOFF
     
     def __init__(
         self,

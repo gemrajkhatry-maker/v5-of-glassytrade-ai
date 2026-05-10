@@ -26,6 +26,7 @@ class Exchange(str, Enum):
     BFO = "BFO"
     MCX = "MCX"
     INDEX = "INDEX"
+    CDS = "CDS"  # Currency Derivatives Segment
 
 
 class Segment(str, Enum):
@@ -43,6 +44,9 @@ class InstrumentType(str, Enum):
     OPTION = "OPTION"
     INDEX = "INDEX"
     COMM = "COMM"
+    # Aliases used by domain/market/events serialisation (DhanHQ wire format).
+    FUTURES = "FUTURE"
+    OPTIONS = "OPTION"
 
 
 class OptionType(str, Enum):
@@ -78,6 +82,28 @@ class OrderStatus(str, Enum):
     CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
+
+
+class ProductType(str, Enum):
+    """DhanHQ product types — maps directly to Dhan API productType field."""
+    CNC = "CNC"          # Cash and Carry (delivery equity)
+    INTRADAY = "INTRADAY"  # MIS / intraday — auto-squared at 3:20 PM
+    MARGIN = "MARGIN"    # Margin product
+    MTF = "MTF"          # Margin Trading Facility
+
+
+class OrderValidity(str, Enum):
+    """Order validity — maps directly to Dhan API validity field."""
+    DAY = "DAY"   # Valid for the trading day
+    IOC = "IOC"   # Immediate or Cancel
+
+
+class AmoTime(str, Enum):
+    """AMO (After Market Order) timing slots."""
+    PRE_OPEN = "PRE_OPEN"   # 09:00–09:08 call auction
+    OPEN = "OPEN"           # Market open (09:15)
+    OPEN_30 = "OPEN_30"     # 30 min after market open
+    OPEN_60 = "OPEN_60"     # 60 min after market open
 
 
 # =============================================================================

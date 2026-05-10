@@ -119,7 +119,7 @@ class DhanFactory:
         )
         return DhanFactory(new_config)
     
-    def create_gateway(self, enable_ws: Optional[bool] = None) -> DhanGateway:
+    async def create_gateway(self, enable_ws: Optional[bool] = None) -> DhanGateway:
         """
         Create a DhanGateway with configured connection.
         
@@ -130,11 +130,45 @@ class DhanFactory:
             DhanGateway instance ready for use
         """
         use_ws = enable_ws if enable_ws is not None else self._config.enable_ws
-        return DhanGateway(
+        
+        # NEW: Check if we need to auto-generate token
+        access_token = self._config.access_token
+        auth_provider = None
+        
+        if not access_token:
+            # Try to get TOTP credentials from environment
+            totp_secret = os.environ.get("DHAN_TOTP_SECRET") or os.environ.get("TOTP_SECRET", "")
+            pin = os.environ.get("DHAN_PIN") or os.environ.get("PIN", "")
+            
+            if totp_secret and pin:
+                # Create auth provider and generate token
+                from brokersv2.infrastructure.dhan_adapter.auth_provider import DhanAuthProvider
+                auth_provider = DhanAuthProvider(
+                    client_id=self._config.client_id,
+                    env_file=str(Path.cwd() / ".env"),
+                )
+                auth_provider.set_totp_secret(totp_secret)
+                auth_provider.set_pin(pin)
+                
+                # Generate token
+                access_token = await auth_provider.generate_token(pin, totp_secret)
+                logger.info("Auto-generated Dhan access token via TOTP")
+            else:
+                raise ValueError(
+                    f"No access token available. Set DHAN_ACCESS_TOKEN or "
+                    f"DHAN_TOTP_SECRET + DHAN_PIN for auto-generation."
+                )
+        
+        # Create gateway with (possibly) new token and auth provider
+        gateway = DhanGateway(
             config=self._config,
             rate_limiter=self._rate_limiter,
             enable_ws=use_ws,
+            access_token_override=access_token,  # NEW: Pass generated token
+            auth_provider=auth_provider,  # NEW: Pass auth provider
         )
+        
+        return gateway
     
     async def gateway(self, **kw) -> DhanGateway:
         """Async context manager for gateway."""
@@ -159,17 +193,25 @@ class DhanGateway:
         config: DhanGatewayConfig,
         rate_limiter: Optional[RateLimiter] = None,
         enable_ws: bool = True,
+        access_token_override: Optional[str] = None,  # NEW: Generated token
+        auth_provider=None,  # NEW: Auth provider for token refresh
     ):
         self._config = config
+        self._auth_provider = auth_provider  # NEW: Store auth provider
+        
+        # NEW: Use generated token if provided
+        final_token = access_token_override or config.access_token
+        
         self._client = DhanHttpClient(
             DhanConfig(
                 client_id=config.client_id,
-                access_token=config.access_token,
+                access_token=final_token,
                 base_url=config.base_url,
                 ws_url=config.ws_url,
                 timeout=config.timeout,
             ),
             rate_limiter=rate_limiter,
+            auth_provider=auth_provider,  # NEW: Wire auth provider into client
         )
         self._rate_limiter = rate_limiter or RateLimiter()
         self._mapper = InstrumentMapper()
@@ -178,9 +220,10 @@ class DhanGateway:
         self._initialized = False
     
     @classmethod
-    def from_env(cls, prefix: str = "DHAN_") -> DhanGateway:
+    async def from_env(cls, prefix: str = "DHAN_") -> DhanGateway:
         """Create gateway with auto-loaded credentials from environment."""
-        return DhanFactory.from_env(prefix=prefix).create_gateway()
+        factory = DhanFactory.from_env(prefix=prefix)
+        return await factory.create_gateway()
     
     async def __aenter__(self) -> DhanGateway:
         """Initialize connection on context entry."""
@@ -216,23 +259,33 @@ class DhanGateway:
             symbol: Canonical symbol (e.g., "NSE:RELIANCE")
         
         Returns:
-            Quote data dict
+            Quote data dict with LTP, bid, ask, volume, etc.
         """
         from brokersv2.domain.instrument.models import CanonicalInstrument
         
         # Parse canonical symbol
         instrument = CanonicalInstrument.from_symbol(symbol)
-        mapping = self._mapper.canonical_to_broker_mapping(instrument)
         
-        if not mapping:
-            raise ValueError(f"Unknown symbol: {symbol}")
+        # Use HTTP client to fetch real quote
+        quote = await self._client.get_quote(
+            instrument=instrument,
+            mapper=self._mapper,
+        )
         
-        # Use HTTP client to fetch quote
-        # This would call the actual endpoint
+        # Convert Quote object to dict for compatibility
         return {
             "symbol": symbol,
-            "security_id": mapping.security_id,
-            # Would return actual quote data
+            "security_id": self._mapper.canonical_to_broker_mapping(instrument).security_id,
+            "ltp": quote.ltp,
+            "bid": quote.bid,
+            "ask": quote.ask,
+            "volume": quote.volume,
+            "open": quote.open,
+            "high": quote.high,
+            "low": quote.low,
+            "close": quote.close,
+            "oi": quote.oi,
+            "timestamp": quote.timestamp.isoformat() if quote.timestamp else None,
         }
     
     async def historical(
@@ -246,43 +299,115 @@ class DhanGateway:
         Get historical data.
         
         Args:
-            symbol: Canonical symbol (e.g., "NSE:RELIANCE")
+            symbol: Symbol (e.g., "TCS", "NIFTY", "CRUDEOIL")
             from_date: Start date (YYYY-MM-DD)
             to_date: End date (YYYY-MM-DD)
-            interval: "1d", "1", "5", "15", "25", "60"
+            interval: "1m", "5m", "15m", "25m", "60", "1d"
         
         Returns:
-            List of candle data
+            List of candle dicts
         """
         from brokersv2.domain.instrument.models import CanonicalInstrument
         
+        # Parse symbol to instrument
         instrument = CanonicalInstrument.from_symbol(symbol)
-        # Would call _client.get_historical with proper implementation
-        return []
+        
+        # Map interval format: "1m"->"1", "5m"->"5", "15m"->"15", "1h"->"60", "1d"->"1d"
+        interval_map = {
+            "1m": "1", "5m": "5", "15m": "15", "25m": "25", 
+            "1h": "60", "60": "60", "1d": "1d"
+        }
+        dhan_interval = interval_map.get(interval, interval)
+        
+        # Call the HTTP client
+        candles = await self._client.get_historical(
+            instrument=instrument,
+            from_date=from_date,
+            to_date=to_date,
+            interval=dhan_interval,
+            mapper=self._mapper,
+        )
+        
+        # Convert Candle objects to dicts for CLI
+        return [
+            {
+                "timestamp": c.timestamp,
+                "open": float(c.open),
+                "high": float(c.high),
+                "low": float(c.low),
+                "close": float(c.close),
+                "volume": float(c.volume),
+            }
+            for c in candles
+        ]
     
     async def option_chain(
         self,
         underlying: str,
         expiry_index: int = 0,
     ) -> Dict[str, Any]:
-        """
-        Get option chain for underlying.
+        """Get option chain for underlying.
         
         Args:
             underlying: Underlying symbol (e.g., "NIFTY")
             expiry_index: Expiry index (0=current, 1=near, 2=far)
         
         Returns:
-            Option chain data
+            Option chain data with strikes, Greeks, OI, etc.
         """
-        # Would call the option chain endpoint
-        return {
-            "underlying": underlying,
-            "expiry_index": expiry_index,
-            # Actual chain data
-        }
+        # Call real client method to fetch option chain
+        chain_data = await self._client.get_option_chain(
+            symbol=underlying,
+            exchange="NSE",  # Default exchange
+            expiry_index=expiry_index,
+            mapper=self._mapper,
+        )
+        
+        return chain_data
     
     async def get_expiry_list(self, underlying: str) -> list:
-        """Get list of expiry dates for an underlying."""
-        # Would call expiry list endpoint
-        return []
+        """Get list of expiry dates for an underlying.
+        
+        Args:
+            underlying: Underlying symbol (e.g., "NIFTY", "BANKNIFTY")
+        
+        Returns:
+            List of expiry date strings (e.g., ["2024-01-25", "2024-02-22"])
+        """
+        from brokersv2.domain.instrument.models import CanonicalInstrument
+        
+        # Resolve security ID via mapper
+        instrument = CanonicalInstrument.from_symbol(underlying)
+        mapping = self._mapper.canonical_to_broker_mapping(instrument)
+        
+        if not mapping:
+            raise ValueError(f"Cannot resolve security_id for {underlying}")
+        
+        # Call expiry list endpoint directly
+        expiry_payload = {
+            "UnderlyingScrip": int(mapping.security_id) if mapping.security_id.isdigit() else mapping.security_id,
+            "UnderlyingSeg": mapping.exchange_segment,
+        }
+        
+        expiry_data = await self._client._request(
+            "POST",
+            "/optionchain/expirylist",
+            bucket="non_trading",
+            json=expiry_payload,
+        )
+        
+        # Parse expiry list from response
+        expiries = expiry_data.get("data", [])
+        if isinstance(expiries, dict):
+            expiries = expiries.get("data", [])
+        
+        return expiries
+
+    async def quote(self, symbol: str) -> Dict[str, Any]:
+        """
+        Alias for get_quote() — matches CLI call pattern.
+
+        Args:
+            symbol: Canonical symbol string (e.g. "NSE:RELIANCE" or bare "RELIANCE")
+        """
+        return await self.get_quote(symbol)

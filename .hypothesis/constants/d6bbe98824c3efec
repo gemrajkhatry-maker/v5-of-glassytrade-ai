@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/risk/kill_switch.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.9, 10.0, 10000.0, 100, 100000, 'FAILED', 'INTRADAY', 'Kill switch reset', 'MARGIN', 'MIS', 'NSE_EQ', 'PENDING', 'SENT', 'SKIPPED', 'TIMEOUT', 'activated_at', 'active', 'armed', 'broker_order_id', 'current_pnl', 'daily_loss', 'disarmed', 'error', 'exchangeSegment', 'exchange_segment', 'inactive', 'manual_trigger', 'max_loss_exceeded', 'netQty', 'order_count', 'order_rate', 'position_size', 'productType', 'product_type', 'quantity', 'reason', 'securityId', 'security_id', 'side', 'state', 'status', 'timestamp', 'total_position_size', 'triggered']

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/order_router.py
+# hypothesis_version: 6.152.4
+
+[0.0, 'ALUMINI', 'BANKEX', 'BANKNIFTY', 'BRACKET', 'BSE_FNO', 'CALL', 'CE', 'COPPER', 'CRUDEOIL', 'CRUDEOILM', 'FINNIFTY', 'GOLD', 'GOLDM', 'LEAD', 'LIMIT', 'MCX_COMM', 'MCX_FNO', 'MIDCPNIFTY', 'NATURALGAS', 'NICKEL', 'NIFTY', 'NSE_EQ', 'NSE_FNO', 'PE', 'PUT', 'SENSEX', 'SILVER', 'SILVERM', 'SL', 'SL-M', 'ZINC']

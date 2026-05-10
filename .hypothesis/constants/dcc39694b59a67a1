@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/risk_engine.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.5, 1.0, 2.0, 100000.0, 100, 'LONG', 'SHORT', 'Stop Loss']

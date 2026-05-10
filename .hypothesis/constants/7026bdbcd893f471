@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/events/bus.py
+# hypothesis_version: 6.152.4
+
+[0.1, 5.0, 10000, 'block', 'dlq_size', 'drop_newest', 'drop_oldest', 'dropped_events', 'event_queue', 'max_size']

@@ -149,11 +149,13 @@ class MasterDataLoader:
         registry: InstrumentRegistry,
         cache_enabled: bool = True,
         cache_dir: Optional[Path] = None,
+        api_client=None,
     ):
         self._registry = registry
         self._cache_enabled = cache_enabled
         self._cache_dir = cache_dir or self.DEFAULT_CACHE_DIR
         self._cache_dir.mkdir(parents=True, exist_ok=True)
+        self._api_client = api_client  # Optional DhanHttpClient for API sync
 
     def load_from_csv(
         self,
@@ -469,15 +471,62 @@ class MasterDataLoader:
     def _fetch_from_api(self, exchange_segment: str) -> List[Dict]:
         """
         Fetch instruments from DhanHQ API.
-        
-        This is a placeholder - actual implementation would use DhanHQ SDK.
+
+        Requires an api_client (e.g., DhanHttpClient) to be injected at init.
+        Falls back to CSV download if no client is configured.
         """
-        # TODO: Implement actual API call
-        # Example: response = dhan_client.fetch_instruments(exchange_segment)
-        raise APISyncError(
-            f"API sync not yet implemented for {exchange_segment}. "
-            f"Use CSV loading instead."
-        )
+        if self._api_client is None:
+            raise APISyncError(
+                f"No API client configured for {exchange_segment}. "
+                f"Pass api_client to MasterDataLoader or use CSV loading instead."
+            )
+
+        try:
+            # Dhan master endpoint returns a list of instrument dicts
+            # Use urllib for sync HTTP to avoid asyncio anti-patterns
+            import urllib.request
+            import urllib.error
+            import json
+
+            base_url = getattr(self._api_client, "config", None)
+            base_url = base_url.base_url if base_url else "https://api.dhan.co/v2"
+            url = f"{base_url}/master"
+            headers = getattr(self._api_client, "_headers", {})
+
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as response:
+                raw = response.read().decode("utf-8")
+                master_data = json.loads(raw)
+
+            if not isinstance(master_data, list):
+                raise APISyncError(
+                    f"Unexpected master data format for {exchange_segment}: {type(master_data)}"
+                )
+
+            # Filter by exchange segment if specified
+            if exchange_segment:
+                filtered = []
+                for item in master_data:
+                    if not isinstance(item, dict):
+                        continue
+                    seg = str(item.get("SEM_EXM_EXCH_ID", "")).upper()
+                    expected = exchange_segment.split("_")[0] if "_" in exchange_segment else exchange_segment
+                    if seg == expected:
+                        filtered.append(item)
+                return filtered
+
+            return master_data
+
+        except APISyncError:
+            raise
+        except urllib.error.HTTPError as exc:
+            raise APISyncError(
+                f"HTTP {exc.code} fetching instruments for {exchange_segment}: {exc.reason}"
+            ) from exc
+        except Exception as exc:
+            raise APISyncError(
+                f"Failed to fetch instruments from API for {exchange_segment}: {exc}"
+            ) from exc
 
     def _save_to_cache(self):
         """Save registry instruments to cache."""
@@ -526,3 +575,100 @@ class MasterDataLoader:
     def _get_cache_file_path(self) -> Path:
         """Get cache file path."""
         return self._cache_dir / "instruments_cache.json"
+
+    async def schedule_daily_refresh(
+        self,
+        refresh_time_ist: "time" = None,  # type: ignore[assignment]
+    ) -> None:
+        """
+        Background task: download the Dhan CSV master at 08:45 IST every day.
+
+        Runs forever as an asyncio coroutine.  Wire via asyncio.ensure_future()
+        in the application startup sequence (bootstrap.py).
+
+        Args:
+            refresh_time_ist: Override the refresh time (default 08:45 IST).
+        """
+        import asyncio
+        from datetime import time as _time
+        from zoneinfo import ZoneInfo
+
+        if refresh_time_ist is None:
+            refresh_time_ist = _time(8, 45)  # 08:45 IST before market open
+
+        IST = ZoneInfo("Asia/Kolkata")
+        logger.info("MasterDataLoader: daily refresh scheduled at %s IST", refresh_time_ist)
+
+        while True:
+            from datetime import datetime as _dt
+            now_ist = _dt.now(IST)
+            today_refresh = _dt.combine(now_ist.date(), refresh_time_ist, tzinfo=IST)
+
+            if now_ist >= today_refresh:
+                # Already past today's refresh time — schedule for tomorrow
+                from datetime import timedelta
+                today_refresh += timedelta(days=1)
+
+            wait_seconds = (today_refresh - now_ist).total_seconds()
+            logger.debug(
+                "MasterDataLoader: next refresh in %.0f seconds (%s IST)",
+                wait_seconds,
+                today_refresh.strftime("%Y-%m-%d %H:%M:%S"),
+            )
+            await asyncio.sleep(wait_seconds)
+
+            # Perform the refresh
+            try:
+                before_count = len(self._registry._instruments) if hasattr(self._registry, "_instruments") else 0
+                await self._download_and_reload()
+                after_count = len(self._registry._instruments) if hasattr(self._registry, "_instruments") else 0
+                diff = after_count - before_count
+                logger.info(
+                    "MasterDataLoader: refresh complete — %d instruments "
+                    "(diff %+d from previous load).",
+                    after_count, diff,
+                )
+            except Exception as exc:
+                logger.error("MasterDataLoader: daily refresh FAILED: %s", exc, exc_info=True)
+
+    async def _download_and_reload(self) -> None:
+        """Download the Dhan CSV from the CDN and reload the registry."""
+        import asyncio
+        import io
+        import tempfile
+
+        url = self.DHAN_CSV_COMPACT
+
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    resp.raise_for_status()
+                    content = await resp.text(encoding="utf-8", errors="replace")
+        except ImportError:
+            # Fallback to blocking urllib in a thread pool
+            import urllib.request
+            loop = asyncio.get_running_loop()
+            content = await loop.run_in_executor(
+                None,
+                lambda: urllib.request.urlopen(url, timeout=60).read().decode("utf-8", errors="replace"),
+            )
+
+        # Write to a temp file and pass to the existing CSV loader
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".csv", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        try:
+            # load_from_csv is CPU/IO-bound synchronous — run in a thread pool
+            # so the event loop is not blocked for the duration of the CSV parse.
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self.load_from_csv, tmp_path)
+        finally:
+            import os as _os
+            try:
+                _os.unlink(tmp_path)
+            except OSError:
+                pass

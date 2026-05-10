@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/session_state_manager.py
+# hypothesis_version: 6.152.4
+
+[0.0, 100.0, 100, 3600, 5000, 10000, 86400, 200000, '+00:00', '-', '.', 'BANKNIFTY', 'CRUDE', 'FLAT', 'GOLD', 'LearningEngine', 'Low', 'NIFTY', 'OPEN', 'Portfolio', 'SILVER', 'T', 'Z', '_last_tick_time', 'aggression:', 'confidence', 'count', 'direction', 'input_prompt', 'liquidity:', 'orderflow:', 'poc', 'portfolio', 'price', 'print_levels', 'rationale', 'raw_output', 'resetSymbols', 'vah', 'val']

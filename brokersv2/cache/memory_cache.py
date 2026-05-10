@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from brokersv2.cache.base import CacheInterface, CacheStats
+from brokersv2.core.constants import Cache as CacheConstants
 
 
 @dataclass
@@ -51,13 +52,16 @@ class LRUMemoryCache(CacheInterface):
         value = await cache.get("key")
     """
     
-    def __init__(self, max_size: int = 1000):
+    def __init__(self, max_size: int = CacheConstants.DEFAULT_MAX_SIZE):
         """
         Initialize LRU cache.
         
         Args:
             max_size: Maximum number of items to cache
         """
+        if max_size <= 0:
+            raise ValueError("Max size must be positive")
+        
         self._cache: OrderedDict[str, CacheEntry] = OrderedDict()
         self._max_size = max_size
         self._stats = CacheStats()

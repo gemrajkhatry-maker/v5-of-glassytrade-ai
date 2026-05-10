@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/infrastructure/dhan_feed.py
+# hypothesis_version: 6.152.4
+
+[0.0, 100, 1000, '1', 'BANKNIFTY', 'BUY', 'CRUDEOIL', 'FINNIFTY', 'INDEX', 'MCX', 'NATURALGAS', 'NFO', 'NIFTY', 'NSE', 'SELL', 'SENSEX', 'Stream error: %s', 'Stream stopped', 'Subscribed to: %s', 'atp', 'average_price', 'avg_price', 'best_ask', 'best_ask_qty', 'best_bid', 'best_bid_qty', 'close', 'high', 'low', 'ltp', 'ltq', 'ltt', 'open', 'quantity', 'side', 'symbol', 'time', 'timestamp', 'volume']

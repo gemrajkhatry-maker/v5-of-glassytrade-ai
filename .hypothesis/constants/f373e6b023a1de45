@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/core/circuit_breaker.py
+# hypothesis_version: 6.152.4
+
+[0.0, 300, '_success_count', 'failure_count', 'last_failure_time', 'state', 'success_count']

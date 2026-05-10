@@ -20,7 +20,7 @@ from app.domain.shared.event.domain_events import (
 )
 
 if TYPE_CHECKING:
-    from app.infrastructure.messaging.event_bus import EventBus
+    from app.domain.shared.port.event_bus import IEventBus as EventBus
 
 logger = logging.getLogger(__name__)
 

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/gate_pipeline.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.05, 'Aggression', 'All gates passed', 'BALANCED', 'CLOSE', 'CVDHard', 'Cushion', 'D1 drive suppressed', 'DataQuality', 'DriveValidation', 'EntryZone', 'Insufficient data', 'KeyLevel', 'Low aggression score', 'NO_TRADE', 'NoTradeState', 'OPENING', 'POST_MARKET', 'PRE_MARKET', 'PRE_OPEN', 'PROBING', 'ProbingAggression', 'RR', 'Risk halt active', 'RiskHalt', 'SessionWarmup', 'Signal expired', 'SignalAge', 'SoftQuorum', 'ThetaViability']

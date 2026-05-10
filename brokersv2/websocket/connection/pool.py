@@ -15,7 +15,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional
 
-from brokersv2.websocket.connection.manager import ConnectionHealth
+from brokersv2.core.constants import WebSocket as WSConstants, WSManager
+from brokersv2.websocket.connection.manager import ConnectionHealth, ConnectionState
 
 logger = logging.getLogger(__name__)
 
@@ -64,14 +65,15 @@ class ConnectionPool:
         pool.release(conn)
     """
     
-    def __init__(self, max_size: int = 3):
+    def __init__(self, max_size: int = None):
         """
         Initialize connection pool.
         
         Args:
-            max_size: Maximum pool size (1-5)
+            max_size: Maximum pool size (1-5), defaults to WSConstants.MAX_CONNECTIONS
         """
-        if max_size > 5:
+        self._max_size = max_size or WSConstants.MAX_CONNECTIONS
+        if self._max_size > WSConstants.MAX_CONNECTIONS:
             raise ValueError("Maximum 5 connections allowed for DhanHQ")
         
         self._max_size = max_size

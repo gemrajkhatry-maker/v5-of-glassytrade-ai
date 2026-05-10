@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/liquidity_filter.py
+# hypothesis_version: 6.152.4
+
+[5.0, 'BANKNIFTY', 'NIFTY', 'inf', 'ltp', 'oi', 'spread_bps', 'volume']

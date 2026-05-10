@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/gate_rejection_tracker.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.7, 1.3, 'DECREASING', 'INCREASING', 'STABLE', 'evaluated', 'gates', 'most_common', 'rate', 'rejected', 'top_gates']

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/profile_classifier.py
+# hypothesis_version: 6.152.4
+
+[-0.0001, 0.0, 0.0001, 0.25, 0.3, 0.4, 0.5, 'ALIGNED', 'B', 'D', 'DIVERGENT', 'FALLING', 'LOWER', 'P', 'POC_DIVERGENCE', 'POC_FALLING_BEARISH', 'POC_RISING_BULLISH', 'RISING', 'STABLE', 'UPPER', 'b']

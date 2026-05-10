@@ -188,17 +188,87 @@ class OpenChartHistoricalProvider(BaseHistoricalProvider):
     
     async def search_symbol(self, query: str) -> List[CanonicalInstrument]:
         """
-        Search for symbols on OpenChart/NSE.
-        
+        Search for symbols on NSE using the public NSE symbol search API.
+
         Args:
-            query: Search query
-        
+            query: Search query (case-insensitive substring match)
+
         Returns:
-            List of matching instruments
+            List of matching CanonicalInstrument objects
         """
-        # TODO: Implement OpenChart symbol search
-        logger.warning("OpenChart symbol search not yet implemented")
-        return []
+        if not query or not query.strip():
+            return []
+
+        query_lower = query.strip().lower()
+
+        try:
+            import aiohttp
+            import asyncio
+
+            # NSE public symbol search endpoint
+            search_url = (
+                "https://www.nseindia.com/api/search/autocomplete"
+                f"?q={query_lower}"
+            )
+
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+                "Accept": "application/json",
+            }
+
+            async with aiohttp.ClientSession(headers=headers) as session:
+                async with session.get(search_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status != 200:
+                        logger.warning(
+                            "NSE search API returned %s", response.status
+                        )
+                        return []
+                    data = await response.json()
+
+            symbols = data.get("symbols", []) if isinstance(data, dict) else []
+            if not symbols:
+                return []
+
+            results: List[CanonicalInstrument] = []
+            for sym in symbols:
+                if not isinstance(sym, dict):
+                    continue
+                symbol_name = str(sym.get("symbol", ""))
+                if not symbol_name:
+                    continue
+
+                # Filter to ensure relevance
+                if query_lower not in symbol_name.lower():
+                    continue
+
+                instrument = CanonicalInstrument.create_equity(
+                    symbol=symbol_name.upper(),
+                    exchange=Exchange.NSE,
+                    lot_size=1,
+                    tick_size=Decimal("0.01"),
+                )
+                results.append(instrument)
+
+            logger.info(
+                "OpenChart symbol search for '%s' returned %d results",
+                query, len(results),
+            )
+            return results
+
+        except asyncio.TimeoutError:
+            logger.error("NSE symbol search timed out")
+            raise ProviderUnavailableError(
+                "NSE symbol search timed out", provider="opencart"
+            )
+        except Exception as exc:
+            logger.error("OpenChart symbol search failed: %s", exc)
+            raise ProviderUnavailableError(
+                f"OpenChart symbol search failed: {exc}", provider="opencart"
+            ) from exc
     
     async def _fetch_with_timeout(self, symbol: str, timeframe: str, from_date: str, to_date: str):
         """
@@ -226,7 +296,7 @@ class OpenChartHistoricalProvider(BaseHistoricalProvider):
         
         try:
             # Run blocking call in thread pool
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             df = await asyncio.wait_for(
                 loop.run_in_executor(None, _fetch_blocking),
                 timeout=self._timeout,

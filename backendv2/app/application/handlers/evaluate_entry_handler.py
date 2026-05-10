@@ -3,7 +3,7 @@ from typing import Optional
 from app.application.commands.trading_commands import EvaluateEntry
 from app.domain.shared.event.domain_events import SignalGenerated
 from app.domain.shared.port.signal import ISignalService
-from app.infrastructure.messaging.event_bus import EventBus
+from app.domain.shared.port.event_bus import IEventBus as EventBus
 
 
 class EvaluateEntryHandler:

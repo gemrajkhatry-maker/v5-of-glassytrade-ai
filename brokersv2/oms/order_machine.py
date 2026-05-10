@@ -1,11 +1,32 @@
-"""Order Lifecycle State Machine - manages order state transitions."""
+"""
+Order Lifecycle State Machine — DEPRECATED.
+
+This module is kept for backward compatibility with test code and analytics
+that imported OrderState / OrderEvent / OrderStateMachine directly.
+
+The canonical order state machine is now:
+    brokersv2.domain.order.models.OrderStateMachine   (uses OrderStatus from core/types)
+
+The OrderState / OrderEvent enums defined here are an alternate vocabulary
+that is NOT used by the production OrderManager.  Do not rely on them for
+new code.
+"""
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
+
+warnings.warn(
+    "brokersv2.oms.order_machine is deprecated. "
+    "Use brokersv2.domain.order.models.OrderStateMachine "
+    "(which uses brokersv2.core.types.OrderStatus) instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 logger = logging.getLogger(__name__)
 

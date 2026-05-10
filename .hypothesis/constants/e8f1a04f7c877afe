@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/models/exchange_config.py
+# hypothesis_version: 6.152.4
+
+[0.05, 0.1, 0.55, 0.7, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 5.0, 30.0, 50.0, 100.0, 500.0, 1250.0, 1500.0, 2500.0, 5000.0, 100, 1250, 1500, 2500, 5000, '-', 'ALUMINIUM', 'BANKNIFTY', 'COPPER', 'COTTONCANDY', 'CRUDEOIL', 'CRUDEOILM', 'FINNIFTY', 'GOLD', 'GOLDM', 'LEAD', 'MCX', 'MCX:', 'NATURALGAS', 'NICKEL', 'NIFTY', 'NSE', 'NSE:', 'SILVER', 'SILVERM', 'ZINC', 'aggression_sigma', 'big_trade_multiplier', 'cvd_block_threshold', 'default_symbol', 'eia_symbols', 'llm_instruction', 'lot_sizes', 'point_values', 'scanner_underlying', 'tick_sizes', 'underlyings', 'warm_up_minutes']

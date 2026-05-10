@@ -109,7 +109,7 @@ class OrderManager:
         
         # Place with broker
         try:
-            broker_order_id = self._broker.place_order(order)
+            broker_order_id = await self._broker.place_order(order)
             order.broker_order_id = broker_order_id
             self._broker_to_internal[broker_order_id] = order_id
             
@@ -139,7 +139,7 @@ class OrderManager:
             return False
         
         try:
-            success = self._broker.cancel_order(order.broker_order_id)
+            success = await self._broker.cancel_order(order.broker_order_id)
             if success:
                 order.update_status(OrderStatus.CANCEL_PENDING)
                 await self._add_audit_entry(order_id, OrderStatus.OPEN, OrderStatus.CANCEL_PENDING, "Cancel requested")
@@ -258,7 +258,7 @@ class ReconciliationEngine:
                 stats["checked"] += 1
                 
                 try:
-                    broker_order = self._broker.get_order_status(order.broker_order_id)
+                    broker_order = await self._broker.get_order_status(order.broker_order_id)
                     # Compare and resolve
                     # Would implement actual reconciliation logic
                     stats["resolved"] += 1

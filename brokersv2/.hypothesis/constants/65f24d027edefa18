@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/infrastructure/auth_provider.py
+# hypothesis_version: 6.152.4
+
+[0.0, 130, 200, 401, 3600, '.', '.env', '.git', '2 minutes', '=', 'Auth failed', 'DHAN_ACCESS_TOKEN', 'No client ID stored', 'Not authenticated', 'Renewal failed', 'Set PIN in .env', 'Token refresh failed', 'Token saved to .env', 'access-token', 'accessToken', 'access_token', 'attempts', 'cooldown_remaining', 'data', 'dhan.auth', 'dhanClientId', 'error', 'exp', 'expired_seconds_ago', 'hint', 'invalid otp', 'invalid totp', 'message', 'pin', 'rate limit', 'set_access_token', 'status', 'token', 'too many', 'totp', 'utf-8']

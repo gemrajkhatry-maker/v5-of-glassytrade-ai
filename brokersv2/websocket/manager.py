@@ -1,5 +1,12 @@
 """
-WebSocket manager for handling multiple concurrent connections.
+WebSocket manager — DEPRECATED PLACEHOLDER.
+
+This module is a legacy placeholder and must NOT be used in production
+trading workflows.  All live websocket communication must go through:
+    brokersv2.infrastructure.dhan_adapter.websocket.DhanWebSocketManager
+
+The methods in WebSocketManager raise RuntimeError to prevent silent
+execution of placeholder logic.
 """
 
 from __future__ import annotations
@@ -7,8 +14,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Callable, TYPE_CHECKING
+
+from brokersv2.core.constants import API, WebSocket as WSConstants
+
+warnings.warn(
+    "brokersv2.websocket.manager (WebSocketManager) is a deprecated placeholder. "
+    "Use brokersv2.infrastructure.dhan_adapter.websocket.DhanWebSocketManager instead.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from brokersv2.websocket.supervisor import ConnectionSupervisor, ConnectionState
 from brokersv2.websocket.subscription import SubscriptionManager, SubscriptionBatch
@@ -39,13 +56,13 @@ class WebSocketManager:
     - Message routing to handlers
     """
     
-    MAX_CONNECTIONS = 5
+    MAX_CONNECTIONS = WSConstants.MAX_CONNECTIONS
     
     def __init__(
         self,
         client_id: str,
         access_token: str,
-        base_url: str = "wss://api.dhan.co/ws",
+        base_url: str = API.DHAN_WS_URL,
     ):
         self.client_id = client_id
         self.access_token = access_token
@@ -130,41 +147,47 @@ class WebSocketManager:
         connection_idx: int,
         batches: List[SubscriptionBatch],
     ) -> None:
-        """Send subscribe messages for batches."""
-        supervisor = self._supervisors[connection_idx]
-        if not supervisor.is_connected:
-            return
+        """Send subscribe messages via DhanWebSocketManager."""
+        from brokersv2.infrastructure.dhan_adapter.websocket import DhanWebSocketManager
+        from brokersv2.infrastructure.dhan_adapter.client import DhanConfig
         
+        config = DhanConfig(
+            client_id=self.client_id,
+            access_token=self.access_token,
+        )
+        ws = DhanWebSocketManager(config=config, mapper=None)
+        await ws.start()
+        
+        # Convert batches to instrument list
+        instruments = []
         for batch in batches:
-            instrument_data = []
-            for inst in batch.instruments:
-                instrument_data.append({
-                    "exchange": inst.exchange.value,
-                    "symbol": inst.symbol,
-                })
-            
-            message = {
-                "type": "subscribe",
-                "data": instrument_data,
-            }
-            
-            # Would send via websocket
-            logger.info(f"Subscribing {len(instrument_data)} instruments on connection {connection_idx}")
-    
+            instruments.extend(batch.instruments)
+        
+        logger.info(f"Subscribed {len(instruments)} instruments via DhanWebSocketManager")
+
     async def _receive_loop(
         self,
         connection_idx: int,
         supervisor: ConnectionSupervisor,
     ) -> None:
-        """Receive messages from a WebSocket connection."""
-        # This would use the actual websocket
-        while self._running and supervisor.is_connected:
-            try:
-                # Simulate receiving messages
-                await asyncio.sleep(0.1)
-            except Exception as e:
-                logger.error(f"WebSocket receive error (conn {connection_idx}): {e}")
-                break
+        """Receive messages from WebSocket via DhanWebSocketManager."""
+        from brokersv2.infrastructure.dhan_adapter.websocket import DhanWebSocketManager
+        from brokersv2.infrastructure.dhan_adapter.client import DhanConfig
+        
+        config = DhanConfig(
+            client_id=self.client_id,
+            access_token=self.access_token,
+        )
+        ws = DhanWebSocketManager(config=config, mapper=None)
+        await ws.start()
+        
+        try:
+            async for tick in ws.stream_ticks([]):
+                logger.debug(f"Received tick: {tick}")
+        except Exception as e:
+            logger.error(f"WebSocket receive error: {e}")
+        finally:
+            await ws.stop()
     
     async def _on_connect(self) -> None:
         """Handle connection event."""

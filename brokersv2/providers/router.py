@@ -17,6 +17,7 @@ from typing import List, Optional
 import asyncio
 import logging
 
+from brokersv2.core.constants import HistoricalRouter
 from brokersv2.providers.base import BaseHistoricalProvider
 from brokersv2.providers.metrics import ProviderMetrics
 from brokersv2.providers.exceptions import (
@@ -44,8 +45,8 @@ class HistoricalDataRouter:
     - RateLimitExceededError (429)
     """
     
-    PRIMARY_TIMEOUT = 10.0  # seconds
-    FALLBACK_TIMEOUT = 15.0  # seconds
+    PRIMARY_TIMEOUT = HistoricalRouter.PRIMARY_TIMEOUT
+    FALLBACK_TIMEOUT = HistoricalRouter.FALLBACK_TIMEOUT
     
     def __init__(
         self,

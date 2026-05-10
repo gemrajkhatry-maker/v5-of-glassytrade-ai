@@ -1,8 +1,8 @@
 """
 Dhan historical data provider implementation.
 
-Wraps existing DhanBrokerAdapter with BaseHistoricalProvider interface.
-Primary provider for historical data with retry logic.
+Wraps DhanBrokerAdapter with BaseHistoricalProvider interface.
+Retry logic is delegated to the platform RetryPolicy (canonical).
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from decimal import Decimal
 import logging
 import asyncio
 
+from brokersv2.core.constants import Retry, HistoricalRouter
 from brokersv2.providers.base import BaseHistoricalProvider
 from brokersv2.providers.exceptions import (
     ProviderUnavailableError,
@@ -23,41 +24,53 @@ from brokersv2.providers.exceptions import (
 from brokersv2.domain.market.models import Candle
 from brokersv2.domain.instrument.models import CanonicalInstrument
 from brokersv2.infrastructure.dhan_adapter.adapter import DhanBrokerAdapter
+from brokersv2.resilience.policies.retry import RetryPolicy, RetryManager, RetryExhaustedError
 
 logger = logging.getLogger(__name__)
+
+# Default retry policy for Dhan historical API calls - from centralized constants
+_DEFAULT_RETRY_POLICY = RetryPolicy(
+    max_retries=Retry.MAX_RETRIES,
+    base_delay=Retry.BASE_DELAY,
+    max_delay=Retry.MAX_DELAY,
+    retryable_exceptions=Retry.DEFAULT_RETRYABLE_EXCEPTIONS,
+    log_retries=True,
+)
 
 
 class DhanHistoricalProvider(BaseHistoricalProvider):
     """
     Dhan historical data provider.
-    
+
     Primary provider for historical candle data.
-    Wraps existing DhanBrokerAdapter and adds:
-    - Retry logic with exponential backoff
-    - DataFrame to Candle conversion
+    Wraps DhanBrokerAdapter and adds:
+    - Platform RetryPolicy (exponential backoff with jitter)
+    - Candle conversion
     - Structured error handling
     - Health monitoring
     """
-    
+
     SUPPORTED_TIMEFRAMES = ["1m", "5m", "15m", "25m", "1h", "1d"]
-    MAX_RETRIES = 3
-    BASE_RETRY_DELAY = 1.0  # seconds
-    
+
     def __init__(
         self,
         adapter: DhanBrokerAdapter,
-        timeout: float = 10.0,
+        timeout: float = HistoricalRouter.PRIMARY_TIMEOUT,
+        retry_policy: RetryPolicy | None = None,
     ):
         """
         Initialize Dhan provider.
-        
+
         Args:
             adapter: DhanBrokerAdapter instance
             timeout: Request timeout in seconds
+            retry_policy: Override the default RetryPolicy (optional)
         """
         self._adapter = adapter
         self._timeout = timeout
         self._available = True
+        self._retry_policy = retry_policy or _DEFAULT_RETRY_POLICY
+        self._retry_manager = RetryManager(policy=self._retry_policy)
     
     @property
     def provider_name(self) -> str:
@@ -100,76 +113,137 @@ class DhanHistoricalProvider(BaseHistoricalProvider):
                 f"Unsupported timeframe: {timeframe}. "
                 f"Supported: {self.SUPPORTED_TIMEFRAMES}"
             )
-        
-        last_exception = None
-        
-        for attempt in range(self.MAX_RETRIES):
-            try:
-                logger.debug(
-                    f"Dhan provider: fetching {instrument.symbol} "
-                    f"{timeframe} ({from_date} to {to_date}), attempt {attempt + 1}"
-                )
-                
-                # Fetch from Dhan adapter (returns DataFrame)
-                candles = await self._fetch_candles_with_timeout(
+
+        logger.debug(
+            "Dhan provider: fetching %s %s (%s to %s)",
+            instrument.symbol, timeframe, from_date, to_date,
+        )
+
+        try:
+            candles = await self._retry_manager.execute(
+                lambda: self._fetch_candles_with_timeout(
                     instrument, timeframe, from_date, to_date
                 )
-                
-                if candles is not None:
-                    self._available = True
-                    logger.info(
-                        f"Dhan provider: fetched {len(candles)} candles "
-                        f"for {instrument.symbol} {timeframe}"
-                    )
-                    return candles
-                
-                # Empty response
-                logger.warning(f"Dhan provider: empty response for {instrument.symbol}")
-                return []
-                
-            except asyncio.TimeoutError as e:
-                last_exception = e
-                logger.warning(
-                    f"Dhan provider timeout (attempt {attempt + 1}/{self.MAX_RETRIES}): {e}"
-                )
-                await self._wait_before_retry(attempt)
-                
-            except RateLimitExceededError as e:
-                # Don't retry rate limits - let router fallback
+            )
+        except RateLimitExceededError as exc:
+            self._available = False
+            raise ProviderUnavailableError(f"Dhan rate limit exceeded: {exc}") from exc
+        except RetryExhaustedError as exc:
+            self._available = False
+            raise ProviderUnavailableError(
+                f"Dhan provider failed after {self._retry_policy.max_retries} attempts: {exc.last_exception}"
+            ) from exc.last_exception
+        except Exception as exc:
+            err_str = str(exc)
+            if "401" in err_str or "403" in err_str:
                 self._available = False
-                raise ProviderUnavailableError(f"Dhan rate limit exceeded: {e}") from e
-                
-            except Exception as e:
-                last_exception = e
-                logger.error(f"Dhan provider error (attempt {attempt + 1}): {e}")
-                
-                # Check if it's a fatal error
-                if "401" in str(e) or "403" in str(e):
-                    self._available = False
-                    raise ProviderUnavailableError(f"Dhan auth failed: {e}") from e
-                
-                await self._wait_before_retry(attempt)
-        
-        # All retries exhausted
-        self._available = False
-        raise ProviderUnavailableError(
-            f"Dhan provider failed after {self.MAX_RETRIES} attempts: {last_exception}"
-        ) from last_exception
+                raise ProviderUnavailableError(f"Dhan auth failed: {exc}") from exc
+            raise
+
+        if candles is None:
+            return []
+
+        self._available = True
+        logger.info(
+            "Dhan provider: fetched %d candles for %s %s",
+            len(candles), instrument.symbol, timeframe,
+        )
+        return candles
     
     async def search_symbol(self, query: str) -> List[CanonicalInstrument]:
         """
         Search for symbols on Dhan.
-        
+
+        Downloads the Dhan master instrument file, parses it, and
+        returns instruments whose trading symbol or name matches the query.
+
         Args:
-            query: Search query
-        
+            query: Search query (case-insensitive substring match)
+
         Returns:
-            List of matching instruments
+            List of matching CanonicalInstrument objects
         """
-        # TODO: Implement Dhan symbol search
-        # For now, return empty list
-        logger.warning("Dhan symbol search not yet implemented")
-        return []
+        if not query or not query.strip():
+            return []
+
+        query_lower = query.strip().lower()
+
+        try:
+            # Fetch master instrument list from Dhan
+            master_data = await self._adapter._client._request(
+                "GET", "/master", bucket="non_trading"
+            )
+
+            if not isinstance(master_data, list):
+                logger.warning("Dhan master data unexpected format")
+                return []
+
+            results: List[CanonicalInstrument] = []
+            for item in master_data:
+                if not isinstance(item, dict):
+                    continue
+
+                symbol = str(item.get("SEM_TRADING_SYMBOL", ""))
+                name = str(item.get("SEM_SMST_SYMBOL_NAME", ""))
+
+                if query_lower in symbol.lower() or query_lower in name.lower():
+                    instrument = self._parse_master_item(item)
+                    if instrument:
+                        results.append(instrument)
+
+            logger.info(
+                "Dhan symbol search for '%s' returned %d results",
+                query, len(results),
+            )
+            return results
+
+        except Exception as exc:
+            logger.error("Dhan symbol search failed: %s", exc)
+            raise SymbolNotFoundError(
+                f"Dhan symbol search failed for '{query}': {exc}"
+            ) from exc
+
+    def _parse_master_item(self, item: dict) -> Optional[CanonicalInstrument]:
+        """Parse a Dhan master instrument dict into CanonicalInstrument."""
+        from brokersv2.core.types import InstrumentType, OptionType
+        from decimal import Decimal
+        from datetime import datetime
+
+        try:
+            symbol = str(item.get("SEM_TRADING_SYMBOL", ""))
+            exchange_code = str(item.get("SEM_EXM_EXCH_ID", "NSE"))
+            inst_type = str(item.get("SEM_INSTRUMENT_NAME", "EQ"))
+            lot_size = int(item.get("SEM_LOT_SIZE", 1) or 1)
+            tick_size = Decimal(str(item.get("SEM_TICK_SIZE", "0.01") or "0.01"))
+
+            exchange = Exchange.NSE if exchange_code == "NSE" else Exchange.BSE
+
+            if inst_type in ("OPTSTK", "OPTIDX"):
+                expiry_str = str(item.get("SEM_EXPIRY_DATE", ""))
+                strike = Decimal(str(item.get("SEM_STRIKE_PRICE", 0) or 0))
+                opt_type = OptionType.CALL if str(item.get("SEM_OPTION_TYPE", "")).upper() == "CE" else OptionType.PUT
+                expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date() if expiry_str else None
+                if expiry:
+                    return CanonicalInstrument.create_option(
+                        symbol=symbol, exchange=exchange, expiry=expiry,
+                        strike=strike, option_type=opt_type, lot_size=lot_size, tick_size=tick_size,
+                    )
+            elif inst_type in ("FUTSTK", "FUTIDX"):
+                expiry_str = str(item.get("SEM_EXPIRY_DATE", ""))
+                expiry = datetime.strptime(expiry_str, "%Y-%m-%d").date() if expiry_str else None
+                if expiry:
+                    return CanonicalInstrument.create_future(
+                        symbol=symbol, exchange=exchange, expiry=expiry,
+                        lot_size=lot_size, tick_size=tick_size,
+                    )
+            else:
+                return CanonicalInstrument.create_equity(
+                    symbol=symbol, exchange=exchange, lot_size=lot_size, tick_size=tick_size,
+                )
+        except Exception as exc:
+            logger.debug("Failed to parse master item: %s", exc)
+            return None
+        return None
     
     async def _fetch_candles_with_timeout(
         self,
@@ -291,17 +365,6 @@ class DhanHistoricalProvider(BaseHistoricalProvider):
         
         logger.warning(f"Could not parse timestamp: {ts}")
         return datetime.now()
-    
-    async def _wait_before_retry(self, attempt: int):
-        """
-        Wait before retry with exponential backoff.
-        
-        Args:
-            attempt: Current attempt number (0-based)
-        """
-        delay = self.BASE_RETRY_DELAY * (2 ** attempt)
-        logger.debug(f"Waiting {delay}s before retry")
-        await asyncio.sleep(delay)
     
     def __repr__(self) -> str:
         return f"<DhanHistoricalProvider available={self._available}>"

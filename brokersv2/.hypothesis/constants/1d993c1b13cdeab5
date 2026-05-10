@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/infrastructure/http_client.py
+# hypothesis_version: 6.152.4
+
+[200, 400, 401, 403, 408, 429, 500, 502, 503, 504, '/', 'Accept', 'Content-Type', 'DELETE', 'DhanAuthProvider', 'DhanHttpClient', 'DhanPythonClient/1.0', 'GET', 'Invalid access token', 'POST', 'Rate limit exceeded', 'Request timed out', 'Retry-After', 'Token refresh failed', 'User-Agent', 'access-token', 'application/json', 'client-id', 'correlation_id', 'dhan.http', 'dhanClientId', 'error', 'errorCode', 'headers', 'http_method', 'json', 'message', 'params', 'raw', 'response', 'status', 'timeout', 'url']

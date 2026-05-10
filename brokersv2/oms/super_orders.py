@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional
 
+from brokersv2.core.constants import SuperOrder as SuperOrderConstants
+
 
 class SuperOrderType(Enum):
     """Super order execution types."""
@@ -29,7 +31,7 @@ class TWAPConfig:
     """TWAP execution configuration."""
     total_quantity: int
     duration_minutes: int
-    slice_interval_seconds: int = 60
+    slice_interval_seconds: int = SuperOrderConstants.DEFAULT_SLICE_INTERVAL
 
     @property
     def num_slices(self) -> int:
@@ -95,7 +97,7 @@ class SuperOrder:
         
         elif self.order_type == SuperOrderType.VWAP:
             if market_volume is None:
-                return min(100, remaining)  # Default slice
+                return min(SuperOrderConstants.DEFAULT_VWAP_SLICE, remaining)  # Default slice
             
             slice_qty = int(market_volume * self.config.participation_rate)
             

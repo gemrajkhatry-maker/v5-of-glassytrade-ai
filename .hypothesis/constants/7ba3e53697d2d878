@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/shared/config.py
+# hypothesis_version: 6.152.4
+
+['.env', 'NFO', 'PAPER', 'SharedSettings', 'development', 'ignore', 'utf-8']

@@ -12,6 +12,8 @@ from datetime import datetime
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from brokersv2.replay.types import ReplayEvent
+from brokersv2.domain.instrument.models import CanonicalInstrument
+from brokersv2.core.types import Exchange
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,7 @@ class HistoricalReplayEngine:
         from_date: str,
         to_date: str,
         speed: float = 1.0,
+        exchange: str = "NSE",
     ):
         """
         Initialize replay engine.
@@ -61,6 +64,7 @@ class HistoricalReplayEngine:
             from_date: Start date (YYYY-MM-DD)
             to_date: End date (YYYY-MM-DD)
             speed: Replay speed multiplier (1.0 = real-time)
+            exchange: Exchange code for symbol resolution (default: "NSE")
         """
         self._router = historical_router
         self._symbols = symbols
@@ -68,6 +72,7 @@ class HistoricalReplayEngine:
         self._from_date = from_date
         self._to_date = to_date
         self._speed = max(0.1, speed)  # Minimum 0.1x
+        self._exchange = exchange
         
         # Control state
         self._paused = asyncio.Event()
@@ -91,9 +96,14 @@ class HistoricalReplayEngine:
         all_candles = {}
         for symbol in self._symbols:
             try:
+                # Convert symbol string to CanonicalInstrument
+                instrument = CanonicalInstrument.create_equity(
+                    symbol=symbol,
+                    exchange=Exchange(self._exchange),
+                )
                 # Load candles from router
                 candles = await self._router.get_candles(
-                    instrument=symbol,
+                    instrument=instrument,
                     timeframe=self._timeframe,
                     from_date=self._from_date,
                     to_date=self._to_date,

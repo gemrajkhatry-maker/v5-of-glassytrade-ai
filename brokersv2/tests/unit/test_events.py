@@ -1,7 +1,8 @@
 """Tests for Event Bus."""
 
 import pytest
-from brokersv2.events import EventBus, TickEvent, OrderEvent
+from brokersv2.events import EventBus
+from brokersv2.core.events import OrderEvent
 
 
 class TestEventBus:
@@ -16,9 +17,9 @@ class TestEventBus:
         async def handler(event):
             received.append(event)
 
-        bus.subscribe(TickEvent, handler)
-        await bus.publish(TickEvent(symbol="NSE:RELIANCE", price=100.0, volume=100))
-        
+        bus.subscribe(OrderEvent, handler)
+        await bus.publish(OrderEvent(order_id="ORD1", symbol="NSE:RELIANCE", side="BUY", quantity=10.0, status="NEW"))
+
         assert len(received) == 1
         assert received[0].symbol == "NSE:RELIANCE"
 
@@ -34,10 +35,10 @@ class TestEventBus:
         async def handler2(event):
             results.append(("h2", event))
 
-        bus.subscribe(TickEvent, handler1)
-        bus.subscribe(TickEvent, handler2)
-        await bus.publish(TickEvent(symbol="NSE:RELIANCE", price=100.0, volume=100))
-        
+        bus.subscribe(OrderEvent, handler1)
+        bus.subscribe(OrderEvent, handler2)
+        await bus.publish(OrderEvent(order_id="ORD1", symbol="NSE:RELIANCE", side="BUY", quantity=10.0, status="NEW"))
+
         assert len(results) == 2
 
     @pytest.mark.asyncio
@@ -48,7 +49,7 @@ class TestEventBus:
         async def bad_handler(event):
             raise ValueError("Test error")
 
-        bus.subscribe(TickEvent, bad_handler)
-        await bus.publish(TickEvent(symbol="NSE:RELIANCE", price=100.0, volume=100))
-        
+        bus.subscribe(OrderEvent, bad_handler)
+        await bus.publish(OrderEvent(order_id="ORD1", symbol="NSE:RELIANCE", side="BUY", quantity=10.0, status="NEW"))
+
         assert bus.get_dlq_size() == 1

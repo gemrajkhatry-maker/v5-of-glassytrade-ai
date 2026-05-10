@@ -61,6 +61,10 @@ class DhanWebSocketManager:
         self._depth_queue: asyncio.Queue = asyncio.Queue(maxsize=5000)
         self._subscriptions: Dict = {}
         
+        # Dropped tick metrics
+        self._dropped_ticks: int = 0
+        self._dropped_depth: int = 0
+        
         # Reconnection state
         self._reconnect_attempts = 0
         self._last_heartbeat = datetime.now()
@@ -260,7 +264,8 @@ class DhanWebSocketManager:
                 try:
                     self._tick_queue.put_nowait(tick)
                 except asyncio.QueueFull:
-                    logger.warning("Tick queue full, dropping tick")
+                    self._dropped_ticks += 1
+                    logger.warning("Tick queue full, dropping tick (total dropped: %d)", self._dropped_ticks)
                     
         except Exception as e:
             logger.error(f"Error handling tick: {e}")
@@ -288,7 +293,21 @@ class DhanWebSocketManager:
             # Parse tick data with fallbacks
             last_price = float(raw_data.get("last_traded_price", 0.0))
             volume = int(raw_data.get("volume", 0))
-            timestamp = datetime.now()
+            
+            # Use broker-provided timestamp when available, fallback to local clock
+            exchange_ts = raw_data.get("exchange_timestamp") or raw_data.get("timestamp")
+            if exchange_ts:
+                if isinstance(exchange_ts, (int, float)):
+                    timestamp = datetime.fromtimestamp(exchange_ts)
+                elif isinstance(exchange_ts, str):
+                    try:
+                        timestamp = datetime.fromisoformat(exchange_ts)
+                    except (ValueError, TypeError):
+                        timestamp = datetime.now()
+                else:
+                    timestamp = datetime.now()
+            else:
+                timestamp = datetime.now()
             
             # Validate
             if last_price <= 0:
@@ -384,25 +403,29 @@ class DhanWebSocketManager:
     async def _reconnect(self):
         """
         Reconnect with exponential backoff and jitter.
-        Max 5 attempts.
+        After MAX_RECONNECT_ATTEMPTS, uses extended backoff (5 min) instead of killing the stream.
         """
         import random
         
-        if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
-            logger.error(f"Max reconnection attempts ({MAX_RECONNECT_ATTEMPTS}) reached")
-            self._running = False
-            return
-        
         self._reconnect_attempts += 1
         
-        # Exponential backoff with jitter
-        delay = BASE_RECONNECT_DELAY * (2 ** (self._reconnect_attempts - 1))
-        jitter = random.uniform(0.1, 0.5)
-        delay = min(delay + jitter, 60)  # Cap at 60s
+        if self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+            logger.error(
+                "Max reconnection attempts (%d) reached -- using extended backoff (5 min)",
+                MAX_RECONNECT_ATTEMPTS,
+            )
+            # Extended backoff: wait 5 minutes then reset counter so we try again
+            delay = 300
+            self._reconnect_attempts = 0
+        else:
+            # Exponential backoff with jitter
+            delay = BASE_RECONNECT_DELAY * (2 ** (self._reconnect_attempts - 1))
+            jitter = random.uniform(0.1, 0.5)
+            delay = min(delay + jitter, 60)  # Cap at 60s
         
         logger.info(
-            f"Reconnecting (attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS}) "
-            f"in {delay:.1f}s"
+            "Reconnecting (attempt %d/%d) in %.1fs",
+            self._reconnect_attempts + 1, MAX_RECONNECT_ATTEMPTS, delay,
         )
         
         await asyncio.sleep(delay)
@@ -490,7 +513,8 @@ class DhanWebSocketManager:
             try:
                 self._depth_queue.put_nowait(raw_data)
             except asyncio.QueueFull:
-                logger.warning("Depth queue full, dropping update")
+                self._dropped_depth += 1
+                logger.warning("Depth queue full, dropping update (total dropped: %d)", self._dropped_depth)
                 
         except Exception as e:
             logger.error(f"Error handling depth: {e}")

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/aggression_scorer.py
+# hypothesis_version: 6.152.4
+
+[0.0, 4.5, 'BALANCED', 'HIGH', 'IMBALANCED', 'LOW', 'MEDIUM', 'PROBING', 'absorption', 'bearish', 'big_trade', 'bubble', 'confluence', 'cvd', 'footprint', 'ofi']

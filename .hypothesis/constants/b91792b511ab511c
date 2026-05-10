@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/domain/probability/agent_pipeline.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.0025, 0.003, 0.004, 0.005, 0.0075, 0.015, 0.02, 0.03, 0.04, 0.05, 0.25, 0.27, 0.29, 0.5, 0.51, 0.52, 0.53, 0.55, 0.6, 0.65, 0.8, 0.9, 1.0, 1.1, 1.15, 1.2, 1.3, 1.4, 2.0, 3.0, 1000, 'BALANCED', 'BUY', 'DEAD', 'ENTER_NOW', 'FLAT', 'LONG', 'OrderBook | None', 'SELL', 'SHORT', 'SKIP', 'TRENDING', 'VOLATILE', 'WAIT', 'aggression:', 'atr_ratio', 'balance_ratio', 'book_imbalance_l1', 'book_imbalance_l5', 'close_vs_vah_pct', 'close_vs_val_pct', 'cvd_slope', 'delta_normalized', 'liquidity:', 'location: near LVN', 'market_state', 'orderflow:', 'return_to_value', 'volume_vs_ema20']

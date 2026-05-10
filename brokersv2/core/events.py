@@ -1,5 +1,12 @@
 """
 Core event definitions for the event-driven architecture.
+
+Market data event types (TickEvent, DepthEvent, QuoteEvent, CandleEvent) are
+defined in brokersv2.domain.market.events using msgspec for high-performance
+serialisation and re-exported here for backward compatibility.
+
+All other events (order, fill, position, risk, error, connection, heartbeat)
+are defined directly in this module using plain frozen dataclasses.
 """
 
 from __future__ import annotations
@@ -11,6 +18,16 @@ from uuid import uuid4
 
 from .types import OrderId, Symbol, CorrelationId
 
+# Market data events — canonical definitions live in domain/market/events.py.
+# Re-exported here so existing importers (`from brokersv2.core.events import TickEvent`)
+# continue to work without changes.
+from brokersv2.domain.market.events import (  # noqa: F401
+    TickEvent,
+    DepthEvent,
+    QuoteEvent,
+    CandleEvent,
+)
+
 
 @dataclass(frozen=True)
 class Event:
@@ -19,48 +36,6 @@ class Event:
     timestamp: datetime = field(default_factory=datetime.now)
     correlation_id: Optional[CorrelationId] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class TickEvent(Event):
-    """Market tick event."""
-    symbol: str = ""
-    price: float = 0.0
-    volume: int = 0
-    bid: Optional[float] = None
-    ask: Optional[float] = None
-    sequence: Optional[int] = None
-
-
-@dataclass(frozen=True)
-class QuoteEvent(Event):
-    """Quote update event."""
-    symbol: str = ""
-    ltp: float = 0.0
-    bid: float = 0.0
-    ask: float = 0.0
-    volume: int = 0
-    oi: Optional[int] = None
-
-
-@dataclass(frozen=True)
-class DepthEvent(Event):
-    """Market depth event."""
-    symbol: str = ""
-    side: str = ""
-    levels: list = field(default_factory=list)
-
-
-@dataclass(frozen=True)
-class CandleEvent(Event):
-    """Candle event."""
-    symbol: str = ""
-    timeframe: str = ""
-    open: float = 0.0
-    high: float = 0.0
-    low: float = 0.0
-    close: float = 0.0
-    volume: int = 0
 
 
 @dataclass(frozen=True)

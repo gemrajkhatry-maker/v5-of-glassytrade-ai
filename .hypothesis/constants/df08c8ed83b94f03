@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/trading/models/entities.py
+# hypothesis_version: 6.152.4
+
+[0.0, '0', 'LLM_EXIT', 'LONG', 'MANUAL', 'Position', 'SCRATCH', 'SHORT', 'Signal', 'Stop Loss', 'TIME_STOP', 'Take Profit', 'Take Profit (Full)', 'USER_EXIT', 'is_expiry', 'session_phase']

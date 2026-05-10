@@ -60,6 +60,7 @@ class IntelligentMarketDataCache:
         self._l1_cache = LRUMemoryCache(max_size=l1_max_size)
         self._l2_cache = SQLiteDiskCache(db_path=l2_db_path)
         self._default_ttl = default_ttl
+        self._key_index: dict[str, set[str]] = {}  # instrument_id -> set of cache keys
     
     def _build_key(
         self,
@@ -142,13 +143,48 @@ class IntelligentMarketDataCache:
         """
         key = self._build_key(instrument_id, timeframe, from_date, to_date)
         ttl = ttl_seconds or self._default_ttl
-        
+
         # Store in both caches
         await self._l1_cache.set(key, candles, ttl_seconds=ttl)
         await self._l2_cache.set(key, candles, ttl_seconds=ttl)
-        
+        self._add_to_index(key)
+
         logger.debug(f"Cached {key} ({len(candles)} candles)")
     
+    def _extract_instrument_id(self, key: str) -> str:
+        """Extract instrument_id from a cache key.
+
+        Key format: candles:{instrument_id}:{timeframe}:{from_date}:{to_date}
+        """
+        parts = key.split(":")
+        if len(parts) >= 3 and parts[0] == "candles":
+            return parts[1]
+        return ""
+
+    def _add_to_index(self, key: str) -> None:
+        """Add a cache key to the inverted index."""
+        instrument_id = self._extract_instrument_id(key)
+        if instrument_id:
+            self._key_index.setdefault(instrument_id, set()).add(key)
+
+    def _remove_from_index(self, key: str) -> None:
+        """Remove a cache key from the inverted index."""
+        instrument_id = self._extract_instrument_id(key)
+        if instrument_id and instrument_id in self._key_index:
+            self._key_index[instrument_id].discard(key)
+            if not self._key_index[instrument_id]:
+                del self._key_index[instrument_id]
+
+    def _get_keys_for_instrument(
+        self, instrument_id: str, timeframe: Optional[str] = None
+    ) -> list[str]:
+        """Get all cache keys for an instrument, optionally filtered by timeframe."""
+        keys = self._key_index.get(instrument_id, set()).copy()
+        if timeframe is not None:
+            prefix = f"candles:{instrument_id}:{timeframe}:"
+            keys = {k for k in keys if k.startswith(prefix)}
+        return list(keys)
+
     async def invalidate(
         self,
         instrument_id: str,
@@ -156,26 +192,30 @@ class IntelligentMarketDataCache:
     ) -> int:
         """
         Invalidate cache for instrument (and optionally timeframe).
-        
+
+        Uses the inverted key index for efficient selective invalidation.
+
         Args:
             instrument_id: Instrument identifier
             timeframe: Timeframe to invalidate (None = all timeframes)
-            
+
         Returns:
             Number of entries invalidated
         """
         invalidated = 0
-        
-        # We need to scan for matching keys - in production, maintain an index
-        # For now, clear all cache entries for this instrument
-        # TODO: Implement key indexing for efficient invalidation
-        
-        # Clear L1 entries matching pattern
-        l1_stats = self._l1_cache.get_stats()
-        await self._l1_cache.clear()  # Simplified - should be more selective
-        invalidated += l1_stats.item_count
-        
-        logger.info(f"Invalidated {invalidated} cache entries for {instrument_id}")
+        keys_to_remove = self._get_keys_for_instrument(instrument_id, timeframe)
+
+        for key in keys_to_remove:
+            deleted_l1 = await self._l1_cache.delete(key)
+            deleted_l2 = await self._l2_cache.delete(key)
+            if deleted_l1 or deleted_l2:
+                invalidated += 1
+            self._remove_from_index(key)
+
+        logger.info(
+            f"Invalidated {invalidated} cache entries for {instrument_id}"
+            f"{' (timeframe=' + timeframe + ')' if timeframe else ''}"
+        )
         return invalidated
     
     async def warmup(
@@ -200,6 +240,7 @@ class IntelligentMarketDataCache:
         for key, data in keys_data.items():
             await self._l1_cache.set(key, data, ttl_seconds=ttl)
             await self._l2_cache.set(key, data, ttl_seconds=ttl)
+            self._add_to_index(key)
             warmed += 1
         
         logger.info(f"Warmed cache with {warmed} entries")
@@ -256,4 +297,5 @@ class IntelligentMarketDataCache:
         """Clear all cache data."""
         await self._l1_cache.clear()
         await self._l2_cache.clear()
+        self._key_index.clear()
         logger.info("Cleared all cache data")

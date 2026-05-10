@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/mobile_alerts.py
+# hypothesis_version: 6.152.4
+
+[200, 'HTML', 'chat_id', 'parse_mode', 'text', '✅', '❌', '🔴 CRITICAL', '🔵 INFO', '🟡 WARNING']

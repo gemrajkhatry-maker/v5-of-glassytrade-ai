@@ -10,18 +10,15 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import TYPE_CHECKING
 
-from app.domain.trading.model.entities import Position
-from app.domain.trading.model.enums import CushionState
+from app.domain.exit.model.exit_decision import ExitDecision
 from app.domain.exit.model.exit_models import ExitReason
 from app.domain.exit.service.exit_rules import (
     check_time_stop,
     check_spread_blowout,
 )
-
-if TYPE_CHECKING:
-    from app.runtime.pipeline.events import ExitDecision
+from app.domain.trading.model.entities import Position
+from app.domain.trading.model.enums import CushionState
 
 logger = logging.getLogger(name=__name__)
 
@@ -43,7 +40,6 @@ class ExitEngine:
 
     @staticmethod
     def _exit_decision(**kwargs: object):
-        from app.runtime.pipeline.events import ExitDecision
         return ExitDecision(**kwargs)
 
     def evaluate(
@@ -213,7 +209,6 @@ class PartitionExitManager:
 
     @staticmethod
     def _exit_decision(**kwargs: object):
-        from app.runtime.pipeline.events import ExitDecision
         return ExitDecision(**kwargs)
 
     def check(self, pos: Position, current_price: float) -> ExitDecision | None:

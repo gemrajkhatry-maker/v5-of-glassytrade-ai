@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/signal_coordinator.py
+# hypothesis_version: 6.152.4
+
+[0.65, 'Agent says no edge', 'BALANCED', 'ENTER_NOW', 'FLAT', 'HIGH', 'IMBALANCED', 'LOW', 'MEAN_REVERSION', 'MEDIUM', 'NONE', 'No agent decision', 'Overseer processing', 'SHORT', 'SHORT not allowed', 'SKIP', 'TREND_CONTINUATION', 'WAIT', 'allow_entry']

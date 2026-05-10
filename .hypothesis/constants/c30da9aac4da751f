@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/loss_tracker.py
+# hypothesis_version: 6.152.4
+
+[-30000.0, 0.0, 0.0025, 0.0035, 0.004, 0.005, 0.2, 0.3, 1.5, 30.0, 15000.0, '%Y-%m-%d', 'ACTIVE', 'CIRCUIT_HIT', 'Conservative', 'TARGET_HIT', 'daily_losses_v2', 'date', 'global_count', 'global_daily_losses', 'session_realized_pnl', 'storage.load', 'storage.persist', 'symbol_counts', 'symbol_daily_losses']

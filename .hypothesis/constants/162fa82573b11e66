@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/rule_based_rationale.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.001, 1.5, 2.0, ', ', 'BALANCED', 'CONSECUTIVE_LOSSES', 'CVD aligned', 'DAILY_LOSS_LIMIT', 'DRAWDOWN_LIMIT', 'FLAT', 'IMBALANCED', 'Mean Reversion', 'NO_TRADE', 'OFI aligned', 'POC', 'PROBING', 'TREND_MODEL', 'Trend', 'VAH', 'VAL', 'absorption', 'direction', 'footprint imbalance', 'institutional prints', 'price', 'profile confluence', 'volume bubble']

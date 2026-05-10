@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/break_detector.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.003, 0.25, 0.3, 1.2, 1.5, 'ABSORPTION', 'DOWN', 'IBH', 'IBL', 'INITIATIVE', 'RESPONSIVE', 'UP', 'VAH', 'VAL', 'break_direction', 'break_level', 'break_price', 'break_type', 'inf', 'volume_ratio']

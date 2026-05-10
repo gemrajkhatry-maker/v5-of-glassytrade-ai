@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/order_book_l2.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.3, 0.5, 0.8, 3.0, 50.0, 999.0, 100, 'LONG', 'ask_vol', 'bid_vol', 'imbalance', 'mid_price', 'timestamp']

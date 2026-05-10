@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/infrastructure/metrics.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.95, -500, 1000, 'avg_latency_s', 'cache', 'count', 'hit_rate', 'hits', 'inference', 'misses', 'p50_latency_s', 'p95_latency_s', 'regime_changes', 'signals', 'ticks_processed', 'total_pnl', 'uptime_seconds']

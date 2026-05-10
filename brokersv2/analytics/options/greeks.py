@@ -33,46 +33,48 @@ def black_scholes_price(
     volatility: float,
     risk_free_rate: float,
     option_type: str,
+    dividend_yield: float = 0.013,
 ) -> float:
     """
-    Calculate Black-Scholes option price.
-    
+    Calculate Black-Scholes option price using the Merton continuous-dividend model.
+
     Args:
         spot: Current underlying price
         strike: Option strike price
         time_to_expiry: Time to expiry in years
         volatility: Implied volatility (annualized)
-        risk_free_rate: Risk-free interest rate
+        risk_free_rate: Risk-free interest rate (e.g. 0.065 for 6.5%)
         option_type: "CE" for call, "PE" for put
-        
+        dividend_yield: Continuous dividend yield (default 0.013 = NIFTY ~1.3%)
+
     Returns:
         Option price
     """
     if time_to_expiry <= 0:
-        # Expired option - intrinsic value only
         if option_type == "CE":
             return max(0.0, spot - strike)
         else:
             return max(0.0, strike - spot)
-    
+
+    # Merton adjustment: discount spot by dividend yield
+    adj_spot = spot * math.exp(-dividend_yield * time_to_expiry)
+
     d1 = (
-        math.log(spot / strike)
+        math.log(adj_spot / strike)
         + (risk_free_rate + 0.5 * volatility**2) * time_to_expiry
     ) / (volatility * math.sqrt(time_to_expiry))
-    
+
     d2 = d1 - volatility * math.sqrt(time_to_expiry)
-    
+
     if option_type == "CE":
-        # Call option
-        price = spot * _norm_cdf(d1) - strike * math.exp(
+        price = adj_spot * _norm_cdf(d1) - strike * math.exp(
             -risk_free_rate * time_to_expiry
         ) * _norm_cdf(d2)
     else:
-        # Put option
         price = strike * math.exp(-risk_free_rate * time_to_expiry) * _norm_cdf(
             -d2
-        ) - spot * _norm_cdf(-d1)
-    
+        ) - adj_spot * _norm_cdf(-d1)
+
     return max(0.0, price)
 
 
@@ -83,60 +85,63 @@ def calculate_greeks(
     volatility: float,
     risk_free_rate: float,
     option_type: str,
+    dividend_yield: float = 0.013,
 ) -> GreeksResult:
     """
-    Calculate all options Greeks.
-    
+    Calculate all options Greeks using the Merton continuous-dividend model.
+
     Args:
         spot: Current underlying price
         strike: Option strike price
         time_to_expiry: Time to expiry in years
         volatility: Implied volatility (annualized)
-        risk_free_rate: Risk-free interest rate
+        risk_free_rate: Risk-free interest rate (e.g. 0.065 for 6.5%)
         option_type: "CE" for call, "PE" for put
-        
+        dividend_yield: Continuous dividend yield (default 0.013 = NIFTY ~1.3%)
+
     Returns:
         GreeksResult with delta, gamma, theta, vega, rho
     """
     if time_to_expiry <= 0:
         return GreeksResult(delta=0.0, gamma=0.0, theta=0.0, vega=0.0, rho=0.0)
-    
+
+    # Merton adjustment: discount spot by dividend yield
+    adj_spot = spot * math.exp(-dividend_yield * time_to_expiry)
+
     d1 = (
-        math.log(spot / strike)
+        math.log(adj_spot / strike)
         + (risk_free_rate + 0.5 * volatility**2) * time_to_expiry
     ) / (volatility * math.sqrt(time_to_expiry))
-    
+
     d2 = d1 - volatility * math.sqrt(time_to_expiry)
-    
+
     # Gamma (same for call and put)
-    gamma = _norm_pdf(d1) / (spot * volatility * math.sqrt(time_to_expiry))
-    
+    gamma = _norm_pdf(d1) / (adj_spot * volatility * math.sqrt(time_to_expiry))
+
     # Vega (same for call and put)
-    vega = spot * _norm_pdf(d1) * math.sqrt(time_to_expiry) / 100.0
-    
+    vega = adj_spot * _norm_pdf(d1) * math.sqrt(time_to_expiry) / 100.0
+
     if option_type == "CE":
-        # Call options
-        delta = _norm_cdf(d1)
+        delta = math.exp(-dividend_yield * time_to_expiry) * _norm_cdf(d1)
         theta = (
-            -(spot * _norm_pdf(d1) * volatility)
-            / (2.0 * math.sqrt(time_to_expiry))
+            -(adj_spot * _norm_pdf(d1) * volatility) / (2.0 * math.sqrt(time_to_expiry))
             - risk_free_rate * strike * math.exp(-risk_free_rate * time_to_expiry) * _norm_cdf(d2)
-        ) / 365.0
+            + dividend_yield * adj_spot * _norm_cdf(d1)
+        ) / 252.0  # trading days denominator (not calendar)
         rho = (
             strike * time_to_expiry * math.exp(-risk_free_rate * time_to_expiry) * _norm_cdf(d2)
         ) / 100.0
     else:
-        # Put options
-        delta = _norm_cdf(d1) - 1.0
+        delta = math.exp(-dividend_yield * time_to_expiry) * (_norm_cdf(d1) - 1.0)
         theta = (
-            -(spot * _norm_pdf(d1) * volatility)
-            / (2.0 * math.sqrt(time_to_expiry))
+            -(adj_spot * _norm_pdf(d1) * volatility) / (2.0 * math.sqrt(time_to_expiry))
             + risk_free_rate * strike * math.exp(-risk_free_rate * time_to_expiry) * _norm_cdf(-d2)
-        ) / 365.0
+            - dividend_yield * adj_spot * _norm_cdf(-d1)
+        ) / 252.0  # trading days denominator
         rho = (
             -strike * time_to_expiry * math.exp(-risk_free_rate * time_to_expiry) * _norm_cdf(-d2)
         ) / 100.0
-    
+
     return GreeksResult(
         delta=delta,
         gamma=gamma,
@@ -155,10 +160,11 @@ def calculate_iv(
     option_type: str,
     tolerance: float = 0.0001,
     max_iterations: int = 100,
+    dividend_yield: float = 0.013,
 ) -> float:
     """
-    Calculate implied volatility using bisection method.
-    
+    Calculate implied volatility using bisection method (Merton model).
+
     Args:
         market_price: Market price of the option
         spot: Current underlying price
@@ -168,22 +174,24 @@ def calculate_iv(
         option_type: "CE" for call, "PE" for put
         tolerance: Convergence tolerance
         max_iterations: Maximum iterations
-        
+        dividend_yield: Continuous dividend yield (default 0.013 = NIFTY ~1.3%)
+
     Returns:
         Implied volatility
-        
+
     Raises:
         ValueError: If IV cannot be found
     """
     # Bisection method
     low_vol = 0.001
     high_vol = 5.0
-    
+
     for _ in range(max_iterations):
         mid_vol = (low_vol + high_vol) / 2.0
-        
+
         theoretical_price = black_scholes_price(
-            spot, strike, time_to_expiry, mid_vol, risk_free_rate, option_type
+            spot, strike, time_to_expiry, mid_vol, risk_free_rate, option_type,
+            dividend_yield=dividend_yield,
         )
         
         price_diff = theoretical_price - market_price
@@ -231,11 +239,14 @@ class GreeksCalculator:
         option_type,
     ) -> float:
         """Calculate option delta.
-        
+
         Args:
-            time_to_expiry: Time to expiry in DAYS (will be converted to years)
+            time_to_expiry: Calendar days to expiry.  Converted to years
+                (÷365) before being passed to the Black-Scholes formula.
+                Theta output from calculate_greeks is expressed per trading
+                day (÷252) — these are intentionally different denominators.
         """
-        # Convert days to years
+        # Calendar days → years (Black-Scholes convention)
         time_in_years = time_to_expiry / 365.0
         
         # Map option type to CE/PE format
@@ -255,7 +266,7 @@ class GreeksCalculator:
         risk_free_rate: float,
         option_type=None,
     ) -> float:
-        """Calculate option gamma. time_to_expiry in DAYS. option_type defaults to CALL."""
+        """Calculate option gamma. time_to_expiry in calendar DAYS."""
         time_in_years = time_to_expiry / 365.0
         opt_type = _map_option_type(option_type) if option_type else "CE"
         result = calculate_greeks(
@@ -272,7 +283,8 @@ class GreeksCalculator:
         risk_free_rate: float,
         option_type=None,
     ) -> float:
-        """Calculate option theta. time_to_expiry in DAYS. option_type defaults to CALL."""
+        """Calculate option theta. time_to_expiry in calendar DAYS.
+        Returns theta per trading day (÷252 denominator in BS formula)."""
         time_in_years = time_to_expiry / 365.0
         opt_type = _map_option_type(option_type) if option_type else "CE"
         result = calculate_greeks(
@@ -289,7 +301,7 @@ class GreeksCalculator:
         risk_free_rate: float,
         option_type=None,
     ) -> float:
-        """Calculate option vega. time_to_expiry in DAYS. option_type defaults to CALL."""
+        """Calculate option vega. time_to_expiry in calendar DAYS."""
         time_in_years = time_to_expiry / 365.0
         opt_type = _map_option_type(option_type) if option_type else "CE"
         result = calculate_greeks(

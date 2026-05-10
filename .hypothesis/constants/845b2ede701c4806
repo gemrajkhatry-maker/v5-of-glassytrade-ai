@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/session_strategy_selector.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.25, 0.5, 1.5, 2.0, 2.5, 3.0, 'AFTERNOON', 'CLOSE', 'EVENING', 'EXIT_ONLY', 'LONG', 'MCX', 'MEAN_REVERSION', 'MIDDAY', 'MORNING', 'NO_TRADE', 'NSE', 'OPENING', 'POWER_HOUR', 'PRIMARY', 'SELECTIVE', 'SHORT', 'TREND_FOLLOWING', 'US_SESSION']

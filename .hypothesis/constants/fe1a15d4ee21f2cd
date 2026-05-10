@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/underlying_futures_provider.py
+# hypothesis_version: 6.152.4
+
+[0.05, '01', '02', '03', '04', '05', '06', '07', '08', '09', '09:15', '10', '11', '12', '15:30', 'APR', 'AUG', 'DEC', 'FEB', 'JAN', 'JUL', 'JUN', 'MAR', 'MAY', 'MCX:', 'NOV', 'NSE:', 'OCT', 'SEP', 'config', 'dead_volume_pct', 'ib_window_minutes', 'instruments.json', 'lot_size', 'options_segment', 'range_bar_size', 'session_end', 'session_start', 'strike_step', 'tick_size', 'underlying_segment', 'underlying_symbol']

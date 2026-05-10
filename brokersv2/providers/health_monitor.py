@@ -8,14 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
-
-# Test instrument for health checks (use a common liquid symbol)
-TEST_INSTRUMENT_SYMBOL = "RELIANCE"
 
 
 class ProviderHealthMonitor:
@@ -34,6 +32,7 @@ class ProviderHealthMonitor:
             providers={"dhan": dhan_provider, "opencart": opencart_provider},
             check_interval=30,
             failure_threshold=3,
+            test_symbol="RELIANCE",
         )
         await monitor.start_monitoring()
         
@@ -49,6 +48,7 @@ class ProviderHealthMonitor:
         check_interval: int = 30,
         failure_threshold: int = 3,
         recovery_threshold: int = 2,
+        test_symbol: Optional[str] = None,
     ):
         """
         Initialize health monitor.
@@ -63,6 +63,7 @@ class ProviderHealthMonitor:
         self._check_interval = check_interval
         self._failure_threshold = failure_threshold
         self._recovery_threshold = recovery_threshold
+        self._test_symbol = test_symbol or os.environ.get("HEALTH_CHECK_SYMBOL", "RELIANCE")
         
         # Health tracking
         self._health_scores: Dict[str, float] = {name: 50.0 for name in providers}
@@ -190,10 +191,10 @@ class ProviderHealthMonitor:
             yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
             today = datetime.now().strftime("%Y-%m-%d")
             
-            # Use mock instrument for health check
-            # In production, use a real instrument from registry
+            # Use configurable test instrument for health check
+            # Set via test_symbol parameter or HEALTH_CHECK_SYMBOL env var
             await provider.get_candles(
-                instrument=TEST_INSTRUMENT_SYMBOL,
+                instrument=self._test_symbol,
                 timeframe="1m",
                 from_date=yesterday,
                 to_date=today,

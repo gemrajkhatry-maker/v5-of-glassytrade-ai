@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/core/events.py
+# hypothesis_version: 6.152.4
+
+[100, 1000, ' AND event_type = ?', ' AND symbol = ?', 'component', 'data', 'eventType', 'glassytrade.db', 'timestamp', '{}']

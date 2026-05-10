@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/trading/services/risk_manager.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.45, '0.20', '0.60', 'Trade rejected: %s', 'Trading HALTED: %s', 'symbol']

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/risk_tier_engine.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.0015, 0.0025, 0.0045, 0.85, 1.0, 2.0, 3.0, 3.5, 5000000.0, 'A', 'B', 'C', 'HALT', 'consecutive_losses', 'daily_pnl_r', 'halted', 'tier', 'trade_count']

@@ -31,12 +31,7 @@ class ExitSignal:
     new_stop: float | None = None  # New SL after partial exit
 
 
-@dataclass(frozen=True)
-class ExitDecision:
-    """Result of exit analysis."""
-    should_exit: bool
-    exit_signal: ExitSignal | None = None
-    reason: str = ""
+
 
 
 @dataclass

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/infrastructure/dhan_adapter/jwt_manager.py
+# hypothesis_version: 6.152.4
+
+[3600, 'access_token', 'expires_in']

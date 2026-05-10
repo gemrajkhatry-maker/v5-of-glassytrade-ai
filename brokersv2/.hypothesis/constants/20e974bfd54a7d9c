@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/infrastructure/depth_websocket_client.py
+# hypothesis_version: 6.152.4
+
+[200, 332, '<B', '<H', '<I', '<d', 'ExchangeSegment', 'InstrumentCount', 'InstrumentList', 'NSE_EQ', 'RequestCode', 'SecurityId', 'ask', 'bid', 'binary_error', 'binary_unknown', 'count', 'depth', 'disconnected', 'error', 'exchange_segment', 'levels', 'orders', 'price', 'qty', 'raw', 'reason_code', 'response_code', 'security_id', 'side', 'ws_security_id']

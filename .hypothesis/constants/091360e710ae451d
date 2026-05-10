@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/api/middleware.py
+# hypothesis_version: 6.152.4
+
+[400, 500, 1000, 'DATA_ERROR', 'EXECUTION_ERROR', 'INTERNAL_ERROR', 'RISK_ERROR', 'TRADING_ERROR', 'X-Correlation-ID', 'X-Response-Time', 'correlation_id', 'error', 'message']

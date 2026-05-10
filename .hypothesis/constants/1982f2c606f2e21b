@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/handlers/entry_gate_coordinator.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.05, 1.0, 'All gates passed', 'BALANCED', 'CVD gate passed', 'LONG', 'P', 'SHORT', 'b', 'cvd_slope', 'drive_entry_valid', 'drive_number', 'is_extreme_deviation', 'overextended', 'profile_shape', 'symbol', 'warning']

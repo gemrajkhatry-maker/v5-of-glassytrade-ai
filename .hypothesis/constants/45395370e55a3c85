@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/backend_v2/src/core/session_manager.py
+# hypothesis_version: 6.152.4
+
+['ACTIVE', 'CLOSING', 'DEAD_ZONE', 'MCX', 'OUTSIDE', 'WARMUP']

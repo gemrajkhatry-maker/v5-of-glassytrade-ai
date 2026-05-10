@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/strategy/fabio_detectors.py
+# hypothesis_version: 6.152.4
+
+[-4.0, -0.1, 0.0, 0.001, 0.01, 0.05, 0.1, 0.3, 0.7, 1.0, 1.5, 2.0, 4.0, 10.0, 100, ' | ', 'BALANCE', 'CHOP', 'DEAD', 'HIGH', 'IB_BREAKOUT', 'LONG', 'MEDIUM', 'NEUTRAL', 'NORMAL', 'NORMAL_VARIATION', 'SHORT', 'TRANSITION', 'TREND', 'UNKNOWN', 'VAH_PROBE_EXHAUSTION', 'VAH_PROBE_TESTING', '_poc_history', 'absorption_detected', 'absorption_side', 'absorption_vol_ratio', 'agg_result', 'aggression_score', 'avg_candle_vol', 'big_trade_confirmed', 'confluence_bonus', 'cvd_confirmed', 'cvd_state', 'footprint_confirmed', 'has_aggression', 'norm_delta', 'obi', 'ofi_aligned', 'ofi_result', 'option', 'toxicity', 'volume_bubble_near']

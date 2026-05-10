@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/eia_calendar.py
+# hypothesis_version: 6.152.4
+
+['%Y-%m-%d', '08:30', '10:30', '14:00', 'FOMC Rate Decision', 'HIGH', 'LOW', 'MEDIUM', 'Non-Farm Payroll', 'USD']

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/amt_parameters.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.05, 1.0, 1.1, 1.5, 2.0, 3.0, 10.0, 'AMTResult', 'Any', 'BALANCED', 'Conservative', 'D', 'MEAN_REVERSION', 'NEUTRAL', 'NIFTY', 'OHLC']

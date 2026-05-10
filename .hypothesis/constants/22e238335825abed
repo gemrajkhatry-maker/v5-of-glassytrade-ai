@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/dependencies.py
+# hypothesis_version: 6.152.4
+
+['Configuration', 'GenerativeAIService', 'IBroker', 'IMarketData', 'IStorage']

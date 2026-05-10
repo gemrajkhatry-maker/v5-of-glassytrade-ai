@@ -15,6 +15,7 @@ from enum import Enum
 from threading import RLock
 from typing import Optional
 
+from brokersv2.core.constants import CircuitBreaker as CBConstants
 from brokersv2.core.errors import CircuitBreakerOpenError
 
 logger = logging.getLogger(__name__)
@@ -53,8 +54,8 @@ class CircuitBreaker:
     
     def __init__(
         self,
-        failure_threshold: int = 5,
-        recovery_timeout: float = 60.0,
+        failure_threshold: int = CBConstants.FAILURE_THRESHOLD,
+        recovery_timeout: float = CBConstants.RECOVERY_TIMEOUT,
     ):
         """
         Initialize circuit breaker.

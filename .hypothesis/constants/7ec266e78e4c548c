@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/candle_aggregator.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.05, 3600, 10000, 86400, '5m', 'buy_volume', 'candle_buy_vol', 'candle_sell_vol', 'candle_vol', 'close', 'd', 'h', 'high', 'low', 'm', 'oi', 'open', 'prev_cum_buy', 'prev_cum_sell', 'prev_cum_vol', 'start', 'volume', 'vwap_den', 'vwap_num']

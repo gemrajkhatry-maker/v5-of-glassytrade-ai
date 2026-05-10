@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/rl/data_loader.py
+# hypothesis_version: 6.152.4
+
+[0.2, 0.3, 0.5, 0.6, 0.95, 100.0, 1000.0, 100, 2025, 5000, 12345, 1103515245, 2147483647, 'close', 'delta', 'high', 'low', 'open', 'r', 'taker_buy_volume', 'time', 'timestamp', 'volume', 'vwap']

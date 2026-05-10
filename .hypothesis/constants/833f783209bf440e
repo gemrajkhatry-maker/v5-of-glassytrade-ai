@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/risk_sizing_engine.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.0025, 0.003, 0.005, 0.02, 0.2, 0.3, 0.4, 0.5, 1.0, 2.0, 375.0, 100, 1250, 50000, 500000, 1000000, '1R', 'BANKNIFTY', 'CLOSE_PROTECTION', 'CRUDEOIL', 'ELEVATED', 'FINNIFTY', 'GOLD', 'GOLDM', 'LONG', 'MIDDAY_CONSOLIDATION', 'NATURALGAS', 'NIFTY', 'OPENING_NOISE', 'POWER_HOUR', 'PRIMARY_WINDOW', 'REDUCED', 'SILVER', 'SILVERM', 'STANDARD', 'cushion']

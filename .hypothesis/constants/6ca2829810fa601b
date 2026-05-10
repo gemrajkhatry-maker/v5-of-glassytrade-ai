@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/domain/trading/models/value_objects.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.05, 0.15, 0.25, 0.4, '0', 'BALANCE', 'Conservative', 'OHLC', 'Signal | None', 'UNKNOWN']

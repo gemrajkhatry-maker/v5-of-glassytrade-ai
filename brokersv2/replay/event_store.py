@@ -4,6 +4,7 @@ Replay Infrastructure - Event Store.
 Append-only event log storage with indexed access.
 """
 
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -115,17 +116,38 @@ class EventStore:
         self._next_sequence = 1
     
     def verify_checksum(self, sequence: int) -> bool:
-        """Verify event checksum."""
+        """Verify event checksum.
+
+        Supports both legacy (chk_) and new (v1:sha256:) checksum formats.
+        """
         record = self._events.get(sequence)
         if not record:
             return False
-        
-        expected = self._compute_checksum(sequence, record.event_data)
-        return record.checksum == expected
-    
+
+        stored = record.checksum
+        if stored.startswith("v1:sha256:"):
+            expected = self._compute_checksum_sha256(sequence, data=record.event_data)
+            return stored == expected
+        elif stored.startswith("chk_"):
+            # Legacy format — fall back to length-based checksum
+            expected = self._compute_checksum_legacy(sequence, record.event_data)
+            return stored == expected
+        return False
+
     def _compute_checksum(self, sequence: int, data: bytes) -> str:
-        """Compute simple checksum for integrity."""
-        # TODO: Use proper hash (SHA256)
+        """Compute cryptographically secure SHA256 checksum for integrity."""
+        return self._compute_checksum_sha256(sequence, data)
+
+    def _compute_checksum_sha256(self, sequence: int, data: bytes) -> str:
+        """Compute versioned SHA256 checksum.
+
+        Format: v1:sha256:<hexdigest>
+        """
+        digest = hashlib.sha256(data).hexdigest()
+        return f"v1:sha256:{digest}"
+
+    def _compute_checksum_legacy(self, sequence: int, data: bytes) -> str:
+        """Legacy length-based checksum (for backward compatibility)."""
         return f"chk_{sequence}_{len(data)}"
     
     def __len__(self) -> int:

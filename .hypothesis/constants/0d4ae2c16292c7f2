@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/core/llm_circuit_breaker.py
+# hypothesis_version: 6.152.4
+
+[0.0, 60.0, 'BALANCED', 'FLAT', 'Low', 'closed', 'confidence', 'direction', 'failure_count', 'failure_rate', 'half_open', 'input_prompt', 'is_fallback', 'market_state', 'open', 'rationale', 'raw_output', 'state', 'total_calls', 'total_failures', 'total_fallbacks']

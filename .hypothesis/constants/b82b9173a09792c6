@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/volatility_features.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 100, 'EXTREME', 'HIGH', 'LONG', 'LOW', 'NORMAL']

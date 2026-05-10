@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/routers/rl.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.0003, 0.01, 0.5, 1.0, 5.0, 100000.0, 400, 404, 409, 500, 503, 1000, 100000, 10000000, '.zip', '/load/{model_name}', '/models', '/predict', '/rl', '/status', '/train', 'UNKNOWN', 'message', 'training']

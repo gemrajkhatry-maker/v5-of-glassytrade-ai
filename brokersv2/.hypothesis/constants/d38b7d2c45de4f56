@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/market_info.py
+# hypothesis_version: 6.152.4
+
+[1.0, 2.5, 5.0, 10.0, 25.0, 50.0, 80.0, 100.0, 250.0, 100, 125, 150, 250, 300, 550, 600, 700, 750, 1000, 1200, 1250, 1500, 2300, 2500, 2600, 3600, 5000, '%A', 'ADANIENT', 'ALUMINIUM', 'AXISBANK', 'Asia/Kolkata', 'BAJFINANCE', 'BANKEX', 'BANKNIFTY', 'BHARTIARTL', 'COPPER', 'CRUDEOIL', 'CRUDEOILM', 'FINNIFTY', 'GOLD', 'GOLDGUINEA', 'GOLDM', 'GOLDPETAL', 'HDFCBANK', 'HINDUNILVR', 'ICICIBANK', 'INFY', 'KOTAKBANK', 'LEAD', 'LT', 'MARUTI', 'MIDCPNIFTY', 'NATURALGAS', 'NICKEL', 'NIFTY', 'NIFTY 50', 'NIFTY BANK', 'NIFTY FIN SERVICE', 'NIFTY MID SELECT', 'NTPC', 'POWERGRID', 'RELIANCE', 'SBIN', 'SENSEX', 'SILVER', 'SILVERM', 'SILVERMIC', 'TATAMOTORS', 'TATASTEEL', 'TCS', 'ULTRACEMCO', 'WIPRO', 'ZINC', 'current_time', 'expiry_weekday', 'is_expiry_cutoff', 'is_expiry_day', 'is_market_open', 'lot_size', 'step_size', 'symbol', 'time_to_expiry', 'weekday']

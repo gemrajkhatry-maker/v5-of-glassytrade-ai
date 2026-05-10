@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/watchdog_manager.py
+# hypothesis_version: 6.152.4
+
+[0.0, 1.0, 60.0, 300.0, 1800, 'GC loop error', 'RECONCILIATION_GHOST', 'SL watchdog error', 'StateBroadcaster', 'StreamManager', '_broker', '_exit_coordinator', '_state_manager', '_storage', 'closed_at', 'entry_price', 'exit_price', 'get_positions', 'instrument', 'ltp', 'netQty', 'net_qty', 'opened_at', 'orderId', 'pnl', 'position_id', 'quantity', 'reason', 'side', 'size', 'source', 'storage.save_trade', 'symbol', 'trading_symbol', 'value']

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/infrastructure/adapters/dhan_adapter.py
+# hypothesis_version: 6.152.4
+
+[0.0, 3.0, 100, 120, 365, 500, '1', '15', '15m', '1d', '1h', '1m', '25', '25m', '5', '5m', '60', '8.0', '?', 'ALUMINIUM', 'BANKNIFTY', 'BSE', 'CALL', 'CE', 'COPPER', 'COTTONCANDY', 'CRUDEOIL', 'CRUDEOILM', 'DhanBroker closed', 'DhanBroker created', 'GOLD', 'GOLDM', 'LEAD', 'MCX', 'NATURALGAS', 'NFO', 'NICKEL', 'NIFTY', 'NSE', 'PE', 'PUT', 'SILVER', 'SILVERM', 'ZINC', 'brokers', 'close', 'date', 'depth_asks', 'depth_bids', 'high', 'isoformat', 'low', 'ltp', 'ltq', 'oi', 'open', 'symbol', 'timestamp', 'total_buy_qty', 'total_sell_qty', 'true', 'tzinfo', 'volume', 'yes']

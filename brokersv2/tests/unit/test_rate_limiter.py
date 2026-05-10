@@ -62,12 +62,9 @@ class TestRateLimiter:
                 count += 1
             else:
                 break
-        
-        # Should have consumed at least 10
-        assert count >= 10
-        
-        # After capacity, should be empty
-        assert count == 250  # Bucket capacity
+
+        # DhanHQ post-March-2026: orders bucket burst capacity is 10
+        assert count == 10  # Bucket capacity
     
     def test_quotes_limit(self):
         """Test quotes rate limit (1/sec)."""

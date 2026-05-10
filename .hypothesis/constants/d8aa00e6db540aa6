@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/amt_pipeline.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.3, 0.4, 0.5, 1.0, 1.5, 2.0, 1000, 'BALANCED', 'D', 'IMBALANCED', 'Incremental', 'MEAN_REVERSION', 'NEUTRAL', 'Session', 'UNKNOWN', 'absorption_detected', 'absorption_side', 'aggression_score', 'amt_pipeline', 'big_trade_confirmed', 'close', 'cvd_state', 'duration_ms', 'has_aggression', 'has_displacement', 'high', 'low', 'lower_1', 'lower_2', 'market_state', 'ofi', 'profile_type', 'setup', 'slope', 'symbol', 'upper_1', 'upper_2', 'volume', 'vwap']

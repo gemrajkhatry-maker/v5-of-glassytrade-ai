@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/composite_profile.py
+# hypothesis_version: 6.152.4
+
+[-0.2, 0.0, 0.1, 0.5, 1.0, 100, 'LONG', 'NEUTRAL', 'SHORT', 'aligned', 'poc', 'profile', 'vah', 'val', 'weekly_bias', 'weekly_poc']

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/brokers_backup/broker/types.py
+# hypothesis_version: 6.152.4
+
+['BFO', 'BSE', 'BUY', 'CANCELLED', 'CE', 'FILLED', 'INDEX', 'LIMIT', 'MARKET', 'MCX', 'NFO', 'NSE', 'OPEN', 'PE', 'PENDING', 'REJECTED', 'SELL', 'SL', 'SLM']

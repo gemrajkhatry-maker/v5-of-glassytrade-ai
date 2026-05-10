@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/position_reconciliation.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.01, 'CRITICAL', 'GHOST_POSITION', 'MISSING_POSITION', 'OK', 'QUANTITY_MISMATCH', 'SYMBOL_MISMATCH', 'WARNING', 'ghost_positions', 'issues_found', 'mismatches', 'netQty', 'orderId', 'quantity', 'size', 'symbol', 'trading_symbol']

@@ -82,7 +82,7 @@ class MockBrokerAdapter:
         self.should_fail = False
         self.fail_on_cancel = False
     
-    def place_order(self, order) -> str:
+    async def place_order(self, order) -> str:
         """Place order with broker."""
         if self.should_fail:
             raise Exception("Broker placement failed")
@@ -97,7 +97,7 @@ class MockBrokerAdapter:
         })
         return broker_order_id
     
-    def cancel_order(self, broker_order_id: str) -> bool:
+    async def cancel_order(self, broker_order_id: str) -> bool:
         """Cancel order with broker."""
         if self.fail_on_cancel:
             raise Exception("Cancel failed")
@@ -105,7 +105,7 @@ class MockBrokerAdapter:
         self.orders_cancelled.append(broker_order_id)
         return True
     
-    def get_order_status(self, broker_order_id: str) -> Dict:
+    async def get_order_status(self, broker_order_id: str) -> Dict:
         """Get order status from broker."""
         return {
             "broker_order_id": broker_order_id,
@@ -646,3 +646,43 @@ class TestEdgeCases:
         
         success = await order_manager.cancel_order(order.order_id)
         assert success is False
+
+
+# =============================================================================
+# 7. Async Contract Verification
+# =============================================================================
+
+class TestAsyncContract:
+    """Verify broker methods are properly awaited and return actual values."""
+
+    @pytest.mark.asyncio
+    async def test_broker_place_order_returns_string_not_coroutine(self, order_manager, sample_instrument):
+        """Verify place_order returns actual string, not coroutine object."""
+        order = await order_manager.place_order(
+            instrument=sample_instrument,
+            quantity=Decimal("100"),
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+        )
+        
+        # broker_order_id must be a string, not a coroutine
+        assert isinstance(order.broker_order_id, str), \
+            f"broker_order_id should be str, got {type(order.broker_order_id)}"
+        assert order.broker_order_id.startswith("BROKER-")
+
+    @pytest.mark.asyncio
+    async def test_broker_cancel_order_returns_bool_not_coroutine(self, order_manager, sample_instrument):
+        """Verify cancel_order returns actual bool, not coroutine object."""
+        order = await order_manager.place_order(
+            instrument=sample_instrument,
+            quantity=Decimal("100"),
+            side=OrderSide.BUY,
+            order_type=OrderType.MARKET,
+        )
+        
+        result = await order_manager.cancel_order(order.order_id)
+        
+        # Result must be a bool, not a coroutine
+        assert isinstance(result, bool), \
+            f"cancel_order should return bool, got {type(result)}"
+        assert result is True

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/platform/policies/rate_limit.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.01, 0.05, 0.15, 0.33, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 600, 3600, 10000, 'BrokerRateLimiter', 'ProviderRateLimiter', 'RateLimit', 'RateLimiter', 'RequestScheduler', '_ScheduledRequest', 'current_tokens', 'default', 'failure_count', 'historical', 'in_cooldown', 'non_trading', 'option_chain', 'orders', 'quotes', 'total_acquires', 'total_cooldowns', 'total_waits']

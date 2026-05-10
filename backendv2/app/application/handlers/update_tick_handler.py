@@ -2,7 +2,7 @@
 from typing import Optional
 from app.application.commands.trading_commands import UpdateTick
 from app.domain.shared.event.domain_events import TickReceived, AMTAnalyzed
-from app.infrastructure.messaging.event_bus import EventBus
+from app.domain.shared.port.event_bus import IEventBus as EventBus
 
 
 class IAMTService:

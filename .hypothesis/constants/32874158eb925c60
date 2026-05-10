@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/option_selector.py
+# hypothesis_version: 6.152.4
+
+[-1.0, 0.0, 0.02, 0.2, 100, 500, 1250, 2500, 50000, 200000, 500000, 'APR', 'AUG', 'BANKNIFTY', 'COPPER', 'CRUDEOIL', 'CRUDEOILM', 'DEC', 'FEB', 'GOLD', 'GOLDM', 'GOLDPETAL', 'JAN', 'JUL', 'JUN', 'LONG', 'MAR', 'MAY', 'NATURALGAS', 'NOV', 'OCT', 'SEP', 'SILVER', 'SILVERM', 'gamma']

@@ -17,6 +17,14 @@ from app.runtime.feeds import LiveFeed
 from app.runtime.orchestrator.session import SessionRuntime
 
 
+class SimpleStorage:
+    """Minimal storage for tests."""
+    def save_tick(self, symbol: str, tick_data: dict) -> None:
+        pass
+    def _flush_ticks(self):
+        pass
+
+
 def _changed_sections(before: dict, after: dict) -> set[str]:
     all_keys = set(before) | set(after)
     return {key for key in all_keys if before.get(key) != after.get(key)}
@@ -69,9 +77,11 @@ def _ticks() -> list[Tick]:
 
 
 def test_tick_snapshot_mutations_are_stage_local() -> None:
+    storage = SimpleStorage()
     runtime = SessionRuntime(
         feed=LiveFeed(symbols=["BANKNIFTY"], tick_source=_ticks(), strict_symbol_mode=True),
         symbols=["BANKNIFTY"],
+        storage=storage,
     )
 
     before = _runtime_snapshot(runtime)
@@ -115,9 +125,11 @@ def _make_rejected_signal() -> Signal:
 
 
 def test_rejected_signal_flow_mutates_only_rollback_contract_sections() -> None:
+    storage = SimpleStorage()
     runtime = SessionRuntime(
         feed=LiveFeed(symbols=["BANKNIFTY"], tick_source=[], strict_symbol_mode=True),
         symbols=["BANKNIFTY"],
+        storage=storage,
     )
     runtime._execution._broker = _FailingBroker()
 
@@ -151,9 +163,11 @@ def test_rejected_signal_flow_mutates_only_rollback_contract_sections() -> None:
 
 
 def test_risk_state_is_seeded_from_portfolio_before_first_signal() -> None:
+    storage = SimpleStorage()
     runtime = SessionRuntime(
         feed=type("Feed", (), {"start": lambda self: None, "stop": lambda self: None, "stream": lambda self: iter([]), "name": lambda self: "noop", "symbols": lambda self: ["BANKNIFTY"]})(),  # noqa: E501
         symbols=["BANKNIFTY"],
+        storage=storage,
     )
     gate = GateResult(
         symbol="BANKNIFTY",

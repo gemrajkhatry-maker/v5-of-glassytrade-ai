@@ -182,6 +182,22 @@ class TestEventStore:
 
         assert store.verify_checksum(1) is True
 
+    def test_verify_checksum_legacy_format(self):
+        """Verify checksum supports legacy format."""
+        store = EventStore()
+        # Manually insert a legacy-format record
+        legacy_record = EventRecord(
+            sequence=1,
+            timestamp=datetime.now(timezone.utc),
+            event_type="tick",
+            event_data=b"data",
+            checksum="chk_1_4",
+        )
+        store._events[1] = legacy_record
+        store._next_sequence = 2
+
+        assert store.verify_checksum(1) is True
+
     def test_verify_checksum_invalid(self):
         """Verify checksum returns False for nonexistent."""
         store = EventStore()
@@ -222,8 +238,26 @@ class TestEventStore:
         assert len(store.get_events_by_type("depth")) == 1
         assert len(store.get_events_by_type("candle")) == 1
 
-    def test_checksum_includes_sequence(self):
-        """Checksum incorporates sequence number."""
+    def test_checksum_detects_tampering(self):
+        """SHA256 checksum detects data tampering."""
+        store = EventStore()
+        store.append(event_type="tick", event_data=b"data")
+
+        record = store.get_event(1)
+        # Valid checksum should verify
+        assert store.verify_checksum(1) is True
+
+        # Tamper with the data
+        original_data = record.event_data
+        record.event_data = b"tampered"
+        assert store.verify_checksum(1) is False
+
+        # Restore original data
+        record.event_data = original_data
+        assert store.verify_checksum(1) is True
+
+    def test_checksum_same_data_same_hash(self):
+        """Identical data produces identical SHA256 checksums."""
         store = EventStore()
         store.append(event_type="tick", event_data=b"data")
         store.append(event_type="tick", event_data=b"data")
@@ -231,5 +265,6 @@ class TestEventStore:
         record1 = store.get_event(1)
         record2 = store.get_event(2)
 
-        # Different sequences should have different checksums
-        assert record1.checksum != record2.checksum
+        # Same data should have same SHA256 checksum
+        assert record1.checksum == record2.checksum
+        assert record1.checksum.startswith("v1:sha256:")

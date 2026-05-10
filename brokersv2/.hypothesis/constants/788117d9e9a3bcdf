@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/providers/router.py
+# hypothesis_version: 6.152.4
+
+[10.0, 15.0, 'available', 'fallback', 'fallback_rate', 'metrics', 'name', 'none', 'primary', 'primary_health', 'supported_timeframes', 'total_fallbacks', 'total_requests']

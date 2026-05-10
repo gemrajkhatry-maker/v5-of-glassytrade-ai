@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/enums/session_phase.py
+# hypothesis_version: 6.152.4
+
+['AFTERNOON', 'CLOSE', 'EVENING', 'MIDDAY', 'MORNING', 'OPENING', 'POST_MARKET', 'POWER_HOUR', 'PRE_MARKET', 'PRE_OPEN', 'PRIMARY']

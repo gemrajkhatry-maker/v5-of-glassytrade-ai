@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/trading/services/trade_aggregate_adapter.py
+# hypothesis_version: 6.152.4
+
+['BROKER_REJECTED', 'CIRCUIT_BREAKER', 'DAILY_LOSS_LIMIT', 'LONG', 'MANUAL', 'OVERSEER', 'PARTIAL', 'PARTIAL_TP', 'SHORT', 'SIGNAL_REJECTED', 'SL', 'STOP_LOSS', 'TAKE_PROFIT', 'TIME_STOP', 'TIME_STOP_MAX', 'TP']

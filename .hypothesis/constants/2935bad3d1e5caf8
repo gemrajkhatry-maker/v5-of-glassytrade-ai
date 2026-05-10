@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/exit_coordinator.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.5, '%H:%M:%S', '+00:00', 'BSE', 'NFO', 'NSE', 'UNKNOWN', 'Z', 'broker.cancel_order', 'close_reason', 'dhan_sl_order_id', 'id', 'mae', 'mfe', 'symbol', 'tick_count', 'tick_trace_id']

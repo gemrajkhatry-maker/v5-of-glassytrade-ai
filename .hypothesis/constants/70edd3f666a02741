@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/domain/fabio_ai/services/footprint_analyzer.py
+# hypothesis_version: 6.152.4
+
+[0.0, 1e-09, 1e-07, 0.0001, 0.01, 0.15, 0.65, 3.5, 200, 'BUY', 'SELL', 'absorbed_by', 'aggressive_side', 'detected', 'dominance_ratio', 'price_change_pct', 'volume']

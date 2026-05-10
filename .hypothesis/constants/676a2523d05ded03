@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/core/startup_telemetry.py
+# hypothesis_version: 6.152.4
+
+[0.0, 1000.0, 'action', 'breakdown', 'broker_positions', 'category', 'config', 'count', 'crash_summary', 'db_positions', 'detail', 'discrepancies', 'duration_ms', 'elapsed_ms', 'engine', 'failed', 'found', 'message', 'missing', 'missing_count', 'missing_symbols', 'mlx', 'ok', 'orphaned_registered', 'phase', 'phase_count', 'phases', 'runbook', 'runtime', 'stage', 'stale_removed', 'started_at', 'startup', 'startup_phase_status', 'status', 'symbol_resolution', 'syntax']

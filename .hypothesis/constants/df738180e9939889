@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/watchdog.py
+# hypothesis_version: 6.152.4
+
+[30.0, 'crashed', 'error', 'last_error', 'restart_count', 'running', 'sessions', 'symbol', 'timestamp', 'total_alerts']

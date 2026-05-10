@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any, DefaultDict, Dict, List, Type
 import logging
 
+from app.domain.shared.port.event_bus import IEventBus
 from app.domain.shared.event.base import DomainEvent
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 EventHandler = Callable[[DomainEvent], None]
 
 
-class EventBus:
+class EventBus(IEventBus):
     """Simple event bus with idempotency and read-only history.
 
     The bus intentionally has no historic reconstruction execution path. It stores events only for

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/domain/trading/events.py
+# hypothesis_version: 6.152.4
+
+[0.0, 'AIAnalysisCompleted', 'APPROVED', 'ENTRY', 'FLAT', 'FillReceived', 'MARKET', 'Medium', 'OrderCancelled', 'OrderPlaced', 'PositionChanged', 'PositionClosed', 'PositionOpened', 'REJECTED', 'RiskCheckFailed', 'SignalGenerated', 'SignalValidated', 'TickReceived', 'ai_analysis', 'cancelled', 'closed', 'daily_loss_limit', 'opened', 'position_changed', 'risk_failed', 'validated', '|']

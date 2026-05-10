@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/domain/segment_mapping.py
+# hypothesis_version: 6.152.4
+
+['BANKEX', 'BANKNIFTY', 'BSE_EQ', 'BSE_FNO', 'EQUITY', 'FINNIFTY', 'FUTCOM', 'FUTIDX', 'IDX_I', 'INDEX', 'MCX', 'MCX_COMM', 'MIDCPNIFTY', 'NFO', 'NIFTY', 'NIFTY 50', 'NIFTY BANK', 'NIFTY FIN SERVICE', 'NIFTY MID SELECT', 'NSE', 'NSE_EQ', 'NSE_FNO', 'OPTFUT', 'OPTIDX', 'OPTSTK', 'SENSEX']

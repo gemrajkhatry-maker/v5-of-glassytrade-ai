@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/handlers/llm_decision_processor.py
+# hypothesis_version: 6.152.4
+
+[0.3, 1.01, 'AVAILABLE', 'FLAT', 'LONG', 'SHORT', '_llm_memory', 'aggression', 'confidence', 'delta', 'direction', 'input_prompt', 'market_state', 'poc', 'price', 'profile_shape', 'rationale', 'raw_output', 'setup_type', 'strategy_hint', 'symbol', 'vah', 'val', 'value', 'volume']

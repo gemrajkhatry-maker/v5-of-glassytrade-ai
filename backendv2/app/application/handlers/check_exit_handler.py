@@ -4,7 +4,7 @@ from app.application.commands.trading_commands import CheckExit
 from app.domain.trading.model.entities import Position
 from app.domain.trading.model.enums import Side, PositionStatus
 from app.domain.shared.event.domain_events import PositionClosed
-from app.infrastructure.messaging.event_bus import EventBus
+from app.domain.shared.port.event_bus import IEventBus as EventBus
 
 
 class IPositionRepository:

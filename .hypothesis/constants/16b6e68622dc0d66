@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/config/mode_config.py
+# hypothesis_version: 6.152.4
+
+[100, '    - Capital: ₹%.0f', '    - Log Level: %s', '  Active Symbols: %s', '  Environment: %s', '  Risk Settings:', '  Strategy: %s', '  System Config:', '.env', '=', 'DHAN_ACCESS_TOKEN', 'DHAN_API_KEY', 'DHAN_API_SECRET', 'DHAN_CLIENT_ID', 'GLASSYTRADE_ENV', 'GLASSYTRADE_STRATEGY', 'Loaded .env file: %s', 'MCX', 'OPENROUTER_API_KEY', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'amt_thresholds', 'base.yaml', 'config', 'default', 'environments', 'exchange', 'feature_flags', 'mcx_options', 'paper', 'scanner', 'strategies', 'symbols', 'underlyings']

@@ -79,11 +79,12 @@ class TestHistoricalReplayEngine:
         mock_router = Mock()
         
         def mock_get_candles(instrument, **kwargs):
-            if instrument == "RELIANCE":
+            sym = instrument.symbol if hasattr(instrument, 'symbol') else instrument
+            if sym == "RELIANCE":
                 return [
                     {"timestamp": datetime(2026, 5, 1, 9, 15), "open": 100},
                 ]
-            elif instrument == "TCS":
+            elif sym == "TCS":
                 return [
                     {"timestamp": datetime(2026, 5, 1, 9, 16), "open": 3500},
                 ]

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/marketdata/pipeline.py
+# hypothesis_version: 6.152.4
+
+[-0.001, 0.001, 0.1, 1.0, 100, 10000, '0.999', '1', '1.001', '1000.0', '1d', '2024-01-01', '2024-12-31', 'CanonicalInstrument', 'DhanHttpClient', 'historical', 'live', 'quotes', 'replay', 'simulation']

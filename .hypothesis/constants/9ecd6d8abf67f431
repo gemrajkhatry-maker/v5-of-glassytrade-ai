@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/trading/event_store.py
+# hypothesis_version: 6.152.4
+
+['*', 'EventSystem', 'T', 'event_bus', 'event_store', 'events', 'memory', 'positions', 'symbol', 'trade_id', 'trades']

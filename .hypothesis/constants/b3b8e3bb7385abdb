@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/shared/parsing.py
+# hypothesis_version: 6.152.4
+
+[':', 'ALUMINIUM', 'BSE', 'COPPER', 'COTTONCANDY', 'CRUDEOIL', 'CRUDEOILM', 'GOLD', 'GOLDM', 'LEAD', 'MCX', 'NATURALGAS', 'NFO', 'NICKEL', 'NSE', 'SILVER', 'SILVERM', 'T', 'ZINC']

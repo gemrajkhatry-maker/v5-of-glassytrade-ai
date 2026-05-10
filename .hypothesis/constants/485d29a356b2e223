@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/application/session_state_manager.py
+# hypothesis_version: 6.152.4
+
+[0.0, -100, 100, 2000, 'candle_count', 'close', 'confidence', 'daily_pnl', 'delta', 'direction', 'entry_price', 'executed_count', 'high', 'last_reset_date', 'last_tick_time', 'low', 'open', 'pending_signal', 'stop_loss', 'symbol', 'take_profit', 'time', 'timestamp', 'trade_count', 'underlying', 'volume']

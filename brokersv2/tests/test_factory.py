@@ -49,9 +49,11 @@ class TestDhanGatewayConfig:
         old_env = os.environ.copy()
         try:
             os.environ.clear()
-            os.environ['DHAN_ACCESS_TOKEN'] = 'test_token'
-            with pytest.raises(ValueError, match="DHAN_CLIENT_ID"):
-                DhanGatewayConfig.from_env()
+            # Must also clear the dotenv loading effect
+            with patch('brokersv2.infrastructure.dhan_adapter.factory._load_dotenv'):
+                os.environ['DHAN_ACCESS_TOKEN'] = 'test_token'
+                with pytest.raises(ValueError, match="DHAN_CLIENT_ID"):
+                    DhanGatewayConfig.from_env()
         finally:
             os.environ.clear()
             os.environ.update(old_env)
@@ -77,10 +79,12 @@ class TestDhanGatewayConfig:
         old_env = os.environ.copy()
         try:
             os.environ.clear()
-            os.environ['DHAN_CLIENT_ID'] = 'test_client'
-            # access_token not set, no TOTP+PIN
-            with pytest.raises(ValueError, match="DHAN_ACCESS_TOKEN"):
-                DhanGatewayConfig.from_env()
+            # Must also clear the dotenv loading effect
+            with patch('brokersv2.infrastructure.dhan_adapter.factory._load_dotenv'):
+                os.environ['DHAN_CLIENT_ID'] = 'test_client'
+                # access_token not set, no TOTP+PIN
+                with pytest.raises(ValueError, match="DHAN_ACCESS_TOKEN"):
+                    DhanGatewayConfig.from_env()
         finally:
             os.environ.clear()
             os.environ.update(old_env)
@@ -115,7 +119,8 @@ class TestDhanFactory:
         # New has override
         assert new_factory._config.timeout == 60
     
-    def test_factory_create_gateway(self):
+    @pytest.mark.asyncio
+    async def test_factory_create_gateway(self):
         """Test gateway creation."""
         config = DhanGatewayConfig(
             client_id='test',
@@ -123,7 +128,7 @@ class TestDhanFactory:
         )
         factory = DhanFactory(config)
         
-        gateway = factory.create_gateway()
+        gateway = await factory.create_gateway()
         
         assert isinstance(gateway, DhanGateway)
         assert gateway._config.client_id == 'test'
@@ -139,7 +144,7 @@ class TestDhanGateway:
             'DHAN_CLIENT_ID': 'test',
             'DHAN_ACCESS_TOKEN': 'token',
         }):
-            async with DhanGateway.from_env() as gw:
+            async with await DhanGateway.from_env() as gw:
                 assert gw._initialized
             
             # After context exit, should be closed
@@ -152,8 +157,8 @@ class TestDhanGateway:
             'DHAN_CLIENT_ID': 'test',
             'DHAN_ACCESS_TOKEN': 'token',
         }):
-            async with DhanGateway.from_env() as gw:
-                with pytest.raises(ValueError, match="Unknown symbol"):
+            async with await DhanGateway.from_env() as gw:
+                with pytest.raises(ValueError, match="'UNKNOWN' is not a valid Exchange|Unknown symbol"):
                     await gw.get_quote("UNKNOWN:SYMBOL")
     
     @pytest.mark.asyncio
@@ -163,7 +168,7 @@ class TestDhanGateway:
             'DHAN_CLIENT_ID': 'test',
             'DHAN_ACCESS_TOKEN': 'token',
         }):
-            async with DhanGateway.from_env() as gw:
+            async with await DhanGateway.from_env() as gw:
                 result = await gw.historical("NSE:TEST", "2024-01-01", "2024-01-31")
                 assert isinstance(result, list)
 

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/statistical_validator.py
+# hypothesis_version: 6.152.4
+
+[-1.453152027, -0.284496736, 0.0, 1e-10, 0.05, 0.065, 0.254829592, 0.3275911, 0.5, 0.95, 1.0, 1.061405429, 1.421413741, 1.96, 252, 9999, 'benjamini_hochberg', 'bonferroni']

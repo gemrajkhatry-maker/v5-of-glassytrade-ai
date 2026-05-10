@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Optional
 
+from brokersv2.core.constants import Idempotency
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,7 +48,7 @@ class IdempotencyRecord:
     @property
     def is_stale(self) -> bool:
         """Check if record is stale (> 1 hour)."""
-        return self.age > 3600
+        return self.age > Idempotency.DEFAULT_TTL
 
 
 class IdempotencyManager:
@@ -73,9 +75,9 @@ class IdempotencyManager:
         manager.record_completion(idempotency_key, result)
     """
     
-    def __init__(self, max_records: int = 10000):
+    def __init__(self, max_records: int = None):
         self._records: Dict[str, IdempotencyRecord] = {}
-        self._max_records = max_records
+        self._max_records = max_records or Idempotency.DEFAULT_MAX_RECORDS
     
     def generate_idempotency_key(
         self,

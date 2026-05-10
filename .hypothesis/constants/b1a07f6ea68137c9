@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/position_sizer.py
+# hypothesis_version: 6.152.4
+
+[0.02, 0.1, 0.7, 0.85, 100, 'Risk per lot is zero']
