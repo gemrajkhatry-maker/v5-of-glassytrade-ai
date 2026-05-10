@@ -4,49 +4,31 @@ Order Book Engine - Core.
 Full L2 order book reconstruction with price-time priority.
 """
 
-from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import Enum
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
+
+# Import canonical types from events module
+from brokersv2.analytics.order_book.events import (
+    PriceLevel,
+    OrderBookSnapshot,
+    OrderBookEvent,
+    OrderBookEventType,
+)
 
 
-class Side(Enum):
+# Keep local enums for backward compatibility
+class Side:
     """Order side."""
     BID = "bid"
     ASK = "ask"
 
 
-class OrderAction(Enum):
+class OrderAction:
     """Order action type."""
     ADD = "add"
     MODIFY = "modify"
     CANCEL = "cancel"
     TRADE = "trade"
-
-
-@dataclass
-class PriceLevel:
-    """Price level in order book."""
-    price: float
-    quantity: int
-    order_count: int
-
-
-@dataclass
-class Trade:
-    """Executed trade."""
-    price: float
-    quantity: int
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-
-
-@dataclass
-class OrderBookSnapshot:
-    """Snapshot of order book state."""
-    symbol: str
-    bids: List[PriceLevel]
-    asks: List[PriceLevel]
-    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class OrderBookEngine:
@@ -130,6 +112,7 @@ class OrderBookEngine:
         """Current order book snapshot."""
         return OrderBookSnapshot(
             symbol=self.symbol,
+            timestamp=datetime.now(timezone.utc),
             bids=self.bids.copy(),
             asks=self.asks.copy(),
         )

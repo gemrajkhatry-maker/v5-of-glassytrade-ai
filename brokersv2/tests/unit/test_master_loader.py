@@ -30,9 +30,9 @@ def registry():
 def sample_csv_content():
     """Sample DhanHQ CSV format."""
     return """SECURITY_ID,SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_INSTRUMENT_NAME,SM_SYMBOL_NAME,SEM_CUSTOM_SYMBOL,SEM_EXCH_INSTRUMENT_TYPE,SEM_EXPIRY_DATE,SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_LOT_UNITS,SEM_TICK_SIZE,SEM_EXPIRY_FLAG
-12345,NSE,EQ,EQUITY,RELIANCE,RELIANCE,EQ,,,1,0.01,
-12346,NSE,EQ,EQUITY,TCS,TCS,EQ,,,1,0.01,
-54321,NFO,FNO,FUTURES,NIFTY,NIFTY26JANFUT,FUT,2026-01-29,,75,0.05,M
+12345,NSE,EQ,EQUITY,RELIANCE,RELIANCE,EQ,,,,1,0.01,
+12346,NSE,EQ,EQUITY,TCS,TCS,EQ,,,,1,0.01,
+54321,NFO,FNO,FUTURES,NIFTY,NIFTY26JANFUT,FUT,2026-01-29,,,75,0.05,M
 98765,NFO,FNO,OPTIONS,NIFTY,NIFTY26JAN24000CE,OPT,2026-01-29,24000.00,CE,75,0.05,W
 98766,NFO,FNO,OPTIONS,NIFTY,NIFTY26JAN24000PE,OPT,2026-01-29,24000.00,PE,75,0.05,W
 """
@@ -183,7 +183,7 @@ class TestMasterDataLoader:
         result = loader.load_from_csv(sample_csv_file)
 
         # Verify futures are loaded
-        futures = registry.get_instruments_by_type("FUTURES")
+        futures = registry.get_instruments_by_type("FUTURE")
         assert len(futures) >= 1
 
     def test_load_from_api_segment(self, registry):
@@ -253,9 +253,9 @@ class TestMasterDataLoader:
     def test_load_with_validation_errors(self, registry):
         """Test CSV loading with some validation errors."""
         csv_content = """SECURITY_ID,SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_INSTRUMENT_NAME,SM_SYMBOL_NAME,SEM_CUSTOM_SYMBOL,SEM_EXCH_INSTRUMENT_TYPE,SEM_EXPIRY_DATE,SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_LOT_UNITS,SEM_TICK_SIZE,SEM_EXPIRY_FLAG
-12345,NSE,EQ,EQUITY,RELIANCE,RELIANCE,EQ,,,,,50,0.01,
-INVALID,NSE,EQ,EQUITY,BAD,BAD,EQ,,,,,50,0.01,
-12347,NSE,EQ,EQUITY,TCS,TCS,EQ,,,,,50,0.01,
+12345,NSE,EQ,EQUITY,RELIANCE,RELIANCE,EQ,,,,50,0.01,
+12346,INVALID_EXCHANGE,EQ,EQUITY,BAD,BAD,EQ,,,,50,0.01,
+12347,NSE,EQ,EQUITY,TCS,TCS,EQ,,,,50,0.01,
 """
         with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
             f.write(csv_content)
@@ -277,7 +277,7 @@ INVALID,NSE,EQ,EQUITY,BAD,BAD,EQ,,,,,50,0.01,
         # Generate 1000 instruments
         csv_lines = ["SECURITY_ID,SEM_EXM_EXCH_ID,SEM_SEGMENT,SEM_INSTRUMENT_NAME,SM_SYMBOL_NAME,SEM_CUSTOM_SYMBOL,SEM_EXCH_INSTRUMENT_TYPE,SEM_EXPIRY_DATE,SEM_STRIKE_PRICE,SEM_OPTION_TYPE,SEM_LOT_UNITS,SEM_TICK_SIZE,SEM_EXPIRY_FLAG"]
         for i in range(1000):
-            csv_lines.append(f"{10000+i},NSE,EQ,EQUITY,STOCK{i},STOCK{i},EQ,,,,,50,0.01,")
+            csv_lines.append(f"{10000+i},NSE,EQ,EQUITY,STOCK{i},STOCK{i},EQ,,,,50,0.01,")
         
         csv_content = "\n".join(csv_lines)
         
