@@ -241,7 +241,7 @@ class TestInstrumentDiscovery:
         """Test searching instruments by type."""
         results = discovery.search_instruments(instrument_type=InstrumentType.OPTION)
         
-        assert len(results) == 15  # 5 strikes x 3 expiries x 2 types
+        assert len(results) == 30  # 5 strikes x 3 expiries x 2 types
         assert all("CE" in r.symbol or "PE" in r.symbol for r in results)
 
     def test_search_instruments_combined_filters(self, discovery):

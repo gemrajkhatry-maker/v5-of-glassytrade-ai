@@ -203,33 +203,133 @@ def calculate_iv(
     )
 
 
+def _map_option_type(option_type) -> str:
+    """Map option type to CE/PE format."""
+    if hasattr(option_type, 'value'):
+        # Enum - map call/put to CE/PE
+        val = option_type.value.lower()
+        return "CE" if val == "call" else "PE"
+    elif isinstance(option_type, str):
+        val = option_type.lower()
+        if val in ["call", "c", "ce"]:
+            return "CE"
+        else:
+            return "PE"
+    return "CE"  # default to call
+
+
 class GreeksCalculator:
-    """Calculator class wrapper for options Greeks (for test compatibility)."""
+    """Calculator class for options Greeks (instance methods for test compatibility)."""
     
-    @staticmethod
-    def calculate_greeks(
-        spot: float,
+    def delta(
+        self,
+        underlying_price: float,
         strike: float,
         time_to_expiry: float,
         volatility: float,
         risk_free_rate: float,
-        option_type: str,
-    ) -> GreeksResult:
-        """Calculate all Greeks."""
-        return calculate_greeks(
-            spot, strike, time_to_expiry, volatility, risk_free_rate, option_type
-        )
-    
-    @staticmethod
-    def calculate_price(
-        spot: float,
-        strike: float,
-        time_to_expiry: float,
-        volatility: float,
-        risk_free_rate: float,
-        option_type: str,
+        option_type,
     ) -> float:
-        """Calculate option price."""
-        return black_scholes_price(
-            spot, strike, time_to_expiry, volatility, risk_free_rate, option_type
+        """Calculate option delta.
+        
+        Args:
+            time_to_expiry: Time to expiry in DAYS (will be converted to years)
+        """
+        # Convert days to years
+        time_in_years = time_to_expiry / 365.0
+        
+        # Map option type to CE/PE format
+        opt_type = _map_option_type(option_type)
+        
+        result = calculate_greeks(
+            underlying_price, strike, time_in_years, volatility, risk_free_rate, opt_type
+        )
+        return result.delta
+    
+    def gamma(
+        self,
+        underlying_price: float,
+        strike: float,
+        time_to_expiry: float,
+        volatility: float,
+        risk_free_rate: float,
+        option_type=None,
+    ) -> float:
+        """Calculate option gamma. time_to_expiry in DAYS. option_type defaults to CALL."""
+        time_in_years = time_to_expiry / 365.0
+        opt_type = _map_option_type(option_type) if option_type else "CE"
+        result = calculate_greeks(
+            underlying_price, strike, time_in_years, volatility, risk_free_rate, opt_type
+        )
+        return result.gamma
+    
+    def theta(
+        self,
+        underlying_price: float,
+        strike: float,
+        time_to_expiry: float,
+        volatility: float,
+        risk_free_rate: float,
+        option_type=None,
+    ) -> float:
+        """Calculate option theta. time_to_expiry in DAYS. option_type defaults to CALL."""
+        time_in_years = time_to_expiry / 365.0
+        opt_type = _map_option_type(option_type) if option_type else "CE"
+        result = calculate_greeks(
+            underlying_price, strike, time_in_years, volatility, risk_free_rate, opt_type
+        )
+        return result.theta
+    
+    def vega(
+        self,
+        underlying_price: float,
+        strike: float,
+        time_to_expiry: float,
+        volatility: float,
+        risk_free_rate: float,
+        option_type=None,
+    ) -> float:
+        """Calculate option vega. time_to_expiry in DAYS. option_type defaults to CALL."""
+        time_in_years = time_to_expiry / 365.0
+        opt_type = _map_option_type(option_type) if option_type else "CE"
+        result = calculate_greeks(
+            underlying_price, strike, time_in_years, volatility, risk_free_rate, opt_type
+        )
+        return result.vega
+    
+    def calculate_all_greeks(
+        self,
+        symbol: str,
+        underlying_price: float,
+        strike: float,
+        time_to_expiry: float,
+        volatility: float,
+        risk_free_rate: float,
+        option_type,
+    ) -> 'GreeksSnapshot':
+        """Calculate all Greeks and return as snapshot.
+        
+        Args:
+            time_to_expiry: Time to expiry in DAYS
+        """
+        from brokersv2.analytics.options.events import GreeksSnapshot
+        from datetime import datetime, timezone
+        
+        time_in_years = time_to_expiry / 365.0
+        opt_type = _map_option_type(option_type)
+        
+        result = calculate_greeks(
+            underlying_price, strike, time_in_years, volatility, risk_free_rate, opt_type
+        )
+        
+        return GreeksSnapshot(
+            symbol=symbol,
+            timestamp=datetime.now(timezone.utc),
+            delta=result.delta,
+            gamma=result.gamma,
+            theta=result.theta,
+            vega=result.vega,
+            rho=result.rho,
+            underlying_price=underlying_price,
+            strike=strike,
         )

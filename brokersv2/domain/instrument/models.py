@@ -66,6 +66,23 @@ class CanonicalInstrument:
         """Check if this is an index."""
         return self.instrument_type == InstrumentType.INDEX
     
+    def underlying_symbol(self) -> str:
+        """Extract underlying symbol from full symbol.
+        
+        For options: NIFTY29JAN24000CE -> NIFTY
+        For futures: NIFTY29JANFUT -> NIFTY
+        For equities: RELIANCE -> RELIANCE
+        """
+        if self.is_option() or self.is_future():
+            # Extract underlying by removing date, strike, and option type
+            # Pattern: UNDERLYING + DDMMM + STRIKE + CE/PE (or FUT)
+            import re
+            # Match: letters + digits + letters (date) + optional digits + optional CE/PE/FUT
+            match = re.match(r'^([A-Z]+?)(?:\d{2}[A-Z]{3})', self.symbol)
+            if match:
+                return match.group(1)
+        return self.symbol
+    
     def canonical_symbol(self) -> str:
         """Return canonical representation: EXCHANGE:SYMBOL"""
         return f"{self.exchange.value}:{self.symbol}"

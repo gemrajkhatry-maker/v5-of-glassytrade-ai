@@ -95,8 +95,10 @@ class InstrumentRegistry:
             
             # Options chain index (for derivatives)
             if instrument.is_option() and instrument.expiry:
+                # Use underlying symbol, not full symbol
+                underlying = instrument.underlying_symbol()
                 index_key = (
-                    instrument.symbol,
+                    underlying,
                     instrument.exchange,
                     instrument.expiry,
                 )
@@ -105,7 +107,7 @@ class InstrumentRegistry:
                 self._options_index[index_key].append(instrument)
                 
                 # Expiry index
-                expiry_key = (instrument.symbol, instrument.exchange)
+                expiry_key = (underlying, instrument.exchange)
                 if expiry_key not in self._expiry_index:
                     self._expiry_index[expiry_key] = set()
                 self._expiry_index[expiry_key].add(instrument.expiry)

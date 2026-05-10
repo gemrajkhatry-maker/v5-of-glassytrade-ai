@@ -106,9 +106,9 @@ class InstrumentDiscovery:
 
         # Find matching strike and type
         for option in options:
-            if (option.strike_price == strike and
+            if (option.strike == strike and
                 option.option_type and
-                option.option_type.upper() == option_type.upper()):
+                option.option_type.value.upper() == option_type.upper()):
                 return option
 
         return None
@@ -153,7 +153,7 @@ class InstrumentDiscovery:
         # Filter futures for this underlying
         futures = [
             inst for inst in all_instruments
-            if inst.is_future() and inst.underlying == underlying
+            if inst.is_future() and inst.underlying_symbol() == underlying
         ]
 
         # Sort by expiry
@@ -247,8 +247,8 @@ class InstrumentDiscovery:
         # Extract unique strikes
         strikes = set()
         for option in options:
-            if option.strike_price:
-                strikes.add(option.strike_price)
+            if option.strike:
+                strikes.add(option.strike)
 
         if not strikes:
             return None
@@ -319,11 +319,8 @@ class InstrumentDiscovery:
 
         underlyings = set()
         for inst in instruments:
-            if inst.underlying:
-                underlyings.add(inst.underlying)
-            else:
-                # For equities, symbol is the underlying
-                underlyings.add(inst.symbol)
+            # Use underlying_symbol() method for all instruments
+            underlyings.add(inst.underlying_symbol())
 
         return underlyings
 
