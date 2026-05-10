@@ -7,6 +7,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Generic, Optional, Protocol, TypeVar, runtime_checkable
 from app.runtime.pipeline.events import PipelineEvent
+from app.runtime.pipeline.base import PipelineStageBase
 
 T = TypeVar("T")
 

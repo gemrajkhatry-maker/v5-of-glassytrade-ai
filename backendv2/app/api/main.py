@@ -1,16 +1,16 @@
-"""FastAPI runtime control and event streaming API."""
+"""FastAPI runtime control and event streaming API.
+
+Thin HTTP layer — all bootstrap logic lives in app.bootstrap.
+"""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-import logging
-import os
-from typing import List
 import asyncio
 import json
-import time
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+import logging
+import os
+from datetime import UTC, datetime
+from typing import List
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,218 +24,51 @@ from app.api.routers import (
     market_router,
     metrics_router,
     observability_router,
-    scanner_router,
     rl_router,
+    scanner_router,
     trading_router,
 )
 from app.api.websocket import gameloop_router
 from app.application.commands.trading_commands import UpdateTick
-from app.application.di.container import Container
 from app.application.handlers.update_tick_handler import UpdateTickHandler
-from app.core.metrics import MetricsRegistry
-from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerConfig
-from app.core.event_store import EventStore
-from app.core.feature_flags import FeatureFlags
+from app.bootstrap import create_lifespan
 from app.infrastructure.messaging.event_bus import EventBus
 from app.infrastructure.serialization import OHLCDataDTO
-from app.infrastructure.config import AppSettings, load_environment_config
-from app.infrastructure.storage.database import SQLiteStorageAdapter
-from app.runtime.orchestrator import RuntimeOrchestrator
-from app.domain.risk.service import StartupReconciliation
-from app.infrastructure.adapters.dhan_adapter import DhanAdapter
-from app.domain.fabio_ai.services.option_scanner import ContractSwitchGuard, OptionScannerService
-from app.domain.models.exchange_config import ExchangeConfig
-from app.application.service.session_state_manager import SessionStateManager
-from app.application.event_subscribers import wire_event_bus_subscribers
 
 logger = logging.getLogger(__name__)
 
-@asynccontextmanager
-async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
-    # Initialize DI Container and register core services
-    container = Container()
-    container.register(MetricsRegistry, MetricsRegistry())
-    container.register(CircuitBreaker, CircuitBreaker(CircuitBreakerConfig(
-        failure_threshold=5,
-        timeout_seconds=300.0,
-        success_threshold=3
-    )))
-    container.register(EventStore, EventStore())
-    container.register(FeatureFlags, FeatureFlags())
-    application.state.container = container
+# ── Event bus (module-level, wired once) ──────────────────────────────────
+event_bus = EventBus()
+from app.application.event_subscribers import wire_event_bus_subscribers
 
-    settings = AppSettings.from_yaml_file()
-    runtime_config = load_environment_config(environment=getattr(settings, "environment", None))
-    scanner = getattr(settings, "scanner", None)
-    top_n = int(getattr(scanner, "top_n", 3))
-    top_per_underlying = int(getattr(scanner, "top_per_underlying", 2))
-    strikes_around_atm = int(getattr(scanner, "strikes_around_atm", 2))
-    expiry_index = int(getattr(scanner, "expiry_index", 0))
+wire_event_bus_subscribers(event_bus)
 
-    application.state.app_settings = settings
-    application.state.storage = SQLiteStorageAdapter(settings.db_path)
-    application.state.orchestrator = RuntimeOrchestrator(storage=application.state.storage)
-    application.state.session_service = SessionStateManager(storage=application.state.storage)
-    application.state.connected_clients = connected_clients
+# ── Connected SSE clients ─────────────────────────────────────────────────
+connected_clients: List[asyncio.Queue] = []
 
-    broker_cfg = runtime_config.get("broker", {}) if isinstance(runtime_config, dict) else {}
-    client_id = os.getenv("DHAN_CLIENT_ID") or str(broker_cfg.get("client_id", ""))
-    access_token = os.getenv("DHAN_ACCESS_TOKEN") or str(broker_cfg.get("access_token", ""))
-    
-    # Read strategy mode to determine exchange
-    strategy_mode = os.getenv("GLASSYTRADE_STRATEGY", "").lower()
-    default_exchange_name = os.getenv("DEFAULT_EXCHANGE", "NSE").upper()
-    
-    # If MCX strategy, force MCX exchange
-    if "mcx" in strategy_mode:
-        default_exchange_name = "MCX"
-        logger.info(f"GLASSYTRADE_STRATEGY={strategy_mode}, forcing MCX exchange")
-    
-    exchanges = runtime_config.get("exchanges", {}) if isinstance(runtime_config, dict) else {}
-    selected_exchange = None
-    for ex_name, ex_data in exchanges.items():
-        if not isinstance(ex_data, dict) or not ex_data.get("enabled", True):
-            continue
-        # If strategy specifies an exchange, prefer it
-        if "mcx" in strategy_mode and str(ex_name).upper() == "MCX":
-            selected_exchange = "MCX"
-            break
-        if "nse" in strategy_mode and str(ex_name).upper() == "NSE":
-            selected_exchange = "NSE"
-            break
-        # Otherwise use first enabled
-        if selected_exchange is None:
-            selected_exchange = str(ex_name).upper()
-    if selected_exchange is None:
-        selected_exchange = default_exchange_name
-
-    ex_data = exchanges.get(selected_exchange, {}) if isinstance(exchanges, dict) else {}
-    symbols_cfg = ex_data.get("symbols", {}) if isinstance(ex_data, dict) else {}
-    configured_symbols = [
-        symbol_name
-        for symbol_name, symbol_cfg in symbols_cfg.items()
-        if not isinstance(symbol_cfg, dict) or symbol_cfg.get("enabled", True)
-    ]
-    try:
-        exchange_config = ExchangeConfig.from_dict(selected_exchange, ex_data)
-        configured_symbols = list(exchange_config.scanner_underlyings) or configured_symbols
-    except Exception:
-        exchange_config = ExchangeConfig.for_exchange(selected_exchange)
-
-    market_data = DhanAdapter(
-        symbols=configured_symbols,
-        exchange="NFO" if selected_exchange == "NSE" else "MCX",
-        client_id=client_id,
-        access_token=access_token,
-        testnet=bool(broker_cfg.get("testnet", True)),
-    )
-    application.state.market_data_adapter = market_data
-    application.state.exchange_config = exchange_config
-    application.state.active_symbols = list(configured_symbols)
-    application.state.contract_guard = ContractSwitchGuard()
-    application.state.scanner_status = {
-        "last_scan_time": None,
-        "parameters": {
-            "n": top_n,
-            "top_per_underlying": top_per_underlying,
-            "strikes_around_atm": strikes_around_atm,
-            "expiry_index": expiry_index,
-            "exchange": selected_exchange,
-            "underlyings": list(configured_symbols),
-        },
-        "result_count": 0,
-    }
-    try:
-        scanner_service = OptionScannerService(market_data, default_underlyings=list(configured_symbols))
-        now = time.time()
-        async_scan_result = await asyncio.get_running_loop().run_in_executor(
-            None,
-            scanner_service.scan_top_n,
-            top_n,
-            configured_symbols,
-            None,
-            top_per_underlying,
-            ("NFO" if selected_exchange == "NSE" else "MCX"),
-            expiry_index,
-            strikes_around_atm,
-        )
-        symbols = [r.symbol for r in async_scan_result]
-        if symbols:
-            switch_decision = None
-            if async_scan_result:
-                first = async_scan_result[0]
-                switch_decision = application.state.contract_guard.evaluate_switch(
-                    first.symbol,
-                    first.score,
-                    now,
-                )
-                if switch_decision.accepted:
-                    application.state.contract_guard.apply_switch(switch_decision, now)
-            if switch_decision is None or switch_decision.accepted or switch_decision.reason == "same_contract":
-                application.state.active_symbols = symbols
-            application.state.scanner_status["result_count"] = len(application.state.active_symbols)
-            application.state.scanner_status["last_scan_time"] = datetime.now(UTC).isoformat()
-            if switch_decision is not None:
-                application.state.scanner_status["last_decision"] = switch_decision.as_dict()
-    except Exception as exc:
-        logger.warning(
-            "scanner startup failed; keeping configured symbols from config. error=%s",
-            exc,
-            exc_info=True,
-        )
-        application.state.scanner_status["last_scan_time"] = datetime.now(UTC).isoformat()
-        application.state.scanner_status["error"] = str(exc)
-
-    try:
-        startup_reconciliation = StartupReconciliation(
-            broker_adapter=market_data,
-            storage=application.state.storage,
-        )
-        application.state.startup_reconciliation = startup_reconciliation.reconcile(
-            portfolio=None,
-        )
-        logger.info(
-            "Startup reconciliation complete: %s",
-            application.state.startup_reconciliation,
-        )
-    except Exception as exc:
-        application.state.startup_reconciliation = None
-        logger.warning("Startup reconciliation failed: %s", exc, exc_info=True)
-
-    yield
-
-    orchestrator = getattr(application.state, "orchestrator", None)
-    if isinstance(orchestrator, RuntimeOrchestrator):
-        orchestrator.teardown_all()
-
-    storage = getattr(application.state, "storage", None)
-    if hasattr(storage, "flush"):
-        storage.flush()
-    if hasattr(storage, "close"):
-        storage.close()
-
+# ── FastAPI Application ───────────────────────────────────────────────────
 app = FastAPI(
     title="GlassyTrade AI BackendV2 API",
     description="Runtime control API",
     version="2.0.0",
-    lifespan=lifespan,
+    lifespan=create_lifespan,
 )
+
+app.state.connected_clients = connected_clients
+
+# ── CORS ──────────────────────────────────────────────────────────────────
+_cors_origins_env = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000")
+_cors_origins = [item.strip() for item in _cors_origins_env.split(",") if item.strip()]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=(lambda origins: origins if origins else ["http://localhost:5173", "http://localhost:3000"])(
-        [item.strip() for item in os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",") if item.strip()],
-    ),
+    allow_origins=_cors_origins or ["http://localhost:5173", "http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-event_bus = EventBus()
-wire_event_bus_subscribers(event_bus)
-connected_clients: List[asyncio.Queue] = []
-app.state.connected_clients = connected_clients
-
+# ── Routers ───────────────────────────────────────────────────────────────
 app.include_router(metrics_router, prefix="/api")
 app.include_router(health_router, prefix="/api")
 app.include_router(ai_router, prefix="/api")

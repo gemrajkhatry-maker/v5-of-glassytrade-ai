@@ -7,13 +7,18 @@ import logging
 import time
 
 from app.runtime.pipeline import StageMetrics
+from app.runtime.pipeline.base import PipelineStageBase
 from app.runtime.pipeline.events import PipelineEvent
 
 logger = logging.getLogger(__name__)
 
 
-class TelemetryPipeline:
+class TelemetryPipeline(PipelineStageBase):
     """Capture stage timings and basic counters."""
+
+    @property
+    def stage_name(self) -> str:
+        return "TelemetryPipeline"
 
     def __init__(self, tracer=None):
         self._counters: dict[str, int] = {}
@@ -21,7 +26,7 @@ class TelemetryPipeline:
         self._started_ns: dict[int, int] = {}
         self._started_tracer_span_ids: dict[int, str] = {}
         self._tick_spans: dict[int, str] = {}
-        self._metrics = StageMetrics(stage_name="TelemetryPipeline")
+        self._metrics = StageMetrics(stage_name=self.stage_name)
         self._tracer = tracer
 
     @property

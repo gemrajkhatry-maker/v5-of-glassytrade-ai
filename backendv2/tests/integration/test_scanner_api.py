@@ -28,7 +28,7 @@ class _StubScanner:
 def test_scanner_status_has_state_fields(monkeypatch):
     if TestClient is None:
         raise RuntimeError("TestClient unavailable")
-    monkeypatch.setattr(main, "OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
+    monkeypatch.setattr("app.bootstrap.lifespan.OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
     monkeypatch.setattr("app.api.routers.scanner.OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
 
     with TestClient(main.app) as client:
@@ -43,7 +43,7 @@ def test_scanner_status_has_state_fields(monkeypatch):
 def test_scanner_rescan_updates_active_symbols(monkeypatch):
     if TestClient is None:
         raise RuntimeError("TestClient unavailable")
-    monkeypatch.setattr(main, "OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
+    monkeypatch.setattr("app.bootstrap.lifespan.OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
     monkeypatch.setattr("app.api.routers.scanner.OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
 
     with TestClient(main.app) as client:

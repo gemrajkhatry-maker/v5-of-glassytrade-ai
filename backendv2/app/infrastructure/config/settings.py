@@ -68,6 +68,23 @@ class AppSettings(BaseSettings):
     log_level: str = "INFO"
     db_path: str = "glassytrade.db"
 
+    # CORS
+    cors_allowed_origins: str = "http://localhost:5173,http://localhost:3000"
+
+    # Trading
+    live_trading_enabled: bool = False
+    strategy: str = ""
+
+    # Broker credentials (prefer env vars for secrets)
+    dhan_client_id: str = ""
+    dhan_access_token: str = ""
+
+    # Scanner
+    scanner_top_n: int = 3
+    scanner_top_per_underlying: int = 2
+    scanner_strikes_around_atm: int = 2
+    scanner_expiry_index: int = 0
+
     broker: BrokerSettings | None = None
     risk: RiskSettings | None = None
     cost_model: CostModelSettings | None = None

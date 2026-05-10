@@ -30,7 +30,7 @@ def test_system_config_prefers_runtime_symbols(monkeypatch):
     if TestClient is None:
         raise RuntimeError("TestClient unavailable")
 
-    monkeypatch.setattr(main, "OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
+    monkeypatch.setattr("app.bootstrap.lifespan.OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
     monkeypatch.setattr("app.api.routers.scanner.OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
 
     with TestClient(main.app) as client:
@@ -45,7 +45,7 @@ def test_scanner_endpoints_rescan_and_status(monkeypatch):
     if TestClient is None:
         raise RuntimeError("TestClient unavailable")
 
-    monkeypatch.setattr(main, "OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
+    monkeypatch.setattr("app.bootstrap.lifespan.OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
     monkeypatch.setattr("app.api.routers.scanner.OptionScannerService", lambda *_args, **_kwargs: _StubScanner())
 
     with TestClient(main.app) as client:

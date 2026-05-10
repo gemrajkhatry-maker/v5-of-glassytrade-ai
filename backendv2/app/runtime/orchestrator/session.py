@@ -35,6 +35,8 @@ from app.runtime.pipeline.signal import SignalGeneration
 from app.runtime.pipeline.telemetry import TelemetryPipeline
 from app.runtime.pipeline.strategy import StrategyEvent, StrategyRuntime
 from app.runtime.pipeline.events import CandleTimeframe, OrderStatusEvent, PositionEvent, Signal, Tick
+from app.domain.services.aaa_precondition_engine import AAAPreconditionEngine
+from app.domain.services.session_phase_gate import SessionPhaseGate
 from dataclasses import asdict
 
 logger = logging.getLogger(__name__)
@@ -67,6 +69,9 @@ class SessionRuntime:
         self._gates = GateEvaluation(
             equity_fn=lambda symbol: float(self._position.get_portfolio(symbol).equity)
         )
+        self._aaa_engine = AAAPreconditionEngine()
+        self._phase_gate = SessionPhaseGate()
+        self._last_candle: dict[str, object] = {}
         self._running = False
         self._metrics = StageMetrics(stage_name="SessionRuntime")
         self._event_count = 0
@@ -266,6 +271,8 @@ class SessionRuntime:
             "persistence": self._persistence.snapshot(),
             "telemetry": self._telemetry.snapshot(),
             "strategy": self._strategy.snapshot(),
+            "aaa_engine": {"buffer_pct": self._aaa_engine._buffer_pct},
+            "phase_gate": {"friday_skip": self._phase_gate._friday_skip},
         }
         snapshot["state_digest"] = self.state_digest_payload(snapshot)
 
@@ -456,7 +463,173 @@ class SessionRuntime:
             self._telemetry.end_span("SessionRuntime", span_id)
         return [e for e in stage_events if e is not None]
 
+    def _evaluate_aaa(self, signal: Signal):
+        """Evaluate AAA preconditions for a signal.
+
+        Evaluates all 5 preconditions and returns which passed/failed.
+        If no candle or market data is available the result is a graceful
+        pass so that the signal is not silently dropped.
+        """
+        from datetime import datetime
+        from app.domain.services.aaa_precondition_engine import PreconditionResult, Precondition
+        from app.domain.services.session_phase_gate import AllowedAction
+
+        symbol = signal.symbol
+        candle = self._last_candle.get(symbol)
+        if candle is None:
+            return PreconditionResult(
+                all_passed=True,
+                failed=[],
+                passed=[],
+                reason="No candle data available for AAA evaluation",
+            )
+
+        market_state = self._market_structure._states.get(symbol)
+        if market_state is None or not hasattr(market_state, "last_result"):
+            return PreconditionResult(
+                all_passed=True,
+                failed=[],
+                passed=[],
+                reason="No market state available for AAA evaluation",
+            )
+
+        market = market_state.last_result
+        if not market:
+            return PreconditionResult(
+                all_passed=True,
+                failed=[],
+                passed=[],
+                reason="Empty market state for AAA evaluation",
+            )
+
+        session_state = getattr(market, "market_state", "")
+        # Graceful pass when market state is empty
+        if not session_state:
+            return PreconditionResult(
+                all_passed=True,
+                failed=[],
+                passed=[],
+                reason="No market state available for AAA evaluation",
+            )
+
+        ts = signal.timestamp
+        dt = datetime.fromtimestamp(ts) if isinstance(ts, (int, float)) else ts
+        phase_state = self._phase_gate.evaluate(dt)
+        ofi_metric = self._signal._last_orderflow.get(symbol)
+        avg_volume = getattr(candle, "volume", 0.0)
+        delta = getattr(ofi_metric, "cumulative_delta", 0.0) if ofi_metric else 0.0
+        ofi = getattr(ofi_metric, "ofi", 0.0) if ofi_metric else 0.0
+
+        # Evaluate all 5 preconditions independently
+        failed: list[Precondition] = []
+        passed: list[Precondition] = []
+        reasons: list[str] = []
+
+        # PRE1: State
+        leg_state = getattr(market, "leg_state", "")
+        if session_state != "IMBALANCED" or leg_state != "IMBALANCED":
+            failed.append(Precondition.PRE1_STATE)
+            reasons.append("PRE-1 state not IMBALANCED")
+        else:
+            passed.append(Precondition.PRE1_STATE)
+
+        # PRE2: Time
+        if phase_state.allowed_action not in (AllowedAction.ALL_MODELS, AllowedAction.AAA_ONLY):
+            failed.append(Precondition.PRE2_TIME)
+            reasons.append(f"PRE-2 phase={phase_state.phase} requires AAA window")
+        else:
+            passed.append(Precondition.PRE2_TIME)
+
+        # PRE3: Shape
+        profile_shape = getattr(market, "profile_shape", "")
+        direction = str(signal.type)
+        if direction == "LONG" and profile_shape not in {"P", "p", "D", "d"}:
+            failed.append(Precondition.PRE3_SHAPE)
+            reasons.append("PRE-3 LONG needs P-shape")
+        elif direction == "SHORT" and profile_shape not in {"b", "B"}:
+            failed.append(Precondition.PRE3_SHAPE)
+            reasons.append("PRE-3 SHORT needs b-shape")
+        else:
+            passed.append(Precondition.PRE3_SHAPE)
+
+        # PRE4: Price
+        val = getattr(market, "val", 0.0)
+        vah = getattr(market, "vah", 0.0)
+        poc = getattr(market, "poc", 0.0)
+        price = signal.entry
+        buffer_pct = self._aaa_engine._buffer_pct
+        effective_poc = poc
+        near_poc = effective_poc > 0 and abs(price - effective_poc) / effective_poc <= buffer_pct
+        if direction == "LONG":
+            near_val = val > 0 and abs(price - val) / val <= buffer_pct
+            if not near_val and not near_poc:
+                failed.append(Precondition.PRE4_PRICE)
+                reasons.append(f"PRE-4 price {price} not within {buffer_pct:.1%} of VAL={val}")
+            else:
+                passed.append(Precondition.PRE4_PRICE)
+        else:
+            near_vah = vah > 0 and abs(price - vah) / vah <= buffer_pct
+            if not near_vah and not near_poc:
+                failed.append(Precondition.PRE4_PRICE)
+                reasons.append(f"PRE-4 price {price} not within {buffer_pct:.1%} of VAH={vah}")
+            else:
+                passed.append(Precondition.PRE4_PRICE)
+
+        # PRE5: Absorption
+        vol_spike_mult = self._aaa_engine._vol_spike_mult
+        body_threshold = self._aaa_engine._body_threshold
+        vol_ok = avg_volume > 0 and float(candle.volume) > avg_volume * vol_spike_mult
+        candle_range = float(candle.high) - float(candle.low)
+        if candle_range > 0:
+            body_pos = (float(candle.close) - float(candle.low)) / candle_range
+            if direction == "LONG":
+                body_ok = body_pos >= body_threshold
+            else:
+                body_ok = body_pos <= (1 - body_threshold)
+        else:
+            body_ok = False
+        delta_ok = (delta > 0) if direction == "LONG" else (delta < 0)
+        ofi_ok = (ofi > 0) if direction == "LONG" else (ofi < 0)
+
+        if not vol_ok:
+            failed.append(Precondition.PRE5_ABSORPTION)
+            reasons.append("PRE-5 volume spike not confirmed")
+        elif not body_ok:
+            failed.append(Precondition.PRE5_ABSORPTION)
+            reasons.append("PRE-5 candle structure not confirmed")
+        elif not delta_ok:
+            failed.append(Precondition.PRE5_ABSORPTION)
+            reasons.append("PRE-5 delta not confirmed")
+        elif not ofi_ok:
+            failed.append(Precondition.PRE5_ABSORPTION)
+            reasons.append("PRE-5 OFI not confirmed")
+        else:
+            passed.append(Precondition.PRE5_ABSORPTION)
+
+        all_passed = len(failed) == 0
+        reason = "; ".join(reasons) if reasons else "All 5 AAA preconditions passed"
+        return PreconditionResult(all_passed, failed, passed, reason)
+
     def _run_signal_flow(self, signal: Signal, stage_events: list[object]) -> None:
+        # AAA precondition gating
+        if signal.type in ("LONG", "SHORT"):
+            aaa_result = self._evaluate_aaa(signal)
+            if not aaa_result.all_passed:
+                downgraded = Signal(
+                    symbol=signal.symbol,
+                    timestamp=signal.timestamp,
+                    type="NO_TRADE",
+                    entry=signal.entry,
+                    sl=signal.sl,
+                    tp=signal.tp,
+                    confidence=signal.confidence,
+                    rr=signal.rr,
+                    ofi=signal.ofi,
+                    reason=f"AAA downgrade: {aaa_result.reason}",
+                )
+                stage_events.append(downgraded)
+                return
+
         gates = self._gates.process(signal)
         stage_events.extend(gates)
         for gate in gates:
@@ -566,6 +739,7 @@ class SessionRuntime:
         self._persistence.warmup()
         self._telemetry.warmup()
         self._strategy.warmup()
+        self._last_candle = {}
 
     def teardown(self) -> None:
         self.stop()
