@@ -65,7 +65,7 @@ from .tick_utils import (
 )
 from .trade_costs import TradeCosts, compute_trade_costs
 from .watchdog import SessionWatchEntry, Watchdog
-from .initial_balance_engine import IBLocation, IBState, InitialBalanceEngine
+from .initial_balance_engine import IBLocation, IBState, LegacyInitialBalanceEngine
 from .ib_breakout_scalp import IBScalpSignal, IBScalpType, IBBreakoutScalpEngine
 from .aaa_precondition_engine import AAAPreconditionEngine, Precondition, PreconditionResult
 from .option_selection_engine import (
@@ -158,7 +158,7 @@ __all__ = [
     "Watchdog",
     "IBLocation",
     "IBState",
-    "InitialBalanceEngine",
+    "LegacyInitialBalanceEngine",
     "IBScalpSignal",
     "IBScalpType",
     "IBBreakoutScalpEngine",

@@ -178,8 +178,8 @@ class KillSwitchEngine:
     
     def emergency_shutdown(self, reason: str) -> None:
         """Emergency shutdown with custom reason."""
-        self._last_reason = reason
         self.activate(KillSwitchReason.MANUAL_TRIGGER)
+        self._last_reason = reason  # Override with custom reason
         logger.critical(f"Emergency shutdown: {reason}")
     
     def reset(self) -> None:

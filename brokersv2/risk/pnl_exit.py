@@ -188,6 +188,15 @@ class PnLExitManager:
         for symbol, pos in self._positions.items():
             position_pnl = pos.quantity * (pos.current_price - pos.entry_price)
             
+            # Check position profit target (use daily profit target as default)
+            if position_pnl >= self._config.daily_profit_target:
+                exits.append(ExitEvent(
+                    timestamp=now,
+                    exit_type=ExitType.POSITION_PROFIT_TARGET,
+                    pnl=position_pnl,
+                    symbol=symbol,
+                ))
+            
             # Check position stop loss
             if position_pnl <= -self._config.position_stop_loss:
                 exits.append(ExitEvent(

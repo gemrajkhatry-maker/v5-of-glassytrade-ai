@@ -16,6 +16,8 @@ class VWAPResult:
     vwap: float
     total_volume: int
     total_trades: int
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,9 @@ class AnchoredVWAP:
     anchor_time: datetime
     total_volume: int
     total_trades: int
+    periods_since_anchor: int = 0
+    current_price: float = 0.0
+    distance_pct: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -36,6 +41,8 @@ class RollingVWAP:
     window: timedelta
     total_volume: int
     total_trades: int
+    window_start: Optional[datetime] = None
+    window_end: Optional[datetime] = None
 
 
 @dataclass(frozen=True)
@@ -78,6 +85,11 @@ def calculate_session_vwap(symbol: str, trades: List[dict]) -> VWAPResult:
     total_pv = 0.0
     total_volume = 0
     
+    # Extract timestamps if available
+    timestamps = [t.get("timestamp") for t in trades if "timestamp" in t]
+    start_time = min(timestamps) if timestamps else None
+    end_time = max(timestamps) if timestamps else None
+    
     for trade in trades:
         price = trade["price"]
         volume = trade["volume"]
@@ -91,6 +103,8 @@ def calculate_session_vwap(symbol: str, trades: List[dict]) -> VWAPResult:
         vwap=vwap,
         total_volume=total_volume,
         total_trades=len(trades),
+        start_time=start_time,
+        end_time=end_time,
     )
 
 

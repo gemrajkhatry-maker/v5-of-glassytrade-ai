@@ -26,8 +26,8 @@ class IBState:
     ib_position_pct: float
 
 
-class InitialBalanceEngine:
-    """Track initial balance for the first `ib_minutes` of each session."""
+class LegacyInitialBalanceEngine:
+    """Track initial balance for the first `ib_minutes` of each session (legacy)."""
 
     def __init__(self, ib_minutes: int = 30) -> None:
         self._ib_minutes = int(ib_minutes)
