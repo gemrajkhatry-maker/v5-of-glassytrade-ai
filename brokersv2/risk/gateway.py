@@ -54,12 +54,22 @@ class ExposureLimit:
 
 
 @dataclass
+class RiskViolation:
+    """A risk violation."""
+    violation_type: str
+    message: str
+    severity: str = "error"  # error, warning
+
+
+@dataclass
 class RiskCheckResult:
     """Result of a risk check."""
     check_name: str
     passed: bool
     message: str = ""
     is_blocking: bool = False
+    approved: bool = True
+    violations: List[RiskViolation] = field(default_factory=list)
 
 
 @dataclass
@@ -88,7 +98,10 @@ class RiskGateway:
     - Comprehensive risk summary
     """
 
-    def __init__(self):
+    def __init__(self, limits: Optional['RiskLimits'] = None):
+        from brokersv2.domain.risk.models import RiskLimits as DomainRiskLimits
+        
+        self._limits = limits or DomainRiskLimits()
         self._position_limits: List[PositionLimit] = []
         self._exposure_limit: Optional[ExposureLimit] = None
         self._positions: Dict[str, PositionInfo] = {}
@@ -97,6 +110,7 @@ class RiskGateway:
         self._daily_pnl = Decimal("0")
         self._current_exposure = Decimal("0")
         self._open_orders = 0
+        self._pending_orders: set = set()
 
     def add_position_limit(self, limit: PositionLimit):
         """Add a position limit."""
@@ -397,3 +411,49 @@ class RiskGateway:
         self._open_orders = 0
 
         logger.info("Risk gateway reset")
+    
+    def register_pending_order(self, order_id: str) -> None:
+        """Register a pending order to prevent duplicates."""
+        self._pending_orders.add(order_id)
+    
+    async def check_order(self, order) -> RiskCheckResult:
+        """
+        Check order against risk limits.
+        
+        Args:
+            order: Order to check
+            
+        Returns:
+            RiskCheckResult with approval status and any violations
+        """
+        violations = []
+        
+        # Check position size limit
+        order_quantity = order.quantity
+        if isinstance(order_quantity, Decimal):
+            qty = order_quantity
+        else:
+            qty = Decimal(str(order_quantity))
+        
+        if qty > self._limits.max_position_size:
+            violations.append(RiskViolation(
+                violation_type="position_limit",
+                message=f"Order quantity {qty} exceeds max position size {self._limits.max_position_size}"
+            ))
+        
+        # Check for duplicate orders
+        if order.order_id in self._pending_orders:
+            violations.append(RiskViolation(
+                violation_type="duplicate_order",
+                message=f"Order {order.order_id} is already pending"
+            ))
+        
+        approved = len(violations) == 0
+        
+        return RiskCheckResult(
+            check_name="order_risk_check",
+            passed=approved,
+            approved=approved,
+            violations=violations,
+            message="Order approved" if approved else f"{len(violations)} risk violation(s) found"
+        )
