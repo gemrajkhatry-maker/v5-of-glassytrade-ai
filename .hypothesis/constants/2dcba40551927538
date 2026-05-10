@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/infrastructure/dhan_adapter/adapter.py
+# hypothesis_version: 6.147.0
+
+['+00:00', '1d', 'CanonicalInstrument', 'DhanBrokerAdapter', 'Exchange', 'OptionChainData', 'Z', 'ce', 'data', 'delta', 'expiry', 'expiryDate', 'gamma', 'greeks', 'implied_volatility', 'last_price', 'oc', 'oi', 'pe', 'security_id', 'symbol', 'theta', 'top_ask_price', 'top_bid_price', 'value', 'vega', 'volume']

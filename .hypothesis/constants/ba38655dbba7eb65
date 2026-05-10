@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/websocket/connection/pool.py
+# hypothesis_version: 6.147.0
+
+['CONNECTED', 'DISCONNECTED', 'FAILED', 'RECONNECTING', 'available', 'healthy', 'max_size', 'total', 'unhealthy']

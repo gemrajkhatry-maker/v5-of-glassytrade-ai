@@ -9,6 +9,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 
 from app.infrastructure.adapters.dhan_adapter import DhanAdapter
+from app.infrastructure.adapters.option_chain_cache import OptionChainCache
 
 
 class TestDhanAdapterInitialization:
@@ -101,12 +102,10 @@ class TestDhanAdapterOptionChain:
     def test_uses_cache_when_valid(self):
         """Should use cached option chain when within TTL."""
         adapter = DhanAdapter(access_token="test_token")
-        import time
         
-        # Pre-populate cache
-        cache_key = ("NIFTY", "NFO", 0)
+        # Pre-populate cache via public API
         mock_chain = MagicMock()
-        adapter._option_chain_cache[cache_key] = (mock_chain, time.monotonic())
+        adapter._option_chain_cache.set("NIFTY", "NFO", 0, mock_chain)
         
         chain = adapter.get_option_chain("NIFTY", "NFO", 0)
         
@@ -115,20 +114,15 @@ class TestDhanAdapterOptionChain:
 
     def test_respects_cache_ttl(self):
         """Should expire cache after TTL."""
-        adapter = DhanAdapter(
-            access_token="test_token",
-        )
-        adapter._option_chain_cache_ttl_sec = 1  # 1 second TTL
+        adapter = DhanAdapter(access_token="test_token")
+        adapter._option_chain_cache = OptionChainCache(ttl_sec=1)
         
-        import time
-        cache_key = ("NIFTY", "NFO", 0)
         mock_chain = MagicMock()
-        # Set cache with old timestamp
-        adapter._option_chain_cache[cache_key] = (mock_chain, time.monotonic() - 10)
+        # Set cache then wait for expiry
+        adapter._option_chain_cache.set("NIFTY", "NFO", 0, mock_chain)
         
-        # Cache should be expired (would make API call in real scenario)
-        # For now, just verify cache behavior
-        assert cache_key in adapter._option_chain_cache
+        # Cache should exist immediately
+        assert adapter._option_chain_cache.get("NIFTY", "NFO", 0) is mock_chain
 
 
 class TestDhanAdapterStreaming:
@@ -194,12 +188,10 @@ class TestDhanAdapterCaching:
         """Option chain cache should use (underlying, exchange, expiry_index) key."""
         adapter = DhanAdapter(access_token="test_token")
         
-        cache_key = ("NIFTY", "NFO", 0)
         mock_chain = MagicMock()
-        adapter._option_chain_cache[cache_key] = (mock_chain, 1000.0)
+        adapter._option_chain_cache.set("NIFTY", "NFO", 0, mock_chain)
         
-        assert cache_key in adapter._option_chain_cache
-        assert adapter._option_chain_cache[cache_key][0] is mock_chain
+        assert adapter._option_chain_cache.get("NIFTY", "NFO", 0) is mock_chain
 
 
 class TestDhanAdapterCleanup:

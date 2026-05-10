@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.infrastructure.adapters.dhan_adapter import DhanAdapter
+from app.infrastructure.adapters.option_chain_cache import OptionChainCache
 
 
 @dataclass
@@ -40,7 +41,7 @@ def test_option_chain_ttl_cache_reuses_response(monkeypatch):
         return _MockResponse(200, _option_chain_payload())
 
     monkeypatch.setattr(adapter, "_run_sync", _fake_run_sync)
-    adapter._option_chain_cache_ttl_sec = 30
+    adapter._option_chain_cache = OptionChainCache(ttl_sec=30)
 
     first = adapter.get_option_chain("NIFTY", exchange="NFO")
     second = adapter.get_option_chain("NIFTY", exchange="NFO")
@@ -58,7 +59,7 @@ def test_option_chain_ttl_cache_disabled_hits_network_each_call(monkeypatch):
         return _MockResponse(200, _option_chain_payload())
 
     monkeypatch.setattr(adapter, "_run_sync", _fake_run_sync)
-    adapter._option_chain_cache_ttl_sec = 0
+    adapter._option_chain_cache = OptionChainCache(ttl_sec=0)
     adapter.get_option_chain("NIFTY", exchange="NFO")
     adapter.get_option_chain("NIFTY", exchange="NFO")
 

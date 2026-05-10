@@ -29,16 +29,17 @@ def load_settings() -> tuple[AppSettings, dict[str, Any]]:
 def resolve_exchange(
     runtime_config: dict[str, Any],
     strategy_mode: str,
+    default_exchange: str = "NSE",
 ) -> tuple[str, dict[str, Any]]:
     """Determine which exchange to use based on strategy and config.
 
     Returns (exchange_name, exchange_data_dict).
     """
-    default_exchange_name = os.getenv("DEFAULT_EXCHANGE", "NSE").upper()
+    default_exchange_name = default_exchange.upper()
 
     if "mcx" in strategy_mode:
         default_exchange_name = "MCX"
-        logger.info("GLASSYTRADE_STRATEGY=%s, forcing MCX exchange", strategy_mode)
+        logger.info("strategy_mode=%s, forcing MCX exchange", strategy_mode)
 
     exchanges = runtime_config.get("exchanges", {})
     selected_exchange = None

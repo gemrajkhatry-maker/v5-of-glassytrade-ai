@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/analytics/options/events.py
+# hypothesis_version: 6.147.0
+
+[0.0, 2.0, 100.0, 'at_the_money', 'call', 'in_the_money', 'out_of_the_money', 'put']

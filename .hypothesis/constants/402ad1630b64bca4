@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/infrastructure/dhan_adapter/websocket.py
+# hypothesis_version: 6.147.0
+
+[0.0, 0.1, 0.5, 1.0, 100, 5000, 10000, 'NSE', 'asks', 'bids', 'broker_symbol', 'depth', 'is_snapshot', 'last_traded_price', 'orderbook', 'orders', 'price', 'quantity', 'security_id', 'sequence', 'symbol', 'tick', 'trade', 'type', 'volume']

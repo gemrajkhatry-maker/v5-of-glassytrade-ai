@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/logging/logging_config.py
+# hypothesis_version: 6.147.0
+
+['args', 'brokers', 'correlation_id', 'created', 'exc_info', 'exc_text', 'exception', 'execution_stack', 'filename', 'funcName', 'json', 'level', 'levelname', 'levelno', 'lineno', 'logger', 'message', 'module', 'msecs', 'msg', 'name', 'pathname', 'process', 'processName', 'relativeCreated', 'stack_info', 'thread', 'threadName', 'timestamp', '| ']

@@ -1,256 +1,234 @@
-"""Greeks Calculator - Black-Scholes options Greeks."""
-
-from __future__ import annotations
+"""Black-Scholes Options Greeks Calculation."""
 
 import math
-from datetime import datetime
+from dataclasses import dataclass
+from typing import Optional
 
-from brokersv2.analytics.options.events import (
-    GreeksSnapshot,
-    OptionType,
-)
+
+@dataclass(frozen=True)
+class GreeksResult:
+    """Options Greeks calculation result."""
+    delta: float
+    gamma: float
+    theta: float
+    vega: float
+    rho: float
+
+
+def _norm_cdf(x: float) -> float:
+    """Cumulative distribution function for standard normal distribution."""
+    return (1.0 + math.erf(x / math.sqrt(2.0))) / 2.0
+
+
+def _norm_pdf(x: float) -> float:
+    """Probability density function for standard normal distribution."""
+    return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
+
+
+def black_scholes_price(
+    spot: float,
+    strike: float,
+    time_to_expiry: float,
+    volatility: float,
+    risk_free_rate: float,
+    option_type: str,
+) -> float:
+    """
+    Calculate Black-Scholes option price.
+    
+    Args:
+        spot: Current underlying price
+        strike: Option strike price
+        time_to_expiry: Time to expiry in years
+        volatility: Implied volatility (annualized)
+        risk_free_rate: Risk-free interest rate
+        option_type: "CE" for call, "PE" for put
+        
+    Returns:
+        Option price
+    """
+    if time_to_expiry <= 0:
+        # Expired option - intrinsic value only
+        if option_type == "CE":
+            return max(0.0, spot - strike)
+        else:
+            return max(0.0, strike - spot)
+    
+    d1 = (
+        math.log(spot / strike)
+        + (risk_free_rate + 0.5 * volatility**2) * time_to_expiry
+    ) / (volatility * math.sqrt(time_to_expiry))
+    
+    d2 = d1 - volatility * math.sqrt(time_to_expiry)
+    
+    if option_type == "CE":
+        # Call option
+        price = spot * _norm_cdf(d1) - strike * math.exp(
+            -risk_free_rate * time_to_expiry
+        ) * _norm_cdf(d2)
+    else:
+        # Put option
+        price = strike * math.exp(-risk_free_rate * time_to_expiry) * _norm_cdf(
+            -d2
+        ) - spot * _norm_cdf(-d1)
+    
+    return max(0.0, price)
+
+
+def calculate_greeks(
+    spot: float,
+    strike: float,
+    time_to_expiry: float,
+    volatility: float,
+    risk_free_rate: float,
+    option_type: str,
+) -> GreeksResult:
+    """
+    Calculate all options Greeks.
+    
+    Args:
+        spot: Current underlying price
+        strike: Option strike price
+        time_to_expiry: Time to expiry in years
+        volatility: Implied volatility (annualized)
+        risk_free_rate: Risk-free interest rate
+        option_type: "CE" for call, "PE" for put
+        
+    Returns:
+        GreeksResult with delta, gamma, theta, vega, rho
+    """
+    if time_to_expiry <= 0:
+        return GreeksResult(delta=0.0, gamma=0.0, theta=0.0, vega=0.0, rho=0.0)
+    
+    d1 = (
+        math.log(spot / strike)
+        + (risk_free_rate + 0.5 * volatility**2) * time_to_expiry
+    ) / (volatility * math.sqrt(time_to_expiry))
+    
+    d2 = d1 - volatility * math.sqrt(time_to_expiry)
+    
+    # Gamma (same for call and put)
+    gamma = _norm_pdf(d1) / (spot * volatility * math.sqrt(time_to_expiry))
+    
+    # Vega (same for call and put)
+    vega = spot * _norm_pdf(d1) * math.sqrt(time_to_expiry) / 100.0
+    
+    if option_type == "CE":
+        # Call options
+        delta = _norm_cdf(d1)
+        theta = (
+            -(spot * _norm_pdf(d1) * volatility)
+            / (2.0 * math.sqrt(time_to_expiry))
+            - risk_free_rate * strike * math.exp(-risk_free_rate * time_to_expiry) * _norm_cdf(d2)
+        ) / 365.0
+        rho = (
+            strike * time_to_expiry * math.exp(-risk_free_rate * time_to_expiry) * _norm_cdf(d2)
+        ) / 100.0
+    else:
+        # Put options
+        delta = _norm_cdf(d1) - 1.0
+        theta = (
+            -(spot * _norm_pdf(d1) * volatility)
+            / (2.0 * math.sqrt(time_to_expiry))
+            + risk_free_rate * strike * math.exp(-risk_free_rate * time_to_expiry) * _norm_cdf(-d2)
+        ) / 365.0
+        rho = (
+            -strike * time_to_expiry * math.exp(-risk_free_rate * time_to_expiry) * _norm_cdf(-d2)
+        ) / 100.0
+    
+    return GreeksResult(
+        delta=delta,
+        gamma=gamma,
+        theta=theta,
+        vega=vega,
+        rho=rho,
+    )
+
+
+def calculate_iv(
+    market_price: float,
+    spot: float,
+    strike: float,
+    time_to_expiry: float,
+    risk_free_rate: float,
+    option_type: str,
+    tolerance: float = 0.0001,
+    max_iterations: int = 100,
+) -> float:
+    """
+    Calculate implied volatility using bisection method.
+    
+    Args:
+        market_price: Market price of the option
+        spot: Current underlying price
+        strike: Option strike price
+        time_to_expiry: Time to expiry in years
+        risk_free_rate: Risk-free interest rate
+        option_type: "CE" for call, "PE" for put
+        tolerance: Convergence tolerance
+        max_iterations: Maximum iterations
+        
+    Returns:
+        Implied volatility
+        
+    Raises:
+        ValueError: If IV cannot be found
+    """
+    # Bisection method
+    low_vol = 0.001
+    high_vol = 5.0
+    
+    for _ in range(max_iterations):
+        mid_vol = (low_vol + high_vol) / 2.0
+        
+        theoretical_price = black_scholes_price(
+            spot, strike, time_to_expiry, mid_vol, risk_free_rate, option_type
+        )
+        
+        price_diff = theoretical_price - market_price
+        
+        if abs(price_diff) < tolerance:
+            return mid_vol
+        
+        if price_diff > 0:
+            # Theoretical price too high, reduce volatility
+            high_vol = mid_vol
+        else:
+            # Theoretical price too low, increase volatility
+            low_vol = mid_vol
+    
+    raise ValueError(
+        f"IV calculation failed to converge after {max_iterations} iterations"
+    )
 
 
 class GreeksCalculator:
-    """
-    Calculate options Greeks using Black-Scholes model.
+    """Calculator class wrapper for options Greeks (for test compatibility)."""
     
-    Features:
-    - Delta calculation
-    - Gamma calculation
-    - Theta (time decay)
-    - Vega (volatility sensitivity)
-    - Rho (interest rate sensitivity)
-    - Complete Greeks snapshots
-    """
-
-    def __init__(self, risk_free_rate: float = 0.05):
-        """
-        Initialize calculator.
-        
-        Args:
-            risk_free_rate: Risk-free interest rate (default 5%)
-        """
-        self.risk_free_rate = risk_free_rate
-
-    def _d1_d2(
-        self,
-        underlying_price: float,
-        strike: float,
-        time_to_expiry: float,
-        volatility: float,
-    ) -> tuple[float, float]:
-        """Calculate d1 and d2 for Black-Scholes."""
-        if time_to_expiry <= 0 or volatility <= 0:
-            return 0.0, 0.0
-        
-        d1 = (
-            math.log(underlying_price / strike)
-            + (self.risk_free_rate + 0.5 * volatility**2) * time_to_expiry
-        ) / (volatility * math.sqrt(time_to_expiry))
-        
-        d2 = d1 - volatility * math.sqrt(time_to_expiry)
-        return d1, d2
-
-    def delta(
-        self,
-        underlying_price: float,
-        strike: float,
-        time_to_expiry: float,
-        volatility: float,
-        risk_free_rate: float = None,
-        option_type: OptionType = OptionType.CALL,
-    ) -> float:
-        """
-        Calculate option delta.
-        
-        Args:
-            underlying_price: Current underlying price
-            strike: Strike price
-            time_to_expiry: Time to expiry in days
-            volatility: Implied volatility
-            risk_free_rate: Risk-free rate
-            option_type: Call or Put
-            
-        Returns:
-            Delta value
-        """
-        if risk_free_rate is None:
-            risk_free_rate = self.risk_free_rate
-            
-        time_years = time_to_expiry / 365.0
-        d1, _ = self._d1_d2(underlying_price, strike, time_years, volatility)
-        
-        delta = self._norm_cdf(d1)
-        
-        if option_type == OptionType.PUT:
-            delta = delta - 1.0
-        
-        return delta
-
-    def gamma(
-        self,
-        underlying_price: float,
-        strike: float,
-        time_to_expiry: float,
-        volatility: float,
-        risk_free_rate: float = None,
-    ) -> float:
-        """
-        Calculate option gamma.
-        
-        Args:
-            underlying_price: Current underlying price
-            strike: Strike price
-            time_to_expiry: Time to expiry in days
-            volatility: Implied volatility
-            risk_free_rate: Risk-free rate
-            
-        Returns:
-            Gamma value
-        """
-        if risk_free_rate is None:
-            risk_free_rate = self.risk_free_rate
-            
-        time_years = time_to_expiry / 365.0
-        d1, _ = self._d1_d2(underlying_price, strike, time_years, volatility)
-        
-        if volatility <= 0 or time_years <= 0:
-            return 0.0
-        
-        gamma = self._norm_pdf(d1) / (
-            underlying_price * volatility * math.sqrt(time_years)
-        )
-        
-        return gamma
-
-    def theta(
-        self,
-        underlying_price: float,
-        strike: float,
-        time_to_expiry: float,
-        volatility: float,
-        risk_free_rate: float = None,
-        option_type: OptionType = OptionType.CALL,
-    ) -> float:
-        """
-        Calculate option theta (time decay).
-        
-        Args:
-            underlying_price: Current underlying price
-            strike: Strike price
-            time_to_expiry: Time to expiry in days
-            volatility: Implied volatility
-            risk_free_rate: Risk-free rate
-            option_type: Call or Put
-            
-        Returns:
-            Theta value (typically negative)
-        """
-        if risk_free_rate is None:
-            risk_free_rate = self.risk_free_rate
-            
-        time_years = time_to_expiry / 365.0
-        d1, d2 = self._d1_d2(underlying_price, strike, time_years, volatility)
-        
-        if volatility <= 0 or time_years <= 0:
-            return 0.0
-        
-        # Common term
-        term1 = -(underlying_price * self._norm_pdf(d1) * volatility) / (
-            2 * math.sqrt(time_years)
-        )
-        
-        if option_type == OptionType.CALL:
-            term2 = risk_free_rate * strike * math.exp(-risk_free_rate * time_years) * self._norm_cdf(d2)
-            theta = term1 - term2
-        else:
-            term2 = risk_free_rate * strike * math.exp(-risk_free_rate * time_years) * self._norm_cdf(-d2)
-            theta = term1 + term2
-        
-        # Convert to daily theta
-        return theta / 365.0
-
-    def vega(
-        self,
-        underlying_price: float,
-        strike: float,
-        time_to_expiry: float,
-        volatility: float,
-        risk_free_rate: float = None,
-    ) -> float:
-        """
-        Calculate option vega.
-        
-        Args:
-            underlying_price: Current underlying price
-            strike: Strike price
-            time_to_expiry: Time to expiry in days
-            volatility: Implied volatility
-            risk_free_rate: Risk-free rate
-            
-        Returns:
-            Vega value
-        """
-        if risk_free_rate is None:
-            risk_free_rate = self.risk_free_rate
-            
-        time_years = time_to_expiry / 365.0
-        d1, _ = self._d1_d2(underlying_price, strike, time_years, volatility)
-        
-        if volatility <= 0 or time_years <= 0:
-            return 0.0
-        
-        vega = underlying_price * self._norm_pdf(d1) * math.sqrt(time_years)
-        
-        return vega
-
-    def calculate_all_greeks(
-        self,
-        symbol: str,
-        underlying_price: float,
-        strike: float,
-        time_to_expiry: float,
-        volatility: float,
-        risk_free_rate: float = None,
-        option_type: OptionType = OptionType.CALL,
-    ) -> GreeksSnapshot:
-        """
-        Calculate all Greeks in one snapshot.
-        
-        Args:
-            symbol: Option symbol
-            underlying_price: Current underlying price
-            strike: Strike price
-            time_to_expiry: Time to expiry in days
-            volatility: Implied volatility
-            risk_free_rate: Risk-free rate
-            option_type: Call or Put
-            
-        Returns:
-            Complete Greeks snapshot
-        """
-        if risk_free_rate is None:
-            risk_free_rate = self.risk_free_rate
-        
-        return GreeksSnapshot(
-            symbol=symbol,
-            timestamp=datetime.now(),
-            delta=self.delta(underlying_price, strike, time_to_expiry, volatility, risk_free_rate, option_type),
-            gamma=self.gamma(underlying_price, strike, time_to_expiry, volatility, risk_free_rate),
-            theta=self.theta(underlying_price, strike, time_to_expiry, volatility, risk_free_rate, option_type),
-            vega=self.vega(underlying_price, strike, time_to_expiry, volatility, risk_free_rate),
-            implied_vol=volatility,
-            underlying_price=underlying_price,
-            strike=strike,
-        )
-
     @staticmethod
-    def _norm_cdf(x: float) -> float:
-        """Standard normal cumulative distribution function."""
-        return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
-
+    def calculate_greeks(
+        spot: float,
+        strike: float,
+        time_to_expiry: float,
+        volatility: float,
+        risk_free_rate: float,
+        option_type: str,
+    ) -> GreeksResult:
+        """Calculate all Greeks."""
+        return calculate_greeks(
+            spot, strike, time_to_expiry, volatility, risk_free_rate, option_type
+        )
+    
     @staticmethod
-    def _norm_pdf(x: float) -> float:
-        """Standard normal probability density function."""
-        return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
+    def calculate_price(
+        spot: float,
+        strike: float,
+        time_to_expiry: float,
+        volatility: float,
+        risk_free_rate: float,
+        option_type: str,
+    ) -> float:
+        """Calculate option price."""
+        return black_scholes_price(
+            spot, strike, time_to_expiry, volatility, risk_free_rate, option_type
+        )

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/infrastructure/retry_manager.py
+# hypothesis_version: 6.147.0
+
+[0.0, 0.25, 1.0, 2.0, 30.0, 'Circuit breaker open']

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/application/services/options_service.py
+# hypothesis_version: 6.147.0
+
+[0.0, 50.0, 200, 201, '%Y-%m-%d', '%b', 'CALL', 'CE', 'EXPIRY_NOT_FOUND', 'Expiry', 'IDX_I', 'PE', 'PUT', 'UnderlyingScrip', 'UnderlyingSeg', 'average_price', 'ce', 'data', 'delta', 'expiries', 'gamma', 'greeks', 'implied_volatility', 'last_price', 'oc', 'oi', 'option_chain', 'pe', 'previous_close_price', 'previous_oi', 'previous_volume', 'security_id', 'theta', 'top_ask_price', 'top_ask_quantity', 'top_bid_price', 'top_bid_quantity', 'vega', 'volume']

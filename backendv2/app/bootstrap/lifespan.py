@@ -56,8 +56,10 @@ async def create_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.session_service = SessionStateManager(storage=storage)
 
     # ── Exchange Resolution ───────────────────────────────────────────────
-    strategy_mode = os.getenv("GLASSYTRADE_STRATEGY", "").lower()
-    selected_exchange, ex_data = resolve_exchange(runtime_config, strategy_mode)
+    strategy_mode = (settings.strategy or "").lower()
+    selected_exchange, ex_data = resolve_exchange(
+        runtime_config, strategy_mode, default_exchange=getattr(settings, "default_exchange", "NSE")
+    )
     symbols_cfg = ex_data.get("symbols", {})
     exchange_config, configured_symbols = build_exchange_config(
         selected_exchange, ex_data, symbols_cfg
@@ -67,8 +69,8 @@ async def create_lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ── Broker / Market Data Adapter ──────────────────────────────────────
     broker_cfg = runtime_config.get("broker", {})
-    client_id = os.getenv("DHAN_CLIENT_ID") or str(broker_cfg.get("client_id", ""))
-    access_token = os.getenv("DHAN_ACCESS_TOKEN") or str(broker_cfg.get("access_token", ""))
+    client_id = settings.dhan_client_id or str(broker_cfg.get("client_id", ""))
+    access_token = settings.dhan_access_token or str(broker_cfg.get("access_token", ""))
     testnet = bool(broker_cfg.get("testnet", True))
 
     market_data = bootstrap_market_data(

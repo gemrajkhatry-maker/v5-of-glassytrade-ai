@@ -1,19 +1,49 @@
-"""Kill Switch Manager - Emergency shutdown and P&L exit."""
+"""Kill Switch Engine - Emergency shutdown and risk limit enforcement."""
 
-import asyncio
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
 class KillSwitchState(Enum):
     """Kill switch operational states."""
-    DISARMED = "disarmed"
-    ARMED = "armed"
-    TRIGGERED = "triggered"
+    INACTIVE = "inactive"
+    ACTIVE = "active"
+
+
+class KillSwitchReason(Enum):
+    """Reasons for kill switch activation."""
+    MAX_LOSS_EXCEEDED = "max_loss_exceeded"
+    MAX_POSITION_EXCEEDED = "max_position_exceeded"
+    MAX_ORDER_RATE_EXCEEDED = "max_order_rate_exceeded"
+    MANUAL_TRIGGER = "manual_trigger"
+
+
+class RiskLimitType(Enum):
+    """Types of risk limits."""
+    DAILY_LOSS = "daily_loss"
+    POSITION_SIZE = "position_size"
+    ORDER_RATE = "order_rate"
+
+
+@dataclass
+class RiskLimit:
+    """Risk limit definition."""
+    limit_type: RiskLimitType
+    threshold: float
+    current_value: float = 0.0
+
+
+@dataclass
+class KillSwitchConfig:
+    """Kill switch configuration."""
+    max_daily_loss: float = 10000.0
+    max_position_size: int = 100000
+    max_order_rate: int = 100
 
 
 class KillSwitchError(Exception):
@@ -21,222 +51,173 @@ class KillSwitchError(Exception):
     pass
 
 
-class KillSwitchManager:
+class KillSwitchEngine:
     """
-    Manages emergency shutdown and position squaring.
+    Manages emergency shutdown and risk limit enforcement.
     
     Features:
-    - Three-state kill switch (disarmed/armed/triggered)
-    - Confirmation code required to arm
-    - Cancels all pending orders on trigger
-    - Squares off all positions via P&L Exit API
-    - Comprehensive audit logging
-    
-    Usage:
-        kill_switch = KillSwitchManager(broker_adapter)
-        
-        # Arm with confirmation
-        await kill_switch.arm_kill_switch("CONFIRM123")
-        
-        # Trigger emergency shutdown
-        await kill_switch.trigger_kill_switch("Margin breach detected")
+    - Two-state kill switch (inactive/active)
+    - Auto-activation on limit breaches
+    - Order submission blocking when active
+    - P&L, position size, and order rate tracking
+    - Alert generation on approaching limits
+    - State serialization/deserialization
     """
     
-    def __init__(self, broker_adapter, confirmation_code: str):
+    def __init__(self, config: Optional[KillSwitchConfig] = None):
         """
-        Initialize kill switch manager.
+        Initialize kill switch engine.
         
         Args:
-            broker_adapter: DhanBrokerAdapter instance
-            confirmation_code: Code required to arm (REQUIRED, no default)
-            
-        Raises:
-            ValueError: If confirmation_code is empty
+            config: KillSwitchConfig instance (uses defaults if None)
         """
-        if not confirmation_code or not confirmation_code.strip():
-            raise ValueError("confirmation_code is required and cannot be empty")
+        self._config = config or KillSwitchConfig()
+        self._state = KillSwitchState.INACTIVE
+        self._activation_reason: Optional[KillSwitchReason] = None
+        self._activation_timestamp: Optional[datetime] = None
+        self._last_reason: str = ""
         
-        self._broker = broker_adapter
-        self._state_lock = asyncio.Lock()  # Thread safety
-        self._state = KillSwitchState.DISARMED
-        self._confirmation_code = confirmation_code.strip()
-        self._armed_at: Optional[datetime] = None
-        self._triggered_at: Optional[datetime] = None
-        self._trigger_reason: Optional[str] = None
-    
-    async def arm_kill_switch(self, confirmation_code: str) -> None:
-        """
-        Arm kill switch with confirmation.
+        # Tracking state
+        self._current_pnl: float = 0.0
+        self._total_position_size: int = 0
+        self._order_count: int = 0
+        self._positions: Dict[str, int] = {}
         
-        Args:
-            confirmation_code: Confirmation code
-            
-        Raises:
-            KillSwitchError: If confirmation code invalid
-        """
-        async with self._state_lock:
-            if confirmation_code != self._confirmation_code:
-                raise KillSwitchError("Invalid confirmation code")
-            
-            self._state = KillSwitchState.ARMED
-            self._armed_at = datetime.now(timezone.utc)
-            
-            logger.critical("Kill switch ARMED - ready for emergency shutdown")
-    
-    async def disarm_kill_switch(self, confirmation_code: str) -> None:
-        """
-        Disarm kill switch.
-        
-        Args:
-            confirmation_code: Confirmation code
-            
-        Raises:
-            KillSwitchError: If confirmation code invalid or already triggered
-        """
-        async with self._state_lock:
-            if confirmation_code != self._confirmation_code:
-                raise KillSwitchError("Invalid confirmation code")
-            
-            if self._state == KillSwitchState.TRIGGERED:
-                raise KillSwitchError("Cannot disarm triggered kill switch")
-            
-            self._state = KillSwitchState.DISARMED
-            self._armed_at = None
-            
-            logger.info("Kill switch DISARMED")
-    
-    async def trigger_kill_switch(self, reason: str) -> dict:
-        """
-        Execute emergency shutdown.
-        
-        Steps:
-        1. Cancel all pending orders
-        2. Square off all positions
-        3. Update state to TRIGGERED
-        4. Log all actions
-        
-        Args:
-            reason: Reason for triggering
-            
-        Returns:
-            Dictionary with shutdown results
-            
-        Raises:
-            KillSwitchError: If not armed
-        """
-        async with self._state_lock:
-            if self._state != KillSwitchState.ARMED:
-                raise KillSwitchError(
-                    f"Kill switch must be armed before triggering (current: {self._state.value})"
-                )
-            
-            logger.critical(f"Kill switch TRIGGERED - Reason: {reason}")
-            
-            results = {
-                "reason": reason,
-                "orders_cancelled": 0,
-                "positions_squared": 0,
-                "errors": [],
-            }
-            
-            try:
-                # Step 1: Cancel all pending orders
-                logger.info("Cancelling all pending orders...")
-                try:
-                    cancelled = await self._cancel_all_orders()
-                    results["orders_cancelled"] = cancelled
-                    logger.info(f"Cancelled {cancelled} orders")
-                except Exception as e:
-                    error_msg = f"Failed to cancel orders: {e}"
-                    logger.error(error_msg)
-                    results["errors"].append(error_msg)
-                
-                # Step 2: Square off all positions
-                logger.info("Squaring off all positions...")
-                try:
-                    squared = await self._square_off_positions()
-                    results["positions_squared"] = squared
-                    logger.info(f"Squared off {squared} positions")
-                except Exception as e:
-                    error_msg = f"Failed to square off positions: {e}"
-                    logger.error(error_msg)
-                    results["errors"].append(error_msg)
-                
-                # Step 3: Update state
-                self._state = KillSwitchState.TRIGGERED
-                self._triggered_at = datetime.now(timezone.utc)
-                self._trigger_reason = reason
-                
-                logger.critical(
-                    f"Kill switch shutdown complete: "
-                    f"{results['orders_cancelled']} orders cancelled, "
-                    f"{results['positions_squared']} positions squared"
-                )
-                
-                return results
-                
-            except Exception as e:
-                logger.critical(f"Kill switch shutdown failed: {e}")
-                raise
-    
-    async def _cancel_all_orders(self) -> int:
-        """Cancel all pending orders."""
-        # Get all pending orders
-        pending_orders = await self._broker.get_pending_orders()
-        
-        cancelled_count = 0
-        for order in pending_orders:
-            try:
-                await self._broker.cancel_order(order.order_id)
-                cancelled_count += 1
-            except Exception as e:
-                logger.warning(f"Failed to cancel order {order.order_id}: {e}")
-        
-        return cancelled_count
-    
-    async def _square_off_positions(self) -> int:
-        """Square off all open positions."""
-        # Get all positions
-        positions = await self._broker.get_positions()
-        
-        squared_count = 0
-        for position in positions:
-            if position.quantity == 0:
-                continue  # Already squared
-            
-            try:
-                # Place opposite order to square off
-                side = "SELL" if position.quantity > 0 else "BUY"
-                quantity = abs(position.quantity)
-                
-                await self._broker.place_order(
-                    symbol=position.symbol,
-                    side=side,
-                    quantity=quantity,
-                    order_type="MARKET",
-                )
-                squared_count += 1
-            except Exception as e:
-                logger.warning(
-                    f"Failed to square off position {position.symbol}: {e}"
-                )
-        
-        return squared_count
+        # Alerts
+        self._alerts: List[str] = []
     
     @property
-    async def state(self) -> KillSwitchState:
-        """Get current kill switch state (thread-safe)."""
-        async with self._state_lock:
-            return self._state
+    def state(self) -> KillSwitchState:
+        """Current kill switch state."""
+        return self._state
     
     @property
-    async def is_armed(self) -> bool:
-        """Check if kill switch is armed (thread-safe)."""
-        async with self._state_lock:
-            return self._state == KillSwitchState.ARMED
+    def is_active(self) -> bool:
+        """Whether kill switch is active."""
+        return self._state == KillSwitchState.ACTIVE
     
     @property
-    async def is_triggered(self) -> bool:
-        """Check if kill switch has been triggered (thread-safe)."""
-        async with self._state_lock:
-            return self._state == KillSwitchState.TRIGGERED
+    def activation_reason(self) -> Optional[KillSwitchReason]:
+        """Reason for activation."""
+        return self._activation_reason
+    
+    @property
+    def last_reason(self) -> str:
+        """Last reason string."""
+        return self._last_reason
+    
+    @property
+    def current_pnl(self) -> float:
+        """Current P&L."""
+        return self._current_pnl
+    
+    @property
+    def order_count(self) -> int:
+        """Order count."""
+        return self._order_count
+    
+    def activate(self, reason: KillSwitchReason) -> None:
+        """Activate kill switch with reason."""
+        self._state = KillSwitchState.ACTIVE
+        self._activation_reason = reason
+        self._activation_timestamp = datetime.now(timezone.utc)
+        self._last_reason = reason.value
+        self._alerts.append(f"Kill switch activated: {reason.value}")
+        logger.warning(f"Kill switch activated: {reason.value}")
+    
+    def deactivate(self) -> None:
+        """Deactivate kill switch."""
+        self._state = KillSwitchState.INACTIVE
+        self._activation_reason = None
+        self._activation_timestamp = None
+        logger.info("Kill switch deactivated")
+    
+    def check_order_allowed(self, symbol: str, quantity: int, price: float) -> bool:
+        """Check if order is allowed (raises if kill switch active)."""
+        if self.is_active:
+            raise KillSwitchError(f"Kill switch active: {self._activation_reason.value}")
+        return True
+    
+    def update_pnl(self, pnl: float) -> None:
+        """Update P&L and check limits."""
+        self._current_pnl += pnl
+        
+        # Check if approaching limit (90%)
+        if abs(self._current_pnl) >= 0.9 * self._config.max_daily_loss:
+            self._alerts.append(f"P&L approaching limit: {self._current_pnl:.2f}")
+        
+        # Auto-activate if limit exceeded
+        if abs(self._current_pnl) >= self._config.max_daily_loss:
+            self.activate(KillSwitchReason.MAX_LOSS_EXCEEDED)
+    
+    def update_position(self, symbol: str, size: int) -> None:
+        """Update position and check limits."""
+        old_size = self._positions.get(symbol, 0)
+        self._positions[symbol] = old_size + size
+        self._total_position_size = sum(abs(s) for s in self._positions.values())
+        
+        # Check if approaching limit (90%)
+        if self._total_position_size >= 0.9 * self._config.max_position_size:
+            self._alerts.append(f"Position size approaching limit: {self._total_position_size}")
+        
+        # Auto-activate if limit exceeded
+        if self._total_position_size >= self._config.max_position_size:
+            self.activate(KillSwitchReason.MAX_POSITION_EXCEEDED)
+    
+    def record_order(self) -> None:
+        """Record order and check rate limits."""
+        self._order_count += 1
+        
+        # Check if approaching limit (90%)
+        if self._order_count >= 0.9 * self._config.max_order_rate:
+            self._alerts.append(f"Order rate approaching limit: {self._order_count}")
+        
+        # Auto-activate if limit exceeded
+        if self._order_count >= self._config.max_order_rate:
+            self.activate(KillSwitchReason.MAX_ORDER_RATE_EXCEEDED)
+    
+    def emergency_shutdown(self, reason: str) -> None:
+        """Emergency shutdown with custom reason."""
+        self._last_reason = reason
+        self.activate(KillSwitchReason.MANUAL_TRIGGER)
+        logger.critical(f"Emergency shutdown: {reason}")
+    
+    def reset(self) -> None:
+        """Reset all state."""
+        self._state = KillSwitchState.INACTIVE
+        self._activation_reason = None
+        self._activation_timestamp = None
+        self._last_reason = ""
+        self._current_pnl = 0.0
+        self._total_position_size = 0
+        self._order_count = 0
+        self._positions.clear()
+        self._alerts.clear()
+        logger.info("Kill switch reset")
+    
+    def serialize_state(self) -> dict:
+        """Serialize kill switch state."""
+        return {
+            "state": self._state.value,
+            "reason": self._activation_reason.value if self._activation_reason else None,
+            "activated_at": self._activation_timestamp.isoformat() if self._activation_timestamp else None,
+            "current_pnl": self._current_pnl,
+            "total_position_size": self._total_position_size,
+            "order_count": self._order_count,
+        }
+    
+    def deserialize_state(self, state: dict) -> None:
+        """Deserialize kill switch state."""
+        self._state = KillSwitchState(state["state"])
+        if state.get("reason"):
+            self._activation_reason = KillSwitchReason(state["reason"])
+        if state.get("activated_at"):
+            self._activation_timestamp = datetime.fromisoformat(state["activated_at"])
+    
+    def get_alerts(self) -> List[str]:
+        """Get all alerts."""
+        return self._alerts.copy()
+
+
+# Backward compatibility alias
+KillSwitchManager = KillSwitchEngine

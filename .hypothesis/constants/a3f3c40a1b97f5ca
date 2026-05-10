@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/analytics/order_book/queue_pressure.py
+# hypothesis_version: 6.147.0
+
+[0.0, 0.05, 5.0, 100.0, -100, 100, 'OrderBookEngine', 'Side', 'decreasing', 'increasing', 'stable']

@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/providers/symbol_mapper.py
+# hypothesis_version: 6.147.0
+
+[' BE', ' EQ', '-', '-BE', '-EQ', 'BANKNIFTY', 'FINNIFTY', 'NIFTY', 'NIFTY 50', 'NIFTY BANK', 'NIFTY FIN SERVICE', 'NIFTY FINANCIAL', 'NSEBANK', 'NSEI', 'RELIANCE', 'RELIANCE-EQ', '^MCX:', '^NFO:', '^NSE:', '^\\^', '^mcx:', '^nfo:', '^nse:', 'canonical', 'dhan', 'nse', 'opencart']

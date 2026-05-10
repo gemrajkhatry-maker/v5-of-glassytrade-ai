@@ -23,6 +23,7 @@ import httpx
 from app.domain.shared.port.market_data import IMarketData
 from app.shared.timezones import IST
 from app.domain.trading.model.value_objects import OHLC, OrderBook, OrderBookLevel
+from app.infrastructure.adapters.option_chain_cache import OptionChainCache
 
 try:
     from app.core.cost_tracker import get_cost_tracker
@@ -68,9 +69,9 @@ class DhanAdapter(IMarketData):
         self._ltp_cache: dict[str, tuple[float, float]] = {}
         self._order_books: dict[str, OrderBook] = {}
         self._stream_offsets: deque[float] = deque(maxlen=1024)
-        self._option_chain_cache: dict[tuple[str, str, int], tuple[object, float]] = {}
-        self._option_chain_cache_ttl_sec = float(os.getenv("OPTION_CHAIN_CACHE_TTL_SEC", "30") or 30)
-        self._option_chain_cache_lock = threading.Lock()
+        self._option_chain_cache = OptionChainCache(
+            ttl_sec=float(os.getenv("OPTION_CHAIN_CACHE_TTL_SEC", "30") or 30)
+        )
 
     def ensure_initialized_sync(self, timeout: float = 120) -> None:
         self._is_ready = True
@@ -347,15 +348,10 @@ class DhanAdapter(IMarketData):
     def get_option_chain(self, underlying: str, exchange: str = "NFO", expiry_index: int = 0):
         if not self._access_token:
             return None
-        key = (underlying.upper(), exchange.upper(), int(expiry_index))
-        now = time.monotonic()
-        if self._option_chain_cache_ttl_sec > 0:
-            with self._option_chain_cache_lock:
-                hit = self._option_chain_cache.get(key)
-                if hit is not None:
-                    chain_obj, ts = hit
-                    if now - ts <= self._option_chain_cache_ttl_sec:
-                        return chain_obj  # Cache hit, no API call
+        # Try cache first
+        cached = self._option_chain_cache.get(underlying, exchange, expiry_index)
+        if cached is not None:
+            return cached
 
         t0 = time.monotonic()
         request_awaitable = self._client.get(
@@ -384,14 +380,7 @@ class DhanAdapter(IMarketData):
         if chain is None:
             return None
 
-        if self._option_chain_cache_ttl_sec > 0:
-            with self._option_chain_cache_lock:
-                self._option_chain_cache[key] = (chain, now)
-                self._option_chain_cache = {
-                    k: v
-                    for k, v in self._option_chain_cache.items()
-                    if now - v[1] <= self._option_chain_cache_ttl_sec + 1
-                }
+        self._option_chain_cache.set(underlying, exchange, expiry_index, chain)
         return chain
 
     def _run_sync(self, awaitable: Any) -> Any:
