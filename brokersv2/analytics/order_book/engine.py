@@ -81,15 +81,84 @@ class OrderBookEngine:
         self.symbol = symbol
         self.max_depth = max_depth
         
-        # Price levels: price -> (quantity, order_count)
-        self.bids: Dict[float, Tuple[int, int]] = {}
-        self.asks: Dict[float, Tuple[int, int]] = {}
+        # Price levels as sorted lists
+        self.bids: List[PriceLevel] = []  # Sorted descending by price
+        self.asks: List[PriceLevel] = []  # Sorted ascending by price
         
         # Order tracking: order_id -> (price, quantity, side)
         self.orders: Dict[str, Tuple[float, int, Side]] = {}
         
         # Trade history
         self.trades: List[Trade] = []
+    
+    @property
+    def bid_levels(self) -> int:
+        """Number of bid price levels."""
+        return len(self.bids)
+    
+    @property
+    def ask_levels(self) -> int:
+        """Number of ask price levels."""
+        return len(self.asks)
+    
+    @property
+    def best_bid(self) -> Optional[PriceLevel]:
+        """Best bid price level."""
+        return self.bids[0] if self.bids else None
+    
+    @property
+    def best_ask(self) -> Optional[PriceLevel]:
+        """Best ask price level."""
+        return self.asks[0] if self.asks else None
+    
+    @property
+    def spread(self) -> float:
+        """Bid-ask spread."""
+        if self.best_bid and self.best_ask:
+            return self.best_ask.price - self.best_bid.price
+        return 0.0
+    
+    @property
+    def mid_price(self) -> float:
+        """Mid price = (best_bid + best_ask) / 2."""
+        if self.best_bid and self.best_ask:
+            return (self.best_bid.price + self.best_ask.price) / 2.0
+        return 0.0
+    
+    @property
+    def snapshot(self) -> OrderBookSnapshot:
+        """Current order book snapshot."""
+        return OrderBookSnapshot(
+            symbol=self.symbol,
+            bids=self.bids.copy(),
+            asks=self.asks.copy(),
+        )
+    
+    def take_snapshot(self) -> OrderBookSnapshot:
+        """Take a snapshot of current order book state."""
+        return self.snapshot
+    
+    def update_bid(self, level: PriceLevel) -> None:
+        """Update bid price level, maintaining sorted order."""
+        # Remove existing level at this price
+        self.bids = [b for b in self.bids if b.price != level.price]
+        
+        # Add if quantity > 0
+        if level.quantity > 0:
+            self.bids.append(level)
+            # Sort descending by price
+            self.bids.sort(key=lambda x: x.price, reverse=True)
+    
+    def update_ask(self, level: PriceLevel) -> None:
+        """Update ask price level, maintaining sorted order."""
+        # Remove existing level at this price
+        self.asks = [a for a in self.asks if a.price != level.price]
+        
+        # Add if quantity > 0
+        if level.quantity > 0:
+            self.asks.append(level)
+            # Sort ascending by price
+            self.asks.sort(key=lambda x: x.price)
     
     def add_order(
         self,
