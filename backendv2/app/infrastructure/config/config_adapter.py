@@ -8,37 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from .loader import _deep_merge, _read_yaml, resolve_environment, load_settings_from_yaml
 from .settings import AppSettings, SettingsMode
 
 logger = logging.getLogger(__name__)
 
 
 _CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"
-
-
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in override.items():
-        if (
-            isinstance(value, dict)
-            and isinstance(merged.get(key), dict)
-        ):
-            merged[key] = _deep_merge(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
-
-
-def _read_yaml(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    with path.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
-    if not isinstance(data, dict):
-        return {}
-    return data
 
 
 def load_yaml(path: str | os.PathLike[str]) -> dict[str, Any]:
@@ -49,18 +25,8 @@ def _safe_str(value: Any, fallback: str = "") -> str:
     return str(value or "").strip().lower()
 
 
-def resolve_environment() -> str:
-    env = _safe_str(os.getenv("GLASSYTRADE_ENV"), SettingsMode.DEVELOPMENT.value)
-    if env in {"dev", "development", "paper", "live"}:
-        return "development" if env == "dev" else env
-    return SettingsMode.DEVELOPMENT.value
-
-
 def load_environment_config(environment: str | None = None) -> dict[str, Any]:
-    env = environment or resolve_environment()
-    base = _read_yaml(_CONFIG_DIR / "base.yaml")
-    env_override = _read_yaml(_CONFIG_DIR / "environments" / f"{env}.yaml")
-    return _deep_merge(base, env_override)
+    return load_settings_from_yaml(_CONFIG_DIR, env=environment)
 
 
 def load_strategy_config(name: str | None = None) -> dict[str, Any]:

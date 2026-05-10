@@ -9,12 +9,17 @@ from enum import Enum
 import os
 from typing import Any
 
-import yaml
-
 try:
     from pydantic_settings import BaseSettings  # type: ignore
 except ImportError:  # pragma: no cover - compatibility path
     from pydantic import BaseModel as BaseSettings  # type: ignore
+
+from .loader import (
+    _deep_merge,
+    _read_yaml as _read_yaml_file,
+    resolve_environment as _resolve_profile,
+    load_settings_from_yaml,
+)
 
 
 class SettingsMode(str, Enum):
@@ -134,43 +139,6 @@ logger = logging.getLogger(__name__)
 
 
 _CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"
-_ENV_ALIAS: dict[str, str] = {
-    "dev": "development",
-    "development": "development",
-    "paper": "paper",
-    "live": "live",
-}
-
-
-def _resolve_profile(profile: str | None = None) -> str:
-    env = (
-        str(profile or os.getenv("GLASSYTRADE_ENV") or os.getenv("APP_PROFILE") or SettingsMode.DEVELOPMENT.value)
-        .strip()
-        .lower()
-    )
-    return _ENV_ALIAS.get(env, SettingsMode.DEVELOPMENT.value)
-
-
-def _read_yaml_file(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        logger.debug("YAML config not found: %s", path)
-        return {}
-    with path.open("r", encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
-    if not isinstance(data, dict):
-        logger.debug("YAML config was not a mapping: %s", path)
-        return {}
-    return data
-
-
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
 
 
 def load_app_settings(
@@ -180,11 +148,9 @@ def load_app_settings(
 ) -> dict[str, Any]:
     """Load a plain settings dict from base.yaml + selected environment yaml."""
     base_dir = Path(base_path) if base_path else _CONFIG_DIR
-    normalized = _resolve_profile(profile)
-    base = _read_yaml_file(base_dir / "base.yaml")
-    override = _read_yaml_file(base_dir / "environments" / f"{normalized}.yaml")
-    merged = _deep_merge(base, override)
-    merged["environment"] = merged.get("environment", normalized)
+    env = profile or _resolve_profile()
+    merged = load_settings_from_yaml(base_dir, env=env)
+    merged["environment"] = merged.get("environment", env)
     merged["broker_mode"] = (
         merged.get("broker_mode")
         or merged.get("broker", {}).get("mode")

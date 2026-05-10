@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/risk/kill_switch.py
+# hypothesis_version: 6.152.4
+
+[0.0, 0.9, 10000.0, 100, 100000, 'Kill switch reset', 'activated_at', 'active', 'current_pnl', 'daily_loss', 'inactive', 'manual_trigger', 'max_loss_exceeded', 'order_count', 'order_rate', 'position_size', 'reason', 'state', 'total_position_size']

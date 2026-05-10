@@ -1,0 +1,4 @@
+# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/analytics/vwap.py
+# hypothesis_version: 6.152.4
+
+[0.0, 2.0, 100.0, 10000, 'BENCHMARK', 'above', 'below', 'price', 'timestamp', 'volume', 'within']
