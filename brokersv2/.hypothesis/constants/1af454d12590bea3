@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/domain/value_objects.py
-# hypothesis_version: 6.152.4
-
-[0.0, 'BO', 'BSE', 'BSE_CASH', 'BSE_EQ', 'BSE_FNO', 'C', 'CE', 'CO', 'COMMODITY', 'CURRENCY', 'DAY', 'EQ', 'EQUITY', 'Exchange', 'ExchangeSegment', 'FULL', 'FULL_DEPTH', 'FUTCOM', 'FUTCUR', 'FUTIDX', 'FUTSTK', 'FUTURES', 'GTC', 'I', 'IDX_I', 'INDEX', 'IOC', 'InstrumentTypeVO', 'M', 'MCX', 'MCX_COMM', 'NSE', 'NSE_CASH', 'NSE_CURRENCY', 'NSE_EQ', 'NSE_FNO', 'OPTCUR', 'OPTFUT', 'OPTIDX', 'OPTIONS', 'OPTSTK', 'PE', 'QUOTE', 'TICKER', 'delta', 'gamma', 'iv', 'theta', 'vega']

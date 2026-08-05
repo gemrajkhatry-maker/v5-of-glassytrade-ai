@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/oms/forever_orders.py
-# hypothesis_version: 6.147.0
-
-['active', 'cancelled', 'child_order_ids', 'created_at', 'filled', 'filled_quantity', 'order_id', 'pending', 'price', 'quantity', 'side', 'state', 'symbol', 'updated_at']

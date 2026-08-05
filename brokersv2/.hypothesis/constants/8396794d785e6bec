@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/gateway/session_manager.py
-# hypothesis_version: 6.152.4
-
-[0.0, 2.0, 300, 3600, 86400, 'access_token', 'active', 'active_sessions', 'auto_refresh', 'config', 'created', 'created_at', 'expired', 'expires_at', 'last_refreshed', 'refresh_count', 'refresh_threshold', 'refresh_token', 'refreshing', 'revoked', 'session_id', 'state', 'time_to_expiry', 'token_lifetime', 'total_sessions', 'user_id']

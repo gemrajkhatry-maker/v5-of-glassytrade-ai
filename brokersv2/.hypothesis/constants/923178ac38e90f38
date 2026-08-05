@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/application/facade.py
-# hypothesis_version: 6.152.4
-
-[0.0, 200, '%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '1d', 'BSE_EQ', 'BSE_FNO', 'BUY', 'CE', 'DAY', 'DHAN_ACCESS_TOKEN', 'DHAN_CLIENT_ID', 'DHAN_TOTP_SECRET', 'DhanBroker', 'DhanFacade', 'M', 'MARKET', 'MCX', 'MCX_COMM', 'NSE_EQ', 'NSE_FNO', 'PE', '_loop', 'brokerage', 'close', 'data', 'dhan.facade', 'exchange', 'exchangeSegment', 'from_date', 'interval', 'orderId', 'order_id', 'pnl', 'price', 'quantity', 'realizedPnl', 'symbol', 'taxes', 'timestamp', 'to_date', 'tradeId', 'trade_id', 'tradedAt', 'tradingSymbol', 'transactionType', 'unrealizedPnl']

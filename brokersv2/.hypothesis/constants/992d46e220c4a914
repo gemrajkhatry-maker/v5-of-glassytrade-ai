@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/analytics/order_book/execution_pressure.py
-# hypothesis_version: 6.147.0
-
-[0.0, 1.0, 2.0, 'OrderBookEngine', 'Side', 'ask', 'bid', 'unknown']

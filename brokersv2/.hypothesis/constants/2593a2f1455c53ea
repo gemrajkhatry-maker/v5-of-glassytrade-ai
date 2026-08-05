@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/analytics/order_book/events.py
-# hypothesis_version: 6.147.0
-
-[0.0, 'imbalance_alert', 'liquidity_change', 'pressure_alert', 'snapshot', 'trade', 'update']

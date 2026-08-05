@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/oms/idempotency_manager.py
-# hypothesis_version: 6.152.4
-
-[3600, 10000, 'completed', 'failed', 'pending', 'total_records']

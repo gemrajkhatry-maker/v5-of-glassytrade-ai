@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/infrastructure/dhan_adapter/mapper.py
-# hypothesis_version: 6.147.0
-
-['%Y-%m-%d', '0.01', 'AXISBANK', 'BANKNIFTY', 'HDFCBANK', 'ICICIBANK', 'INFY', 'KOTAKBANK', 'NIFTY', 'NSE_EQ', 'NSE_INDEX', 'RELIANCE', 'SBIN', 'TCS', 'broker_symbol', 'exchange', 'exchange_segment', 'expiry', 'instrument_type', 'lot_size', 'option_type', 'r', 'security_id', 'segment', 'strike', 'symbol', 'tick_size']

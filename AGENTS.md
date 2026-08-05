@@ -14,4 +14,4 @@ The five canonical triage labels are used: `needs-triage`, `needs-info`, `ready-
 
 ### Domain docs
 
-Single-context layout with `CONTEXT.md` at the root and `docs/adr/` for decisions. See `docs/agents/domain.md`.
+See `docs/agents/domain.md`.

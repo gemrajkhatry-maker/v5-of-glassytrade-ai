@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/providers/metrics.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.2, 0.5, 100.0, 1000, 'degraded', 'fallback_failure', 'fallback_rate_limit', 'fallback_rate_pct', 'fallback_success', 'fallback_timeout', 'healthy', 'last_primary_failure', 'primary_failure', 'primary_health', 'primary_rate_limit', 'primary_success', 'primary_timeout', 'rate_limit', 'timeout', 'total_fallbacks', 'total_requests', 'unknown', 'warning']

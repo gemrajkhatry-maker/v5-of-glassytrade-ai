@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/analytics/options/oi_analytics.py
-# hypothesis_version: 6.147.0
-
-[0.0, 5.0, 10.0, 20.0, 100.0, 'long_buildup', 'long_unwinding', 'moderate', 'oi', 'option_type', 'price', 'short_buildup', 'short_covering', 'strike', 'strong', 'symbol', 'very_strong', 'volume', 'weak']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/gateway/request_dispatcher.py
-# hypothesis_version: 6.152.4
-
-[0.0, 30.0, -1000, 100, 1000, 'average_latency', 'circuit_breaker', 'critical', 'endpoint', 'failed_requests', 'high', 'idempotency_key', 'latency', 'low', 'method', 'metrics', 'normal', 'not_configured', 'open', 'priority', 'recent_requests', 'retried_requests', 'success', 'success_rate', 'successful_requests', 'timeout', 'timestamp', 'total_requests']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/application/services/streaming_service.py
-# hypothesis_version: 6.152.4
-
-[0.0, 200, 'MCX', 'NSE_EQ', 'Persistent WS closed', 'QUOTE', 'TICKER', '_ws_client_factory', 'ask', 'atp', 'bid', 'circuit_breaker', 'close', 'config', 'depth', 'depth_asks', 'depth_bids', 'ensure_initialized', 'exchange_segment', 'full', 'high', 'http_client', 'instrument', 'last_trade_time', 'levels', 'low', 'ltp', 'ltq', 'oi', 'open', 'option_symbol_cache', 'orders', 'price', 'qty', 'quote', 'rate_limiter', 'security_id', 'side', 'symbol_mapper', 'tick', 'total_buy_qty', 'total_sell_qty', 'volume']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/replay/historical_replay.py
-# hypothesis_version: 6.152.4
-
-[0.1, 1.0, 10.0, 'Replay paused', 'Replay resumed', 'Replay stopped', 'UNKNOWN', 'symbol', 'timestamp', 'total_seconds']

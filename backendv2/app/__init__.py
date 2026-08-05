@@ -1,1 +1,0 @@
-"""BackendV2 - Clean Architecture Trading System."""

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/analytics/options/oi_analytics.py
-# hypothesis_version: 6.152.4
-
-[0.0, 2000, 'oi_change', 'option_type', 'price_change', 'strike', 'timestamp']

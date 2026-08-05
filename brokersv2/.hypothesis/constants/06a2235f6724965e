@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/infrastructure/http_client_sync.py
-# hypothesis_version: 6.152.4
-
-[200, 300, 1000, '/', 'Accept', 'Content-type', 'GET', 'POST', 'UNKNOWN_ERROR', 'UNKNOWN_TYPE', 'X-Correlation-ID', 'access-token', 'application/json', 'client-id', 'correlation_id', 'data', 'dhan.http_sync', 'dhanClientId', 'duration_ms', 'endpoint', 'error', 'errorCode', 'errorMessage', 'errorType', 'error_code', 'error_message', 'error_type', 'failure', 'http_method', 'message', 'params', 'remarks', 'status', 'status_code', 'success']

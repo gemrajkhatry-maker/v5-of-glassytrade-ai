@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/application/services/historical_service.py
-# hypothesis_version: 6.152.4
-
-[200, '%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '(\\d+)', '1', '1d', 'D', 'INVALID_DATE_RANGE', 'close', 'daily', 'data', 'default', 'drvOptionType', 'exchangeSegment', 'expiryCode', 'expiryFlag', 'first', 'fromDate', 'from_date', 'high', 'historical', 'instrument', 'interval', 'low', 'oi', 'open', 'open_interest', 'requiredData', 'securityId', 'strike', 'timestamp', 'toDate', 'to_date', 'volume']

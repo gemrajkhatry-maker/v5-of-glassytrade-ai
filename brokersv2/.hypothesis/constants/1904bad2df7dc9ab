@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/core/resilience.py
-# hypothesis_version: 6.152.4
-
-[60.0, 'CLOSED', 'HALF_OPEN', 'OPEN', 'failure_count', 'failure_threshold', 'last_failure_time', 'recovery_timeout', 'state', 'success_count', 'total_requests']

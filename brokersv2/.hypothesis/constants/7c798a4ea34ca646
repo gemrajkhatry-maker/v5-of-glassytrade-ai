@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/core/constants.py
-# hypothesis_version: 6.152.4
-
-[0.1, 1.0, 2.0, 10.0, 15.0, 30.0, 60.0, 100, 1000, 3600, 5000, 9090, 10000, '0.0.0.0', '30', 'DHAN_BASE_URL', 'DHAN_TIMEOUT', 'DHAN_WS_URL', 'true', 'wss://api.dhan.co/ws']
