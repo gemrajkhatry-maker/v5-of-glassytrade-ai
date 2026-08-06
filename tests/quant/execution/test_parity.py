@@ -584,3 +584,62 @@ def test_trade_costs_parity():
         lambda: _run_trade_costs(legacy),
         lambda: _run_trade_costs(quant_compute),
     )
+
+
+# ---------------------------------------------------------------------------
+# ExitEngine.check_position
+# ---------------------------------------------------------------------------
+
+
+def _exit_position() -> Position:
+    return Position(
+        id="P1",
+        symbol="NIFTY",
+        side=Side.LONG,
+        entry_price=Decimal("100.0"),
+        stop_loss=Decimal("95.0"),
+        take_profit=Decimal("115.0"),
+        initial_stop=Decimal("95.0"),
+    )
+
+
+def _run_check_position(engine_cls) -> dict:
+    engine = engine_cls()
+    pos = _exit_position()
+    sig = engine.check_position(pos, 95.0)
+    return {
+        "sig": (sig.position_id, sig.reason, sig.exit_price) if sig else None,
+        "cushion": pos.cushion_state.value,
+    }
+
+
+def _run_check_position_hold(engine_cls) -> dict:
+    engine = engine_cls()
+    pos = _exit_position()
+    pos.entry_time = "2026-01-01T00:00:00Z"
+    sigs = [engine.check_position(pos, 102.0) for _ in range(6)]
+    return {
+        "sig": (sigs[-1].position_id, sigs[-1].reason, sigs[-1].exit_price) if sigs[-1] else None,
+        "tick_count": pos.tick_count,
+        "mfe": float(pos.mfe),
+    }
+
+
+def test_exit_engine_stop_loss_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.fabio_ai.services.exit_engine").ExitEngine
+    from quant.execution.exit_engine import ExitEngine as QuantExitEngine
+    assert_parity(
+        lambda: _run_check_position(legacy),
+        lambda: _run_check_position(QuantExitEngine),
+    )
+
+
+def test_exit_engine_hold_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.fabio_ai.services.exit_engine").ExitEngine
+    from quant.execution.exit_engine import ExitEngine as QuantExitEngine
+    assert_parity(
+        lambda: _run_check_position_hold(legacy),
+        lambda: _run_check_position_hold(QuantExitEngine),
+    )

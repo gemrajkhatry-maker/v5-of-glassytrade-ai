@@ -3,8 +3,8 @@
 import pytest
 from decimal import Decimal
 
-from app.domain.fabio_ai.services.exit_engine import ExitEngine
-from app.domain.trading.models.entities import Position, Side, PositionStatus
+from quant.execution.exit_engine import ExitEngine
+from quant.contracts.entities import Position, Side, PositionStatus
 
 
 class TestExitEnginePyramid:
