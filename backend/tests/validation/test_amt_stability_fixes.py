@@ -358,7 +358,7 @@ class TestStructureHysteresis:
 
     def test_hysteresis_parameters_increased(self):
         """Verify that dwell/cooldown are no longer 1."""
-        from app.domain.fabio_ai.services import market_structure_classifier as msc
+        from quant.amt.market import structure as msc
 
         assert msc._DWELL_TICKS >= 2, (
             f"Dwell ticks should be >= 2, got {msc._DWELL_TICKS}"
