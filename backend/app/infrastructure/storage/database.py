@@ -199,6 +199,7 @@ class SQLiteStorageAdapter(IStorage):
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
             self._conn.execute("PRAGMA wal_autocheckpoint=500")
             self._conn.executescript(_SCHEMA)
             # Upgrade to UNIQUE index on (symbol, time): dedup rows first, then swap index.

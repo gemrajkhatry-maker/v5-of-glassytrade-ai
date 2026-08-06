@@ -332,6 +332,11 @@ class SettingsAdapter:
     def TICK_POLL_SECONDS(self) -> float:
         """Get tick poll seconds from env."""
         return float(os.getenv("TICK_POLL_SECONDS", "5.0"))
+
+    @property
+    def SIGNAL_STALE_SECONDS(self) -> int:
+        """Stale-signal TTL in seconds (B-13). Default 60s; env override."""
+        return int(os.getenv("SIGNAL_STALE_SECONDS", "60"))
     
     # =========================================================================
     # Gap Fill Configuration
