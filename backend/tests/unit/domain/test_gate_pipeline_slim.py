@@ -6,7 +6,6 @@ from app.domain.trading.models.enums import MarketState
 
 def test_gate_context_has_triple_a_fields_with_defaults():
     ctx = GateContext()
-    assert ctx.triple_a_phase == ""
     assert ctx.absorption_detected is False
     assert ctx.absorption_bar_age == 0
     assert ctx.vwap_breakout is None
@@ -14,12 +13,11 @@ def test_gate_context_has_triple_a_fields_with_defaults():
 
 def test_gate_context_accepts_explicit_values():
     ctx = GateContext(
-        triple_a_phase="AGGRESSION",
         absorption_detected=True,
         absorption_bar_age=2,
         vwap_breakout="LONG",
     )
-    assert ctx.triple_a_phase == "AGGRESSION"
+    assert ctx.absorption_detected is True
     assert ctx.absorption_bar_age == 2
     assert ctx.vwap_breakout == "LONG"
 
@@ -48,8 +46,7 @@ def _qualified(**overrides) -> GateContext:
         setup_type="IMBALANCE_CONTINUATION",
         r_r_ratio=2.0,
         cushion_ticks=3.0,
-        triple_a_phase="AGGRESSION",
-        absorption_detected=False,
+        absorption_detected=True,
         absorption_bar_age=0,
         vwap_breakout=None,
     )
@@ -111,8 +108,10 @@ def test_no_position_gate_blocks_risk_halt():
 
 
 def test_vwap_breakout_alone_does_not_pass_gate_4():
-    """A lone VWAP breakout is NOT a confirmed edge without Triple-A/absorption context."""
-    result = GatePipeline().evaluate(_qualified(triple_a_phase="", vwap_breakout="LONG"))
+    """A lone VWAP breakout is NOT a confirmed edge without absorption context."""
+    result = GatePipeline().evaluate(
+        _qualified(absorption_detected=False, absorption_bar_age=0, vwap_breakout="LONG")
+    )
     assert result.passed is False
     assert result.gate == 4
     assert result.reason == GateReason.WAIT
@@ -122,7 +121,6 @@ def test_absorption_context_enables_gate_4():
     """Fresh absorption + breakout direction aligns the strategy edge."""
     result = GatePipeline().evaluate(
         _qualified(
-            triple_a_phase="",
             vwap_breakout="LONG",
             absorption_detected=True,
             absorption_bar_age=2,
@@ -135,7 +133,6 @@ def test_absorption_too_old_does_not_enable_gate_4():
     """Stale absorption is not an accumulation context — edge must be fresh."""
     result = GatePipeline().evaluate(
         _qualified(
-            triple_a_phase="",
             vwap_breakout="LONG",
             absorption_detected=True,
             absorption_bar_age=20,

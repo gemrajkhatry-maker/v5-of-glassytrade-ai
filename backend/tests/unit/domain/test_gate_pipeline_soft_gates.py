@@ -38,8 +38,7 @@ def _default_context(**overrides) -> GateContext:
         setup_type="TREND_CONTINUATION",
         r_r_ratio=2.5,
         cushion_ticks=3.0,
-        triple_a_phase="AGGRESSION",
-        absorption_detected=False,
+        absorption_detected=True,
         absorption_bar_age=0,
         vwap_breakout=None,
     )
@@ -120,7 +119,8 @@ def test_breakout_above_vah_passes_all_five():
         aggression_score=3.5,
         r_r_ratio=2.5,
         cushion_ticks=3.0,
-        triple_a_phase="AGGRESSION",
+        absorption_detected=True,
+        absorption_bar_age=0,
     )
 
     result = GatePipeline().evaluate(ctx)

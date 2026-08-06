@@ -74,14 +74,8 @@ def run_gate_pipeline(
     eia_suppressed = eia_calendar.is_suppressed(symbol) if symbol else False
 
     # ── Triple-A / VWAP context ────────────────────────────────────────────
-    # Triple-A phase lives on the range-bar state machine, not on AMTResult —
-    # leave it unset until that wiring lands.
-    triple_a_phase = ""
-    vwap_breakout = _detect_vwap_breakout(amt_result, tick, data)
-    absorption_side = getattr(amt_result, "absorption_side", "") or ""
     absorption_detected = bool(absorption_side)
-    if triple_a_phase:
-        logger.debug("gate_runner: triple_a_phase=%s", triple_a_phase)
+    vwap_breakout = _detect_vwap_breakout(amt_result, tick, data)
     if absorption_detected:
         logger.debug(
             "gate_runner: absorption_detected via absorption_side=%s (bar_age unavailable)",
@@ -118,7 +112,6 @@ def run_gate_pipeline(
         min_aggression_score=min_aggression_score,
         max_cushion_ticks=max_cushion_ticks,
         min_rr_ratio=min_rr_ratio,
-        triple_a_phase=triple_a_phase,
         absorption_detected=absorption_detected,
         absorption_bar_age=0,
         vwap_breakout=vwap_breakout,

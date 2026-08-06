@@ -331,7 +331,8 @@ class TestSoftGateQuorum:
             r_r_ratio=2.0,
             position_size_ok=True,
             eia_window_active=False,
-            triple_a_phase="AGGRESSION",
+            absorption_detected=True,
+            absorption_bar_age=0,
         )
         base.update(overrides)
         return GateContext(**base)

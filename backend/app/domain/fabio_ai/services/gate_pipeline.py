@@ -141,8 +141,8 @@ class GateContext:
     # Quorum configuration (overridable per exchange/session)
     soft_gate_quorum: int = SOFT_GATE_QUORUM  # Minimum soft gates that must pass
 
-    # Triple-A (aggression/absorption/agreement) context
-    triple_a_phase: str = ""
+    # Triple-A context (absorption + VWAP breakout carry the edge; the
+    # range-bar Triple-A state machine was removed with the range-bar layer)
     absorption_detected: bool = False
     absorption_bar_age: int = 0
     vwap_breakout: str | None = None
@@ -239,18 +239,13 @@ class GatePipeline:
             return self._fail(3, GateReason.WAIT, "CVD conflicts with intended direction")
 
         # ── GATE 4: Strategy alignment (Triple-A / VWAP context) ─────────────
-        # Edge must be present: AGGRESSION phase OR fresh absorption (which gives
-        # accumulation context to a VWAP breakout). A lone vwap_breakout is not a
+        # Edge must be present: fresh absorption (accumulation context) which
+        # gives meaning to a VWAP breakout. A lone vwap_breakout is not a
         # confirmed edge. If no Triple-A/VWAP context is populated at all, gate 4
         # degrades to a location-only check so un-wired callers keep working.
-        triple_a_populated = (
-            ctx.triple_a_phase != ""
-            or ctx.absorption_detected
-            or ctx.vwap_breakout is not None
-        )
+        triple_a_populated = ctx.absorption_detected or ctx.vwap_breakout is not None
         if triple_a_populated:
-            edge = ctx.triple_a_phase == "AGGRESSION"
-            edge = edge or (
+            edge = (
                 ctx.absorption_detected
                 and ctx.absorption_bar_age <= MAX_ABSORPTION_BAR_AGE
             )
@@ -258,7 +253,7 @@ class GatePipeline:
                 return self._fail(
                     4,
                     GateReason.WAIT,
-                    "No strategy edge (Triple-A/VWAP): no AGGRESSION phase, no fresh absorption",
+                    "No strategy edge (Triple-A/VWAP): no fresh absorption",
                 )
         if ctx.nearest_level <= 0:
             return self._fail(4, GateReason.WAIT, "No key level near price")
