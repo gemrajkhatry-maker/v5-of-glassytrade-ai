@@ -120,11 +120,18 @@ class RangeBarBuilder:
         self._vwap_pv: float = 0.0  # sum(price * volume)
         self._vwap_v: float = 0.0  # sum(volume)
 
-        # Triple-A state machine
-        self._triple_a_phase: str = ""  # "", "ABSORPTION", "ACCUMULATION"
+        # Triple-A state machine — persistent across detect_triple_a() calls
+        self._triple_a_phase: str = ""  # "", "ABSORPTION", "ACCUMULATION", "AGGRESSION"
         self._triple_a_absorption_idx: int = -1
         self._triple_a_direction: str = ""
         self._leg_start_idx: int = 0
+        self._absorption_bar_index: int | None = None
+        self._accumulation_count: int = 0
+        self._aggression_bar_index: int = -1
+        self._last_processed_idx: int = -1
+        self._poc_at_detection: float = 0.0
+        self._vah_at_detection: float = 0.0
+        self._val_at_detection: float = 0.0
         import time
         self._next_ts: int = int(time.time()) - (self._max_bars * 60)
 
@@ -142,6 +149,13 @@ class RangeBarBuilder:
         self._triple_a_absorption_idx = -1
         self._triple_a_direction = ""
         self._leg_start_idx = 0
+        self._absorption_bar_index = None
+        self._accumulation_count = 0
+        self._aggression_bar_index = -1
+        self._last_processed_idx = -1
+        self._poc_at_detection = 0.0
+        self._vah_at_detection = 0.0
+        self._val_at_detection = 0.0
         import time
         self._next_ts = int(time.time()) - (self._max_bars * 60)
 
@@ -380,18 +394,29 @@ class RangeBarBuilder:
     def detect_triple_a(self) -> TripleAPattern:
         """Detect Triple-A (Absorption + Accumulation + Aggression) pattern.
 
+        STATEFUL: instead of recomputing the pattern from the last ~10 bars on
+        every call, this advances a persistent state machine over each newly
+        finalized bar only once:
+
+            WAITING("") -> ABSORPTION -> ACCUMULATION -> AGGRESSION -> reset to ""
+
         Phase 1 — ABSORPTION: High-volume bar with tight range
             (volume > 1.5x average AND range < 0.5x average range)
 
-        Phase 2 — ACCUMULATION: 2-3 tight-range bars after absorption
-            (range < 0.7x average range, directionless)
+        Phase 2 — ACCUMULATION: 2+ tight-range bars after absorption that keep
+            trading within/near the POC (range < 0.7x average range AND the bar
+            trades within 2 tick-steps of POC)
 
-        Phase 3 — AGGRESSION: Breakout bar with expanding volume
-            (volume > 1.2x average AND range > 1.0x average range,
-             closes beyond absorption bar's high/low)
+        Phase 3 — AGGRESSION: Breakout bar with expanding volume that closes
+            beyond the VWAP band (volume > 1.2x average AND range > 1.0x
+            average range AND close > VWAP + 1sigma for LONG / < VWAP - 1sigma
+            for SHORT)
+
+        A bar is only evaluated once; the phase persists between calls until
+        a fresh bar after AGGRESSION resets the machine to WAITING.
         """
         if len(self._bars) < 5:
-            return TripleAPattern()
+            return self._triple_a_snapshot()
 
         recent = self._bars[-10:]
 
@@ -400,77 +425,129 @@ class RangeBarBuilder:
         avg_range = sum(b.high - b.low for b in recent) / len(recent)
 
         if avg_vol <= 0 or avg_range <= 0:
-            return TripleAPattern()
+            return self._triple_a_snapshot()
 
-        # Phase 1: Look for absorption in last 5 bars
-        absorption_idx = -1
-        for i in range(max(0, len(recent) - 5), len(recent)):
-            bar = recent[i]
-            bar_range = bar.high - bar.low
+        # Guard against the bar list being trimmed: drop stale references and
+        # restart the walk from the current end of the list.
+        if self._absorption_bar_index is not None and self._absorption_bar_index >= len(self._bars):
+            self._triple_a_phase = ""
+            self._absorption_bar_index = None
+            self._accumulation_count = 0
+            self._triple_a_direction = ""
+        self._last_processed_idx = min(self._last_processed_idx, len(self._bars) - 1)
+
+        # Advance the state machine over every bar finalized since the last call.
+        while self._last_processed_idx < len(self._bars) - 1:
+            idx = self._last_processed_idx + 1
+            self._last_processed_idx = idx
+            self._advance_triple_a(idx, self._bars[idx], avg_vol, avg_range)
+
+        return self._triple_a_snapshot()
+
+    def _advance_triple_a(
+        self, idx: int, bar: RangeBar, avg_vol: float, avg_range: float
+    ) -> None:
+        """Feed one freshly finalized bar through the state machine."""
+        # A new bar arriving after a signal starts a fresh cycle.
+        if self._triple_a_phase == "AGGRESSION":
+            self._triple_a_phase = ""
+            self._absorption_bar_index = None
+            self._accumulation_count = 0
+            self._triple_a_direction = ""
+            self._aggression_bar_index = -1
+
+        bar_range = bar.high - bar.low
+
+        if self._triple_a_phase == "":  # WAITING
             if bar.volume > avg_vol * 1.5 and bar_range < avg_range * 0.5:
-                absorption_idx = i
-                break
+                self._triple_a_phase = "ABSORPTION"
+                self._absorption_bar_index = idx
+                self._triple_a_absorption_idx = idx
+                self._accumulation_count = 0
+                self._triple_a_direction = ""
 
-        if absorption_idx < 0:
-            return TripleAPattern()
-
-        # Phase 2: Check for accumulation (2-3 tight bars after absorption)
-        acc_count = 0
-        for i in range(absorption_idx + 1, len(recent)):
-            bar = recent[i]
-            bar_range = bar.high - bar.low
-            if bar_range < avg_range * 0.7:
-                acc_count += 1
+        elif self._triple_a_phase == "ABSORPTION":
+            if self._is_accumulation_bar(bar, bar_range, avg_range):
+                self._accumulation_count += 1
+                if self._accumulation_count >= 2:
+                    self._triple_a_phase = "ACCUMULATION"
             else:
-                break
+                self._accumulation_count = 0
 
-        if acc_count < 1:
-            return TripleAPattern()
+        elif self._triple_a_phase == "ACCUMULATION":
+            direction = self._check_aggression(idx, bar, bar_range, avg_vol, avg_range)
+            if direction:
+                self._triple_a_phase = "AGGRESSION"
+                self._triple_a_direction = direction
+                self._aggression_bar_index = idx
+                vp = self.get_volume_profile()
+                self._poc_at_detection = vp.poc
+                self._vah_at_detection = vp.vah
+                self._val_at_detection = vp.val
 
-        # Phase 3: Check for aggression (breakout bar after accumulation)
-        aggression_idx = absorption_idx + acc_count + 1
-        if aggression_idx >= len(recent):
-            # Still in accumulation phase
-            return TripleAPattern(
-                detected=False,
-                phase="ACCUMULATION",
-                direction="",
-                absorption_bar_index=absorption_idx,
-                aggression_bar_index=-1,
-            )
+    def _is_accumulation_bar(self, bar: RangeBar, bar_range: float, avg_range: float) -> bool:
+        """True when a bar consolidates near the POC region (tight range, trades
+        within 2 tick-steps of the session POC)."""
+        if bar_range >= avg_range * 0.7:
+            return False
+        poc = self.get_volume_profile().poc
+        if poc <= 0:
+            return True
+        tol = 2 * self._tick_size
+        return bar.low <= poc + tol and bar.high >= poc - tol
 
-        agg_bar = recent[aggression_idx]
-        agg_range = agg_bar.high - agg_bar.low
-        absorption_bar = recent[absorption_idx]
+    def _check_aggression(
+        self, idx: int, bar: RangeBar, bar_range: float, avg_vol: float, avg_range: float
+    ) -> str:
+        """Return the direction ("LONG"/"SHORT") for a VWAP-band breakout bar,
+        else "" when the bar does not qualify as aggression."""
+        if bar.volume <= avg_vol * 1.2 or bar_range <= avg_range * 1.0:
+            return ""
+        vwap = self.get_vwap()
+        if vwap <= 0:
+            return ""
 
-        if agg_bar.volume > avg_vol * 1.2 and agg_range > avg_range * 1.0:
-            # Breakout detected
-            if agg_bar.close > absorption_bar.high:
-                direction = "LONG"
-            elif agg_bar.close < absorption_bar.low:
-                direction = "SHORT"
-            else:
-                direction = ""
+        closes = [b.close for b in self._bars[-10:]]
+        mean = sum(closes) / len(closes)
+        variance = sum((c - mean) ** 2 for c in closes) / len(closes)
+        std = variance ** 0.5
 
-            vp = self.get_volume_profile()
+        if bar.close > vwap + std:
+            return "LONG"
+        if bar.close < vwap - std:
+            return "SHORT"
+        return ""
+
+    def _triple_a_snapshot(self) -> TripleAPattern:
+        """Current state machine snapshot in the caller-facing TripleAPattern shape."""
+        if self._triple_a_phase == "AGGRESSION":
             return TripleAPattern(
                 detected=True,
                 phase="AGGRESSION",
-                direction=direction,
-                absorption_bar_index=absorption_idx,
-                aggression_bar_index=aggression_idx,
-                poc_at_detection=vp.poc,
-                vah_at_detection=vp.vah,
-                val_at_detection=vp.val,
+                direction=self._triple_a_direction,
+                absorption_bar_index=(
+                    self._absorption_bar_index
+                    if self._absorption_bar_index is not None
+                    else -1
+                ),
+                aggression_bar_index=self._aggression_bar_index,
+                poc_at_detection=self._poc_at_detection,
+                vah_at_detection=self._vah_at_detection,
+                val_at_detection=self._val_at_detection,
             )
-
-        return TripleAPattern(
-            detected=False,
-            phase="ACCUMULATION",
-            direction="",
-            absorption_bar_index=absorption_idx,
-            aggression_bar_index=-1,
-        )
+        if self._triple_a_phase in ("ABSORPTION", "ACCUMULATION"):
+            return TripleAPattern(
+                detected=False,
+                phase=self._triple_a_phase,
+                direction="",
+                absorption_bar_index=(
+                    self._absorption_bar_index
+                    if self._absorption_bar_index is not None
+                    else -1
+                ),
+                aggression_bar_index=-1,
+            )
+        return TripleAPattern()
 
     # ── Serialization ───────────────────────────────────────────────
 
