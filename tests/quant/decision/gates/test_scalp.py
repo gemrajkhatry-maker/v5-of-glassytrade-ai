@@ -1,7 +1,7 @@
 """Tests for Scalp Gate Pipeline."""
 
 import pytest
-from app.domain.services.scalp_gate_pipeline import (
+from quant.decision.gates.scalp import (
     ScalpGate,
     ScalpContext,
     ScalpGateResult,
