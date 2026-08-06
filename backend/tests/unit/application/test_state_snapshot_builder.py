@@ -95,9 +95,11 @@ def _make_session():
         },
         portfolio=_FakePortfolio(),
         last_amt={"marketState": "IMBALANCED"},
+        last_auction={},
         last_footprint={},
         data=[],
         _agent_decision=_make_agent_decision(),
+        last_quant_decision=None,
     )
 
 
@@ -163,3 +165,14 @@ def test_genai_analysis_dto_keeps_only_strategy_fields():
         "marketState",
         "aggression",
     }
+
+
+def test_snapshot_contains_quant_decision():
+    session = _make_session()
+    session.last_quant_decision = {
+        "approved": True, "reason": "Triple-A", "phase": "AGGRESSION",
+        "signal": {"type": "LONG", "entry": 100.0, "sl": 99.0, "tp": 102.0, "rr": 2.0, "confidence": 0.8},
+    }
+    snap = build_state_snapshot(session, _FakeRiskCoordinator(), object())
+    assert snap["quantDecision"]["approved"] is True
+    assert snap["quantDecision"]["signal"]["type"] == "LONG"

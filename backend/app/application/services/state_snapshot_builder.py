@@ -40,6 +40,7 @@ def build_state_snapshot(
         "portfolio": portfolio_dto,
         "amt": session.last_amt,
         "auction": session.last_auction,
+        "quantDecision": getattr(session, "last_quant_decision", None),
         "genAIAnalysis": _camel_case_ai(ai_analysis),
         "overseerAction": (ai_analysis or {}).get("overseer_action", ""),
         "overseerReason": (ai_analysis or {}).get("overseer_reason", ""),
