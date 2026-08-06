@@ -112,8 +112,11 @@ class DriveDecay:
         """
         from quant.contracts.tick_utils import round_to_tick
 
-        bucket = round_to_tick(level, record["tick_size"])
-        record = self._drive_1_records.get(bucket)
+        record = None
+        for bucket, rec in self._drive_1_records.items():
+            if round_to_tick(level, rec["tick_size"]) == bucket:
+                record = rec
+                break
 
         if record is None:
             return DriveDecayResult(
