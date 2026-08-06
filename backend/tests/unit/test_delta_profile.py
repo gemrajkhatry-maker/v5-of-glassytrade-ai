@@ -8,7 +8,7 @@ Tests the DeltaProfileAdapter implementation against Fabio AMT spec:
 
 import pytest
 from app.infrastructure.adapters.delta_profile_adapter import DeltaProfileAdapter
-from app.domain.ports.delta_profile import DeltaBucket, DeltaProfile
+from quant.contracts.ports.delta_profile import DeltaBucket, DeltaProfile
 
 
 class TestDeltaProfileAdapter:

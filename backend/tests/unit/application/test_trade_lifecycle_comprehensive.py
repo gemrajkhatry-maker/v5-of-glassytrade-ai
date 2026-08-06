@@ -17,9 +17,9 @@ from unittest.mock import MagicMock, patch
 from decimal import Decimal
 
 from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
-from app.domain.fabio_ai.services.exit_engine import ExitEngine, ExitReason, ExitSignal
-from app.domain.trading.models.enums import SignalType, Source, SetupType, Side
-from app.domain.trading.models.entities import Position
+from quant.execution.exit_engine import ExitEngine, ExitReason, ExitSignal
+from quant.contracts.enums import SignalType, Source, SetupType, Side
+from quant.contracts.entities import Position
 
 
 # ---------------------------------------------------------------------------

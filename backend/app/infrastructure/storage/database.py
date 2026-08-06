@@ -16,7 +16,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from app.domain.ports.storage import IStorage
+from quant.contracts.ports.storage import IStorage
 from shared.conversion import to_float
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,7 @@ quant LONG/SHORT map to SignalType.BUY/SELL respectively.
 from decimal import Decimal
 
 from app.application.services.quant_signal_mapper import quant_signal_to_domain
-from app.domain.trading.models.enums import SetupType, SignalType, Source
+from quant.contracts.enums import SetupType, SignalType, Source
 from quant.decision.signal_builder import Signal
 
 

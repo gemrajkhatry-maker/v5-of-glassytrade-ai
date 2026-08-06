@@ -6,7 +6,7 @@ Tests the DRY helpers that eliminate duplicated patterns.
 import pytest
 from unittest.mock import MagicMock
 from decimal import Decimal
-from app.domain.trading.models.utils import Side, ValueSerializer, MarketStateMapper
+from quant.contracts.utils import Side, ValueSerializer, MarketStateMapper
 
 
 class TestSideNormalize:

@@ -1,7 +1,7 @@
 """Contract tests for prompt_builder.py — pure string functions, no mocks."""
 
 import pytest
-from app.domain.fabio_ai.services.prompt_builder import (
+from quant.inference.prompt_builder import (
     build_entry_prompt,
     parse_entry_response,
     build_overseer_prompt,
@@ -11,14 +11,14 @@ from app.domain.fabio_ai.services.prompt_builder import (
     render_entry_prompt,
     _build_narrative_market_state,
 )
-from app.domain.fabio_ai.services import generative_ai_service
-from app.domain.trading.models.value_objects import (
+from quant.inference import generative_ai as generative_ai_service
+from quant.contracts.value_objects import (
     OHLC,
     AMTResult,
     FootprintCandle,
     FootprintLevel,
 )
-from app.domain.fabio_ai.services.session_context import SessionInfo
+from quant.amt.session.context import SessionInfo
 
 
 def _tick(close=100, delta=50, volume=500, vwap=100):

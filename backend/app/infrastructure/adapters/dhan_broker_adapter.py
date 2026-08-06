@@ -22,14 +22,14 @@ for _ancestor in _this_file.parents:
         break
 
 from app.config import Configuration
-from app.domain.ports.broker import IBroker
-from app.domain.trading.models.aggregates import (
+from quant.contracts.ports.broker import IBroker
+from quant.contracts.aggregates import (
     RISK_BY_CONFIDENCE,
     RISK_PER_TRADE,
     Portfolio,
 )
-from app.domain.trading.models.entities import Position, Signal
-from app.domain.trading.models.enums import Side, Source
+from quant.contracts.entities import Position, Signal
+from quant.contracts.enums import Side, Source
 from brokers.broker import Exchange
 from brokers.broker import Instrument, Order
 from brokers.broker.types import OrderStatus, OrderType

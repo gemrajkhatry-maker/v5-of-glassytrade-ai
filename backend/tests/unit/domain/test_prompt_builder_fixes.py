@@ -11,7 +11,7 @@ Validates three critical fixes:
 
 import pytest
 
-from app.domain.fabio_ai.services.prompt_builder import build_entry_prompt
+from quant.inference.prompt_builder import build_entry_prompt
 
 
 def _data(**overrides):

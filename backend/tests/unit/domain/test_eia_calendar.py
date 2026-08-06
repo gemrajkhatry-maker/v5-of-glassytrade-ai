@@ -2,7 +2,7 @@
 
 import pytest
 from datetime import datetime, time, timedelta, timezone
-from app.domain.fabio_ai.services.eia_calendar import EIACalendar, EIAWindow, EIA_SCHEDULE
+from quant.amt.session.eia import EIACalendar, EIAWindow, EIA_SCHEDULE
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 _ET = timezone(timedelta(hours=-5))

@@ -15,7 +15,7 @@ from app.application.handlers.llm_overseer_handler import (
     ADD_COOLDOWN,
     MAX_ADDS_PER_POSITION,
 )
-from app.domain.fabio_ai.services.prompt_builder import OverseerAction
+from quant.inference.prompt_builder import OverseerAction
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +321,7 @@ class TestProbabilityOverride:
     def test_high_reversal_overrides_hold_to_exit(self):
         """When exit_probability > 0.65 and LLM says HOLD, override to FULL_EXIT."""
         # Create mock probability engine that returns low P(long wins) = high P(adverse)
-        from app.domain.ports.probability_inference import ProbabilityEstimate
+        from quant.contracts.ports.probability_inference import ProbabilityEstimate
         prob_engine = MagicMock()
         prob_engine.is_ready.return_value = True
         def fake_estimate(features):
@@ -333,10 +333,10 @@ class TestProbabilityOverride:
 
         # Patch extract_features to return dummy features so the probability path succeeds
         def fake_extract_features(*args, **kwargs):
-            from app.domain.probability.features import FEATURE_NAMES
+            from quant.probability.features import FEATURE_NAMES
             return {name: 0.0 for name in FEATURE_NAMES}
         
-        with patch('app.domain.probability.features.extract_features', side_effect=fake_extract_features):
+        with patch('quant.probability.features.extract_features', side_effect=fake_extract_features):
 
             handler, gen_ai, tm, storage = _make_handler(
                 predict_return='{"action":"HOLD","reason":"looks fine"}',
@@ -344,7 +344,7 @@ class TestProbabilityOverride:
             )
 
             # Need 20+ data bars for probability engine to fire
-            from app.domain.trading.models.value_objects import OHLC
+            from quant.contracts.value_objects import OHLC
             fake_bars = [OHLC(open=100, high=101, low=99, close=100, volume=1000, delta=0, time="2025-01-01T10:00:00Z", vwap=100)] * 25
             session = FakeSession(data=fake_bars)
             mock_pos = MagicMock()

@@ -7,7 +7,7 @@ import logging
 import urllib.parse
 import urllib.request
 
-from app.domain.ports.notification_adapter import INotificationAdapter
+from quant.contracts.ports.notification_adapter import INotificationAdapter
 
 log = logging.getLogger(__name__)
 

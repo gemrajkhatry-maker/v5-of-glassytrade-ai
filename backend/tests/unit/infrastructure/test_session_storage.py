@@ -17,12 +17,12 @@ import tempfile
 import pytest
 
 from app.infrastructure.storage.database import SQLiteStorageAdapter
-from app.domain.fabio_ai.services.session_context import (
+from quant.amt.session.context import (
     classify_gap,
     opening_inventory_bias,
 )
-from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
-from app.domain.trading.models.value_objects import OHLC
+from quant.amt.analyzer import AMTAnalyzer
+from quant.contracts.value_objects import OHLC
 
 
 # ---------------------------------------------------------------------------

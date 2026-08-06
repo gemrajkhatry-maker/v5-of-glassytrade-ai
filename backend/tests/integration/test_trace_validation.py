@@ -10,10 +10,10 @@ from app.application.services.session_state_manager import SessionStateManager
 from app.application.services.entry_coordinator import EntryCoordinator
 from app.application.services.session_event_logger import SessionEventLogger
 from app.application.services.exit_coordinator import ExitCoordinator
-from app.domain.trading.models.entities import Position, Signal
-from app.domain.trading.models.enums import PositionStatus, SetupType, SignalType, Side, Source
-from app.domain.trading.models.value_objects import AMTResult, OHLC
-from app.domain.trading.events import TickReceived
+from quant.contracts.entities import Position, Signal
+from quant.contracts.enums import PositionStatus, SetupType, SignalType, Side, Source
+from quant.contracts.value_objects import AMTResult, OHLC
+from quant.contracts.events import TickReceived
 
 
 class _FakeTradeJournal:

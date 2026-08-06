@@ -9,7 +9,7 @@ from app.application.handlers.post_trade_analyst import (
     build_post_trade_prompt,
     parse_post_trade_response,
 )
-from app.domain.fabio_ai.services.prompt_builder import (
+from quant.inference.prompt_builder import (
     build_advisory_prompt,
     parse_advisory_response,
 )
@@ -39,7 +39,7 @@ class TestAdvisoryResult:
 
 class TestBuildAdvisoryPrompt:
     def test_prompt_contains_symbol(self):
-        from app.domain.trading.models.value_objects import OHLC, AMTResult
+        from quant.contracts.value_objects import OHLC, AMTResult
 
         tick = OHLC.create(
             time="2024-01-01T09:15:00",

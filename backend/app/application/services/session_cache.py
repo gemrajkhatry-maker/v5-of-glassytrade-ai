@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from app.core.async_boundary import ensure_sync_adapter_result
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.value_objects import OHLC, OrderBook, AMTResult
+    from quant.contracts.value_objects import OHLC, OrderBook, AMTResult
 
 log = logging.getLogger(__name__)
 

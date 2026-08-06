@@ -9,7 +9,7 @@ from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from threading import Lock
 from typing import Any
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 
 logger = logging.getLogger(__name__)
 

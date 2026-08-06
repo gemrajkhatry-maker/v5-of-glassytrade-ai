@@ -6,8 +6,8 @@ from decimal import Decimal
 
 from app.application.services.exit_coordinator import ExitCoordinator
 from app.application.services.session_state_manager import SessionStateManager
-from app.domain.trading.models.entities import Position
-from app.domain.trading.models.enums import PositionStatus, Side, Source
+from quant.contracts.entities import Position
+from quant.contracts.enums import PositionStatus, Side, Source
 
 
 class FakeExitEngine:

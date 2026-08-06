@@ -4,9 +4,9 @@ from unittest.mock import MagicMock
 from decimal import Decimal
 
 from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
-from app.domain.fabio_ai.services.exit_engine import ExitEngine, ExitReason, ExitSignal
-from app.domain.trading.models.entities import Position
-from app.domain.trading.models.enums import Side, Source
+from quant.execution.exit_engine import ExitEngine, ExitReason, ExitSignal
+from quant.contracts.entities import Position
+from quant.contracts.enums import Side, Source
 
 
 def _make_handler():

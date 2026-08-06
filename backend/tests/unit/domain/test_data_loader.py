@@ -1,8 +1,8 @@
 import os
 import csv
 import pytest
-from app.domain.fabio_ai.rl.data_loader import load_from_csv, split_data, DataSplit
-from app.domain.trading.models.value_objects import OHLC
+from quant.inference.rl.data_loader import load_from_csv, split_data, DataSplit
+from quant.contracts.value_objects import OHLC
 
 class TestDataLoader:
     def test_load_from_csv_empty(self, tmp_path):

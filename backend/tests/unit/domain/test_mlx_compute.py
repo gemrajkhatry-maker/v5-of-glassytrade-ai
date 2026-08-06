@@ -2,7 +2,7 @@
 
 import math
 import pytest
-from app.domain.fabio_ai.services import mlx_compute as mc
+from quant.amt import compute as mc
 
 
 class TestGaussianWeights:

@@ -1,7 +1,7 @@
 """No-op notification adapter — default when no credentials configured."""
 from __future__ import annotations
 import logging
-from app.domain.ports.notifications import INotification
+from quant.contracts.ports.notifications import INotification
 
 logger = logging.getLogger(__name__)
 

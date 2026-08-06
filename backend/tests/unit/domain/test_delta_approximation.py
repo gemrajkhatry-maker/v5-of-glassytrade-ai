@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain.services.tick_delta import (
+from quant.amt.orderflow.tick_delta import (
     candle_delta_proxy,
     TickDeltaClassifier,
 )

@@ -6,12 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.domain.fabio_ai.services.option_selector import (
+from quant.amt.session.selector import (
     OptionSelector,
     OptionSelectorConfig,
     OptionSelection,
 )
-from app.domain.fabio_ai.services.option_scanner import OptionScannerService, ScanResult
+from quant.amt.session.scanner import OptionScannerService, ScanResult
 
 
 # ---------------------------------------------------------------------------

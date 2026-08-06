@@ -1,12 +1,12 @@
 """Unit tests for domain value objects — immutability, creation, defaults."""
 
 import pytest
-from app.domain.trading.models.value_objects import (
+from quant.contracts.value_objects import (
     OHLC, OrderBookLevel, OrderBook, VolumeProfileLevel,
     StrategyStats,
     FootprintLevel, FootprintCandle, AICommandResponse, AggressivePrint,
 )
-from app.domain.fabio_ai.models.predictions import (
+from quant.inference.models import (
     ModelWeights, FactorBreakdown, AIAnalysisResult,
 )
 

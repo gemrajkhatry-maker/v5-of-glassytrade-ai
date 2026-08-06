@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch, call
 
 
 from app.application.handlers.amt_handler import AMTHandler, _filter_today_session
-from app.domain.trading.models.value_objects import (
+from quant.contracts.value_objects import (
     OHLC, AMTResult, OrderBook, OrderBookLevel, VolumeProfileLevel,
     FootprintCandle, FootprintLevel,
 )

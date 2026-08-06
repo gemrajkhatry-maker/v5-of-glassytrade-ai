@@ -17,7 +17,7 @@ class TestCandleHistoryTrimming:
     """Verify session.data is capped at MAX_CANDLES_PER_SYMBOL."""
 
     def _make_ohlc(self, time_str: str):
-        from app.domain.trading.models.value_objects import OHLC
+        from quant.contracts.value_objects import OHLC
         return OHLC(
             time=time_str, open=100, high=101, low=99,
             close=100, volume=10, vwap=100, taker_buy_volume=5, delta=1,

@@ -1,10 +1,10 @@
 """Unit tests for Portfolio aggregate root."""
 
 import pytest
-from app.domain.trading.models.enums import Side, Source, PositionStatus, SignalType, SetupType
-from app.domain.trading.models.entities import Position, Signal
-from app.domain.trading.models.aggregates import Portfolio
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.enums import Side, Source, PositionStatus, SignalType, SetupType
+from quant.contracts.entities import Position, Signal
+from quant.contracts.aggregates import Portfolio
+from quant.contracts.value_objects import OHLC
 
 
 def _make_tick(close: float = 100, **overrides) -> OHLC:
@@ -27,7 +27,7 @@ def _make_signal(price=100, sl=95, tp=110, source=Source.AMT, sig_type=SignalTyp
 class TestPortfolioCreate:
     def test_default(self):
         p = Portfolio.create_default()
-        from app.domain.trading.models.aggregates import INITIAL_CAPITAL
+        from quant.contracts.aggregates import INITIAL_CAPITAL
         assert p.balance == INITIAL_CAPITAL
         assert p.equity == INITIAL_CAPITAL
         assert p.leverage == 1
@@ -373,7 +373,7 @@ class TestStraddlePrevention:
 
     def test_history_trim(self):
         """Test that closed_trades list is trimmed at 200."""
-        from app.domain.trading.models.entities import Position
+        from quant.contracts.entities import Position
         
         p = Portfolio.create_default()
         
@@ -403,7 +403,7 @@ class TestStraddlePrevention:
 
     def test_long_position_small_loss_at_time_stop(self):
         """Test TIME_STOP behavior with R-multiple logic for small loss trades."""
-        from app.domain.fabio_ai.services.exit_rules import check_time_stop_with_price, ExitReason
+        from quant.execution.exit_rules import check_time_stop_with_price, ExitReason
         
         p = Portfolio.create_default()
         
@@ -431,8 +431,8 @@ class TestStraddlePrevention:
 
     def test_time_stop_r_multiple_at_one_r(self):
         """Test TIME_STOP doesn't exit when at 1R profit."""
-        from app.domain.trading.models.entities import Position
-        from app.domain.fabio_ai.services.exit_rules import check_time_stop_with_price
+        from quant.contracts.entities import Position
+        from quant.execution.exit_rules import check_time_stop_with_price
         import time
         
         p = Portfolio.create_default()

@@ -11,7 +11,7 @@ Tests the two-stage _parse_response() in GenerativeAIService against:
 import pytest
 import logging
 
-from app.domain.fabio_ai.services.prompt_builder import parse_entry_response
+from quant.inference.prompt_builder import parse_entry_response
 
 
 # ---------------------------------------------------------------

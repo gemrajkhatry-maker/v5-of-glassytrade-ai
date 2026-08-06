@@ -1,8 +1,8 @@
 """Tests for GenerativeAIService — LLM-based entry decision logic."""
 
-from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-from app.domain.fabio_ai.services.prompt_builder import build_entry_prompt, parse_entry_response
-from app.domain.ports.llm_inference import ILLMInference
+from quant.inference.generative_ai import GenerativeAIService
+from quant.inference.prompt_builder import build_entry_prompt, parse_entry_response
+from quant.contracts.ports.llm_inference import ILLMInference
 
 
 # ---------------------------------------------------------------------------

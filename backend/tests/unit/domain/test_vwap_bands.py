@@ -10,8 +10,8 @@ import math
 
 import pytest
 
-from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
-from app.domain.trading.models.value_objects import OHLC
+from quant.amt.analyzer import AMTAnalyzer
+from quant.contracts.value_objects import OHLC
 
 
 def _candle(

@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.application.handlers.amt_handler import AMTHandler
 from app.application.services.amt_service import AMTService
-from app.domain.trading.models.value_objects import AMTResult, OHLC
+from quant.contracts.value_objects import AMTResult, OHLC
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 

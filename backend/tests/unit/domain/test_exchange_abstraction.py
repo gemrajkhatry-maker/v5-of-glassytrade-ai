@@ -14,11 +14,11 @@ import os
 import pytest
 from datetime import datetime, timezone, timedelta
 
-from app.domain.models.exchange_config import ExchangeConfig
-from app.domain.services.symbol_registry import SymbolRegistry
+from quant.contracts.exchange_config import ExchangeConfig
+from quant.amt.session.symbol_registry import SymbolRegistry
 from app.infrastructure.strategies.nse_strategy import NSEExchangeStrategy
 from app.infrastructure.strategies.mcx_strategy import MCXExchangeStrategy
-from app.domain.fabio_ai.services.session_context_factory import SessionContextFactory
+from quant.amt.session.context_factory import SessionContextFactory
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -305,7 +305,7 @@ class TestSessionContextFactory:
 
     def test_from_tick_uses_injected_config(self):
         """Instance method should use injected exchange config."""
-        from app.domain.trading.models.value_objects import OHLC
+        from quant.contracts.value_objects import OHLC
 
         cfg = ExchangeConfig.for_exchange("MCX")
         reg = SymbolRegistry()
@@ -419,7 +419,7 @@ class TestAbstractionLayerConsistency:
         config = Configuration.from_unified()
         container = compose_container(config)
 
-        from app.domain.ports import IExchangeStrategy
+        from quant.contracts.ports import IExchangeStrategy
 
         strat = container.resolve(IExchangeStrategy)
         assert strat is not None
@@ -435,7 +435,7 @@ class TestAbstractionLayerConsistency:
         """
         import inspect
 
-        from app.domain.fabio_ai.services import session_context_factory
+        from quant.amt.session import context_factory as session_context_factory
 
         source = inspect.getsource(session_context_factory)
         lines = source.split("\n")

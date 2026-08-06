@@ -8,9 +8,9 @@ import pytest
 from app.application.services.session_event_router import SessionEventRouter
 from app.application.services.session_state_manager import SessionState
 from app.config_models.settings_adapter import SettingsAdapter
-from app.domain.trading.models.entities import Signal as DomainSignal
-from app.domain.trading.models.enums import SignalType
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.entities import Signal as DomainSignal
+from quant.contracts.enums import SignalType
+from quant.contracts.value_objects import OHLC
 
 
 def _build_router(entry_coordinator, risk_coordinator):

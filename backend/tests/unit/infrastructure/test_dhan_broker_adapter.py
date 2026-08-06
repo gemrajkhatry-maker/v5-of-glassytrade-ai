@@ -29,9 +29,9 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter
-from app.domain.trading.models.entities import Signal
-from app.domain.trading.models.enums import SignalType, SetupType, Source
-from app.domain.trading.models.aggregates import Portfolio
+from quant.contracts.entities import Signal
+from quant.contracts.enums import SignalType, SetupType, Source
+from quant.contracts.aggregates import Portfolio
 from brokers.broker.types import OrderStatus
 
 

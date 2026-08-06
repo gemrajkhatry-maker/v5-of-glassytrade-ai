@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from app.domain.services.underlying_futures_provider import (
+from quant.amt.session.futures_provider import (
     InstrumentConfig,
     DualFeedMapping,
     UnderlyingFuturesProvider,

@@ -9,8 +9,8 @@ Verifies that:
 from __future__ import annotations
 
 import pytest
-from app.domain.services.symbol_registry import SymbolRegistry
-from app.domain.models.exchange_config import ExchangeConfig
+from quant.amt.session.symbol_registry import SymbolRegistry
+from quant.contracts.exchange_config import ExchangeConfig
 
 
 class TestExchangeIsolation:
@@ -85,7 +85,7 @@ class TestMCXScannerFiltering:
 
     def test_mcx_underlyings_in_scanner(self):
         """Scanner _MCX_UNDERLYINGS should include GOLD and SILVER."""
-        from app.domain.fabio_ai.services.option_scanner import OptionScannerService
+        from quant.amt.session.scanner import OptionScannerService
 
         # Check the scanner's internal mapping
         mcx = {"CRUDEOIL", "NATURALGAS", "GOLD", "SILVER"}

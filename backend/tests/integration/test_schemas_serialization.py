@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import pytest
-from app.domain.trading.models.enums import Side, Source, SignalType, SetupType, PositionStatus
-from app.domain.trading.models.value_objects import (
+from quant.contracts.enums import Side, Source, SignalType, SetupType, PositionStatus
+from quant.contracts.value_objects import (
     OHLC, OrderBook, OrderBookLevel,
     StrategyStats, FootprintLevel, FootprintCandle,
     AMTResult, VolumeProfileLevel, AggressivePrint,
 )
-from app.domain.fabio_ai.models.predictions import (
+from quant.inference.models import (
     ModelWeights, FactorBreakdown, AIAnalysisResult,
 )
-from app.domain.trading.models.entities import Signal, Position
-from app.domain.trading.models.aggregates import Portfolio
+from quant.contracts.entities import Signal, Position
+from quant.contracts.aggregates import Portfolio
 from app.infrastructure.serialization.schemas import (
     ohlc_to_dto, dto_to_ohlc, OHLCDataDTO,
     portfolio_to_dto, position_to_dto, signal_to_dto,
@@ -111,7 +111,7 @@ class TestPortfolioSerialization:
     def test_empty_portfolio(self):
         p = Portfolio.create_default()
         d = portfolio_to_dto(p)
-        from app.domain.trading.models.aggregates import INITIAL_CAPITAL
+        from quant.contracts.aggregates import INITIAL_CAPITAL
         assert d["balance"] == INITIAL_CAPITAL
         assert d["positions"] == []
         assert d["closedTrades"] == []

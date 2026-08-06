@@ -1,5 +1,5 @@
 """Phase 5 tests — StoragePort ISP split."""
-from app.domain.ports.storage import (
+from quant.contracts.ports.storage import (
     IStorage, ITickStorage, ITradeStorage, IDecisionStorage,
     IOpenPositionStorage, IPositionEventStorage,
 )

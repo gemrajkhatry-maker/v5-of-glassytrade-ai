@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.domain.trading.models.value_objects import OHLC, AMTResult
+from quant.contracts.value_objects import OHLC, AMTResult
 from app.application.services.session_state_manager import (
     SessionState,
     SessionStateManager,

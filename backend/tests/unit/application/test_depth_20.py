@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import MagicMock, patch
 from app.application.engine import TradingEngine
-from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
-from app.domain.probability.features import (
+from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
+from quant.probability.features import (
     active_model_features,
     extract_features,
 )

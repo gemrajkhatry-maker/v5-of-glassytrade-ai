@@ -1,7 +1,7 @@
 """Tests for CVD (Cumulative Delta Volume) models."""
 
 import pytest
-from app.domain.trading.models.cvd import CVDState, CVDDataPoint
+from quant.contracts.cvd import CVDState, CVDDataPoint
 
 
 class TestCVDDataPoint:

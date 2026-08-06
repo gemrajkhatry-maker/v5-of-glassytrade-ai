@@ -5,7 +5,7 @@ Tests the immutable context object that eliminates parameter clumps.
 
 import pytest
 from unittest.mock import MagicMock
-from app.domain.trading.models.trading_context import TradingContext
+from quant.contracts.trading_context import TradingContext
 
 
 class TestTradingContext:

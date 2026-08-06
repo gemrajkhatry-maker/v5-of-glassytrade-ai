@@ -1,6 +1,6 @@
 """Phase 4 tests — MarketState enum usage."""
-from app.domain.trading.models.enums import MarketState
-from app.domain.trading.models.value_objects import AMTResult
+from quant.contracts.enums import MarketState
+from quant.contracts.value_objects import AMTResult
 
 
 class TestMarketStateEnum:

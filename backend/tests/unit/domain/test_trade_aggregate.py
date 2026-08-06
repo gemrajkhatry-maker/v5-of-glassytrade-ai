@@ -22,7 +22,7 @@ from app.domain.trading.models.trade_aggregate import (
     TradeThesis,
     create_trade,
 )
-from app.domain.trading.models.enums import Side, SetupType
+from quant.contracts.enums import Side, SetupType
 
 
 class TestPositionDerivation:

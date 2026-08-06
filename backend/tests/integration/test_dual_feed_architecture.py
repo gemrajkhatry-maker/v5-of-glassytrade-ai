@@ -10,7 +10,7 @@ These tests validate the core components for futures data flow:
 import pytest
 from datetime import datetime, timedelta
 
-from app.domain.services.underlying_futures_provider import (
+from quant.amt.session.futures_provider import (
     UnderlyingFuturesProvider,
     DualFeedMapping,
     InstrumentConfig,
@@ -102,7 +102,7 @@ class TestSessionCacheUnderlyingData:
 
     def test_underlying_data_after_update(self, cache):
         """Test has_underlying_data returns True after update."""
-        from app.domain.trading.models.value_objects import OHLC
+        from quant.contracts.value_objects import OHLC
 
         # Add 5 underlying candles
         for i in range(5):
@@ -120,7 +120,7 @@ class TestSessionCacheUnderlyingData:
 
     def test_underlying_data_insufficient(self, cache):
         """Test has_underlying_data returns False with insufficient data."""
-        from app.domain.trading.models.value_objects import OHLC
+        from quant.contracts.value_objects import OHLC
 
         # Add only 3 underlying candles (less than 5 required)
         for i in range(3):
@@ -138,7 +138,7 @@ class TestSessionCacheUnderlyingData:
 
     def test_get_underlying_data_returns_list(self, cache):
         """Test get_underlying_data returns the stored data."""
-        from app.domain.trading.models.value_objects import OHLC
+        from quant.contracts.value_objects import OHLC
 
         ohlc = OHLC(
             time=datetime.now().isoformat(),
@@ -157,7 +157,7 @@ class TestSessionCacheUnderlyingData:
 
     def test_get_option_data_returns_session_data(self, simple_session, cache):
         """Test get_option_data returns session candle buffer."""
-        from app.domain.trading.models.value_objects import OHLC
+        from quant.contracts.value_objects import OHLC
 
         # Add option candles
         for i in range(3):
@@ -198,7 +198,7 @@ class TestAMTServiceDataSource:
     @pytest.fixture
     def cache_with_underlying(self, simple_session):
         """Cache with underlying data."""
-        from app.domain.trading.models.value_objects import OHLC
+        from quant.contracts.value_objects import OHLC
 
         cache = SessionCache(simple_session)
 

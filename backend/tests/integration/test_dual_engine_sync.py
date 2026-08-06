@@ -1,11 +1,11 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+from quant.inference.generative_ai import GenerativeAIService
 from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
-from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
-from app.domain.fabio_ai.services.amt_analyzer import AMTConfig
-from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook
-from app.domain.fabio_ai.services.session_context import SessionInfo
+from quant.execution.exit_engine import ExitEngine as TradeManager
+from quant.amt.analyzer import AMTConfig
+from quant.contracts.value_objects import OHLC, AMTResult, OrderBook
+from quant.amt.session.context import SessionInfo
 
 @pytest.fixture
 def mock_adapter():
@@ -88,7 +88,7 @@ class TestDualEngineSynchronization:
         mock_adapter.predict.return_value = '{"action": "HOLD", "reason": "narrative matches"}'
         
         # We need to bypass the background execution for testing
-        from app.domain.fabio_ai.services.prompt_builder import build_overseer_prompt
+        from quant.inference.prompt_builder import build_overseer_prompt
         overseer_prompt = build_overseer_prompt(pos_state, tick, amt_result)
         
         # 4. Assert Overseer uses the same rich context

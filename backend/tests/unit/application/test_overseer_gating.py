@@ -24,7 +24,7 @@ from app.application.handlers.llm_overseer_handler import (
     LLMOverseerHandler,
     OVERSEER_COOLDOWN,
 )
-from app.domain.trading.models.entities import Position, PositionStatus, Side
+from quant.contracts.entities import Position, PositionStatus, Side
 
 
 _created_handlers = []

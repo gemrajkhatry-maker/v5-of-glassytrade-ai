@@ -21,14 +21,14 @@ from decimal import Decimal
 import pytest
 
 from app.infrastructure.adapters.data_generator import generate_market_data
-from app.domain.trading.models.value_objects import OHLC, AMTResult
-from app.domain.trading.models.entities import Position, Signal
-from app.domain.trading.models.aggregates import Portfolio, INITIAL_CAPITAL
-from app.domain.trading.models.enums import SignalType, SetupType, Source, Side, PositionStatus
-from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import compute_atr
-from app.domain.fabio_ai.services.exit_rules import update_excursions
-from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
-from app.domain.fabio_ai.services.exit_engine import ExitEngine, ExitReason
+from quant.contracts.value_objects import OHLC, AMTResult
+from quant.contracts.entities import Position, Signal
+from quant.contracts.aggregates import Portfolio, INITIAL_CAPITAL
+from quant.contracts.enums import SignalType, SetupType, Source, Side, PositionStatus
+from quant.decision.gates.confirmation_bundle import compute_atr
+from quant.execution.exit_rules import update_excursions
+from quant.decision.gates.signal_builder import build_entry_signal
+from quant.execution.exit_engine import ExitEngine, ExitReason
 from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 
 

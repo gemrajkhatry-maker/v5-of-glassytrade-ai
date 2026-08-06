@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import math
 import random
 
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.value_objects import OHLC
 
 
 _REGIME_DRIFT = {

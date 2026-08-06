@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from app.domain.trading.models.value_objects import OHLC
-from app.domain.fabio_ai.services.cvd_tracker import CVDTracker
-from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+from quant.contracts.value_objects import OHLC
+from quant.amt.orderflow.cvd import CVDTracker
+from quant.amt.analyzer import AMTAnalyzer
 from app.infrastructure.adapters.data_generator import generate_market_data
 
 

@@ -5,13 +5,13 @@ EMA variance warm-up, and SL placement from aggressive prints.
 """
 
 import pytest
-from app.domain.fabio_ai.services import mlx_compute as mc
-from app.domain.fabio_ai.services.amt_analyzer import (
+from quant.amt import compute as mc
+from quant.amt.analyzer import (
     find_aggressive_prints,
     AMTConfig,
 )
-from app.domain.fabio_ai.services.entry_gates.signal_builder import sl_from_aggressive_print
-from app.domain.trading.models.value_objects import OHLC, AggressivePrint, AMTResult
+from quant.decision.gates.signal_builder import sl_from_aggressive_print
+from quant.contracts.value_objects import OHLC, AggressivePrint, AMTResult
 
 
 def _candle(

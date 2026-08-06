@@ -15,7 +15,7 @@ if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
 from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter
-from app.domain.ports.market_data import IMarketData
+from quant.contracts.ports.market_data import IMarketData
 from brokers.broker.dhan.application.broker import DhanBroker
 from brokers.broker.types import Exchange
 

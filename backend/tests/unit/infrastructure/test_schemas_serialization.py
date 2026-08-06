@@ -7,10 +7,10 @@ field the frontend renders.
 
 from __future__ import annotations
 
-from app.domain.trading.models.aggregates import Portfolio
-from app.domain.trading.models.entities import Position
-from app.domain.trading.models.enums import Side, Source
-from app.domain.trading.models.value_objects import AMTResult
+from quant.contracts.aggregates import Portfolio
+from quant.contracts.entities import Position
+from quant.contracts.enums import Side, Source
+from quant.contracts.value_objects import AMTResult
 from app.infrastructure.serialization.schemas import (
     amt_result_to_dto,
     portfolio_to_dto,

@@ -15,13 +15,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.domain.trading.models.value_objects import OHLC, AMTResult
-from app.domain.trading.models.entities import Signal, Position
-from app.domain.trading.models.enums import (
+from quant.contracts.value_objects import OHLC, AMTResult
+from quant.contracts.entities import Signal, Position
+from quant.contracts.enums import (
     SignalType, Source, SetupType, Side, PositionStatus,
 )
-from app.domain.trading.models.aggregates import Portfolio
-from app.domain.trading.events import (
+from quant.contracts.aggregates import Portfolio
+from quant.contracts.events import (
     TickReceived, SignalGenerated, PositionClosed,
 )
 
@@ -198,7 +198,7 @@ class TestSessionLifecycle:
 
     def test_ts06_session_with_open_position(self, mock_deps, cleanup_service_handlers):
         """TS-06b: Session with open position can be created and managed."""
-        from app.domain.trading.models.entities import Position
+        from quant.contracts.entities import Position
         svc = _make_service(mock_deps)
         cleanup_service_handlers.append(svc)
 
@@ -232,8 +232,8 @@ class TestSignalIdempotency:
 
     def test_ts04_duplicate_signal_id_skipped(self, mock_deps, cleanup_service_handlers):
         """TS-04: Same signal_id processed twice -> only first executes."""
-        from app.domain.trading.models.entities import Signal, SignalType
-        from app.domain.trading.models.enums import SetupType, Source
+        from quant.contracts.entities import Signal, SignalType
+        from quant.contracts.enums import SetupType, Source
         import uuid
 
         svc = _make_service(mock_deps)
@@ -353,8 +353,8 @@ class TestPendingSignalDrain:
 
     def test_ts10_pending_signal_mechanism_exists(self, mock_deps, cleanup_service_handlers):
         """TS-10: Session has pending signal mechanism via _event_router."""
-        from app.domain.trading.models.entities import Signal, SignalType
-        from app.domain.trading.models.enums import SetupType, Source
+        from quant.contracts.entities import Signal, SignalType
+        from quant.contracts.enums import SetupType, Source
         import uuid
 
         svc = _make_service(mock_deps)

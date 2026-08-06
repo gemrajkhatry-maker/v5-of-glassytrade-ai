@@ -18,7 +18,7 @@ CVDTracker:
 from __future__ import annotations
 
 import pytest
-from app.domain.services.tick_delta import (
+from quant.amt.orderflow.tick_delta import (
     TickDeltaClassifier,
     candle_delta_proxy,
     TickDelta,

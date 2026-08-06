@@ -20,12 +20,12 @@ from app.config import settings
 from app.application.utils import is_market_open
 
 if TYPE_CHECKING:
-    from app.domain.ports.market_data import IMarketData
+    from quant.contracts.ports.market_data import IMarketData
     from app.application.services.trading_session import TradingSessionService
 
 logger = logging.getLogger(__name__)
 
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 
 _DHAN_CONNECT_COOLDOWN: float = 5.0
 _MAX_STREAM_RETRIES = 10

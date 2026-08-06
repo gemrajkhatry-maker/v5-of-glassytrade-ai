@@ -14,9 +14,9 @@ from decimal import Decimal
 import pytest
 
 from app.application.services.entry_coordinator import EntryCoordinator
-from app.domain.trading.models.entities import Position, Signal
-from app.domain.trading.models.enums import SignalType, SetupType, Source, Side
-from app.domain.fabio_ai.services.scale_manager import ScaleManager
+from quant.contracts.entities import Position, Signal
+from quant.contracts.enums import SignalType, SetupType, Source, Side
+from quant.execution.scale import ScaleManager
 
 
 def _make_signal(is_buy=True, price=100.0, sl=95.0, tp=110.0) -> Signal:

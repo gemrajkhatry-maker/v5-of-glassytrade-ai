@@ -10,7 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar
 
-from app.domain.trading.events import DomainEvent
+from quant.contracts.events import DomainEvent
 
 T = TypeVar("T", bound=DomainEvent)
 

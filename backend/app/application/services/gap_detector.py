@@ -16,12 +16,12 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 from app.config import settings
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 
 if TYPE_CHECKING:
     from app.application.services.trading_session import TradingSessionService
-    from app.domain.ports.broker import IBroker
-    from app.domain.trading.models.value_objects import OHLC
+    from quant.contracts.ports.broker import IBroker
+    from quant.contracts.value_objects import OHLC
 
 logger = logging.getLogger(__name__)
 

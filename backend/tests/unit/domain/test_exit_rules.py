@@ -4,8 +4,8 @@ import pytest
 from decimal import Decimal
 import time
 
-from app.domain.trading.models.entities import Position, Side, PositionStatus
-from app.domain.fabio_ai.services.exit_rules import (
+from quant.contracts.entities import Position, Side, PositionStatus
+from quant.execution.exit_rules import (
     check_time_stop_with_price,
     check_scratch,
     get_session_time_stop,
@@ -254,7 +254,7 @@ class TestUpdateExcursions:
 
     def test_update_excursions_long(self):
         """Test excursion updates for long position."""
-        from app.domain.fabio_ai.services.exit_rules import update_excursions
+        from quant.execution.exit_rules import update_excursions
         
         pos = Position(
             id="test-exc-1",
@@ -275,7 +275,7 @@ class TestUpdateExcursions:
 
     def test_update_excursions_short(self):
         """Test excursion updates for short position."""
-        from app.domain.fabio_ai.services.exit_rules import update_excursions
+        from quant.execution.exit_rules import update_excursions
         
         pos = Position(
             id="test-exc-2",
@@ -299,7 +299,7 @@ class TestSpreadBlowout:
 
     def test_spread_blowout_triggered(self):
         """Spread >= max_spread_pct triggers exit."""
-        from app.domain.fabio_ai.services.exit_rules import check_spread_blowout, ExitReason
+        from quant.execution.exit_rules import check_spread_blowout, ExitReason
         
         pos = Position(
             id="test-spread-1",
@@ -316,7 +316,7 @@ class TestSpreadBlowout:
 
     def test_spread_blowout_not_triggered(self):
         """Normal spread does not trigger exit."""
-        from app.domain.fabio_ai.services.exit_rules import check_spread_blowout
+        from quant.execution.exit_rules import check_spread_blowout
         
         pos = Position(
             id="test-spread-2",
@@ -332,7 +332,7 @@ class TestSpreadBlowout:
 
     def test_spread_blowout_invalid_inputs(self):
         """Invalid inputs return None."""
-        from app.domain.fabio_ai.services.exit_rules import check_spread_blowout
+        from quant.execution.exit_rules import check_spread_blowout
         
         pos = Position(
             id="test-spread-3",
@@ -352,49 +352,49 @@ class TestClassifyExit:
 
     def test_classify_take_profit_long(self):
         """LONG take profit classification."""
-        from app.domain.fabio_ai.services.exit_rules import classify_exit, ExitReason
+        from quant.execution.exit_rules import classify_exit, ExitReason
         
         result = classify_exit("LONG", 100, 110, 95, 110)
         assert result == ExitReason.TAKE_PROFIT
 
     def test_classify_take_profit_short(self):
         """SHORT take profit classification."""
-        from app.domain.fabio_ai.services.exit_rules import classify_exit, ExitReason
+        from quant.execution.exit_rules import classify_exit, ExitReason
         
         result = classify_exit("SHORT", 100, 90, 105, 90)
         assert result == ExitReason.TAKE_PROFIT
 
     def test_classify_stop_loss(self):
         """Stop loss classification."""
-        from app.domain.fabio_ai.services.exit_rules import classify_exit, ExitReason
+        from quant.execution.exit_rules import classify_exit, ExitReason
         
         result = classify_exit("LONG", 100, 95, 95, 110)
         assert result == ExitReason.STOP_LOSS
 
     def test_classify_adverse_exit(self):
         """Adverse exit classification."""
-        from app.domain.fabio_ai.services.exit_rules import classify_exit, ExitReason
+        from quant.execution.exit_rules import classify_exit, ExitReason
         
         result = classify_exit("LONG", 100, 98, 95, 110)
         assert result == ExitReason.ADVERSE_EXIT
 
     def test_classify_time_stop(self):
         """Time stop classification."""
-        from app.domain.fabio_ai.services.exit_rules import classify_exit, ExitReason
+        from quant.execution.exit_rules import classify_exit, ExitReason
         
         result = classify_exit("LONG", 100, 102, 95, 110, is_time_exit=True)
         assert result == ExitReason.TIME_STOP
 
     def test_classify_manual_exit(self):
         """Manual exit classification."""
-        from app.domain.fabio_ai.services.exit_rules import classify_exit
+        from quant.execution.exit_rules import classify_exit
         
         result = classify_exit("LONG", 100, 102, 95, 110, is_manual=True)
         assert result == "MANUAL_EXIT"
 
     def test_classify_partial_profit(self):
         """Partial profit classification."""
-        from app.domain.fabio_ai.services.exit_rules import classify_exit, ExitReason
+        from quant.execution.exit_rules import classify_exit, ExitReason
         
         result = classify_exit("LONG", 100, 105, 95, 110, is_partial=True)
         assert result == ExitReason.PARTIAL_TAKE_PROFIT
@@ -405,7 +405,7 @@ class TestSessionTimeStop:
 
     def test_session_time_stop_morning(self):
         """Morning session time stop."""
-        from app.domain.fabio_ai.services.exit_rules import get_session_time_stop
+        from quant.execution.exit_rules import get_session_time_stop
         
         result = get_session_time_stop(
             market_state="BALANCED",
@@ -417,7 +417,7 @@ class TestSessionTimeStop:
 
     def test_session_time_stop_expiry(self):
         """Expiry session time stop."""
-        from app.domain.fabio_ai.services.exit_rules import get_session_time_stop
+        from quant.execution.exit_rules import get_session_time_stop
         
         result = get_session_time_stop(
             market_state="BALANCED",

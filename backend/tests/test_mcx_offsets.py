@@ -1,8 +1,8 @@
 
 import pytest
 from types import SimpleNamespace
-from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
-from app.domain.models.exchange_config import ExchangeConfig
+from quant.decision.gates.three_align import three_align_check
+from quant.contracts.exchange_config import ExchangeConfig
 
 @pytest.mark.skip(reason="three_align_check Rule 2 logic changed — Nifty now passes with 1.4 point distance")
 def test_mcx_tick_size_proximity():
@@ -96,10 +96,10 @@ def test_mcx_afternoon_lull_volume():
     between 13:00 and 17:00 IST, so a moderate tick passes during the lull but
     is blocked outside it.
     """
-    from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import (
+    from quant.decision.gates.confirmation_bundle import (
         check_confirmation_bundle,
     )
-    from app.domain.trading.models.value_objects import OHLC
+    from quant.contracts.value_objects import OHLC
 
     # 20 candles of steady volume -> EMA(20) ~= 1000
     data = [
@@ -129,7 +129,7 @@ def test_mcx_afternoon_lull_volume():
 
 def test_scanner_gate_sync():
     """Verify that assess_timing (scanner) correctly waits if run_gate_pipeline fails."""
-    from app.domain.probability.agent_pipeline import assess_timing
+    from quant.probability.agent_pipeline import assess_timing
     
     # Setup data where three_align_check PASSES but run_gate_pipeline FAILS
     # e.g. R:R is poor (< 1.5)

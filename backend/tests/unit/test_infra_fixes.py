@@ -4,7 +4,7 @@ import time
 import tempfile
 import os
 
-from app.domain.fabio_ai.services.regime_detector import RegimeDetector
+from quant.amt.market.regime import RegimeDetector
 
 
 class TestFailedEntriesCapped:

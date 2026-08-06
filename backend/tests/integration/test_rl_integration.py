@@ -21,12 +21,12 @@ try:
 except ImportError:
     RL_DEPENDENCIES_AVAILABLE = False
 
-from app.domain.trading.models.value_objects import OHLC
-from app.domain.trading.models.enums import Source, SignalType, SetupType
+from quant.contracts.value_objects import OHLC
+from quant.contracts.enums import Source, SignalType, SetupType
 from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 from app.infrastructure.adapters.data_generator import generate_market_data
 from app.application.services.trading_session import TradingSessionService
-from app.domain.fabio_ai.rl.valentini_env import (
+from quant.inference.rl.valentini_env import (
     ACTION_HOLD, ACTION_TREND_BUY, ACTION_TREND_SELL,
 )
 
@@ -37,7 +37,7 @@ class TestRLSignalIntegration:
 
     def setup_method(self):
         self.broker = PaperBrokerAdapter()
-        from app.domain.ports.llm_inference import LLMInferencePort
+        from quant.contracts.ports.llm_inference import LLMInferencePort
 
         class _StubLLM(LLMInferencePort):
             def predict(self, instruction, input_text):
@@ -45,7 +45,7 @@ class TestRLSignalIntegration:
             def is_ready(self):
                 return True
 
-        from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+        from quant.inference.generative_ai import GenerativeAIService
         gen_ai = GenerativeAIService(llm_adapter=_StubLLM())
         self.session = TradingSessionService(
             broker=self.broker, gen_ai_service=gen_ai,

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
+from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
 from app.application.services.state_snapshot_builder import _camel_case_ai
 from app.shared.depth_dto import order_book_to_dto
 

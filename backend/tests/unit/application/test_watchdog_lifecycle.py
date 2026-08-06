@@ -19,9 +19,9 @@ import pytest
 
 from app.application.watchdog_manager import WatchdogManager
 from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
-from app.domain.trading.models.entities import Position
-from app.domain.trading.models.enums import PositionStatus, Side, Source
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.entities import Position
+from quant.contracts.enums import PositionStatus, Side, Source
+from quant.contracts.value_objects import OHLC
 
 
 # ---------------------------------------------------------------------------

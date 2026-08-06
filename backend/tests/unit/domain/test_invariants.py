@@ -29,15 +29,15 @@ from app.domain.trading.models.trade_aggregate import (
     create_trade,
     create_trade_from_snapshot,
 )
-from app.domain.trading.models.enums import Side, SetupType
-from app.domain.trading.events import (
+from quant.contracts.enums import Side, SetupType
+from quant.contracts.events import (
     DomainEvent,
     FillReceived,
     SignalGenerated,
     OrderPlaced,
     PositionChanged,
 )
-from app.domain.trading.event_store import (
+from quant.contracts.event_store import (
     EventBus,
     InMemoryEventStore,
     AuditTrailVerifier,
@@ -350,7 +350,7 @@ class TestIdempotencyInvariant:
         store.append(event)
 
         # Try to add duplicate
-        from app.domain.trading.event_store import DuplicateEventError
+        from quant.contracts.event_store import DuplicateEventError
 
         with pytest.raises(DuplicateEventError):
             store.append(event)

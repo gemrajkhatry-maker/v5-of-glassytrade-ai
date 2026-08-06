@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone, timedelta
 
 import pytest
 
-from app.domain.fabio_ai.services.session_context import (
+from quant.amt.session.context import (
     get_session_info,
     is_expiry_day,
     seconds_to_close,

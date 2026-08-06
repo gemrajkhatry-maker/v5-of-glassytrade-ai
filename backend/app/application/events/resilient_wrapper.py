@@ -11,11 +11,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from app.domain.trading.events import DomainEvent
+from quant.contracts.events import DomainEvent
 
 if TYPE_CHECKING:
     from app.application.events.handler import IEventHandler
-    from app.domain.trading.event_store import EventBus
+    from quant.contracts.event_store import EventBus
 
 logger = logging.getLogger(__name__)
 

@@ -16,7 +16,7 @@ def test_di_container_resolves_core_services():
     """Verify DIContainer can resolve market_data port."""
     from config.consolidated import ConsolidatedConfig as Configuration
     from app.application.di.composition_root import compose_container
-    from app.domain.ports.market_data import IMarketData
+    from quant.contracts.ports.market_data import IMarketData
 
     config = Configuration.from_unified()
     container = compose_container(config)

@@ -1,6 +1,6 @@
 import pytest
-from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer, AggressivePrintRegistry, AMTConfig
-from app.domain.trading.models.value_objects import OHLC, AggressivePrint
+from quant.amt.analyzer import AMTAnalyzer, AggressivePrintRegistry, AMTConfig
+from quant.contracts.value_objects import OHLC, AggressivePrint
 
 class TestAggressivePrintRegistry:
     def test_register_and_retest(self):

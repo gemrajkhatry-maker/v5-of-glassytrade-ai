@@ -15,26 +15,26 @@ import math
 import pytest
 import numpy as np
 
-from app.domain.trading.models.value_objects import (
+from quant.contracts.value_objects import (
     OHLC,
     VolumeProfileLevel,
     OrderBook,
     OrderBookLevel,
 )
-from app.domain.fabio_ai.models.observation import AMTObservation
-from app.domain.fabio_ai.services.cvd_tracker import CVDTracker, CVDState
-from app.domain.fabio_ai.services.profile_classifier import (
+from quant.amt.models.observation import AMTObservation
+from quant.amt.orderflow.cvd import CVDTracker, CVDState
+from quant.amt.profile.classifier import (
     classify_shape,
     POCMigrationTracker,
     ProfileShape,
 )
-from app.domain.fabio_ai.services.session_context import (
+from quant.amt.session.context import (
     get_session,
     opening_relation,
     get_session_info,
 )
-from app.domain.fabio_ai.rl.reward_shaper import ValentiniRewardShaper, TradeResult
-from app.domain.fabio_ai.rl.valentini_env import (
+from quant.inference.rl.reward_shaper import ValentiniRewardShaper, TradeResult
+from quant.inference.rl.valentini_env import (
     ValentiniAMTEnv,
     ACTION_HOLD,
     ACTION_TREND_BUY,
@@ -42,8 +42,8 @@ from app.domain.fabio_ai.rl.valentini_env import (
     ACTION_REVERT_BUY,
     ACTION_REVERT_SELL,
 )
-from app.domain.fabio_ai.rl.data_loader import generate_synthetic, split_data
-from app.domain.fabio_ai.services.amt_analyzer import compute_aggression_sigma
+from quant.inference.rl.data_loader import generate_synthetic, split_data
+from quant.amt.analyzer import compute_aggression_sigma
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +425,7 @@ class TestValentiniEnv:
 
 class TestAMTObservation:
     def test_compute_observation_returns_correct_type(self):
-        from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+        from quant.amt.analyzer import AMTAnalyzer
 
         data = generate_synthetic(100)
         analyzer = AMTAnalyzer()
@@ -447,7 +447,7 @@ class TestAMTObservation:
         )
 
     def test_observation_with_order_book(self):
-        from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+        from quant.amt.analyzer import AMTAnalyzer
 
         data = generate_synthetic(100)
         ob = OrderBook(

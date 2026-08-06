@@ -11,13 +11,13 @@ from __future__ import annotations
 import pytest
 from decimal import Decimal
 
-from app.domain.services.tick_utils import (
+from quant.contracts.tick_utils import (
     round_to_tick,
     round_down_to_tick,
     round_up_to_tick,
 )
-from app.domain.trading.models.entities import Position
-from app.domain.trading.models.enums import Side, Source
+from quant.contracts.entities import Position
+from quant.contracts.enums import Side, Source
 
 
 class TestTickUtilsRounding:
@@ -65,7 +65,7 @@ class TestExitEngineTickSize:
 
     def test_adjust_stop_loss_rounds_to_tick(self):
         """adjust_stop_loss should round new SL to tick boundary."""
-        from app.domain.fabio_ai.services.exit_engine import (
+        from quant.execution.exit_engine import (
             ExitEngine,
             TradeManagerConfig,
         )
@@ -93,7 +93,7 @@ class TestExitEngineTickSize:
 
     def test_adjust_stop_loss_nse_tick(self):
         """NSE tick size 0.05 — SL should round to nearest 0.05."""
-        from app.domain.fabio_ai.services.exit_engine import (
+        from quant.execution.exit_engine import (
             ExitEngine,
             TradeManagerConfig,
         )
@@ -123,7 +123,7 @@ class TestPartitionBreakeven:
 
     def test_breakeven_triggers_at_1r(self):
         """Breakeven should trigger at 1.0R toward target (Fabio spec)."""
-        from app.domain.fabio_ai.services.partition_exit_manager import (
+        from quant.execution.partition import (
             PartitionExitManager,
             PartitionState,
         )
@@ -154,7 +154,7 @@ class TestPartitionBreakeven:
 
     def test_p1_triggers_at_1r(self):
         """P1 should trigger at 1.0R (Fabio spec)."""
-        from app.domain.fabio_ai.services.partition_exit_manager import (
+        from quant.execution.partition import (
             PartitionExitManager,
             PartitionState,
         )
@@ -186,7 +186,7 @@ class TestPartitionBreakeven:
 
     def test_p2_triggers_at_target(self):
         """P2 should trigger when price reaches target."""
-        from app.domain.fabio_ai.services.partition_exit_manager import (
+        from quant.execution.partition import (
             PartitionExitManager,
             PartitionState,
         )

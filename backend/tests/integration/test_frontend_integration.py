@@ -294,7 +294,7 @@ class TestDTOContract:
 
     def test_portfolio_dto_keys(self):
         from app.infrastructure.serialization.schemas import portfolio_to_dto
-        from app.domain.trading.models.aggregates import Portfolio
+        from quant.contracts.aggregates import Portfolio
 
         p = Portfolio.create_default()
         dto = portfolio_to_dto(p)
@@ -357,7 +357,7 @@ class TestDTOContract:
 
     def test_stats_dto_keys(self):
         from app.infrastructure.serialization.schemas import stats_to_dto
-        from app.domain.trading.models.value_objects import StrategyStats
+        from quant.contracts.value_objects import StrategyStats
 
         s = StrategyStats(
             total_trades=5, wins=3, losses=2, win_rate=60.0,

@@ -8,12 +8,12 @@ import time as _time
 
 import pytest
 
-from app.domain.trading.models.enums import Side, Source, PositionStatus, SignalType, SetupType
-from app.domain.trading.models.entities import Position, Signal
-from app.domain.trading.models.aggregates import (
+from quant.contracts.enums import Side, Source, PositionStatus, SignalType, SetupType
+from quant.contracts.entities import Position, Signal
+from quant.contracts.aggregates import (
     Portfolio, COMMISSION_PER_LOT, SLIPPAGE_PCT, DEFAULT_LOT_SIZE,
 )
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.value_objects import OHLC
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +175,7 @@ class TestEventImmutability:
 
     def test_tick_received_data_is_tuple(self):
         """TickReceived.data should be a tuple (immutable), not a list."""
-        from app.domain.trading.events import TickReceived
+        from quant.contracts.events import TickReceived
         tick = _make_tick(close=100)
         original_list = [tick, tick, tick]
         event = TickReceived(symbol="SYM", tick=tick, data=tuple(original_list))
@@ -186,7 +186,7 @@ class TestEventImmutability:
 
     def test_frozen_event_cannot_be_mutated(self):
         """TickReceived is a frozen dataclass — attributes cannot be reassigned."""
-        from app.domain.trading.events import TickReceived
+        from quant.contracts.events import TickReceived
         tick = _make_tick(close=100)
         event = TickReceived(symbol="SYM", tick=tick)
         with pytest.raises(AttributeError):

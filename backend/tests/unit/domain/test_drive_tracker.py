@@ -1,8 +1,8 @@
 """Unit tests for DriveTracker — D1/D2/D3+ drive detection per Fabio FR-05."""
 
 import pytest
-from app.domain.fabio_ai.services.drive_tracker import DriveTracker
-from app.domain.trading.models.value_objects import OHLC
+from quant.amt.orderflow.drive import DriveTracker
+from quant.contracts.value_objects import OHLC
 
 
 def _candle(close=100, high=None, low=None, volume=500, time="t"):

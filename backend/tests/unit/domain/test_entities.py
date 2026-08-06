@@ -1,10 +1,10 @@
 """Unit tests for domain entities — Position lifecycle, Signal creation."""
 
 import pytest
-from app.domain.trading.models.enums import (
+from quant.contracts.enums import (
     Side, SignalType, Source, SetupType, PositionStatus,
 )
-from app.domain.trading.models.entities import Signal, Position
+from quant.contracts.entities import Signal, Position
 
 
 class TestSignal:

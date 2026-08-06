@@ -1,7 +1,7 @@
 """Unit tests for AggressionScorer — multi-signal additive scoring per Fabio FR-06."""
 
 import pytest
-from app.domain.fabio_ai.services.aggression_scorer import (
+from quant.amt.orderflow.aggression import (
     AggressionScorer,
     AggressionResult,
 )

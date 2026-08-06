@@ -2,15 +2,15 @@
 
 from decimal import Decimal
 
-from app.domain.constants import AGENT_DECISION_THRESHOLD
-from app.domain.probability.agent_pipeline import (
+from quant.contracts.constants import AGENT_DECISION_THRESHOLD
+from quant.probability.agent_pipeline import (
     AgentDecision,
     DirectionSignal,
     kelly_size,
     playbook_thresholds,
 )
-from app.domain.trading.models.enums import MarketState
-from app.domain.trading.models.value_objects import AMTResult, OHLC
+from quant.contracts.enums import MarketState
+from quant.contracts.value_objects import AMTResult, OHLC
 
 def test_flat_direction_returns_valid_probability():
     """FLAT direction should return the higher of p_long/p_short, not 0."""

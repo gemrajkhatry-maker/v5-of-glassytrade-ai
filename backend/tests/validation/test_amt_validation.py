@@ -60,7 +60,7 @@ class TestMarketStateDetection:
         
         # Import here to avoid circular imports
         try:
-            from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+            from quant.amt.analyzer import AMTAnalyzer
             analyzer = AMTAnalyzer()
             
             ohlc = candles_to_ohlc(scenario.candles)
@@ -78,7 +78,7 @@ class TestMarketStateDetection:
         scenario = get_scenario_trend_long_at_lvn()
         
         try:
-            from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+            from quant.amt.analyzer import AMTAnalyzer
             analyzer = AMTAnalyzer()
             
             ohlc = candles_to_ohlc(scenario.candles)
@@ -104,7 +104,7 @@ class TestVolumeProfileValidation:
         scenario = get_scenario_balanced_mean_reversion()
         
         try:
-            from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+            from quant.amt.analyzer import AMTAnalyzer
             analyzer = AMTAnalyzer()
             
             ohlc = candles_to_ohlc(scenario.candles)
@@ -122,7 +122,7 @@ class TestVolumeProfileValidation:
         scenario = get_scenario_trend_long_at_lvn()
         
         try:
-            from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+            from quant.amt.analyzer import AMTAnalyzer
             analyzer = AMTAnalyzer()
             
             ohlc = candles_to_ohlc(scenario.candles)
@@ -152,7 +152,7 @@ class TestLVNDetection:
         scenario = get_scenario_trend_long_at_lvn()
         
         try:
-            from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+            from quant.amt.analyzer import AMTAnalyzer
             analyzer = AMTAnalyzer()
             
             ohlc = candles_to_ohlc(scenario.candles)
@@ -206,8 +206,8 @@ class TestGateLogic:
         scenario = get_scenario_no_trade_choppy()
         
         try:
-            from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
-            from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+            from quant.decision.gates.three_align import three_align_check
+            from quant.amt.analyzer import AMTAnalyzer
             
             analyzer = AMTAnalyzer()
             ohlc = candles_to_ohlc(scenario.candles)
@@ -232,7 +232,7 @@ class TestGateLogic:
         scenario = get_scenario_trend_long_at_lvn()
         
         try:
-            from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+            from quant.amt.analyzer import AMTAnalyzer
             
             analyzer = AMTAnalyzer()
             ohlc = candles_to_ohlc(scenario.candles)
@@ -256,7 +256,7 @@ class TestCompleteScenarios:
     def test_scenario_produces_valid_output(self, scenario: MarketScenario):
         """Each scenario should produce valid AMT output."""
         try:
-            from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
+            from quant.amt.analyzer import AMTAnalyzer
             
             analyzer = AMTAnalyzer()
             ohlc = candles_to_ohlc(scenario.candles)

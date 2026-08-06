@@ -15,8 +15,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from app.application.handlers.llm_entry_handler import LLMEntryHandler
-from app.domain.probability.agent_pipeline import AgentDecision
-from app.domain.trading.models.value_objects import AMTResult, OHLC
+from quant.probability.agent_pipeline import AgentDecision
+from quant.contracts.value_objects import AMTResult, OHLC
 
 
 def _amt(**kwargs: object) -> AMTResult:

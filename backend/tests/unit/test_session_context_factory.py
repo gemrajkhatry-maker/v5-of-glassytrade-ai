@@ -5,9 +5,9 @@ Tests the DIP-compliant session context factory with constructor injection.
 
 import pytest
 
-from app.domain.fabio_ai.services.session_context_factory import SessionContextFactory
-from app.domain.models.exchange_config import ExchangeConfig
-from app.domain.services.symbol_registry import SymbolRegistry
+from quant.amt.session.context_factory import SessionContextFactory
+from quant.contracts.exchange_config import ExchangeConfig
+from quant.amt.session.symbol_registry import SymbolRegistry
 
 
 @pytest.fixture

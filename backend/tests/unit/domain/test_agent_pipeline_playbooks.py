@@ -6,14 +6,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.domain.probability.agent_pipeline import (
+from quant.probability.agent_pipeline import (
     assess_timing,
     playbook_thresholds,
     run_agent_pipeline,
     select_playbook,
     summarize_feature_drivers,
 )
-from app.domain.trading.models.value_objects import AMTResult, OHLC
+from quant.contracts.value_objects import AMTResult, OHLC
 
 
 def _tick(close=100.0, volume=1000.0, delta=200.0, high=None, low=None):
@@ -141,7 +141,7 @@ def test_run_agent_pipeline_skips_without_canonical_playbook():
 
 def test_select_playbook_no_trade_session_balanced_leg():
     """When session=NO_TRADE but leg=BALANCED, should return return_to_value."""
-    from app.domain.trading.models.value_objects import AMTResult
+    from quant.contracts.value_objects import AMTResult
     
     # Session regime is NO_TRADE, but leg regime is BALANCED
     regime = SimpleNamespace(regime="NO_TRADE")
@@ -162,7 +162,7 @@ def test_select_playbook_no_trade_session_balanced_leg():
 
 def test_select_playbook_no_trade_session_trending_leg():
     """When session=NO_TRADE but leg=TRENDING, should return imbalance_continuation."""
-    from app.domain.trading.models.value_objects import AMTResult
+    from quant.contracts.value_objects import AMTResult
     
     regime = SimpleNamespace(regime="NO_TRADE")
     amt = AMTResult(

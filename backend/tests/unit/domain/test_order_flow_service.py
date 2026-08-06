@@ -1,12 +1,12 @@
 """Tests for OrderFlowService."""
 
 import pytest
-from app.domain.fabio_ai.services.order_flow_service import (
+from quant.amt.orderflow.service import (
     OrderFlowService,
     OrderFlowConfig,
     OrderFlowMetrics,
 )
-from app.domain.trading.models.value_objects import OHLC, OrderBook
+from quant.contracts.value_objects import OHLC, OrderBook
 
 
 class TestOrderFlowService:

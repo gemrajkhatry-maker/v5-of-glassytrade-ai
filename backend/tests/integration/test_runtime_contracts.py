@@ -17,13 +17,13 @@ from fastapi.testclient import TestClient
 import app.main as main
 from app.application.services.entry_coordinator import EntryCoordinator
 from app.application.services.session_state_manager import SessionStateManager
-from app.domain.ports.broker import IBroker
-from app.domain.ports.llm_inference import ILLMInference
-from app.domain.ports.market_data import IMarketData
-from app.domain.ports.storage import IStorage
-from app.domain.trading.models.entities import Position, Signal
-from app.domain.trading.models.enums import SetupType, SignalType, Source, Side
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.ports.broker import IBroker
+from quant.contracts.ports.llm_inference import ILLMInference
+from quant.contracts.ports.market_data import IMarketData
+from quant.contracts.ports.storage import IStorage
+from quant.contracts.entities import Position, Signal
+from quant.contracts.enums import SetupType, SignalType, Source, Side
+from quant.contracts.value_objects import OHLC
 from app.application.services.trading_session import TradingSessionService
 
 
@@ -188,7 +188,7 @@ def _build_runtime_app_fixture(
         lambda config: container,
     )
     monkeypatch.setattr(
-        "app.domain.fabio_ai.services.option_scanner.OptionScannerService",
+        "quant.amt.session.scanner.OptionScannerService",
         _FakeScanner,
     )
     monkeypatch.setattr("app.application.engine.TradingEngine", _FakeEngine)

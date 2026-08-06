@@ -10,7 +10,7 @@ from app.application.services.quant_bridge import (
 )
 from app.application.services.session_state_manager import SessionState
 from app.config_models.settings_adapter import SettingsAdapter
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.value_objects import OHLC
 
 
 def _ohlc(time="t1", close=100.0, high=101.0, low=99.0, open_=100.0, vol=100.0):

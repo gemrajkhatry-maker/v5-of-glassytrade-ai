@@ -15,29 +15,29 @@ import pytest
 from unittest.mock import MagicMock
 from decimal import Decimal
 
-from app.domain.fabio_ai.services.aggression_scorer import (
+from quant.amt.orderflow.aggression import (
     AggressionScorer,
     PersistentAggressionScorer,
 )
-from app.domain.fabio_ai.services.cvd_tracker import CVDTracker
-from app.domain.fabio_ai.services.amt_analyzer import (
+from quant.amt.orderflow.cvd import CVDTracker
+from quant.amt.analyzer import (
     AMTAnalyzer,
     AMTConfig,
     LVNPersistenceTracker,
     find_lvns,
 )
-from app.domain.fabio_ai.services.market_state_engine import detect_market_state
-from app.domain.fabio_ai.services.market_structure_classifier import (
+from quant.amt.market.state_engine import detect_market_state
+from quant.amt.market.structure import (
     MarketStructureClassifier,
     MarketStructure,
 )
-from app.domain.fabio_ai.services.gate_pipeline import (
+from quant.decision.gates.legacy_gate_pipeline import (
     GatePipeline,
     GateContext,
     GateReason,
 )
-from app.domain.trading.models.enums import MarketState
-from app.domain.trading.models.value_objects import OHLC, VolumeProfileLevel
+from quant.contracts.enums import MarketState
+from quant.contracts.value_objects import OHLC, VolumeProfileLevel
 
 
 # ---------------------------------------------------------------------------
@@ -201,7 +201,7 @@ class TestProbingRangeContradiction:
         """When market_state=PROBING and structure=BALANCE, override to TRANSITION."""
         # Note: PROBING is now mapped to IMBALANCED in the 2-state model
         # This test verifies the cross-validation logic is handled in the pipeline
-        from app.domain.fabio_ai.services.market_structure_classifier import (
+        from quant.amt.market.structure import (
             MarketStructure,
         )
         # PROBING state maps to IMBALANCED
@@ -219,7 +219,7 @@ class TestProbingRangeContradiction:
 
     def test_balanced_state_preserves_balance_structure(self):
         """When market_state=BALANCED, BALANCE structure is valid."""
-        from app.domain.fabio_ai.services.market_structure_classifier import (
+        from quant.amt.market.structure import (
             MarketStructure,
         )
         balance_structure = MarketStructure(
@@ -310,7 +310,7 @@ class TestLVNStability:
 
     def test_lvn_removed_when_volume_rises(self):
         """LVN is removed when its bucket volume rises above threshold."""
-        from app.domain.fabio_ai.services.amt_analyzer import LVNPersistenceTracker as T
+        from quant.amt.analyzer import LVNPersistenceTracker as T
 
         tracker = T(min_bars=2)
 

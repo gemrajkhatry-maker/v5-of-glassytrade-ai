@@ -1,6 +1,6 @@
 """Tests for absorption detection and contested zone detection."""
 
-from app.domain.fabio_ai.services.footprint_analyzer import (
+from quant.amt.orderflow.footprint import (
     FootprintCandle, FootprintLevel, detect_absorption, detect_contested_zone,
 )
 

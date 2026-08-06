@@ -8,7 +8,7 @@
 from datetime import datetime
 
 from app.application.candle_aggregator import CandleAggregator
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 
 NOW = datetime(2026, 8, 6, 10, 0, 0, tzinfo=IST)
 

@@ -1,7 +1,7 @@
 """Unit tests for OrderFlow Detectors — BigTrade, Bubble, OFI, Absorption per FR-03."""
 
 import pytest
-from app.domain.fabio_ai.services.orderflow_detectors import (
+from quant.amt.orderflow.detectors import (
     BigTradeDetector,
     BubbleDetector,
     OFICalculator,
@@ -11,7 +11,7 @@ from app.domain.fabio_ai.services.orderflow_detectors import (
     OFIResult,
     AbsorptionResult,
 )
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.value_objects import OHLC
 
 
 def _candle(close=100, volume=500, delta=100, high=None, low=None, time="t"):

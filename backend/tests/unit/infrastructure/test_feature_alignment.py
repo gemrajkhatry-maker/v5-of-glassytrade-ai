@@ -21,7 +21,7 @@ def _parquet_available():
 def test_feature_alignment_training_vs_live():
     """Training-path and live-path features must agree within 5% for non-OI fields."""
     import pandas as pd
-    from app.domain.probability.features import FEATURE_NAMES, extract_features_from_row
+    from quant.probability.features import FEATURE_NAMES, extract_features_from_row
 
     # Load one parquet
     files = [f for f in os.listdir(_IND_DIR) if f.endswith(".parquet")]
@@ -47,7 +47,7 @@ def test_feature_alignment_training_vs_live():
 
 
 def test_probability_feature_contract_metadata():
-    from app.domain.probability.features import (
+    from quant.probability.features import (
         FEATURE_NAMES,
         PROBABILITY_FEATURE_SCHEMA_VERSION,
     )

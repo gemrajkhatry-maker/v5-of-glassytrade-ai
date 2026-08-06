@@ -3,7 +3,7 @@ import time
 from unittest.mock import MagicMock, patch
 import pytest
 from app.infrastructure.adapters.mlx_inference_adapter import MLXInferenceAdapter
-from app.domain.ports.llm_inference import LLMNotReadyError
+from quant.contracts.ports.llm_inference import LLMNotReadyError
 
 @pytest.fixture
 def mock_mlx():

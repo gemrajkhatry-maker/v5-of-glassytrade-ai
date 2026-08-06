@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.domain.trading.models.value_objects import OHLC, AMTResult
+from quant.contracts.value_objects import OHLC, AMTResult
 
 
 # ---- Helpers ----
@@ -133,7 +133,7 @@ class TestP7OverseerPnLGuard:
 class TestP8ConfirmationBundle:
     pytestmark = pytest.mark.skip(reason="Pre-existing P8 confirmation bundle assertion")
     def test_gate_returns_tuple(self):
-        from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
+        from quant.decision.gates.three_align import three_align_check
         data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
         tick = _tick(close=100, volume=500, delta=200)
         amt = _amt(poc=100, vah=105, val=95)
@@ -145,7 +145,7 @@ class TestP8ConfirmationBundle:
         assert isinstance(confirmation, bool)
 
     def test_gate_passes_near_poc(self):
-        from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
+        from quant.decision.gates.three_align import three_align_check
         data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
         tick = _tick(close=100, volume=500, delta=200)
         amt = _amt(poc=100, vah=105, val=95)
@@ -153,7 +153,7 @@ class TestP8ConfirmationBundle:
         assert gate_passed is True
 
     def test_gate_blocks_far_from_levels(self):
-        from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
+        from quant.decision.gates.three_align import three_align_check
         data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
         tick = _tick(close=200, volume=500, delta=200)
         amt = _amt(poc=100, vah=105, val=95)
@@ -165,32 +165,32 @@ class TestP8ConfirmationBundle:
 
 class TestP9StructuredParser:
     def test_parse_market_state_trigger_format(self):
-        from app.domain.fabio_ai.services.prompt_builder import parse_entry_response
+        from quant.inference.prompt_builder import parse_entry_response
         text = "Market State: Balance\nLogic: Price at POC, mean reversion setup\nTrigger: Enter Long on pullback"
         result = parse_entry_response(text)
         assert result["direction"] == "LONG"
 
     def test_parse_short_trigger(self):
-        from app.domain.fabio_ai.services.prompt_builder import parse_entry_response
+        from quant.inference.prompt_builder import parse_entry_response
         text = "Market State: Imbalance\nLogic: Sellers in control\nTrigger: Enter Short"
         result = parse_entry_response(text)
         assert result["direction"] == "SHORT"
 
     def test_parse_stay_flat(self):
-        from app.domain.fabio_ai.services.prompt_builder import parse_entry_response
+        from quant.inference.prompt_builder import parse_entry_response
         text = "Market State: Balance\nLogic: No clear setup\nTrigger: Stay Flat"
         result = parse_entry_response(text)
         assert result["direction"] == "FLAT"
 
     def test_freeform_with_trigger_keyword(self):
         """MLX model often outputs freeform with 'Trigger:' embedded."""
-        from app.domain.fabio_ai.services.prompt_builder import parse_entry_response
+        from quant.inference.prompt_builder import parse_entry_response
         text = "Market State:Balance (mean reversion). Price at VAL. Logic: buyers stepping in at support. Trigger: Enter Long with size"
         result = parse_entry_response(text)
         assert result["direction"] == "LONG"
 
     def test_json_still_works(self):
-        from app.domain.fabio_ai.services.prompt_builder import parse_entry_response
+        from quant.inference.prompt_builder import parse_entry_response
         text = '{"direction": "SHORT", "rationale": "test", "confidence": "High"}'
         result = parse_entry_response(text)
         assert result["direction"] == "SHORT"
@@ -209,7 +209,7 @@ class TestDevelopingVA:
 
     def test_gate_checks_dev_va_levels(self):
         """Price far from session VA but near developing VA should pass gate."""
-        from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
+        from quant.decision.gates.three_align import three_align_check
         data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
         # Price=150 is far from session VA (95-105) but near dev_vah=148
         tick = _tick(close=150, volume=500, delta=200)

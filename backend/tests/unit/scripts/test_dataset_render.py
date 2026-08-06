@@ -2,7 +2,7 @@
 
 import json
 
-from app.domain.fabio_ai.services.prompt_builder import render_entry_prompt
+from quant.inference.prompt_builder import render_entry_prompt
 from scripts.dataset_render import (
     DATASET_DIR,
     OUTPUT_DIR,
@@ -61,8 +61,8 @@ def test_render_split_writes_output_file():
 
 def test_system_message_matches_live_instruction():
     """The dataset system message must equal what live inference sends."""
-    from app.domain.fabio_ai.services.generative_ai_service import _DEFAULT_INSTRUCTION
-    from app.domain.fabio_ai.services.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
+    from quant.inference.generative_ai import _DEFAULT_INSTRUCTION
+    from quant.inference.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
 
     row = _first_row()
     rendered = render_row(row)

@@ -2,12 +2,12 @@
 
 import pytest
 
-from app.domain.services.initial_balance_engine import (
+from quant.amt.session.ib_engine import (
     IBLocation,
     IBState,
     InitialBalanceEngine,
 )
-from app.domain.services.short_signal_gates import (
+from quant.decision.gates.short import (
     ShortGateResult,
     check_s1_direction_allowed,
     check_s2_market_state,
@@ -16,7 +16,7 @@ from app.domain.services.short_signal_gates import (
     check_s5_contract_type,
     evaluate_short_gates,
 )
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.value_objects import OHLC
 
 
 # ===== Initial Balance Engine =====

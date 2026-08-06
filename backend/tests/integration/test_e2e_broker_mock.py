@@ -19,14 +19,14 @@ from typing import Dict, List, Optional
 
 import pytest
 
-from app.domain.fabio_ai.services.exit_engine import (
+from quant.execution.exit_engine import (
     CushionState,
     ExitReason,
     ExitEngine as TradeManager,
     TradeManagerConfig,
 )
-from app.domain.services.circuit_breakers import BreakerReason, BreakerResult, CircuitBreakers
-from app.domain.trading.models.value_objects import OHLC
+from quant.execution.circuit_breakers import BreakerReason, BreakerResult, CircuitBreakers
+from quant.contracts.value_objects import OHLC
 
 
 # ==============================================================================

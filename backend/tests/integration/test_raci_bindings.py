@@ -5,16 +5,16 @@ matrix defined in plan/03_responsibility_matrix.md.
 """
 
 import pytest
-from app.domain.fabio_ai.services.market_state_engine import (
+from quant.amt.market.state_engine import (
     detect_market_state,
     classify_zone,
     log_state_transition,
     MarketStateResult,
 )
-from app.domain.fabio_ai.services.aggression_scorer import AggressionScorer
-from app.domain.fabio_ai.services.gate_pipeline import GatePipeline, GateContext, GateReason
-from app.domain.fabio_ai.services.eia_calendar import EIACalendar
-from app.domain.trading.models.enums import MarketState
+from quant.amt.orderflow.aggression import AggressionScorer
+from quant.decision.gates.legacy_gate_pipeline import GatePipeline, GateContext, GateReason
+from quant.amt.session.eia import EIACalendar
+from quant.contracts.enums import MarketState
 
 
 class TestProfileToMarketStateBinding:

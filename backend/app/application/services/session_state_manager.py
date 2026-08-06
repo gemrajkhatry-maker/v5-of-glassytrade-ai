@@ -37,12 +37,12 @@ class SessionState:
     order_book: OrderBook | None = None
     portfolio: Portfolio = field(
         default_factory=lambda: __import__(
-            "app.domain.trading.models.aggregates", fromlist=["Portfolio"]
+            "quant.contracts.aggregates", fromlist=["Portfolio"]
         ).Portfolio.create_default()
     )
     learning: LearningEngine = field(
         default_factory=lambda: __import__(
-            "app.domain.fabio_ai.services.learning_engine", fromlist=["LearningEngine"]
+            "quant.inference.learning_engine", fromlist=["LearningEngine"]
         ).LearningEngine()
     )
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from decimal import Decimal
 
-from app.domain.trading.models.aggregates import Portfolio
-from app.domain.trading.models.enums import Side, Source, PositionStatus
+from quant.contracts.aggregates import Portfolio
+from quant.contracts.enums import Side, Source, PositionStatus
 
 
 class TestRecoverPosition:

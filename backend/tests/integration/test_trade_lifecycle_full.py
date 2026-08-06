@@ -10,16 +10,16 @@ from unittest.mock import patch
 
 import pytest
 
-from app.domain.fabio_ai.services.exit_engine import (
+from quant.execution.exit_engine import (
     CushionState,
     ExitReason,
     ExitSignal,
     ExitEngine as TradeManager,
     TradeManagerConfig,
 )
-from app.domain.services.circuit_breakers import BreakerReason, BreakerResult, CircuitBreakers
-from app.domain.trading.models.entities import Position
-from app.domain.trading.models.enums import Side
+from quant.execution.circuit_breakers import BreakerReason, BreakerResult, CircuitBreakers
+from quant.contracts.entities import Position
+from quant.contracts.enums import Side
 
 
 def create_position(

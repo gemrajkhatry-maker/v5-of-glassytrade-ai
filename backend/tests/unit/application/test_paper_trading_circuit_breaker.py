@@ -2,10 +2,10 @@
 
 import pytest
 from unittest.mock import Mock, MagicMock
-from app.domain.trading.models.entities import Signal
-from app.domain.trading.models.enums import SignalType, Source, Side
+from quant.contracts.entities import Signal
+from quant.contracts.enums import SignalType, Source, Side
 from app.application.services.session_risk_coordinator import SessionRiskCoordinator
-from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager
+from quant.execution.session_risk_manager import SessionRiskManager
 
 
 class TestPaperTradingCircuitBreaker:

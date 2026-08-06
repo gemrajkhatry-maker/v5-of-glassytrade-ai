@@ -16,9 +16,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.application.handlers.llm_entry_handler import LLMEntryHandler
-from app.domain.fabio_ai.services.prompt_builder import build_entry_prompt
-from app.domain.trading.models.enums import SetupType
-from app.domain.trading.models.value_objects import AMTResult, OHLC
+from quant.inference.prompt_builder import build_entry_prompt
+from quant.contracts.enums import SetupType
+from quant.contracts.value_objects import AMTResult, OHLC
 
 # Keys verified (grep) as never read by any prompt block / parser. delta is
 # deliberately NOT here: the key is still emitted by _build_market_data_ai
@@ -240,8 +240,8 @@ class TestPostTradeContext:
         from app.application.services.session_state_manager import (
             SessionStateManager,
         )
-        from app.domain.trading.models.entities import Position
-        from app.domain.trading.models.enums import PositionStatus, Side, Source
+        from quant.contracts.entities import Position
+        from quant.contracts.enums import PositionStatus, Side, Source
 
         class FakePostTrade:
             def __init__(self):

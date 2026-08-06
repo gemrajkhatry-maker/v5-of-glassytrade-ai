@@ -3,7 +3,7 @@ import asyncio
 from unittest.mock import AsyncMock, patch, MagicMock, PropertyMock
 
 from app.application.stream_manager import StreamManager
-from app.domain.ports.market_data import IMarketData
+from quant.contracts.ports.market_data import IMarketData
 
 @pytest.fixture
 def mock_market_data():

@@ -3,8 +3,8 @@
 import pytest
 from decimal import Decimal
 
-from app.domain.trading.models.aggregates import Portfolio, PortfolioConfig
-from app.domain.trading.models.enums import Side
+from quant.contracts.aggregates import Portfolio, PortfolioConfig
+from quant.contracts.enums import Side
 
 
 class TestSlippageModel:

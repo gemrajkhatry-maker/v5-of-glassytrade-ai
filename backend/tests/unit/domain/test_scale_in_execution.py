@@ -4,10 +4,10 @@ import pytest
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from app.domain.trading.models.entities import Position, Signal, Side, SignalType, Source, SetupType
-from app.domain.trading.models.aggregates import Portfolio
+from quant.contracts.entities import Position, Signal, Side, SignalType, Source, SetupType
+from quant.contracts.aggregates import Portfolio
 from app.application.services.entry_coordinator import EntryCoordinator
-from app.domain.trading.models.enums import PositionStatus
+from quant.contracts.enums import PositionStatus
 
 
 class TestScaleInExecution:
@@ -46,7 +46,7 @@ class TestScaleInExecution:
     ):
         """SizingResult returns scale_in_1,2,3 sizes that should be used."""
         # Sizing result returns scale_in_1,2,3 sizes that should be used
-        from app.domain.services.risk_sizing_engine import RiskSizingEngine, KellySizingTier
+        from quant.execution.risk_sizing import RiskSizingEngine, KellySizingTier
 
         engine = RiskSizingEngine()
         result = engine.calculate(

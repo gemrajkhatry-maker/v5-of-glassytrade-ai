@@ -3,14 +3,14 @@
 import pytest
 from datetime import datetime, timezone
 
-from app.domain.trading.events import (
+from quant.contracts.events import (
     DomainEvent,
     FillReceived,
     SignalGenerated,
     PositionChanged,
     OrderPlaced,
 )
-from app.domain.trading.event_store import (
+from quant.contracts.event_store import (
     InMemoryEventStore,
     EventBus,
     EventSystem,

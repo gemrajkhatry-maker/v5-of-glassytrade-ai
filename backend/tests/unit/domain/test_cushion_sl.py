@@ -2,9 +2,9 @@
 
 from unittest.mock import MagicMock
 
-from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
-from app.domain.trading.models.enums import SetupType
-from app.domain.trading.models.value_objects import OHLC, AMTResult
+from quant.decision.gates.signal_builder import build_entry_signal
+from quant.contracts.enums import SetupType
+from quant.contracts.value_objects import OHLC, AMTResult
 
 
 def _make_tick(close=100.0):

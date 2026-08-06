@@ -10,21 +10,21 @@ import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi.testclient import TestClient
 
-from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
-from app.domain.trading.models.aggregates import (
+from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
+from quant.contracts.aggregates import (
     Portfolio, COMMISSION_PER_LOT, SLIPPAGE_PCT,
 )
-from app.domain.trading.models.entities import Position, Signal
-from app.domain.trading.models.enums import (
+from quant.contracts.entities import Position, Signal
+from quant.contracts.enums import (
     Side, Source, PositionStatus, SignalType, SetupType,
 )
 from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 from app.infrastructure.adapters.data_generator import generate_market_data
 from app.application.services.trading_session import TradingSessionService
-from app.domain.trading.events import TickReceived
+from quant.contracts.events import TickReceived
 from app.application.services.trading_session import SystemRiskState
-from app.domain.ports.probability_inference import NoOpProbabilityAdapter
-from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+from quant.contracts.ports.probability_inference import NoOpProbabilityAdapter
+from quant.inference.generative_ai import GenerativeAIService
 
 
 def _make_tick(close: float = 100.0, time: str = "2026-01-01T10:00:00Z", **overrides) -> OHLC:
@@ -48,7 +48,7 @@ def _make_signal(price=100, sl=90, tp=120, source=Source.AMT, sig_type=SignalTyp
 def _create_session_service():
     """Create a TradingSessionService with stub dependencies."""
     broker = PaperBrokerAdapter()
-    from app.domain.ports.llm_inference import ILLMInference
+    from quant.contracts.ports.llm_inference import ILLMInference
     class _StubLLM(ILLMInference):
         def predict(self, instruction, input_text): return "Trigger: **Stay Flat**"
         def is_ready(self): return True

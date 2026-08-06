@@ -1,8 +1,8 @@
 """Unit tests for Footprint Analyzer domain service."""
 
 import pytest
-from app.domain.trading.models.value_objects import OHLC
-from app.domain.fabio_ai.services.footprint_analyzer import FootprintAnalyzer
+from quant.contracts.value_objects import OHLC
+from quant.amt.orderflow.footprint import FootprintAnalyzer
 from app.infrastructure.adapters.data_generator import generate_market_data
 
 

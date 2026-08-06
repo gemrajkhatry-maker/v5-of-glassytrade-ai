@@ -16,11 +16,11 @@ from uuid import uuid4
 from app.core.async_boundary import ensure_sync_adapter_result
 from app.application.services.trade_journal import TradeJournal
 from app.application.services.experiment_context import build_experiment_context
-from app.domain.trading.models.utils import safe_side as _safe_side
+from quant.contracts.utils import safe_side as _safe_side
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.entities import Position, Signal
-    from app.domain.ports.storage import IStorage
+    from quant.contracts.entities import Position, Signal
+    from quant.contracts.ports.storage import IStorage
 
 logger = logging.getLogger(__name__)
 

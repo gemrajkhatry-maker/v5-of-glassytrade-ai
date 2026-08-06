@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from app.domain.trading.models.enums import Side, Source, PositionStatus
-from app.domain.trading.models.entities import Position
-from app.domain.fabio_ai.models.predictions import ModelWeights
-from app.domain.fabio_ai.services.learning_engine import LearningEngine
+from quant.contracts.enums import Side, Source, PositionStatus
+from quant.contracts.entities import Position
+from quant.inference.models import ModelWeights
+from quant.inference.learning_engine import LearningEngine
 
 
 def _make_closed_trade(pnl: float, side: Side = Side.LONG, factor_bd: dict | None = None) -> Position:

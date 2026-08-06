@@ -6,12 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.domain.fabio_ai.services.session_risk_manager import (
+from quant.execution.session_risk_manager import (
     SessionRiskManager,
     CapitalRiskBand,
 )
-from app.domain.fabio_ai.services.entry_gates.grading import compute_grade_score, check_vwap_bias
-from app.domain.trading.models.enums import SetupType
+from quant.decision.gates.grading import compute_grade_score, check_vwap_bias
+from quant.contracts.enums import SetupType
 
 
 # ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ from app.domain.trading.models.enums import SetupType
 # ---------------------------------------------------------------------------
 
 def _make_tick(close=100.0):
-    from app.domain.trading.models.value_objects import OHLC
+    from quant.contracts.value_objects import OHLC
     return OHLC(open=close, high=close + 1, low=close - 1, close=close,
                 volume=1000, delta=0, time="2025-01-01T10:00:00Z", vwap=close)
 
@@ -160,6 +160,6 @@ class TestAgentVWAPBias:
 class TestAgentCushionSL:
     def test_build_entry_signal_accepts_risk_sl_pct(self):
         import inspect
-        from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
+        from quant.decision.gates.signal_builder import build_entry_signal
         sig = inspect.signature(build_entry_signal)
         assert "risk_sl_pct" in sig.parameters

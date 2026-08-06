@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain.fabio_ai.services.session_context import (
+from quant.amt.session.context import (
     get_session_info,
     load_prior_profile,
     persist_prior_profile,

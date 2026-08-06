@@ -14,7 +14,7 @@ Deliberate exclusions (fields the live narrative never prints as a raw number):
 
 import json
 
-from app.domain.fabio_ai.services.prompt_builder import render_entry_prompt
+from quant.inference.prompt_builder import render_entry_prompt
 from scripts.dataset_render import DATASET_DIR, key_value_to_fields
 
 _CATEGORIZED = {"delta", "cvd_slope"}

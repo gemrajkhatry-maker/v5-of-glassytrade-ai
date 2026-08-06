@@ -19,9 +19,9 @@ from decimal import Decimal
 
 from app.infrastructure.adapters.data_generator import generate_market_data
 from app.application.services.trading_session import TradingSessionService
-from app.domain.ports.probability_inference import NoOpProbabilityAdapter
-from app.domain.trading.models.entities import Signal
-from app.domain.trading.models.enums import SignalType, SetupType, Source, PositionStatus
+from quant.contracts.ports.probability_inference import NoOpProbabilityAdapter
+from quant.contracts.entities import Signal
+from quant.contracts.enums import SignalType, SetupType, Source, PositionStatus
 from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 
 

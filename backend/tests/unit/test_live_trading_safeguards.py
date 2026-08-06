@@ -10,7 +10,7 @@ Tests the 5 critical safeguards required for live trading readiness:
 
 import pytest
 from datetime import datetime, timedelta, timezone
-from app.domain.fabio_ai.services.drive_decay import DriveDecay
+from quant.amt.orderflow.drive_decay import DriveDecay
 
 
 IST = timezone(timedelta(hours=5, minutes=30))

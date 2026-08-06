@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from unittest.mock import MagicMock, call
 
-from app.domain.ports.npoc import INPOC, NPOCRecord, NPOCResult
-from app.domain.fabio_ai.services.npoc_tracker import NPOCTracker
+from quant.contracts.ports.npoc import INPOC, NPOCRecord, NPOCResult
+from quant.amt.session.npoc import NPOCTracker
 
 
 class MockStorage:

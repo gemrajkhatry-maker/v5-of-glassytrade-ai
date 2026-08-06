@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain.probability.agent_pipeline import calculate_timing_probability
-from app.domain.trading.models.value_objects import AMTResult, OHLC
+from quant.probability.agent_pipeline import calculate_timing_probability
+from quant.contracts.value_objects import AMTResult, OHLC
 
 
 def _tick(close=100.0, volume=1000.0, delta=200.0, high=None, low=None):

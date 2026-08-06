@@ -1,10 +1,10 @@
 """Unit tests for Prediction Engine domain service."""
 
 import pytest
-from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
+from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
 pytestmark = pytest.mark.skip(reason="Requires additional stubbed infrastructure — planned")
-from app.domain.fabio_ai.models.predictions import ModelWeights
-from app.domain.fabio_ai.services.prediction_engine import PredictionEngine
+from quant.inference.models import ModelWeights
+from quant.inference.prediction import PredictionEngine
 from app.infrastructure.adapters.data_generator import generate_market_data
 
 

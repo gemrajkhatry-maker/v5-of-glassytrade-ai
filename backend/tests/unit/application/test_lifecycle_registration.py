@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 from decimal import Decimal
 
 from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
-from app.domain.trading.models.entities import Signal, Position
-from app.domain.trading.models.enums import (
+from quant.contracts.entities import Signal, Position
+from quant.contracts.enums import (
     SignalType, Source, SetupType, Side, PositionStatus,
 )
 

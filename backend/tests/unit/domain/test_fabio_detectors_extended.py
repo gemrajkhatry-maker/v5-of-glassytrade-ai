@@ -8,7 +8,7 @@ from app.domain.fabio_ai.strategy.fabio_detectors import (
     detect_vah_probe, check_exhaustion, compute_volume_above_vah,
     track_drives,
 )
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.value_objects import OHLC
 
 
 def test_detect_vah_probe_none_when_below_vah():
