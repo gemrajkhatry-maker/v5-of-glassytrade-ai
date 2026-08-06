@@ -1,0 +1,23 @@
+# Reproducible LoRA retrain config for the AMT entry model.
+# Mirrors models/vibethinker-amt-lora/adapter_config.json (steps_per_eval=200,
+# seed=0, steps_per_report=10 are taken from the shipped adapter).
+model: models/vibethinker-3b
+data: amt_dataset/nifty_amt_data_livefmt
+iters: 300
+learning_rate: 2.0e-05
+num_layers: 16
+batch_size: 1
+grad_accumulation_steps: 1
+grad_checkpoint: true
+mask_prompt: true
+max_seq_length: 2048
+save_every: 100
+steps_per_eval: 200
+steps_per_report: 10
+val_batches: 25
+optimizer: adam
+seed: 0
+lora_parameters:
+  rank: 8
+  dropout: 0.0
+  scale: 20.0
