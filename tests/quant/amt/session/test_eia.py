@@ -1,0 +1,170 @@
+"""Tests for EIACalendar — ported from backend/tests/unit/domain/test_eia_calendar.py + parity."""
+
+import pytest
+from datetime import datetime, time, timedelta, timezone
+
+from app.domain.fabio_ai.services.eia_calendar import (
+    EIACalendar as LegacyEIACalendar,
+    EIAWindow,
+    EIA_SCHEDULE,
+)
+from quant.amt.session.eia import EIACalendar, EIAWindow, EIA_SCHEDULE
+from tests.quant.parity import assert_parity
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+_ET = timezone(timedelta(hours=-5))
+
+
+class TestEIACalendarSchedule:
+    """Verify EIA schedule configuration."""
+
+    def test_naturalgas_schedule(self):
+        ng = EIA_SCHEDULE["NATURALGAS"]
+        assert ng.symbol == "NATURALGAS"
+        assert ng.release_day == 3  # Thursday
+        assert ng.release_time_et == time(10, 30)
+        assert ng.suppression_minutes == 15
+
+    def test_crudeoil_schedule(self):
+        cl = EIA_SCHEDULE["CRUDEOIL"]
+        assert cl.symbol == "CRUDEOIL"
+        assert cl.release_day == 2  # Wednesday
+        assert cl.release_time_et == time(10, 30)
+        assert cl.suppression_minutes == 15
+
+
+class TestEIACalendarIsSuppressed:
+    """Test suppression window detection."""
+
+    def test_naturalgas_thursday_suppressed(self):
+        cal = EIACalendar(suppression_minutes=15)
+        thursday_1020_et = datetime(2026, 3, 19, 10, 20, tzinfo=_ET)
+        thursday_1020_ist = thursday_1020_et.astimezone(_IST)
+        assert cal.is_suppressed("NATURALGAS", thursday_1020_ist) is True
+
+    def test_naturalgas_thursday_not_suppressed_before_window(self):
+        cal = EIACalendar(suppression_minutes=15)
+        thursday_1010_et = datetime(2026, 3, 19, 10, 10, tzinfo=_ET)
+        thursday_1010_ist = thursday_1010_et.astimezone(_IST)
+        assert cal.is_suppressed("NATURALGAS", thursday_1010_ist) is False
+
+    def test_naturalgas_thursday_not_suppressed_after_window(self):
+        cal = EIACalendar(suppression_minutes=15)
+        thursday_1050_et = datetime(2026, 3, 19, 10, 50, tzinfo=_ET)
+        thursday_1050_ist = thursday_1050_et.astimezone(_IST)
+        assert cal.is_suppressed("NATURALGAS", thursday_1050_ist) is False
+
+    def test_naturalgas_wednesday_not_suppressed(self):
+        cal = EIACalendar(suppression_minutes=15)
+        wednesday_1020_et = datetime(2026, 3, 18, 10, 20, tzinfo=_ET)
+        wednesday_1020_ist = wednesday_1020_et.astimezone(_IST)
+        assert cal.is_suppressed("NATURALGAS", wednesday_1020_ist) is False
+
+    def test_crudeoil_wednesday_suppressed(self):
+        cal = EIACalendar(suppression_minutes=15)
+        wednesday_1025_et = datetime(2026, 3, 18, 10, 25, tzinfo=_ET)
+        wednesday_1025_ist = wednesday_1025_et.astimezone(_IST)
+        assert cal.is_suppressed("CRUDEOIL", wednesday_1025_ist) is True
+
+    def test_crudeoil_thursday_not_suppressed(self):
+        cal = EIACalendar(suppression_minutes=15)
+        thursday_1025_et = datetime(2026, 3, 19, 10, 25, tzinfo=_ET)
+        thursday_1025_ist = thursday_1025_et.astimezone(_IST)
+        assert cal.is_suppressed("CRUDEOIL", thursday_1025_ist) is False
+
+    def test_unknown_symbol_not_suppressed(self):
+        cal = EIACalendar(suppression_minutes=15)
+        assert cal.is_suppressed("GOLD") is False
+        assert cal.is_suppressed("NIFTY") is False
+
+    def test_boundary_start(self):
+        cal = EIACalendar(suppression_minutes=15)
+        thursday_1015_et = datetime(2026, 3, 19, 10, 15, tzinfo=_ET)
+        thursday_1015_ist = thursday_1015_et.astimezone(_IST)
+        assert cal.is_suppressed("NATURALGAS", thursday_1015_ist) is True
+
+    def test_boundary_end(self):
+        cal = EIACalendar(suppression_minutes=15)
+        thursday_1045_et = datetime(2026, 3, 19, 10, 45, tzinfo=_ET)
+        thursday_1045_ist = thursday_1045_et.astimezone(_IST)
+        assert cal.is_suppressed("NATURALGAS", thursday_1045_ist) is True
+
+
+class TestEIACalendarNextRelease:
+    """Test next release time calculation."""
+
+    def test_next_release_naturalgas(self):
+        cal = EIACalendar(suppression_minutes=15)
+        monday = datetime(2026, 3, 16, 12, 0, tzinfo=_IST)
+        next_release = cal.get_next_release("NATURALGAS", monday)
+        assert next_release is not None
+        assert next_release.weekday() == 3  # Thursday
+
+    def test_next_release_crudeoil(self):
+        cal = EIACalendar(suppression_minutes=15)
+        monday = datetime(2026, 3, 16, 12, 0, tzinfo=_IST)
+        next_release = cal.get_next_release("CRUDEOIL", monday)
+        assert next_release is not None
+        assert next_release.weekday() == 2  # Wednesday
+
+    def test_next_release_unknown_symbol(self):
+        cal = EIACalendar(suppression_minutes=15)
+        assert cal.get_next_release("GOLD") is None
+
+
+class TestEIACalendarSuppressionWindow:
+    """Test suppression window retrieval."""
+
+    def test_get_suppression_window_when_active(self):
+        cal = EIACalendar(suppression_minutes=15)
+        thursday_1020_et = datetime(2026, 3, 19, 10, 20, tzinfo=_ET)
+        thursday_1020_ist = thursday_1020_et.astimezone(_IST)
+        window = cal.get_suppression_window("NATURALGAS", thursday_1020_ist)
+        assert window is not None
+        start, end = window
+        assert start < thursday_1020_ist < end
+
+    def test_get_suppression_window_when_not_active(self):
+        cal = EIACalendar(suppression_minutes=15)
+        thursday_1050_et = datetime(2026, 3, 19, 10, 50, tzinfo=_ET)
+        thursday_1050_ist = thursday_1050_et.astimezone(_IST)
+        window = cal.get_suppression_window("NATURALGAS", thursday_1050_ist)
+        assert window is None
+
+
+# ======================================================================
+# Parity: EIACalendar.is_suppressed / get_next_release on fixed datetimes.
+# The calendar's static data is identical (same EIA_SCHEDULE via shim), so
+# no patching is needed — both sides read the same schedule.
+# ======================================================================
+
+_SUPPRESS_CASES = [
+    ("NATURALGAS", datetime(2026, 3, 19, 10, 20, tzinfo=_ET)),
+    ("NATURALGAS", datetime(2026, 3, 19, 10, 10, tzinfo=_ET)),
+    ("NATURALGAS", datetime(2026, 3, 19, 10, 50, tzinfo=_ET)),
+    ("NATURALGAS", datetime(2026, 3, 18, 10, 20, tzinfo=_ET)),
+    ("CRUDEOIL", datetime(2026, 3, 18, 10, 25, tzinfo=_ET)),
+    ("CRUDEOIL", datetime(2026, 3, 19, 10, 25, tzinfo=_ET)),
+    ("GOLD", datetime(2026, 3, 18, 10, 25, tzinfo=_ET)),
+]
+
+_NEXT_RELEASE_CASES = [
+    ("NATURALGAS", datetime(2026, 3, 16, 12, 0, tzinfo=_IST)),
+    ("CRUDEOIL", datetime(2026, 3, 16, 12, 0, tzinfo=_IST)),
+    ("GOLD", datetime(2026, 3, 16, 12, 0, tzinfo=_IST)),
+]
+
+
+def test_eia_parity_is_suppressed():
+    legacy = LegacyEIACalendar(suppression_minutes=15)
+    new = EIACalendar(suppression_minutes=15)
+    for symbol, dt_et in _SUPPRESS_CASES:
+        dt_ist = dt_et.astimezone(_IST)
+        assert_parity(legacy.is_suppressed, new.is_suppressed, symbol, dt_ist)
+
+
+def test_eia_parity_get_next_release():
+    legacy = LegacyEIACalendar(suppression_minutes=15)
+    new = EIACalendar(suppression_minutes=15)
+    for symbol, dt in _NEXT_RELEASE_CASES:
+        assert_parity(legacy.get_next_release, new.get_next_release, symbol, dt)
