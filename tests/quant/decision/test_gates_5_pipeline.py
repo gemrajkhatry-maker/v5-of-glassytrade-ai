@@ -1,0 +1,63 @@
+from quant.decision.context import DecisionContext
+from quant.decision.gates_rr import gate_risk_reward
+from quant.decision.pipeline import GatePipeline
+from quant.auction_state import AuctionState
+from quant.vwap import VWAPState
+from quant.volume_profile import VolumeProfile
+from quant.order_flow import OrderFlowState
+from quant.location import LocationState
+
+
+def _ctx(**kw):
+    state = AuctionState(
+        time="t", close=kw.get("close", 100.0),
+        volume_profile=VolumeProfile(levels=(), poc=100, vah=kw.get("vah", 101.0),
+                                     val=kw.get("val", 99.0), step=1, total_volume=100),
+        vwap=VWAPState(value=100, upper_1=101, lower_1=99, upper_2=102, lower_2=98, std=1, deviation_sigmas=0),
+        order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=0, cvd_divergence="NONE", aggressive_prints=()),
+        absorption=None,
+        location=LocationState(ib_high=105, ib_low=95, ib_complete=True, zone="INSIDE_VA",
+                               nearest_level=kw.get("nearest", 100), distance_to_level=0),
+        triple_a_phase=kw.get("triple_a_phase", "AGGRESSION"),
+        triple_a_signal=kw.get("triple_a_signal", "LONG"),
+    )
+    return DecisionContext(state=state, bar=None, agent_direction="LONG",
+                           agent_probability=0.7,
+                           position_open=kw.get("position_open", False),
+                           cooldown_remaining_sec=kw.get("cooldown_remaining_sec", 0),
+                           risk_halted=kw.get("risk_halted", False),
+                           tick_size=kw.get("tick_size", 0.05))
+
+
+def test_gate5_passes_good_rr():
+    # LONG: entry 100, structural SL = val (support). val=99.5 -> 0.5 risk,
+    # tp 101 -> rr 2.0, stop 10 ticks at 0.05 -> within max_distance_ticks.
+    r = gate_risk_reward(_ctx(val=99.5))
+    assert r.passed and r.gate == 5
+
+
+def test_gate5_fails_poor_rr():
+    # SL only 0.1 away -> rr 2.0; force failure with a high min_rr
+    r = gate_risk_reward(_ctx(val=99.9), min_rr=5.0)
+    assert not r.passed and r.gate == 5
+
+
+def test_gate5_fails_stop_too_far():
+    # SL 5.0 away = 100 ticks at 0.05 -> exceeds max_distance_ticks=20
+    r = gate_risk_reward(_ctx(val=95.0))
+    assert not r.passed and r.gate == 5
+
+
+def test_pipeline_runs_all_gates():
+    pipe = GatePipeline()
+    results = pipe.evaluate(_ctx(val=99.5))
+    assert [r.gate for r in results] == [1, 2, 3, 4, 5]
+    assert all(r.passed for r in results)
+
+
+def test_pipeline_position_open_fails_gate2_but_runs_rest():
+    ctx = _ctx(val=99.5, position_open=True)
+    results = GatePipeline().evaluate(ctx)
+    assert results[0].passed        # gate1 session open
+    assert not results[1].passed    # gate2 position open
+    assert results[2].passed        # gate3 still runs
