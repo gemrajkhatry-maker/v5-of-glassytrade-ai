@@ -57,3 +57,15 @@ def test_render_split_writes_output_file():
     assert dst.exists()
     assert dst.stat().st_size > 0
     assert OUTPUT_DIR.exists()
+
+
+def test_system_message_matches_live_instruction():
+    """The dataset system message must equal what live inference sends."""
+    from app.domain.fabio_ai.services.generative_ai_service import _DEFAULT_INSTRUCTION
+    from app.domain.fabio_ai.services.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
+
+    row = _first_row()
+    rendered = render_row(row)
+    expected = _DEFAULT_INSTRUCTION + "\n" + ENTRY_JSON_RUNTIME_REMINDER
+    assert rendered["messages"][0]["content"] == expected
+    assert "DECISION HIERARCHY" in rendered["messages"][0]["content"]

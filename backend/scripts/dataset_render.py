@@ -106,12 +106,20 @@ def _assistant_content(assistant_raw: str) -> dict:
 
 
 def render_row(row: dict) -> dict:
-    """Render one dataset row to the live prompt shape."""
+    """Render one dataset row to the live prompt shape.
+
+    The system message mirrors what live inference sends
+    (generative_ai_service._DEFAULT_INSTRUCTION + the JSON contract reminder),
+    so a retrain teaches the model the exact instruction it will see at runtime.
+    """
+    from app.domain.fabio_ai.services.generative_ai_service import _DEFAULT_INSTRUCTION
+    from app.domain.fabio_ai.services.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
+
     messages = row["messages"]
     fields = key_value_to_fields(messages[1]["content"])
     return {
         "messages": [
-            {"role": "system", "content": messages[0]["content"]},
+            {"role": "system", "content": _DEFAULT_INSTRUCTION + "\n" + ENTRY_JSON_RUNTIME_REMINDER},
             {"role": "user", "content": render_entry_prompt(fields)},
             {
                 "role": "assistant",
