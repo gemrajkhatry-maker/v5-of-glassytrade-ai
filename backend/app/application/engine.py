@@ -32,7 +32,6 @@ from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLe
 # Import delegated modules
 from app.application.stream_manager import StreamManager
 from app.application.candle_aggregator import CandleAggregator
-from app.application.range_bar_builder import RangeBarBuilder
 from app.application.watchdog_manager import WatchdogManager
 # New decomposed services
 from app.application.services.tick_processor import TickProcessor
@@ -207,7 +206,6 @@ class TradingEngine:
         # New decomposed services
         self._tick_processor = TickProcessor(
             candle_aggregator=self._candle_aggregator,
-            range_default_size=3.0,
         )
         self._state_broadcaster = StateBroadcaster()
         self._lifecycle = EngineLifecycle(
@@ -305,7 +303,6 @@ class TradingEngine:
             session=session,
             session_service=self._session_service,
             current_depth=self._current_depths.get(symbol, {}),
-            range_builder_dict=self._tick_processor.get_range_builder_dict(symbol),
         )
 
     # ------------------------------------------------------------------
@@ -496,19 +493,6 @@ class TradingEngine:
                                 k: footprint_to_dto(v) for k, v in real_fp.items()
                             }
                             state["footprint"] = session.last_footprint
-
-                    # Range bar builder (delegated to TickProcessor)
-                    rb = self._tick_processor.get_or_create_range_builder(pkt_symbol)
-                    # Backfill if new
-                    if len(rb._bars) == 0 and session and session.data:
-                        self._tick_processor.backfill_range_bars(
-                            pkt_symbol, session.data
-                        )
-                    range_dict = self._tick_processor.update_range_bar(
-                        pkt_symbol, ltp, str(now), tick
-                    )
-                    if range_dict:
-                        state["rangeBars"] = range_dict
 
                     self._state_broadcaster.set_state(pkt_symbol, state)
                     await self._state_broadcaster.notify_viewers()

@@ -231,7 +231,6 @@ class StateBroadcaster:
         session,
         session_service,
         current_depth: dict,
-        range_builder_dict: dict | None,
     ) -> None:
         """Build fresh state snapshot for symbol and notify all viewers.
 
@@ -243,7 +242,6 @@ class StateBroadcaster:
             session: TradingSession instance
             session_service: TradingSessionService for dependencies
             current_depth: Current depth book dict
-            range_builder_dict: Range bar dict for visualization
         """
         try:
             logger.info("trigger_immediate_update called for %s", symbol)
@@ -282,10 +280,6 @@ class StateBroadcaster:
             state["oi"] = getattr(session, "_last_oi", 0)
             state["_symbol"] = symbol
             state["depth"] = order_book_to_dto(current_depth.get("book") if current_depth else None)
-
-            # Range bars (visualization)
-            if range_builder_dict:
-                state["rangeBars"] = range_builder_dict
 
             # Update state (thread-safe)
             self.set_state(symbol, state)

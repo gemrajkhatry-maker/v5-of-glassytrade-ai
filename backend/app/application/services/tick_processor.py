@@ -4,18 +4,15 @@ Extracted from engine.py. Responsibilities:
 - Tick demux and routing
 - OI tracking and change calculation
 - OrderBook depth building from packet data
-- Range bar builder updates
 - Throttled state updates between full process_tick calls
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
-from app.application.range_bar_builder import RangeBarBuilder
 from app.application.services.state_snapshot_builder import _camel_case_ai
 from app.shared.depth_dto import order_book_to_dto
 
@@ -31,27 +28,22 @@ class TickProcessor:
     Handles:
     - OI (Open Interest) tracking and trend detection
     - OrderBook depth building from packet data
-    - Range bar builder coordination
     - Throttled state updates between full process_tick calls
     """
 
     def __init__(
         self,
         candle_aggregator: "CandleAggregator",
-        range_default_size: float = 3.0,
     ):
         """Initialize tick processor.
 
         Args:
             candle_aggregator: Candle aggregator for footprint updates
-            range_default_size: Default range size for range bars (points)
         """
         self._candle_aggregator = candle_aggregator
-        self._range_default_size = range_default_size
 
         # Per-symbol state
         self._prev_oi_values: dict[str, int] = {}
-        self._range_builders: dict[str, RangeBarBuilder] = {}
 
     # ------------------------------------------------------------------
     # OI Tracking
@@ -138,126 +130,6 @@ class TickProcessor:
         return current_book
 
     # ------------------------------------------------------------------
-    # Range Bar Builder
-    # ------------------------------------------------------------------
-
-    def get_or_create_range_builder(
-        self, symbol: str, range_size: float | None = None
-    ) -> "RangeBarBuilder":
-        """Get or create a range bar builder for a symbol.
-
-        Args:
-            symbol: Trading symbol
-            range_size: Range size (uses default if None)
-
-        Returns:
-            RangeBarBuilder instance
-        """
-        if symbol not in self._range_builders:
-            size = range_size or self._range_default_size
-            self._range_builders[symbol] = RangeBarBuilder(range_size=size)
-        return self._range_builders[symbol]
-
-    def update_range_bar(
-        self,
-        symbol: str,
-        ltp: float,
-        timestamp: str,
-        tick: OHLC,
-    ) -> dict | None:
-        """Update range bar builder with new tick.
-
-        Args:
-            symbol: Trading symbol
-            ltp: Last traded price
-            timestamp: Tick timestamp
-            tick: OHLC tick for volume split
-
-        Returns:
-            Range bar dict for state broadcast, or None if no builder
-        """
-        rb = self._range_builders.get(symbol)
-        if rb is None:
-            return None
-
-        rb.on_tick(
-            ltp=float(ltp),
-            timestamp=timestamp,
-            buy_vol=float(tick.taker_buy_volume),
-            sell_vol=max(0.0, float(tick.volume) - float(tick.taker_buy_volume)),
-        )
-        return rb.to_dict()
-
-    def backfill_range_bars(
-        self, symbol: str, session_data: list[OHLC], limit: int = 200
-    ) -> None:
-        """Backfill range bars from historical candle data.
-
-        Generates synthetic ticks from each historical candle's OHLC
-        so the range bar builder has initial data.
-
-        Args:
-            symbol: Trading symbol
-            session_data: List of historical OHLC candles
-            limit: Maximum number of candles to process
-        """
-        rb = self._range_builders.get(symbol)
-        if not rb or not session_data:
-            return
-
-        try:
-            for candle in session_data[-limit:]:
-                ts = str(candle.time) if hasattr(candle, "time") else ""
-                o = float(candle.open)
-                h = float(candle.high)
-                l = float(candle.low)
-                c = float(candle.close)
-                v = float(candle.volume)
-                tb = float(getattr(candle, "taker_buy_volume", v / 2))
-
-                if o <= 0 or h <= 0 or l <= 0 or c <= 0:
-                    continue
-
-                # Generate synthetic ticks: open → low → high → close
-                ticks = [o]
-                if l < o:
-                    ticks.append(l)
-                if h > o:
-                    ticks.append(h)
-                ticks.append(c)
-
-                vol_per_tick = v / len(ticks) if ticks else 0
-                buy_per_tick = tb / len(ticks) if ticks else 0
-                sell_per_tick = (v - tb) / len(ticks) if ticks else 0
-
-                for tick_price in ticks:
-                    closed_bar = rb.on_tick(
-                        ltp=tick_price,
-                        timestamp=ts,
-                        buy_vol=buy_per_tick,
-                        sell_vol=sell_per_tick,
-                    )
-                    if closed_bar is not None:
-                        # Synthetic backfill bars use an assumed price path +
-                        # equal volume — flag them so the frontend can
-                        # distinguish warm-up bars from live data.
-                        closed_bar.is_warmup = True
-        except Exception:
-            logger.debug("Range bar backfill failed for %s — non-critical", symbol, exc_info=True)  # Non-critical — depth book degrades gracefully
-
-    def get_range_builder_dict(self, symbol: str) -> dict | None:
-        """Get range bar dict for a symbol.
-
-        Args:
-            symbol: Trading symbol
-
-        Returns:
-            Range bar dict or None
-        """
-        rb = self._range_builders.get(symbol)
-        return rb.to_dict() if rb else None
-
-    # ------------------------------------------------------------------
     # Throttled State Update
     # ------------------------------------------------------------------
 
@@ -331,4 +203,3 @@ class TickProcessor:
             symbol: Trading symbol to remove
         """
         self._prev_oi_values.pop(symbol, None)
-        self._range_builders.pop(symbol, None)
