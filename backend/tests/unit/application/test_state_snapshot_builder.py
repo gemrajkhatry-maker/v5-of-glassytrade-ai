@@ -128,7 +128,6 @@ def test_snapshot_keeps_live_strategy_keys():
     for keep in (
         "portfolio",
         "amt",
-        "footprint",
         "genAIAnalysis",
         "overseerAction",
         "overseerReason",

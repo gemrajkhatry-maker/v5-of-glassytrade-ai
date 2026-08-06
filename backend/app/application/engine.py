@@ -321,7 +321,6 @@ class TradingEngine:
         """Stream ticks from Dhan, aggregate candles, run process_tick."""
         from app.infrastructure.serialization.schemas import (
             ohlc_to_dto,
-            footprint_to_dto,
         )
 
         dhan_connect_state = [0.0]
@@ -483,16 +482,6 @@ class TradingEngine:
                     state["depth"] = _depth_to_dto(
                         self._current_depths[pkt_symbol]["book"]
                     )
-
-                    # Overlay footprint
-                    session = self._session_service.get_or_create_session(pkt_symbol)
-                    if session:
-                        real_fp = self._candle_aggregator.get_footprint(pkt_symbol)
-                        if real_fp:
-                            session.last_footprint = {
-                                k: footprint_to_dto(v) for k, v in real_fp.items()
-                            }
-                            state["footprint"] = session.last_footprint
 
                     self._state_broadcaster.set_state(pkt_symbol, state)
                     await self._state_broadcaster.notify_viewers()
