@@ -260,12 +260,26 @@ def check_time_stop_with_price(
         
         # R-MULTIPLE CHECK: Don't exit if ≥ 1R, activate trailing instead
         if r_multiple >= 1.0:
+            # Do NOT force-exit a winner at time stop — trailing/partition
+            # logic owns the exit from here.  Protect the locked profit: ensure
+            # the stop sits at least at breakeven (never loosens an already
+            # trailed stop), and extend the hold window so a re-check on the
+            # next tick doesn't kill the runner prematurely.
+            if not position.breakeven_set:
+                position.breakeven_set = True
+                if is_long and position.stop_loss < position.entry_price:
+                    position.stop_loss = position.entry_price
+                elif not is_long and position.stop_loss > position.entry_price:
+                    position.stop_loss = position.entry_price
+            position.applied_time_stop = max(
+                position.applied_time_stop, int(max_hold * 1.3)
+            )
             logger.info(
-                "TIME_STOP: Skipping exit for %s - R-multiple=%.2fR (≥ 1R), activating trail",
+                "TIME_STOP: Holding winner %s - %.2fR (>= 1R), "
+                "trailing/partitions manage the exit",
                 position.id,
                 r_multiple,
             )
-            # Return None to let trailing stop handle it
             return None
         
         # 0.5R to 1R: Move SL to breakeven, give more time

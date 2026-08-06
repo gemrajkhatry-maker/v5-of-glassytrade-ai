@@ -100,27 +100,61 @@ class Portfolio:
             ),
         )
 
-    def has_straddle_conflict(self, symbol: str, strike: float | int) -> bool:
+    @staticmethod
+    def _position_strike(metadata: dict | None) -> float | int:
+        """Resolve the strike from position/signal metadata.
+
+        The entry path stores the strike under ``option_strike`` (see
+        EntryCoordinator).  ``strike`` is supported as a legacy alias so
+        tests and other callers that use it keep working.
+        """
+        md = metadata or {}
+        return md.get("strike") or md.get("option_strike") or 0
+
+    @staticmethod
+    def _position_option_type(metadata: dict | None) -> str:
+        """Resolve the option type (CE/PE) from metadata, defaulting to empty."""
+        md = metadata or {}
+        raw = md.get("option_type") or md.get("type") or ""
+        upper = str(raw).strip().upper()
+        if upper in ("CE", "CALL"):
+            return "CE"
+        if upper in ("PE", "PUT"):
+            return "PE"
+        return ""
+
+    def has_straddle_conflict(
+        self, symbol: str, strike: float | int, new_meta: dict | None = None
+    ) -> bool:
         """Check if opening a position would create a straddle.
-        
+
         Straddles are forbidden in AMT - you cannot have both CE and PE
         at the same strike price simultaneously.
-        
+
         Args:
             symbol: The underlying symbol (e.g., "CRUDEOIL")
             strike: The strike price to check
-            
+            new_meta: Metadata of the proposed new position (its option type
+                determines whether the conflict is a true straddle).
+
         Returns:
             True if a straddle would be created, False otherwise
         """
+        new_type = self._position_option_type(new_meta)
         for pos in self.positions:
             if not pos.is_open:
                 continue
-            # Strike is stored in position metadata
-            pos_strike = (pos.metadata or {}).get("strike", 0)
-            # Check same symbol and SAME strike (exact match)
+            pos_metadata = pos.metadata or {}
+            pos_strike = self._position_strike(pos_metadata)
+            # Check same symbol and SAME strike (exact match).
+            # Only a true straddle (opposite option types at the same strike)
+            # is blocked; same-direction positions at the same strike are
+            # still rejected by the duplicate-source invariant.  If either
+            # side has no option type, block conservatively.
             if pos.symbol == symbol and pos_strike == strike:
-                return True
+                pos_type = self._position_option_type(pos_metadata)
+                if not pos_type or not new_type or pos_type != new_type:
+                    return True
         return False
 
     def get_open_positions_summary(self) -> list[dict]:
@@ -133,7 +167,7 @@ class Portfolio:
             if pos.is_open:
                 result.append({
                     "symbol": pos.symbol,
-                    "strike": (pos.metadata or {}).get("strike", 0),
+                    "strike": self._position_strike(pos.metadata),
                     "side": str(pos.side.value) if hasattr(pos.side, "value") else str(pos.side),
                     "size": float(pos.size),
                 })
@@ -312,8 +346,8 @@ class Portfolio:
             return None
 
         # Straddle prevention: don't allow both CE and PE at same strike
-        strike = (signal.metadata or {}).get("strike", 0)
-        if strike and self.has_straddle_conflict(symbol, strike):
+        strike = self._position_strike(signal.metadata)
+        if strike and self.has_straddle_conflict(symbol, strike, signal.metadata or {}):
             logger.warning(
                 "Straddle prevention: blocking %s at strike %s - position already exists",
                 symbol, strike
@@ -511,6 +545,11 @@ class Portfolio:
 
                 # Move stop to break-even on the Position entity
                 pos.stop_loss = pos.entry_price
+
+                # Mark the position as having taken a partial so the ATR
+                # trailing stop can arm (Fabio: trail only after a partial TP).
+                # Without this flag apply_atr_trail silently no-ops forever.
+                pos.set_partial_taken(True)
 
                 # If all partials sum to full size, treat as a full close
                 if pos.size <= 0:

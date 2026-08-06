@@ -26,26 +26,26 @@ class TestUnderlyingFuturesProvider:
         return UnderlyingFuturesProvider()
 
     def test_mapping_crudeoil_call(self, provider):
-        """Test CRUDEOIL option maps to correct futures."""
+        """Test CRUDEOIL option maps to current futures (dynamic, Dhan-resolvable)."""
         mapping = provider.get_mapping("CRUDEOIL 14 MAY 10150 CALL")
         assert mapping is not None
-        assert mapping.underlying_symbol == "CRUDEOIL25MAYFUT"
+        assert mapping.underlying_symbol == "CRUDEOIL MAY FUT"
         assert mapping.underlying == "CRUDEOIL"
         assert mapping.exchange == "MCX"
 
     def test_mapping_nifty_call(self, provider):
-        """Test NIFTY option maps to correct futures."""
+        """Test NIFTY option maps to current futures (dynamic, Dhan-resolvable)."""
         mapping = provider.get_mapping("NIFTY 22 MAY 24000 CALL")
         assert mapping is not None
-        assert mapping.underlying_symbol == "NIFTY25MAYFUT"
+        assert mapping.underlying_symbol == "NIFTY MAY FUT"
         assert mapping.underlying == "NIFTY"
         assert mapping.exchange == "NSE"
 
     def test_mapping_gold_call(self, provider):
-        """Test GOLD option maps to correct futures."""
+        """Test GOLD option maps to current futures (dynamic, Dhan-resolvable)."""
         mapping = provider.get_mapping("GOLD 14 MAY 8900 CALL")
         assert mapping is not None
-        assert mapping.underlying_symbol == "GOLD25MAYFUT"
+        assert mapping.underlying_symbol == "GOLD MAY FUT"
         assert mapping.underlying == "GOLD"
         assert mapping.exchange == "MCX"
 
@@ -53,7 +53,7 @@ class TestUnderlyingFuturesProvider:
         """Test PUT option maps correctly."""
         mapping = provider.get_mapping("CRUDEOIL 16 MAY 10200 PUT")
         assert mapping is not None
-        assert mapping.underlying_symbol == "CRUDEOIL25MAYFUT"
+        assert mapping.underlying_symbol == "CRUDEOIL MAY FUT"
 
     def test_build_futures_routing(self, provider):
         """Test building futures to options routing map."""
@@ -64,9 +64,9 @@ class TestUnderlyingFuturesProvider:
         ]
         fut_to_opts, futures_list = provider.build_futures_routing(symbols)
 
-        assert "CRUDEOIL25MAYFUT" in futures_list
-        assert "NIFTY25MAYFUT" in futures_list
-        assert set(fut_to_opts["CRUDEOIL25MAYFUT"]) == {
+        assert "CRUDEOIL MAY FUT" in futures_list
+        assert "NIFTY MAY FUT" in futures_list
+        assert set(fut_to_opts["CRUDEOIL MAY FUT"]) == {
             "CRUDEOIL 14 MAY 10150 CALL",
             "CRUDEOIL 16 MAY 10200 PUT",
         }
@@ -257,8 +257,8 @@ class TestDualFeedIntegration:
 
         # 3. Verify routing
         assert len(futures_list) == 2  # One for each underlying
-        assert "CRUDEOIL25MAYFUT" in futures_list
-        assert "NIFTY25MAYFUT" in futures_list
+        assert "CRUDEOIL MAY FUT" in futures_list
+        assert "NIFTY MAY FUT" in futures_list
 
         # 4. Verify each option maps to correct futures
         for sym, mapping in mappings.items():

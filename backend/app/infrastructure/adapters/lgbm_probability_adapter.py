@@ -41,11 +41,10 @@ class LGBMProbabilityAdapter(IProbabilityInference):
         short_path = os.path.join(self._model_dir, "fp_short.txt")
 
         if not os.path.exists(long_path) or not os.path.exists(short_path):
-            logger.warning(
-                "Probability models not found at %s — adapter will return neutral estimates",
-                self._model_dir,
+            raise FileNotFoundError(
+                f"Probability models not found at {self._model_dir} "
+                "(fp_long.txt / fp_short.txt missing)"
             )
-            return
 
         try:
             import lightgbm as lgb

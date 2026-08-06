@@ -899,7 +899,6 @@ class TradingSessionService:
                 event.symbol,
                 event.tick,
                 amt_result,
-                tick_trace_id=getattr(event, "tick_trace_id", ""),
             )
             self._record_stage_latency(event.symbol, "llm_trigger", _stage_start)
             if monitoring_trigger:

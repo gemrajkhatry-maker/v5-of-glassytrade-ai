@@ -73,8 +73,9 @@ class TestPortfolioOpenPosition:
         sig = _make_signal(price=100, sl=95, tp=110)
         pos = p.open_position(sig, "BTCUSDT")
         # No metadata → confidence="Medium" → risk=0.35%
-        # risk_amount = 1M * 0.0035 = 3.5K; risk_per_unit = 5; size = 700
-        assert pos.size == pytest.approx(700, rel=0.01)
+        # risk_amount = 5M (INITIAL_CAPITAL) * 0.0035 = 17.5K
+        # risk_per_unit = 5; size = 17.5K / 5 = 3500
+        assert pos.size == pytest.approx(3500, rel=0.01)
 
 
 class TestPortfolioProcessTick:
@@ -254,6 +255,58 @@ class TestStraddlePrevention:
         pos2 = p.open_position(sig2, "BANKNIFTY")
         assert pos2 is not None  # Different symbol - allowed
         assert len(p.positions) == 2
+
+    def test_straddle_blocked_with_option_strike_and_type(self):
+        """Regression: the production entry path stores the strike under
+        ``option_strike`` (with ``option_type``), not ``strike``.  A CE at a
+        strike must block a PE at the same strike (true straddle)."""
+        p = Portfolio.create_default()
+        sig_ce = _make_signal(price=100, sl=95, tp=110, source=Source.AMT)
+        sig_ce.metadata = {"option_strike": 24000, "option_type": "CE"}
+        assert p.open_position(sig_ce, "NIFTY") is not None
+
+        # PE at the same strike -> straddle, must be blocked
+        sig_pe = _make_signal(price=100, sl=95, tp=110, source=Source.PREDICTION)
+        sig_pe.metadata = {"option_strike": 24000, "option_type": "PE"}
+        assert p.open_position(sig_pe, "NIFTY") is None
+        assert len(p.positions) == 1
+
+    def test_same_option_type_same_strike_allowed(self):
+        """Regression: two CALLs at the same strike are NOT a straddle — AMT
+        only forbids holding both CE and PE.  Same-type duplicates remain
+        governed by the duplicate-source invariant."""
+        p = Portfolio.create_default()
+        sig1 = _make_signal(price=100, sl=95, tp=110, source=Source.AMT)
+        sig1.metadata = {"option_strike": 24000, "option_type": "CE"}
+        assert p.open_position(sig1, "NIFTY") is not None
+
+        sig2 = _make_signal(price=101, sl=96, tp=111, source=Source.PREDICTION)
+        sig2.metadata = {"option_strike": 24000, "option_type": "CE"}
+        assert p.open_position(sig2, "NIFTY") is not None
+        assert len(p.positions) == 2
+
+    def test_straddle_not_blocked_across_strikes_with_option_keys(self):
+        """Opposite option types at different strikes are not a straddle."""
+        p = Portfolio.create_default()
+        sig1 = _make_signal(price=100, sl=95, tp=110, source=Source.AMT)
+        sig1.metadata = {"option_strike": 24000, "option_type": "CE"}
+        assert p.open_position(sig1, "NIFTY") is not None
+
+        sig2 = _make_signal(price=110, sl=105, tp=120, source=Source.PREDICTION)
+        sig2.metadata = {"option_strike": 24500, "option_type": "PE"}
+        assert p.open_position(sig2, "NIFTY") is not None
+        assert len(p.positions) == 2
+
+    def test_open_positions_summary_reports_option_strike(self):
+        """Regression: the LLM context summary must report the strike even
+        when it is stored under ``option_strike``."""
+        p = Portfolio.create_default()
+        sig = _make_signal(price=100, sl=95, tp=110, source=Source.AMT)
+        sig.metadata = {"option_strike": 24000, "option_type": "CE"}
+        p.open_position(sig, "NIFTY")
+        summary = p.get_open_positions_summary()
+        assert len(summary) == 1
+        assert summary[0]["strike"] == 24000
 
     def test_position_helpers(self):
         """Test helper methods: has_open_positions, open_position_ids, etc."""

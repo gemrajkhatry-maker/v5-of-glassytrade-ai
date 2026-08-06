@@ -228,6 +228,14 @@ class DhanBrokerAdapter(IBroker):
                 }
             )
 
+            # 40/30/30 scale-in plan: the broker only deployed 40% of target.
+            # Record the target full size + deployed fraction so
+            # Portfolio.add_to_position can size the 30% confirm/breakout adds.
+            if (signal.metadata or {}).get("scale_in"):
+                deployed_fraction = 0.4
+                metadata["full_size"] = str(float(filled_quantity) / deployed_fraction)
+                metadata["deployed_fraction"] = str(deployed_fraction)
+
             return Position(
                 symbol=str(getattr(final_order.instrument, "symbol", symbol)),
                 side=Side.LONG if signal.is_buy else Side.SHORT,
@@ -237,6 +245,10 @@ class DhanBrokerAdapter(IBroker):
                 stop_loss=_to_decimal(signal.stop_loss),
                 take_profit=_to_decimal(signal.take_profit),
                 entry_time=entry_time,
+                # initial_stop is the original stop — required by the exit
+                # engine (R-multiple, ATR/VWAP trail, partition exits).  Without
+                # it those risk calculations silently no-op on live positions.
+                initial_stop=_to_decimal(signal.stop_loss),
                 metadata=metadata,
             )
         except DhanError as exc:

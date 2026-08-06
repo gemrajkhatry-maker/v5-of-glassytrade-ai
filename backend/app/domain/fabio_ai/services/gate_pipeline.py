@@ -104,6 +104,9 @@ class GateContext:
     # Aggression (from AggressionScorer)
     aggression_score: float = 0.0
 
+    # CVD conflict flag (directional CVD divergence vs price action)
+    cvd_conflict: bool = False
+
     # Risk
     is_risk_halted: bool = False
     halt_reason: str = ""

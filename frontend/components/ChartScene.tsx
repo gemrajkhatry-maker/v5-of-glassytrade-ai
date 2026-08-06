@@ -249,7 +249,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         timeVisible: true,
         secondsVisible: true,
         // Handle irregular tick data better
-        shiftVisibleRangeWhenNewBarIsAdded: false,
+        shiftVisibleRangeOnNewBar: false,
       }
     });
 

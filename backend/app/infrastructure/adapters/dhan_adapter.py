@@ -194,6 +194,13 @@ class DhanMarketDataAdapter(IMarketData):
             exchange = _exchange_enum("MCX" if is_mcx else "NFO")
             option_type = OptionType.CALL if ("CALL" in sym_upper or sym_upper.endswith("CE")) else OptionType.PUT
             return Instrument(symbol=symbol, exchange=exchange, option_type=option_type)
+        elif sym_upper.endswith(" FUT"):
+            # Futures roots (e.g. "NIFTY AUG FUT", "CRUDEOIL AUG FUT") — route to
+            # the same derivative exchanges as options so Dhan resolves the security
+            # ID in NSE_FNO / MCX_COMM instead of the equity segment.
+            is_mcx = any(sym_upper.startswith(u) for u in self._MCX_UNDERLYINGS)
+            exchange = _exchange_enum("MCX" if is_mcx else "NFO")
+            return Instrument(symbol=symbol, exchange=exchange)
         else:
             exchange = _exchange_enum(self._exchange_str)
             return Instrument(symbol=symbol, exchange=exchange)

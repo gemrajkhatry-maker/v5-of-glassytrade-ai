@@ -70,8 +70,9 @@ class _TradingSession:
 
 
 def test_startup_contracts_healthy_state(monkeypatch) -> None:
-    monkeypatch.setattr("app.config.settings.SCANNER_TOP_N", 4, raising=False)
-    monkeypatch.setattr("app.config.settings.DEFAULT_EXCHANGE", "MCX", raising=False)
+    # Note: settings.* are read-only env/YAML-backed properties on
+    # SettingsAdapter and cannot be monkeypatched. YAML defaults provide
+    # SCANNER_TOP_N>0 and DEFAULT_EXCHANGE="MCX", so this is unnecessary.
 
     session = _TradingSession()
     contract = build_startup_contracts(
@@ -96,8 +97,9 @@ def test_startup_contracts_healthy_state(monkeypatch) -> None:
 
 
 def test_startup_contracts_broker_runtime_must_define_execute_and_cancel(monkeypatch) -> None:
-    monkeypatch.setattr("app.config.settings.SCANNER_TOP_N", 4, raising=False)
-    monkeypatch.setattr("app.config.settings.DEFAULT_EXCHANGE", "MCX", raising=False)
+    # Note: settings.* are read-only env/YAML-backed properties on
+    # SettingsAdapter and cannot be monkeypatched. YAML defaults provide
+    # SCANNER_TOP_N>0 and DEFAULT_EXCHANGE="MCX", so this is unnecessary.
 
     class _BadBroker(_Broker):
         execute_order = None
@@ -120,8 +122,9 @@ def test_startup_contracts_broker_runtime_must_define_execute_and_cancel(monkeyp
 
 
 def test_startup_contracts_storage_runtime_requires_persistence_methods(monkeypatch) -> None:
-    monkeypatch.setattr("app.config.settings.SCANNER_TOP_N", 4, raising=False)
-    monkeypatch.setattr("app.config.settings.DEFAULT_EXCHANGE", "MCX", raising=False)
+    # Note: settings.* are read-only env/YAML-backed properties on
+    # SettingsAdapter and cannot be monkeypatched. YAML defaults provide
+    # SCANNER_TOP_N>0 and DEFAULT_EXCHANGE="MCX", so this is unnecessary.
 
     class _BadStorage(_Storage):
         save_trade = None
@@ -144,8 +147,9 @@ def test_startup_contracts_storage_runtime_requires_persistence_methods(monkeypa
 
 
 def test_startup_contracts_strategy_runtime_uses_callability(monkeypatch) -> None:
-    monkeypatch.setattr("app.config.settings.SCANNER_TOP_N", 4, raising=False)
-    monkeypatch.setattr("app.config.settings.DEFAULT_EXCHANGE", "MCX", raising=False)
+    # Note: settings.* are read-only env/YAML-backed properties on
+    # SettingsAdapter and cannot be monkeypatched. YAML defaults provide
+    # SCANNER_TOP_N>0 and DEFAULT_EXCHANGE="MCX", so this is unnecessary.
 
     session = _TradingSession(with_strategy=False)
     contract = build_startup_contracts(
@@ -164,8 +168,9 @@ def test_startup_contracts_strategy_runtime_uses_callability(monkeypatch) -> Non
 
 
 def test_startup_contracts_reconciliation_depends_on_storage_and_broker_methods(monkeypatch) -> None:
-    monkeypatch.setattr("app.config.settings.SCANNER_TOP_N", 4, raising=False)
-    monkeypatch.setattr("app.config.settings.DEFAULT_EXCHANGE", "MCX", raising=False)
+    # Note: settings.* are read-only env/YAML-backed properties on
+    # SettingsAdapter and cannot be monkeypatched. YAML defaults provide
+    # SCANNER_TOP_N>0 and DEFAULT_EXCHANGE="MCX", so this is unnecessary.
 
     class _BadStorage(_Storage):
         load_open_positions = None

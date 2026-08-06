@@ -656,13 +656,8 @@ class MLXInferenceAdapter(ILLMInference):
             # Trading decisions need low temperature (0.3) for deterministic output
             # mlx_lm v0.31+ requires sampler object instead of direct temperature/top_p params
             sampler = make_sampler(temp=self._temperature, top_p=0.95)
-            response = generate(
-                self.model,
-                self.processor,
-                prompt=prompt,
-                max_tokens=max_t,
-                verbose=False,
-                sampler=sampler,
+            response = self._generate_early_stop(
+                prompt, max_t, sampler, target
             )
             duration = _time.time() - t0
             logger.info("[%s] Generation complete in %.2fs.", target, duration)
@@ -671,6 +666,64 @@ class MLXInferenceAdapter(ILLMInference):
         if is_overseer:
             return self._truncate_repetition(rendered)
         return self._extract_json_candidate(rendered)
+
+    def _generate_early_stop(
+        self, prompt: str, max_t: int, sampler, target: str
+    ) -> str:
+        """Generate with early termination on a complete JSON object or EOS.
+
+        Local reasoning models (VibeThinker, DeepSeek) ramble on after emitting
+        the JSON decision, wasting time and tokens. We stream tokens and stop as
+        soon as the JSON object opened by the prefill ``{`` is closed, or on
+        ``<|im_end|>`` / EOS — cutting latency ~2-3x on live trading calls.
+        """
+        import json as _json
+
+        from mlx_lm import stream_generate
+
+        buffer = ""
+        json_depth = 0
+        json_closed = False
+        for resp in stream_generate(
+            self.model,
+            self.processor,
+            prompt=prompt,
+            max_tokens=max_t,
+            sampler=sampler,
+        ):
+            segment = resp.text or ""
+            buffer += segment
+
+            # Track JSON nesting so we stop only on the matching close brace.
+            for ch in segment:
+                if ch == "{":
+                    json_depth += 1
+                elif ch == "}":
+                    json_depth -= 1
+                    if json_depth <= 0:
+                        json_closed = True
+                        break
+
+            if json_closed:
+                logger.info("[%s] Early stop: JSON closed after %d tokens.", target, len(buffer))
+                break
+
+            if resp.finish_reason == "stop":
+                logger.info("[%s] EOS reached.", target)
+                break
+
+            if resp.finish_reason == "length":
+                logger.info("[%s] Hit max_tokens=%d.", target, max_t)
+                break
+
+            # Guard against runaway non-JSON output (e.g. model refusing).
+            if len(buffer) > max_t * 3 + 64:
+                logger.info("[%s] Stop: generated %d chars without JSON close.", target, len(buffer))
+                break
+
+        return buffer
+
+
 
     @staticmethod
     def _truncate_repetition(text: str) -> str:

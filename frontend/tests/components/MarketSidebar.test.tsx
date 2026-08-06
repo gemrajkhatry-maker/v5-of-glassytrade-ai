@@ -12,21 +12,20 @@ const createMockInstrument = (symbol?: string, overrides: Partial<InstrumentStat
     { time: '2024-01-01T10:00:00Z', open: 24900, high: 25100, low: 24800, close: 25000, volume: 1000, vwap: 25000, takerBuyVolume: 600, delta: 200 },
     { time: '2024-01-01T10:05:00Z', open: 25000, high: 25150, low: 24950, close: 25100, volume: 1200, vwap: 25100, takerBuyVolume: 700, delta: 300 },
   ],
-  orderBook: null,
-  portfolio: {
+  orderBook: null,    portfolio: {
     positions: [] as TradePosition[],
     closedTrades: [],
     balance: 100000,
     equity: 100000,
     leverage: 10,
     history: [],
-    realizedPnl: 0,
   },
   modelWeights: { trend: 0.2, momentum: 0.2, delta: 0.2, orderBook: 0.2, volatility: 0.2 },
   generation: 0,
   aiAnalysis: null,
   genAIAnalysis: null,
   amtAnalysis: null,
+  riskState: null,
   agentDecision: null,
   llmHistory: [],
   predictions: [],
@@ -56,7 +55,8 @@ describe('MarketSidebar', () => {
 
   it('renders market scanner header', () => {
     render(<MarketSidebar {...defaultProps} />);
-    expect(screen.getByText('MARKET SCANNER')).toBeInTheDocument();
+    // CSS `uppercase` transform — match case-insensitively
+    expect(screen.getByText(/market scanner/i)).toBeInTheDocument();
   });
 
   it('displays symbol count', () => {
@@ -77,7 +77,7 @@ describe('MarketSidebar', () => {
     await user.type(input, '25600');
     
     // After filtering, should show only the symbol with 25600
-    const symbols = screen.getAllByRole('listitem');
+    const symbols = screen.getAllByRole('button');
     expect(symbols.length).toBe(1);
     expect(symbols[0]).toHaveTextContent('25600');
   });
@@ -86,7 +86,7 @@ describe('MarketSidebar', () => {
     const user = userEvent.setup();
     render(<MarketSidebar {...defaultProps} />);
     
-    const buttons = screen.getAllByRole('listitem');
+    const buttons = screen.getAllByRole('button');
     await user.click(buttons[1]);
     
     expect(mockOnSelect).toHaveBeenCalledWith('NIFTY 27 FEB 25600 CALL');
@@ -94,17 +94,17 @@ describe('MarketSidebar', () => {
 
   it('displays live feed status', () => {
     render(<MarketSidebar {...defaultProps} />);
-    expect(screen.getByText('LIVE FEED')).toBeInTheDocument();
+    expect(screen.getByText(/live feed/i)).toBeInTheDocument();
   });
 
   it('shows visible count in footer', () => {
     render(<MarketSidebar {...defaultProps} />);
-    expect(screen.getByText('2 VISIBLE')).toBeInTheDocument();
+    expect(screen.getByText(/2 visible/i)).toBeInTheDocument();
   });
 
   it('renders trade history section', () => {
     render(<MarketSidebar {...defaultProps} />);
-    expect(screen.getByText('NIFTY 25500 TRADES')).toBeInTheDocument();
+    expect(screen.getByText(/NIFTY 25500 trades/i)).toBeInTheDocument();
   });
 
   it('displays empty state when no matching symbols', async () => {
@@ -139,7 +139,8 @@ describe('MarketSidebar', () => {
 
   it('has symbol list items', () => {
     render(<MarketSidebar {...defaultProps} />);
-    const items = screen.getAllByRole('listitem');
+    // Symbol cards render as buttons (not listitems) in the current design
+    const items = screen.getAllByRole('button');
     expect(items.length).toBeGreaterThan(0);
   });
 });

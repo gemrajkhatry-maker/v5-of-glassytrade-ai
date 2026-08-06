@@ -196,12 +196,9 @@ def _build_runtime_app_fixture(
         "config.consolidated.ConsolidatedConfig.from_unified",
         lambda: SimpleNamespace(dhan_symbols=list(startup_symbols), cors_origins=["*"]),
     )
-    monkeypatch.setattr("app.config.settings.SCANNER_TOP_N", len(selected_symbols), raising=False)
-    monkeypatch.setattr("app.config.settings.SCANNER_UNDERLYINGS", ["TESTIDX"], raising=False)
-    monkeypatch.setattr("app.config.settings.SCANNER_OPTION_TYPE", "", raising=False)
-    monkeypatch.setattr("app.config.settings.DEFAULT_EXCHANGE", "MCX", raising=False)
-    monkeypatch.setattr("app.config.settings.SCANNER_EXPIRY_INDEX", 0, raising=False)
-    monkeypatch.setattr("app.config.settings.STRIKES_AROUND_ATM", 2, raising=False)
+    # Note: settings.* are read-only env/YAML-backed properties on
+    # SettingsAdapter and cannot be monkeypatched here. The fake scanner and
+    # fake config below make the actual values irrelevant to these tests.
 
     return main.create_application(), container, fake_storage, fake_session
 
@@ -618,7 +615,19 @@ def test_readiness_contract_rejects_missing_storage_runtime(monkeypatch):
 
 
 def test_readiness_contract_rejects_zero_active_symbols(monkeypatch):
-    monkeypatch.setattr("app.config.settings.DHAN_SYMBOLS", [], raising=False)
+    # DHAN_SYMBOLS is a read-only property backed by the YAML mode config, so
+    # force an empty symbol selection by replacing the mode config itself.
+    from types import SimpleNamespace as _NS
+
+    monkeypatch.setattr(
+        "app.config.settings._mode_config",
+        _NS(
+            active_symbols=[],
+            default_exchange="MCX",
+            scanner_underlyings=[],
+            scanner_config={"top_n": 4, "option_type": ""},
+        ),
+    )
     app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(
         monkeypatch,
         selected_symbols=(),

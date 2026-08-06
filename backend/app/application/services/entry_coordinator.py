@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app.core.async_boundary import ensure_sync_adapter_result
@@ -59,6 +60,35 @@ class EntryCoordinator:
         self._option_selector = option_selector
         self._state_manager = state_manager
         self._sizing_engine = sizing_engine or RiskSizingEngine()
+
+    @staticmethod
+    def _init_scale_prices(position, sig) -> None:
+        """Initialize 40/30/30 scale-in trigger prices on a fresh position.
+
+        The ScaleManager advances steps only when the confirm/breakout prices
+        are non-zero.  Defaults: step 2 confirms at 50% of the reward distance,
+        step 3 breaks out at 80% of the reward distance (both inside the TP so
+        the adds can actually trigger before take-profit closes the position).
+        """
+        try:
+            entry = float(position.entry_price)
+            sl = float(position.stop_loss)
+            tp = float(position.take_profit)
+            is_buy = bool(getattr(sig, "is_buy", True))
+            # Reward must be in the direction of the trade for a valid scale plan.
+            reward = (tp - entry) if is_buy else (entry - tp)
+            if sl <= 0 or reward <= 0:
+                return
+            confirm = entry + reward * 0.5 if is_buy else entry - reward * 0.5
+            breakout = entry + reward * 0.8 if is_buy else entry - reward * 0.8
+            position.scale_confirm_price = Decimal(str(confirm))
+            position.scale_breakout_price = Decimal(str(breakout))
+            log.info(
+                "Scale-in initialized for %s: confirm=%.2f breakout=%.2f",
+                position.id, confirm, breakout,
+            )
+        except Exception:
+            log.debug("Scale-in price initialization failed (non-critical)", exc_info=True)
 
     def execute_signal(self, symbol: str, sig: Signal, session: SessionState) -> None:
         """Execute a trade signal — MUST run on main thread or under lock.
@@ -242,11 +272,17 @@ class EntryCoordinator:
                         getattr(session, "_agent_decision", None), "feature_drivers", ()
                     ),
                 )
+
             # Initialize partition exit state for P1/P2/P3 management
             # Position already has lifecycle fields set by Position.from_signal()
             self._lifecycle_handler.initialize_partition_state(position.id, symbol)
             # Track scale step for 40/30/30 execution plan
             position.scale_step = 1  # First entry of scale-in plan
+            # Initialize 40/30/30 scale-in trigger prices so check_scale_in can
+            # fire.  Step 2 (confirm) = 50% of the way to target, step 3
+            # (breakout) = 80%.  Without these, the ScaleManager's triggers
+            # stay 0 and the plan never advances past the 40% initial leg.
+            self._init_scale_prices(position, sig)
             # Track entry LVN for pyramid adds (FR-09)
             if sig.metadata and "entry_lvn" in sig.metadata:
                 position.entry_lvns = [sig.metadata["entry_lvn"]]

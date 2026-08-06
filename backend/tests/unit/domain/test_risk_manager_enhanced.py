@@ -45,10 +45,11 @@ class TestCircuitBreakers:
         assert self.rm._daily.consecutive_losses == 1
 
     def test_halts_on_daily_drawdown(self):
-        # 5% of 1M = 50k. Simulate equity drop beyond threshold.
-        self.portfolio.balance -= 51_000
+        # MAX_DAILY_DRAWDOWN_PCT = 2% of peak equity.
+        # INITIAL_CAPITAL is 5M, so halt requires a loss >= 100k (2%).
+        self.portfolio.balance -= 110_000
         self.portfolio.equity = self.portfolio.balance
-        self.rm.record_trade_result(-51_000, self.portfolio)
+        self.rm.record_trade_result(-110_000, self.portfolio)
 
         assert self.rm.is_halted
         assert "drawdown" in self.rm.halt_reason

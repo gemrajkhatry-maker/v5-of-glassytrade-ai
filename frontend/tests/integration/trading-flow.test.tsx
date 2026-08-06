@@ -68,13 +68,13 @@ describe('MarketSidebar to ChartScene Integration', () => {
       equity: 100000,
       leverage: 10,
       history: [],
-      realizedPnl: 0,
     },
     modelWeights: { trend: 0.2, momentum: 0.2, delta: 0.2, orderBook: 0.2, volatility: 0.2 },
     generation: 0,
     aiAnalysis: null,
     genAIAnalysis: null,
     amtAnalysis: null,
+    riskState: null,
     agentDecision: null,
     llmHistory: [],
     predictions: [],
@@ -98,7 +98,7 @@ describe('MarketSidebar to ChartScene Integration', () => {
   const defaultConfig: ChartConfig = {
     symbol: 'NIFTY',
     interval: '5m',
-    dataSource: 'live',
+    dataSource: 'SERVER',
     bullColor: '#22c55e',
     bearColor: '#ef4444',
     showVolumeProfile: true,
@@ -150,7 +150,7 @@ describe('MarketSidebar to ChartScene Integration', () => {
     );
 
     expect(container).toBeInTheDocument();
-    expect(screen.getByText('MARKET SCANNER')).toBeInTheDocument();
+    expect(screen.getByText(/market scanner/i)).toBeInTheDocument();
     expect(screen.getByText('STANDARD CANDLESTICKS')).toBeInTheDocument();
   });
 
@@ -177,11 +177,12 @@ describe('MarketSidebar to ChartScene Integration', () => {
     );
 
     // Verify initial render - both components present
-    expect(screen.getByText('MARKET SCANNER')).toBeInTheDocument();
+    expect(screen.getByText(/market scanner/i)).toBeInTheDocument();
     expect(screen.getByText('STANDARD CANDLESTICKS')).toBeInTheDocument();
 
     // Click on second symbol (BANKNIFTY) in MarketSidebar
-    const items = screen.getAllByRole('listitem');
+    // Symbol cards render as buttons in the current design
+    const items = screen.getAllByRole('button');
     expect(items.length).toBe(2);
     
     // First click selects NIFTY (already active), second click selects BANKNIFTY
@@ -297,9 +298,9 @@ describe('MarketSidebar to ChartScene Integration', () => {
       </>
     );
 
-    // MarketSidebar shows live feed status
-    expect(screen.getByText('LIVE FEED')).toBeInTheDocument();
-    expect(screen.getByText('2 VISIBLE')).toBeInTheDocument();
+    // MarketSidebar shows live feed status (CSS uppercase — match case-insensitively)
+    expect(screen.getByText(/live feed/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 visible/i)).toBeInTheDocument();
   });
 
   it('switches between STANDARD and FOOTPRINT modes', () => {

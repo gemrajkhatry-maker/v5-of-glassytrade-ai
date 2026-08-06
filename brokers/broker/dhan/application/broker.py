@@ -762,6 +762,19 @@ class DhanBroker(IBrokerPort):
             instrument, from_date, to_date, interval, include_oi
         )
 
+    async def get_historical_async(
+        self, instrument: Instrument, from_date: datetime, to_date: datetime,
+        interval: str = "1d", include_oi: bool = False,
+    ) -> pd.DataFrame:
+        """Fetch historical candles asynchronously.
+
+        Public alias used by the trading engine's gap-fill callback
+        (``TradingEngine.fetch_historical_callback``) for historical seeding.
+        """
+        return await self._get_historical_async(
+            instrument, from_date, to_date, interval, include_oi
+        )
+
     async def _place_order_async(self, order: Order) -> Order:
         return await self._orders.place_order_async(order)
 

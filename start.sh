@@ -2,7 +2,7 @@
 # Start backend and frontend for GlassyTrade AI
 set -e
 
-PROJECT_DIR="/Users/apple/Downloads/v5-of-glassytrade-ai"
+PROJECT_DIR="/Users/apple/Documents/v5-of-glassytrade-ai"
 BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
 
@@ -21,7 +21,7 @@ GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}" \
 GLASSYTRADE_STRATEGY="${GLASSYTRADE_STRATEGY:-nse_index_options}" \
 PYTHONPATH="$PROJECT_DIR:$BACKEND_DIR" \
 DEBUG=false \
-nohup "$BACKEND_DIR/venv/bin/python" -u -m uvicorn app.main:app \
+nohup python3 -u -m uvicorn app.main:app \
   --host 0.0.0.0 --port 9090 \
   > "$BACKEND_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!

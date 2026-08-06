@@ -182,10 +182,8 @@ class TrailEngine:
         current_sl = float(position.stop_loss)
 
         if is_long:
-            valid_bands = [b for b in bands if b < current_price and b > entry]
-            trail_sl = max(valid_bands) if valid_bands else entry + initial_risk * 1.5
-            min_trail = entry + initial_risk * 1.5
-            trail_sl = max(trail_sl, min_trail)
+            valid_bands = [b for b in bands if entry < b < current_price]
+            trail_sl = max(valid_bands) if valid_bands else current_sl
 
             # Tighten at 2 sigma overextension
             if current_price >= vwap_upper_2:
@@ -202,10 +200,8 @@ class TrailEngine:
                     position.id, trail_sl, unrealised_r,
                 )
         else:
-            valid_bands = [b for b in bands if b > current_price and b < entry]
-            trail_sl = min(valid_bands) if valid_bands else entry - initial_risk * 1.5
-            max_trail = entry - initial_risk * 1.5
-            trail_sl = min(trail_sl, max_trail)
+            valid_bands = [b for b in bands if entry > b > current_price]
+            trail_sl = min(valid_bands) if valid_bands else current_sl
 
             # Tighten at 2 sigma overextension
             if current_price <= vwap_lower_2:

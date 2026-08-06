@@ -23,13 +23,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Month abbreviation → two-digit number, for building futures symbols
-_MONTH_MAP = {
-    "JAN": "01", "FEB": "02", "MAR": "03", "APR": "04",
-    "MAY": "05", "JUN": "06", "JUL": "07", "AUG": "08",
-    "SEP": "09", "OCT": "10", "NOV": "11", "DEC": "12",
-}
-
 # Pattern: "UNDERLYING DD MON STRIKE CALL/PUT"
 # e.g. "CRUDEOIL 16 APR 9000 CALL" → groups: ("CRUDEOIL", "16", "APR", "9000", "CALL")
 _OPTION_SYMBOL_RE = re.compile(
@@ -39,20 +32,19 @@ _OPTION_SYMBOL_RE = re.compile(
 
 
 def build_futures_symbol(underlying: str, day: str, month: str) -> str:
-    """Build a futures symbol from parsed option contract components.
+    """Build a Dhan-resolvable futures symbol from option contract components.
 
     Args:
         underlying: "CRUDEOIL", "NIFTY", "GOLD", etc.
-        day: Day of month, e.g. "16" or "6"
+        day: Day of month, e.g. "16" or "6" (kept for signature compat)
         month: Three-letter month, e.g. "APR"
 
     Returns:
-        Futures symbol, e.g. "CRUDEOIL16APRFUT" or "NIFTY06APRFUT"
+        Futures symbol in Dhan custom-symbol form, e.g. "NIFTY APR FUT" or
+        "CRUDEOIL APR FUT" — resolves against the live broker instrument cache
+        (``SEM_CUSTOM_SYMBOL``), so futures roots never go stale across rolls.
     """
-    day_padded = day.zfill(2)
-    month_upper = month.upper()
-    month_num = _MONTH_MAP.get(month_upper, month_upper[:3].upper())
-    return f"{underlying.upper()}{day_padded}{month_num}FUT"
+    return f"{underlying.upper()} {month.upper()[:3]} FUT"
 
 
 def extract_option_date(symbol: str) -> tuple[str, str, str] | None:
@@ -183,33 +175,22 @@ class UnderlyingFuturesProvider:
         if not config:
             return None
 
-        # Prefer instruments.json `underlying_symbol` — it matches broker/Dhan tickers
-        # (e.g. CRUDEOIL25APRFUT). Dynamic DD+MM+FUT derivation does NOT match MCX/NSE
-        # contract names and breaks subscriptions + historical fetch.
-        configured = (config.underlying_symbol or "").strip()
+        # Prefer DYNAMIC derivation from the option's own expiry month — it
+        # always matches the live broker contract (e.g. "NIFTY AUG FUT"),
+        # whereas config `underlying_symbol` goes stale when contracts roll.
+        # Config is only a fallback when the option symbol can't be parsed.
         dynamic_symbol = self._derive_futures_symbol(option_symbol, underlying)
-        if configured:
-            underlying_symbol = configured
-            if dynamic_symbol and dynamic_symbol != configured:
-                logger.debug(
-                    "Dual feed: %s → %s (config; derived would be %s)",
-                    option_symbol,
-                    underlying_symbol,
-                    dynamic_symbol,
-                )
-        elif dynamic_symbol:
+        if dynamic_symbol:
             underlying_symbol = dynamic_symbol
-            logger.debug(
-                "Dual feed mapping: %s → %s (derived; no config symbol)",
-                option_symbol,
-                underlying_symbol,
-            )
         else:
-            logger.warning(
-                "No futures symbol in config and could not derive from %s",
-                option_symbol,
-            )
-            return None
+            configured = (config.underlying_symbol or "").strip()
+            underlying_symbol = configured
+            if not underlying_symbol:
+                logger.warning(
+                    "No futures symbol derivable from %s and no config symbol",
+                    option_symbol,
+                )
+                return None
 
         if not underlying_symbol:
             return None

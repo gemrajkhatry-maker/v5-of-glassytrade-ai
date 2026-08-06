@@ -343,6 +343,8 @@ export interface AMTAnalysis {
   swingDelta?: number;
   // Fix 1: Option type for direction labeling
   optionType?: string;
+  // Underlying futures LTP used for context (MCX/NSE)
+  underlyingPrice?: number;
   // Fix 4: AMT time window for timing transparency
   amtTimeWindow?: {
     window: string;

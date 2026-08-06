@@ -80,15 +80,15 @@ class TestUnderlyingFuturesProvider:
     def test_get_mapping_crudeoil(self, provider):
         mapping = provider.get_mapping("CRUDEOIL 16 APR 8900 CALL")
         assert mapping is not None
-        # Broker symbol from instruments.json (not DDMMFUT derivation)
-        assert mapping.underlying_symbol == "CRUDEOIL25APRFUT"
+        # Dynamic derivation from the option's expiry month — Dhan custom-symbol form
+        assert mapping.underlying_symbol == "CRUDEOIL APR FUT"
         assert mapping.underlying == "CRUDEOIL"
         assert mapping.exchange == "MCX"
 
     def test_get_mapping_nifty(self, provider):
         mapping = provider.get_mapping("NIFTY 30 MAR 23300 PUT")
         assert mapping is not None
-        assert mapping.underlying_symbol == "NIFTY25APRFUT"
+        assert mapping.underlying_symbol == "NIFTY MAR FUT"
         assert mapping.underlying == "NIFTY"
         assert mapping.exchange == "NSE"
 
@@ -99,10 +99,10 @@ class TestUnderlyingFuturesProvider:
     def test_get_underlying_symbol(self, provider):
         assert (
             provider.get_underlying_symbol("CRUDEOIL 16 APR 8900 CALL")
-            == "CRUDEOIL25APRFUT"
+            == "CRUDEOIL APR FUT"
         )
         assert (
-            provider.get_underlying_symbol("NIFTY 30 MAR 23300 PUT") == "NIFTY25APRFUT"
+            provider.get_underlying_symbol("NIFTY 30 MAR 23300 PUT") == "NIFTY MAR FUT"
         )
 
     def test_get_config(self, provider):
@@ -121,7 +121,7 @@ class TestUnderlyingFuturesProvider:
     def test_dual_feed_mapping(self, provider):
         mapping = provider.get_mapping("CRUDEOIL 16 APR 8850 PE")
         assert mapping.option_symbol == "CRUDEOIL 16 APR 8850 PE"
-        assert mapping.underlying_symbol == "CRUDEOIL25APRFUT"
+        assert mapping.underlying_symbol == "CRUDEOIL APR FUT"
         assert mapping.config.ib_window_minutes == 30
         assert mapping.config.session_start == "09:00"
 
@@ -132,13 +132,12 @@ class TestUnderlyingFuturesProvider:
             "NIFTY 30 MAR 23300 PUT",
         ]
         fut_map, futs = provider.build_futures_routing(opts)
-        assert set(futs) == {"CRUDEOIL25APRFUT", "NIFTY25APRFUT"}
-        assert len(fut_map["CRUDEOIL25APRFUT"]) == 2
-        assert len(fut_map["NIFTY25APRFUT"]) == 1
+        assert set(futs) == {"CRUDEOIL APR FUT", "NIFTY MAR FUT"}
+        assert len(fut_map["CRUDEOIL APR FUT"]) == 2
+        assert len(fut_map["NIFTY MAR FUT"]) == 1
 
     def test_instrument_config_fields(self, provider):
         cfg = provider.get_config("NIFTY", "NSE")
-        assert cfg.underlying_symbol == "NIFTY25APRFUT"
         assert cfg.session_start == "09:15"
         assert cfg.session_end == "15:30"
         assert cfg.range_bar_size == 20
@@ -146,17 +145,17 @@ class TestUnderlyingFuturesProvider:
 
 class TestDynamicFuturesDerivation:
     def test_build_futures_symbol_mcx(self):
-        assert build_futures_symbol("CRUDEOIL", "16", "APR") == "CRUDEOIL1604FUT"
-        assert build_futures_symbol("GOLD", "20", "APR") == "GOLD2004FUT"
-        assert build_futures_symbol("NATURALGAS", "6", "APR") == "NATURALGAS0604FUT"
+        assert build_futures_symbol("CRUDEOIL", "16", "APR") == "CRUDEOIL APR FUT"
+        assert build_futures_symbol("GOLD", "20", "APR") == "GOLD APR FUT"
+        assert build_futures_symbol("NATURALGAS", "6", "APR") == "NATURALGAS APR FUT"
 
     def test_build_futures_symbol_nse(self):
-        assert build_futures_symbol("NIFTY", "27", "FEB") == "NIFTY2702FUT"
-        assert build_futures_symbol("BANKNIFTY", "10", "MAR") == "BANKNIFTY1003FUT"
+        assert build_futures_symbol("NIFTY", "27", "FEB") == "NIFTY FEB FUT"
+        assert build_futures_symbol("BANKNIFTY", "10", "MAR") == "BANKNIFTY MAR FUT"
 
     def test_build_futures_symbol_single_digit_day(self):
-        # Single digit days should be zero-padded
-        assert build_futures_symbol("CRUDEOIL", "6", "APR") == "CRUDEOIL0604FUT"
+        # Single digit days are irrelevant to the Dhan custom-symbol form
+        assert build_futures_symbol("CRUDEOIL", "6", "APR") == "CRUDEOIL APR FUT"
 
     def test_extract_option_date(self):
         result = extract_option_date("CRUDEOIL 16 APR 9000 CALL")
@@ -189,7 +188,9 @@ def test_repo_instruments_json_maps_goldm_silverm_mini_options():
     assert goldm is not None
     assert goldm.underlying == "GOLDM"
     assert "GOLDM" in goldm.underlying_symbol.upper()
+    assert goldm.underlying_symbol.upper().startswith("GOLDM ")
     silvm = provider.get_mapping("SILVERM 21 APR 260000 PUT")
     assert silvm is not None
     assert silvm.underlying == "SILVERM"
     assert "SILVERM" in silvm.underlying_symbol.upper()
+    assert silvm.underlying_symbol.upper().startswith("SILVERM ")

@@ -90,73 +90,42 @@ def test_mcx_tick_size_proximity():
     assert res_nifty[0] is False, "Nifty should fail Rule 2 with 1.4 point distance (28 ticks)"
 
 def test_mcx_afternoon_lull_volume():
-    """Verify that volume threshold is relaxed during MCX afternoon lull."""
-    from datetime import datetime
-    import pytz
-    
-    # Create a timestamp in IST during the lull (e.g., 14:00 IST)
-    ist = pytz.timezone('Asia/Kolkata')
-    lull_time = datetime(2026, 3, 30, 14, 0, 0, tzinfo=ist)
-    
-    # Create session_info
-    session_info = SimpleNamespace(
-        session="MCX_AFTERNOON",
-        timestamp=lull_time,
-        market="MCX"
+    """Verify that the volume-impulse threshold is relaxed during the MCX afternoon lull.
+
+    ``check_confirmation_bundle`` lowers the volume multiplier from 1.5x to 1.0x
+    between 13:00 and 17:00 IST, so a moderate tick passes during the lull but
+    is blocked outside it.
+    """
+    from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import (
+        check_confirmation_bundle,
     )
-    
-    # Setup data with low aggression (e.g., 0.6)
-    # Default multiplier is 1.5, so 0.6 * 1.5 = 0.9 (PASS if > 0.5)
-    # But wait, logic in entry_gate.py:
-    # multiplier = 1.5 if not is_mcx_lull else 1.0
-    # score = aggression * multiplier
-    
-    # If aggression is 0.4:
-    # Regular time: 0.4 * 1.5 = 0.6 -> PASS (> 0.5)
-    # Lull time: 0.4 * 1.0 = 0.4 -> FAIL (< 0.5)
-    # Wait, the logic I implemented was to REDUCE the multiplier during lull?
-    # Actually, the user asked to "relax" it. Lull = less volume = harder to meet threshold.
-    # If I want to RELAX the threshold, I should INCREASE the multiplier or decrease the barrier.
-    # My implementation:
-    # multiplier = 1.5 (default)
-    # if is_mcx and (13:00 <= hour < 17:00): multiplier = 1.0
-    # score = aggression * multiplier
-    # This actually makes it HARDER to pass during lull if aggression is the same.
-    # "Accommodate lower participation" means we should be more lenient.
-    
-    # Actually, the user's prompt said:
-    # "implementing time-aware volume thresholds to accommodate lower participation during afternoon lulls"
-    # If participation is low, aggression values will be smaller.
-    # So if I use a smaller multiplier (1.0 vs 1.5), I'm making the score smaller, which is the OPPOSITE of relaxing.
-    
-    # Let me re-read the implementation in entry_gate.py.
-    # Oh, wait. In entry_gate.py I wrote:
-    # multiplier = 1.5
-    # if is_mcx and (13 <= hour < 17): multiplier = 1.0
-    # score = aggression * multiplier
-    # If I want to RELAX it, I should probably use a HIGHER multiplier during lull, or lower the threshold.
-    
-    # Wait, usually a "multiplier" on the data makes it more likely to pass if we are scaling UP.
-    # If I scale DOWN to 1.0 during lull, and stay at 1.5 during peak, it means 
-    # during peak we BOOST the aggression score. 
-    
-    # Let's check the logic again:
-    # check_confirmation_bundle(..., aggression_score=...)
-    # In check_confirmation_bundle:
-    # score = aggression * multiplier
-    # if score > 0.5: pass
-    
-    # If it's peak time (multiplier 1.5):
-    # Aggression 0.35 * 1.5 = 0.525 -> PASS
-    # If it's lull time (multiplier 1.0):
-    # Aggression 0.35 * 1.0 = 0.35 -> FAIL
-    
-    # This means during lull it is HARDER to pass. This is NOT relaxing.
-    # I should reverse it. Multiplier should be higher during lull to "boost" the signal.
-    # OR, the 1.5 is already a "boost" for peak? No, peak has natural volume.
-    
-    # Let's fix entry_gate.py before running tests.
-    pass
+    from app.domain.trading.models.value_objects import OHLC
+
+    # 20 candles of steady volume -> EMA(20) ~= 1000
+    data = [
+        OHLC.create(f"2026-03-30T09:{i:02d}:00Z", 100.0, 101.0, 99.0, 100.0, 1000.0)
+        for i in range(20)
+    ]
+
+    def _tick(time_str: str) -> OHLC:
+        # Moderate volume (1100) with weak delta (0.09 ratio < 0.15) so the
+        # volume-impulse gate is the deciding factor (needs 2/3 to pass).
+        return OHLC(
+            time=time_str,
+            open=100.0,
+            high=101.0,
+            low=99.0,
+            close=100.0,
+            volume=1100.0,
+            delta=100.0,
+        )
+
+    # 14:00 IST -> inside the 13:00-17:00 lull window -> multiplier 1.0 -> 1100 > 1000
+    assert check_confirmation_bundle(data, _tick("2026-03-30T14:00:00Z")) is True
+
+    # 10:00 IST -> outside the lull window -> multiplier 1.5 -> 1100 < 1500
+    assert check_confirmation_bundle(data, _tick("2026-03-30T10:00:00Z")) is False
+
 
 def test_scanner_gate_sync():
     """Verify that assess_timing (scanner) correctly waits if run_gate_pipeline fails."""

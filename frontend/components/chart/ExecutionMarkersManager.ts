@@ -292,6 +292,12 @@ export function generateAllExecutionMarkers(
 /**
  * Count markers by type
  * 
+ * Classification by marker text (more reliable than shape alone, since exit
+ * markers use the same circle shape as event markers):
+ *   - exits:    EXIT / TP HIT / SL HIT / signed P&L text
+ *   - events:   CVD divergence, IB break, acceptance/rejection
+ *   - entries:  everything else (arrow markers from open/closed positions)
+ * 
  * @param markers - Array of markers
  * @returns Count breakdown by type
  */
@@ -302,15 +308,17 @@ export function countMarkersByType(markers: ChartMarker[]): Record<string, numbe
     events: 0,
   };
 
+  const EVENT_PATTERN = /CVD|IB BREAK|ACCEPT|REJECT|DIV/i;
+  const EXIT_PATTERN = /EXIT|TP HIT|SL HIT|\bHIT\b|^[+-]\d/;
+
   markers.forEach(marker => {
-    if (marker.shape === 'arrowUp' || marker.shape === 'arrowDown') {
-      if (marker.text.includes('EXIT') || marker.text.includes('+') || marker.text.includes('-')) {
-        counts.exits++;
-      } else {
-        counts.entries++;
-      }
-    } else {
+    const text = marker.text || '';
+    if (EVENT_PATTERN.test(text)) {
       counts.events++;
+    } else if (EXIT_PATTERN.test(text)) {
+      counts.exits++;
+    } else {
+      counts.entries++;
     }
   });
 

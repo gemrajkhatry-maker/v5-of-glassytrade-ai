@@ -57,7 +57,7 @@ const mockData: OHLCData[] = [
 const defaultConfig: ChartConfig = {
   symbol: 'NIFTY',
   interval: '5m',
-  dataSource: 'live',
+  dataSource: 'SERVER',
   bullColor: '#22c55e',
   bearColor: '#ef4444',
   showVolumeProfile: true,
@@ -116,7 +116,7 @@ describe('ChartScene', () => {
     expect(container).toBeInTheDocument();
   });
 
-  it('renders in hidden mode', () => {
+  it('renders without crashing on minimal props', () => {
     const { container } = render(
       <ChartScene
         data={mockData}
@@ -125,7 +125,6 @@ describe('ChartScene', () => {
         positions={[]}
         footprintData={{}}
         cumulativeDeltas={[]}
-        isHidden={true}
       />
     );
     expect(container).toBeInTheDocument();

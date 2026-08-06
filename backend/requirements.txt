@@ -18,5 +18,11 @@ mlx-lm>=0.8.0
 mlx-vlm>=0.1.0
 # Probability engine
 lightgbm>=4.0.0
+# Reinforcement learning (RL) — ValentiniAMTEnv
+# gymnasium is required (valentini_env is part of the core domain).
+gymnasium>=1.0.0
+# Optional: RL training (ValentiniTrainer). Heavy (pulls torch); runtime code
+# degrades gracefully when absent, so it is intentionally not pinned here.
+# stable-baselines3>=2.0.0
 # Config
 pyyaml>=6.0

@@ -328,7 +328,6 @@ class SessionEventRouter:
         symbol: str,
         tick: OHLC,
         amt_result: AMTResult,
-        tick_trace_id: str = "",
     ) -> None:
         """Trigger LLM entry handler.
 
@@ -338,7 +337,7 @@ class SessionEventRouter:
             tick: Current tick
             amt_result: AMT analysis result
         """
-        self._llm_handler.run_entry(session, symbol, tick, amt_result, tick_trace_id=tick_trace_id)
+        self._llm_handler.run_entry(session, symbol, tick, amt_result)
 
     # ----- Entry Path Execution -----
 

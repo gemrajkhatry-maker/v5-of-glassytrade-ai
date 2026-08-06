@@ -33,6 +33,31 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+# Stable int code per session phase for the RegimeDetector's int comparison.
+# Deterministic across processes (unlike builtin hash()) so stop-out learning
+# data is consistent between runs.
+_SESSION_PHASE_CODES: dict[str, int] = {
+    "PRE_OPEN": 0,
+    "OPEN": 1,
+    "MORNING": 2,
+    "MIDDAY": 3,
+    "AFTERNOON": 4,
+    "LONDON": 5,
+    "NY": 6,
+    "POWER_HOUR": 7,
+    "CLOSED": 8,
+}
+
+
+def _session_phase_num(phase: object) -> int:
+    """Deterministic session-phase code: known phases map to fixed ints."""
+    name = str(phase or "").strip().upper()
+    if name in _SESSION_PHASE_CODES:
+        return _SESSION_PHASE_CODES[name]
+    # Deterministic fallback for unknown phase labels (no salted hash).
+    return sum(ord(c) for c in name) % 10 if name else 0
+
+
 class ExitCoordinator:
     """Handles exit callbacks and position lifecycle events.
 
@@ -172,8 +197,10 @@ class ExitCoordinator:
             _market = "NSE"
         si = _get_si(timestamp=now_ist, market=_market)
         # si.phase is a session-phase identifier (e.g. "LONDON", "NY");
-        # hash to int so the RegimeDetector's int-comparison still works.
-        phase_num = hash(si.phase) % 10
+        # map it to a stable int so the RegimeDetector's int-comparison works.
+        # NOTE: must be deterministic — builtin hash() is salted per-process
+        # (PYTHONHASHSEED), which would make learning IDs differ across restarts.
+        phase_num = _session_phase_num(si.phase)
         self._llm_handler.record_stop_out(level, direction, phase_num, symbol=symbol)
 
     def on_position_closed(self, symbol: str, position, session=None) -> None:

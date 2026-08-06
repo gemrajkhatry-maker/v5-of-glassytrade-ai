@@ -388,17 +388,19 @@ def test_vwap_trail_at_1_5r_long():
         vwap_upper_2=106.0,
         vwap_lower_2=94.0,
     )
-    # Should trail to highest band below price and above entry: 106
-    # But 1.5R floor = 100 + 7.5 = 107.5, so floor dominates
-    assert float(pos.stop_loss) >= 107.5
+    # Trails to the highest band below price and above entry (106).
+    # Crucially it must stay BELOW the current price — the old 1.5R floor
+    # set SL exactly at the current price, causing an instant stop-out.
+    assert float(pos.stop_loss) == pytest.approx(106.0, abs=0.1)
+    assert float(pos.stop_loss) < 107.5
 
 
 def test_vwap_trail_at_2sigma_tighten():
-    """At 2 sigma overextension, SL tightened to 50% of current distance."""
+    """At 2 sigma overextension, SL is tightened to the 2nd band."""
     mgr = TradeManager()
     pos = create_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0)
     
-    # Price at vwap_upper_2 (110) -> overextended, triggers 2sigma tighten
+    # Price at vwap_upper_2 (110) -> overextended
     mgr.apply_vwap_trail(
         pos,
         current_price=110.0,
@@ -408,16 +410,17 @@ def test_vwap_trail_at_2sigma_tighten():
         vwap_upper_2=110.0,
         vwap_lower_2=90.0,
     )
-    # 1.5R floor = 100 + 7.5 = 107.5
-    assert float(pos.stop_loss) >= 107.5
+    # Highest band below price and above entry is 103 (tighten keeps 103)
+    assert float(pos.stop_loss) == pytest.approx(103.0, abs=0.1)
+    assert float(pos.stop_loss) < 110.0
 
 
 def test_vwap_trail_cap_at_1_5r():
-    """High-vol wide bands: trail capped at 1.5R distance from entry."""
+    """Wide bands: trail to the nearest band above entry, not the current price."""
     mgr = TradeManager()
     pos = create_position("P1", "NIFTY", "LONG", 100.0, 95.0, 120.0)
     
-    # Very wide VWAP bands
+    # Bands close to entry
     mgr.apply_vwap_trail(
         pos,
         current_price=108.0,
@@ -427,8 +430,10 @@ def test_vwap_trail_cap_at_1_5r():
         vwap_upper_2=102.0,
         vwap_lower_2=98.0,
     )
-    # 1.5R floor = 100 + 7.5 = 107.5
-    assert float(pos.stop_loss) >= 107.5
+    # SL trails to band 102 — above entry, below current price
+    assert float(pos.stop_loss) == pytest.approx(102.0, abs=0.1)
+    assert float(pos.stop_loss) > 100.0
+    assert float(pos.stop_loss) < 108.0
 
 
 # ---- 12. Imbalance Tighten Tests ----

@@ -31,11 +31,11 @@ describe('GlassPanel', () => {
         <div>Content</div>
       </GlassPanel>
     );
-    // The outermost div has the glass styling
+    // The outermost div has the institutional solid-background styling
     const outer = container.firstChild as HTMLElement;
-    expect(outer).toHaveClass('bg-white/5');
-    expect(outer).toHaveClass('backdrop-blur-xl');
-    expect(outer).toHaveClass('border-white/10');
+    expect(outer).toHaveClass('bg-glassy-bg-secondary');
+    expect(outer).toHaveClass('border-glassy-border-default');
+    expect(outer).toHaveClass('rounded-md');
   });
 
   it('handles click events', async () => {

@@ -264,7 +264,11 @@ class TradeLifecycleHandler:
                     self._exit_engine.record_loss(pos.symbol, exit_sig.exit_price)
                     if self._on_stop_out:
                         side = "LONG" if is_long else "SHORT"
-                        self._on_stop_out(float(pos.entry_price), side, pos.symbol)
+                        # Report the actual stop level (post-trail) so the
+                        # re-entry blocker and learning record the level that
+                        # was breached — NOT the entry price.
+                        stop_level = float(pos.stop_loss)
+                        self._on_stop_out(stop_level, side, pos.symbol)
                 logger.info(
                     f"Position {pos.id} closed: {exit_sig.reason} "
                     f"at {exit_sig.exit_price:.2f}"

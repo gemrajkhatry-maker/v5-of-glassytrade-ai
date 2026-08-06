@@ -192,8 +192,13 @@ export function getLastNVolumePoints(data: VolumeDataPoint[], count: number): Vo
 /**
  * Detect volume spikes (unusually high volume)
  * 
+ * Uses a one-sided robust z-score based on the median absolute deviation
+ * (MAD). A plain mean/std is inflated by the spike itself — a single huge
+ * bar pushes the standard deviation up so much that nothing looks unusual
+ * anymore. MAD is resilient to that inflation.
+ * 
  * @param data - Volume data points
- * @param threshold - Standard deviations above mean (default: 2)
+ * @param threshold - Robust z-score threshold (default: 2)
  * @returns Array of spike data points
  */
 export function detectVolumeSpikes(
@@ -205,13 +210,40 @@ export function detectVolumeSpikes(
   }
 
   const values = data.map(d => d.value);
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const variance = values.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / values.length;
-  const stdDev = Math.sqrt(variance);
 
-  const spikeThreshold = mean + (threshold * stdDev);
+  // Guard against non-numeric data — otherwise NaN would silently disable
+  // the entire detection (median/MAD become NaN).
+  if (values.some(v => !Number.isFinite(v))) {
+    return [];
+  }
 
-  return data.filter(d => d.value > spikeThreshold);
+  // Median of the data
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median =
+    sorted.length % 2 === 0
+      ? (sorted[mid - 1] + sorted[mid]) / 2
+      : sorted[mid];
+
+  // Median absolute deviation
+  const deviations = values
+    .map(v => Math.abs(v - median))
+    .sort((a, b) => a - b);
+  const midDev = Math.floor(deviations.length / 2);
+  const mad =
+    deviations.length % 2 === 0
+      ? (deviations[midDev - 1] + deviations[midDev]) / 2
+      : deviations[midDev];
+
+  if (mad <= 0) {
+    // All values identical (or only one unique value) — nothing to flag.
+    return [];
+  }
+
+  // 0.6745 normalizes MAD so `threshold` behaves like a z-score.
+  // Only flag HIGH volume (one-sided): low-volume dips are not spikes.
+  const madSigma = 0.6745 * mad;
+  return data.filter(d => (d.value - median) / madSigma > threshold);
 }
 
 /**
