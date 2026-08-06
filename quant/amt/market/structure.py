@@ -15,8 +15,7 @@ import logging
 from dataclasses import dataclass, field
 
 from quant.contracts.value_objects import OHLC
-# TODO(migration): switch to quant.amt.compute once Track A3 lands
-from app.domain.fabio_ai.services import mlx_compute as mc
+from quant.amt import compute as mc
 from quant.contracts.constants import (
     STRUCTURE_DWELL_TICKS,
     STRUCTURE_COOLDOWN_TICKS,

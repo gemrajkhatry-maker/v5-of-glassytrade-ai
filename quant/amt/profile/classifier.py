@@ -9,8 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from quant.contracts.value_objects import VolumeProfileLevel
-# TODO(migration): switch to quant.amt.compute once Track A3 lands
-from app.domain.fabio_ai.services import mlx_compute as mc
+from quant.amt import compute as mc
 
 
 # ---------------------------------------------------------------------------
