@@ -564,3 +564,23 @@ def test_risk_tier_parity():
         lambda: _run_risk_tier(legacy_mod.RiskTierEngine, legacy_mod.TierAPremiumCheck),
         lambda: _run_risk_tier(QuantRiskTier, QuantPremium),
     )
+
+
+# ---------------------------------------------------------------------------
+# TradeCosts
+# ---------------------------------------------------------------------------
+
+
+def _run_trade_costs(fn) -> dict:
+    import dataclasses
+    return dataclasses.asdict(fn(notional=600_000, slippage_bps=15.0, is_sell=True))
+
+
+def test_trade_costs_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.services.trade_costs").compute_trade_costs
+    from quant.execution.trade_costs import compute_trade_costs as quant_compute
+    assert_parity(
+        lambda: _run_trade_costs(legacy),
+        lambda: _run_trade_costs(quant_compute),
+    )
