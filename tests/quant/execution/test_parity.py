@@ -233,3 +233,50 @@ def test_partition_parity():
         lambda: _run_partition(legacy_mod.PartitionExitManager, legacy_mod.PartitionState),
         lambda: _run_partition(QuantPartition, QuantState),
     )
+
+
+# ---------------------------------------------------------------------------
+# LossTracker
+# ---------------------------------------------------------------------------
+
+
+def _loss_sequence(engine_cls) -> dict:
+    tracker = engine_cls(max_daily_losses=3)
+    tracker.record_loss("NIFTY", stop_price=100.0)
+    tracker.record_loss("NIFTY", stop_price=99.0)
+    tracker.record_loss("NIFTY", stop_price=98.0)
+    return {
+        "limit_nifty": tracker.is_daily_limit_reached("NIFTY"),
+        "limit_bn": tracker.is_daily_limit_reached("BANKNIFTY"),
+        "blocked": tracker.should_block_entry("NIFTY", current_price=98.5, current_atr=1.0),
+        "state": tracker.get_state(),
+    }
+
+
+def _dynamic_risk(engine_cls) -> dict:
+    tracker = engine_cls()
+    return {
+        "neg": tracker.compute_dynamic_risk(100_000.0, -1000.0),
+        "profit": tracker.compute_dynamic_risk(100_000.0, 5000.0),
+        "huge": tracker.compute_dynamic_risk(100_000.0, 500_000.0),
+    }
+
+
+def test_loss_tracker_daily_limit_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.fabio_ai.services.loss_tracker").LossTracker
+    from quant.execution.loss_tracker import LossTracker as QuantLossTracker
+    assert_parity(
+        lambda: _loss_sequence(legacy),
+        lambda: _loss_sequence(QuantLossTracker),
+    )
+
+
+def test_loss_tracker_dynamic_risk_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.fabio_ai.services.loss_tracker").LossTracker
+    from quant.execution.loss_tracker import LossTracker as QuantLossTracker
+    assert_parity(
+        lambda: _dynamic_risk(legacy),
+        lambda: _dynamic_risk(QuantLossTracker),
+    )
