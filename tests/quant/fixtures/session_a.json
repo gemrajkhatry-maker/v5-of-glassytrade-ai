@@ -1,0 +1,302 @@
+[
+  {
+    "time": "t0",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t1",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t2",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t3",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t4",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t5",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t6",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t7",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t8",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t9",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t10",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t11",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t12",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t13",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t14",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t15",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t16",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t17",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t18",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t19",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t20",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t21",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t22",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t23",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t24",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t25",
+    "phase": "ABSORBING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t26",
+    "phase": "ABSORBING",
+    "vwap": 100.129
+  },
+  {
+    "time": "t27",
+    "phase": "AGGRESSION",
+    "vwap": 100.375
+  },
+  {
+    "time": "t28",
+    "phase": "WAITING",
+    "vwap": 100.7273
+  },
+  {
+    "time": "t29",
+    "phase": "WAITING",
+    "vwap": 101.1765
+  },
+  {
+    "time": "t30",
+    "phase": "WAITING",
+    "vwap": 101.1429
+  },
+  {
+    "time": "t31",
+    "phase": "WAITING",
+    "vwap": 101.1111
+  },
+  {
+    "time": "t32",
+    "phase": "WAITING",
+    "vwap": 101.0811
+  },
+  {
+    "time": "t33",
+    "phase": "WAITING",
+    "vwap": 101.0526
+  },
+  {
+    "time": "t34",
+    "phase": "WAITING",
+    "vwap": 101.0256
+  },
+  {
+    "time": "t35",
+    "phase": "WAITING",
+    "vwap": 101.0
+  },
+  {
+    "time": "t36",
+    "phase": "WAITING",
+    "vwap": 100.9756
+  },
+  {
+    "time": "t37",
+    "phase": "WAITING",
+    "vwap": 100.9524
+  },
+  {
+    "time": "t38",
+    "phase": "WAITING",
+    "vwap": 100.9302
+  },
+  {
+    "time": "t39",
+    "phase": "WAITING",
+    "vwap": 100.9091
+  },
+  {
+    "time": "t40",
+    "phase": "ABSORBING",
+    "vwap": 100.8163
+  },
+  {
+    "time": "t41",
+    "phase": "ABSORBING",
+    "vwap": 100.72
+  },
+  {
+    "time": "t42",
+    "phase": "AGGRESSION",
+    "vwap": 100.549
+  },
+  {
+    "time": "t43",
+    "phase": "WAITING",
+    "vwap": 100.3077
+  },
+  {
+    "time": "t44",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t45",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t46",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t47",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t48",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t49",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t50",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t51",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t52",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t53",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t54",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t55",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t56",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t57",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t58",
+    "phase": "WAITING",
+    "vwap": 100.0
+  },
+  {
+    "time": "t59",
+    "phase": "WAITING",
+    "vwap": 100.0
+  }
+]
