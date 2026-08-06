@@ -1,18 +1,2 @@
-"""Exit signal — immutable record of an exit decision.
-
-This module is isolated to break the dependency cycle between
-exit_engine.py and exit_rules.py.
-"""
-
-from __future__ import annotations
-
-from dataclasses import dataclass
-
-
-@dataclass
-class ExitSignal:
-    """Returned by exit rule checks when an exit is triggered."""
-
-    position_id: str
-    reason: str
-    exit_price: float
+"""Re-export shim — moved to quant.execution.exit_signal. Delete after importers switch (Phase 3)."""
+from quant.execution.exit_signal import *  # noqa: F401,F403

@@ -1,14 +1,2 @@
-"""Notification adapter port for transport-level notification delivery."""
-
-from __future__ import annotations
-
-from abc import ABC, abstractmethod
-
-
-class INotificationAdapter(ABC):
-    """Transport adapter for sending alerts to external channels."""
-
-    @abstractmethod
-    def send(self, message: str) -> None:
-        """Send a notification message to the configured channel."""
-        ...
+"""Re-export shim — moved to quant.contracts.ports.notification_adapter. Delete after importers switch (Phase 3)."""
+from quant.contracts.ports.notification_adapter import *  # noqa: F401,F403
