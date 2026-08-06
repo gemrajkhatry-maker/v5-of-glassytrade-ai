@@ -92,11 +92,11 @@ class TestAggressionToTradeConstructionBinding:
     """RACI: AggressionScorer → TradeConstructor (AggressionScorer is R, TradeConstructor is C)."""
 
     def test_aggression_score_used_in_gate_pipeline(self):
-        """Aggression score feeds into GatePipeline Gate 8."""
-        # Low aggression fails Gate 8
+        """Aggression score feeds into GatePipeline Gate 2 (IMBALANCED probing)."""
+        # Low aggression fails the IMBALANCED probing check in gate 2
         ctx = GateContext(
             candle_count=10, tick_age_seconds=1.0,
-            market_state=MarketState.BALANCED,
+            market_state=MarketState.IMBALANCED,
             nearest_level=100, distance_to_level_ticks=1.0,
             drive_number=2, drive_entry_valid=True,
             aggression_score=1.5,  # Below 2.0
@@ -104,20 +104,22 @@ class TestAggressionToTradeConstructionBinding:
             r_r_ratio=2.0,
         )
         result = GatePipeline().evaluate(ctx)
-        # With low aggression, gate 8 should fail or the result should indicate WAIT
-        assert result.reason == GateReason.WAIT or result.gate >= 8
+        # Low aggression on IMBALANCED → blocked as PROBING without aggression
+        assert result.passed is False
+        assert result.gate == 2
+        assert result.reason == GateReason.FLAT
 
-    def test_aggression_score_passes_gate_8(self):
-        """Aggression ≥ 2.0 passes Gate 8."""
+    def test_aggression_score_passes_gate_2(self):
+        """Aggression ≥ 2.0 lets the IMBALANCED probing check pass."""
         ctx = GateContext(
             candle_count=10, tick_age_seconds=1.0,
-            market_state=MarketState.BALANCED,
+            market_state=MarketState.IMBALANCED,
             nearest_level=100, distance_to_level_ticks=1.0,
             drive_number=2, drive_entry_valid=True,
-            aggression_score=2.5, cushion_ticks=5, r_r_ratio=2.0,
+            aggression_score=3.5, cushion_ticks=5, r_r_ratio=2.0,
         )
         result = GatePipeline().evaluate(ctx)
-        assert result.gate > 8  # Passed gate 8
+        assert result.passed is True  # Passed gate 2
 
 
 class TestRiskToTradeConstructionBinding:
@@ -168,8 +170,8 @@ class TestGatePipelineToTradeConstructorBinding:
 class TestEIAToGatePipelineBinding:
     """RACI: EIACalendar → GatePipeline (EIACalendar is R, GatePipeline is C)."""
 
-    def test_eia_suppression_blocks_gate_12(self):
-        """EIA suppression blocks Gate 12."""
+    def test_eia_suppression_blocks_gate_1(self):
+        """EIA suppression blocks Gate 1 (session phase)."""
         ctx = GateContext(
             candle_count=10, tick_age_seconds=1.0,
             market_state=MarketState.BALANCED,
@@ -179,5 +181,5 @@ class TestEIAToGatePipelineBinding:
             position_size_ok=True, eia_window_active=True,
         )
         result = GatePipeline().evaluate(ctx)
-        assert result.gate == 12
+        assert result.gate == 1
         assert result.reason == GateReason.SUPPRESSED

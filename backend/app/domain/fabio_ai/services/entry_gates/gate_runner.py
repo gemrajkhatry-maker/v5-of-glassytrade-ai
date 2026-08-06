@@ -1,6 +1,10 @@
-"""Gate Runner — 12-gate pipeline runner + position sizing wrapper."""
+"""Gate Runner — 5-gate pipeline runner + position sizing wrapper."""
 
 from __future__ import annotations
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def run_gate_pipeline(
@@ -27,7 +31,7 @@ def run_gate_pipeline(
     oi_walls: list = None,  # OI walls for NSE protection levels
     favor_strategy: str = "NEUTRAL",  # Session-favored strategy
 ) -> tuple[bool, str, str, int, int]:
-    """Run the 12-gate pipeline for additional validation.
+    """Run the 5-gate pipeline for additional validation.
 
     Call this AFTER three_align_check passes.
     Returns (passed, reason, detail, soft_gates_passed, soft_gates_total).
@@ -69,6 +73,21 @@ def run_gate_pipeline(
     eia_calendar = EIACalendar(suppression_minutes=15)
     eia_suppressed = eia_calendar.is_suppressed(symbol) if symbol else False
 
+    # ── Triple-A / VWAP context ────────────────────────────────────────────
+    # Triple-A phase lives on the range-bar state machine, not on AMTResult —
+    # leave it unset until that wiring lands.
+    triple_a_phase = ""
+    vwap_breakout = _detect_vwap_breakout(amt_result, tick, data)
+    absorption_side = getattr(amt_result, "absorption_side", "") or ""
+    absorption_detected = bool(absorption_side)
+    if triple_a_phase:
+        logger.debug("gate_runner: triple_a_phase=%s", triple_a_phase)
+    if absorption_detected:
+        logger.debug(
+            "gate_runner: absorption_detected via absorption_side=%s (bar_age unavailable)",
+            absorption_side,
+        )
+
     ctx = GateContext(
         symbol=symbol,
         candle_count=len(data),
@@ -99,6 +118,10 @@ def run_gate_pipeline(
         min_aggression_score=min_aggression_score,
         max_cushion_ticks=max_cushion_ticks,
         min_rr_ratio=min_rr_ratio,
+        triple_a_phase=triple_a_phase,
+        absorption_detected=absorption_detected,
+        absorption_bar_age=0,
+        vwap_breakout=vwap_breakout,
     )
 
     result = GatePipeline().evaluate(ctx)
@@ -109,6 +132,30 @@ def run_gate_pipeline(
         result.soft_gates_passed,
         result.soft_gates_total,
     )
+
+
+def _detect_vwap_breakout(amt_result, tick, data) -> str | None:
+    """Detect a VWAP-band breakout from AMTResult + current tick volume.
+
+    VWAP std is derived from the committed 1-sigma upper band. Missing data
+    (vwap/std/avg volume) degrades to None.
+    """
+    from app.domain.fabio_ai.services.vwap_breakout import detect_vwap_breakout
+
+    vwap = float(getattr(amt_result, "session_vwap", 0) or 0)
+    vwap_upper_1 = float(getattr(amt_result, "vwap_upper_1", 0) or 0)
+    std = (vwap_upper_1 - vwap) if (vwap > 0 and vwap_upper_1 > 0) else 0.0
+    price = float(getattr(tick, "close", 0) or 0)
+    volume = float(getattr(tick, "volume", 0) or 0)
+    volumes = [
+        float(getattr(d, "volume", 0) or 0)
+        for d in (data or [])
+        if getattr(d, "volume", 0)
+    ]
+    avg_volume = sum(volumes) / len(volumes) if volumes else 0.0
+    if vwap <= 0 or std <= 0 or price <= 0 or avg_volume <= 0:
+        return None
+    return detect_vwap_breakout(vwap, std, price, volume, avg_volume)
 
 
 def calculate_position_size(

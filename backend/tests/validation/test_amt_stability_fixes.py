@@ -241,7 +241,7 @@ class TestProbingPlaybook:
     """Verify PROBING state can generate signals with high aggression."""
 
     def test_gate4_allows_with_high_aggression(self):
-        """IB imbalance with high aggression passes gate 8."""
+        """IMBALANCED with high aggression passes the 5-gate pipeline."""
         pipeline = GatePipeline()
         ctx = GateContext(
             market_state=MarketState.IMBALANCED,
@@ -256,8 +256,9 @@ class TestProbingPlaybook:
             position_size_ok=True,
         )
         result = pipeline.evaluate(ctx)
-        # Should pass gate 8 (aggression check)
-        assert result.gate >= 8
+        # All 5 gates pass (aggression proxy is folded into gate 2/4)
+        assert result.passed is True
+        assert result.gate_count == 5
 
 
 # ===================================================================

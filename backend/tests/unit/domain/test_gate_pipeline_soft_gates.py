@@ -1,4 +1,12 @@
-"""Tests for soft gate pipeline (rules 6, 8, 9, 10)."""
+"""Tests for the strategy-quality checks folded into the 5-gate pipeline.
+
+The old soft gates (6 proximity, 8 aggression, 9 cushion, 10 R:R) are folded:
+  - proximity / level-location → GATE 4 (strategy alignment)
+  - IMBALANCED probing aggression → GATE 2 (no-position/cooldown)
+  - cushion + R:R → GATE 5 (risk-reward)
+
+There is no soft-gate quorum anymore — every gate is fail-fast.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +17,7 @@ from app.domain.trading.models.enums import MarketState
 
 
 def _default_context(**overrides) -> GateContext:
-    """Create a default context that passes all gates."""
+    """Create a default context that passes all 5 gates."""
     defaults = dict(
         symbol="CRUDEOIL",
         candle_count=15,
@@ -30,70 +38,80 @@ def _default_context(**overrides) -> GateContext:
         setup_type="TREND_CONTINUATION",
         r_r_ratio=2.5,
         cushion_ticks=3.0,
+        triple_a_phase="AGGRESSION",
+        absorption_detected=False,
+        absorption_bar_age=0,
+        vwap_breakout=None,
     )
     defaults.update(overrides)
     return GateContext(**defaults)
 
 
-def test_soft_gate_6_price_at_entry_zone_passes():
-    """Gate 6 should pass when price is within 3 ticks of level."""
+def test_gate_4_price_at_entry_zone_passes():
+    """Price within max ticks of a level passes gate 4."""
     ctx = _default_context(distance_to_level_ticks=1.0)
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed >= 3, f"Only {result.soft_gates_passed}/4 soft gates passed"
+    assert result.passed is True
 
 
-def test_soft_gate_6_fails_when_far_from_level():
-    """Gate 6 should fail when price is far from entry zone."""
+def test_gate_4_fails_when_far_from_level():
+    """Distance-to-level (old soft gate 6) folds into gate 4 (WAIT)."""
     ctx = _default_context(distance_to_level_ticks=5.0)  # > 3 ticks
     result = GatePipeline().evaluate(ctx)
-    # Should fail gate 6 but might pass others
-    assert result.soft_gates_passed < 4
+    assert result.passed is False
+    assert result.gate == 4
+    assert result.soft_gates_passed == 3  # gates 1-3 passed
 
 
-def test_soft_gate_8_aggression_minimum_passes():
-    """Gate 8 should pass when aggression >= 2.0."""
+def test_gate_2_imbalanced_requires_aggression():
+    """IMBALANCED probing without high aggression blocks gate 2 (FLAT)."""
+    ctx = _default_context(aggression_score=1.5)  # < probing threshold
+    result = GatePipeline().evaluate(ctx)
+    assert result.passed is False
+    assert result.gate == 2
+    assert result.reason.value == "FLAT"
+
+
+def test_imbalanced_with_aggression_passes():
     ctx = _default_context(aggression_score=3.5, market_state=MarketState.BALANCED)
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed >= 3
+    assert result.passed is True
 
 
-def test_soft_gate_8_fails_low_aggression():
-    """Gate 8 should fail when aggression < 2.0."""
-    ctx = _default_context(aggression_score=1.5)  # < 2.0
-    result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed < 4
-
-
-def test_soft_gate_9_cushion_ticks_passes():
-    """Gate 9 should pass when cushion <= 10 ticks."""
+def test_gate_5_cushion_ticks_passes():
     ctx = _default_context(cushion_ticks=8.0)
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed >= 3
+    assert result.passed is True
 
 
-def test_soft_gate_9_fails_high_cushion():
-    """Gate 9 should fail when cushion > 10 ticks."""
+def test_gate_5_fails_high_cushion():
+    """Cushion > max ticks (old soft gate 9) folds into gate 5 (INVALID)."""
     ctx = _default_context(cushion_ticks=12.0)  # > 10
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed < 4
+    assert result.passed is False
+    assert result.gate == 5
+    assert result.reason.value == "INVALID"
+    assert result.gate_count == 5
 
 
-def test_soft_gate_10_rr_ratio_passes():
-    """Gate 10 should pass when R:R >= 1.5."""
+def test_gate_5_rr_ratio_passes():
     ctx = _default_context(r_r_ratio=2.0)
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed >= 3
+    assert result.passed is True
 
 
-def test_soft_gate_10_fails_low_rr():
-    """Gate 10 should fail when R:R < 1.5."""
+def test_gate_5_fails_low_rr():
+    """R:R < 1.5 (old soft gate 10) is now a hard gate 5 (SKIP)."""
     ctx = _default_context(r_r_ratio=1.2)  # < 1.5
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed < 4
+    assert result.passed is False
+    assert result.gate == 5
+    assert result.reason.value == "SKIP"
+    assert result.gate_count == 5
 
 
-def test_rule_checklist_breakout_above_vah():
-    """Integration test: confirmed breakout above VAH should pass 4/4 rules."""
+def test_breakout_above_vah_passes_all_five():
+    """Confirmed breakout above VAH with an AGGRESSION edge passes 5/5."""
     ctx = _default_context(
         market_state=MarketState.IMBALANCED,
         price=106.0,  # Above VAH
@@ -102,26 +120,21 @@ def test_rule_checklist_breakout_above_vah():
         aggression_score=3.5,
         r_r_ratio=2.5,
         cushion_ticks=3.0,
+        triple_a_phase="AGGRESSION",
     )
-    
+
     result = GatePipeline().evaluate(ctx)
-    assert result.soft_gates_passed == 4, f"Expected 4/4 rules to pass, got {result.soft_gates_passed}/4"
-    assert result.quorum_met
-    assert result.passed
+    assert result.passed is True
+    assert result.reason.value == "TRADE"
+    assert result.soft_gates_passed == 5
+    assert result.gate_count == 5
 
 
-def test_soft_gate_logging_includes_actual_vs_threshold(caplog):
-    """Verify failed gates log actual vs threshold values."""
+def test_gate_failures_log_gate_number(caplog):
+    """Verify failed gates log the gate number."""
     import logging
-    caplog.set_level(logging.INFO)
-    
-    # Create context that will fail some soft gates (use BALANCED to avoid hard gate 4)
-    ctx = _default_context(aggression_score=1.0, market_state=MarketState.BALANCED, distance_to_level_ticks=0.0, cushion_ticks=5.0, r_r_ratio=2.0)
-    
-    result = GatePipeline().evaluate(ctx)
-    
-    # Check logs contain actual and threshold values (only logged for failed soft gates)
-    # Note: logging happens when soft gates fail
-    if not result.passed or result.soft_gates_passed < 4:
-        assert any("ACTUAL:" in record.message and "THRESHOLD:" in record.message 
-                   for record in caplog.records), f"Expected actual vs threshold in logs: {result}"
+
+    caplog.set_level(logging.DEBUG)
+    ctx = _default_context(r_r_ratio=1.2)
+    GatePipeline().evaluate(ctx)
+    assert any("GATE FAILED" in record.message for record in caplog.records)

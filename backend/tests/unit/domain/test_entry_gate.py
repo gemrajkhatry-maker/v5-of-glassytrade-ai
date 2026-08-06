@@ -64,6 +64,38 @@ class TestThreeAlignCheck:
         amt = _amt(poc=100, vah=105, val=95, lvns=(98.0,))
         assert three_align_check(data, amt, tick)[0] is True
 
+    def test_absorption_plus_breakout_confirms_weak_bundle(self):
+        """Absorption + VWAP-breakout evidence substitutes for the confirmation bundle."""
+        data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
+        tick = _tick(close=100, volume=100, delta=5)  # weak bundle: normally blocked
+        amt = _amt(poc=100, vah=105, val=95)
+        assert three_align_check(data, amt, tick)[0] is False
+        assert (
+            three_align_check(
+                data,
+                amt,
+                tick,
+                absorption_detected=True,
+                vwap_breakout="LONG",
+            )[0]
+            is True
+        )
+
+    def test_absorption_without_breakout_does_not_confirm(self):
+        data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
+        tick = _tick(close=100, volume=100, delta=5)
+        amt = _amt(poc=100, vah=105, val=95)
+        assert (
+            three_align_check(
+                data,
+                amt,
+                tick,
+                absorption_detected=True,
+                vwap_breakout=None,
+            )[0]
+            is False
+        )
+
 
 class TestConfirmationBundle:
     def test_requires_20_bars(self):

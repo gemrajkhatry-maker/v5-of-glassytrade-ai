@@ -136,6 +136,8 @@ def three_align_check(
     return_is_second_drive: bool = False,
     session_info=None,
     tick_size: float = 0.05,
+    absorption_detected: bool = False,
+    vwap_breakout: str | None = None,
 ) -> tuple[bool, bool] | tuple[bool, bool, bool]:
     """Three-Align Gate: Market State + Location + Confirmation Bundle.
 
@@ -304,7 +306,13 @@ def three_align_check(
     
     # CVD divergence counts as strong confirmation override
     confirmation_strong = agg_ok or divergence_confirmation
-    
+
+    # Absorption + VWAP-breakout evidence: prior absorption of the opposing side
+    # (absorption_detected) with a confirmed directional breakout gives the
+    # confirmation bundle an alternative edge — the Triple-A context.
+    absorption_override = absorption_detected and vwap_breakout in ("LONG", "SHORT")
+    confirmation_strong = confirmation_strong or absorption_override
+
     if not confirmation_strong:
         logger.debug("Three-Align: blocked — confirmation bundle weak")
         return (False, False, False) if return_is_second_drive else (False, False)
