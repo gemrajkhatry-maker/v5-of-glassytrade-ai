@@ -45,8 +45,6 @@ export interface GenAIAnalysis {
   rawOutput?: string;
   marketState?: string;
   aggression?: string;
-  quantProbability?: number;
-  quantDirection?: string;
 }
 
 export interface AgentDecision {
@@ -55,12 +53,8 @@ export interface AgentDecision {
   regime: string;
   timing: string;
   sizeFraction: number;
-  slAdjust: number;
-  tpAdjust: number;
   latencyUs: number;
   rationale: string;
-  playbook?: string;
-  featureDrivers?: string[];
 }
 
 export interface RiskState {
@@ -131,7 +125,6 @@ export interface Portfolio {
   leverage: number;
   positions: TradePosition[];
   closedTrades: TradePosition[];
-  history: { time: string; pnl: number }[];
 }
 
 /**
@@ -316,7 +309,6 @@ export interface AMTAnalysis {
     has_delta_flip: boolean;
   } | null;
   llmThinking?: string;
-  llmJson?: string;
   tickSize?: number;
   // Decision card fields (from backend agent)
   direction?: 'LONG' | 'SHORT' | 'FLAT';

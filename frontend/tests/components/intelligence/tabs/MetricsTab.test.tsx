@@ -14,8 +14,6 @@ describe('MetricsTab', () => {
       sizeFraction: 1.0,
       rationale: 'Strong bullish momentum',
       latencyUs: 150000,
-      slAdjust: 0,
-      tpAdjust: 0,
     },
     overseerAction: 'HOLD',
     overseerReason: 'Trend intact, hold position',
@@ -27,7 +25,6 @@ describe('MetricsTab', () => {
       equity: 100000,
       leverage: 1,
       closedTrades: [],
-      history: [],
     },
     amtResult: {
       isSecondDrive: false,

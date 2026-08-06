@@ -32,7 +32,6 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
         leverage: 10,
         positions: [],
         closedTrades: [],
-        history: [],
     },
     modelWeights: DEFAULT_WEIGHTS,
     generation: 0,
@@ -559,14 +558,12 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 const hasAnalytics = state.portfolio !== undefined ||
                     state.amt !== undefined ||
                     state.genAIAnalysis !== undefined ||
-                    state.prediction !== undefined ||
                     state.riskState !== undefined ||
                     state.agentDecision !== undefined ||
                     state.overseerAction !== undefined ||
                     state.overseerReason !== undefined ||
                     state.depth !== undefined ||
                     state.depth20Active !== undefined ||
-                    state.stats !== undefined ||
                     state.ltp !== undefined ||
                     state.oi !== undefined ||
                     state.feed !== undefined ||
@@ -602,17 +599,12 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         merged.amtAnalysis = state.amt === null ? null : { ...existing.amtAnalysis, ...state.amt };
                     }
                     if (state.genAIAnalysis !== undefined) merged.genAIAnalysis = { ...existing.genAIAnalysis, ...state.genAIAnalysis };
-                    if (state.prediction?.predictions !== undefined) merged.predictions = state.prediction.predictions;
-                    if (state.prediction?.analysis !== undefined) merged.aiAnalysis = state.prediction.analysis;
-                    if (state.modelWeights !== undefined) merged.modelWeights = { ...existing.modelWeights, ...state.modelWeights };
-                    if (state.generation !== undefined) merged.generation = state.generation;
                     if (state.riskState !== undefined) merged.riskState = { ...existing.riskState, ...state.riskState };
                     if (state.agentDecision !== undefined) merged.agentDecision = state.agentDecision;
                     if (state.overseerAction !== undefined) merged.overseerAction = state.overseerAction;
                     if (state.overseerReason !== undefined) merged.overseerReason = state.overseerReason;
                     if (state.depth !== undefined) merged.orderBook = state.depth;
                     if (state.depth20Active !== undefined) merged.depth20Active = state.depth20Active;
-                    if (state.stats !== undefined) merged.stats = { ...existing.stats, ...state.stats };
                     if (state.ltp !== undefined) merged.ltp = state.ltp;
                     if (state.oi !== undefined) merged.oi = state.oi;
                     if (state.rangeBars !== undefined) merged.rangeBars = state.rangeBars;
@@ -688,15 +680,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     ? (state.amt ?? null)
                     : inst.amtAnalysis;
                 const newGenAIAnalysis = state.genAIAnalysis ?? inst.genAIAnalysis;
-                const newPredictions = state.prediction?.predictions ?? inst.predictions;
-                const newModelWeights = state.modelWeights ?? inst.modelWeights;
-                const newGeneration = state.generation ?? inst.generation;
                 const newRiskState = state.riskState ?? inst.riskState;
                 const newRuntimeSafety = runtimeSafetyFromState(state, inst.runtimeSafety);
                 const newAgentDecision = state.agentDecision ?? inst.agentDecision;
                 const newOverseerAction = state.overseerAction ?? inst.overseerAction;
                 const newOverseerReason = state.overseerReason ?? inst.overseerReason;
-                const newStats = state.stats ?? inst.stats;
 
                 return {
                     ...prev,
@@ -705,7 +693,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         data: newData,
                         portfolio: newPortfolio,
                         amtAnalysis: newAmtAnalysis,
-                        aiAnalysis: state.prediction?.analysis ?? inst.aiAnalysis,
+                        aiAnalysis: inst.aiAnalysis,
                         genAIAnalysis: newGenAIAnalysis,
                         llmHistory: (() => {
                             const newAi = state.genAIAnalysis;
@@ -722,16 +710,12 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                             };
                             return [...inst.llmHistory, entry].slice(-20);
                         })(),
-                        predictions: newPredictions,
-                        modelWeights: newModelWeights,
-                        generation: newGeneration,
                         riskState: newRiskState,
                         agentDecision: newAgentDecision,
                         overseerAction: newOverseerAction,
                         overseerReason: newOverseerReason,
                         orderBook: state.depth ?? inst.orderBook,
                         depth20Active: state.depth20Active ?? inst.depth20Active,
-                        stats: newStats,
                         rangeBars: state.rangeBars ?? inst.rangeBars,
                         runtimeSafety: newRuntimeSafety,
                         stale: newRuntimeSafety.feedStale,

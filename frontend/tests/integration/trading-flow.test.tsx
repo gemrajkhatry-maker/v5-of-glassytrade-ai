@@ -67,7 +67,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
       balance: 100000,
       equity: 100000,
       leverage: 10,
-      history: [],
     },
     modelWeights: { trend: 0.2, momentum: 0.2, delta: 0.2, orderBook: 0.2, volatility: 0.2 },
     generation: 0,

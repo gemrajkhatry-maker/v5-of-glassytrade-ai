@@ -437,8 +437,7 @@ def dto_to_weights(d: ModelWeightsDTO):
 def position_to_dto(p) -> dict:
     """Convert a domain Position entity to a serialisable dict."""
     metadata = p.metadata or {}
-    lot_size = metadata.get("option_lot_size", 0)
-    
+
     return {
         "id": p.id,
         "symbol": p.symbol,
@@ -459,8 +458,6 @@ def position_to_dto(p) -> dict:
             float(metadata.get("partial_realized_pnl", 0.0)), 2
         ),
         "originalSize": float(metadata.get("full_size", p.size)),
-        # FIX P2-A: Include lot_size for frontend display consistency
-        "lotSize": float(lot_size) if lot_size else None,
     }
 
 
@@ -498,7 +495,6 @@ def portfolio_to_dto(p) -> dict:
         "leverage": p.leverage,
         "positions": [position_to_dto(pos) for pos in p.positions],
         "closedTrades": [position_to_dto(ct) for ct in p.closed_trades[-50:]],
-        "history": p.history[-100:],
     }
 
 
@@ -525,13 +521,12 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
     Args:
         r: AMTResult domain object (frozen).
         llm_thinking: Reasoning model thinking text (from session state).
-        llm_json: Reasoning model JSON output (from session state).
+        llm_json: Reasoning model JSON output (from session state); accepted
+            for caller compatibility but no longer serialized (dead UI field).
     """
     return {
         "marketState": r.market_state,
         "poc": r.poc,
-        "vah": r.value_area_high,
-        "val": r.value_area_low,
         "valueAreaHigh": r.value_area_high,
         "valueAreaLow": r.value_area_low,
         "lvns": list(r.lvns),
@@ -614,27 +609,13 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         "pocVsPrice": r.poc_vs_price,
         "lvnPlay": r.lvn_play,
         "isSecondDrive": r.drive_entry_valid,  # Task 3.3: Fabio Playbook drive cycle
-        # Developing VA (short lookback)
-        "devPoc": r.dev_poc,
-        "devVah": r.dev_vah,
-        "devVal": r.dev_val,
-        # Cushion System State
-        "cushionTier": r.cushion_tier,
-        "sessionPnl": r.session_pnl,
         # Reasoning model output (injected from session state)
         "llmThinking": llm_thinking,
-        "llmJson": llm_json,
-        # MTF & Opening Type
-        "openingType": r.opening_type,
-        "mtfAlignment": r.mtf_alignment,
+        # Higher Timeframe Levels
         "dailyVah": r.daily_vah,
         "dailyVal": r.daily_val,
         "dailyPoc": r.daily_poc,
-        "hourlyVah": r.hourly_vah,
-        "hourlyVal": r.hourly_val,
         "hourlyPoc": r.hourly_poc,
-        # Day type classification
-        "dayType": r.day_type,
         # Absorption context
         "absorptionSide": r.absorption_side,
         "absorptionRangeRatio": r.absorption_range_ratio,
@@ -643,10 +624,6 @@ def amt_result_to_dto(r, *, llm_thinking: str = "", llm_json: str = "{}") -> dic
         "swingDelta": r.swing_delta,
         # Per-symbol delta (FIX BUG #3: isolated per option contract)
         "deltaNormalizedOption": r.delta_normalized_option,
-        # CVD data source indicator
-        "cvdSource": r.cvd_source,
-        # Bimodal active pole
-        "bimodalActivePole": r.bimodal_active_pole,
     }
 
 
