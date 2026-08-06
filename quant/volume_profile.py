@@ -1,11 +1,13 @@
 """Volume profile — uniform distribution across [low, high], POC, average-weighted
-CME two-row value area (70%)."""
+CME two-row value area (68%)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from quant.bars import Bar
+
+VALUE_AREA_PCT = 0.68
 
 
 @dataclass(frozen=True)
@@ -106,7 +108,7 @@ class VolumeProfileBuilder:
 
     @staticmethod
     def _value_area(levels, volumes, poc_idx, step, total_volume):
-        target = total_volume * 0.70
+        target = total_volume * VALUE_AREA_PCT
         current = volumes[poc_idx]
         up_idx = down_idx = poc_idx
         n_buckets = len(volumes)
