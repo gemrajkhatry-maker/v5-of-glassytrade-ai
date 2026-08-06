@@ -14,8 +14,13 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-import gymnasium as gym
-from gymnasium import spaces
+
+try:  # gymnasium is optional — only needed to import/instantiate the env
+    import gymnasium as gym
+    from gymnasium import spaces
+except ImportError:  # pragma: no cover
+    gym = None
+    spaces = None
 
 from quant.contracts.value_objects import OHLC
 from quant.amt.models.observation import AMTObservation
@@ -85,7 +90,7 @@ class _Position:
 # ---------------------------------------------------------------------------
 
 
-class ValentiniAMTEnv(gym.Env):
+class ValentiniAMTEnv(gym.Env if gym is not None else object):
     """Gymnasium environment for Valentini AMT RL training.
 
     Supports ``action_masks()`` for sb3-contrib MaskablePPO.
