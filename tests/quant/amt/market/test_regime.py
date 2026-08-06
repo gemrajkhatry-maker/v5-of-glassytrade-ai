@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 import pytest
 
-from app.domain.fabio_ai.services.regime_detector import RegimeDetector
-from app.domain.trading.models.value_objects import AMTResult, OHLC
+from quant.amt.market.regime import RegimeDetector
+from quant.contracts.value_objects import AMTResult, OHLC
 
 
 def _tick(close=100.0, delta=50.0, volume=1000.0, t="2024-01-01T10:00:00Z") -> OHLC:
@@ -31,7 +31,7 @@ class TestRegimeDetector:
         # Immediately after — should not trigger even with state change
         assert self.rd.should_trigger_llm(_tick(), _amt(state="IMBALANCED")) is False
 
-    @patch("app.domain.fabio_ai.services.regime_detector.time")
+    @patch("quant.amt.market.regime.time")
     def test_triggers_on_state_change(self, mock_time):
         mock_time.time.return_value = 100.0
         self.rd.should_trigger_llm(_tick(), _amt())
@@ -39,7 +39,7 @@ class TestRegimeDetector:
         mock_time.time.return_value = 106.0  # past cooldown
         assert self.rd.should_trigger_llm(_tick(), _amt(state="IMBALANCED")) is True
 
-    @patch("app.domain.fabio_ai.services.regime_detector.time")
+    @patch("quant.amt.market.regime.time")
     def test_triggers_on_zone_change(self, mock_time):
         mock_time.time.return_value = 100.0
         self.rd.should_trigger_llm(_tick(close=100), _amt(poc=100, vah=105, val=95))
@@ -48,7 +48,7 @@ class TestRegimeDetector:
         # Price moves from INSIDE_VA to ABOVE_VAH
         assert self.rd.should_trigger_llm(_tick(close=105), _amt(poc=100, vah=105, val=95)) is True
 
-    @patch("app.domain.fabio_ai.services.regime_detector.time")
+    @patch("quant.amt.market.regime.time")
     def test_triggers_on_poc_migration(self, mock_time):
         mock_time.time.return_value = 100.0
         self.rd.should_trigger_llm(_tick(), _amt(poc=100))
@@ -57,7 +57,7 @@ class TestRegimeDetector:
         # POC moves by 0.5% (> 0.2% threshold)
         assert self.rd.should_trigger_llm(_tick(), _amt(poc=100.5)) is True
 
-    @patch("app.domain.fabio_ai.services.regime_detector.time")
+    @patch("quant.amt.market.regime.time")
     def test_no_trigger_without_change(self, mock_time):
         mock_time.time.return_value = 100.0
         self.rd.should_trigger_llm(_tick(), _amt())
@@ -66,7 +66,7 @@ class TestRegimeDetector:
         # Same state — no trigger
         assert self.rd.should_trigger_llm(_tick(), _amt()) is False
 
-    @patch("app.domain.fabio_ai.services.regime_detector.time")
+    @patch("quant.amt.market.regime.time")
     def test_triggers_on_delta_spike(self, mock_time):
         mock_time.time.return_value = 100.0
         self.rd.should_trigger_llm(_tick(delta=50), _amt())

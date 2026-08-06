@@ -1,7 +1,7 @@
 """Tests for RegimeDetector second drive and squeeze detection."""
 import pytest
 from unittest.mock import MagicMock
-from app.domain.fabio_ai.services.regime_detector import RegimeDetector
+from quant.amt.market.regime import RegimeDetector
 
 
 def _ohlc(close, low=None, high=None):
