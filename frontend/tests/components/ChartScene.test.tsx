@@ -76,7 +76,6 @@ describe('ChartScene', () => {
     const { container } = render(
       <ChartScene
         data={mockData}
-        predictions={[]}
         config={defaultConfig}
         positions={[]}
       />
@@ -88,7 +87,6 @@ describe('ChartScene', () => {
     render(
       <ChartScene
         data={mockData}
-        predictions={[]}
         config={defaultConfig}
         positions={[]}
       />
@@ -102,7 +100,6 @@ describe('ChartScene', () => {
     const { container } = render(
       <ChartScene
         data={[]}
-        predictions={[]}
         config={defaultConfig}
         positions={[]}
       />
@@ -114,7 +111,6 @@ describe('ChartScene', () => {
     const { container } = render(
       <ChartScene
         data={mockData}
-        predictions={[]}
         config={defaultConfig}
         positions={[]}
       />
@@ -126,7 +122,6 @@ describe('ChartScene', () => {
     render(
       <ChartScene
         data={mockData}
-        predictions={[]}
         config={defaultConfig}
         positions={[]}
         mode="STANDARD"
@@ -158,7 +153,6 @@ describe('ChartScene', () => {
     render(
       <ChartScene
         data={mockData}
-        predictions={[]}
         config={defaultConfig}
         positions={positions}
       />
@@ -170,7 +164,6 @@ describe('ChartScene', () => {
     render(
       <ChartScene
         data={mockData}
-        predictions={[]}
         config={defaultConfig}
         positions={[]}
         symbol="NIFTY 25500 CE"
@@ -183,12 +176,31 @@ describe('ChartScene', () => {
     render(
       <ChartScene
         data={mockData}
-        predictions={[]}
         config={defaultConfig}
         positions={[]}
       />
     );
     const canvas = document.querySelector('canvas');
     expect(canvas).toBeInTheDocument();
+  });
+
+  it('shows real agentDecision direction in the decision card', () => {
+    render(
+      <ChartScene
+        data={mockData}
+        config={defaultConfig}
+        positions={[]}
+        agentDecision={{
+          direction: 'LONG',
+          probability: 0.8,
+          regime: 'TRENDING',
+          timing: 'ENTER_NOW',
+          sizeFraction: 0.5,
+          latencyUs: 0,
+          rationale: 'Strong bullish setup',
+        }}
+      />
+    );
+    expect(screen.getByText(/▲ LONG/)).toBeInTheDocument();
   });
 });

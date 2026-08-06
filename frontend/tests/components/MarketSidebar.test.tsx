@@ -142,4 +142,28 @@ describe('MarketSidebar', () => {
     const items = screen.getAllByRole('button');
     expect(items.length).toBeGreaterThan(0);
   });
+
+  it('does not show UNSAFE badge even when runtimeSafety.unsafeToTrade is set', () => {
+    // Backend never sends runtimeSafety, so no symbol may ever show UNSAFE.
+    const props = {
+      ...defaultProps,
+      instruments: {
+        'NIFTY 27 FEB 25500 CALL': createMockInstrument('NIFTY 27 FEB 25500 CALL', {
+          agentDecision: {
+            direction: 'LONG' as const,
+            probability: 0.6,
+            regime: 'TRENDING',
+            timing: 'MONITOR',
+            sizeFraction: 0.5,
+            latencyUs: 0,
+            rationale: 'x',
+          },
+          runtimeSafety: { brokerBound: false, feedStale: true, unsafeToTrade: true },
+        }),
+      },
+    };
+
+    render(<MarketSidebar {...props} />);
+    expect(screen.queryByText(/UNSAFE/)).not.toBeInTheDocument();
+  });
 });

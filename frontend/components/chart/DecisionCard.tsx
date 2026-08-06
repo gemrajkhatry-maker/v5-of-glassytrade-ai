@@ -4,32 +4,23 @@ import { sanitizeRationale } from '../../utils/textSanitizer';
 
 interface DecisionCardProps {
   direction: string;
-  setup: string;
-  pLong: number;
-  pShort: number;
+  probability: number;
   regime: string;
   timing: string;
-  kelly: number;
   rationale: string;
-  marketState: string;
-  aggression: string;
 }
 
 /**
  * DecisionCard displays the current AI trading decision with expandable rationale.
  * Extracted from ChartScene for better maintainability.
+ * Props mirror the backend's real `agentDecision` contract.
  */
 const DecisionCard: React.FC<DecisionCardProps> = ({ 
   direction, 
-  setup, 
-  pLong, 
-  pShort, 
+  probability, 
   regime, 
   timing, 
-  kelly, 
-  rationale, 
-  marketState, 
-  aggression 
+  rationale 
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   
@@ -40,7 +31,7 @@ const DecisionCard: React.FC<DecisionCardProps> = ({
   const directionColor = isLong ? 'text-emerald-400' : isShort ? 'text-red-400' : 'text-slate-400';
   const directionBg = isLong ? 'bg-emerald-500/20 border-emerald-500/30' : isShort ? 'bg-red-500/20 border-red-500/30' : 'bg-slate-500/20 border-slate-500/30';
   const directionIcon = isLong ? '▲' : isShort ? '▼' : '—';
-  const prob = isLong ? pLong : isShort ? pShort : 0;
+  const prob = probability || 0;
 
   return (
     <div className="flex flex-col bg-slate-900/80 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl overflow-hidden font-sans">

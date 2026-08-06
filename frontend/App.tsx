@@ -211,10 +211,10 @@ function App() {
                             data={activeInstrument.data}
                             tickBus={tickBus}
                             symbol={activeInstrument.symbol}
-                            predictions={activeInstrument.predictions}
                             config={effectiveConfig}
                             positions={activeInstrument.portfolio.positions}
                             closedTrades={activeInstrument.portfolio.closedTrades}
+                            agentDecision={activeInstrument.agentDecision}
                             amtAnalysis={activeInstrument.amtAnalysis}
                             mode={chartMode}
                         />
@@ -359,11 +359,9 @@ function App() {
                             agentDecision={activeInstrument.agentDecision}
                             llmHistory={activeInstrument.llmHistory}
                             orderBook={activeInstrument.orderBook}
-                            depth20Active={activeInstrument.depth20Active}
                             overseerAction={activeInstrument.overseerAction}
                             overseerReason={activeInstrument.overseerReason}
                             symbol={activeSymbol}
-                            underlyingPrice={activeInstrument.amtAnalysis?.underlyingPrice}
                             data={activeInstrument.data}
                         />
                     </ErrorBoundary>

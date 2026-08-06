@@ -124,3 +124,84 @@ describe('InstrumentState defaults', () => {
     expect(result.current).toHaveProperty('tickBus');
   });
 });
+
+describe('phantom field removal (backend never sends these)', () => {
+  // Render the hook with a mocked config fetch so it connects a real WS,
+  // then push a crafted full-state message through the socket.
+  const connectHook = async () => {
+    const instances: MockWebSocket[] = [];
+    class TrackingWS extends MockWebSocket {
+      constructor(url: string) {
+        super(url);
+        instances.push(this);
+      }
+    }
+    const realFetch = global.fetch;
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ activeSymbols: ['NIFTY'] }),
+    })) as any;
+    global.WebSocket = TrackingWS as any;
+
+    const rendered = renderHook(() => useServerTradingSystem(DEFAULT_CONFIG));
+
+    // Let the config fetch resolve and the WS connect effect run.
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await new Promise(r => setTimeout(r, 20));
+      });
+    }
+
+    global.fetch = realFetch;
+    return { ...rendered, ws: instances[0] };
+  };
+
+  const pushMessage = async (ws: MockWebSocket, msg: Record<string, unknown>) => {
+    await act(async () => {
+      ws.onmessage?.({ data: JSON.stringify(msg) } as any);
+      // Flush the RAF-batched state update inside act.
+      await new Promise(r => setTimeout(r, 30));
+    });
+  };
+
+  it('does not derive unsafeToTrade/feedStale from phantom feed/execution/readiness fields', async () => {
+    const { result, ws } = await connectHook();
+    expect(ws).toBeDefined();
+
+    await pushMessage(ws, {
+      _type: 'full',
+      _symbol: 'NIFTY',
+      feed: { last_tick_age_sec: 999, ticks_seen: 0, state: 'failed' },
+      execution: { broker_bound: false },
+      readiness: { safe_to_trade: false },
+    });
+
+    const inst = result.current.instruments['NIFTY'];
+    expect(inst).toBeDefined();
+    expect(inst.runtimeSafety?.unsafeToTrade).toBe(false);
+    expect(inst.runtimeSafety?.feedStale).toBe(false);
+    expect(inst.stale).toBeFalsy();
+  });
+
+  it('does not store phantom depth20Active state', async () => {
+    const { result, ws } = await connectHook();
+
+    await pushMessage(ws, {
+      _type: 'full',
+      _symbol: 'NIFTY',
+      depth20Active: true,
+    });
+
+    const inst = result.current.instruments['NIFTY'];
+    expect(inst.depth20Active).toBeUndefined();
+  });
+
+  it('ignores backend stale-notification messages', async () => {
+    const { result, ws } = await connectHook();
+
+    await pushMessage(ws, { _type: 'stale', _symbol: 'NIFTY' });
+
+    const inst = result.current.instruments['NIFTY'];
+    expect(inst.stale).toBeFalsy();
+  });
+});

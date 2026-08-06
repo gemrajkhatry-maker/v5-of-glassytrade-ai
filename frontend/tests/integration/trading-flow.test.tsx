@@ -138,7 +138,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
         />
         <ChartScene
           data={mockDataNIFTY}
-          predictions={[]}
           config={defaultConfig}
           positions={[]}
           symbol={activeSymbol}
@@ -163,7 +162,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
         />
         <ChartScene
           data={mockDataNIFTY}
-          predictions={[]}
           config={defaultConfig}
           positions={[]}
           symbol={activeSymbol}
@@ -202,7 +200,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
         />
         <ChartScene
           data={mockDataNIFTY}
-          predictions={[]}
           config={defaultConfig}
           positions={[]}
           symbol={activeSymbol}
@@ -224,7 +221,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
         />
         <ChartScene
           data={mockDataBANKNIFTY}
-          predictions={[]}
           config={defaultConfig}
           positions={[]}
           symbol={newActiveSymbol}
@@ -248,7 +244,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
         />
         <ChartScene
           data={mockDataNIFTY}
-          predictions={[]}
           config={defaultConfig}
           positions={[]}
           symbol={activeSymbol}
@@ -277,7 +272,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
         />
         <ChartScene
           data={mockDataNIFTY}
-          predictions={[]}
           config={defaultConfig}
           positions={[]}
           symbol={activeSymbol}
@@ -300,7 +294,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
         />
         <ChartScene
           data={mockDataNIFTY}
-          predictions={[]}
           config={defaultConfig}
           positions={[]}
           symbol={activeSymbol}
@@ -322,7 +315,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
         />
         <ChartScene
           data={mockDataNIFTY}
-          predictions={[]}
           config={defaultConfig}
           positions={[]}
           symbol={activeSymbol}

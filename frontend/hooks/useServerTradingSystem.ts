@@ -5,17 +5,8 @@ import {
     ChartConfig,
     OHLCData,
     OrderBook,
-    ModelWeights,
     LLMHistoryEntry,
 } from '../types';
-
-const DEFAULT_WEIGHTS: ModelWeights = {
-    trend: 0.40,
-    momentum: 0.25,
-    delta: 0.15,
-    orderBook: 0.15,
-    volatility: 0.05,
-};
 
 /**
  * Creates a fresh instrument state.
@@ -32,66 +23,21 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
         positions: [],
         closedTrades: [],
     },
-    modelWeights: DEFAULT_WEIGHTS,
-    generation: 0,
     aiAnalysis: null,
     genAIAnalysis: null,
     amtAnalysis: null,
     riskState: null,
     agentDecision: null,
     llmHistory: [],
-    predictions: [],
     overseerAction: '',
     overseerReason: '',
-    stats: null,
-    depth20Active: false,
-    stale: false,
     runtimeSafety: {
         brokerBound: false,
         feedStale: false,
-        unsafeToTrade: true,
+        unsafeToTrade: false,
     },
     lastUpdate: Date.now(),
 });
-
-const runtimeSafetyFromState = (
-    state: any,
-    existing?: InstrumentState['runtimeSafety'],
-): InstrumentState['runtimeSafety'] => {
-    const feed = state.feed !== undefined ? state.feed : existing?.feed;
-    const execution = state.execution !== undefined ? state.execution : existing?.execution;
-    const readiness = state.readiness !== undefined ? state.readiness : existing?.readiness;
-    if (readiness?.safe_to_trade !== undefined) {
-        const readyState = readiness?.safe_to_trade === true;
-        return {
-            brokerBound: Boolean((execution as any)?.broker_bound ?? existing?.brokerBound ?? false),
-            feedStale: !readyState,
-            unsafeToTrade: !readyState,
-            feed,
-            execution,
-            stateDigest: state.state_digest ?? existing?.stateDigest,
-            readiness,
-        };
-    }
-    const brokerBound = Boolean((execution as any)?.broker_bound ?? existing?.brokerBound ?? false);
-    const age = Number((feed as any)?.last_tick_age_sec ?? 0);
-    const ticksSeen = Number((feed as any)?.ticks_seen ?? 0);
-    const stateValue = String((feed as any)?.state ?? "").toLowerCase();
-    const producerError = Boolean((feed as any)?.producer_error);
-    const feedStale = producerError
-        || (Number.isFinite(age) && age > 30)
-        || ticksSeen <= 0
-        || stateValue === "drained"
-        || stateValue === "failed";
-    return {
-        brokerBound,
-        feedStale,
-        unsafeToTrade: !brokerBound || feedStale,
-        feed,
-        execution,
-        stateDigest: state.state_digest ?? existing?.stateDigest,
-    };
-};
 
 /**
  * Merge historical candles into existing candle data.
@@ -519,16 +465,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 return;
             }
 
-            // Handle stale-data notification from backend
-            if (state._type === 'stale' && state._symbol) {
-                setInstruments(prev => {
-                    const existing = prev[state._symbol];
-                    if (!existing) return prev;
-                    return { ...prev, [state._symbol]: { ...existing, stale: true } };
-                });
-                return;
-            }
-
             // Handle pong (heartbeat response)
             if (state.pong) {
                 lastPongRef.current = Date.now();
@@ -558,12 +494,8 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     state.overseerAction !== undefined ||
                     state.overseerReason !== undefined ||
                     state.depth !== undefined ||
-                    state.depth20Active !== undefined ||
                     state.ltp !== undefined ||
-                    state.oi !== undefined ||
-                    state.feed !== undefined ||
-                    state.execution !== undefined ||
-                    state.state_digest !== undefined;
+                    state.oi !== undefined;
 
                 if (!hasAnalytics) {
                     return;
@@ -574,7 +506,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     const existing = prev[symbol];
                     if (!existing) return prev;
 
-                    const merged: any = { ...existing, lastUpdate: Date.now(), stale: false };
+                    const merged: any = { ...existing, lastUpdate: Date.now() };
 
                     if (state.tick) {
                         const newData = [...existing.data];
@@ -599,38 +531,32 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.overseerAction !== undefined) merged.overseerAction = state.overseerAction;
                     if (state.overseerReason !== undefined) merged.overseerReason = state.overseerReason;
                     if (state.depth !== undefined) merged.orderBook = state.depth;
-                    if (state.depth20Active !== undefined) merged.depth20Active = state.depth20Active;
                     if (state.ltp !== undefined) merged.ltp = state.ltp;
                     if (state.oi !== undefined) merged.oi = state.oi;
-                    if (state.feed !== undefined || state.execution !== undefined || state.state_digest !== undefined) {
-                        merged.runtimeSafety = runtimeSafetyFromState(state, existing.runtimeSafety);
-                        merged.stale = merged.runtimeSafety.feedStale;
-                    }
 
-                    // History tracking: Listen for both standard generative AI and the new reasoning worker
+                    // History tracking: Listen for generative AI analysis
                     const newAi = state.genAIAnalysis;
-                    const hasNewReasoning = state.amt?.tradeDecision && state.amt?.tradeDecision !== 'FLAT';
-                    
-                    if (newAi?.inputPrompt || hasNewReasoning) {
+
+                    if (newAi?.inputPrompt) {
                         const lastEntry = existing.llmHistory[existing.llmHistory.length - 1];
-                        const newPrompt = newAi?.inputPrompt || "Reasoning Model Analysis";
-                        const newDirection = newAi?.direction || state.amt.tradeDecision;
-                        const newRationale = newAi?.rationale || state.amt.llmThinking;
-                        
+                        const newPrompt = newAi.inputPrompt;
+                        const newDirection = newAi.direction;
+                        const newRationale = newAi.rationale;
+
                         // FIX P1-B: Enhanced deduplication - check direction + rationale, not just prompt
-                        const isDuplicate = lastEntry && 
-                            lastEntry.direction === newDirection && 
+                        const isDuplicate = lastEntry &&
+                            lastEntry.direction === newDirection &&
                             lastEntry.rationale === newRationale &&
                             (Date.now() - lastEntry.timestamp) < 10000; // within 10 seconds
-                        
+
                         if (!isDuplicate) {
                             merged.llmHistory = [...existing.llmHistory, {
                                 timestamp: Date.now(), // FIX P1-A: Captured at creation time, not render
                                 direction: newDirection,
-                                confidence: newAi?.confidence || 'High',
+                                confidence: newAi.confidence,
                                 rationale: newRationale,
                                 inputPrompt: newPrompt,
-                                rawOutput: newAi?.rawOutput || state.amt.llmThinking,
+                                rawOutput: newAi.rawOutput,
                             }].slice(-20);
                         }
                     }
@@ -672,7 +598,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     : inst.amtAnalysis;
                 const newGenAIAnalysis = state.genAIAnalysis ?? inst.genAIAnalysis;
                 const newRiskState = state.riskState ?? inst.riskState;
-                const newRuntimeSafety = runtimeSafetyFromState(state, inst.runtimeSafety);
                 const newAgentDecision = state.agentDecision ?? inst.agentDecision;
                 const newOverseerAction = state.overseerAction ?? inst.overseerAction;
                 const newOverseerReason = state.overseerReason ?? inst.overseerReason;
@@ -706,9 +631,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         overseerAction: newOverseerAction,
                         overseerReason: newOverseerReason,
                         orderBook: state.depth ?? inst.orderBook,
-                        depth20Active: state.depth20Active ?? inst.depth20Active,
-                        runtimeSafety: newRuntimeSafety,
-                        stale: newRuntimeSafety.feedStale,
+                        runtimeSafety: inst.runtimeSafety,
                         lastUpdate: Date.now(),
                     },
                 };

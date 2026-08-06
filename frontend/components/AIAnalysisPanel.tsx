@@ -12,15 +12,13 @@ interface AIAnalysisPanelProps {
     agentDecision?: AgentDecision | null;
     llmHistory?: LLMHistoryEntry[];
     orderBook?: OrderBook | null;
-    depth20Active?: boolean;
     overseerAction?: string;
     overseerReason?: string;
     symbol?: string;
-    underlyingPrice?: number;
     data?: any[];
 }
 
-const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, depth20Active, overseerAction, overseerReason, symbol, underlyingPrice, data = [] }) => {
+const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, overseerAction, overseerReason, symbol, data = [] }) => {
     // Determine current best price proxy (LTP) with 3-tier fallback chain.
     // Tier 1: Order book mid-price (most accurate, requires depth data)
     // Tier 2: Last close price from history
@@ -185,17 +183,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
 
                 {/* Equity Panel (Header) */}
                 <EquityPanel portfolio={portfolio} openPnl={openPnl} />
-
-                {/* P1-9: Underlying Index Panel */}
-                {underlyingPrice && underlyingPrice > 0 && (
-                    <div className="mt-2 px-3 py-1.5 bg-glassy-bg-elevated/50 border border-glassy-border-default rounded-sm flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                            <Activity className="w-3.5 h-3.5 text-glassy-neutral-cool" />
-                            <span className="text-[9px] font-bold text-glassy-text-secondary uppercase tracking-wider">Underlying Index</span>
-                        </div>
-                        <span className="text-xs font-mono font-bold tabular-nums text-glassy-neutral-cool">{underlyingPrice.toFixed(2)}</span>
-                    </div>
-                )}
 
                 {/* Risk State Warning */}
                 <RiskStateDisplay riskState={riskState} />
@@ -679,9 +666,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     </span>
                                 ) : <span className="text-[10px] text-white/20">—</span>;
                             })()}
-                            <span title="Order Book Depth" className={`text-[9px] font-mono px-1 py-0.5 rounded ${depth20Active ? 'bg-green-500/20 text-green-400' : 'bg-white/5 text-white/20'}`}>
-                                {depth20Active ? 'Depth-20' : 'Depth-5'}
-                            </span>
                         </div>
                     </div>
                 </div>
@@ -1378,13 +1362,11 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     {(() => {
                                         const dir = agentDecision?.direction || 'FLAT';
                                         const regime = agentDecision?.regime || '';
-                                        const optionType = amtResult?.optionType || '';
                                         
                                         if (dir === 'FLAT') return 'FLAT';
                                         
                                         // Map direction to option action
                                         const action = dir === 'LONG' ? 'BUY' : 'SELL';
-                                        const optionLabel = optionType ? ` ${optionType}` : '';
                                         
                                         // AMT playbook terminology
                                         const playbookLabel = regime === 'TRENDING' ? 'Initiative Trend' : 
@@ -1392,7 +1374,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                                               regime === 'PROBING' ? 'Breakout Test' : 
                                                               regime === 'DEAD' ? 'Failed Auction' : regime;
                                         
-                                        return `${action}${optionLabel} (${playbookLabel})`;
+                                        return `${action} (${playbookLabel})`;
                                     })()}
                                 </span>
                             </div>
@@ -1639,7 +1621,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
             <div className="flex flex-col gap-2 mt-2">
                 {(() => {
                     let passedCount = 0;
-                    const ts = amtResult?.tickSize || 0.05;
+                    const ts = 0.05;
                     const distThreshold = 5 * ts;
                     if (amtResult?.marketState !== 'DEAD') passedCount++;
                     if (currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold) passedCount++;
@@ -1753,19 +1735,9 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                     <span className="text-white/60 w-24">Timing</span>
                                     {(() => {
                                         const timing = agentDecision?.timing || 'SKIP';
-                                        const timeWindow = amtResult?.amtTimeWindow;
-                                        
-                                        if (!timeWindow) return <span className="text-white/40 font-mono text-[9px]">{timing}</span>;
-                                        
                                         const timingColor = timing === 'ENTER_NOW' ? 'text-emerald-400' : 
                                                             timing === 'WAIT' ? 'text-yellow-400' : 'text-white/40';
-                                        
-                                        return (
-                                            <div className="flex flex-col gap-0.5">
-                                                <span className={`font-mono text-[9px] font-bold ${timingColor}`}>{timing}</span>
-                                                <span className="text-[8px] text-white/30">{timeWindow.label}</span>
-                                            </div>
-                                        );
+                                        return <span className={`font-mono text-[9px] font-bold ${timingColor}`}>{timing}</span>;
                                     })()}
                                 </div>
                             </div>

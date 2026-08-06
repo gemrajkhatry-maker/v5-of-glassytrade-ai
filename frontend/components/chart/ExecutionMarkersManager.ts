@@ -198,7 +198,7 @@ export function generateAcceptanceRejectionMarkers(
   }
 
   // Rejection from high levels (if available)
-  if ((amt as any).rejectionFromVah) {
+  if (amt.rejectionAtHigh) {
     markers.push({
       time: lastTime,
       position: 'aboveBar',
@@ -222,7 +222,7 @@ export function generateAcceptanceRejectionMarkers(
   }
 
   // Rejection from low levels (if available)
-  if ((amt as any).rejectionFromVal) {
+  if (amt.rejectionAtLow) {
     markers.push({
       time: lastTime,
       position: 'belowBar',

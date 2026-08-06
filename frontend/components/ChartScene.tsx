@@ -11,9 +11,7 @@ import {
   IPriceLine,
   SeriesMarker,
 } from 'lightweight-charts';
-import { OHLCData, ChartConfig, TradePosition, AIAnalysis, AMTAnalysis, ChartMode, AggressivePrint } from '../types';
-import { Brain, Cpu, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
-import { sanitizeRationale } from '../utils/textSanitizer';
+import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, ChartMode, AggressivePrint } from '../types';
 import DecisionCard from './chart/DecisionCard';
 
 // Extracted chart components (Phase 3)
@@ -40,11 +38,10 @@ import {
 } from './chart/VolumeSeriesManager';
 interface ChartSceneProps {
   data: OHLCData[];
-  predictions: OHLCData[];
   config: ChartConfig;
   positions: TradePosition[];
   closedTrades?: TradePosition[];
-  aiAnalysis?: AIAnalysis | null;
+  agentDecision?: AgentDecision | null;
   amtAnalysis?: AMTAnalysis | null;
   mode?: ChartMode;
   tickBus?: EventTarget;
@@ -85,11 +82,10 @@ function arraysShallowEqual<T>(a: T[] | undefined, b: T[] | undefined): boolean 
 
 const ChartScene: React.FC<ChartSceneProps> = ({
   data,
-  predictions,
   config,
   positions,
   closedTrades = [],
-  aiAnalysis,
+  agentDecision,
   amtAnalysis,
   mode = 'STANDARD',
   tickBus,
@@ -100,7 +96,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const predictionSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const activePriceLinesRef = useRef<Map<string, IPriceLine[]>>(new Map());
   const amtLinesRef = useRef<IPriceLine[]>([]);
   const initializedRef = useRef(false);
@@ -179,15 +174,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       wickDownColor: config.bearColor,
     });
 
-    const predSeries = chart.addCandlestickSeries({
-      upColor: '#7c5cfc', // glassy-ai-primary
-      downColor: '#6048d0', // glassy-ai-muted
-      borderVisible: true,
-      borderColor: '#7c5cfc',
-      wickUpColor: '#7c5cfc',
-      wickDownColor: '#7c5cfc',
-    });
-
     const volumeSeries = chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
       priceScaleId: '',
@@ -200,7 +186,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
-    predictionSeriesRef.current = predSeries;
 
     chartRef.current.priceScale('right').applyOptions({
       scaleMargins: {
@@ -225,7 +210,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     });
 
     candleSeries.applyOptions({ visible: true });
-    predSeries.applyOptions({ visible: true });
 
     const resizeObserver = new ResizeObserver(entries => {
       if (entries.length === 0 || !entries[0].contentRect) return;
@@ -346,7 +330,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
   // Handle mode/config changes dynamically without remount
   useEffect(() => {
-    if (!candleSeriesRef.current || !predictionSeriesRef.current) return;
+    if (!candleSeriesRef.current) return;
 
     candleSeriesRef.current.applyOptions({
       upColor: config.bullColor,
@@ -355,7 +339,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       wickDownColor: config.bearColor,
       borderVisible: false
     });
-    predictionSeriesRef.current.applyOptions({ visible: true });
   }, [mode, config.bullColor, config.bearColor]);
 
   // 3. Canvas Overlay Drawing
@@ -875,7 +858,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
   // 4a. Update Candlestick Series (STANDARD mode)
   useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current || !predictionSeriesRef.current) return;
+    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
     // Offset UTC → IST (+5:30) so chart axis shows Indian Standard Time
     const IST_OFFSET = 19800; // 5h30m in seconds
@@ -909,13 +892,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         initializedRef.current = true;
       }
     }
-
-    if (predictions.length > 0) {
-      predictionSeriesRef.current.setData(predictions.map(formatCandle));
-    } else {
-      predictionSeriesRef.current.setData([]);
-    }
-  }, [data, predictions, config.bullColor, config.bearColor, mode]);
+  }, [data, config.bullColor, config.bearColor, mode]);
 
   // 5. Update Markers & Lines
   useEffect(() => {
@@ -1034,19 +1011,14 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       </div>
 
       {/* Current Decision Card */}
-      {(amtAnalysis?.direction || amtAnalysis?.llmThinking) && (
+      {(agentDecision?.direction || agentDecision?.rationale) && (
         <div className="absolute top-4 right-4 z-40 w-72 max-h-[80%] overflow-hidden">
-          <DecisionCard 
-            direction={amtAnalysis.direction || 'FLAT'} 
-            setup={amtAnalysis.setup || 'NONE'}
-            pLong={amtAnalysis.pLong || 0}
-            pShort={amtAnalysis.pShort || 0}
-            regime={amtAnalysis.agentRegime || ''}
-            timing={amtAnalysis.agentTiming || ''}
-            kelly={amtAnalysis.agentKelly || 0}
-            rationale={amtAnalysis.agentRationale || amtAnalysis.llmThinking || ''}
-            marketState={amtAnalysis.marketState}
-            aggression={String(amtAnalysis.aggression ?? '')}
+          <DecisionCard
+            direction={agentDecision.direction || 'FLAT'}
+            probability={agentDecision.probability || 0}
+            regime={agentDecision.regime || ''}
+            timing={agentDecision.timing || ''}
+            rationale={agentDecision.rationale || ''}
           />
         </div>
       )}
@@ -1063,6 +1035,7 @@ function chartSceneAreEqual(prev: ChartSceneProps, next: ChartSceneProps): boole
     if (prev.data.length !== next.data.length) return false;
     if (prev.positions.length !== next.positions.length) return false;
     if ((prev.closedTrades?.length ?? 0) !== (next.closedTrades?.length ?? 0)) return false;
+    if (prev.agentDecision !== next.agentDecision) return false;
     if (prev.amtAnalysis !== next.amtAnalysis) return false;
     return true;
 }

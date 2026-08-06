@@ -59,13 +59,11 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const totalSize = openPositions.reduce((sum, p) => sum + (p.size || 0), 0);
 
     const isDead = inst.genAIAnalysis?.rationale?.includes('DEAD') || inst.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
-    const unsafeToTrade = Boolean(inst.runtimeSafety?.unsafeToTrade);
     const prob = inst.agentDecision?.probability || 0;
     const timing = inst.agentDecision?.timing || 'SKIP';
     const mode = inst.amtAnalysis?.marketState || 'BALANCED';
     const modeAbbr = (mode || 'BAL').substring(0, 3).toUpperCase();
     const actionLabel =
-        unsafeToTrade ? 'UNSAFE' :
         timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing === 'SKIP' ? 'SKIP' : (timing || '—').slice(0, 6);
 
     return (
@@ -126,9 +124,9 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                         <span className="shrink-0">{modeAbbr}</span>
                         <span className="text-glassy-text-tertiary">·</span>
                         <span className={`shrink-0 inline-flex items-center gap-0.5 font-bold ${
-                            unsafeToTrade ? 'text-glassy-bear-primary' : timing === 'ENTER_NOW' ? 'text-glassy-bull-primary' : timing === 'SKIP' ? 'text-glassy-bear-primary' : 'text-glassy-warning'
+                            timing === 'ENTER_NOW' ? 'text-glassy-bull-primary' : timing === 'SKIP' ? 'text-glassy-bear-primary' : 'text-glassy-warning'
                         }`}>
-                            <span className={`w-1 h-1 rounded-full shrink-0 ${unsafeToTrade ? 'bg-glassy-bear-primary animate-pulse' : timing === 'ENTER_NOW' ? 'bg-glassy-bull-primary animate-pulse' : timing === 'SKIP' ? 'bg-glassy-bear-primary' : 'bg-glassy-warning'}`} />
+                            <span className={`w-1 h-1 rounded-full shrink-0 ${timing === 'ENTER_NOW' ? 'bg-glassy-bull-primary animate-pulse' : timing === 'SKIP' ? 'bg-glassy-bear-primary' : 'bg-glassy-warning'}`} />
                             {actionLabel}
                         </span>
                     </span>

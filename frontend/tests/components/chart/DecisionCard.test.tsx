@@ -3,17 +3,13 @@ import { render, screen } from '@testing-library/react';
 import DecisionCard from '../../../components/chart/DecisionCard';
 
 describe('DecisionCard', () => {
+  // Props mirror the real agentDecision contract.
   const defaultProps = {
     direction: 'LONG' as const,
-    setup: 'TREND_MODEL',
-    pLong: 0.75,
-    pShort: 0.25,
+    probability: 0.75,
     regime: 'TRENDING',
     timing: 'ENTER_NOW',
-    kelly: 0.15,
     rationale: 'Strong bullish momentum with volume confirmation',
-    marketState: 'BALANCED',
-    aggression: 'BULLISH',
   };
 
   it('renders LONG direction with correct icon', () => {
@@ -47,12 +43,12 @@ describe('DecisionCard', () => {
   });
 
   it('displays probability percentage for SHORT', () => {
-    render(<DecisionCard {...defaultProps} direction="SHORT" />);
+    render(<DecisionCard {...defaultProps} direction="SHORT" probability={0.25} />);
     expect(screen.getByText(/25\.0%/)).toBeInTheDocument();
   });
 
   it('displays 0% probability for FLAT', () => {
-    render(<DecisionCard {...defaultProps} direction="FLAT" />);
+    render(<DecisionCard {...defaultProps} direction="FLAT" probability={0} />);
     expect(screen.getByText(/0\.0%/)).toBeInTheDocument();
   });
 
@@ -103,13 +99,13 @@ describe('DecisionCard', () => {
     expect(screen.getByText(/▲ LONG/)).toBeInTheDocument();
   });
 
-  it('handles zero probabilities', () => {
-    render(<DecisionCard {...defaultProps} pLong={0} pShort={0} />);
+  it('handles zero probability', () => {
+    render(<DecisionCard {...defaultProps} probability={0} />);
     expect(screen.getByText(/0\.0%/)).toBeInTheDocument();
   });
 
   it('handles probability of 1.0 (100%)', () => {
-    render(<DecisionCard {...defaultProps} pLong={1.0} />);
+    render(<DecisionCard {...defaultProps} probability={1.0} />);
     expect(screen.getByText(/100\.0%/)).toBeInTheDocument();
   });
 

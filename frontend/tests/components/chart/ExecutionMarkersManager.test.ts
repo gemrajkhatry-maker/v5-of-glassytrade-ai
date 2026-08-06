@@ -209,8 +209,8 @@ describe('ExecutionMarkersManager', () => {
       expect(markers[0].text).toBe('ACCEPT ABOVE');
     });
 
-    it('generates rejection from VAH marker', () => {
-      const amt = { rejectionFromVah: true } as any;
+    it('generates rejection from high marker', () => {
+      const amt = { rejectionAtHigh: true } as any;
       const markers = generateAcceptanceRejectionMarkers(data, amt);
       expect(markers[0].text).toBe('REJECT VAH');
     });
@@ -221,8 +221,8 @@ describe('ExecutionMarkersManager', () => {
       expect(markers[0].text).toBe('ACCEPT BELOW');
     });
 
-    it('generates rejection from VAL marker', () => {
-      const amt = { rejectionFromVal: true } as any;
+    it('generates rejection from low marker', () => {
+      const amt = { rejectionAtLow: true } as any;
       const markers = generateAcceptanceRejectionMarkers(data, amt);
       expect(markers[0].text).toBe('REJECT VAL');
     });
