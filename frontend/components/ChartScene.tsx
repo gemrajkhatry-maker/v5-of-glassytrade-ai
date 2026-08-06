@@ -286,45 +286,8 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     tickBus.addEventListener('tick', handleTick);
 
-    // Gap fill event handler - updates chart with historical candles
-    const handleGapFill = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      if (customEvent.detail.symbol !== symbol) return;
-
-      const candles = customEvent.detail.candles || [];
-      console.log(`[ChartScene] Gap fill: updating chart with ${candles.length} historical candles`);
-
-      // Update chart with each historical candle
-      candles.forEach((candle: any) => {
-        try {
-          const time = (new Date(candle.time).getTime() / 1000 + 19800) as any;
-          
-          // Update candlestick
-          candleSeriesRef.current?.update({
-            time,
-            open: candle.open,
-            high: candle.high,
-            low: candle.low,
-            close: candle.close,
-          });
-
-          // Update volume
-          volumeSeriesRef.current?.update({
-            time,
-            value: candle.volume,
-            color: candle.close >= candle.open ? '#22c55e80' : '#ef444480',
-          });
-        } catch (e) {
-          console.warn('[ChartScene] Failed to update gap fill candle:', candle.time, e);
-        }
-      });
-    };
-
-    tickBus.addEventListener('gap_fill', handleGapFill);
-
     return () => {
       tickBus.removeEventListener('tick', handleTick);
-      tickBus.removeEventListener('gap_fill', handleGapFill);
     };
   }, [tickBus, symbol, mode]);
 
