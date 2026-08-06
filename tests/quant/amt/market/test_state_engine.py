@@ -1,12 +1,12 @@
 """Unit tests for MarketStateEngine — Fabio's 2-state model."""
 
 import pytest
-from app.domain.fabio_ai.services.market_state_engine import (
+from quant.amt.market.state_engine import (
     detect_market_state,
     classify_zone,
     MarketStateResult,
 )
-from app.domain.trading.models.enums import MarketState
+from quant.contracts.enums import MarketState
 
 
 class TestDetectMarketState:
