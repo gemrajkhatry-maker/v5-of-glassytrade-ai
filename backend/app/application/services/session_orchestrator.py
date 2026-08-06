@@ -193,6 +193,69 @@ class SessionOrchestrator:
         return (now_ts - last_trigger_ts) > interval_seconds
 
     @staticmethod
+    def detect_market_state_transition(session, market_state: str) -> bool:
+        """Edge-detect BALANCED<->IMBALANCED market-state transitions.
+
+        Seeds/updates ``session._last_market_state`` each call so a single
+        transition fires the entry LLM exactly once.
+        """
+        prev = getattr(session, "_last_market_state", "")
+        session._last_market_state = market_state
+        if not prev or prev == market_state:
+            return False
+        return (
+            prev in ("BALANCED", "IMBALANCED")
+            and market_state in ("BALANCED", "IMBALANCED")
+        )
+
+    @staticmethod
+    def detect_vwap_sigma_cross(
+        session, tick_close: float, vwap_upper_2: float, vwap_lower_2: float
+    ) -> bool:
+        """Edge-detect price crossing either the +2σ or -2σ VWAP band."""
+        prev_close = getattr(session, "_last_tick_close", 0.0)
+        close = float(tick_close)
+        session._last_tick_close = close
+        if prev_close <= 0 or vwap_upper_2 <= 0 or vwap_lower_2 <= 0:
+            return False
+        crossed_up = prev_close < vwap_upper_2 and close >= vwap_upper_2
+        crossed_down = prev_close > vwap_lower_2 and close <= vwap_lower_2
+        return crossed_up or crossed_down
+
+    @staticmethod
+    def detect_new_break_or_absorption(
+        session, break_direction: str, absorption_side: str
+    ) -> bool:
+        """Edge-detect a fresh break or absorption signal."""
+        prev_break = getattr(session, "_last_break_direction", "")
+        prev_absorb = getattr(session, "_last_absorption_side", "")
+        session._last_break_direction = break_direction or ""
+        session._last_absorption_side = absorption_side or ""
+        new_break = bool(break_direction) and break_direction != prev_break
+        new_absorption = bool(absorption_side) and absorption_side != prev_absorb
+        return new_break or new_absorption
+
+    @staticmethod
+    def should_fire_entry_llm(
+        trigger_llm: bool,
+        is_new_candle: bool,
+        monitoring_trigger: bool,
+        event_trigger: bool,
+        last_ai_time: float,
+        now_ts: float,
+        cooldown_seconds: float = 60.0,
+    ) -> bool:
+        """60s-floor entry-LLM gate.
+
+        The entry LLM fires on candle close (guarded by the entry handler's own
+        ``should_run``), the 5-min monitoring cadence, or any structural event
+        trigger — but never more often than ``cooldown_seconds``.
+        """
+        if (now_ts - last_ai_time) < cooldown_seconds:
+            return False
+        return bool((trigger_llm and is_new_candle) or monitoring_trigger or event_trigger)
+
+    @staticmethod
     def resolve_llm_triggers(
         should_trigger_llm_fn,
         session,
@@ -232,4 +295,24 @@ class SessionOrchestrator:
                 interval_seconds=monitoring_interval,
             )
         )
-        return LLMTriggerContract(trigger_llm=trigger_llm, monitoring_trigger=monitoring_trigger)
+        event_trigger = (
+            SessionOrchestrator.detect_market_state_transition(session, market_state)
+            or SessionOrchestrator.detect_vwap_sigma_cross(
+                session,
+                float(getattr(event.tick, "close", 0.0)),
+                float(getattr(amt_result, "vwap_upper_2", 0.0)),
+                float(getattr(amt_result, "vwap_lower_2", 0.0)),
+            )
+            or SessionOrchestrator.detect_new_break_or_absorption(
+                session,
+                getattr(amt_result, "break_direction", ""),
+                getattr(amt_result, "absorption_side", ""),
+            )
+        )
+        if not trading_enabled:
+            event_trigger = False
+        return LLMTriggerContract(
+            trigger_llm=trigger_llm,
+            monitoring_trigger=monitoring_trigger,
+            event_trigger=event_trigger,
+        )

@@ -85,7 +85,18 @@ class SessionState:
 
     # Track last candle time — LLM only fires on new candle boundaries
     _last_candle_time: str = ""
-    
+
+    # Entry-LLM cursor: the last CLOSED candle time. Updated on EVERY closed
+    # candle (not just when a signal is built) so is_new_candle is meaningful
+    # from tick one even when gates block the signal path (audit defect C.2).
+    _last_entry_candle_time: str = ""
+
+    # Event-trigger cursors for the entry LLM (market-state / VWAP / break)
+    _last_market_state: str = ""
+    _last_tick_close: float = 0.0
+    _last_break_direction: str = ""
+    _last_absorption_side: str = ""
+
     # Monitoring-mode LLM: fires every 5 min in BALANCED/NO_TRADE for context
     _last_monitoring_llm: float = 0.0
 

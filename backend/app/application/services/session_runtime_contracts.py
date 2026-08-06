@@ -34,3 +34,4 @@ class LLMTriggerContract:
 
     trigger_llm: bool
     monitoring_trigger: bool
+    event_trigger: bool = False

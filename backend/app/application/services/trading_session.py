@@ -103,6 +103,13 @@ log = logging.getLogger(__name__)
 # Cap candle history per symbol to bound memory in long-running sessions.
 MAX_CANDLES_PER_SYMBOL = 2000
 
+# Minimum seconds between entry LLM calls across all trigger sources (candle,
+# monitoring, event). The canonical constant is owned by Task 5 in
+# llm_entry_handler; read defensively until it lands (default 60s floor).
+import app.application.handlers.llm_entry_handler as _llm_entry_module
+
+ENTRY_LLM_COOLDOWN = getattr(_llm_entry_module, "COOLDOWN", 60.0)
+
 
 class TradingSessionService:
     """Application service coordinating the event-driven trading pipeline."""
@@ -838,16 +845,8 @@ class TradingSessionService:
                 )
             has_position = session.portfolio.has_open_positions()
 
-            overseer_time = session._last_overseer_time
-            overseer_running = session._overseer_running
             ai_running = session._ai_running
             ai_time = session._last_ai_time
-            run_overseer = has_position and self._overseer_handler.should_run(
-                last_overseer_time=overseer_time,
-                overseer_running=overseer_running,
-                ai_running=ai_running,
-                has_position=has_position,
-            )
 
             # Track candle boundaries for entry evaluation
             is_new_candle = event.tick.time != cache.get_last_entry_candle_time()
@@ -914,11 +913,22 @@ class TradingSessionService:
         self._record_stage_latency(event.symbol, "entry_execution", _stage_start)
         
         # 4b. Trigger LLM descriptor for UI
-        # Monitoring-mode LLM: fire every 5 min in active market states for context
+        # Event-driven entry LLM: candle close OR 5-min monitoring cadence OR
+        # structural event triggers (market-state transition, VWAP ±2σ cross,
+        # new break/absorption), always with a 60s floor (audit defect C.2).
         monitoring_trigger = _llm_contract.monitoring_trigger
-        
+        event_trigger = _llm_contract.event_trigger
+
         _trigger_llm = _llm_contract.trigger_llm
-        if trading_enabled and ((_trigger_llm and is_new_candle) or monitoring_trigger):
+        if trading_enabled and SessionOrchestrator.should_fire_entry_llm(
+            trigger_llm=_trigger_llm,
+            is_new_candle=is_new_candle,
+            monitoring_trigger=monitoring_trigger,
+            event_trigger=event_trigger,
+            last_ai_time=session._last_ai_time,
+            now_ts=_now,
+            cooldown_seconds=ENTRY_LLM_COOLDOWN,
+        ):
             _stage_start = time.monotonic()
             session._llm_status = "RUNNING"
             self._event_router.trigger_llm_entry(

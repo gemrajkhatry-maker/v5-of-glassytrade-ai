@@ -405,6 +405,12 @@ class SessionEventRouter:
         _time_since_last = _time_mod.monotonic() - _last_exec_mono
         _can_execute = _time_since_last > 60
 
+        # Candle-close cursor: advance on EVERY closed candle so is_new_candle
+        # stays meaningful regardless of gate outcomes (audit defect C.2). The
+        # previous write lived inside the signal-build branch and was never
+        # reached when gates blocked, making is_new_candle always True.
+        session._last_entry_candle_time = event.tick.time
+
         if run_entry and _can_execute:
             srm = self._risk_coordinator.get_session_risk_manager(event.symbol)
             if srm and not srm.can_trade:
@@ -569,7 +575,6 @@ class SessionEventRouter:
                     signal.metadata = _meta
                     signal.metadata["tick_trace_id"] = _tick_trace_id
                 if signal:
-                    session._last_entry_candle_time = event.tick.time
                     session._last_exec_mono = _time_mod.monotonic()
                     ad = getattr(session, "_agent_decision", None)
                     if ad is not None:
