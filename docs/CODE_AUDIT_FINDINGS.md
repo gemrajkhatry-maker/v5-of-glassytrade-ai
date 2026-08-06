@@ -7,6 +7,36 @@
 
 ---
 
+## Fix Status (Updated 2026-08-06)
+
+### ✅ Fixed in Current Branch
+
+| # | Fix | File | Commit |
+|---|-----|------|--------|
+| 1 | VP double-counting removed | `range_bar_builder.py:243-257` | ✅ |
+| 2 | VWAP bands volume-weighted std | `amt_analyzer.py:684-708` | ✅ |
+| 3 | VWAP std proportional clamp (0.1% floor, 3% cap) | `amt_analyzer.py:697-708` | ✅ |
+| 4 | Persistent Triple-A state machine | `range_bar_builder.py:394-519` | ✅ |
+| 5 | VWAP breakout detector | `vwap_breakout.py` (new) | ✅ |
+| 6 | VWAP bands value object | `vwap_bands.py` (new) | ✅ |
+| 7 | ATR True Range calculation | `amt_analyzer.py:483-500` | ✅ |
+| 8 | Lee-Ready delta enabled | `engine.py:189-193` | ✅ |
+| 9 | Volume spike cap clamps (not zero) | `candle_aggregator.py:172` | ✅ |
+| 10 | Tests: volume profile, VWAP bands, VWAP breakout | `tests/unit/domain/` | ✅ |
+
+### ❌ Remaining (Non-Critical)
+
+| # | Issue | Priority | Effort |
+|---|-------|----------|--------|
+| 1 | AbsorptionValidator not wired into GatePipeline | P1 | 3 hr |
+| 2 | Dynamic position sizing not connected | P1 | 1 hr |
+| 3 | Dual VWAP state (VWAPService + AMTAnalyzer) | P2 | 2 hr |
+| 4 | Dead code removal (RL, MLX, etc.) | P2 | 2 hr |
+| 5 | Prior session POC/VAL persistence | P2 | 2 hr |
+| 6 | Gate pipeline simplification (12 → 5 gates) | P2 | 2 hr |
+
+---
+
 ## Executive Summary
 
 The backend implements a sophisticated AMT (Auction Market Theory) trading system with 70+ service files. While individual calculation components are well-engineered, the Triple-A strategy pattern is **fragmented across multiple partially-implemented systems** with significant bugs and architectural issues preventing cohesive execution.
