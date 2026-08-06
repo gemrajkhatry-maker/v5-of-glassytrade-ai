@@ -182,8 +182,7 @@ def calculate_position_size(
     from quant.decision.sizer import PositionSizer
 
     if session_realized_pnl is not None:
-        # TODO(migration): switch to quant.execution.loss_tracker once Track D lands
-        from app.domain.fabio_ai.services.loss_tracker import LossTracker
+        from quant.execution.loss_tracker import LossTracker
 
         risk_pct, _risk_mode = LossTracker().compute_dynamic_risk(
             equity, session_realized_pnl

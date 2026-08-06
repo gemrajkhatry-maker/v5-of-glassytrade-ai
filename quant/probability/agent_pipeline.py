@@ -58,9 +58,8 @@ if TYPE_CHECKING:
     from quant.contracts.ports.probability_inference import IProbabilityInference
     from quant.probability.regime_hysteresis import RegimeHysteresisStore
 
-# TODO(migration): switch to quant.decision.gates.* once Track B merges
-from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
-from app.domain.fabio_ai.services.entry_gates.gate_runner import run_gate_pipeline
+from quant.decision.gates.three_align import three_align_check
+from quant.decision.gates.gate_runner import run_gate_pipeline
 
 logger = logging.getLogger(__name__)
 

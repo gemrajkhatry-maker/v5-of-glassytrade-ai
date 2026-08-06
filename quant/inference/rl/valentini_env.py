@@ -19,8 +19,7 @@ from gymnasium import spaces
 
 from quant.contracts.value_objects import OHLC
 from quant.amt.models.observation import AMTObservation
-# TODO(migration): switch to quant.amt.analyzer once Track A5 merges.
-from app.domain.fabio_ai.services.amt_analyzer import (
+from quant.amt.analyzer import (
     AMTAnalyzer,
     AMTConfig,
     compute_aggression_sigma,

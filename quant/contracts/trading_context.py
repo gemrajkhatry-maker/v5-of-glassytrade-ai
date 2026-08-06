@@ -21,8 +21,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from quant.contracts.value_objects import OHLC, OrderBook, AMTResult
-    from app.domain.fabio_ai.services.session_context import SessionInfo  # TODO(migration)
-    from app.domain.probability.agent_pipeline import AgentDecision  # TODO(migration)
+    from quant.amt.session.context import SessionInfo
+    from quant.probability.agent_pipeline import AgentDecision
 
 
 @dataclass(frozen=True)

@@ -17,8 +17,7 @@ from quant.contracts.enums import MarketStateCodec, ProfileShapeCodec
 
 if TYPE_CHECKING:
     from quant.contracts.value_objects import OHLC, AMTResult, FootprintCandle
-    # SessionInfo lives in backend session_context (not yet migrated); the type
-    # hint is only used under TYPE_CHECKING so the import is intentionally absent.
+    from quant.amt.session.context import SessionInfo
 
 logger = logging.getLogger(__name__)
 

@@ -18,7 +18,7 @@ from quant.contracts.exchange_config import ExchangeConfig
 
 if TYPE_CHECKING:
     # Lazy — only used in annotations. Resolves when symbol_registry moves (Phase 3).
-    from app.domain.services.symbol_registry import SymbolRegistry  # TODO(migration)
+    from quant.amt.session.symbol_registry import SymbolRegistry
 
 
 class IExchangeStrategy(ABC):

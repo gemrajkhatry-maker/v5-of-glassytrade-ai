@@ -27,8 +27,7 @@ from quant.contracts.value_objects import (
     AggressivePrint,
     AMTResult,
 )
-# TODO(migration): switch to quant.amt.models.observation once Track E merges
-from app.domain.fabio_ai.models.observation import AMTObservation
+from quant.amt.models.observation import AMTObservation
 from quant.contracts.entities import Signal
 from quant.contracts.constants import (
     LVN_MIN_PERSISTENCE_BARS,
