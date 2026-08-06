@@ -1,10 +1,10 @@
 """Unit tests for Risk Manager domain service."""
 
 import pytest
-from app.domain.trading.models.enums import Source, SignalType, SetupType
-from app.domain.trading.models.entities import Signal
-from app.domain.trading.models.aggregates import Portfolio
-from app.domain.trading.services.risk_manager import RiskManager
+from quant.contracts.enums import Source, SignalType, SetupType
+from quant.contracts.entities import Signal
+from quant.contracts.aggregates import Portfolio
+from quant.execution.risk_manager import RiskManager
 
 
 class TestRiskManager:

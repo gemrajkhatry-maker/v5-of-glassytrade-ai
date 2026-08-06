@@ -334,3 +334,83 @@ def test_kill_switch_parity():
         lambda: _kill_switch_sequence(legacy),
         lambda: _kill_switch_sequence(QuantKillSwitch),
     )
+
+
+# ---------------------------------------------------------------------------
+# RiskManager
+# ---------------------------------------------------------------------------
+
+
+def _make_signal(price="100", sl="95"):
+    from quant.contracts.enums import SignalType, Source, SetupType
+    return (
+        SignalType.BUY, price, sl, "110", "2026-01-01T10:00:00Z",
+        SetupType.TREND_MODEL, Source.AMT,
+    )
+
+
+def _rm_validate(engine_cls) -> dict:
+    from quant.contracts.enums import SignalType, Source, SetupType
+    from quant.contracts.entities import Signal
+    from quant.contracts.aggregates import Portfolio
+
+    rm = engine_cls()
+    portfolio = Portfolio.create_default()
+    sig = Signal(
+        type=SignalType.BUY, price=100, reason="test",
+        stop_loss=95, take_profit=110, timestamp="t",
+        setup=SetupType.TREND_MODEL, source=Source.AMT,
+    )
+    result = {}
+    result["clean"] = rm.validate(sig, portfolio)
+    portfolio.open_position(sig, "BTCUSDT")
+    sig2 = Signal(
+        type=SignalType.BUY, price=100, reason="test",
+        stop_loss=95, take_profit=110, timestamp="t",
+        setup=SetupType.TREND_MODEL, source=Source.AMT,
+    )
+    result["dup_source"] = rm.validate(sig2, portfolio)
+    result["zero_risk"] = rm.validate(
+        Signal(
+            type=SignalType.BUY, price=100, reason="test",
+            stop_loss=100, take_profit=110, timestamp="t",
+            setup=SetupType.TREND_MODEL, source=Source.PREDICTION,
+        ),
+        portfolio,
+    )
+    return result
+
+
+def _rm_record_trade(engine_cls) -> dict:
+    from quant.contracts.aggregates import Portfolio
+    rm = engine_cls()
+    portfolio = Portfolio.create_default()
+    rm.record_trade_result(-100.0, portfolio)
+    rm.record_trade_result(-100.0, portfolio)
+    rm.record_trade_result(-100.0, portfolio)
+    return {
+        "halted": rm.is_halted,
+        "reason": rm.halt_reason,
+        "consec": rm._daily.consecutive_losses,
+        "total_trades": rm._daily.total_trades,
+    }
+
+
+def test_risk_manager_validate_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.trading.services.risk_manager").RiskManager
+    from quant.execution.risk_manager import RiskManager as QuantRiskManager
+    assert_parity(
+        lambda: _rm_validate(legacy),
+        lambda: _rm_validate(QuantRiskManager),
+    )
+
+
+def test_risk_manager_record_trade_result_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.trading.services.risk_manager").RiskManager
+    from quant.execution.risk_manager import RiskManager as QuantRiskManager
+    assert_parity(
+        lambda: _rm_record_trade(legacy),
+        lambda: _rm_record_trade(QuantRiskManager),
+    )
