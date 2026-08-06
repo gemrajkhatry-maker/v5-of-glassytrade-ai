@@ -4,7 +4,7 @@ from quant.bars import Bar
 
 _BAR_BUFFER = 30
 _AVG_WINDOW = 20
-_RANGE_EPS = 0.5
+_MIN_BARS = 20
 
 
 @dataclass(frozen=True)
@@ -35,13 +35,13 @@ class AbsorptionDetector:
             del self._bars[:-_BAR_BUFFER]
         self._index += 1
 
-        bar_range = bar.high - bar.low
-        if avg_range > 0:
-            range_ok = bar_range <= self._range_ratio * avg_range
-        else:
-            range_ok = bar_range <= _RANGE_EPS
+        if self._index <= _MIN_BARS:
+            return
 
-        if bar.volume > self._volume_mult * avg_volume and range_ok:
+        bar_range = bar.high - bar.low
+        range_ok = avg_range > 0 and bar_range <= self._range_ratio * avg_range
+
+        if avg_volume > 0 and bar.volume > self._volume_mult * avg_volume and range_ok:
             self._current = Absorption(
                 bar_index=self._index - 1,
                 price=bar.close,
@@ -54,6 +54,8 @@ class AbsorptionDetector:
             self._current = replace(self._current, bar_age=self._current.bar_age + 1)
 
     def snapshot(self) -> Absorption | None:
+        if self._index <= _MIN_BARS:
+            return None
         return self._current
 
     @staticmethod
@@ -66,4 +68,6 @@ class AbsorptionDetector:
         return "BUY" if bar.close > mid else "SELL"
 
     def _strength(self, volume: float, avg_volume: float) -> float:
+        if avg_volume <= 0:
+            return 0.0
         return min(1.0, (volume / avg_volume - 1) / 3)
