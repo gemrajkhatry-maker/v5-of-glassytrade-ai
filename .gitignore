@@ -66,6 +66,8 @@ backend/.vite/
 **/*.jsonl
 **/*.csv
 !backend/tests/**/*.csv
+# AMT training datasets are small and versioned so a fresh clone can retrain
+!amt_dataset/**/*.jsonl
 
 # Environment and large logs
 backend/rl_logs/
