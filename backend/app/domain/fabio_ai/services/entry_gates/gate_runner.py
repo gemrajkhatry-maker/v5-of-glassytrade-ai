@@ -117,10 +117,14 @@ def calculate_position_size(
     stop_loss: float,
     point_value: float = 10.0,
     price_velocity: float = 0.0,
+    session_realized_pnl: float | None = None,
 ) -> tuple[int, float, bool]:
     """Calculate position size using PositionSizer.
 
     Bug #10 fix: Applies velocity-based size scaling after base calculation.
+    P1-11 fix: When session_realized_pnl is provided, risk is sized dynamically
+    via LossTracker.compute_dynamic_risk (conservative 0.25% after losses);
+    otherwise falls back to the fixed RISK_PER_TRADE_PCT.
 
     Args:
         equity: Account equity.
@@ -128,13 +132,25 @@ def calculate_position_size(
         stop_loss: Stop loss price.
         point_value: INR value per price point (lot_size × multiplier).
         price_velocity: Price velocity in points/second for size adjustment.
+        session_realized_pnl: Optional session realized PnL; when available it
+            drives dynamic risk sizing (reduces risk after losses).
 
     Returns:
         (lots, risk_amount, valid).
     """
     from app.domain.fabio_ai.services.position_sizer import PositionSizer
 
-    ps = PositionSizer.calculate(equity, entry_price, stop_loss, point_value)
+    if session_realized_pnl is not None:
+        from app.domain.fabio_ai.services.loss_tracker import LossTracker
+
+        risk_pct, _risk_mode = LossTracker().compute_dynamic_risk(
+            equity, session_realized_pnl
+        )
+        ps = PositionSizer.calculate(
+            equity, entry_price, stop_loss, point_value, risk_pct
+        )
+    else:
+        ps = PositionSizer.calculate(equity, entry_price, stop_loss, point_value)
     if not ps.valid or ps.lots <= 0:
         return ps.lots, ps.risk_amount, ps.valid
 
