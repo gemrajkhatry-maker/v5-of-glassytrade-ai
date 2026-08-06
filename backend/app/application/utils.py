@@ -3,7 +3,7 @@
 import re
 from datetime import datetime, timezone, timedelta, date, time as dtime
 from zoneinfo import ZoneInfo
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 
 IST_ZONE = ZoneInfo("Asia/Kolkata")
 
