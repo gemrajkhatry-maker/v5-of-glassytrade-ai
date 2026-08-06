@@ -1,8 +1,8 @@
-"""Repo root conftest — exposes the backend legacy package to quant parity tests.
+"""Repo root conftest — exposes the backend ``app`` package to repo-root quant tests.
 
-Parity tests import moved brain modules via their re-export shim at the legacy
-path (``app.domain.*``), so the ``backend/`` root must be importable from the
-repo root. Same approach as tests/system/*.
+Some quant/system tests import live backend application modules (e.g.
+``app.application.services.quant_bridge``), so the ``backend/`` root must be
+importable from the repo root.
 
 Appended (not prepended) so that ``backend/tests/`` cannot shadow the repo-root
 ``tests`` package.

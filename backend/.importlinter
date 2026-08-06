@@ -5,6 +5,10 @@ output = .lint-imports-report.txt
 
 # ─── Layer constraints (enforce DDD layering) ──────────────────────────
 
+# Domain now contains only `ops` (backend-resident operational services:
+# reconciliation, self-healing, alerts, observability) and `models`
+# (exchange / market_state). The brain lives in `quant`.
+
 [importlinter:contract:1]
 name = Domain must not import Application, API, Infrastructure, or Config
 type = forbidden
@@ -26,7 +30,6 @@ source_modules =
   app.application.utils
   app.application.stream_manager
   app.application.candle_aggregator
-  app.application.range_bar_builder
   app.application.watchdog_manager
 forbidden_modules =
   app.api
