@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.domain.services.lvn_detector import (
+from quant.amt.profile.lvn import (
     HVNLevel,
     LVNLevel,
     LVNPersistenceTracker,
@@ -11,7 +11,7 @@ from app.domain.services.lvn_detector import (
     find_hvns,
     find_lvns,
 )
-from app.domain.trading.models.value_objects import VolumeProfileLevel
+from quant.contracts.value_objects import VolumeProfileLevel
 
 
 # ---------------------------------------------------------------------------
