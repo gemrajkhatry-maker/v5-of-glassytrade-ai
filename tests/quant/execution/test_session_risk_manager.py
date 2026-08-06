@@ -1,6 +1,6 @@
 """Tests for SessionRiskManager — Fabio cushion/compounding system."""
 import pytest
-from app.domain.fabio_ai.services.session_risk_manager import (
+from quant.execution.session_risk_manager import (
     SessionRiskManager,
     CapitalRiskBand,
 )

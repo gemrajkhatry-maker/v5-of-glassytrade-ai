@@ -10,15 +10,15 @@ from unittest.mock import patch
 
 import pytest
 
-from app.domain.fabio_ai.services.exit_engine import (
-    CushionState,
-    ExitReason,
-    ExitSignal,
+from quant.contracts.enums import CushionState
+from quant.execution.exit_rules import ExitReason
+from quant.execution.exit_signal import ExitSignal
+from quant.execution.exit_engine import (
     ExitEngine as TradeManager,
     TradeManagerConfig,
 )
-from app.domain.trading.models.entities import Position
-from app.domain.trading.models.enums import Side
+from quant.contracts.entities import Position
+from quant.contracts.enums import Side
 
 
 def create_position(
@@ -442,7 +442,7 @@ def test_vwap_trail_cap_at_1_5r():
 class TestImbalanceTighten:
     def test_opposing_imbalance_tightens_sl_long(self):
         """LONG position + SELL imbalance -> SL tightened by 30% of distance."""
-        from app.domain.trading.models.value_objects import StackedImbalance
+        from quant.contracts.value_objects import StackedImbalance
 
         mgr = TradeManager()
         pos = create_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0)
@@ -463,7 +463,7 @@ class TestImbalanceTighten:
 
     def test_aligned_imbalance_no_tighten(self):
         """LONG position + BUY imbalance -> no tighten."""
-        from app.domain.trading.models.value_objects import StackedImbalance
+        from quant.contracts.value_objects import StackedImbalance
 
         mgr = TradeManager()
         pos = create_position("P1", "NIFTY", "LONG", 100.0, 95.0, 115.0)
@@ -490,7 +490,7 @@ class TestImbalanceTighten:
 
     def test_opposing_imbalance_tightens_sl_short(self):
         """SHORT position + BUY imbalance -> SL tightened by 30%."""
-        from app.domain.trading.models.value_objects import StackedImbalance
+        from quant.contracts.value_objects import StackedImbalance
 
         mgr = TradeManager()
         pos = create_position("P1", "NIFTY", "SHORT", 100.0, 105.0, 85.0)

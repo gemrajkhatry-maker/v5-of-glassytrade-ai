@@ -10,9 +10,9 @@ Verifies Fabio-compliant trailing stop logic:
 import pytest
 from decimal import Decimal
 
-from app.domain.fabio_ai.services.trail_engine import TrailEngine
-from app.domain.trading.models.entities import Position
-from app.domain.trading.models.enums import Side, CushionState
+from quant.contracts.entities import Position
+from quant.contracts.enums import Side, CushionState
+from quant.execution.trail import TrailEngine
 
 
 @pytest.fixture

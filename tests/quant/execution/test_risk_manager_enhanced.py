@@ -4,10 +4,10 @@ import pytest
 from datetime import date, datetime, timezone, timedelta
 from unittest.mock import patch
 
-from app.domain.trading.models.enums import Source, SignalType, SetupType
-from app.domain.trading.models.entities import Signal
-from app.domain.trading.models.aggregates import Portfolio
-from app.domain.trading.services.risk_manager import RiskManager
+from quant.contracts.enums import Source, SignalType, SetupType
+from quant.contracts.entities import Signal
+from quant.contracts.aggregates import Portfolio
+from quant.execution.risk_manager import RiskManager
 
 
 def _make_signal(price=100, sl=95, source=Source.AMT) -> Signal:
@@ -94,7 +94,7 @@ class TestDailyReset:
         assert self.rm.is_halted
 
         # Simulate next day (risk_manager uses datetime.now(_IST).date())
-        with patch("app.domain.trading.services.risk_manager.datetime") as mock_dt:
+        with patch("quant.execution.risk_manager.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2099, 1, 1, 12, 0, tzinfo=timezone(timedelta(hours=5, minutes=30)))
             mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
             sig = _make_signal()

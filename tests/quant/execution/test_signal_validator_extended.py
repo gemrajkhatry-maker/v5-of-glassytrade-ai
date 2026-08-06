@@ -6,10 +6,10 @@ from datetime import datetime, timezone, timedelta
 
 import pytest
 
-from app.domain.trading.services.signal_validator import SignalValidator
-from app.domain.trading.models.entities import Signal
-from app.domain.trading.models.enums import SignalType, SetupType, Source
-from app.domain.trading.models.value_objects import OHLC
+from quant.execution.signal_validator import SignalValidator
+from quant.contracts.entities import Signal
+from quant.contracts.enums import SignalType, SetupType, Source
+from quant.contracts.value_objects import OHLC
 
 
 def _make_signal(price=100, timestamp=None):

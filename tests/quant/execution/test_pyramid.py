@@ -1,7 +1,7 @@
 """Unit tests for PyramidManager — structured add-on to winning positions per FR-09."""
 
 import pytest
-from app.domain.fabio_ai.services.pyramid_manager import PyramidManager
+from quant.execution.pyramid import PyramidManager
 
 
 class TestPyramidEligibility:
