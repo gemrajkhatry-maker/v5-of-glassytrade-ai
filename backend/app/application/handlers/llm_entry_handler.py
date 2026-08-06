@@ -13,7 +13,7 @@ import logging
 import threading
 import time
 from dataclasses import replace as _replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import queue
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -36,7 +36,6 @@ from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggress
 # Import delegated modules
 from app.application.handlers.entry_gate_coordinator import EntryGateCoordinator
 # SignalConstructor removed - use build_entry_signal directly
-from app.shared.timezones import IST
 
 from app.domain.fabio_ai.services.position_sizer import PositionSizer
 
@@ -202,15 +201,6 @@ class LLMEntryHandler:
             return "PUT"
         return "UNKNOWN"
 
-    @staticmethod
-    def _get_amt_time_window(ist_now) -> dict:
-        """Get current AMT time window for timing transparency.
-        
-        Fix 4: Exposes Fabio's time-based filters to frontend.
-        """
-        from app.domain.fabio_ai.services.session_context import get_amt_time_window
-        return get_amt_time_window(ist_now)
-
     def _build_imbalance_summary(self, session) -> str:
         """Extract stacked imbalances from footprint domain."""
         fp_domain = getattr(session, "_last_fp_domain", None)
@@ -231,35 +221,6 @@ class LLMEntryHandler:
         except Exception:
             logger.debug("Stacked imbalance extraction for LLM prompt failed", exc_info=True)
         return ""
-
-    def _load_episodic_memory(self) -> str:
-        """Load recent trade history for LLM context."""
-        if not self._storage:
-            return ""
-        try:
-            _today = datetime.now(IST).strftime("%Y-%m-%d")
-            recent_trades = self._storage.get_recent_trades(limit=10)
-            if not recent_trades:
-                return ""
-            today_trades = [t for t in recent_trades if _today in str(t.get("time", ""))]
-            if not today_trades:
-                today_trades = recent_trades[:5]
-
-            parts = []
-            session_pnl = 0.0
-            for i, t in enumerate(today_trades, 1):
-                side = t.get("side", "?")
-                pnl = t.get("pnl", 0)
-                reason = t.get("reason", "")
-                session_pnl += pnl
-                sign = "+" if pnl >= 0 else ""
-                parts.append(f"{i}) {side} {sign}Rs{pnl:.0f} ({reason})")
-
-            pnl_sign = "+" if session_pnl >= 0 else ""
-            return f"Session P&L: {pnl_sign}Rs{session_pnl:.0f} ({len(today_trades)} trades). " + ", ".join(parts) + "."
-        except Exception:
-            logger.debug("Failed to load episodic memory", exc_info=True)
-            return ""
 
     def _build_gate_context(self, amt_result, tick, session, session_info, agg_levels, fp_domain) -> str:
         """Build Three-Align gate warning context for LLM."""
@@ -282,20 +243,12 @@ class LLMEntryHandler:
     def _build_market_data_ai(self, symbol, session, tick, amt_result, session_info,
                                setup_type, strategy_hint, profile_shape_str, market_state_str,
                                gate_context, is_second_drive, session_context_for_llm) -> dict:
-        """Build the complete market data dictionary for LLM inference."""
-        # Session elapsed time
-        from app.domain.fabio_ai.services.session_context import _to_ist
-        ist_now = _to_ist(tick.time)
-        market_open = ist_now.replace(hour=9, minute=15, second=0, microsecond=0)
-        elapsed_min = max(0, (ist_now - market_open).total_seconds() / 60)
+        """Build the complete market data dictionary for LLM inference.
 
-        # Prior cycle context
-        prior_context = []
-        with session._lock:
-            memory = getattr(session, "_llm_memory", [])
-            for m in memory[-2:]:
-                prior_context.append(f"[PRIOR CYCLE]: {m}")
-
+        Every key mirrors what prompt_builder reads; the worker must NOT hot-
+        refresh these fields from a newer session state (decision consistency
+        with the post-LLM gates, which consume the same amt_result/tick).
+        """
         # Quant context
         agent_decision = getattr(session, "_agent_decision", None)
         quant_context = {}
@@ -312,50 +265,55 @@ class LLMEntryHandler:
             }
 
         market_data_ai = {
-            "ltp": tick.close, "delta": tick.delta, "volume": tick.volume,
-            "vah": amt_result.value_area_high, "val": amt_result.value_area_low,
-            "poc": amt_result.poc, "market_state": market_state_str,
-            "aggression": amt_result.aggression,
+            "ltp": float(tick.close),
+            "delta": tick.delta,
+            "vah": float(amt_result.value_area_high),
+            "val": float(amt_result.value_area_low),
+            "poc": float(amt_result.poc),
+            "market_state": market_state_str,
+            "aggression": float(amt_result.aggression),
             "profile_shape": getattr(amt_result, "profile_shape", profile_shape_str),
-            "session_elapsed_minutes": round(elapsed_min, 1),
-            "prior_analysis_context": "\n".join(prior_context),
             "quant_context": quant_context,
-            "strategy_hint": strategy_hint,
             "volume_bubbles": self._build_volume_bubble_summary(amt_result, tick),
             "stacked_imbalances": self._build_imbalance_summary(session),
-            "hvns": amt_result.hvns[:3] if amt_result.hvns else (),
             "lvns": amt_result.lvns[:3] if amt_result.lvns else (),
-            "cvd_slope": amt_result.cvd_slope, "cvd_divergence": amt_result.cvd_divergence,
-            "vwap": amt_result.session_vwap if amt_result.session_vwap > 0 else tick.vwap,
-            "leg_poc": amt_result.leg_poc,
-            "leg_lvns": amt_result.leg_lvns[:3] if amt_result.leg_lvns else (),
-            "opening_relation": session_info.opening_relation,
+            "cvd_slope": float(amt_result.cvd_slope),
+            "cvd_divergence": amt_result.cvd_divergence,
+            "session_vwap": float(amt_result.session_vwap)
+            if amt_result.session_vwap > 0
+            else float(tick.vwap),
+            "vwap_upper_2": float(amt_result.vwap_upper_2),
+            "vwap_lower_2": float(amt_result.vwap_lower_2),
+            "leg_poc": float(amt_result.leg_poc),
+            "leg_vah": float(amt_result.leg_vah),
+            "leg_val": float(amt_result.leg_val),
             "market_structure": amt_result.market_structure,
-            "structure_confidence": amt_result.structure_confidence,
-            "balance_ratio": amt_result.balance_ratio,
-            "episodic_memory": self._load_episodic_memory(),
             "gate_context": session_context_for_llm + gate_context,
-            "ib_high": amt_result.ib_high, "ib_low": amt_result.ib_low,
+            "ib_high": float(amt_result.ib_high),
+            "ib_low": float(amt_result.ib_low),
             "ib_complete": amt_result.ib_complete,
-            "prior_poc": amt_result.prior_poc, "prior_vah": amt_result.prior_vah,
-            "prior_val": amt_result.prior_val, "gap_type": amt_result.gap_type,
+            "prior_poc": float(amt_result.prior_poc),
+            "prior_vah": float(amt_result.prior_vah),
+            "prior_val": float(amt_result.prior_val),
+            "gap_type": amt_result.gap_type,
             "opening_bias": amt_result.opening_bias,
             "acceptance_above": amt_result.acceptance_above,
             "acceptance_below": amt_result.acceptance_below,
             "rejection_at_high": amt_result.rejection_at_high,
             "rejection_at_low": amt_result.rejection_at_low,
-            "absorption_side": getattr(amt_result, "absorption_side", ""),
-            "absorption_range_ratio": getattr(amt_result, "absorption_range_ratio", 0.0),
-            "absorption_vol_ratio": getattr(amt_result, "absorption_vol_ratio", 0.0),
-            "price_velocity": amt_result.price_velocity,
-            "break_direction": amt_result.break_direction,
-            "break_type": amt_result.break_type, "break_level": amt_result.break_level,
-            "poc_signal": amt_result.poc_signal, "poc_vs_price": amt_result.poc_vs_price,
-            "lvn_play": amt_result.lvn_play, "is_second_drive": is_second_drive,
+            "lvn_play": amt_result.lvn_play,
+            "is_second_drive": is_second_drive,
+            "session_name": session_info.session,
+            "favor_strategy": session_info.favor_strategy,
+            "dev_poc": float(amt_result.dev_poc),
+            "dev_vah": float(amt_result.dev_vah),
+            "dev_val": float(amt_result.dev_val),
+            # AMTResult has no iv/theta — safe defaults (0.0) keep the option
+            # context inert until the analyzer populates them.
+            "iv": float(getattr(amt_result, "iv", 0.0) or 0.0),
+            "theta": float(getattr(amt_result, "theta", 0.0) or 0.0),
             # Fix 1: Option type detection for direction labeling
             "option_type": self._detect_option_type(symbol),
-            # Fix 4: AMT time window for timing transparency
-            "amt_time_window": self._get_amt_time_window(ist_now),
         }
 
         # ML signal for LLM meta-filter
@@ -366,18 +324,6 @@ class LLMEntryHandler:
                 "regime": agent.regime,
             }
         return market_data_ai, "OK"
-
-    @staticmethod
-    def _enrich_market_context(market_data_ai: dict, amt_result) -> None:
-        """Add contextual warning flags to market_data_ai for LLM prompt."""
-        if amt_result.aggression < 1.0:
-            market_data_ai["aggression_warning"] = "Weak aggression — higher risk"
-        if amt_result.market_state == "IMBALANCED":
-            market_data_ai["drive_warning"] = "First drive — wait for second if possible"
-        if abs(amt_result.cvd_slope) > 50:
-            market_data_ai["cvd_warning"] = (
-                f"Extreme CVD ({amt_result.cvd_slope:.0f}) — respect institutional pressure"
-            )
 
     @staticmethod
     def _resolve_fallback_direction(session, amt_result) -> str:
@@ -888,33 +834,11 @@ class LLMEntryHandler:
                     worker_queue.task_done()
                     continue
 
-                # Add context flags to market_data_ai
-                self._enrich_market_context(market_data_ai, amt_result)
-
-                # Refresh volatile fields from latest AMT result on session.
-                # The LLM worker runs asynchronously — by the time it processes,
-                # the aggression/cvd_slope/ofi/delta values from enqueue-time may
-                # be stale (e.g., "neutral aggression" vs live display showing +1.50).
-                # This mirrors the existing LTP refresh pattern below.
-                try:
-                    _latest_amt = session.last_amt
-                    if _latest_amt:
-                        market_data_ai["aggression"] = _latest_amt.get("aggression", market_data_ai.get("aggression", 0))
-                        market_data_ai["cvd_slope"] = _latest_amt.get("cvdSlope", market_data_ai.get("cvd_slope", 0))
-                        market_data_ai["ofi"] = _latest_amt.get("ofi", market_data_ai.get("ofi", 0))
-                        market_data_ai["delta"] = _latest_amt.get("deltaNormalizedOption", _latest_amt.get("delta", market_data_ai.get("delta", 0)))
-                        _new_ms = _latest_amt.get("marketState", "")
-                        if _new_ms:
-                            market_data_ai["market_state"] = _new_ms
-                except Exception:
-                    pass  # Non-critical — stale values are acceptable during active inference
-
-                # Update LTP to use the absolute latest tick to avoid stale context during inference delay
-                try:
-                    if session.data:
-                        market_data_ai["ltp"] = session.data[-1].close
-                except Exception:
-                    pass  # LTP refresh failure — non-critical; stale LTP is acceptable during active inference
+                # Decision-consistent inputs: the worker uses the SAME
+                # amt_result/tick that the post-LLM gates (check_entry_eligibility)
+                # and build_entry_signal consume. No hot-refresh from a newer
+                # session.last_amt — the LLM must reason over the exact data the
+                # gates validated.
                 try:
                     is_extreme_volatility = self._is_extreme_volatility(amt_result)
                 except Exception:

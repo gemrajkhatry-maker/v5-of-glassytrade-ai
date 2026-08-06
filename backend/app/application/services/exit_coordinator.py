@@ -96,6 +96,37 @@ class ExitCoordinator:
         """Normalize metadata to a dict to avoid RuntimeError in heterogeneous callers."""
         return metadata if isinstance(metadata, dict) else {}
 
+    def _build_trade_context(self, state_session, pos) -> tuple[str, str]:
+        """Build entry/exit context strings for the post-trade LLM analyst.
+
+        Entry market-state comes from the position metadata recorded at signal
+        build (market_state_model). Session VWAP is read from the latest AMT DTO
+        — entry-time VWAP is not persisted on the position, so the close-time
+        value is used as the best available proxy for both.
+        """
+        meta = self._metadata_dict(getattr(pos, "metadata", None))
+        entry_ms = str(meta.get("market_state_model", "") or "Unknown")
+        entry_vwap = 0.0
+        exit_ms = "Unknown"
+        exit_vwap = 0.0
+        amt = getattr(state_session, "last_amt", None)
+        if isinstance(amt, dict):
+            exit_ms = str(amt.get("marketState", "") or "Unknown")
+            try:
+                exit_vwap = float(amt.get("sessionVwap", 0) or 0)
+            except (TypeError, ValueError):
+                exit_vwap = 0.0
+            entry_vwap = exit_vwap  # entry-time VWAP not persisted on the position
+        try:
+            exit_price = float(pos.exit_price) if pos.exit_price else 0.0
+        except (TypeError, ValueError):
+            exit_price = 0.0
+        entry_context = f"State={entry_ms} SessionVWAP={entry_vwap:.2f}"
+        exit_context = (
+            f"State={exit_ms} SessionVWAP={exit_vwap:.2f} Price={exit_price:.2f}"
+        )
+        return entry_context, exit_context
+
     def _resolve_position(
         self,
         symbol: str,
@@ -284,6 +315,9 @@ class ExitCoordinator:
         # Post-trade LLM analysis (non-blocking)
         if self._post_trade_analyst:
             try:
+                entry_context, exit_context = self._build_trade_context(
+                    state_session, pos
+                )
                 self._post_trade_analyst.analyze(
                     symbol=symbol,
                     entry_price=float(pos.entry_price),
@@ -292,6 +326,8 @@ class ExitCoordinator:
                     pnl=float(pos.pnl) if pos.pnl else 0,
                     hold_time_seconds=time_in_trade,
                     close_reason=getattr(pos, "close_reason", "UNKNOWN"),
+                    entry_context=entry_context,
+                    exit_context=exit_context,
                 )
             except Exception:
                 log.debug("Post-trade analysis fire failed", exc_info=True)

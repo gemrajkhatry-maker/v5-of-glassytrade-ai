@@ -8,7 +8,9 @@ from app.domain.fabio_ai.services.prompt_builder import (
     parse_overseer_response,
     compute_tighten_sl,
     OverseerAction,
+    _build_narrative_market_state,
 )
+from app.domain.fabio_ai.services import generative_ai_service
 from app.domain.trading.models.value_objects import (
     OHLC,
     AMTResult,
@@ -93,6 +95,46 @@ class TestBuildEntryPrompt:
             }
         )
         assert "bubble" in prompt.lower() or "BUBBLE" in prompt
+
+
+class TestLLMInputContract:
+    def test_market_state_renders_vwap_from_session_vwap_key(self):
+        rendered = " ".join(
+            _build_narrative_market_state(
+                {
+                    "ltp": 24080.0,
+                    "session_vwap": 24000.0,
+                    "vwap_upper_2": 24080.0,
+                    "vwap_lower_2": 23920.0,
+                    "vah": 24100.0,
+                    "val": 23900.0,
+                    "poc": 24000.0,
+                    "market_state": "BALANCED",
+                }
+            )
+        )
+        assert "24000" in rendered  # VWAP bias block renders
+        assert "VWAP" in rendered
+        assert "Overextended" in rendered
+
+    def test_no_duplicate_cvd_divergence_block(self):
+        prompt = build_entry_prompt(
+            {
+                "ltp": 100,
+                "vah": 105,
+                "val": 95,
+                "poc": 100,
+                "cvd_divergence": "BEARISH_DIV",
+            }
+        )
+        assert prompt.count("CVD DIVERGENCE") == 1  # deduped
+
+    def test_json_instruction_not_triplicated(self):
+        raw = (
+            build_entry_prompt({"ltp": 100, "vah": 105, "val": 95, "poc": 100})
+            + generative_ai_service._DEFAULT_INSTRUCTION
+        )
+        assert raw.count("Return ONLY a valid JSON") == 1
 
 
 class TestParseEntryResponse:

@@ -21,27 +21,29 @@ ENTRY_RESPONSE_KEYS: tuple[str, ...] = (
 )
 
 
+ENTRY_JSON_RUNTIME_REMINDER = (
+    "Return ONLY a valid JSON object with direction, confidence, and rationale keys. "
+    "No markdown, no extra text, no prose outside the JSON."
+)
+
+
 @lru_cache(maxsize=2)
 def entry_response_schema_instruction(*, allow_short: bool) -> str:
     """Return the canonical entry-response schema instruction.
-    
-    FABIO-ALIGNED: Forces clean JSON output for reliable parsing.
+
+    FABIO-ALIGNED: Forces clean JSON output for reliable parsing. The phrasing
+    is the single canonical ENTRY_JSON_RUNTIME_REMINDER constant.
     """
     direction_choices = (
         '"LONG" | "SHORT" | "FLAT"' if allow_short else '"LONG" | "FLAT"'
     )
     return (
-        '\n\nRespond with VALID JSON only (no markdown, no extra text):\n'
-        '{\n'
+        "\n\n"
+        + ENTRY_JSON_RUNTIME_REMINDER
+        + "\n{\n"
         '  "direction": ' + direction_choices + ',\n'
         '  "confidence": "High" | "Medium" | "Low",\n'
         '  "rationale": "Brief justification referencing market state + location + aggression"\n'
-        '}\n\n'
-        'CRITICAL: Output ONLY the JSON object. No other text before or after.'
+        "}\n\n"
+        "No other text before or after."
     )
-
-
-ENTRY_JSON_RUNTIME_REMINDER = (
-    "Return ONLY a valid JSON object with direction, confidence, and rationale keys. "
-    "No markdown, no extra text, no prose outside the JSON."
-)

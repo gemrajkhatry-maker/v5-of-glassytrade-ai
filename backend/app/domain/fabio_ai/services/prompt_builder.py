@@ -235,12 +235,6 @@ def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
     elif cvd_slope >= 3:
         parts.append("Sustained buying.")
 
-    cvd_div = data.get("cvd_divergence", "")
-    if cvd_div == "BEARISH_DIV":
-        parts.append("⚠️ CVD DIVERGENCE: Bearish setup. DO NOT GO LONG.")
-    elif cvd_div == "BULLISH_DIV":
-        parts.append("⚠️ CVD DIVERGENCE: Bullish setup. DO NOT GO SHORT.")
-
     # Priority 2: Quant Probability (Soft Gate Context)
     quant_ctx = data.get("ml_signal") or data.get("quant_context")
     if quant_ctx and isinstance(quant_ctx, dict):
@@ -261,22 +255,6 @@ def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
     if imbalance_desc:
         parts.append(imbalance_desc)
 
-    # FABIO'S PRIORITY HIERARCHY RULE
-    parts.append(
-        "\nDECISION HIERARCHY:\n"
-        "1. AGGRESSION (CVD/OFI/Delta) - What the market IS doing (Decisive)\n"
-        "2. STRUCTURE (Mode/IB/Location) - WHERE it is doing it (Contextual)\n"
-        "3. QUANT (Probability) - Statistical edge (Confirming)\n"
-        "4. TIMING (VWAP/Velocity) - Execution precision\n"
-    )
-
-    # AMT Rules update
-    parts.append(
-        "AMT RULES: 1) NO counter-flow trades (avoid fading strong CVD). "
-        "2) Entries MUST be at structural boundaries (VAH/VAL/LVN). "
-        "3) Cap confidence at 0.85 (HIGH) if P > 0.7 and Structure aligns. "
-        "4) If P ~ 0.5, cap confidence at MEDIUM even with strong structure."
-    )
     return parts
 
 

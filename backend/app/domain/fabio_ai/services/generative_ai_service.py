@@ -17,9 +17,18 @@ _DEFAULT_INSTRUCTION = (
     "You are NOT predicting — you are interpreting market structure, order flow, "
     "and institutional behavior. Consider ALL context provided: session phase, "
     "gate warnings, market state, volume bubbles, stacked imbalances, CVD slope, "
-    "profile shape, VWAP bias, and episodic memory. If the story is clear and "
+    "profile shape, and VWAP bias. If the story is clear and "
     "elements align, state your CONVICTION and direction. If you don't see a "
-    "clear setup or if gate warnings are significant, STAY FLAT."
+    "clear setup or if gate warnings are significant, STAY FLAT.\n"
+    "DECISION HIERARCHY:\n"
+    "1. AGGRESSION (CVD/OFI/Delta) - What the market IS doing (Decisive)\n"
+    "2. STRUCTURE (Mode/IB/Location) - WHERE it is doing it (Contextual)\n"
+    "3. QUANT (Probability) - Statistical edge (Confirming)\n"
+    "4. TIMING (VWAP/Velocity) - Execution precision\n"
+    "AMT RULES: 1) NO counter-flow trades (avoid fading strong CVD). "
+    "2) Entries MUST be at structural boundaries (VAH/VAL/LVN). "
+    "3) Cap confidence at 0.85 (HIGH) if P > 0.7 and Structure aligns. "
+    "4) If P ~ 0.5, cap confidence at MEDIUM even with strong structure."
 )
 
 
