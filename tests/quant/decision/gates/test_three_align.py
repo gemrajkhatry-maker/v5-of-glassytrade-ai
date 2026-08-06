@@ -87,6 +87,22 @@ class TestThreeAlignCheck:
         )
 
 
+class TestThreeAlignAggressiveLevels:
+    def test_near_aggressive_level(self):
+        """Price near an aggressive print cluster level counts as near level."""
+        data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
+        tick = _tick(close=110, volume=500, delta=200)
+        amt = _amt(poc=100, vah=105, val=95)
+        assert three_align_check(data, amt, tick)[0] is False
+        assert three_align_check(data, amt, tick, aggressive_levels=[110])[0] is True
+
+    def test_existing_levels_still_work(self):
+        data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
+        tick = _tick(close=100, volume=500, delta=200)
+        amt = _amt(poc=100, vah=105, val=95)
+        assert three_align_check(data, amt, tick, aggressive_levels=None)[0] is True
+
+
 class TestClusterAggressivePrints:
     def test_merges_nearby(self):
         prints = (
@@ -129,6 +145,13 @@ class TestNearestRoundNumber:
     def test_above_10000(self):
         assert nearest_round_number(15200) == 15000
 
+    def test_amt_analyzer_cases(self):
+        assert nearest_round_number(6130) == 6000
+        assert nearest_round_number(6350) == 6500
+        assert nearest_round_number(98) == 100
+        assert nearest_round_number(12500) == 12000
+        assert nearest_round_number(12400) == 12000
+
 
 class TestMinCandlesGate:
     def test_enough_candles(self):
@@ -150,6 +173,18 @@ class TestFullBodyCloseGate:
     def test_small_body_fails(self):
         tick = _tick(close=100.6, open=100.5, high=101, low=99.5)
         assert full_body_close_gate(tick, break_level=100.5, direction="LONG") is False
+
+    def test_wick_heavy_doji_fails(self):
+        doji = _tick(close=100, open=100, high=105, low=95)
+        assert full_body_close_gate(doji, 99, "LONG") is False
+
+    def test_bullish_body_close_below_level_fails(self):
+        bull = _tick(close=100, open=98, high=101, low=98)
+        assert full_body_close_gate(bull, 102, "LONG") is False
+
+    def test_bearish_full_body_close(self):
+        bear = _tick(close=98, open=100, high=100, low=97)
+        assert full_body_close_gate(bear, 99, "SHORT") is True
 
 
 class TestExtractBubbleLevelsFromFootprint:

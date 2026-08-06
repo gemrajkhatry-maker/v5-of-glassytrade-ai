@@ -2,7 +2,7 @@
 
 import pytest
 
-from quant.contracts.value_objects import OHLC
+from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
 from quant.decision.gates.confirmation_bundle import (
     check_confirmation_bundle,
     compute_atr,
@@ -30,6 +30,20 @@ class TestConfirmationBundle:
         data = [_tick(volume=100, delta=5) for _ in range(30)]
         tick = _tick(volume=100, delta=5)  # no impulse, low delta ratio
         assert check_confirmation_bundle(data, tick) is False
+
+    def test_spread_tightness_passes_tight_spread(self):
+        data = [_tick(volume=200, delta=80) for _ in range(30)]
+        tick = _tick(volume=500, delta=200)
+        ob = OrderBook(
+            bids=(OrderBookLevel(price=99.99, quantity=100),),
+            asks=(OrderBookLevel(price=100.01, quantity=100),),  # 2 bps spread
+        )
+        assert check_confirmation_bundle(data, tick, ob) is True
+
+    def test_spread_tightness_no_orderbook_blocks_when_others_weak(self):
+        data = [_tick(volume=200, delta=80) for _ in range(30)]
+        tick = _tick(volume=200, delta=10)
+        assert check_confirmation_bundle(data, tick, None) is False
 
 
 class TestComputeATR:

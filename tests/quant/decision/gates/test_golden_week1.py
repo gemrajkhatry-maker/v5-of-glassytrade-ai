@@ -10,10 +10,10 @@ import pytest
 from unittest.mock import Mock
 
 # Import domain types
-from app.domain.trading.models.value_objects import OHLC, AMTResult
-from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
-from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
-from app.domain.trading.models.enums import SetupType
+from quant.contracts.value_objects import OHLC, AMTResult
+from quant.decision.gates.three_align import three_align_check
+from quant.decision.gates.signal_builder import build_entry_signal
+from quant.contracts.enums import SetupType
 
 
 def test_three_align_check_golden():
@@ -52,7 +52,7 @@ def test_three_align_check_golden():
     data = [Mock(time="2026-05-04T10:29:00Z")] * 30
     
     # Legacy call (with AMTResult)
-    from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check as legacy_fn
+    from quant.decision.gates.three_align import three_align_check as legacy_fn
     legacy_result = legacy_fn(data, amt_result, tick)
     
     # New call (with same AMTResult — it implements ThreeAlignInput)
@@ -89,7 +89,7 @@ def test_build_entry_signal_golden():
     ai_result = {"setup": "mean-reversion", "rationale": "POC reversion play"}
     
     # Legacy call
-    from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal as legacy_fn
+    from quant.decision.gates.signal_builder import build_entry_signal as legacy_fn
     legacy_signal = legacy_fn(
         direction="LONG",
         tick=tick,
