@@ -12,6 +12,7 @@ import {
   SeriesMarker,
 } from 'lightweight-charts';
 import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, ChartMode, AggressivePrint } from '../types';
+import { IST_OFFSET_SECONDS } from '../constants';
 import DecisionCard from './chart/DecisionCard';
 
 // Extracted chart components (Phase 3)
@@ -261,7 +262,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       const { tick } = customEvent.detail;
 
       // Common Time
-      const unixTime = (new Date(tick.time).getTime() / 1000 + 19800) as any;
+      const unixTime = (new Date(tick.time).getTime() / 1000 + IST_OFFSET_SECONDS) as any;
 
       // CRITICAL: In server-mode, sometimes delayed ticks can arrive.
       // Lightweight charts will crash if we update with an older timestamp.
@@ -286,45 +287,8 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     tickBus.addEventListener('tick', handleTick);
 
-    // Gap fill event handler - updates chart with historical candles
-    const handleGapFill = (e: Event) => {
-      const customEvent = e as CustomEvent;
-      if (customEvent.detail.symbol !== symbol) return;
-
-      const candles = customEvent.detail.candles || [];
-      console.log(`[ChartScene] Gap fill: updating chart with ${candles.length} historical candles`);
-
-      // Update chart with each historical candle
-      candles.forEach((candle: any) => {
-        try {
-          const time = (new Date(candle.time).getTime() / 1000 + 19800) as any;
-          
-          // Update candlestick
-          candleSeriesRef.current?.update({
-            time,
-            open: candle.open,
-            high: candle.high,
-            low: candle.low,
-            close: candle.close,
-          });
-
-          // Update volume
-          volumeSeriesRef.current?.update({
-            time,
-            value: candle.volume,
-            color: candle.close >= candle.open ? '#22c55e80' : '#ef444480',
-          });
-        } catch (e) {
-          console.warn('[ChartScene] Failed to update gap fill candle:', candle.time, e);
-        }
-      });
-    };
-
-    tickBus.addEventListener('gap_fill', handleGapFill);
-
     return () => {
       tickBus.removeEventListener('tick', handleTick);
-      tickBus.removeEventListener('gap_fill', handleGapFill);
     };
   }, [tickBus, symbol, mode]);
 
@@ -410,7 +374,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     prints.forEach(print => {
       // Convert time string to timestamp
-      const printTime = (new Date(print.time).getTime() / 1000 + 19800) as UTCTimestamp;
+      const printTime = (new Date(print.time).getTime() / 1000 + IST_OFFSET_SECONDS) as UTCTimestamp;
 
       // Coordinate conversion
       const x = timeScale.timeToCoordinate(printTime);
@@ -507,7 +471,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     // Convert OHLCData time string to chart timestamp (same as toIST)
     const toChartTs = (timeStr: string) => {
       const unix = new Date(timeStr).getTime() / 1000;
-      return unix + 19800; // IST offset
+      return unix + IST_OFFSET_SECONDS; // IST offset
     };
 
     // Find the X coordinate for a specific IST hour:minute
@@ -622,7 +586,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     // Convert break candle time to chart coordinate
     const breakCandle = data[breakCandleIndex];
-    const toChartTs = (timeStr: string) => new Date(timeStr).getTime() / 1000 + 19800;
+    const toChartTs = (timeStr: string) => new Date(timeStr).getTime() / 1000 + IST_OFFSET_SECONDS;
     const breakTs = toChartTs(breakCandle.time as string) as UTCTimestamp;
     const breakX = chart.timeScale().timeToCoordinate(breakTs);
     if (breakX === null) return;
@@ -855,7 +819,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
     // Offset UTC → IST (+5:30) so chart axis shows Indian Standard Time
-    const IST_OFFSET = 19800; // 5h30m in seconds
+    const IST_OFFSET = IST_OFFSET_SECONDS; // 5h30m in seconds
     const toIST = (timeStr: string) =>
       (new Date(timeStr).getTime() / 1000 + IST_OFFSET) as UTCTimestamp;
 

@@ -205,3 +205,116 @@ describe('phantom field removal (backend never sends these)', () => {
     expect(inst.stale).toBeFalsy();
   });
 });
+
+describe('no gap-filling fabrication (F-03/F-05)', () => {
+  const connectHook = async () => {
+    const instances: MockWebSocket[] = [];
+    class TrackingWS extends MockWebSocket {
+      constructor(url: string) {
+        super(url);
+        instances.push(this);
+      }
+    }
+    const realFetch = global.fetch;
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ activeSymbols: ['NIFTY'] }),
+    })) as any;
+    global.WebSocket = TrackingWS as any;
+
+    const rendered = renderHook(() => useServerTradingSystem(DEFAULT_CONFIG));
+
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await new Promise(r => setTimeout(r, 20));
+      });
+    }
+
+    global.fetch = realFetch;
+    return { ...rendered, ws: instances[0] };
+  };
+
+  const pushMessage = async (ws: MockWebSocket, msg: Record<string, unknown>) => {
+    await act(async () => {
+      ws.onmessage?.({ data: JSON.stringify(msg) } as any);
+      await new Promise(r => setTimeout(r, 30));
+    });
+  };
+
+  const candle = (time: string, close: number) => ({
+    time,
+    open: close - 2,
+    high: close + 2,
+    low: close - 3,
+    close,
+    volume: 100,
+    vwap: close - 1,
+    takerBuyVolume: 50,
+    delta: 5,
+  });
+
+  it('does not fabricate candles from a gap_fill history message', async () => {
+    const { result, ws } = await connectHook();
+    expect(ws).toBeDefined();
+
+    // Two real candles with a 30-minute gap between them.
+    await pushMessage(ws, {
+      status: 'history_loaded',
+      _type: 'gap_fill',
+      symbol: 'NIFTY',
+      count: 2,
+      history: [
+        candle('2024-01-01T09:15:00Z', 104),
+        candle('2024-01-01T09:45:00Z', 109),
+      ],
+    });
+
+    const inst = result.current.instruments['NIFTY'];
+    expect(inst).toBeDefined();
+    expect(inst.data).toHaveLength(2);
+    // The gap at 09:30 stays empty — no zero-volume flat bar is fabricated.
+    expect(inst.data.map(c => c.time)).toEqual([
+      '2024-01-01T09:15:00Z',
+      '2024-01-01T09:45:00Z',
+    ]);
+    expect(inst.data.some(c => c.volume === 0)).toBe(false);
+  });
+
+  it('stores history as-is with gaps preserved on initial load', async () => {
+    const { result, ws } = await connectHook();
+    expect(ws).toBeDefined();
+
+    await pushMessage(ws, {
+      status: 'history_loaded',
+      symbol: 'NIFTY',
+      count: 2,
+      history: [
+        candle('2024-01-01T09:15:00Z', 104),
+        candle('2024-01-01T10:15:00Z', 111),
+      ],
+    });
+
+    const inst = result.current.instruments['NIFTY'];
+    expect(inst).toBeDefined();
+    expect(inst.data).toHaveLength(2);
+    expect(inst.data[0].time).toBe('2024-01-01T09:15:00Z');
+    expect(inst.data[1].time).toBe('2024-01-01T10:15:00Z');
+    expect(inst.data.some(c => c.volume === 0)).toBe(false);
+  });
+
+  it('does not emit a gap_fill tickBus event', async () => {
+    const { result, ws } = await connectHook();
+    expect(ws).toBeDefined();
+
+    const listener = vi.fn();
+    result.current.tickBus.addEventListener('gap_fill', listener);
+    await pushMessage(ws, {
+      status: 'history_loaded',
+      _type: 'gap_fill',
+      symbol: 'NIFTY',
+      count: 2,
+      history: [candle('2024-01-01T09:15:00Z', 104), candle('2024-01-01T09:45:00Z', 109)],
+    });
+    expect(listener).not.toHaveBeenCalled();
+  });
+});

@@ -40,92 +40,6 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
 });
 
 /**
- * Merge historical candles into existing candle data.
- * 
- * Combines two sorted candle arrays, removes duplicates (same timestamp),
- * and prefers real-time candles over historical if there's a conflict.
- * 
- * @param existing Existing candle data (real-time stream)
- * @param historical Historical candles to merge (gap fill)
- * @returns Merged and sorted candle array
- */
-const mergeCandleData = (existing: OHLCData[], historical: OHLCData[]): OHLCData[] => {
-    if (historical.length === 0) return existing;
-    if (existing.length === 0) return historical;
-
-    // Create a map of existing candles by timestamp for fast lookup
-    const existingMap = new Map<string, OHLCData>();
-    existing.forEach(candle => {
-        existingMap.set(candle.time, candle);
-    });
-
-    // Add historical candles that don't exist
-    const merged = [...existing];
-    let added = 0;
-    let skipped = 0;
-
-    historical.forEach(histCandle => {
-        if (existingMap.has(histCandle.time)) {
-            // Skip duplicates (prefer real-time data)
-            skipped++;
-            return;
-        }
-        merged.push(histCandle);
-        added++;
-    });
-
-    // Sort by timestamp
-    merged.sort((a, b) => 
-        new Date(a.time).getTime() - new Date(b.time).getTime()
-    );
-
-    // FORWARD-FILL: Fill gaps between candles to prevent visual blank space
-    const intervalMs = 60000; // 1-minute candles
-    const filled: OHLCData[] = merged.length > 0 ? [merged[0]] : [];
-    let gapFilled = 0;
-    
-    for (let i = 1; i < merged.length; i++) {
-        const prevTime = new Date(merged[i - 1].time).getTime();
-        const currTime = new Date(merged[i].time).getTime();
-        const gap = currTime - prevTime;
-        
-        // If gap > 1.5x interval, forward-fill missing candles
-        if (gap > intervalMs * 1.5) {
-            let fillTime = prevTime + intervalMs;
-            while (fillTime < currTime) {
-                const fillCandle: OHLCData = {
-                    time: new Date(fillTime).toISOString(),
-                    open: merged[i - 1].close,  // Forward-fill close
-                    high: merged[i - 1].close,
-                    low: merged[i - 1].close,
-                    close: merged[i - 1].close,
-                    volume: 0,  // Zero volume for filled candles
-                    vwap: merged[i - 1].close,  // VWAP = close for filled candles
-                    takerBuyVolume: 0,  // No taker buy volume
-                    delta: 0,  // No delta for filled candles
-                };
-                filled.push(fillCandle);
-                gapFilled++;
-                fillTime += intervalMs;
-            }
-        }
-        filled.push(merged[i]);
-    }
-
-    if (gapFilled > 0) {
-        console.log(`[Gap Fill] Forward-filled ${gapFilled} missing candles`);
-    }
-
-    // Cap at 2000 candles to prevent memory bloat
-    if (filled.length > 2000) {
-        return filled.slice(-2000);
-    }
-
-    console.log(`[Gap Fill] Merged ${added} candles, skipped ${skipped} duplicates`);
-    return filled;
-};
-
-/**
  * Server-driven trading system hook.
  *
  * Backend streams ticks from Dhan, processes them, and pushes state.
@@ -148,10 +62,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // Generation counter to prevent stale subscribe messages from racing with
     // rapid activeSymbol changes (e.g. user clicks multiple tabs quickly).
     const subscribeGenRef = useRef(0);
-    
-    // Message deduplication - track recent message IDs to skip duplicates
-    const recentMessageIdsRef = useRef<Set<string>>(new Set());
-    const maxMessageCacheSize = 1000;
 
     // --- RAF-batched state updates ---
     // Queue multiple WS messages into a single React render per animation frame.
@@ -427,39 +337,21 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             if (state.status === 'history_loaded') {
                 if (state.history && state.symbol) {
                     const sym = state.symbol;
-                    
-                    // Check if this is a gap fill or initial history load
-                    if (state._type === 'gap_fill') {
-                        // Gap fill: merge into existing data
-                        setInstruments(prev => {
-                            const inst = prev[sym] || createInstrumentState(sym);
-                            const merged = mergeCandleData(inst.data, state.history);
-                            return {
-                                ...prev,
-                                [sym]: { ...inst, data: merged },
-                            };
-                        });
-                        
-                        // Dispatch event to update chart without full re-render
-                        tickBusRef.current.dispatchEvent(new CustomEvent('gap_fill', {
-                            detail: { symbol: sym, candles: state.history }
-                        }));
-                        
-                        console.log(`[TradingSystem] Gap fill: ${state.history.length} candles merged for ${sym}`);
-                    } else {
-                        // Initial history load: replace data
-                        // CRITICAL: Ensure history is sorted by time to prevent Lightweight Charts crash
-                        const sortedHistory = [...state.history].sort((a, b) => 
-                            new Date(a.time).getTime() - new Date(b.time).getTime()
-                        );
-                        setInstruments(prev => {
-                            const inst = prev[sym] || createInstrumentState(sym);
-                            return {
-                                ...prev,
-                                [sym]: { ...inst, data: sortedHistory },
-                            };
-                        });
-                    }
+
+                    // Initial history load: replace data.
+                    // gap_fill messages are handled identically — the backend's gap-fill
+                    // history contains real candles; no candles are fabricated client-side.
+                    // CRITICAL: Ensure history is sorted by time to prevent Lightweight Charts crash
+                    const sortedHistory = [...state.history].sort((a, b) => 
+                        new Date(a.time).getTime() - new Date(b.time).getTime()
+                    );
+                    setInstruments(prev => {
+                        const inst = prev[sym] || createInstrumentState(sym);
+                        return {
+                            ...prev,
+                            [sym]: { ...inst, data: sortedHistory },
+                        };
+                    });
                 }
                 console.log(`[TradingSystem] History loaded: ${state.count} candles`);
                 return;

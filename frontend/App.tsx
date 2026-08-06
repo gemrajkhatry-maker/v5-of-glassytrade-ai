@@ -12,7 +12,6 @@ import JournalPage from './components/JournalPage';
 import ModelStateBanner from './components/ModelStateBanner';
 import { useKeyboardNavigation, getDefaultTradingHotkeys } from './hooks/useKeyboardNavigation';
 import { useUIStore, selectChartMode, selectSidebarOpen, selectRightSidebarOpen, selectVpMode } from './stores/ui';
-import { useInstrumentsStore, selectAllSymbols } from './stores/instruments';
 
 const simpleId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
 
@@ -31,9 +30,6 @@ function App() {
     const setCurrentPage = useUIStore(s => s.setCurrentPage);
     const vpMode = useUIStore(selectVpMode) as 'session' | 'leg' | 'combined' | 'off';
     const setVpMode = useUIStore(s => s.setVpMode);
-    
-    // Get symbols for navigation
-    const allSymbols = useInstrumentsStore(selectAllSymbols);
     const currentSymbolIndex = useRef(0);
     // Draggable overseer box
     const [overseerPos, setOverseerPos] = useState({ x: -1, y: 16 }); // -1 = auto right
@@ -83,6 +79,10 @@ function App() {
         connectionStatus,
         tickBus,
     } = useTradingSystem(config);
+
+    // Symbols for Tab/Shift+Tab navigation, derived from the live WS instrument
+    // state (the legacy instruments store is unused and was removed).
+    const allSymbols = useMemo(() => Object.keys(instruments), [instruments]);
 
     // 3. Keyboard Navigation
     const handleNextSymbol = useCallback(() => {
@@ -334,6 +334,7 @@ function App() {
                             orderBook={activeInstrument.orderBook}
                             overseerAction={activeInstrument.overseerAction}
                             overseerReason={activeInstrument.overseerReason}
+                            quantDecision={activeInstrument.quantDecisionAnalysis}
                             symbol={activeSymbol}
                             data={activeInstrument.data}
                         />

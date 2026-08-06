@@ -1,4 +1,5 @@
 import { TradePosition, OHLCData, AMTAnalysis } from '../../types';
+import { IST_OFFSET_SECONDS } from '../../constants';
 
 /**
  * ExecutionMarkersManager - Pure data transformation for chart execution markers
@@ -30,7 +31,7 @@ export interface ExecutionMarkersOptions {
 /**
  * IST timezone offset in seconds (UTC+5:30)
  */
-const IST_OFFSET = 19800;
+const IST_OFFSET = IST_OFFSET_SECONDS;
 
 /**
  * Generate entry markers from open positions
