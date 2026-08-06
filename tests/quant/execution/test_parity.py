@@ -84,27 +84,22 @@ def _run_adjust_sl(engine_cls) -> dict:
 
 
 def test_trail_atr_parity():
-    import importlib
     (lambda: _run_atr_trail(QuantTrailEngine))()
 
 
 def test_trail_vwap_parity():
-    import importlib
     (lambda: _run_vwap_trail(QuantTrailEngine))()
 
 
 def test_trail_imbalance_tighten_parity():
-    import importlib
     (lambda: _run_imbalance_tighten(QuantTrailEngine))()
 
 
 def test_trail_cvd_breakeven_parity():
-    import importlib
     (lambda: _run_cvd_breakeven(QuantTrailEngine))()
 
 
 def test_trail_adjust_sl_parity():
-    import importlib
     (lambda: _run_adjust_sl(QuantTrailEngine))()
 
 
@@ -145,7 +140,6 @@ def _run_scale_sequence(engine_cls) -> dict:
 
 
 def test_scale_parity():
-    import importlib
     from quant.execution.scale import ScaleManager as QuantScale
     (lambda: _run_scale_sequence(QuantScale))()
 
@@ -168,7 +162,6 @@ def _run_pyramid(engine_cls) -> dict:
 
 
 def test_pyramid_parity():
-    import importlib
     from quant.execution.pyramid import PyramidManager as QuantPyramid
     (lambda: _run_pyramid(QuantPyramid))()
 
@@ -195,7 +188,6 @@ def _run_partition(engine_cls, state_cls) -> dict:
 
 
 def test_partition_parity():
-    import importlib
     from quant.execution.partition import (
         PartitionExitManager as QuantPartition,
         PartitionState as QuantState,
@@ -231,13 +223,11 @@ def _dynamic_risk(engine_cls) -> dict:
 
 
 def test_loss_tracker_daily_limit_parity():
-    import importlib
     from quant.execution.loss_tracker import LossTracker as QuantLossTracker
     (lambda: _loss_sequence(QuantLossTracker))()
 
 
 def test_loss_tracker_dynamic_risk_parity():
-    import importlib
     from quant.execution.loss_tracker import LossTracker as QuantLossTracker
     (lambda: _dynamic_risk(QuantLossTracker))()
 
@@ -264,7 +254,6 @@ def _session_sequence(engine_cls) -> dict:
 
 
 def test_session_risk_manager_parity():
-    import importlib
     from quant.execution.session_risk_manager import SessionRiskManager as QuantSrm
     (lambda: _session_sequence(QuantSrm))()
 
@@ -283,7 +272,6 @@ def _kill_switch_sequence(engine_cls) -> dict:
 
 
 def test_kill_switch_parity():
-    import importlib
     from quant.execution.kill_switch import KillSwitch as QuantKillSwitch
     (lambda: _kill_switch_sequence(QuantKillSwitch))()
 
@@ -349,13 +337,11 @@ def _rm_record_trade(engine_cls) -> dict:
 
 
 def test_risk_manager_validate_parity():
-    import importlib
     from quant.execution.risk_manager import RiskManager as QuantRiskManager
     (lambda: _rm_validate(QuantRiskManager))()
 
 
 def test_risk_manager_record_trade_result_parity():
-    import importlib
     from quant.execution.risk_manager import RiskManager as QuantRiskManager
     (lambda: _rm_record_trade(QuantRiskManager))()
 
@@ -393,7 +379,6 @@ def _run_signal_validator(validator_cls) -> dict:
 
 
 def test_signal_validator_parity():
-    import importlib
     from quant.execution.signal_validator import SignalValidator as QuantSignalValidator
     (lambda: _run_signal_validator(QuantSignalValidator))()
 
@@ -417,7 +402,6 @@ def _run_circuit_breakers(engine_cls, reason_cls) -> dict:
 
 
 def test_circuit_breakers_parity():
-    import importlib
     from quant.execution.circuit_breakers import (
         CircuitBreakers as QuantCircuitBreakers,
         BreakerReason as QuantBreakerReason,
@@ -447,7 +431,6 @@ def _run_risk_sizing(engine_cls) -> dict:
 
 
 def test_risk_sizing_calculate_parity():
-    import importlib
     from quant.execution.risk_sizing import RiskSizingEngine as QuantRiskSizing
     (lambda: _run_risk_sizing(QuantRiskSizing))()
 
@@ -486,7 +469,6 @@ def _run_risk_tier(engine_cls, premium_cls) -> dict:
 
 
 def test_risk_tier_parity():
-    import importlib
     from quant.execution.risk_tier import (
         RiskTierEngine as QuantRiskTier,
         TierAPremiumCheck as QuantPremium,
@@ -505,7 +487,6 @@ def _run_trade_costs(fn) -> dict:
 
 
 def test_trade_costs_parity():
-    import importlib
     from quant.execution.trade_costs import compute_trade_costs as quant_compute
     (lambda: _run_trade_costs(quant_compute))()
 
@@ -550,12 +531,10 @@ def _run_check_position_hold(engine_cls) -> dict:
 
 
 def test_exit_engine_stop_loss_parity():
-    import importlib
     from quant.execution.exit_engine import ExitEngine as QuantExitEngine
     (lambda: _run_check_position(QuantExitEngine))()
 
 
 def test_exit_engine_hold_parity():
-    import importlib
     from quant.execution.exit_engine import ExitEngine as QuantExitEngine
     (lambda: _run_check_position_hold(QuantExitEngine))()
