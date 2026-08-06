@@ -4,8 +4,8 @@ import threading
 from pathlib import Path
 
 from dotenv import load_dotenv
-from app.domain.fabio_ai.services.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
-from app.domain.ports.llm_inference import ILLMInference, LLMNotReadyError
+from quant.inference.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
+from quant.contracts.ports.llm_inference import ILLMInference, LLMNotReadyError
 from app.infrastructure.mlx_gpu_lock import MLX_GPU_LOCK
 from app.infrastructure.transformers_quiet import quiet_gemma4_tokenizer_config_warning
 

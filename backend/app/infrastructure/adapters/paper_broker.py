@@ -28,10 +28,10 @@ from __future__ import annotations
 
 import logging
 
-from app.domain.trading.models.entities import Position, Signal
-from app.domain.trading.models.aggregates import Portfolio
-from app.domain.ports.broker import IBroker
-from app.domain.services.trade_costs import TradeCosts, compute_trade_costs
+from quant.contracts.entities import Position, Signal
+from quant.contracts.aggregates import Portfolio
+from quant.contracts.ports.broker import IBroker
+from quant.execution.trade_costs import TradeCosts, compute_trade_costs
 
 logger = logging.getLogger(__name__)
 

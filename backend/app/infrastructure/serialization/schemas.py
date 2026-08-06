@@ -387,7 +387,7 @@ def ohlc_to_dto(o) -> dict:
 
 def dto_to_ohlc(d: OHLCDataDTO):
     """Convert a Pydantic DTO to a domain OHLC value object."""
-    from app.domain.trading.models.value_objects import OHLC
+    from quant.contracts.value_objects import OHLC
 
     return OHLC(
         time=d.time,
@@ -406,7 +406,7 @@ def dto_to_order_book(d: Optional[OrderBookDTO]):
     """Convert a DTO OrderBook to domain."""
     if d is None:
         return None
-    from app.domain.trading.models.value_objects import OrderBook, OrderBookLevel
+    from quant.contracts.value_objects import OrderBook, OrderBookLevel
 
     return OrderBook(
         bids=tuple(OrderBookLevel(price=b.price, quantity=b.quantity) for b in d.bids),
@@ -415,7 +415,7 @@ def dto_to_order_book(d: Optional[OrderBookDTO]):
 
 
 def dto_to_weights(d: ModelWeightsDTO):
-    from app.domain.fabio_ai.models.predictions import ModelWeights
+    from quant.inference.models import ModelWeights
 
     return ModelWeights(
         trend=d.trend,
