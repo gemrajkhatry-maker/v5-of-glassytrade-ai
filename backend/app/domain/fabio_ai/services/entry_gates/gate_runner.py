@@ -74,6 +74,7 @@ def run_gate_pipeline(
     eia_suppressed = eia_calendar.is_suppressed(symbol) if symbol else False
 
     # ── Triple-A / VWAP context ────────────────────────────────────────────
+    absorption_side = getattr(amt_result, "absorption_side", "") or ""
     absorption_detected = bool(absorption_side)
     vwap_breakout = _detect_vwap_breakout(amt_result, tick, data)
     if absorption_detected:
