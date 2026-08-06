@@ -1,4 +1,5 @@
 import { OHLCData } from '../../types';
+import { IST_OFFSET_SECONDS } from '../../constants';
 
 /**
  * VolumeSeriesManager - Data transformation for volume histogram series
@@ -38,7 +39,7 @@ export interface VolumeColorConfig {
 /**
  * IST timezone offset in seconds (UTC+5:30)
  */
-const IST_OFFSET = 19800;
+const IST_OFFSET = IST_OFFSET_SECONDS;
 
 /**
  * Default volume series configuration

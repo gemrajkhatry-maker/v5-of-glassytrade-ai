@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { IST_OFFSET_SECONDS } from '../../../constants';
 import {
   transformToCandleData,
   transformToVolumeData,
@@ -24,9 +25,9 @@ describe('CandleSeriesManager', () => {
   describe('toISTTimestamp', () => {
     it('converts UTC to IST correctly', () => {
       const timestamp = toISTTimestamp('2024-01-01T00:00:00Z');
-      // IST is UTC+5:30, so offset should be 19800 seconds
+      // IST is UTC+5:30, so offset should be IST_OFFSET_SECONDS
       const utcTime = new Date('2024-01-01T00:00:00Z').getTime() / 1000;
-      expect(timestamp).toBe(utcTime + 19800);
+      expect(timestamp).toBe(utcTime + IST_OFFSET_SECONDS);
     });
   });
 

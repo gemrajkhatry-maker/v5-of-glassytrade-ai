@@ -1,4 +1,5 @@
 import { OHLCData } from '../../types';
+import { IST_OFFSET_SECONDS } from '../../constants';
 
 /**
  * CandleSeriesManager - Pure data transformation for candlestick series
@@ -39,7 +40,7 @@ export interface CandleValidationResult {
 /**
  * IST timezone offset in seconds (UTC+5:30)
  */
-const IST_OFFSET = 19800;
+const IST_OFFSET = IST_OFFSET_SECONDS;
 
 /**
  * Convert timestamp to IST timezone
