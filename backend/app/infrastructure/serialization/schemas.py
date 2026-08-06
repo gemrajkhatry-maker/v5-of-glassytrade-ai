@@ -148,19 +148,11 @@ class AMTAnalysisDTO(BaseModel):
     poc_vs_price: str = Field(alias="pocVsPrice", default="")
     lvn_play: Optional[dict[str, Any]] = Field(alias="lvnPlay", default=None)
     is_second_drive: bool = Field(alias="isSecondDrive", default=False)  # Task 3.3: Fabio Playbook drive cycle
-    # Cushion System State
-    cushion_tier: str = Field(alias="cushionTier", default="Conservative")
     llm_thinking: str = Field(alias="llmThinking", default="")
     llm_json: str = Field(alias="llmJson", default="{}")
-    session_pnl: float = Field(alias="sessionPnl", default=0.0)
-    # MTF & Opening Type
-    opening_type: str = Field(alias="openingType", default="")
-    mtf_alignment: str = Field(alias="mtfAlignment", default="")
     daily_vah: float = Field(alias="dailyVah", default=0.0)
     daily_val: float = Field(alias="dailyVal", default=0.0)
     daily_poc: float = Field(alias="dailyPoc", default=0.0)
-    hourly_vah: float = Field(alias="hourlyVah", default=0.0)
-    hourly_val: float = Field(alias="hourlyVal", default=0.0)
     hourly_poc: float = Field(alias="hourlyPoc", default=0.0)
 
     model_config = {"populate_by_name": True}

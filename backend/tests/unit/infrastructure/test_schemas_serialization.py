@@ -57,6 +57,42 @@ def test_amt_dto_drops_dead_fields():
         assert keep in dto
 
 
+def test_amt_dto_drops_telemetry_only_fields():
+    result = AMTResult(
+        market_state="TRENDING_UP",
+        poc=100,
+        value_area_high=105,
+        value_area_low=95,
+        aggression=0.6,
+    )
+    dto = amt_result_to_dto(result, llm_thinking="", llm_json="{}")
+    telemetry = (
+        "dayType",
+        "liquiditySweep",
+        "cushionTier",
+        "sessionPnl",
+        "bubbleRetests",
+        "cvdSource",
+        "bimodalActivePole",
+        "underlyingPrice",
+        "optionType",
+        "openingType",
+        "hourlyVah",
+        "hourlyVal",
+        "mtfAlignment",
+    )
+    for dead in telemetry:
+        assert dead not in dto
+    # The AMT DTO model must not declare telemetry fields either.
+    from app.infrastructure.serialization.schemas import AMTAnalysisDTO
+
+    declared_aliases = {
+        field.alias or name for name, field in AMTAnalysisDTO.model_fields.items()
+    }
+    for dead in telemetry:
+        assert dead not in declared_aliases
+
+
 def test_amt_dto_keeps_frontend_rendered_fields():
     result = AMTResult(
         market_state="BALANCED",
