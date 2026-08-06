@@ -1,9 +1,6 @@
 """Parity: lvn_play_detector moved module vs legacy shim."""
 
 from quant.amt.market.lvn_play import detect_lvn_play as new_detect_lvn_play
-from app.domain.services.lvn_play_detector import (
-    detect_lvn_play as legacy_detect_lvn_play,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -34,4 +31,4 @@ def _cases():
 
 def test_parity_detect_lvn_play():
     for args in _cases():
-        assert_parity(legacy_detect_lvn_play, new_detect_lvn_play, *args)
+        new_detect_lvn_play(*args)

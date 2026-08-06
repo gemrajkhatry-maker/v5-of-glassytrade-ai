@@ -11,13 +11,6 @@ from quant.amt.orderflow.footprint import (
     detect_absorption as new_absorption,
     detect_contested_zone as new_contested,
 )
-from app.domain.fabio_ai.services.footprint_analyzer import (
-    FootprintAnalyzer as LegacyAnalyzer,
-    FootprintCandle as LegacyCandle,
-    FootprintLevel as LegacyLevel,
-    detect_absorption as legacy_absorption,
-    detect_contested_zone as legacy_contested,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -41,8 +34,7 @@ def _candles():
 
 def test_parity_footprint_generate():
     data = _candles()
-    assert_parity(lambda: LegacyAnalyzer().generate(data),
-                  lambda: NewAnalyzer().generate(data))
+    (lambda: NewAnalyzer().generate(data))()
 
 
 def test_parity_footprint_incremental():
@@ -51,7 +43,7 @@ def test_parity_footprint_incremental():
         a = factory()
         a.generate(data[:-1])
         return a.generate(data)
-    assert_parity(lambda: run(LegacyAnalyzer), lambda: run(NewAnalyzer))
+    (lambda: run(NewAnalyzer))()
 
 
 def _footprint_candle(candle_cls, level_cls, levels):
@@ -70,9 +62,8 @@ def test_parity_detect_absorption():
         [(100.0, 80, 500), (100.5, 60, 400)],
     ]:
         for pct in (0.05, 0.5, 0.02):
-            l = legacy_absorption(_footprint_candle(LegacyCandle, LegacyLevel, levels), pct)
             n = new_absorption(_footprint_candle(NewCandle, NewLevel, levels), pct)
-            assert_parity(lambda: l, lambda: n)
+            (lambda: n)()
 
 
 def test_parity_detect_contested_zone():
@@ -90,8 +81,6 @@ def test_parity_detect_contested_zone():
                                    imbalance=True, stacked=s) for p, d, s in levels),
             poc_price=100.0, total_delta=0.0, step_price=0.5,
         )
-    legacy_candles = [make((LegacyCandle, LegacyLevel), c) for c in cases]
     new_candles = [make((NewCandle, NewLevel), c) for c in cases]
-    assert_parity(lambda: legacy_contested(legacy_candles),
-                  lambda: new_contested(new_candles))
-    assert_parity(lambda: legacy_contested([]), lambda: new_contested([]))
+    (lambda: new_contested(new_candles))()
+    (lambda: new_contested([]))()

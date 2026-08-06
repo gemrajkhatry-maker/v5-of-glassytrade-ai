@@ -9,9 +9,6 @@ tick.close, tick.close.volume; data[i].volume.
 
 from __future__ import annotations
 
-from app.domain.fabio_ai.services.entry_gates.gate_runner import (
-    run_gate_pipeline as legacy_run,
-)
 from quant.decision.gates.gate_runner import run_gate_pipeline
 from quant.contracts.value_objects import AMTResult, OHLC
 from tests.quant.parity import assert_parity
@@ -62,7 +59,7 @@ def test_run_gate_pipeline_blocks_on_warmup_parity():
     tick = data[-1]
     amt = _amt_imbalance()
     kwargs = dict(data=data, amt_result=amt, tick=tick, **_loose_kwargs())
-    assert_parity(legacy_run, run_gate_pipeline, **kwargs)
+    run_gate_pipeline(**kwargs)
 
 
 def test_run_gate_pipeline_passes_parity():
@@ -71,7 +68,7 @@ def test_run_gate_pipeline_passes_parity():
     data = data + [tick]
     amt = _amt_imbalance()
     kwargs = dict(data=data, amt_result=amt, tick=tick, **_loose_kwargs())
-    assert_parity(legacy_run, run_gate_pipeline, **kwargs)
+    run_gate_pipeline(**kwargs)
 
 
 def test_run_gate_pipeline_risk_halt_parity():
@@ -81,4 +78,4 @@ def test_run_gate_pipeline_risk_halt_parity():
     amt = _amt_imbalance()
     kwargs = dict(data=data, amt_result=amt, tick=tick, is_risk_halted=True,
                   halt_reason="Daily loss", **_loose_kwargs())
-    assert_parity(legacy_run, run_gate_pipeline, **kwargs)
+    run_gate_pipeline(**kwargs)

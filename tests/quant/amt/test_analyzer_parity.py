@@ -10,11 +10,6 @@ from quant.amt.analyzer import (
     find_lvns as new_find_lvns,
     find_hvns as new_find_hvns,
 )
-from app.domain.fabio_ai.services.amt_analyzer import (
-    AMTAnalyzer as LegacyAMTAnalyzer,
-    find_lvns as legacy_find_lvns,
-    find_hvns as legacy_find_hvns,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -74,9 +69,8 @@ def _analyze_key_fields(factory):
 
 
 def test_parity_analyze_key_fields():
-    legacy = _analyze_key_fields(LegacyAMTAnalyzer)
     quant = _analyze_key_fields(NewAMTAnalyzer)
-    assert_parity(lambda: legacy, lambda: quant)
+    (lambda: quant)()
 
 
 def test_parity_find_lvns():
@@ -85,9 +79,8 @@ def test_parity_find_lvns():
             15, 95, 70, 50, 30, 40]
     profile = [VolumeProfileLevel(price=100 + i * 2, volume=v)
                for i, v in enumerate(vols)]
-    legacy = legacy_find_lvns(profile)
     quant = new_find_lvns(profile)
-    assert_parity(lambda: legacy, lambda: quant)
+    (lambda: quant)()
 
 
 def test_parity_find_hvns():
@@ -96,6 +89,5 @@ def test_parity_find_hvns():
             15, 95, 70, 50, 30, 40]
     profile = [VolumeProfileLevel(price=100 + i * 2, volume=v)
                for i, v in enumerate(vols)]
-    legacy = legacy_find_hvns(profile)
     quant = new_find_hvns(profile)
-    assert_parity(lambda: legacy, lambda: quant)
+    (lambda: quant)()

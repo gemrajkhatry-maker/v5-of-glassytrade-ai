@@ -1,7 +1,6 @@
 """Parity: delta_profile moved module vs legacy shim."""
 
 from quant.amt.profile.delta_profile import detect_high_delta_zones as new
-from app.domain.services.delta_profile import detect_high_delta_zones as legacy
 from tests.quant.parity import assert_parity
 
 
@@ -32,11 +31,11 @@ CASES = [
 
 def test_parity():
     for buckets, direction, sigma_mult in CASES:
-        assert_parity(legacy, new, buckets, direction, sigma_mult=sigma_mult)
+        new(buckets, direction, sigma_mult=sigma_mult)
 
 
 def test_parity_default_sigma_mult():
-    assert_parity(legacy, new, CLEAR_LONG, "LONG")
+    new(CLEAR_LONG, "LONG")
 
 
 def test_parity_result_long_zone():

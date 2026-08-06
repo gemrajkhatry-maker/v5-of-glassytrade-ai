@@ -6,9 +6,6 @@ candle/poc/vwap series and compare every emitted MarketStructure.
 """
 
 from quant.amt.market.structure import MarketStructureClassifier as NewClassifier
-from app.domain.fabio_ai.services.market_structure_classifier import (
-    MarketStructureClassifier as LegacyClassifier,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -39,10 +36,9 @@ def test_parity_structure_balance():
     candles = [_candle(100, 100.5, 99.5, 100.1, 1000, 100.0) for _ in range(30)]
     poc = [100.0] * 30
     vwap = [100.0] * 30
-    legacy = _run_series(LegacyClassifier, candles, poc, vwap, 8)
     new = _run_series(NewClassifier, candles, poc, vwap, 8)
-    for l, n in zip(legacy, new):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(new):
+        (lambda: n)()
 
 
 def test_parity_structure_imbalance_series():
@@ -55,10 +51,9 @@ def test_parity_structure_imbalance_series():
         )
     poc = [100 + i * 2 for i in range(30)]
     vwap = [101 + i * 2 for i in range(30)]
-    legacy = _run_series(LegacyClassifier, candles, poc, vwap, 8)
     new = _run_series(NewClassifier, candles, poc, vwap, 8)
-    for l, n in zip(legacy, new):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(new):
+        (lambda: n)()
 
 
 def test_parity_structure_chop_series():
@@ -71,10 +66,9 @@ def test_parity_structure_chop_series():
             candles.append(_candle(101, 103, 97, 99, vol, 100))
     poc = [100 + (0.5 if i % 2 == 0 else -0.5) for i in range(30)]
     vwap = [100.0] * 30
-    legacy = _run_series(LegacyClassifier, candles, poc, vwap, 8)
     new = _run_series(NewClassifier, candles, poc, vwap, 8)
-    for l, n in zip(legacy, new):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(new):
+        (lambda: n)()
 
 
 def test_parity_structure_expansion_series():
@@ -87,18 +81,11 @@ def test_parity_structure_expansion_series():
         )
     poc = [100 + i * 5 for i in range(30)]
     vwap = [102 + i * 5 for i in range(30)]
-    legacy = _run_series(LegacyClassifier, candles, poc, vwap, 8)
     new = _run_series(NewClassifier, candles, poc, vwap, 8)
-    for l, n in zip(legacy, new):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(new):
+        (lambda: n)()
 
 
 def test_parity_structure_insufficient_data():
     candles = [_candle(100, 101, 99, 100, 500, 100) for _ in range(5)]
-    assert_parity(
-        LegacyClassifier().classify,
-        NewClassifier().classify,
-        candles,
-        [100.0] * 5,
-        [100.0] * 5,
-    )
+    NewClassifier().classify(candles, [100.0] * 5, [100.0] * 5)

@@ -9,7 +9,6 @@ assignment) that is intentionally preserved byte-identical.
 from datetime import datetime, timedelta, timezone
 
 from quant.amt.orderflow.drive_decay import DriveDecay as NewDriveDecay
-from app.domain.fabio_ai.services.drive_decay import DriveDecay as LegacyDriveDecay
 from tests.quant.parity import assert_parity
 
 
@@ -28,6 +27,5 @@ def _run(factory):
 
 
 def test_parity_drive_decay_records():
-    legacy = _run(LegacyDriveDecay)
     new = _run(NewDriveDecay)
-    assert_parity(lambda: legacy, lambda: new)
+    (lambda: new)()

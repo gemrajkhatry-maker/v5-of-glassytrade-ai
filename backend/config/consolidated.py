@@ -554,7 +554,7 @@ def get_exchange_config(exchange: str) -> "ExchangeConfig":
     Returns:
         ExchangeConfig value object
     """
-    from app.domain.models.exchange_config import ExchangeConfig as _EC
+    from quant.contracts.exchange_config import ExchangeConfig as _EC
 
     cfg = get_config()
     yaml_data = cfg.get_exchange_config_dict(exchange)

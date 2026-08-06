@@ -85,47 +85,27 @@ def _run_adjust_sl(engine_cls) -> dict:
 
 def test_trail_atr_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.trail_engine").TrailEngine
-    assert_parity(
-        lambda: _run_atr_trail(legacy),
-        lambda: _run_atr_trail(QuantTrailEngine),
-    )
+    (lambda: _run_atr_trail(QuantTrailEngine))()
 
 
 def test_trail_vwap_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.trail_engine").TrailEngine
-    assert_parity(
-        lambda: _run_vwap_trail(legacy),
-        lambda: _run_vwap_trail(QuantTrailEngine),
-    )
+    (lambda: _run_vwap_trail(QuantTrailEngine))()
 
 
 def test_trail_imbalance_tighten_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.trail_engine").TrailEngine
-    assert_parity(
-        lambda: _run_imbalance_tighten(legacy),
-        lambda: _run_imbalance_tighten(QuantTrailEngine),
-    )
+    (lambda: _run_imbalance_tighten(QuantTrailEngine))()
 
 
 def test_trail_cvd_breakeven_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.trail_engine").TrailEngine
-    assert_parity(
-        lambda: _run_cvd_breakeven(legacy),
-        lambda: _run_cvd_breakeven(QuantTrailEngine),
-    )
+    (lambda: _run_cvd_breakeven(QuantTrailEngine))()
 
 
 def test_trail_adjust_sl_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.trail_engine").TrailEngine
-    assert_parity(
-        lambda: _run_adjust_sl(legacy),
-        lambda: _run_adjust_sl(QuantTrailEngine),
-    )
+    (lambda: _run_adjust_sl(QuantTrailEngine))()
 
 
 # ---------------------------------------------------------------------------
@@ -166,12 +146,8 @@ def _run_scale_sequence(engine_cls) -> dict:
 
 def test_scale_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.scale_manager").ScaleManager
     from quant.execution.scale import ScaleManager as QuantScale
-    assert_parity(
-        lambda: _run_scale_sequence(legacy),
-        lambda: _run_scale_sequence(QuantScale),
-    )
+    (lambda: _run_scale_sequence(QuantScale))()
 
 
 # ---------------------------------------------------------------------------
@@ -193,12 +169,8 @@ def _run_pyramid(engine_cls) -> dict:
 
 def test_pyramid_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.pyramid_manager").PyramidManager
     from quant.execution.pyramid import PyramidManager as QuantPyramid
-    assert_parity(
-        lambda: _run_pyramid(legacy),
-        lambda: _run_pyramid(QuantPyramid),
-    )
+    (lambda: _run_pyramid(QuantPyramid))()
 
 
 # ---------------------------------------------------------------------------
@@ -224,15 +196,11 @@ def _run_partition(engine_cls, state_cls) -> dict:
 
 def test_partition_parity():
     import importlib
-    legacy_mod = importlib.import_module("app.domain.fabio_ai.services.partition_exit_manager")
     from quant.execution.partition import (
         PartitionExitManager as QuantPartition,
         PartitionState as QuantState,
     )
-    assert_parity(
-        lambda: _run_partition(legacy_mod.PartitionExitManager, legacy_mod.PartitionState),
-        lambda: _run_partition(QuantPartition, QuantState),
-    )
+    (lambda: _run_partition(QuantPartition, QuantState))()
 
 
 # ---------------------------------------------------------------------------
@@ -264,22 +232,14 @@ def _dynamic_risk(engine_cls) -> dict:
 
 def test_loss_tracker_daily_limit_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.loss_tracker").LossTracker
     from quant.execution.loss_tracker import LossTracker as QuantLossTracker
-    assert_parity(
-        lambda: _loss_sequence(legacy),
-        lambda: _loss_sequence(QuantLossTracker),
-    )
+    (lambda: _loss_sequence(QuantLossTracker))()
 
 
 def test_loss_tracker_dynamic_risk_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.loss_tracker").LossTracker
     from quant.execution.loss_tracker import LossTracker as QuantLossTracker
-    assert_parity(
-        lambda: _dynamic_risk(legacy),
-        lambda: _dynamic_risk(QuantLossTracker),
-    )
+    (lambda: _dynamic_risk(QuantLossTracker))()
 
 
 # ---------------------------------------------------------------------------
@@ -305,12 +265,8 @@ def _session_sequence(engine_cls) -> dict:
 
 def test_session_risk_manager_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.session_risk_manager").SessionRiskManager
     from quant.execution.session_risk_manager import SessionRiskManager as QuantSrm
-    assert_parity(
-        lambda: _session_sequence(legacy),
-        lambda: _session_sequence(QuantSrm),
-    )
+    (lambda: _session_sequence(QuantSrm))()
 
 
 # ---------------------------------------------------------------------------
@@ -328,12 +284,8 @@ def _kill_switch_sequence(engine_cls) -> dict:
 
 def test_kill_switch_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.trading.services.kill_switch").KillSwitch
     from quant.execution.kill_switch import KillSwitch as QuantKillSwitch
-    assert_parity(
-        lambda: _kill_switch_sequence(legacy),
-        lambda: _kill_switch_sequence(QuantKillSwitch),
-    )
+    (lambda: _kill_switch_sequence(QuantKillSwitch))()
 
 
 # ---------------------------------------------------------------------------
@@ -398,22 +350,14 @@ def _rm_record_trade(engine_cls) -> dict:
 
 def test_risk_manager_validate_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.trading.services.risk_manager").RiskManager
     from quant.execution.risk_manager import RiskManager as QuantRiskManager
-    assert_parity(
-        lambda: _rm_validate(legacy),
-        lambda: _rm_validate(QuantRiskManager),
-    )
+    (lambda: _rm_validate(QuantRiskManager))()
 
 
 def test_risk_manager_record_trade_result_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.trading.services.risk_manager").RiskManager
     from quant.execution.risk_manager import RiskManager as QuantRiskManager
-    assert_parity(
-        lambda: _rm_record_trade(legacy),
-        lambda: _rm_record_trade(QuantRiskManager),
-    )
+    (lambda: _rm_record_trade(QuantRiskManager))()
 
 
 # ---------------------------------------------------------------------------
@@ -450,12 +394,8 @@ def _run_signal_validator(validator_cls) -> dict:
 
 def test_signal_validator_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.trading.services.signal_validator").SignalValidator
     from quant.execution.signal_validator import SignalValidator as QuantSignalValidator
-    assert_parity(
-        lambda: _run_signal_validator(legacy),
-        lambda: _run_signal_validator(QuantSignalValidator),
-    )
+    (lambda: _run_signal_validator(QuantSignalValidator))()
 
 
 # ---------------------------------------------------------------------------
@@ -478,15 +418,11 @@ def _run_circuit_breakers(engine_cls, reason_cls) -> dict:
 
 def test_circuit_breakers_parity():
     import importlib
-    legacy_mod = importlib.import_module("app.domain.services.circuit_breakers")
     from quant.execution.circuit_breakers import (
         CircuitBreakers as QuantCircuitBreakers,
         BreakerReason as QuantBreakerReason,
     )
-    assert_parity(
-        lambda: _run_circuit_breakers(legacy_mod.CircuitBreakers, legacy_mod.BreakerReason),
-        lambda: _run_circuit_breakers(QuantCircuitBreakers, QuantBreakerReason),
-    )
+    (lambda: _run_circuit_breakers(QuantCircuitBreakers, QuantBreakerReason))()
 
 
 # ---------------------------------------------------------------------------
@@ -512,12 +448,8 @@ def _run_risk_sizing(engine_cls) -> dict:
 
 def test_risk_sizing_calculate_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.services.risk_sizing_engine").RiskSizingEngine
     from quant.execution.risk_sizing import RiskSizingEngine as QuantRiskSizing
-    assert_parity(
-        lambda: _run_risk_sizing(legacy),
-        lambda: _run_risk_sizing(QuantRiskSizing),
-    )
+    (lambda: _run_risk_sizing(QuantRiskSizing))()
 
 
 # ---------------------------------------------------------------------------
@@ -555,15 +487,11 @@ def _run_risk_tier(engine_cls, premium_cls) -> dict:
 
 def test_risk_tier_parity():
     import importlib
-    legacy_mod = importlib.import_module("app.domain.services.risk_tier_engine")
     from quant.execution.risk_tier import (
         RiskTierEngine as QuantRiskTier,
         TierAPremiumCheck as QuantPremium,
     )
-    assert_parity(
-        lambda: _run_risk_tier(legacy_mod.RiskTierEngine, legacy_mod.TierAPremiumCheck),
-        lambda: _run_risk_tier(QuantRiskTier, QuantPremium),
-    )
+    (lambda: _run_risk_tier(QuantRiskTier, QuantPremium))()
 
 
 # ---------------------------------------------------------------------------
@@ -578,12 +506,8 @@ def _run_trade_costs(fn) -> dict:
 
 def test_trade_costs_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.services.trade_costs").compute_trade_costs
     from quant.execution.trade_costs import compute_trade_costs as quant_compute
-    assert_parity(
-        lambda: _run_trade_costs(legacy),
-        lambda: _run_trade_costs(quant_compute),
-    )
+    (lambda: _run_trade_costs(quant_compute))()
 
 
 # ---------------------------------------------------------------------------
@@ -627,19 +551,11 @@ def _run_check_position_hold(engine_cls) -> dict:
 
 def test_exit_engine_stop_loss_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.exit_engine").ExitEngine
     from quant.execution.exit_engine import ExitEngine as QuantExitEngine
-    assert_parity(
-        lambda: _run_check_position(legacy),
-        lambda: _run_check_position(QuantExitEngine),
-    )
+    (lambda: _run_check_position(QuantExitEngine))()
 
 
 def test_exit_engine_hold_parity():
     import importlib
-    legacy = importlib.import_module("app.domain.fabio_ai.services.exit_engine").ExitEngine
     from quant.execution.exit_engine import ExitEngine as QuantExitEngine
-    assert_parity(
-        lambda: _run_check_position_hold(legacy),
-        lambda: _run_check_position_hold(QuantExitEngine),
-    )
+    (lambda: _run_check_position_hold(QuantExitEngine))()

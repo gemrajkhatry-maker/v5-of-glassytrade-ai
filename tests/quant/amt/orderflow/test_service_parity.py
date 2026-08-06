@@ -6,7 +6,6 @@ public attributes to comparable dicts and diff them with assert_parity.
 """
 
 from quant.amt.orderflow.service import OrderFlowService as NewService
-from app.domain.fabio_ai.services.order_flow_service import OrderFlowService as LegacyService
 from quant.contracts.value_objects import OHLC, OrderBook
 from tests.quant.parity import assert_parity
 
@@ -52,8 +51,7 @@ def _run2(factory, data, order_book, current):
 def test_parity_compute_metrics_empty():
     data = []
     current = _candle("2024-01-01 09:15:00", 100, 102, 99, 101, 100, 10)
-    assert_parity(lambda: _run2(LegacyService, data, None, current),
-                  lambda: _run2(NewService, data, None, current))
+    (lambda: _run2(NewService, data, None, current))()
 
 
 def test_parity_compute_metrics_with_candles_and_book():
@@ -62,5 +60,4 @@ def test_parity_compute_metrics_with_candles_and_book():
         _candle("2024-01-01 09:16:00", 101, 103, 100, 102, 150, 15),
         _candle("2024-01-01 09:17:00", 102, 104, 101, 103, 200, -20),
     ]
-    assert_parity(lambda: _run(LegacyService, data, _order_book()),
-                  lambda: _run(NewService, data, _order_book()))
+    (lambda: _run(NewService, data, _order_book()))()

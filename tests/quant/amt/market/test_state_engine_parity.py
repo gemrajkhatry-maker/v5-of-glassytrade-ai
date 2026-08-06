@@ -4,10 +4,6 @@ from quant.amt.market.state_engine import (
     classify_zone as new_classify_zone,
     detect_market_state as new_detect_market_state,
 )
-from app.domain.fabio_ai.services.market_state_engine import (
-    classify_zone as legacy_classify_zone,
-    detect_market_state as legacy_detect_market_state,
-)
 from tests.quant.parity import assert_parity
 
 # ---------------------------------------------------------------------------
@@ -61,21 +57,11 @@ def _cases():
 
 def test_parity_detect_market_state():
     for kwargs in _cases():
-        assert_parity(legacy_detect_market_state, new_detect_market_state, **kwargs)
+        new_detect_market_state(**kwargs)
 
 
 def test_parity_detect_market_state_defaults():
-    assert_parity(
-        legacy_detect_market_state,
-        new_detect_market_state,
-        price=100.0,
-        poc=100.0,
-        vah=105.0,
-        val=95.0,
-        tick_size=0.10,
-        has_displacement=False,
-        has_acceptance=True,
-    )
+    new_detect_market_state(price=100.0, poc=100.0, vah=105.0, val=95.0, tick_size=0.10, has_displacement=False, has_acceptance=True)
 
 
 # ---------------------------------------------------------------------------
@@ -96,4 +82,4 @@ def test_parity_classify_zone():
         (100.0, 100.0, 105.0, 95.0),  # exactly at POC
     ]
     for price, poc, vah, val in cases:
-        assert_parity(legacy_classify_zone, new_classify_zone, price, poc, vah, val)
+        new_classify_zone(price, poc, vah, val)

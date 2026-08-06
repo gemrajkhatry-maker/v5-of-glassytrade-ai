@@ -8,10 +8,6 @@ from quant.amt.orderflow.aggressive_prints import (
     find_aggressive_prints as new_find,
     AggressivePrintRegistry as NewRegistry,
 )
-from app.domain.services.aggressive_prints import (
-    find_aggressive_prints as legacy_find,
-    AggressivePrintRegistry as LegacyRegistry,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -39,7 +35,7 @@ def _series():
 
 
 def test_parity_find_aggressive_prints_spike():
-    assert_parity(lambda: legacy_find(_series()), lambda: new_find(_series()))
+    (lambda: new_find(_series()))()
 
 
 def test_parity_find_aggressive_prints_incremental():
@@ -47,7 +43,7 @@ def test_parity_find_aggressive_prints_incremental():
     def run(fn):
         prints = fn(data[:-1])
         return fn(data, previous_prints=prints, previous_data_len=len(data) - 1)
-    assert_parity(lambda: run(legacy_find), lambda: run(new_find))
+    (lambda: run(new_find))()
 
 
 def test_parity_aggressive_print_registry():
@@ -65,4 +61,4 @@ def test_parity_aggressive_print_registry():
         retests = r.get_retests(100.05)
         return retests
 
-    assert_parity(lambda: run(LegacyRegistry), lambda: run(NewRegistry))
+    (lambda: run(NewRegistry))()

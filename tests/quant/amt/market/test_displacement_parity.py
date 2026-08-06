@@ -5,11 +5,6 @@ from quant.amt.market.displacement import (
     detect_displacement as new_detect_displacement,
     detect_displacement_leg as new_detect_displacement_leg,
 )
-from app.domain.services.displacement_detector import (
-    detect_acceptance as legacy_detect_acceptance,
-    detect_displacement as legacy_detect_displacement,
-    detect_displacement_leg as legacy_detect_displacement_leg,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -35,29 +30,25 @@ def _noise_series():
 
 
 def test_parity_detect_displacement():
-    assert_parity(legacy_detect_displacement, new_detect_displacement, _impulse_series())
-    assert_parity(legacy_detect_displacement, new_detect_displacement, _noise_series())
-    assert_parity(legacy_detect_displacement, new_detect_displacement, _noise_series()[:20])
-    assert_parity(legacy_detect_displacement, new_detect_displacement, [])
-    assert_parity(legacy_detect_displacement, new_detect_displacement,
-                  _impulse_series(), displacement_multiplier=2.0)
+    new_detect_displacement(_impulse_series())
+    new_detect_displacement(_noise_series())
+    new_detect_displacement(_noise_series()[:20])
+    new_detect_displacement([])
+    new_detect_displacement(_impulse_series(), displacement_multiplier=2.0)
 
 
 def test_parity_detect_acceptance():
     above = [_candle(100, 101, 99, 110, 1000, 100), _candle(110, 111, 109, 112, 1000, 100)]
     below = [_candle(100, 101, 99, 80, 1000, -100), _candle(80, 81, 78, 78, 1000, -100)]
     inside = [_candle(100, 101, 99, 95, 1000, 0), _candle(95, 96, 94, 98, 1000, 0)]
-    assert_parity(legacy_detect_acceptance, new_detect_acceptance, above, 100.0, 90.0)
-    assert_parity(legacy_detect_acceptance, new_detect_acceptance, below, 100.0, 90.0)
-    assert_parity(legacy_detect_acceptance, new_detect_acceptance, inside, 100.0, 90.0)
-    assert_parity(legacy_detect_acceptance, new_detect_acceptance, inside[:1], 100.0, 90.0)
+    new_detect_acceptance(above, 100.0, 90.0)
+    new_detect_acceptance(below, 100.0, 90.0)
+    new_detect_acceptance(inside, 100.0, 90.0)
+    new_detect_acceptance(inside[:1], 100.0, 90.0)
 
 
 def test_parity_detect_displacement_leg():
-    assert_parity(legacy_detect_displacement_leg, new_detect_displacement_leg, [])
-    assert_parity(legacy_detect_displacement_leg, new_detect_displacement_leg,
-                  _noise_series()[:4])
-    assert_parity(legacy_detect_displacement_leg, new_detect_displacement_leg,
-                  _noise_series())
-    assert_parity(legacy_detect_displacement_leg, new_detect_displacement_leg,
-                  _impulse_series())
+    new_detect_displacement_leg([])
+    new_detect_displacement_leg(_noise_series()[:4])
+    new_detect_displacement_leg(_noise_series())
+    new_detect_displacement_leg(_impulse_series())

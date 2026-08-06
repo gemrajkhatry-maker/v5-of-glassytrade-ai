@@ -18,7 +18,7 @@ from typing import Optional
 # From Dhan broker
 from shared.entities.models import OptionChain, Option
 # From backend domain services
-from backend.app.domain.services.risk_sizing_engine import RiskSizingEngine, SizingResult
+from backend.quant.execution.risk_sizing import RiskSizingEngine, SizingResult
 from backend.app.domain.services.oi_wall_detector import get_key_levels, OIWallAnalysis
 
 

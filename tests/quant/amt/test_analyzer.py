@@ -243,7 +243,7 @@ class TestConfirmationBundle:
 
     def test_spread_tightness_passes_tight_spread(self):
         """Tight bid-ask spread (≤5 bps) should pass spread check."""
-        from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import check_confirmation_bundle
+        from quant.decision.gates.confirmation_bundle import check_confirmation_bundle
 
         data = [_make_candle(100, volume=200, delta=80) for _ in range(30)]
         tick = _make_candle(100, volume=500, delta=200)
@@ -257,7 +257,7 @@ class TestConfirmationBundle:
 
     def test_spread_tightness_no_orderbook_blocks_when_others_weak(self):
         """No order book sets spread_tight = False. If others weak, it blocks."""
-        from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import check_confirmation_bundle
+        from quant.decision.gates.confirmation_bundle import check_confirmation_bundle
 
         data = [_make_candle(100, volume=200, delta=80) for _ in range(30)]
         # Normal volume, low delta = 0/2 for others
@@ -270,7 +270,7 @@ class TestEntryGateAuditFixes:
     """Tests for new audit fixes in entry_gate.py."""
 
     def test_min_candles_gate(self):
-        from app.domain.fabio_ai.services.entry_gates.three_align import min_candles_gate
+        from quant.decision.gates.three_align import min_candles_gate
 
         data = [_make_candle(100) for _ in range(5)]
         assert min_candles_gate(data, 6) is False
@@ -278,7 +278,7 @@ class TestEntryGateAuditFixes:
         assert min_candles_gate(data, 6) is True
 
     def test_full_body_close_gate(self):
-        from app.domain.fabio_ai.services.entry_gates.three_align import full_body_close_gate
+        from quant.decision.gates.three_align import full_body_close_gate
 
         # Wick-heavy candle (doji)
         doji = _make_candle(100, open_=100, high=105, low=95)
@@ -296,7 +296,7 @@ class TestEntryGateAuditFixes:
         assert full_body_close_gate(bear, 99, "SHORT") is True
 
     def test_nearest_round_number(self):
-        from app.domain.fabio_ai.services.entry_gates.three_align import nearest_round_number
+        from quant.decision.gates.three_align import nearest_round_number
 
         assert nearest_round_number(6130) == 6000
         assert nearest_round_number(6350) == 6500  # 6350/500 = 12.7 -> 13*500 = 6500

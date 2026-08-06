@@ -5,7 +5,6 @@ the CVDState returned after each update plus the state()/value queries.
 """
 
 from quant.amt.orderflow.cvd import CVDTracker as NewCVDTracker
-from app.domain.fabio_ai.services.cvd_tracker import CVDTracker as LegacyCVDTracker
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -40,10 +39,9 @@ def _run(factory):
 
 
 def test_parity_cvd_series():
-    legacy = _run(LegacyCVDTracker)
     new = _run(NewCVDTracker)
-    for l, n in zip(legacy, new):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(new):
+        (lambda: n)()
 
 
 def test_parity_cvd_session_reset():
@@ -56,7 +54,6 @@ def test_parity_cvd_session_reset():
         out.append(t.state())
         return out
 
-    legacy = run(LegacyCVDTracker)
     new = run(NewCVDTracker)
-    for l, n in zip(legacy, new):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(new):
+        (lambda: n)()

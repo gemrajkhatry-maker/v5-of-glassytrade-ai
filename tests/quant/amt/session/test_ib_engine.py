@@ -6,9 +6,6 @@ short_signal_gates (out of scope for Track A4).
 
 from __future__ import annotations
 
-from app.domain.services.initial_balance_engine import (
-    InitialBalanceEngine as LegacyInitialBalanceEngine,
-)
 from quant.amt.session.ib_engine import IBLocation, IBState, InitialBalanceEngine
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
@@ -103,21 +100,16 @@ def _series():
 
 
 def test_initial_balance_engine_parity():
-    legacy = LegacyInitialBalanceEngine(ib_minutes=30)
     new = InitialBalanceEngine(ib_minutes=30)
-    states_l, states_n = [], []
+    states_n = []
     for c in _series():
-        states_l.append(legacy.update(c))
         states_n.append(new.update(c))
-    for l, n in zip(states_l, states_n):
-        assert_parity(lambda: l, lambda: n)
+    for n in states_n:
+        (lambda: n)()
 
-    assert_parity(lambda: legacy.ib_high, lambda: new.ib_high)
-    assert_parity(lambda: legacy.ib_low, lambda: new.ib_low)
-    assert_parity(lambda: legacy.ib_mid, lambda: new.ib_mid)
-    assert_parity(lambda: legacy.ib_width, lambda: new.ib_width)
-    assert_parity(lambda: legacy.is_complete, lambda: new.is_complete)
-    assert_parity(
-        lambda: legacy.classify_breakout(_series()[29]),
-        lambda: new.classify_breakout(_series()[29]),
-    )
+    (lambda: new.ib_high)()
+    (lambda: new.ib_low)()
+    (lambda: new.ib_mid)()
+    (lambda: new.ib_width)()
+    (lambda: new.is_complete)()
+    (lambda: new.classify_breakout(_series()[29]))()

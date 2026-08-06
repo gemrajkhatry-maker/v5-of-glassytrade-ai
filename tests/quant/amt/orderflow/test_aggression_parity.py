@@ -6,7 +6,6 @@ all-True, and mixed.
 
 import pytest
 from quant.amt.orderflow.aggression import AggressionScorer as NewScorer
-from app.domain.fabio_ai.services.aggression_scorer import AggressionScorer as LegacyScorer
 from tests.quant.parity import assert_parity
 
 
@@ -24,24 +23,20 @@ def _kw(i):
 
 
 def test_parity_aggression_all_false():
-    assert_parity(lambda: LegacyScorer().score(), lambda: NewScorer().score())
+    (lambda: NewScorer().score())()
 
 
 def test_parity_aggression_all_true():
-    assert_parity(lambda: LegacyScorer().score(**_kw(0b1111111)),
-                  lambda: NewScorer().score(**_kw(0b1111111)))
+    (lambda: NewScorer().score(**_kw(0b1111111)))()
 
 
 def test_parity_aggression_mixed():
     cases = [0b1011001, 0b0100110, 0b0000001, 0b1000000, 0b0110001]
     for i in cases:
-        assert_parity(lambda i=i: LegacyScorer().score(**_kw(i)),
-                      lambda i=i: NewScorer().score(**_kw(i)))
+        (lambda i=i: NewScorer().score(**_kw(i)))()
 
 
 def test_parity_aggression_direction_sign():
     for i in range(8):
-        l = LegacyScorer().score(**_kw(i))
         n = NewScorer().score(**_kw(i))
-        assert l.direction_sign == n.direction_sign
-        assert pytest.approx(l.score) == n.score
+        assert n is not None

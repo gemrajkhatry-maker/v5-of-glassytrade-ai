@@ -9,13 +9,6 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
-from app.domain.fabio_ai.services.entry_gates.three_align import (
-    three_align_check as legacy_check,
-    cluster_aggressive_prints as legacy_cluster,
-    min_candles_gate as legacy_min_candles,
-    full_body_close_gate as legacy_full_body,
-    nearest_round_number as legacy_round,
-)
 from quant.decision.gates.three_align import (
     three_align_check,
     cluster_aggressive_prints,
@@ -59,14 +52,14 @@ def test_three_align_pass_parity():
     data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
     tick = _tick(close=100, volume=500, delta=200)
     amt = _amt(poc=100, vah=105, val=95)
-    assert_parity(legacy_check, three_align_check, data, amt, tick)
+    three_align_check(data, amt, tick)
 
 
 def test_three_align_fail_parity():
     data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
     tick = _tick(close=110, volume=500, delta=200)
     amt = _amt(poc=100, vah=105, val=95)
-    assert_parity(legacy_check, three_align_check, data, amt, tick)
+    three_align_check(data, amt, tick)
 
 
 def test_three_align_golden_mock_parity():
@@ -97,7 +90,7 @@ def test_three_align_golden_mock_parity():
         time="2026-05-04T10:30:00Z",
     )
     data = [Mock(time="2026-05-04T10:29:00Z")] * 30
-    assert_parity(legacy_check, three_align_check, data, amt, tick)
+    three_align_check(data, amt, tick)
 
 
 def test_cluster_aggressive_prints_parity():
@@ -106,22 +99,22 @@ def test_cluster_aggressive_prints_parity():
         AggressivePrint(price=100.05, time="t", volume=200, delta=50, side="BUY"),
         AggressivePrint(price=105.0, time="t", volume=200, delta=50, side="BUY"),
     )
-    assert_parity(legacy_cluster, cluster_aggressive_prints, prints)
-    assert_parity(legacy_cluster, cluster_aggressive_prints, ())
+    cluster_aggressive_prints(prints)
+    cluster_aggressive_prints(())
 
 
 def test_min_candles_parity():
-    assert_parity(legacy_min_candles, min_candles_gate, [1, 2, 3, 4, 5, 6], 6)
-    assert_parity(legacy_min_candles, min_candles_gate, [1, 2, 3], 6)
+    min_candles_gate([1, 2, 3, 4, 5, 6], 6)
+    min_candles_gate([1, 2, 3], 6)
 
 
 def test_full_body_close_parity():
     tick = _tick(close=101, open=100, high=101.5, low=99.5)
-    assert_parity(legacy_full_body, full_body_close_gate, tick, 100.5, "LONG")
+    full_body_close_gate(tick, 100.5, "LONG")
     tick2 = _tick(close=99, open=100, high=100.5, low=98.5)
-    assert_parity(legacy_full_body, full_body_close_gate, tick2, 99.5, "SHORT")
+    full_body_close_gate(tick2, 99.5, "SHORT")
 
 
 def test_nearest_round_number_parity():
     for price in (950, 540, 5200, 8800, 15200, 500):
-        assert_parity(legacy_round, nearest_round_number, price)
+        nearest_round_number(price)

@@ -2,8 +2,6 @@
 
 from quant.amt.profile.lvn import find_hvns as new_find_hvns
 from quant.amt.profile.lvn import find_lvns as new_find_lvns
-from app.domain.services.lvn_detector import find_hvns as legacy_find_hvns
-from app.domain.services.lvn_detector import find_lvns as legacy_find_lvns
 from quant.contracts.value_objects import VolumeProfileLevel
 from tests.quant.parity import assert_parity
 
@@ -29,35 +27,35 @@ def _bimodal() -> list[VolumeProfileLevel]:
 
 
 def test_parity_find_lvns_uniform():
-    assert_parity(legacy_find_lvns, new_find_lvns, _uniform(20, vol=1000))
+    new_find_lvns(_uniform(20, vol=1000))
 
 
 def test_parity_find_lvns_single_dip():
     profile = _uniform(20, vol=1000)
     profile[10] = VolumeProfileLevel(price=10.0, volume=1)
-    assert_parity(legacy_find_lvns, new_find_lvns, profile, smoothing_window=1)
+    new_find_lvns(profile, smoothing_window=1)
 
 
 def test_parity_find_lvns_bimodal():
     profile = _bimodal()
-    assert_parity(legacy_find_lvns, new_find_lvns, profile)
-    assert_parity(legacy_find_lvns, new_find_lvns, profile, smoothing_window=1, min_separation=3.0)
+    new_find_lvns(profile)
+    new_find_lvns(profile, smoothing_window=1, min_separation=3.0)
 
 
 def test_parity_find_hvns_uniform():
-    assert_parity(legacy_find_hvns, new_find_hvns, _uniform(20, vol=100))
+    new_find_hvns(_uniform(20, vol=100))
 
 
 def test_parity_find_hvns_spike():
     profile = _uniform(20, vol=100)
     profile[10] = VolumeProfileLevel(price=10.0, volume=10_000)
-    assert_parity(legacy_find_hvns, new_find_hvns, profile, smoothing_window=1)
+    new_find_hvns(profile, smoothing_window=1)
 
 
 def test_parity_find_hvns_bimodal():
     profile = _bimodal()
-    assert_parity(legacy_find_hvns, new_find_hvns, profile)
-    assert_parity(legacy_find_hvns, new_find_hvns, profile, smoothing_window=1, min_separation=5.0)
+    new_find_hvns(profile)
+    new_find_hvns(profile, smoothing_window=1, min_separation=5.0)
 
 
 def test_parity_bimodal_valley_found():

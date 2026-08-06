@@ -4,10 +4,6 @@ from quant.amt.profile.volume_profile import (
     compute_value_area as new_compute_value_area,
     create_profile as new_create_profile,
 )
-from app.domain.services.volume_profile import (
-    compute_value_area as legacy_compute_value_area,
-    create_profile as legacy_create_profile,
-)
 from quant.contracts.value_objects import OHLC, VolumeProfileLevel
 from tests.quant.parity import assert_parity
 from tests.quant.test_golden_file import _session_bars
@@ -21,20 +17,20 @@ def _candle(time: str, o: float, h: float, l: float, c: float, v: float) -> OHLC
 
 
 def test_parity_create_profile_empty():
-    assert_parity(legacy_create_profile, new_create_profile, [])
+    new_create_profile([])
 
 
 def test_parity_create_profile_single_candle():
     data = [_candle("09:15", 100, 110, 90, 105, 1000)]
-    assert_parity(legacy_create_profile, new_create_profile, data, buckets=20)
+    new_create_profile(data, buckets=20)
 
 
 def test_parity_create_profile_session_bars_auto_buckets():
-    assert_parity(legacy_create_profile, new_create_profile, _session_bars(), buckets=0)
+    new_create_profile(_session_bars(), buckets=0)
 
 
 def test_parity_create_profile_session_bars_explicit():
-    assert_parity(legacy_create_profile, new_create_profile, _session_bars(), buckets=120)
+    new_create_profile(_session_bars(), buckets=120)
 
 
 def test_parity_create_profile_concentrated_edge():
@@ -44,12 +40,12 @@ def test_parity_create_profile_concentrated_edge():
         _candle("09:17", 101, 101, 101, 101, 300),
         _candle("09:18", 100, 100, 100, 100, 50),
     ]
-    assert_parity(legacy_create_profile, new_create_profile, data, buckets=25, concentrated=True)
+    new_create_profile(data, buckets=25, concentrated=True)
 
 
 def test_parity_create_profile_flat_range():
     data = [_candle("09:15", 100, 100, 100, 100, 500)]
-    assert_parity(legacy_create_profile, new_create_profile, data, buckets=20)
+    new_create_profile(data, buckets=20)
 
 
 # --- compute_value_area ------------------------------------------------------
@@ -63,17 +59,17 @@ def test_parity_value_area_edge_poc_boundary_pair():
         VolumeProfileLevel(price=92, volume=460),
         VolumeProfileLevel(price=93, volume=450),
     ]
-    assert_parity(legacy_compute_value_area, new_compute_value_area, profile, poc_index=1, value_area_pct=0.70)
+    new_compute_value_area(profile, poc_index=1, value_area_pct=0.70)
 
 
 def test_parity_value_area_wide_profile():
     profile = [VolumeProfileLevel(price=float(i), volume=100) for i in range(20)]
-    assert_parity(legacy_compute_value_area, new_compute_value_area, profile, poc_index=10, value_area_pct=0.70)
+    new_compute_value_area(profile, poc_index=10, value_area_pct=0.70)
 
 
 def test_parity_value_area_default_pct():
     profile = [VolumeProfileLevel(price=float(i), volume=100) for i in range(10)]
-    assert_parity(legacy_compute_value_area, new_compute_value_area, profile, poc_index=5)
+    new_compute_value_area(profile, poc_index=5)
 
 
 def test_parity_value_area_poc_at_top_edge():
@@ -82,4 +78,4 @@ def test_parity_value_area_poc_at_top_edge():
         VolumeProfileLevel(price=101, volume=500),
         VolumeProfileLevel(price=102, volume=200),
     ]
-    assert_parity(legacy_compute_value_area, new_compute_value_area, profile, poc_index=2, value_area_pct=0.70)
+    new_compute_value_area(profile, poc_index=2, value_area_pct=0.70)

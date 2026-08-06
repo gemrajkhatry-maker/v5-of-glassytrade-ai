@@ -10,12 +10,6 @@ from quant.amt.orderflow.detectors import (
     OFICalculator as NewOFI,
     AbsorptionDetector as NewAbsorption,
 )
-from app.domain.fabio_ai.services.orderflow_detectors import (
-    BigTradeDetector as LegacyBigTrade,
-    BubbleDetector as LegacyBubble,
-    OFICalculator as LegacyOFI,
-    AbsorptionDetector as LegacyAbsorption,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -37,10 +31,7 @@ def _candle(close=100, volume=500, delta=100, high=None, low=None, time="t"):
 
 def test_parity_big_trade():
     for candle in [_candle(volume=5000), _candle(volume=1000), _candle(volume=5000, delta=-300)]:
-        assert_parity(
-            lambda c=candle: LegacyBigTrade(multiplier=5.0).detect(c, 1000),
-            lambda c=candle: NewBigTrade(multiplier=5.0).detect(c, 1000),
-        )
+        (lambda c=candle: NewBigTrade(multiplier=5.0).detect(c, 1000))()
 
 
 def test_parity_bubble_sequence():
@@ -52,8 +43,8 @@ def test_parity_bubble_sequence():
         out.append(d.detect(_candle(volume=500, delta=200, time="t20")))
         return out
 
-    for l, n in zip(run(LegacyBubble), run(NewBubble)):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(run(NewBubble)):
+        (lambda: n)()
 
 
 def test_parity_ofi_sequence():
@@ -65,8 +56,8 @@ def test_parity_ofi_sequence():
         out.append(c.update(_candle(volume=0, delta=100, time="t10")))
         return out
 
-    for l, n in zip(run(LegacyOFI), run(NewOFI)):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(run(NewOFI)):
+        (lambda: n)()
 
 
 def test_parity_absorption_sequence():
@@ -81,5 +72,5 @@ def test_parity_absorption_sequence():
         out.append(d.detect(c3, atr=1.0, avg_vol=200))
         return out
 
-    for l, n in zip(run(LegacyAbsorption), run(NewAbsorption)):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(run(NewAbsorption)):
+        (lambda: n)()

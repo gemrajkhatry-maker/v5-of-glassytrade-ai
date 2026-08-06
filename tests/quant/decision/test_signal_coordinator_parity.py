@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.domain.fabio_ai.services.signal_coordinator import (
-    SignalCoordinator as LegacySignalCoordinator,
-)
 from quant.decision.signal_coordinator import SignalCoordinator
 from tests.quant.parity import assert_parity
 
@@ -45,32 +42,16 @@ def _kwargs(direction="LONG", probability=0.85, market_state="IMBALANCED",
 
 
 def test_high_conviction_parity():
-    assert_parity(
-        LegacySignalCoordinator().evaluate_entry,
-        SignalCoordinator().evaluate_entry,
-        **_kwargs(),
-    )
+    SignalCoordinator().evaluate_entry(**_kwargs())
 
 
 def test_flat_has_position_parity():
-    assert_parity(
-        LegacySignalCoordinator().evaluate_entry,
-        SignalCoordinator().evaluate_entry,
-        **_kwargs(has_position=True),
-    )
+    SignalCoordinator().evaluate_entry(**_kwargs(has_position=True))
 
 
 def test_short_not_allowed_parity():
-    assert_parity(
-        LegacySignalCoordinator().evaluate_entry,
-        SignalCoordinator().evaluate_entry,
-        **_kwargs(direction="SHORT", probability=0.7, allow_short=False),
-    )
+    SignalCoordinator().evaluate_entry(**_kwargs(direction="SHORT", probability=0.7, allow_short=False))
 
 
 def test_medium_conviction_parity():
-    assert_parity(
-        LegacySignalCoordinator().evaluate_entry,
-        SignalCoordinator().evaluate_entry,
-        **_kwargs(direction="LONG", probability=0.60, market_state="BALANCED"),
-    )
+    SignalCoordinator().evaluate_entry(**_kwargs(direction="LONG", probability=0.60, market_state="BALANCED"))

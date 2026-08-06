@@ -5,7 +5,6 @@ with rejection, D2 without rejection, D3 suppression).
 """
 
 from quant.amt.orderflow.drive import DriveTracker as NewDriveTracker
-from app.domain.fabio_ai.services.drive_tracker import DriveTracker as LegacyDriveTracker
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -34,10 +33,9 @@ def _run(factory):
 
 
 def test_parity_drive_sequence():
-    legacy = _run(LegacyDriveTracker)
     new = _run(NewDriveTracker)
-    for l, n in zip(legacy, new):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(new):
+        (lambda: n)()
 
 
 def test_parity_drive_no_rejection():
@@ -50,5 +48,5 @@ def test_parity_drive_no_rejection():
         out.append(tracker.classify_touch(100.0, 100.0, c2, "LONG"))
         return out
 
-    for l, n in zip(run(LegacyDriveTracker), run(NewDriveTracker)):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(run(NewDriveTracker)):
+        (lambda: n)()

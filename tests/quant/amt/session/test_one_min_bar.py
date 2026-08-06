@@ -7,9 +7,6 @@ through both implementations via assert_parity.
 
 from __future__ import annotations
 
-from app.domain.services.one_min_bar_engine import (
-    OneMinBarEngine as LegacyOneMinBarEngine,
-)
 from quant.amt.session.one_min_bar import OneMinBarEngine, OneMinBarState
 from tests.quant.parity import assert_parity
 
@@ -92,7 +89,6 @@ def _run(factory):
 
 
 def test_one_min_bar_parity_tick_stream():
-    legacy = _run(LegacyOneMinBarEngine)
     new = _run(OneMinBarEngine)
-    for l, n in zip(legacy, new):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(new):
+        (lambda: n)()

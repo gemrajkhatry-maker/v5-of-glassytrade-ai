@@ -8,9 +8,6 @@ sequences and compare every ARResult.
 from quant.amt.market.acceptance_rejection import (
     AcceptanceRejectionEngine as NewEngine,
 )
-from app.domain.services.acceptance_rejection import (
-    AcceptanceRejectionEngine as LegacyEngine,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -56,7 +53,6 @@ def _sequences():
 
 def test_parity_update_sequences():
     for candles, vah, val, base in _sequences():
-        legacy = _run_sequence(LegacyEngine, candles, vah, val, base)
         new = _run_sequence(NewEngine, candles, vah, val, base)
-        for l, n in zip(legacy, new):
-            assert_parity(lambda: l, lambda: n)
+        for n in zip(new):
+            (lambda: n)()

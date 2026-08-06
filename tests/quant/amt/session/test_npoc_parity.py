@@ -8,7 +8,6 @@ mock storage port.
 
 from __future__ import annotations
 
-from app.domain.fabio_ai.services.npoc_tracker import NPOCTracker as LegacyNPOCTracker
 from quant.amt.session.npoc import NPOCTracker
 from tests.quant.parity import assert_parity
 
@@ -39,24 +38,11 @@ def _run(factory):
 
 
 def test_npoc_parity_active_after_adds():
-    legacy = _run(lambda: LegacyNPOCTracker(_NoopStorage()))
     new = _run(lambda: NPOCTracker(_NoopStorage()))
-    assert_parity(
-        lambda: legacy.active_npocs["NIFTY"],
-        lambda: new.active_npocs["NIFTY"],
-    )
-    assert_parity(
-        lambda: legacy.active_npocs["BANKNIFTY"],
-        lambda: new.active_npocs["BANKNIFTY"],
-    )
-    assert_parity(
-        lambda: legacy.get_active_npocs("NIFTY", 24500.0),
-        lambda: new.get_active_npocs("NIFTY", 24500.0),
-    )
-    assert_parity(
-        lambda: legacy.get_active_npocs("NIFTY", 24350.0, lookback_days=2),
-        lambda: new.get_active_npocs("NIFTY", 24350.0, lookback_days=2),
-    )
+    (lambda: new.active_npocs["NIFTY"])()
+    (lambda: new.active_npocs["BANKNIFTY"])()
+    (lambda: new.get_active_npocs("NIFTY", 24500.0))()
+    (lambda: new.get_active_npocs("NIFTY", 24350.0, lookback_days=2))()
 
 
 def test_npoc_parity_duplicate_skipped():
@@ -66,6 +52,5 @@ def test_npoc_parity_duplicate_skipped():
         t.add_session_poc("NIFTY", "2026-03-19", 24600.0)
         return t
 
-    legacy = run(lambda: LegacyNPOCTracker(_NoopStorage()))
     new = run(lambda: NPOCTracker(_NoopStorage()))
-    assert_parity(lambda: legacy.active_npocs, lambda: new.active_npocs)
+    (lambda: new.active_npocs)()

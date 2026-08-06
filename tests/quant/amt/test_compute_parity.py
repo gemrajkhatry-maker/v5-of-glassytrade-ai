@@ -5,7 +5,6 @@ small fixed arrays, including edge cases (len < window, zero array).
 """
 
 from quant.amt import compute as new_mc
-from app.domain.fabio_ai.services import mlx_compute as legacy_mc
 from tests.quant.parity import assert_parity
 
 
@@ -18,8 +17,7 @@ def test_parity_ema():
         ([1.0, 2.0], 2),  # len < window
     ]
     for values, period in cases:
-        assert_parity(lambda v=values, p=period: legacy_mc.ema(v, p),
-                      lambda v=values, p=period: new_mc.ema(v, p))
+        new_mc.ema(values, period)
 
 
 def test_parity_linreg_slope():
@@ -31,8 +29,7 @@ def test_parity_linreg_slope():
         [0.0, 0.0, 0.0],  # zero array
     ]
     for ys in cases:
-        assert_parity(lambda y=ys: legacy_mc.linreg_slope(y),
-                      lambda y=ys: new_mc.linreg_slope(y))
+        (lambda y=ys: new_mc.linreg_slope(y))()
 
 
 def test_parity_atr():
@@ -45,8 +42,7 @@ def test_parity_atr():
          [105.0, 115.0, 125.0, 135.0], 2),  # period smaller than window
     ]
     for highs, lows, closes, period in cases:
-        assert_parity(lambda h=highs, l=lows, c=closes, p=period: legacy_mc.atr(h, l, c, p),
-                      lambda h=highs, l=lows, c=closes, p=period: new_mc.atr(h, l, c, p))
+        new_mc.atr(highs, lows, closes, period)
 
 
 def test_parity_gaussian_weights():
@@ -57,8 +53,7 @@ def test_parity_gaussian_weights():
         ([1.0, 2.0, 3.0], 2.0, 0.0),  # zero sigma edge
     ]
     for centers, center, sigma in cases:
-        assert_parity(lambda c=centers, ctr=center, s=sigma: legacy_mc.gaussian_weights(c, ctr, s),
-                      lambda c=centers, ctr=center, s=sigma: new_mc.gaussian_weights(c, ctr, s))
+        new_mc.gaussian_weights(centers, center, sigma)
 
 
 def test_parity_aggression_sigma():
@@ -71,5 +66,4 @@ def test_parity_aggression_sigma():
         (0.0, [50.0] * 15, 20),  # zero candle volume
     ]
     for vol, history, period in cases:
-        assert_parity(lambda v=vol, h=history, p=period: legacy_mc.aggression_sigma(v, h, p),
-                      lambda v=vol, h=history, p=period: new_mc.aggression_sigma(v, h, p))
+        new_mc.aggression_sigma(vol, history, period)

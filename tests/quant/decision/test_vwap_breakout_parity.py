@@ -1,5 +1,4 @@
 from quant.decision.vwap_breakout import detect_vwap_breakout as new
-from app.domain.fabio_ai.services.vwap_breakout import detect_vwap_breakout as legacy
 from tests.quant.parity import assert_parity
 
 
@@ -23,5 +22,5 @@ CASES = [
 
 def test_parity():
     for kw, expected in CASES:
-        assert_parity(legacy, new, **kw)
+        new(**kw)
         assert new(**kw) == expected, f"case {kw} -> expected {expected!r}"

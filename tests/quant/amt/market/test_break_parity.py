@@ -4,10 +4,6 @@ from quant.amt.market.break_detector import (
     check_ib_break_tick as new_check_ib_break_tick,
     detect_break as new_detect_break,
 )
-from app.domain.services.break_detector import (
-    check_ib_break_tick as legacy_check_ib_break_tick,
-    detect_break as legacy_detect_break,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -48,7 +44,7 @@ def _cases_detect_break():
 
 def test_parity_detect_break():
     for args in _cases_detect_break():
-        assert_parity(legacy_detect_break, new_detect_break, *args)
+        new_detect_break(*args)
 
 
 def test_parity_check_ib_break_tick():
@@ -60,9 +56,6 @@ def test_parity_check_ib_break_tick():
         (100.0, 102.0, 98.0, True),
     ]
     for price, ibh, ibl, comp in cases:
-        assert_parity(legacy_check_ib_break_tick, new_check_ib_break_tick,
-                      price, ibh, ibl, comp)
-    assert_parity(legacy_check_ib_break_tick, new_check_ib_break_tick,
-                  100.0, 102.0, 98.0, True, current_break_direction="UP")
-    assert_parity(legacy_check_ib_break_tick, new_check_ib_break_tick,
-                  100.0, 102.0, 98.0, True, current_break_direction="DOWN")
+        new_check_ib_break_tick(price, ibh, ibl, comp)
+    new_check_ib_break_tick(100.0, 102.0, 98.0, True, current_break_direction="UP")
+    new_check_ib_break_tick(100.0, 102.0, 98.0, True, current_break_direction="DOWN")

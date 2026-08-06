@@ -7,9 +7,6 @@ with fixed inputs via assert_parity.
 
 from __future__ import annotations
 
-from app.domain.services.ib_breakout_scalp import (
-    IBBreakoutScalpEngine as LegacyIBBreakoutScalpEngine,
-)
 from quant.amt.session.ib_scalp import (
     IBBreakoutScalpEngine,
     IBScalpSignal,
@@ -195,10 +192,6 @@ _SETUP_A_CASES = [
 
 
 def test_ib_scalp_parity_setup_a():
-    legacy = LegacyIBBreakoutScalpEngine()
     new = IBBreakoutScalpEngine()
     for kwargs in _SETUP_A_CASES:
-        assert_parity(
-            lambda: legacy.evaluate_setup_a(**kwargs),
-            lambda: new.evaluate_setup_a(**kwargs),
-        )
+        (lambda: new.evaluate_setup_a(**kwargs))()

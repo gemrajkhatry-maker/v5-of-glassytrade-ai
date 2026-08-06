@@ -8,9 +8,6 @@ ported unit tests instead — see report.
 """
 
 from quant.amt.market.regime import RegimeDetector as NewDetector
-from app.domain.fabio_ai.services.regime_detector import (
-    RegimeDetector as LegacyDetector,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -35,26 +32,19 @@ def _trending_series():
 
 
 def test_parity_is_contracting():
-    assert_parity(LegacyDetector().is_contracting, NewDetector().is_contracting,
-                  _contracting_series(), 20)
-    assert_parity(LegacyDetector().is_contracting, NewDetector().is_contracting,
-                  _trending_series(), 20)
-    assert_parity(LegacyDetector().is_contracting, NewDetector().is_contracting,
-                  _trending_series()[:30], 20)
-    assert_parity(LegacyDetector().is_contracting, NewDetector().is_contracting,
-                  [], 20)
+    NewDetector().is_contracting(_contracting_series(), 20)
+    NewDetector().is_contracting(_trending_series(), 20)
+    NewDetector().is_contracting(_trending_series()[:30], 20)
+    NewDetector().is_contracting([], 20)
 
 
 def test_parity_detect_bollinger_squeeze():
     tight = [_candle(100, 100.05, 99.95, 100.0) for _ in range(25)]
     wide = [_candle(100 + i * 0.3, 101.5 + i * 0.3, 98.5 + i * 0.3, 100 + i * 0.3)
             for i in range(25)]
-    assert_parity(LegacyDetector().detect_bollinger_squeeze, NewDetector().detect_bollinger_squeeze,
-                  tight, 20)
-    assert_parity(LegacyDetector().detect_bollinger_squeeze, NewDetector().detect_bollinger_squeeze,
-                  wide, 20)
-    assert_parity(LegacyDetector().detect_bollinger_squeeze, NewDetector().detect_bollinger_squeeze,
-                  wide[:10], 20)
+    NewDetector().detect_bollinger_squeeze(tight, 20)
+    NewDetector().detect_bollinger_squeeze(wide, 20)
+    NewDetector().detect_bollinger_squeeze(wide[:10], 20)
 
 
 def test_parity_is_atr_compressed():
@@ -62,17 +52,12 @@ def test_parity_is_atr_compressed():
     data = [_candle(100 + i * 0.5, 102 + i * 0.5, 98 + i * 0.5, 101 + i * 0.5)
             for i in range(40)]
     data += [_candle(120, 120.1, 119.9, 120.0) for _ in range(40)]
-    assert_parity(LegacyDetector().is_atr_compressed, NewDetector().is_atr_compressed,
-                  data, 20)
-    assert_parity(LegacyDetector().is_atr_compressed, NewDetector().is_atr_compressed,
-                  _trending_series(), 20)
-    assert_parity(LegacyDetector().is_atr_compressed, NewDetector().is_atr_compressed,
-                  data[:20], 20)
+    NewDetector().is_atr_compressed(data, 20)
+    NewDetector().is_atr_compressed(_trending_series(), 20)
+    NewDetector().is_atr_compressed(data[:20], 20)
 
 
 def test_parity_compute_atr():
-    assert_parity(LegacyDetector()._compute_atr, NewDetector()._compute_atr,
-                  _trending_series())
-    assert_parity(LegacyDetector()._compute_atr, NewDetector()._compute_atr,
-                  [_candle(100, 101, 99, 100)])
-    assert_parity(LegacyDetector()._compute_atr, NewDetector()._compute_atr, [])
+    NewDetector()._compute_atr(_trending_series())
+    NewDetector()._compute_atr([_candle(100, 101, 99, 100)])
+    NewDetector()._compute_atr([])

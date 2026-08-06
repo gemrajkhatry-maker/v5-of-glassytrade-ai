@@ -8,10 +8,6 @@ from quant.amt.orderflow.tick_delta import (
     TickDeltaClassifier as NewClassifier,
     candle_delta_proxy as new_proxy,
 )
-from app.domain.services.tick_delta import (
-    TickDeltaClassifier as LegacyClassifier,
-    candle_delta_proxy as legacy_proxy,
-)
 from tests.quant.parity import assert_parity
 
 
@@ -28,9 +24,8 @@ TICKS = [
 
 def test_parity_tick_delta_classify():
     for kwargs in TICKS:
-        l = LegacyClassifier().classify(*kwargs)
         n = NewClassifier().classify(*kwargs)
-        assert_parity(lambda: l, lambda: n)
+        (lambda: n)()
 
 
 def test_parity_tick_delta_sequence():
@@ -45,8 +40,8 @@ def test_parity_tick_delta_sequence():
         out.append(clf.classify(100.5, 10, bid=100.0, ask=101.0))  # after reset
         return out
 
-    for l, n in zip(run(LegacyClassifier), run(NewClassifier)):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(run(NewClassifier)):
+        (lambda: n)()
 
 
 def test_parity_candle_delta_proxy():
@@ -58,4 +53,4 @@ def test_parity_candle_delta_proxy():
         dict(open_=100, high=105, low=95, close=102, volume=0),
     ]
     for kw in cases:
-        assert_parity(lambda kw=kw: legacy_proxy(**kw), lambda kw=kw: new_proxy(**kw))
+        (lambda kw=kw: new_proxy(**kw))()

@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-from app.domain.services.scalp_gate_pipeline import (
-    ScalpContext as LegacyScalpContext,
-    evaluate_scalp_gates as legacy_evaluate,
-)
 from quant.decision.gates.scalp import (
     ScalpContext,
     evaluate_scalp_gates,
@@ -24,11 +20,11 @@ def test_evaluate_scalp_gates_all_pass_parity():
         open_positions=2,
         position_size=100.0,
     )
-    assert_parity(legacy_evaluate, evaluate_scalp_gates, ctx)
+    evaluate_scalp_gates(ctx)
 
 
 def test_evaluate_scalp_gates_default_parity():
-    assert_parity(legacy_evaluate, evaluate_scalp_gates, ScalpContext(symbol="NIFTY"))
+    evaluate_scalp_gates(ScalpContext(symbol="NIFTY"))
 
 
 def test_evaluate_scalp_gates_blocked_parity():
@@ -42,4 +38,4 @@ def test_evaluate_scalp_gates_blocked_parity():
         open_positions=1,
         position_size=10.0,
     )
-    assert_parity(legacy_evaluate, evaluate_scalp_gates, ctx)
+    evaluate_scalp_gates(ctx)

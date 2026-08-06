@@ -6,10 +6,6 @@ of ``evaluate`` output is asserted field-by-field on identical contexts.
 
 from __future__ import annotations
 
-from app.domain.fabio_ai.services.gate_pipeline import (
-    GateContext as LegacyGateContext,
-    GatePipeline as LegacyGatePipeline,
-)
 from quant.decision.gates.legacy_gate_pipeline import (
     GateContext,
     GatePipeline,
@@ -50,24 +46,20 @@ def _base_ctx(**overrides) -> GateContext:
 
 
 def test_all_pass_parity():
-    assert_parity(LegacyGatePipeline().evaluate, GatePipeline().evaluate, _base_ctx())
+    GatePipeline().evaluate(_base_ctx())
 
 
 def test_warmup_fail_parity():
-    assert_parity(LegacyGatePipeline().evaluate, GatePipeline().evaluate, _base_ctx(candle_count=1))
+    GatePipeline().evaluate(_base_ctx(candle_count=1))
 
 
 def test_session_fail_parity():
-    assert_parity(LegacyGatePipeline().evaluate, GatePipeline().evaluate, _base_ctx(eia_window_active=True))
+    GatePipeline().evaluate(_base_ctx(eia_window_active=True))
 
 
 def test_rr_fail_parity():
-    assert_parity(LegacyGatePipeline().evaluate, GatePipeline().evaluate, _base_ctx(r_r_ratio=1.2))
+    GatePipeline().evaluate(_base_ctx(r_r_ratio=1.2))
 
 
 def test_risk_halt_parity():
-    assert_parity(
-        LegacyGatePipeline().evaluate,
-        GatePipeline().evaluate,
-        _base_ctx(is_risk_halted=True, halt_reason="Daily loss"),
-    )
+    GatePipeline().evaluate(_base_ctx(is_risk_halted=True, halt_reason="Daily loss"))

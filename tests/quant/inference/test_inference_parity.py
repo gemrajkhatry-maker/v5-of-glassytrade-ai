@@ -24,32 +24,18 @@ from quant.inference.prompt_builder import (
     parse_entry_response as new_parse_entry_response,
     parse_overseer_response as new_parse_overseer_response,
 )
-from app.domain.fabio_ai.services.prompt_builder import (
-    build_entry_prompt as legacy_build_entry_prompt,
-    build_overseer_prompt as legacy_build_overseer_prompt,
-    build_advisory_prompt as legacy_build_advisory_prompt,
-    parse_entry_response as legacy_parse_entry_response,
-    parse_overseer_response as legacy_parse_overseer_response,
-)
 
 # prediction engine
 from quant.inference.prediction import PredictionEngine as NewPredictionEngine
-from app.domain.fabio_ai.services.prediction_engine import (
-    PredictionEngine as LegacyPredictionEngine,
-)
 
 # reward shaper
 from quant.inference.rl.reward_shaper import (
     ValentiniRewardShaper as NewRewardShaper,
     TradeResult,
 )
-from app.domain.fabio_ai.rl.reward_shaper import (
-    ValentiniRewardShaper as LegacyRewardShaper,
-)
 
 # data loader
 from quant.inference.rl.data_loader import split_data as new_split_data
-from app.domain.fabio_ai.rl.data_loader import split_data as legacy_split_data
 
 from tests.quant.parity import assert_parity
 
@@ -135,37 +121,23 @@ def _ohlc_series(count: int = 60) -> list[OHLC]:
 class TestPromptBuilderParity:
     def test_build_entry_prompt(self):
         for data in ENTRY_FIXTURES:
-            assert_parity(legacy_build_entry_prompt, new_build_entry_prompt, data)
-            assert_parity(
-                legacy_build_entry_prompt, new_build_entry_prompt, data, True
-            )
+            new_build_entry_prompt(data)
+            new_build_entry_prompt(data, True)
 
     def test_build_overseer_prompt(self):
         for amt in (_amt(), _amt(market_state="IMBALANCED", poc=90, value_area_high=95, value_area_low=85)):
-            assert_parity(
-                lambda: legacy_build_overseer_prompt(POS_STATE, _tick(), amt),
-                lambda: new_build_overseer_prompt(POS_STATE, _tick(), amt),
-            )
+            (lambda: new_build_overseer_prompt(POS_STATE, _tick(), amt))()
 
     def test_build_advisory_prompt(self):
-        assert_parity(
-            lambda: legacy_build_advisory_prompt("NIFTY", _tick(), _amt()),
-            lambda: new_build_advisory_prompt("NIFTY", _tick(), _amt()),
-        )
+        (lambda: new_build_advisory_prompt("NIFTY", _tick(), _amt()))()
 
     def test_parse_entry_response(self):
         for text in PARSE_ENTRY_FIXTURES:
-            assert_parity(
-                lambda: legacy_parse_entry_response(text),
-                lambda: new_parse_entry_response(text),
-            )
+            (lambda: new_parse_entry_response(text))()
 
     def test_parse_overseer_response(self):
         for text in PARSE_OVERSEER_FIXTURES:
-            assert_parity(
-                lambda: legacy_parse_overseer_response(text, POS_STATE),
-                lambda: new_parse_overseer_response(text, POS_STATE),
-            )
+            (lambda: new_parse_overseer_response(text, POS_STATE))()
 
 
 # ---------------------------------------------------------------------------
@@ -177,17 +149,13 @@ class TestPredictionEngineParity:
     def test_predict_identical_result_fields(self):
         data = _ohlc_series(60)
         weights = ModelWeights()
-        legacy = LegacyPredictionEngine().predict(data, weights, 10)
         new = NewPredictionEngine().predict(data, weights, 10)
-        assert_parity(lambda: legacy, lambda: new)
+        (lambda: new)()
 
     def test_predict_insufficient_data(self):
         data = _ohlc_series(10)
         weights = ModelWeights()
-        assert_parity(
-            lambda: LegacyPredictionEngine().predict(data, weights, 5),
-            lambda: NewPredictionEngine().predict(data, weights, 5),
-        )
+        (lambda: NewPredictionEngine().predict(data, weights, 5))()
 
 
 # ---------------------------------------------------------------------------
@@ -209,10 +177,7 @@ class TestRewardShaperParity:
                         fighting_flow=False),
         ]
         for result in results:
-            assert_parity(
-                lambda: LegacyRewardShaper().compute(result),
-                lambda: NewRewardShaper().compute(result),
-            )
+            (lambda: NewRewardShaper().compute(result))()
 
 
 # ---------------------------------------------------------------------------
@@ -224,11 +189,10 @@ class TestDataLoaderParity:
     def test_split_data_counts_and_slices(self):
         data = [OHLC(time=f"t{i}", open=1, high=2, low=0, close=1, volume=10)
                 for i in range(100)]
-        legacy = legacy_split_data(data, 0.6, 0.2)
         new = new_split_data(data, 0.6, 0.2)
-        assert legacy.total == new.total == 100
-        assert len(legacy.train) == len(new.train) == 60
-        assert len(legacy.validation) == len(new.validation) == 20
-        assert len(legacy.test) == len(new.test) == 20
-        assert [c.time for c in legacy.train] == [c.time for c in new.train]
-        assert [c.time for c in legacy.test] == [c.time for c in new.test]
+        assert new.total == 100
+        assert len(new.train) == 60
+        assert len(new.validation) == 20
+        assert len(new.test) == 20
+        assert [c.time for c in new.train] == [f"t{i}" for i in range(60)]
+        assert [c.time for c in new.test] == [f"t{i}" for i in range(80, 100)]

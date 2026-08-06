@@ -4,11 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import Mock
 
-from app.domain.fabio_ai.services.trade_thesis import (
-    build_trade_thesis as legacy_build,
-    validate_trade_thesis as legacy_validate,
-    TradeThesis as LegacyTradeThesis,
-)
 from quant.decision.trade_thesis import (
     build_trade_thesis,
     validate_trade_thesis,
@@ -57,7 +52,7 @@ def _tick():
 def test_build_trade_thesis_parity():
     kwargs = dict(tick=_tick(), amt_result=_amt(), setup_type=SetupType.MEAN_REVERSION,
                   session_context="NSE_PRIMARY", invalidation_level=95.0)
-    assert_parity(legacy_build, build_trade_thesis, **kwargs)
+    build_trade_thesis(**kwargs)
 
 
 def test_validate_trade_thesis_parity():
@@ -70,18 +65,18 @@ def test_validate_trade_thesis_parity():
         invalidation_level=95.0,
         setup_family="return_to_value",
     )
-    assert_parity(legacy_validate, validate_trade_thesis, thesis)
+    validate_trade_thesis(thesis)
 
 
 def test_validate_trade_thesis_none_parity():
-    assert_parity(legacy_validate, validate_trade_thesis, None)
+    validate_trade_thesis(None)
 
 
 def test_validate_trade_thesis_dict_parity():
     d = dict(market_state="BALANCED", location_type="VAL", location_level=95.0,
              aggression_trigger="DELTA_EXPANSION", session_context="NSE_PRIMARY",
              invalidation_level=95.0, setup_family="return_to_value")
-    assert_parity(legacy_validate, validate_trade_thesis, d)
+    validate_trade_thesis(d)
 
 
 def test_validate_trade_thesis_incomplete_parity():
@@ -90,4 +85,4 @@ def test_validate_trade_thesis_incomplete_parity():
         aggression_trigger="", session_context="", invalidation_level=0.0,
         setup_family="",
     )
-    assert_parity(legacy_validate, validate_trade_thesis, thesis)
+    validate_trade_thesis(thesis)

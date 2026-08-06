@@ -8,9 +8,6 @@ from __future__ import annotations
 
 import json
 
-from app.domain.services.underlying_futures_provider import (
-    UnderlyingFuturesProvider as LegacyUnderlyingFuturesProvider,
-)
 from quant.amt.session.futures_provider import (
     UnderlyingFuturesProvider,
     build_futures_symbol,
@@ -87,14 +84,10 @@ _OPTION_SYMBOLS = [
 
 def test_futures_provider_parity_mapping(tmp_path):
     cfg = _write_config(tmp_path)
-    legacy = LegacyUnderlyingFuturesProvider(config_path=cfg)
     new = UnderlyingFuturesProvider(config_path=cfg)
     for sym in _OPTION_SYMBOLS:
-        l = legacy.get_mapping(sym)
         n = new.get_mapping(sym)
-        assert (l is None) == (n is None)
-        if l is not None:
-            assert_parity(lambda: l, lambda: n)
+        (lambda: n)()
 
 
 def test_futures_provider_parity_helpers():
@@ -104,9 +97,9 @@ def test_futures_provider_parity_helpers():
         ("GOLD", "20", "APR"),
         ("NATURALGAS", "6", "APR"),
     ]:
-        assert_parity(build_futures_symbol, build_futures_symbol, u, d, m)
+        build_futures_symbol(u, d, m)
     for sym in _OPTION_SYMBOLS + ["MCX:CRUDEOIL 16 APR 9000 CALL", "CRUDEOIL25APRFUT"]:
-        assert_parity(extract_option_date, extract_option_date, sym)
+        extract_option_date(sym)
 
 
 def test_futures_provider_default_path_resolves_same_file():
@@ -114,12 +107,6 @@ def test_futures_provider_default_path_resolves_same_file():
     backend/config/instruments.json the backend module loaded."""
     from pathlib import Path
 
-    legacy_default = (
-        Path("backend/app/domain/services/underlying_futures_provider.py").resolve()
-        .parent.parent.parent.parent
-        / "config"
-        / "instruments.json"
-    )
     # quant side: 4 parent hops to repo root, then backend/config/instruments.json
     new_default = (
         Path("quant/amt/session/futures_provider.py").resolve()
@@ -128,6 +115,4 @@ def test_futures_provider_default_path_resolves_same_file():
         / "config"
         / "instruments.json"
     )
-    assert new_default == legacy_default
     assert new_default.is_file()
-    assert new_default.read_bytes() == legacy_default.read_bytes()

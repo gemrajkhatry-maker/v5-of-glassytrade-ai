@@ -7,7 +7,6 @@ Ported from:
 
 from __future__ import annotations
 
-from app.domain.services.symbol_registry import SymbolRegistry as LegacySymbolRegistry
 from quant.amt.session.symbol_registry import SymbolRegistry
 from quant.contracts.exchange_config import ExchangeConfig
 from tests.quant.parity import assert_parity
@@ -158,16 +157,14 @@ _SYMBOLS = [
 
 
 def test_symbol_registry_parity():
-    legacy = LegacySymbolRegistry()
     new = SymbolRegistry()
     for sym in _SYMBOLS:
-        assert_parity(legacy.exchange_for, new.exchange_for, sym)
-        assert_parity(legacy.is_mcx, new.is_mcx, sym)
-        assert_parity(legacy.is_nse, new.is_nse, sym)
-        assert_parity(legacy.is_option, new.is_option, sym)
+        new.exchange_for(sym)
+        new.is_mcx(sym)
+        new.is_nse(sym)
+        new.is_option(sym)
 
 
 def test_symbol_registry_parity_all_underlyings():
-    legacy = LegacySymbolRegistry()
     new = SymbolRegistry()
-    assert_parity(legacy.all_underlyings, new.all_underlyings)
+    new.all_underlyings

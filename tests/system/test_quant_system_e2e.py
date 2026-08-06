@@ -16,7 +16,7 @@ if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
 from app.application.services.quant_bridge import QuantBridge
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.value_objects import OHLC
 
 FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "ws_session_long.json"
 

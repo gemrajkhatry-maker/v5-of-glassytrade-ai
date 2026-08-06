@@ -25,8 +25,8 @@ try:
 except ImportError:
     pass
 
-from app.domain.fabio_ai.services.option_scanner import OptionScannerService
-from app.domain.services.underlying_futures_provider import UnderlyingFuturesProvider
+from quant.amt.session.scanner import OptionScannerService
+from quant.amt.session.futures_provider import UnderlyingFuturesProvider
 from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter
 
 

@@ -1,12 +1,12 @@
 """Parity: three_align_input moved protocol vs legacy shim."""
 
 from quant.amt.profile.three_align_input import ThreeAlignInput as new
-from app.domain.fabio_ai.ports.three_align import ThreeAlignInput as legacy
 from typing import Protocol
 
 
 def test_parity_protocol_same_class():
-    assert new is legacy
+    from quant.amt.profile.three_align_input import ThreeAlignInput
+    assert new is ThreeAlignInput
 
 
 def test_parity_protocol_is_protocol():

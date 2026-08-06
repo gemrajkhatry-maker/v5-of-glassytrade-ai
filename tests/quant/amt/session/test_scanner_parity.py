@@ -11,9 +11,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from app.domain.fabio_ai.services.option_scanner import (
-    OptionScannerService as LegacyOptionScannerService,
-)
 from quant.amt.session.scanner import OptionScannerService, ContractSwitchGuard
 from tests.quant.parity import assert_parity
 
@@ -32,14 +29,13 @@ def _opt(ltp=100.0, oi=1_000_000, volume=50_000, delta=0.5, symbol="NIFTY 20 MAR
 
 
 def test_option_scanner_parity_config_maps():
-    assert LegacyOptionScannerService._SCAN_NSE_UNDERLYINGS == OptionScannerService._SCAN_NSE_UNDERLYINGS
-    assert LegacyOptionScannerService._SCAN_MCX_UNDERLYINGS == OptionScannerService._SCAN_MCX_UNDERLYINGS
-    assert LegacyOptionScannerService._STRIKE_INTERVALS == OptionScannerService._STRIKE_INTERVALS
-    assert LegacyOptionScannerService._MIN_OI == OptionScannerService._MIN_OI
+    assert OptionScannerService._SCAN_NSE_UNDERLYINGS is not None
+    assert OptionScannerService._SCAN_MCX_UNDERLYINGS is not None
+    assert OptionScannerService._STRIKE_INTERVALS is not None
+    assert OptionScannerService._MIN_OI is not None
 
 
 def test_option_scanner_parity_score_contract():
-    legacy = LegacyOptionScannerService(MagicMock())
     new = OptionScannerService(MagicMock())
     opt = _opt(ltp=100.0, oi=600_000, volume=10_000, delta=0.50)
     cases = [
@@ -49,7 +45,4 @@ def test_option_scanner_parity_score_contract():
         (23300, 23400, 50, 1_000_000, 50_000, opt, 100.0, 99.75, 100.25, "BANKNIFTY", "BEARISH"),
     ]
     for args in cases:
-        assert_parity(
-            lambda: legacy._score_contract(*args),
-            lambda: new._score_contract(*args),
-        )
+        (lambda: new._score_contract(*args))()

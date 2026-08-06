@@ -8,7 +8,7 @@ from datetime import datetime, time
 # Test 1: MarketState Enum Should Be 2-State Only
 def test_market_state_is_two_state():
     """MarketState should only have BALANCED and IMBALANCED."""
-    from backend.app.domain.trading.models.enums import MarketState
+    from backend.quant.contracts.enums import MarketState
     
     states = list(MarketState)
     assert len(states) == 2, f"Expected 2 states, got {len(states)}: {states}"

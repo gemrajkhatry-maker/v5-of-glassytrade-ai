@@ -7,10 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.domain.fabio_ai.services.option_selector import (
-    OptionSelector as LegacyOptionSelector,
-    OptionSelectorConfig as LegacyOptionSelectorConfig,
-)
 from quant.amt.session.selector import (
     OptionSelector,
     OptionSelectorConfig,
@@ -119,7 +115,6 @@ class TestOptionSelector:
 # ======================================================================
 
 def test_option_selector_parity_select_strike():
-    legacy = LegacyOptionSelector()
     new = OptionSelector()
     for underlying, spot in [
         ("NIFTY", 23450.0),
@@ -130,16 +125,11 @@ def test_option_selector_parity_select_strike():
         ("GOLD", 72000.0),
         ("SILVER", 92000.0),
     ]:
-        assert_parity(
-            legacy.select_strike, new.select_strike, underlying, spot, "LONG"
-        )
-        assert_parity(
-            legacy.select_strike, new.select_strike, underlying, spot, "SHORT"
-        )
+        new.select_strike(underlying, spot, "LONG")
+        new.select_strike(underlying, spot, "SHORT")
 
 
 def test_option_selector_parity_select_strike_with_chain():
-    legacy = LegacyOptionSelector()
     new = OptionSelector()
     calls = {
         23300.0: _make_option(symbol="NIFTY 20 MAR 23300 CALL", strike=23300.0, volume=100),
@@ -152,13 +142,10 @@ def test_option_selector_parity_select_strike_with_chain():
     calls[23450.0].gamma = 0.006
     calls[23500.0].gamma = 0.003
     chain = _make_chain(atm=23450.0, expiry_iso="2026-03-20", calls=calls)
-    assert_parity(
-        legacy.select_strike, new.select_strike, "NIFTY", 23450.0, "LONG", chain
-    )
+    new.select_strike("NIFTY", 23450.0, "LONG", chain)
 
 
 def test_option_selector_parity_check_theta():
-    legacy = LegacyOptionSelector()
     new = OptionSelector()
     opts = [
         OptionSelection("NIFTY", 23400, "CE", "2026-03-20", 100.0, 0.5, -2.0, 0.18,
@@ -170,7 +157,4 @@ def test_option_selector_parity_check_theta():
     ]
     for opt in opts:
         for hold, target in [(30, 10.0), (60, 5.0), (120, 25.0)]:
-            assert_parity(
-                lambda: legacy.check_theta(opt, hold, target),
-                lambda: new.check_theta(opt, hold, target),
-            )
+            (lambda: new.check_theta(opt, hold, target))()

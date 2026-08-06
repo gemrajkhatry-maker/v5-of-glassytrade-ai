@@ -27,7 +27,7 @@ SPLITS = ("train", "val", "test")
 _SESSION_NAME = "NSE_PRIMARY"
 _CATEGORICAL_POC = ("above", "below", "middle")
 
-from app.domain.fabio_ai.services.prompt_builder import render_entry_prompt
+from quant.inference.prompt_builder import render_entry_prompt
 
 
 def _to_float(value):
@@ -112,8 +112,8 @@ def render_row(row: dict) -> dict:
     (generative_ai_service._DEFAULT_INSTRUCTION + the JSON contract reminder),
     so a retrain teaches the model the exact instruction it will see at runtime.
     """
-    from app.domain.fabio_ai.services.generative_ai_service import _DEFAULT_INSTRUCTION
-    from app.domain.fabio_ai.services.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
+    from quant.inference.generative_ai import _DEFAULT_INSTRUCTION
+    from quant.inference.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
 
     messages = row["messages"]
     fields = key_value_to_fields(messages[1]["content"])

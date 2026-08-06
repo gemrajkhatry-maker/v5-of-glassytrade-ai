@@ -1,7 +1,7 @@
 import json
 from decimal import Decimal
-from app.domain.trading.models.value_objects import OHLC, AMTResult, AggressivePrint
-from app.domain.fabio_ai.services.prompt_builder import build_entry_prompt, build_overseer_prompt
+from quant.contracts.value_objects import OHLC, AMTResult, AggressivePrint
+from quant.inference.prompt_builder import build_entry_prompt, build_overseer_prompt
 from app.infrastructure.adapters.mlx_inference_adapter import MLXInferenceAdapter
 from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
 

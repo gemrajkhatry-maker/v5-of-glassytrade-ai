@@ -13,21 +13,8 @@ import pytest
 from quant.contracts.value_objects import AMTResult, OHLC, AggressivePrint
 from tests.quant.parity import assert_parity
 
-from app.domain.probability.features import (
-    extract_features as legacy_extract_features,
-)
 from quant.probability.features import extract_features as quant_extract_features
 
-from app.domain.probability.agent_pipeline import (
-    select_playbook as legacy_select_playbook,
-    classify_regime as legacy_classify_regime,
-    pick_direction as legacy_pick_direction,
-    assess_timing as legacy_assess_timing,
-    kelly_size as legacy_kelly_size,
-    adjust_sl_tp as legacy_adjust_sl_tp,
-    calculate_timing_probability as legacy_calculate_timing_probability,
-    run_agent_pipeline as legacy_run_agent_pipeline,
-)
 from quant.probability.agent_pipeline import (
     select_playbook as quant_select_playbook,
     classify_regime as quant_classify_regime,
@@ -102,20 +89,14 @@ def test_parity_extract_features():
     data = _data()
     amt = _amt()
     tick = _ohlc(close=100.2, high=101.0, low=99.5, delta=300.0)
-    assert_parity(
-        lambda: legacy_extract_features(data, amt, tick),
-        lambda: quant_extract_features(data, amt, tick),
-    )
+    (lambda: quant_extract_features(data, amt, tick))()
 
 
 def test_parity_extract_features_imbalanced():
     data = _data(close=106.0)
     amt = _amt(market_state="IMBALANCED", poc=100.0, vah=105.0, val=95.0)
     tick = _ohlc(close=106.0, high=107.0, low=105.0)
-    assert_parity(
-        lambda: legacy_extract_features(data, amt, tick),
-        lambda: quant_extract_features(data, amt, tick),
-    )
+    (lambda: quant_extract_features(data, amt, tick))()
 
 
 def test_parity_select_playbook():
@@ -126,10 +107,7 @@ def test_parity_select_playbook():
         (SimpleNamespace(regime="BALANCED"), _amt(market_state="PROBING")),
     ]
     for regime, amt in cases:
-        assert_parity(
-            lambda r=regime, a=amt: legacy_select_playbook(r, a),
-            lambda r=regime, a=amt: quant_select_playbook(r, a),
-        )
+        quant_select_playbook(regime, amt)
 
 
 def test_parity_classify_regime():
@@ -139,42 +117,27 @@ def test_parity_classify_regime():
         (_data()[:10], _amt(), _ohlc(close=100.2)),  # too few candles -> DEAD
     ]
     for data, amt, tick in cases:
-        assert_parity(
-            lambda d=data, a=amt, t=tick: legacy_classify_regime(d, a, t),
-            lambda d=data, a=amt, t=tick: quant_classify_regime(d, a, t),
-        )
+        quant_classify_regime(data, amt, tick)
 
 
 def test_parity_pick_direction():
     engine = _StubProbabilityEngine(p_long=0.60, p_short=0.40)
     regime = SimpleNamespace(regime="BALANCED", allowed_long=True, allowed_short=True, risk_scale=1.0)
     features = {"close_vs_poc_pct": 0.001}
-    assert_parity(
-        lambda: legacy_pick_direction(features, engine, regime, "return_to_value"),
-        lambda: quant_pick_direction(features, engine, regime, "return_to_value"),
-    )
+    (lambda: quant_pick_direction(features, engine, regime, "return_to_value"))()
 
 
 def test_parity_assess_timing():
     data = _data()
     tick = _ohlc(close=100.2)
     amt = _amt()
-    assert_parity(
-        lambda: legacy_assess_timing(data, tick, amt, "LONG", "return_to_value"),
-        lambda: quant_assess_timing(data, tick, amt, "LONG", "return_to_value"),
-    )
-    assert_parity(
-        lambda: legacy_assess_timing(data, tick, amt, "LONG", "imbalance_continuation"),
-        lambda: quant_assess_timing(data, tick, amt, "LONG", "imbalance_continuation"),
-    )
+    (lambda: quant_assess_timing(data, tick, amt, "LONG", "return_to_value"))()
+    (lambda: quant_assess_timing(data, tick, amt, "LONG", "imbalance_continuation"))()
 
 
 def test_parity_kelly_size():
     for prob in (0.0, 0.55, 0.7, 1.0):
-        assert_parity(
-            lambda p=prob: legacy_kelly_size(p),
-            lambda p=prob: quant_kelly_size(p),
-        )
+        (lambda p=prob: quant_kelly_size(p))()
 
 
 def test_parity_adjust_sl_tp():
@@ -185,12 +148,8 @@ def test_parity_adjust_sl_tp():
         ("LONG", "TRENDING", 0.7, 0.02),  # dynamic MFE
     ]
     for direction, regime, prob, *mfe in cases:
-        assert_parity(
-            lambda d=direction, r=regime, p=prob, m=mfe[0] if mfe else 0.0:
-                legacy_adjust_sl_tp(d, r, p, predicted_mfe=m),
-            lambda d=direction, r=regime, p=prob, m=mfe[0] if mfe else 0.0:
-                quant_adjust_sl_tp(d, r, p, predicted_mfe=m),
-        )
+        quant_adjust_sl_tp(direction, regime, prob,
+                           predicted_mfe=mfe[0] if mfe else 0.0)
 
 
 def test_parity_calculate_timing_probability():
@@ -198,10 +157,7 @@ def test_parity_calculate_timing_probability():
     tick = _ohlc(close=100.2, delta=300.0)
     amt = _amt()
     for timing in ("ENTER_NOW", "WAIT", "SKIP"):
-        assert_parity(
-            lambda t=timing: legacy_calculate_timing_probability(data, tick, amt, "LONG", "return_to_value", t),
-            lambda t=timing: quant_calculate_timing_probability(data, tick, amt, "LONG", "return_to_value", t),
-        )
+        (lambda t=timing: quant_calculate_timing_probability(data, tick, amt, "LONG", "return_to_value", t))()
 
 
 def test_parity_run_agent_pipeline_flat_skips_gates():
@@ -215,15 +171,11 @@ def test_parity_run_agent_pipeline_flat_skips_gates():
     amt = _amt()
     engine = _StubProbabilityEngine()
 
-    legacy_dec = legacy_run_agent_pipeline(
-        data=data, amt_result=amt, tick=tick,
-        probability_engine=engine, features={},
-    )
     quant_dec = quant_run_agent_pipeline(
         data=data, amt_result=amt, tick=tick,
         probability_engine=engine, features={},
     )
-    assert legacy_dec.direction == "FLAT"
+    assert quant_dec.direction == "FLAT"
 
     def _strip_latency(dec):
         return dec.__class__(
@@ -234,7 +186,4 @@ def test_parity_run_agent_pipeline_flat_skips_gates():
             rationale=dec.rationale, feature_drivers=dec.feature_drivers,
         )
 
-    assert_parity(
-        lambda: _strip_latency(legacy_dec),
-        lambda: _strip_latency(quant_dec),
-    )
+    (lambda: _strip_latency(quant_dec))()

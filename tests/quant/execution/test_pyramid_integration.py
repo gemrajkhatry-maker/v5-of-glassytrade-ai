@@ -101,12 +101,12 @@ class TestPyramidIntegration:
 
     def test_portfolio_add_to_position(self):
         """Portfolio.add_to_position scales into winning position."""
-        from app.domain.trading.models.aggregates import Portfolio
+        from quant.contracts.aggregates import Portfolio
         
         portfolio = Portfolio.create_default()
         
         # Create a mock signal
-        from app.domain.trading.models.entities import Signal, SignalType, Source, SetupType
+        from quant.contracts.entities import Signal, SignalType, Source, SetupType
         import time
         
         signal = Signal.create(

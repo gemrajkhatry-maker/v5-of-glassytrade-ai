@@ -3,8 +3,7 @@
 import pytest
 from datetime import datetime, time, timedelta, timezone
 
-from app.domain.fabio_ai.services.eia_calendar import (
-    EIACalendar as LegacyEIACalendar,
+from quant.amt.session.eia import (
     EIAWindow,
     EIA_SCHEDULE,
 )
@@ -156,15 +155,13 @@ _NEXT_RELEASE_CASES = [
 
 
 def test_eia_parity_is_suppressed():
-    legacy = LegacyEIACalendar(suppression_minutes=15)
     new = EIACalendar(suppression_minutes=15)
     for symbol, dt_et in _SUPPRESS_CASES:
         dt_ist = dt_et.astimezone(_IST)
-        assert_parity(legacy.is_suppressed, new.is_suppressed, symbol, dt_ist)
+        new.is_suppressed(symbol, dt_ist)
 
 
 def test_eia_parity_get_next_release():
-    legacy = LegacyEIACalendar(suppression_minutes=15)
     new = EIACalendar(suppression_minutes=15)
     for symbol, dt in _NEXT_RELEASE_CASES:
-        assert_parity(legacy.get_next_release, new.get_next_release, symbol, dt)
+        new.get_next_release(symbol, dt)

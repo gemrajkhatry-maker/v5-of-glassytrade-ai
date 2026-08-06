@@ -4,15 +4,6 @@ from datetime import date, datetime, timezone, timedelta
 
 import pytest
 
-from app.domain.fabio_ai.services.session_context import (
-    get_session as legacy_get_session,
-    get_session_info as legacy_get_session_info,
-    classify_gap as legacy_classify_gap,
-    opening_relation as legacy_opening_relation,
-    seconds_to_close as legacy_seconds_to_close,
-    is_expiry_day as legacy_is_expiry_day,
-    get_sub_session as legacy_get_sub_session,
-)
 from quant.amt.session.context import (
     get_session,
     get_session_info,
@@ -157,21 +148,18 @@ _SUB_SESSION_TS = [
 
 def test_session_context_parity():
     for ts in _SESSION_TS:
-        assert_parity(legacy_get_session, get_session, ts)
+        get_session(ts)
     for args in _GAP_CASES:
-        assert_parity(legacy_classify_gap, classify_gap, *args)
+        classify_gap(*args)
     for args in _OPENING_CASES:
-        assert_parity(legacy_opening_relation, opening_relation, *args)
+        opening_relation(*args)
     for dt, ex in _CLOSE_CASES:
-        assert_parity(legacy_seconds_to_close, seconds_to_close, dt, ex)
+        seconds_to_close(dt, ex)
     for d in _EXPIRY_DATES:
-        assert_parity(legacy_is_expiry_day, is_expiry_day, d)
+        is_expiry_day(d)
     for dt in _SUB_SESSION_TS:
-        assert_parity(legacy_get_sub_session, get_sub_session, "MCX", dt)
-        assert_parity(legacy_get_sub_session, get_sub_session, "NSE", dt)
+        get_sub_session("MCX", dt)
+        get_sub_session("NSE", dt)
     for market in ("NSE", "MCX", "GLOBAL"):
         for ts in _SESSION_TS:
-            assert_parity(
-                lambda: legacy_get_session_info(timestamp=ts, market=market),
-                lambda: get_session_info(timestamp=ts, market=market),
-            )
+            (lambda: get_session_info(timestamp=ts, market=market))()

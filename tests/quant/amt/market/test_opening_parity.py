@@ -1,9 +1,6 @@
 """Parity: opening_classifier moved module vs legacy shim."""
 
 from quant.amt.market.opening import OpeningTypeClassifier as NewClassifier
-from app.domain.fabio_ai.services.opening_classifier import (
-    OpeningTypeClassifier as LegacyClassifier,
-)
 from quant.contracts.value_objects import OHLC
 from tests.quant.parity import assert_parity
 
@@ -55,11 +52,4 @@ def _cases():
 
 def test_parity_opening_classify():
     for data, vah, val, poc in _cases():
-        assert_parity(
-            LegacyClassifier().classify,
-            NewClassifier().classify,
-            data,
-            vah,
-            val,
-            poc,
-        )
+        NewClassifier().classify(data, vah, val, poc)

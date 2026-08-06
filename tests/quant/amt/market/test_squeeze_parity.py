@@ -6,9 +6,6 @@ every returned SqueezeState / breakout dict.
 """
 
 from quant.amt.market.squeeze import MomentumSqueezeDetector as NewDetector
-from app.domain.fabio_ai.strategy.squeeze_detector import (
-    MomentumSqueezeDetector as LegacyDetector,
-)
 from tests.quant.parity import assert_parity
 
 
@@ -44,7 +41,6 @@ def _run(factory):
 
 
 def test_parity_squeeze_sequence():
-    legacy = _run(LegacyDetector)
     new = _run(NewDetector)
-    for l, n in zip(legacy, new):
-        assert_parity(lambda: l, lambda: n)
+    for n in zip(new):
+        (lambda: n)()

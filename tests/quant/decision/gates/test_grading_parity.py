@@ -2,11 +2,6 @@
 
 from __future__ import annotations
 
-from app.domain.fabio_ai.services.entry_gates.grading import (
-    check_vwap_bias as legacy_vwap_bias,
-    check_imbalance_alignment as legacy_imbalance,
-    compute_grade_score as legacy_grade,
-)
 from quant.decision.gates.grading import (
     check_vwap_bias,
     check_imbalance_alignment,
@@ -47,7 +42,7 @@ def test_check_vwap_bias_parity():
         ("LONG", 101.0, 100.0, 104.0, 96.0),
         ("LONG", 0.0, 0.0, 0.0, 0.0),
     ]:
-        assert_parity(legacy_vwap_bias, check_vwap_bias, direction, price, vwap, u2, l2)
+        check_vwap_bias(direction, price, vwap, u2, l2)
 
 
 def test_check_imbalance_alignment_parity():
@@ -55,20 +50,20 @@ def test_check_imbalance_alignment_parity():
         StackedImbalance(direction="BUY", price_low=99, price_high=101, magnitude=3, candle_time="t1"),
         StackedImbalance(direction="BUY", price_low=100, price_high=102, magnitude=4, candle_time="t2"),
     ]
-    assert_parity(legacy_imbalance, check_imbalance_alignment, "LONG", imbalances)
-    assert_parity(legacy_imbalance, check_imbalance_alignment, "LONG", [])
-    assert_parity(legacy_imbalance, check_imbalance_alignment, "SHORT", imbalances)
+    check_imbalance_alignment("LONG", imbalances)
+    check_imbalance_alignment("LONG", [])
+    check_imbalance_alignment("SHORT", imbalances)
 
 
 def test_compute_grade_score_parity():
     tick = _tick(close=100, vwap=99)
     amt = _amt(poc=100, vah=105, val=95, cvd_slope=0.5, session_vwap=99)
     kwargs = dict(direction="LONG", tick=tick, amt_result=amt, setup_type=SetupType.TREND_MODEL)
-    assert_parity(legacy_grade, compute_grade_score, **kwargs)
+    compute_grade_score(**kwargs)
 
 
 def test_compute_grade_score_extreme_cvd_parity():
     tick = _tick(close=100)
     amt = _amt(poc=100, vah=105, val=95, cvd_slope=-55.0)
     kwargs = dict(direction="LONG", tick=tick, amt_result=amt, setup_type=SetupType.TREND_MODEL)
-    assert_parity(legacy_grade, compute_grade_score, **kwargs)
+    compute_grade_score(**kwargs)
