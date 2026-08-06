@@ -20,6 +20,8 @@ import os
 from pathlib import Path
 from typing import Any, List, Optional
 
+import yaml
+
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
@@ -250,6 +252,47 @@ class SettingsAdapter:
             flags = self._mode_config.scanner_config.get("feature_flags", {})
             return flags.get("quant_decision_enabled", False)
         return os.getenv("QUANT_DECISION_ENABLED", "false").lower() == "true"
+
+    @property
+    def QUANT_EXECUTION_MODE(self) -> str:
+        """Get the quant decision execution gate: ``off|shadow|paper|live``.
+
+        Resolution order:
+        1. ``QUANT_EXECUTION_MODE`` env var (highest priority).
+        2. ``quant_execution_mode`` key in ``feature_flags.yaml``.
+        3. Back-compat ``QUANT_DECISION_ENABLED`` alias (true -> shadow).
+        4. Default ``off`` — byte-identical to today's flag-off behaviour.
+        """
+        env_mode = os.getenv("QUANT_EXECUTION_MODE", "").strip().lower()
+        if env_mode:
+            return env_mode
+        yaml_raw = self._feature_flags_yaml().get("quant_execution_mode")
+        yaml_mode = yaml_raw.strip().lower() if isinstance(yaml_raw, str) else ""
+        if yaml_mode:
+            return yaml_mode
+        return "shadow" if self.QUANT_DECISION_ENABLED else "off"
+
+    def _feature_flags_yaml(self) -> dict:
+        """Load the ``features`` mapping from ``feature_flags.yaml`` (cached).
+
+        Returns ``{}`` on any read/parse failure so callers degrade to their
+        defaults instead of raising.
+        """
+        cached = getattr(self, "_feature_flags_yaml_cache", None)
+        if cached is not None:
+            return cached
+        flags: dict = {}
+        config_path = Path(__file__).resolve().parent.parent.parent / "config"
+        flags_path = config_path / "feature_flags.yaml"
+        try:
+            if flags_path.exists():
+                with open(flags_path) as f:
+                    data = yaml.safe_load(f) or {}
+                flags = data.get("features", data) or {}
+        except Exception:
+            logger.warning("Failed to read %s — using defaults", flags_path, exc_info=True)
+        self._feature_flags_yaml_cache = flags
+        return flags
     
     @property
     def REALISTIC_COST_MODEL(self) -> bool:

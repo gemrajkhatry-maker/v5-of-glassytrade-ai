@@ -171,12 +171,13 @@ class QuantBridge:
         """Feed one closed bar, run the quant decision, and store it on the session.
 
         The auction DTO is identical to ``on_bar_close``. When
-        ``QUANT_DECISION_ENABLED`` is set, the ``DecisionService`` is evaluated
-        against the resulting ``AuctionState`` and ``session.last_quant_decision``
-        (a DTO: {approved, reason, phase, timestamp, signal:{type,entry,sl,tp,rr,
-        confidence}|None}) is stored so ``session_event_router`` can route
-        execution from the quant signal. When the flag is off, nothing is stored
-        and the legacy path is byte-identical.
+        ``QUANT_EXECUTION_MODE`` is not ``off`` (shadow/paper/live), the
+        ``DecisionService`` is evaluated against the resulting ``AuctionState``
+        and ``session.last_quant_decision`` (a DTO: {approved, reason, phase,
+        timestamp, signal:{type,entry,sl,tp,rr,confidence}|None}) is stored so
+        ``session_event_router`` can route execution from the quant signal. When
+        the mode is ``off``, nothing is stored and the legacy path is
+        byte-identical to today's ``QUANT_DECISION_ENABLED=false``.
         """
         from app.config import settings
 
@@ -184,7 +185,7 @@ class QuantBridge:
         if state is None:
             return dto  # duplicate bar time — nothing new to decide
 
-        if not settings.QUANT_DECISION_ENABLED:
+        if settings.QUANT_EXECUTION_MODE == "off":
             return dto
 
         from quant.decision.decision_service import DecisionService

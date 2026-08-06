@@ -3,6 +3,13 @@
 # Environment-specific overrides can change these
 
 features:
+  # ── Quant decision execution gate ──
+  # off = decisions not computed (byte-identical to legacy flag off)
+  # shadow = decisions computed + broadcast as quantDecision, never executed
+  # paper = decisions routed to EntryCoordinator.execute_signal (paper broker)
+  # live = decisions routed to EntryCoordinator.execute_signal (live broker)
+  quant_execution_mode: "off"  # quoted: bare `off` is YAML 1.1 boolean False
+
   # ── Phase 0 flags ──
   true_delta_lee_ready: false          # true activates Lee-Ready, false = Gaussian proxy
   realistic_cost_model: true           # true activates full NSE cost model in PaperBroker

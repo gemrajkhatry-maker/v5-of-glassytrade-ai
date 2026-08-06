@@ -421,9 +421,9 @@ class SessionEventRouter:
                 )
                 return
 
-            # Quant decision engine of record: when the flag is on and the latest
-            # quant decision is approved, the quant signal drives execution and
-            # the legacy AMT gate path is bypassed entirely.
+            # Quant decision engine of record: when the execution mode is not
+            # "off" and the latest quant decision is approved, the quant signal
+            # drives execution and the legacy AMT gate path is bypassed entirely.
             if self._try_execute_quant_decision(event.symbol, session):
                 return
 
@@ -645,13 +645,20 @@ class SessionEventRouter:
             )
 
     def _try_execute_quant_decision(self, symbol: str, session: Any) -> bool:
-        """Route execution from a stored quant decision (flag on + approved).
+        """Route execution from a stored quant decision (mode gate + approved).
 
         Maps the stored quant signal DTO to a domain ``Signal`` via
         ``quant_signal_to_domain`` and hands it to ``EntryCoordinator``. Returns
         True when a quant signal was executed so the legacy gate path is skipped.
+
+        Mode gate (``QUANT_EXECUTION_MODE``):
+        - ``off``: never execute (byte-identical to the old flag-off path).
+        - ``shadow``: log what would have been executed, skip the legacy path,
+          but do NOT touch the entry coordinator.
+        - ``paper``/``live``: map and execute via ``EntryCoordinator``.
         """
-        if not settings.QUANT_DECISION_ENABLED:
+        mode = settings.QUANT_EXECUTION_MODE
+        if mode == "off":
             return False
         decision = getattr(session, "last_quant_decision", None)
         if not decision or not decision.get("approved"):
@@ -675,6 +682,16 @@ class SessionEventRouter:
             timestamp=str(decision.get("timestamp") or ""),
         )
         mapped = quant_signal_to_domain(qs, symbol)
+
+        if mode == "shadow":
+            log.info(
+                "SHADOW quant execution would execute %s dir=%s entry=%.4f (not routed)",
+                symbol,
+                qs.type,
+                qs.entry,
+            )
+            return True
+
         session._last_exec_mono = _time_mod.monotonic()
         log.info(
             "EXECUTING quant decision: %s dir=%s entry=%.4f (bypassing legacy gates)",
