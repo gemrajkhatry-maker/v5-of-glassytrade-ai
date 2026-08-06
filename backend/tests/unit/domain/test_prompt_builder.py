@@ -8,6 +8,7 @@ from app.domain.fabio_ai.services.prompt_builder import (
     parse_overseer_response,
     compute_tighten_sl,
     OverseerAction,
+    render_entry_prompt,
     _build_narrative_market_state,
 )
 from app.domain.fabio_ai.services import generative_ai_service
@@ -54,6 +55,19 @@ def _pos_state(**overrides):
     }
     base.update(overrides)
     return base
+
+
+class TestRenderEntryPrompt:
+    def test_render_entry_prompt_is_used_by_build_entry_prompt(self):
+        data = {"ltp": 100, "vah": 105, "val": 95, "poc": 100, "delta": 50}
+        narrative = render_entry_prompt(data)
+        prompt = build_entry_prompt(data)
+        assert prompt.startswith(narrative)
+
+    def test_render_entry_prompt_handles_missing_keys(self):
+        rendered = render_entry_prompt({})
+        assert isinstance(rendered, str)
+        assert len(rendered) > 0
 
 
 class TestBuildEntryPrompt:

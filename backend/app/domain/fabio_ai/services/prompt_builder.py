@@ -45,12 +45,17 @@ class OverseerAction(BaseModel):
 
 
 def _build_narrative_session_context(data: Dict[str, Any]) -> list[str]:
-    """#1 Session context: session name, prior data, gap, IB."""
+    """#1 Session context: session name, prior data, gap, IB.
+
+    Tolerant of a partial key set: the training dataset only provides a
+    session tag, so `session_name` falls back to the live NSE default and the
+    PRIOR SESSION line is skipped entirely when no prior-* keys are present
+    (the live app always sends them, even as 0.0).
+    """
     parts: list[str] = []
-    session_name = data.get("session_name", "")
+    session_name = data.get("session_name") or "NSE_PRIMARY"
+    parts.append(f"SESSION: {session_name}.")
     favor_strategy = data.get("favor_strategy", "")
-    if session_name:
-        parts.append(f"SESSION: {session_name}.")
     if favor_strategy and favor_strategy != "NEUTRAL":
         active_model = (
             "TREND CONTINUATION"
@@ -58,17 +63,18 @@ def _build_narrative_session_context(data: Dict[str, Any]) -> list[str]:
             else "MEAN REVERSION"
         )
         parts.append(f"Session favors: {active_model}.")
-    prior_poc = data.get("prior_poc", 0)
-    prior_vah = data.get("prior_vah", 0)
-    prior_val = data.get("prior_val", 0)
-    if prior_poc > 0 and prior_vah > 0 and prior_val > 0:
-        parts.append(
-            f"PRIOR SESSION: POC {prior_poc:.0f}, VAH {prior_vah:.0f}, VAL {prior_val:.0f}."
-        )
-    else:
-        parts.append(
-            "PRIOR SESSION: No historical data — using current session VA only."
-        )
+    if "prior_poc" in data or "prior_vah" in data or "prior_val" in data:
+        prior_poc = data.get("prior_poc", 0)
+        prior_vah = data.get("prior_vah", 0)
+        prior_val = data.get("prior_val", 0)
+        if prior_poc > 0 and prior_vah > 0 and prior_val > 0:
+            parts.append(
+                f"PRIOR SESSION: POC {prior_poc:.0f}, VAH {prior_vah:.0f}, VAL {prior_val:.0f}."
+            )
+        else:
+            parts.append(
+                "PRIOR SESSION: No historical data — using current session VA only."
+            )
     gap_type = data.get("gap_type", "")
     opening_bias = data.get("opening_bias", "")
     if gap_type:
@@ -103,7 +109,14 @@ def _build_narrative_market_state(data: Dict[str, Any]) -> list[str]:
     else:
         parts.append("MARKET STATE: IMBALANCED. Active model: TREND CONTINUATION.")
         parts.append("Seek: Pullback to LVN → continuation.")
-    if vah > 0 and val > 0 and price > 0:
+    if (
+        isinstance(vah, (int, float))
+        and isinstance(val, (int, float))
+        and isinstance(price, (int, float))
+        and vah > 0
+        and val > 0
+        and price > 0
+    ):
         va_width = vah - val
         if va_width > 0:
             if price > vah:
@@ -139,14 +152,19 @@ def _build_narrative_market_state(data: Dict[str, Any]) -> list[str]:
     }
     if _ps in shapes:
         parts.append(shapes[_ps])
-    if val > 0 and price > 0:
+    if isinstance(val, (int, float)) and isinstance(price, (int, float)) and val > 0 and price > 0:
         if price <= val * 1.002:
             parts.append(f"LOCATION: Price at VAL ({val:.0f}). Entry zone for LONG.")
-        elif poc > 0 and abs(price - poc) / poc < 0.003:
+        elif (
+            isinstance(poc, (int, float))
+            and isinstance(vah, (int, float))
+            and poc > 0
+            and abs(price - poc) / poc < 0.003
+        ):
             parts.append(
                 f"LOCATION: Price at POC ({poc:.0f}). Fair value — WAIT for bias."
             )
-        else:
+        elif isinstance(poc, (int, float)) and isinstance(vah, (int, float)):
             parts.append(
                 f"LOCATION: Price {price:.0f}. POC={poc:.0f}, VAH={vah:.0f}, VAL={val:.0f}."
             )
@@ -267,11 +285,95 @@ def _build_core_amt_narrative(data: Dict[str, Any]) -> str:
 
     Shared by both entry and overseer prompts to ensure context parity.
     """
+    return render_entry_prompt(data)
+
+
+def render_entry_prompt(fields: Dict[str, Any]) -> str:
+    """Render the shared AMT entry narrative (SESSION/MARKET STATE/ORDER FLOW).
+
+    Pure and side-effect-free. Used by both live inference (via
+    build_entry_prompt) and the dataset renderer (scripts/dataset_render.py),
+    which maps the training dataset's `key: value` rows onto the live
+    market_data_ai vocabulary.
+
+    Tolerates a partial key set: missing `session_name` defaults to the live
+    NSE session, absent prior-* keys skip the PRIOR SESSION line, and a
+    categorical `poc` ("above"/"below"/"middle") is emitted instead of the
+    numeric location math. Never crashes on missing keys.
+
+    The CALL/PUT option-mapping block and the JSON schema instruction are NOT
+    part of this narrative — build_entry_prompt appends them for live inference
+    only (the dataset system prompt already says "Output JSON only").
+    """
+    data = dict(fields)
+    if isinstance(data.get("poc"), str):
+        # Categorical dataset POC tag must not reach the numeric location math.
+        data["poc_tag"] = data["poc"]
+        data["poc"] = 0
     parts: list[str] = []
     parts.extend(_build_narrative_session_context(data))
     parts.extend(_build_narrative_market_state(data))
     parts.extend(_build_narrative_order_flow(data))
+    parts.extend(_build_narrative_dataset_context(data))
     return " ".join(parts)
+
+
+def _build_narrative_dataset_context(data: Dict[str, Any]) -> list[str]:
+    """Emit dataset-remapped keys the live market_data_ai never sends.
+
+    The training dataset encodes signal categorically (poc: above, phase:
+    POWER_HOUR, absorption: at_VAH, ib_range: tight) plus flat numeric fields
+    (entry/stop_pts/current/losses_today/...). Rendering them here lets a
+    retrain on nifty_amt_data_livefmt see live-style prose. The live app never
+    populates these keys, so build_entry_prompt output is unchanged.
+    """
+    parts: list[str] = []
+    poc_tag = data.get("poc_tag", "")
+    if poc_tag == "above":
+        parts.append("POC: price below POC — sellers defending above.")
+    elif poc_tag == "below":
+        parts.append("POC: price above POC — buyers defending below.")
+    elif poc_tag == "middle":
+        parts.append("POC: price at POC — fair value, no edge.")
+    phase = data.get("phase", "")
+    if phase:
+        parts.append(f"Phase: {phase}.")
+    absorption = data.get("absorptionSide", "")
+    if absorption:
+        side = "VAH" if "VAH" in str(absorption).upper() else "VAL"
+        parts.append(f"Absorption: absorbing at {side}.")
+    ib_range = data.get("ib_range", "")
+    if ib_range:
+        parts.append(f"IB range: {ib_range}.")
+    if data.get("atr_falling") == "yes":
+        parts.append("ATR: falling — contraction, mean reversion bias.")
+    note = data.get("note", "")
+    if note:
+        parts.append(f"NOTE: {note}.")
+    for key in ("symbol", "time"):
+        if data.get(key):
+            parts.append(f"{key.upper()}: {data[key]}.")
+    auction = []
+    for key in (
+        "entry",
+        "stop_pts",
+        "current",
+        "losses_today",
+        "profit_today",
+        "spot",
+        "futures",
+        "basis",
+        "level",
+        "buffer",
+        "preopen_poc",
+        "account",
+    ):
+        value = data.get(key)
+        if isinstance(value, (int, float)) and value != 0:
+            auction.append(f"{key}={value:g}")
+    if auction:
+        parts.append("AUCTION: " + ", ".join(auction) + ".")
+    return parts
 
 
 # =====================================================================
@@ -281,7 +383,7 @@ def _build_core_amt_narrative(data: Dict[str, Any]) -> str:
 
 def build_entry_prompt(data: Dict[str, Any], allow_short: bool = False) -> str:
     """Build entry prompt using the core AMT narrative."""
-    narrative = _build_core_amt_narrative(data)
+    narrative = render_entry_prompt(data)
 
     # Add option-specific context for entry
     opt_parts = []
@@ -321,6 +423,10 @@ def build_entry_prompt(data: Dict[str, Any], allow_short: bool = False) -> str:
     if opt_parts:
         final_prompt += " " + " ".join(opt_parts)
 
+    # ponytail: the CALL/PUT option-mapping block + JSON schema suffix are
+    # build_entry_prompt-only — the training dataset has no option context and
+    # its system prompt already says "Output JSON only", so render_entry_prompt
+    # (shared with scripts/dataset_render.py) deliberately omits both.
     # Legacy tests expect "Respond ONLY with a JSON object" explicitly if they match that exact string
     # We add it here to ensure compatibility while keeping the schema instruction
     return (
