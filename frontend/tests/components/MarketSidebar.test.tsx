@@ -101,9 +101,9 @@ describe('MarketSidebar', () => {
     expect(screen.getByText(/2 visible/i)).toBeInTheDocument();
   });
 
-  it('renders trade history section', () => {
+  it('does not render the recent-trades panel (closedTrades is canonical in JournalPage)', () => {
     render(<MarketSidebar {...defaultProps} />);
-    expect(screen.getByText(/NIFTY 25500 trades/i)).toBeInTheDocument();
+    expect(screen.queryByText(/trades/i)).toBeNull();
   });
 
   it('displays empty state when no matching symbols', async () => {
@@ -141,6 +141,29 @@ describe('MarketSidebar', () => {
     // Symbol cards render as buttons (not listitems) in the current design
     const items = screen.getAllByRole('button');
     expect(items.length).toBeGreaterThan(0);
+  });
+
+  it('does not show probability in the sidebar (canonical location is the banner)', () => {
+    const props = {
+      ...defaultProps,
+      instruments: {
+        'NIFTY 27 FEB 25500 CALL': createMockInstrument('NIFTY 27 FEB 25500 CALL', {
+          agentDecision: {
+            direction: 'LONG' as const,
+            probability: 0.6,
+            regime: 'TRENDING',
+            timing: 'ENTER_NOW',
+            sizeFraction: 0.5,
+            latencyUs: 0,
+            rationale: 'x',
+          },
+        }),
+      },
+    };
+
+    render(<MarketSidebar {...props} />);
+    expect(screen.queryByText(/Prob/i)).toBeNull();
+    expect(screen.queryByText(/60%/)).toBeNull();
   });
 
   it('does not show UNSAFE badge even when runtimeSafety.unsafeToTrade is set', () => {

@@ -1015,7 +1015,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         <div className="absolute top-4 right-4 z-40 w-72 max-h-[80%] overflow-hidden">
           <DecisionCard
             direction={agentDecision.direction || 'FLAT'}
-            probability={agentDecision.probability || 0}
             regime={agentDecision.regime || ''}
             rationale={agentDecision.rationale || ''}
           />

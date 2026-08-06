@@ -1,12 +1,11 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import ChartScene from './components/ChartScene';
-import { LiveOpportunityCard } from './components/ai';
 import { AIAnalysisPanel } from './components/AIAnalysisPanel';
 import MarketSidebar from './components/MarketSidebar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { DEFAULT_CONFIG } from './constants';
-import { ChartConfig, AgentDecision } from './types';
+import { ChartConfig } from './types';
 import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, BookOpen, Eye } from 'lucide-react';
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
 import JournalPage from './components/JournalPage';
@@ -131,21 +130,6 @@ function App() {
     const handleSymbolSelect = useCallback((symbol: string) => {
         setActiveSymbol(symbol);
     }, [setActiveSymbol]);
-
-    // Find the best live opportunity across all scanned instruments
-    const bestOpportunity = useMemo(() => {
-        let best: { symbol: string, agentDecision: AgentDecision, ltp: number } | null = null;
-        Object.entries(instruments).forEach(([sym, data]) => {
-            const dec = data.agentDecision;
-            if (dec && dec.timing === 'ENTER_NOW') {
-                if (!best || dec.probability > best.agentDecision.probability) {
-                    const ltp = data.data && data.data.length > 0 ? data.data[data.data.length - 1].close : 0;
-                    best = { symbol: sym, agentDecision: dec, ltp };
-                }
-            }
-        });
-        return best;
-    }, [instruments]);
 
     const effectiveConfig = useMemo<ChartConfig>(() => ({
         ...config,
@@ -298,19 +282,6 @@ function App() {
                                     <PanelsTopLeft size={20} className="rotate-180" />
                                 </button>
                             )}
-                        </div>
-                    </div>
-
-                    {/* Bottom Right: Live Opportunity Panel */}
-                    <div className="flex justify-end items-end pointer-events-none">
-                        <div className={`pointer-events-auto transition-all duration-300 origin-bottom-right ${showControls ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none translate-y-10'}`}>
-                            <LiveOpportunityCard 
-                                symbol={bestOpportunity?.symbol || null}
-                                agentDecision={bestOpportunity?.agentDecision || null}
-                                ltp={bestOpportunity?.ltp || 0}
-                                onSelect={(sym) => { setActiveSymbol(sym); setShowControls(false); }}
-                                onClose={() => setShowControls(false)}
-                            />
                         </div>
                     </div>
 

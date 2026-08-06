@@ -4,7 +4,6 @@ import { sanitizeRationale } from '../../utils/textSanitizer';
 
 interface DecisionCardProps {
   direction: string;
-  probability: number;
   regime: string;
   rationale: string;
 }
@@ -13,10 +12,11 @@ interface DecisionCardProps {
  * DecisionCard displays the current AI trading decision with expandable rationale.
  * Extracted from ChartScene for better maintainability.
  * Props mirror the backend's real `agentDecision` contract.
+ * Direction/probability/timing are canonical in the ModelStateBanner — this
+ * chart overlay keeps only rationale + direction.
  */
 const DecisionCard: React.FC<DecisionCardProps> = ({ 
   direction, 
-  probability, 
   regime, 
   rationale 
 }) => {
@@ -29,7 +29,6 @@ const DecisionCard: React.FC<DecisionCardProps> = ({
   const directionColor = isLong ? 'text-emerald-400' : isShort ? 'text-red-400' : 'text-slate-400';
   const directionBg = isLong ? 'bg-emerald-500/20 border-emerald-500/30' : isShort ? 'bg-red-500/20 border-red-500/30' : 'bg-slate-500/20 border-slate-500/30';
   const directionIcon = isLong ? '▲' : isShort ? '▼' : '—';
-  const prob = probability || 0;
 
   return (
     <div className="flex flex-col bg-slate-900/80 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl overflow-hidden font-sans">
@@ -55,17 +54,11 @@ const DecisionCard: React.FC<DecisionCardProps> = ({
       </div>
 
       {/* Decision Footer */}
-      <div className="p-3 flex items-center justify-between bg-black/40">
+      <div className="p-3 flex items-center bg-black/40">
         <div className="flex flex-col">
           <span className="text-[9px] text-white/30 uppercase font-bold tracking-tighter italic">Decision</span>
           <span className={`text-xs font-black uppercase tracking-wider ${directionColor}`}>
             {directionIcon} {direction}{regime && direction !== 'FLAT' ? ` (${regime === 'TRENDING' ? 'Trend' : regime === 'BALANCED' ? 'Reversion' : regime})` : ''}
-          </span>
-        </div>
-        <div className="flex flex-col items-end">
-          <span className="text-[9px] text-white/30 uppercase font-bold tracking-tighter italic">P({direction})</span>
-          <span className={`text-xs font-black uppercase tracking-wider ${directionColor}`}>
-            {(prob * 100).toFixed(1)}%
           </span>
         </div>
       </div>

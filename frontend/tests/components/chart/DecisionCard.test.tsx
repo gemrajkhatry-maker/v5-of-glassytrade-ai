@@ -6,9 +6,7 @@ describe('DecisionCard', () => {
   // Props mirror the real agentDecision contract.
   const defaultProps = {
     direction: 'LONG' as const,
-    probability: 0.75,
     regime: 'TRENDING',
-    timing: 'ENTER_NOW',
     rationale: 'Strong bullish momentum with volume confirmation',
   };
 
@@ -35,21 +33,6 @@ describe('DecisionCard', () => {
   it('shows regime in parentheses for SHORT BALANCED', () => {
     render(<DecisionCard {...defaultProps} direction="SHORT" regime="BALANCED" />);
     expect(screen.getByText(/Reversion/)).toBeInTheDocument();
-  });
-
-  it('displays probability percentage for LONG', () => {
-    render(<DecisionCard {...defaultProps} />);
-    expect(screen.getByText(/75\.0%/)).toBeInTheDocument();
-  });
-
-  it('displays probability percentage for SHORT', () => {
-    render(<DecisionCard {...defaultProps} direction="SHORT" probability={0.25} />);
-    expect(screen.getByText(/25\.0%/)).toBeInTheDocument();
-  });
-
-  it('displays 0% probability for FLAT', () => {
-    render(<DecisionCard {...defaultProps} direction="FLAT" probability={0} />);
-    expect(screen.getByText(/0\.0%/)).toBeInTheDocument();
   });
 
   it('renders rationale when expanded', async () => {
@@ -97,16 +80,6 @@ describe('DecisionCard', () => {
     render(<DecisionCard {...defaultProps} rationale="" />);
     // Component should render without crashing
     expect(screen.getByText(/▲ LONG/)).toBeInTheDocument();
-  });
-
-  it('handles zero probability', () => {
-    render(<DecisionCard {...defaultProps} probability={0} />);
-    expect(screen.getByText(/0\.0%/)).toBeInTheDocument();
-  });
-
-  it('handles probability of 1.0 (100%)', () => {
-    render(<DecisionCard {...defaultProps} probability={1.0} />);
-    expect(screen.getByText(/100\.0%/)).toBeInTheDocument();
   });
 
   it('does not show regime for FLAT direction', () => {

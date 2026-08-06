@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import GlassPanel from './GlassPanel';
 import { InstrumentState } from '../types';
-import { TrendingUp, TrendingDown, Search, BarChart3, History, Radio, Filter } from 'lucide-react';
+import { Search, BarChart3, Radio, Filter } from 'lucide-react';
 
 interface MarketSidebarProps {
     instruments: Record<string, InstrumentState>;
@@ -59,12 +59,8 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const totalSize = openPositions.reduce((sum, p) => sum + (p.size || 0), 0);
 
     const isDead = inst.genAIAnalysis?.rationale?.includes('DEAD') || inst.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
-    const prob = inst.agentDecision?.probability || 0;
-    const timing = inst.agentDecision?.timing || 'SKIP';
     const mode = inst.amtAnalysis?.marketState || 'BALANCED';
     const modeAbbr = (mode || 'BAL').substring(0, 3).toUpperCase();
-    const actionLabel =
-        timing === 'ENTER_NOW' ? 'ENTER' : timing === 'MONITOR' ? 'WAIT' : timing === 'SKIP' ? 'SKIP' : (timing || '—').slice(0, 6);
 
     return (
         <button
@@ -82,8 +78,8 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 border-b border-glassy-border-subtle
             `}
         >
-            {/* Symbol & Tag (24%) */}
-            <div className="flex flex-col w-[24%] overflow-hidden pr-2">
+            {/* Symbol & Tag (40%) */}
+            <div className="flex flex-col w-[40%] overflow-hidden pr-2">
                 <div className="flex items-center gap-1.5 min-h-[14px]">
                     {hasOpenPosition ? (
                         <span className="text-[9px] font-bold text-glassy-bull-primary animate-pulse">●</span>
@@ -103,78 +99,27 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 <span className="text-[8px] text-glassy-text-tertiary font-mono ml-3">{hasData || hasOpenPosition ? tag : '\u00A0'}</span>
             </div>
 
-            {/* Mode + action merged (28%) */}
-            <div className="w-[28%] min-w-0 flex items-center">
+            {/* Mode (plain text) — marketState shown canonically in the ModelStateBanner */}
+            <div className="w-[30%] min-w-0 flex items-center">
                 {hasOpenPosition ? (
                     <span className="text-[9px] font-bold text-glassy-bull-primary font-mono truncate">
                         OPEN · {totalSize.toFixed(0)}L
                     </span>
                 ) : !hasData ? (
                     <span className="h-4 w-full max-w-[5.5rem] rounded bg-glassy-text-disabled/20 animate-pulse" />
-                ) : (
-                    <span
-                        className={`inline-flex items-center gap-1 text-[8px] font-mono px-1 py-0.5 rounded-sm border max-w-full ${
-                            mode === 'BALANCED' ? 'text-glassy-neutral-warm bg-glassy-neutral-warm/10 border-glassy-neutral-warm/20' :
-                            mode === 'PROBING' ? 'text-glassy-neutral-cool bg-glassy-neutral-cool/10 border-glassy-neutral-cool/20' :
-                            mode === 'TRENDING' ? 'text-glassy-bull-primary bg-glassy-bull-primary/10 border-glassy-bull-primary/20' :
-                            mode === 'BREAKING' ? 'text-glassy-bear-primary bg-glassy-bear-primary/10 border-glassy-bear-primary/20' :
-                            'text-glassy-text-disabled bg-glassy-bg-elevated border-glassy-border-subtle'
-                        }`}
-                    >
-                        <span className="shrink-0">{modeAbbr}</span>
-                        <span className="text-glassy-text-tertiary">·</span>
-                        <span className={`shrink-0 inline-flex items-center gap-0.5 font-bold ${
-                            timing === 'ENTER_NOW' ? 'text-glassy-bull-primary' : timing === 'SKIP' ? 'text-glassy-bear-primary' : 'text-glassy-warning'
-                        }`}>
-                            <span className={`w-1 h-1 rounded-full shrink-0 ${timing === 'ENTER_NOW' ? 'bg-glassy-bull-primary animate-pulse' : timing === 'SKIP' ? 'bg-glassy-bear-primary' : 'bg-glassy-warning'}`} />
-                            {actionLabel}
-                        </span>
-                    </span>
-                )}
-            </div>
-
-            {/* Probability & Bar (20%) */}
-            <div className="w-[20%] flex flex-col gap-0.5 pr-2">
-                {hasOpenPosition ? (
-                    <span className={`text-[10px] font-mono font-bold tabular-nums ${totalPnl >= 0 ? 'text-glassy-bull-primary' : 'text-glassy-bear-primary'}`}>
-                        {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(0)}
-                    </span>
-                ) : !hasData ? (
-                    <>
-                        <span className="h-2 w-8 rounded bg-glassy-text-disabled/20 animate-pulse" />
-                        <div className="w-full h-0.5 bg-glassy-text-disabled/20 rounded-full overflow-hidden">
-                            <div className="h-full w-1/3 bg-glassy-text-disabled/20 animate-pulse" />
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <span className={`text-[9px] font-mono font-bold tabular-nums ${prob >= 0.6 ? 'text-glassy-bull-primary' : prob >= 0.5 ? 'text-glassy-warning' : 'text-glassy-bear-primary'}`}>
-                            {Math.round(prob * 100)}%
-                        </span>
-                        <div className="w-full h-0.5 bg-glassy-text-disabled/20 rounded-full overflow-hidden">
-                            <div className="h-full transition-all duration-500" style={{ width: `${prob * 100}%`, backgroundColor: prob >= 0.6 ? '#00c896' : prob >= 0.5 ? '#ffa94d' : '#ff4757' }} />
-                        </div>
-                    </>
-                )}
-            </div>
-
-            {/* LTP / DEAD (16%) */}
-            <div className="w-[16%] flex flex-col items-end pr-2">
-                {isDead ? (
-                    <span className="text-[7px] font-mono font-bold text-glassy-bear-primary/70 border border-glassy-bear-primary/20 px-1 rounded-sm animate-pulse">
+                ) : isDead ? (
+                    <span className="inline-flex text-[8px] font-mono font-bold text-glassy-bear-primary/70 border border-glassy-bear-primary/20 px-1 rounded-sm animate-pulse">
                         DEAD
                     </span>
-                ) : !hasData && !hasOpenPosition ? (
-                    <span className="h-2.5 w-10 rounded bg-glassy-text-disabled/20 animate-pulse" />
                 ) : (
-                    <span className="font-mono text-[10px] text-glassy-text-secondary font-bold tabular-nums">
-                        {price > 0 ? price.toFixed(1) : '—'}
+                    <span className="text-[8px] font-mono text-glassy-text-tertiary truncate">
+                        {modeAbbr}
                     </span>
                 )}
             </div>
 
-            {/* Change% or Live PnL indicator (12%) */}
-            <div className="w-[12%] text-right">
+            {/* Change% or Live PnL indicator (30%) */}
+            <div className="w-[30%] text-right">
                 {hasOpenPosition ? (
                     <span className={`text-[8px] font-mono ${totalPnl >= 0 ? 'text-glassy-bull-primary/80' : 'text-glassy-bear-primary/80'}`}>
                         {totalPnl >= 0 ? '▲' : '▼'}
@@ -197,7 +142,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
     const [filter, setFilter] = useState('');
     const [modeFilter, setModeFilter] = useState('ALL');
     const [actionFilter, setActionFilter] = useState('ALL');
-    const [sortBy, setSortBy] = useState<'ACTION' | 'PROB'>('PROB');
+    const [sortBy, setSortBy] = useState<'ACTION' | 'PROB'>('ACTION');
 
     const symbols = Object.keys(instruments);
     const filtered = useMemo(() => {
@@ -239,13 +184,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
     }, [symbols, filter, modeFilter, actionFilter, instruments, sortBy]);
 
     // Filter trades for the ACTIVE symbol only
-    const recentTrades = React.useMemo(() => {
-        const activeInstrument = instruments[activeSymbol];
-        if (!activeInstrument) return [];
-
-        return [...activeInstrument.portfolio.closedTrades]
-            .sort((a, b) => new Date(b.exitTime || 0).getTime() - new Date(a.exitTime || 0).getTime());
-    }, [instruments, activeSymbol]);
+    // (recent-trades panel removed — closedTrades is canonical in JournalPage)
 
     return (
         <GlassPanel className="h-full w-[280px] flex flex-col border-r border-glassy-border-default rounded-none rounded-r-md bg-glassy-bg-secondary shadow-xl z-50">
@@ -307,15 +246,11 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                         
                         {/* Column Header */}
                         <div className="flex w-full text-[9px] text-glassy-text-disabled font-mono mt-3 px-2 pb-1 border-b border-glassy-border-subtle uppercase tracking-tighter">
-                            <div className="w-[24%]">Symbol</div>
-                            <div className="w-[28%] cursor-pointer hover:text-glassy-text-tertiary" onClick={() => setSortBy('ACTION')} title="Sort by action priority">
+                            <div className="w-[40%]">Symbol</div>
+                            <div className="w-[30%] cursor-pointer hover:text-glassy-text-tertiary" onClick={() => setSortBy(sortBy === 'ACTION' ? 'PROB' : 'ACTION')} title="Sort by action priority">
                                 Status {sortBy === 'ACTION' ? '↓' : '↕'}
                             </div>
-                            <div className="w-[20%] cursor-pointer hover:text-glassy-text-tertiary" onClick={() => setSortBy('PROB')} title="Sort by probability">
-                                Prob% {sortBy === 'PROB' ? '↓' : '↕'}
-                            </div>
-                            <div className="w-[16%] text-right pr-2">LTP</div>
-                            <div className="w-[12%] text-right">Chg</div>
+                            <div className="w-[30%] text-right">Chg</div>
                         </div>
                     </div>
                 </div>
@@ -336,55 +271,6 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                             onSelect={onSelect}
                         />
                     ))}
-                </div>
-            </div>
-
-            {/* --- TRADE HISTORY (Bottom Section) --- */}
-            <div className="h-[250px] border-t border-glassy-border-default flex flex-col bg-glassy-bg-primary/30 shrink-0">
-                <div className="p-3 border-b border-glassy-border-subtle flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                        <History className="text-glassy-neutral-cool" size={16} />
-                        <h3 className="font-bold text-xs tracking-wider text-glassy-text-secondary uppercase">
-                            {activeSymbol ? `${shortSymbol(activeSymbol).name} Trades` : 'Recent Trades'}
-                        </h3>
-                    </div>
-                </div>
-
-                <div className="flex-1 overflow-y-auto p-2 space-y-1">
-                    {recentTrades.length === 0 ? (
-                        <div className="h-full flex flex-col items-center justify-center text-glassy-text-disabled">
-                            <History size={24} className="mb-2 opacity-50" />
-                            <span className="text-[9px] italic">No closed trades for {shortSymbol(activeSymbol).name}</span>
-                        </div>
-                    ) : (
-                        recentTrades.map(trade => (
-                            <div key={trade.id} className="p-2 rounded-sm bg-glassy-bg-elevated/50 border border-glassy-border-subtle text-xs hover:bg-glassy-bg-hover transition-colors space-y-1">
-                                <div className="flex justify-between items-center">
-                                    <div className="flex items-center gap-1.5">
-                                        <span className="font-bold text-glassy-text-primary">{shortSymbol(trade.symbol).name}</span>
-                                        <span className={`text-[9px] px-1 rounded-sm ${trade.side === 'LONG' ? 'bg-glassy-bull-primary/20 text-glassy-bull-primary' : 'bg-glassy-bear-primary/20 text-glassy-bear-primary'}`}>
-                                            {trade.side}
-                                        </span>
-                                        {trade.size > 0 && <span className="text-[9px] text-glassy-text-tertiary">x{(trade.originalSize ?? trade.size).toFixed(0)}</span>}
-                                    </div>
-                                    <div className={`font-mono font-bold ${trade.pnl >= 0 ? 'text-glassy-bull-primary' : 'text-glassy-bear-primary'}`}>
-                                        {trade.pnl >= 0 ? '+' : ''}{trade.pnl.toFixed(2)}
-                                    </div>
-                                </div>
-                                <div className="flex justify-between text-[9px] text-glassy-text-tertiary font-mono">
-                                    <span>Entry: {trade.entryPrice?.toFixed(2)}</span>
-                                    <span>Exit: {trade.exitPrice?.toFixed(2) || '—'}</span>
-                                </div>
-                                <div className="flex justify-between text-[8px] text-glassy-text-disabled">
-                                    <span>{new Date(trade.entryTime || '').toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })} → {new Date(trade.exitTime || '').toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}</span>
-                                </div>
-                                <div className="flex justify-between text-[8px]">
-                                    <span className="text-glassy-text-disabled">{trade.source}</span>
-                                    {trade.closeReason && <span className="text-glassy-warning/70">{trade.closeReason}</span>}
-                                </div>
-                            </div>
-                        ))
-                    )}
                 </div>
             </div>
 
