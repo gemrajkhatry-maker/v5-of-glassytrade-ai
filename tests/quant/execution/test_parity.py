@@ -414,3 +414,45 @@ def test_risk_manager_record_trade_result_parity():
         lambda: _rm_record_trade(legacy),
         lambda: _rm_record_trade(QuantRiskManager),
     )
+
+
+# ---------------------------------------------------------------------------
+# SignalValidator
+# ---------------------------------------------------------------------------
+
+
+def _run_signal_validator(validator_cls) -> dict:
+    from quant.contracts.enums import SignalType, SetupType, Source
+    from quant.contracts.entities import Signal
+    from quant.contracts.value_objects import OHLC
+
+    signal = Signal(
+        type=SignalType.BUY, price=100, reason="test",
+        stop_loss=90, take_profit=110, timestamp="2026-01-01T10:00:00Z",
+        setup=SetupType.TREND_MODEL, source=Source.AMT,
+    )
+    tick = OHLC(
+        time="2026-01-01T10:05:00Z",
+        open=100.0, high=101.0, low=99.0, close=100.0,
+        volume=1000, vwap=100.0,
+        taker_buy_volume=600, delta=200,
+    )
+    return {
+        "stale": validator_cls.validate_staleness(signal, tick, max_age_seconds=60),
+        "fresh": validator_cls.validate_staleness(signal, tick),
+        "direction_ok": validator_cls.validate_direction(signal, "LONG"),
+        "direction_bad": validator_cls.validate_direction(signal, "SHORT"),
+        "vwap_ok": validator_cls.validate_vwap_extreme(signal, 0.0, 0.0),
+        "vwap_extreme": validator_cls.validate_vwap_extreme(signal, 50.0, 25.0),
+        "all": validator_cls.validate_all(signal, tick, "LONG"),
+    }
+
+
+def test_signal_validator_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.trading.services.signal_validator").SignalValidator
+    from quant.execution.signal_validator import SignalValidator as QuantSignalValidator
+    assert_parity(
+        lambda: _run_signal_validator(legacy),
+        lambda: _run_signal_validator(QuantSignalValidator),
+    )
