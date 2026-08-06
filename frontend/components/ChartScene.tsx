@@ -11,7 +11,7 @@ import {
   IPriceLine,
   SeriesMarker,
 } from 'lightweight-charts';
-import { OHLCData, ChartConfig, TradeSignal, TradePosition, AIAnalysis, AMTAnalysis, ChartMode, AggressivePrint } from '../types';
+import { OHLCData, ChartConfig, TradePosition, AIAnalysis, AMTAnalysis, ChartMode, AggressivePrint } from '../types';
 import { Brain, Cpu, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 import { sanitizeRationale } from '../utils/textSanitizer';
 import DecisionCard from './chart/DecisionCard';
@@ -38,23 +38,6 @@ import {
   getVolumeSeriesConfig,
   VolumeDataPoint,
 } from './chart/VolumeSeriesManager';
-import {
-  generateProfileConfig,
-  validateProfileData,
-  ProfileLevel,
-  ProfileRenderOptions,
-} from './chart/ProfileHistogram';
-import {
-  calculateAllSessionZones,
-  DEFAULT_SESSION_PHASES,
-  SessionZoneConfig,
-} from './chart/SessionPhaseMarkers';
-import {
-  buildCrosshairTooltip,
-  validateCrosshairData,
-  CrosshairData,
-} from './chart/CrosshairManager';
-
 interface ChartSceneProps {
   data: OHLCData[];
   predictions: OHLCData[];

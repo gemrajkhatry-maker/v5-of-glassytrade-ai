@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook } from '../types';
 import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Settings, Zap, AlertTriangle, Clock, BarChart3, Shield, Eye, Layers, ArrowUpDown, Crosshair, Navigation } from 'lucide-react';
-import { EquityPanel, RiskStateDisplay, ModelIOPanel, DecisionHistoryPanel } from './ai';
+import { EquityPanel, RiskStateDisplay, DecisionHistoryPanel } from './ai';
 import { sanitizeLlmText, sanitizeRationale, extractDecisionText } from '../utils/textSanitizer';
 
 interface AIAnalysisPanelProps {
