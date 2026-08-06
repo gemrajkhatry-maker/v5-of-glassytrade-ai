@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from app.domain.fabio_ai.services.signal_coordinator import SignalCoordinator, EntryEvaluation
+from quant.decision.signal_coordinator import SignalCoordinator, EntryEvaluation
 
 
 @dataclass
