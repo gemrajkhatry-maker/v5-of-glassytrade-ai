@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from app.domain.models.exchange_config import ExchangeConfig
-from app.domain.ports.exchange_strategy import IExchangeStrategy as ExchangeStrategy
-from app.shared.timezones import IST
+from quant.contracts.exchange_config import ExchangeConfig
+from quant.contracts.ports.exchange_strategy import IExchangeStrategy as ExchangeStrategy
+from quant.contracts.timezones import IST
 
 
 

@@ -11,9 +11,9 @@ Per Fabio methodology:
 from __future__ import annotations
 
 import logging
-from app.domain.ports.delta_profile import IDeltaProfile, DeltaBucket, DeltaProfile
-from app.domain.constants import DELTA_ZONE_SIGMA_MULT, DELTA_BUCKET_SIZE_DEFAULT
-from app.domain.services.delta_profile import detect_high_delta_zones
+from quant.contracts.ports.delta_profile import IDeltaProfile, DeltaBucket, DeltaProfile
+from quant.contracts.constants import DELTA_ZONE_SIGMA_MULT, DELTA_BUCKET_SIZE_DEFAULT
+from quant.amt.profile.delta_profile import detect_high_delta_zones
 
 logger = logging.getLogger(__name__)
 

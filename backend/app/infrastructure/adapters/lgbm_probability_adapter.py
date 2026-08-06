@@ -8,11 +8,11 @@ import pickle
 
 import numpy as np
 
-from app.domain.ports.probability_inference import (
+from quant.contracts.ports.probability_inference import (
     ProbabilityEstimate,
     IProbabilityInference,
 )
-from app.domain.probability.features import (
+from quant.probability.features import (
     FEATURE_NAMES,
     PROBABILITY_FEATURE_SCHEMA_VERSION,
     active_model_features,

@@ -28,13 +28,13 @@ for _ancestor in _here.parents:
             sys.path.insert(0, str(_ancestor))
         break
 
-from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
-from app.domain.ports.market_data import IMarketData
-from app.domain.services.market_data_utils import compute_vwap_approx, estimate_tick_delta
+from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
+from quant.contracts.ports.market_data import IMarketData
+from quant.contracts.market_data_utils import compute_vwap_approx, estimate_tick_delta
 
 logger = logging.getLogger(__name__)
 
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 
 
 def _delta_proxy(

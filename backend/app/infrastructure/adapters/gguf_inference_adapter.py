@@ -4,8 +4,8 @@ import threading
 import time
 from typing import Optional
 
-from app.domain.fabio_ai.services.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
-from app.domain.ports.llm_inference import ILLMInference, LLMNotReadyError
+from quant.inference.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
+from quant.contracts.ports.llm_inference import ILLMInference, LLMNotReadyError
 
 logger = logging.getLogger(__name__)
 
