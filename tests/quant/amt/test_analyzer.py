@@ -558,6 +558,34 @@ class TestIncrementalProfile:
 # ---------------------------------------------------------------------------
 
 
+class TestVWAPDoubleAccumulationRegression:
+    """Regression for audit B-20: analyze() must accumulate each bar ONCE."""
+
+    def test_session_vwap_not_double_accumulated(self):
+        """Two _update_session_vwap call sites per analyze() double-counted the
+        current bar's volume+quote-volume, inflating the VWAP accumulators.
+
+        Feed a known 2-candle series through analyze twice; the accumulated
+        counters and returned VWAP must equal the single-pass expectation.
+        """
+        analyzer = AMTAnalyzer()
+        base = [
+            _make_candle_timed(100.0, f"2026-01-01T09:{i:02d}:00Z", volume=100)
+            for i in range(4)
+        ]
+        c5 = _make_candle_timed(100.0, "2026-01-01T09:04:00Z", volume=100)
+        c6 = _make_candle_timed(120.0, "2026-01-01T09:05:00Z", volume=100)
+
+        analyzer.analyze(base + [c5])
+        result = analyzer.analyze(base + [c5, c6])
+
+        # Single pass: c5 and c6 each accumulated exactly once.
+        # _make_candle_timed gives typical_price == close (h/l symmetric).
+        assert analyzer._vwap_cum_vol == pytest.approx(200.0)
+        assert analyzer._vwap_cum_quote_vol == pytest.approx(100 * 100 + 120 * 100)
+        assert result.session_vwap == pytest.approx((100 * 100 + 120 * 100) / 200.0)
+
+
 class TestDayTypeClassification:
     def test_normal_day_type(self):
         analyzer = AMTAnalyzer()

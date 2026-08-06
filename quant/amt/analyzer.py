@@ -1091,11 +1091,7 @@ class AMTAnalyzer:
             market_state = MarketState.BALANCED
             effective_profile_shape = "D"
 
-        # Session VWAP
-        typical_price = (current.high + current.low + current.close) / 3
-        session_vwap = self._update_session_vwap(current, typical_price)
-
-        # VWAP bands
+        # VWAP bands (single accumulation per bar — B-20: no re-update here)
         vwap_upper_1, vwap_lower_1, vwap_upper_2, vwap_lower_2, vwap_std, vwap_deviation_sigmas = \
             self._build_vwap_bands(session_vwap, current)
 

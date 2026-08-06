@@ -111,3 +111,25 @@ class TestDriveTrackerSessionReset:
         assert len(tracker._levels) > 0
         tracker.reset()
         assert len(tracker._levels) == 0
+
+
+class TestDriveTrackerTickSizeRegression:
+    """Regression: is_level_exhausted / get_drive_count had an undefined
+    tick_size (Track A3). They must work without crashing."""
+
+    def test_is_level_exhausted(self):
+        tracker = DriveTracker()
+        candle = _candle(close=100.3, high=100.5, low=99.0)
+        for _ in range(3):
+            tracker.classify_touch(
+                price=100.0, level=100.0, candle=candle, direction="LONG",
+            )
+        assert tracker.is_level_exhausted(100.0) is True
+
+    def test_get_drive_count(self):
+        tracker = DriveTracker()
+        candle = _candle(close=100.3, high=100.5, low=99.0)
+        tracker.classify_touch(
+            price=100.0, level=100.0, candle=candle, direction="LONG",
+        )
+        assert tracker.get_drive_count(100.0) == 1

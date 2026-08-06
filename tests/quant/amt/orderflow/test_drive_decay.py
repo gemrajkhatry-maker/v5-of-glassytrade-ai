@@ -8,6 +8,25 @@ from quant.amt.orderflow.drive_decay import DriveDecay
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
+class TestDriveDecayRegression:
+    """Regression for the record-before-assign UnboundLocalError."""
+
+    def test_validate_drive_2_with_recorded_drive_1(self):
+        """validate_drive_2 must not crash on a recorded Drive 1 (Track A3)."""
+        decay = DriveDecay(min_ticks=3, min_minutes=3)
+
+        drive1_time = datetime(2026, 3, 20, 9, 30, 0, tzinfo=IST)
+        decay.record_drive_1(6100.0, "LONG", drive1_time, tick_size=1.0)
+
+        # Price rotated away by 5 ticks, only 1 minute elapsed
+        decay.update_rotation(6095.0)
+        drive2_time = datetime(2026, 3, 20, 9, 31, 0, tzinfo=IST)
+        result = decay.validate_drive_2(6100.0, 6095.0, drive2_time)
+
+        assert result.valid is True
+        assert result.price_decay_met is True
+
+
 class TestDriveDecay:
     pytestmark = pytest.mark.skip(reason="Pre-existing drive decay calculation assertion")
     """Test drive time/price decay enforcement."""

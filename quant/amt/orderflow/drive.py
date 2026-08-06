@@ -256,7 +256,7 @@ class DriveTracker:
             reason="D1: direction change, entry suppressed",
         )
 
-    def is_level_exhausted(self, level: float) -> bool:
+    def is_level_exhausted(self, level: float, tick_size: float = 0.05) -> bool:
         """Check if a level has been tested 3+ times (D3+)."""
         from quant.contracts.tick_utils import round_to_tick
 
@@ -264,7 +264,7 @@ class DriveTracker:
         state = self._levels.get(bucket)
         return state is not None and state.drive_count >= 3
 
-    def get_drive_count(self, level: float) -> int:
+    def get_drive_count(self, level: float, tick_size: float = 0.05) -> int:
         """Get current drive count for a level."""
         from quant.contracts.tick_utils import round_to_tick
 
