@@ -20,14 +20,14 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from app.domain.fabio_ai.services.prompt_builder import (
+from quant.inference.prompt_builder import (
     build_advisory_prompt,
     parse_advisory_response,
 )
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.value_objects import OHLC, AMTResult
-    from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+    from quant.contracts.value_objects import OHLC, AMTResult
+    from quant.inference.generative_ai import GenerativeAIService
 
 logger = logging.getLogger(__name__)
 

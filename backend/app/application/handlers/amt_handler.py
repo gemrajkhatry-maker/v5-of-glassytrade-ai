@@ -7,18 +7,18 @@ import threading
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer, IncrementalVolumeProfile
-from app.domain.fabio_ai.services.footprint_analyzer import FootprintAnalyzer
+from quant.amt.analyzer import AMTAnalyzer, IncrementalVolumeProfile
+from quant.amt.orderflow.footprint import FootprintAnalyzer
 from app.infrastructure.serialization.schemas import amt_result_to_dto, footprint_to_dto
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.value_objects import OHLC, OrderBook, AMTResult
+    from quant.contracts.value_objects import OHLC, OrderBook, AMTResult
 
 logger = logging.getLogger(__name__)
 
 from dataclasses import dataclass
 
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 
 
 @dataclass

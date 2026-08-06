@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, Any
 from app.core.async_boundary import ensure_sync_adapter_result
 
 if TYPE_CHECKING:
-    from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    from app.domain.ports.storage import IStorage
+    from quant.inference.generative_ai import GenerativeAIService
+    from quant.contracts.ports.storage import IStorage
 
 logger = logging.getLogger(__name__)
 

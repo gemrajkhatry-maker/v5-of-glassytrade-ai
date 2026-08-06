@@ -26,9 +26,9 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.config import settings
-from app.domain.fabio_ai.services.exit_engine import ExitEngine, ExitReason
+from quant.execution.exit_engine import ExitEngine, ExitReason
 from app.core.async_boundary import ensure_sync_adapter_result
-from app.domain.fabio_ai.services.prompt_builder import (
+from quant.inference.prompt_builder import (
     OVERSEER_INSTRUCTION,
     OverseerAction,
     build_overseer_prompt,
@@ -36,10 +36,10 @@ from app.domain.fabio_ai.services.prompt_builder import (
 )
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.value_objects import OHLC, AMTResult
-    from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    from app.domain.ports.storage import IStorage
-    from app.domain.ports.probability_inference import IProbabilityInference
+    from quant.contracts.value_objects import OHLC, AMTResult
+    from quant.inference.generative_ai import GenerativeAIService
+    from quant.contracts.ports.storage import IStorage
+    from quant.contracts.ports.probability_inference import IProbabilityInference
 
 from app.shared.parsing import is_mcx_symbol
 
@@ -329,7 +329,7 @@ class LLMOverseerHandler:
                 exit_probability = None
                 if self._probability_engine and self._probability_engine.is_ready():
                     try:
-                        from app.domain.probability.features import extract_features
+                        from quant.probability.features import extract_features
 
                         data = getattr(session, "data", [])
                         if len(data) >= 20:
