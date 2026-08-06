@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook } from '../types';
+import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook, QuantDecisionAnalysis } from '../types';
 import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Settings, Zap, AlertTriangle, Clock, BarChart3, Shield, Eye, ArrowUpDown, Crosshair, Navigation } from 'lucide-react';
 import { EquityPanel, RiskStateDisplay, DecisionHistoryPanel } from './ai';
 import { sanitizeLlmText, sanitizeRationale, extractDecisionText } from '../utils/textSanitizer';
@@ -14,11 +14,35 @@ interface AIAnalysisPanelProps {
     orderBook?: OrderBook | null;
     overseerAction?: string;
     overseerReason?: string;
+    quantDecision?: QuantDecisionAnalysis | null;
     symbol?: string;
     data?: any[];
 }
 
-const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, overseerAction, overseerReason, symbol, data = [] }) => {
+/**
+ * Wraps the legacy AMT-driven analysis body. When a quant decision is present
+ * the legacy body is the SECONDARY view: collapsed into a grayed details block.
+ * Without a quant decision the body renders unwrapped (current behaviour).
+ */
+const LegacyAmtWrapper: React.FC<{
+    quantDecision: QuantDecisionAnalysis | null | undefined;
+    children: React.ReactNode;
+}> = ({ quantDecision, children }) => {
+    if (!quantDecision) return <>{children}</>;
+    return (
+        <details className="rounded-md border border-glassy-border-subtle bg-glassy-bg-elevated/30">
+            <summary className="list-none flex items-center justify-between px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-glassy-text-tertiary cursor-pointer select-none">
+                <span className="flex items-center gap-1.5">
+                    <Clock className="w-3 h-3" /> Legacy AMT Analysis
+                </span>
+                <span className="text-glassy-text-disabled">Expand</span>
+            </summary>
+            <div className="opacity-60 px-2 pb-2">{children}</div>
+        </details>
+    );
+};
+
+const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, overseerAction, overseerReason, quantDecision, symbol, data = [] }) => {
     // Determine current best price proxy (LTP) with 3-tier fallback chain.
     // Tier 1: Order book mid-price (most accurate, requires depth data)
     // Tier 2: Last close price from history
@@ -155,6 +179,45 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     </div>
                 )}
             </div>
+
+            {/* 00. QUANT DECISION — PRIMARY */}
+            {quantDecision && (
+                <div className={`p-3 rounded-md border ${quantDecision.approved ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-glassy-border-default bg-glassy-bg-elevated/30'}`}>
+                    <div className="flex items-center justify-between">
+                        <span className="text-[9px] font-bold uppercase tracking-widest text-glassy-text-secondary flex items-center gap-1.5">
+                            <Zap className="w-3.5 h-3.5 text-glassy-ai-primary" /> Quant Decision
+                        </span>
+                        <span className={`px-1.5 py-0.5 rounded-sm text-[8px] font-bold tracking-widest uppercase ${quantDecision.approved ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-white/50'}`}>
+                            {quantDecision.approved ? 'Approved' : 'Standing By'}
+                        </span>
+                    </div>
+                    {quantDecision.signal ? (
+                        <div className="mt-2">
+                            <div className={`text-sm font-bold ${quantDecision.signal.type === 'LONG' ? 'text-glassy-bull-primary' : quantDecision.signal.type === 'SHORT' ? 'text-glassy-bear-primary' : 'text-glassy-text-primary'}`}>
+                                {quantDecision.signal.type} @ {quantDecision.signal.entry.toFixed(2)}
+                                <span className="text-[10px] font-mono text-glassy-text-tertiary ml-2">RR {quantDecision.signal.rr.toFixed(1)}</span>
+                            </div>
+                            <div className="grid grid-cols-3 gap-2 mt-2 text-[9px] font-mono">
+                                <div><div className="text-glassy-text-tertiary">SL</div><div className="font-bold text-glassy-bear-primary">{quantDecision.signal.sl.toFixed(2)}</div></div>
+                                <div><div className="text-glassy-text-tertiary">TP</div><div className="font-bold text-glassy-bull-primary">{quantDecision.signal.tp.toFixed(2)}</div></div>
+                                <div><div className="text-glassy-text-tertiary">Confidence</div><div className="font-bold text-glassy-text-primary">{(quantDecision.signal.confidence * 100).toFixed(0)}%</div></div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="mt-2 text-[10px] font-mono text-glassy-text-tertiary">
+                            {quantDecision.reason || quantDecision.phase || 'No active signal'}
+                        </div>
+                    )}
+                    {quantDecision.phase && (
+                        <div className="mt-2 text-[9px] text-glassy-text-tertiary">
+                            <span className="uppercase tracking-widest">Phase: {quantDecision.phase}</span>
+                            {quantDecision.reason && !quantDecision.signal && <span className="ml-2">{quantDecision.reason}</span>}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <LegacyAmtWrapper quantDecision={quantDecision}>
 
             {/* 01. STATE */}
             <div className="flex flex-col gap-2 relative">
@@ -1488,6 +1551,8 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                 </div>
                 </div>
             </details>
+
+            </LegacyAmtWrapper>
 
             {/* MODEL I/O Footer */}
             <details className="mt-2 group border-t border-white/5 pt-2 cursor-pointer">

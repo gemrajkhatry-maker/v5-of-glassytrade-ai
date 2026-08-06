@@ -334,6 +334,7 @@ function App() {
                             orderBook={activeInstrument.orderBook}
                             overseerAction={activeInstrument.overseerAction}
                             overseerReason={activeInstrument.overseerReason}
+                            quantDecision={activeInstrument.quantDecisionAnalysis}
                             symbol={activeSymbol}
                             data={activeInstrument.data}
                         />
