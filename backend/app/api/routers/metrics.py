@@ -7,8 +7,8 @@ for the React dashboard and monitoring tools.
 from __future__ import annotations
 
 from fastapi import APIRouter
-from app.domain.services.gate_rejection_tracker import GateRejectionTracker
-from app.domain.services.latency_tracker import LatencyTracker
+from app.domain.ops.gate_rejection_tracker import GateRejectionTracker
+from app.domain.ops.latency_tracker import LatencyTracker
 
 router = APIRouter(prefix="/v1/metrics", tags=["metrics"])
 

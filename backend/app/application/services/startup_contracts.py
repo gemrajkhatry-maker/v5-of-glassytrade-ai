@@ -7,7 +7,7 @@ from hashlib import sha256
 import json
 from typing import Any
 
-from app.domain.services.startup_reconciliation import ReconciliationResult
+from app.domain.ops.startup_reconciliation import ReconciliationResult
 
 
 def _callable(obj: object | None, attr: str) -> bool:

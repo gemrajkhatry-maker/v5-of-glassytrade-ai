@@ -1,8 +1,8 @@
 # ===== Gate Rejection Tracker =====
 
 
-from app.domain.services.gate_rejection_tracker import GateRejectionTracker
-from app.domain.services.latency_tracker import LatencyTracker
+from app.domain.ops.gate_rejection_tracker import GateRejectionTracker
+from app.domain.ops.latency_tracker import LatencyTracker
 
 
 class TestGateRejectionTracker:

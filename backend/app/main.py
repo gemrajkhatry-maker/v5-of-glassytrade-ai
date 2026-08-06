@@ -55,7 +55,7 @@ from quant.contracts.ports.market_data import IMarketData
 from quant.contracts.ports.llm_inference import ILLMInference
 from quant.inference.generative_ai import GenerativeAIService
 from app.application.services.trading_session import TradingSessionService
-from app.domain.services.startup_reconciliation import StartupReconciliation
+from app.domain.ops.startup_reconciliation import StartupReconciliation
 
 # Configure structured logging
 setup_logging()

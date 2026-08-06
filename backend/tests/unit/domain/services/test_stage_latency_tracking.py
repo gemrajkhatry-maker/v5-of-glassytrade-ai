@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from decimal import Decimal
 
-from app.domain.services.latency_tracker import LatencyTracker
+from app.domain.ops.latency_tracker import LatencyTracker
 
 
 class TestPerStageLatencyTracking:

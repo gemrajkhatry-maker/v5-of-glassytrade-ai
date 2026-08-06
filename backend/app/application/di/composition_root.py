@@ -284,8 +284,8 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
     allow_short = _resolve_allow_short()
 
     # Observability trackers
-    from app.domain.services.gate_rejection_tracker import GateRejectionTracker
-    from app.domain.services.latency_tracker import LatencyTracker
+    from app.domain.ops.gate_rejection_tracker import GateRejectionTracker
+    from app.domain.ops.latency_tracker import LatencyTracker
     gate_tracker = GateRejectionTracker()
     latency_tracker = LatencyTracker()
 

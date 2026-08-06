@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
-from app.domain.ports.notification_adapter import INotificationAdapter
+from quant.contracts.ports.notification_adapter import INotificationAdapter
 
 logger = logging.getLogger(__name__)
 

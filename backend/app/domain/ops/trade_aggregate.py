@@ -21,7 +21,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Optional
 
-from app.domain.trading.models.enums import (
+from quant.contracts.enums import (
     Side,
     SetupType,
 )

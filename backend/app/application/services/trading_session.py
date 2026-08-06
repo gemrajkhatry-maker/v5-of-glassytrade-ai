@@ -63,8 +63,8 @@ from quant.contracts.ports.probability_inference import (
 from quant.amt.session.ib_engine import InitialBalanceEngine
 from quant.amt.session.ib_scalp import IBBreakoutScalpEngine
 from quant.amt.session.one_min_bar import OneMinBarEngine
-from app.domain.services.mobile_alerts import MobileAlertSystem
-from app.domain.services.self_healing import OrderRejectionHandler, DBFallbackBuffer
+from app.domain.ops.mobile_alerts import MobileAlertSystem
+from app.domain.ops.self_healing import OrderRejectionHandler, DBFallbackBuffer
 from app.application.handlers.post_trade_analyst import PostTradeAnalyst
 
 from app.application.handlers.llm_entry_handler import LLMEntryHandler

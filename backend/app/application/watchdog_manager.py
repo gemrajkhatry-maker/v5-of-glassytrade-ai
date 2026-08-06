@@ -19,7 +19,7 @@ from app.core.async_boundary import ensure_sync_adapter_result
 from app.config import settings
 from app.application.utils import is_market_open
 from quant.contracts.utils import safe_side as _safe_side
-from app.domain.services.position_reconciliation import PositionReconciliationEngine, ReconciliationIssue
+from app.domain.ops.position_reconciliation import PositionReconciliationEngine, ReconciliationIssue
 from quant.contracts.timezones import IST
 from app.shared.mode import is_live_mode
 

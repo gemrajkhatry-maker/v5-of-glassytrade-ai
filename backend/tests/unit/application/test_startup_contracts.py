@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.application.services.startup_contracts import build_startup_contracts
-from app.domain.services.startup_reconciliation import ReconciliationResult
+from app.domain.ops.startup_reconciliation import ReconciliationResult
 
 
 class _StrategyRouter:

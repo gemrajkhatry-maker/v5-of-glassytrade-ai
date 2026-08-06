@@ -9,7 +9,7 @@ These tests verify that the domain model maintains its invariants:
 import pytest
 from decimal import Decimal
 
-from app.domain.trading.models.trade_aggregate import (
+from app.domain.ops.trade_aggregate import (
     Trade,
     TradeStatus,
     CloseReason,
@@ -372,7 +372,7 @@ class TestTradeInvariants:
         snapshot = trade.to_snapshot()
 
         # Reconstruct
-        from app.domain.trading.models.trade_aggregate import create_trade_from_snapshot
+        from app.domain.ops.trade_aggregate import create_trade_from_snapshot
 
         reconstructed = create_trade_from_snapshot(snapshot)
 

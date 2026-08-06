@@ -15,7 +15,7 @@ from decimal import Decimal
 from datetime import datetime, timezone
 import uuid
 
-from app.domain.trading.models.trade_aggregate import (
+from app.domain.ops.trade_aggregate import (
     Trade,
     TradeStatus,
     CloseReason,
