@@ -21,10 +21,13 @@ MCX sessions:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date, datetime, timezone, timedelta
 from functools import lru_cache
 from typing import Literal
+
+from app.core.async_boundary import ensure_sync_adapter_result
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +351,75 @@ def classify_gap(open_price: float, prior_close: float, prior_range: float) -> s
         return "MEDIUM"
     else:
         return "LARGE"
+
+
+# ---------------------------------------------------------------------------
+# Prior-Session Profile Persistence (kv-backed)
+# ---------------------------------------------------------------------------
+
+
+PRIOR_PROFILE_KEY_PREFIX = "prior_profile"
+
+
+def prior_profile_key(symbol: str) -> str:
+    """Namespaced kv key for a symbol's prior-session POC/VAH/VAL."""
+    return f"{PRIOR_PROFILE_KEY_PREFIX}:{symbol}"
+
+
+def persist_prior_profile(
+    storage,
+    symbol: str,
+    *,
+    poc: float = 0.0,
+    vah: float = 0.0,
+    val: float = 0.0,
+) -> None:
+    """Persist prior-session POC/VAH/VAL for a symbol.
+
+    Uses the storage adapter's kv_store (kv_set). Best-effort: no-ops when
+    storage is absent or lacks kv_set. Call at session close so the next
+    session open can reference the prior profile for opening relation / bias.
+    """
+    kv_set = getattr(storage, "kv_set", None)
+    if kv_set is None:
+        return
+    ensure_sync_adapter_result(
+        "storage.kv_set",
+        kv_set,
+        prior_profile_key(symbol),
+        {"poc": float(poc), "vah": float(vah), "val": float(val)},
+    )
+
+
+def load_prior_profile(storage, symbol: str) -> dict[str, float]:
+    """Load prior-session POC/VAH/VAL for a symbol.
+
+    Returns an empty dict when nothing is persisted. The caller feeds the
+    loaded vah/val into get_session_info / opening_relation for the opening
+    profile reference.
+    """
+    kv_get = getattr(storage, "kv_get", None)
+    if kv_get is None:
+        return {}
+    raw = ensure_sync_adapter_result(
+        "storage.kv_get", kv_get, prior_profile_key(symbol)
+    )
+    if not raw:
+        return {}
+    if isinstance(raw, dict):
+        data = raw
+    else:
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        "poc": float(data.get("poc", 0.0) or 0.0),
+        "vah": float(data.get("vah", 0.0) or 0.0),
+        "val": float(data.get("val", 0.0) or 0.0),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -38,6 +38,7 @@ class OHLCDataDTO(BaseModel):
     vwap: float = 0.0
     taker_buy_volume: float = Field(alias="takerBuyVolume", default=0.0)
     delta: float = 0.0
+    is_warmup: bool = Field(alias="isWarmUp", default=False)
 
     model_config = {"populate_by_name": True}
 
@@ -300,6 +301,7 @@ class FootprintCandleDTO(BaseModel):
     poc_price: float = Field(alias="pocPrice", default=0)
     total_delta: float = Field(alias="totalDelta", default=0)
     step_price: float = Field(alias="stepPrice", default=0)
+    is_warmup: bool = Field(alias="isWarmUp", default=False)
 
     model_config = {"populate_by_name": True}
 
@@ -387,6 +389,7 @@ def ohlc_to_dto(o) -> dict:
         "vwap": float(o.vwap),
         "takerBuyVolume": float(o.taker_buy_volume),
         "delta": float(o.delta),
+        "isWarmUp": bool(getattr(o, "is_warmup", False)),
     }
 
 
@@ -678,4 +681,5 @@ def footprint_to_dto(fp) -> dict:
         "pocPrice": fp.poc_price,
         "totalDelta": fp.total_delta,
         "stepPrice": fp.step_price,
+        "isWarmUp": bool(getattr(fp, "is_warmup", False)),
     }

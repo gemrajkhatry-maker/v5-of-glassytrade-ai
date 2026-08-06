@@ -231,12 +231,17 @@ class TickProcessor:
                 sell_per_tick = (v - tb) / len(ticks) if ticks else 0
 
                 for tick_price in ticks:
-                    rb.on_tick(
+                    closed_bar = rb.on_tick(
                         ltp=tick_price,
                         timestamp=ts,
                         buy_vol=buy_per_tick,
                         sell_vol=sell_per_tick,
                     )
+                    if closed_bar is not None:
+                        # Synthetic backfill bars use an assumed price path +
+                        # equal volume — flag them so the frontend can
+                        # distinguish warm-up bars from live data.
+                        closed_bar.is_warmup = True
         except Exception:
             logger.debug("Range bar backfill failed for %s — non-critical", symbol, exc_info=True)  # Non-critical — depth book degrades gracefully
 
