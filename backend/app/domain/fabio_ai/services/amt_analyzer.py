@@ -265,8 +265,8 @@ class AMTAnalyzer:
         # VWAP variance accumulator for σ bands
         self._vwap_cum_sq_vol: float = 0.0  # Σ((TP - shift)² × volume)
         self._vwap_shift: float = 0.0  # Reference price for numerically stable variance
-        # Price deviations for proper VWAP std calculation (Task 2.1)
-        self._vwap_price_deviations: list[float] = []
+        # Session bar history (OHLC) for True Range ATR in absorption checks
+        self._session_data: list[OHLC] = []
         # Initial Balance tracker
         self._ib_tracker = InitialBalanceEngine(ib_minutes=IB_MINUTES)
         # Sticky IB break state (survives price re-entry into IB)
@@ -448,7 +448,7 @@ class AMTAnalyzer:
             self._vwap_cum_quote_vol = 0.0
             self._vwap_cum_sq_vol = 0.0
             self._vwap_shift = 0.0
-            self._vwap_price_deviations = []  # Reset deviations on new session
+            self._session_data = []  # Reset bar history on new session
             self._ib_tracker.reset()
             self._ib_break_direction = ""
             self._ar_engine.reset()
@@ -469,14 +469,37 @@ class AMTAnalyzer:
         shifted = typical_price - self._vwap_shift
         self._vwap_cum_sq_vol += float(shifted * shifted * current.volume)
         
-        # Track price deviations for proper VWAP std calculation (Task 2.1)
-        self._vwap_price_deviations.append(shifted)
+        # Accumulate bar history for True Range ATR (dedup: analyze() re-feeds
+        # the same candle on sub-candle ticks)
+        if not self._session_data or self._session_data[-1].time != current.time:
+            self._session_data.append(current)
+            if len(self._session_data) > 500:
+                self._session_data = self._session_data[-500:]
         
         return float(
             self._vwap_cum_quote_vol / self._vwap_cum_vol
             if self._vwap_cum_vol > 0
             else current.close
         )
+
+    def _compute_atr(self, period: int = 14, data: list[OHLC] | None = None) -> float:
+        """Average True Range over the last `period` bars.
+
+        True Range per bar: TR = max(high - low, |high - prev_close|,
+        |low - prev_close|).  Defaults to the accumulated session bar history;
+        an explicit bar list can be supplied for callers holding recent data.
+        """
+        bars = data if data is not None else self._session_data
+        if len(bars) < 2:
+            return 0.0
+        trs: list[float] = []
+        for i in range(1, len(bars)):
+            h = float(bars[i].high)
+            l = float(bars[i].low)
+            pc = float(bars[i - 1].close)
+            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        window = trs[-period:]
+        return sum(window) / max(len(window), 1)
 
     def _compute_order_flow_metrics(
         self,
@@ -544,10 +567,7 @@ class AMTAnalyzer:
         result["big_trade_confirmed"] = big_trade is not None
 
         # FR-06-04: Absorption
-        atr = (
-            max(d.high for d in recent_data[-14:])
-            - min(d.low for d in recent_data[-14:])
-        ) / max(len(recent_data[-14:]), 1)
+        atr = self._compute_atr(period=14, data=recent_data)
         absorption = self._absorption_detector.detect(
             current, atr, result["avg_candle_vol"]
         )
@@ -666,22 +686,25 @@ class AMTAnalyzer:
     def _build_vwap_bands(self, session_vwap: float, current) -> tuple[float, float, float, float, float, float | None]:
         """Compute VWAP standard deviation bands (±1σ, ±2σ)."""
         vwap_std = 0.0
-        if self._vwap_cum_vol > 0 and len(self._vwap_price_deviations) > 1:
-            # Calculate std from actual price deviations (Task 2.1 fix)
-            mean_deviation = sum(self._vwap_price_deviations) / len(self._vwap_price_deviations)
-            variance = sum((d - mean_deviation) ** 2 for d in self._vwap_price_deviations) / len(self._vwap_price_deviations)
+        if self._vwap_cum_vol > 0:
+            # Volume-weighted std from the shifted-variance accumulator:
+            # σ² = E[(TP - VWAP)²] = E[(TP - shift)²] - (VWAP - shift)²
+            variance = (
+                self._vwap_cum_sq_vol / self._vwap_cum_vol
+                - (session_vwap - self._vwap_shift) ** 2
+            )
             vwap_std = math.sqrt(max(0.0, variance))
 
-            # Enforce minimum std to prevent extreme sigma values
-            MIN_VWAP_STD = 1.0  # Increased from 0.5 for MCX options
+            # Proportional clamp bounds (0.1% floor, 3% cap of session VWAP)
+            MIN_VWAP_STD = max(1.0, session_vwap * 0.001)
             if vwap_std < MIN_VWAP_STD:
                 vwap_std = MIN_VWAP_STD
-            
+
             # Enforce maximum std (4σ is extreme, anything higher is calculation error)
-            MAX_VWAP_STD = session_vwap * 0.10  # Max 10% of VWAP
+            MAX_VWAP_STD = session_vwap * 0.03  # Max 3% of VWAP
             if vwap_std > MAX_VWAP_STD:
                 logger.warning(
-                    "VWAP std clamped from %.2f to %.2f (max 10%% of VWAP=%.2f)",
+                    "VWAP std clamped from %.2f to %.2f (max 3%% of VWAP=%.2f)",
                     vwap_std, MAX_VWAP_STD, session_vwap
                 )
                 vwap_std = MAX_VWAP_STD
