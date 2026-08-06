@@ -1,3 +1,7 @@
+"""Frozen OHLCV bar shared across all quant detectors."""
+
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 
