@@ -8,55 +8,13 @@ Extraction from entry_gate.py (was 1,105 lines) into 5 focused modules:
 - signal_builder.py     — SL/TP construction & aggressive print clustering
 - grading.py            — A/B/C setup grade scoring
 - gate_runner.py        — 12-gate pipeline runner & position sizing
+
+Moved to quant/decision/gates — delete in Phase 3.
 """
 
-from app.domain.fabio_ai.services.entry_gates.three_align import (
-    min_candles_gate,
-    full_body_close_gate,
-    nearest_round_number,
-    cluster_aggressive_prints,
-    extract_bubble_levels_from_footprint,
-    three_align_check,
-)
-from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import (
-    check_confirmation_bundle,
-    check_momentum_fade,
-    compute_atr,
-)
-from app.domain.fabio_ai.services.entry_gates.signal_builder import (
-    build_entry_signal,
-    sl_from_aggressive_print,
-)
-from app.domain.fabio_ai.services.entry_gates.grading import (
-    compute_grade_score,
-    check_vwap_bias,
-    check_imbalance_alignment,
-)
-from app.domain.fabio_ai.services.entry_gates.gate_runner import (
-    run_gate_pipeline,
-    calculate_position_size,
-)
+from quant.decision.gates.confirmation_bundle import *  # noqa: F401,F403
+from quant.decision.gates.grading import *  # noqa: F401,F403
+from quant.decision.gates.three_align import *  # noqa: F401,F403
+from quant.decision.gates.signal_builder import *  # noqa: F401,F403
+from quant.decision.gates.gate_runner import *  # noqa: F401,F403
 
-__all__ = [
-    # three_align
-    "min_candles_gate",
-    "full_body_close_gate",
-    "nearest_round_number",
-    "cluster_aggressive_prints",
-    "extract_bubble_levels_from_footprint",
-    "three_align_check",
-    # confirmation_bundle
-    "check_confirmation_bundle",
-    "check_momentum_fade",
-    "compute_atr",
-    # signal_builder
-    "build_entry_signal",
-    "sl_from_aggressive_print",
-    # grading
-    "compute_grade_score",
-    "check_vwap_bias",
-    "check_imbalance_alignment",
-    # gate_runner
-    "run_gate_pipeline",
-    "calculate_position_size",
-]
