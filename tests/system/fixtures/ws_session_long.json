@@ -1,0 +1,2252 @@
+[
+  {
+    "time": "t0",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 100.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 20.0,
+      "cvdSlope": 0.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": false,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t1",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 200.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 40.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": false,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t2",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 300.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 60.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": false,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t3",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 400.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 80.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": false,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t4",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 500.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 100.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": false,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t5",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 600.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 120.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t6",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 700.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 140.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t7",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 800.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 160.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t8",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 900.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 180.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t9",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 1000.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 200.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t10",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 1100.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 220.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t11",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 1200.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 240.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t12",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 1300.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 260.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t13",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 1400.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 280.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t14",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 1500.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 300.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t15",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 1600.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 320.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t16",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 1700.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 340.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t17",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 1800.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 360.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t18",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 1900.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 380.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t19",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 2000.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 400.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t20",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 2100.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 420.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t21",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 2200.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 440.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t22",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 2300.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 460.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t23",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 2400.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 480.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t24",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 2500.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 500.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t25",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 2600.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 520.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t26",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 2700.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 540.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t27",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 2800.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 560.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t28",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 2900.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 580.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t29",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 3000.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 600.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t30",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 3100.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 620.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t31",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 3200.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 640.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t32",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 3300.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 660.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t33",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 3400.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 680.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t34",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 3500.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 700.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t35",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 3600.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 720.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t36",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 3700.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 740.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t37",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 3800.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 760.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t38",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 3900.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 780.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t39",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 4000.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 800.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t40",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 4100.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 820.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t41",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 4200.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 840.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t42",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 4300.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 860.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t43",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 4400.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 880.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t44",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 4500.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 900.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t45",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 4600.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 920.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t46",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 4700.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 940.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t47",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 4800.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 960.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t48",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 4900.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 980.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t49",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 5000.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 1000.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t50",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 5100.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 1020.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t51",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 5200.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 1040.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t52",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 5300.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 1060.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t53",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 5400.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 1080.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t54",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 99.01,
+      "vah": 100.38,
+      "val": 99.0,
+      "step": 0.02,
+      "totalVolume": 5500.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 1100.0,
+      "cvdSlope": 20.0,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": null,
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.38,
+      "distanceToLevel": 0.38
+    },
+    "tripleAPhase": "WAITING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t55",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 100.01,
+      "vah": 101.0,
+      "val": 99.68,
+      "step": 0.02,
+      "totalVolume": 6000.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 400.0,
+      "cvd": 1500.0,
+      "cvdSlope": 25.4286,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": {
+      "side": "BUY",
+      "price": 100.0,
+      "volume": 500.0,
+      "strength": 1.0,
+      "barAge": 0
+    },
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.01,
+      "distanceToLevel": 0.01
+    },
+    "tripleAPhase": "ABSORBING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t56",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 100.01,
+      "vah": 101.0,
+      "val": 99.68,
+      "step": 0.02,
+      "totalVolume": 6100.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 1520.0,
+      "cvdSlope": 30.2857,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": {
+      "side": "BUY",
+      "price": 100.0,
+      "volume": 500.0,
+      "strength": 1.0,
+      "barAge": 1
+    },
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.01,
+      "distanceToLevel": 0.01
+    },
+    "tripleAPhase": "ABSORBING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t57",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 100.01,
+      "vah": 101.0,
+      "val": 99.68,
+      "step": 0.02,
+      "totalVolume": 6200.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 1540.0,
+      "cvdSlope": 34.5714,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": {
+      "side": "BUY",
+      "price": 100.0,
+      "volume": 500.0,
+      "strength": 1.0,
+      "barAge": 2
+    },
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.01,
+      "distanceToLevel": 0.01
+    },
+    "tripleAPhase": "ACCUMULATING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t58",
+    "close": 100.0,
+    "volumeProfile": {
+      "poc": 100.01,
+      "vah": 101.0,
+      "val": 99.68,
+      "step": 0.02,
+      "totalVolume": 6300.0
+    },
+    "vwap": {
+      "value": 100.0,
+      "upper1": 100.0,
+      "lower1": 100.0,
+      "upper2": 100.0,
+      "lower2": 100.0,
+      "std": 0.0,
+      "deviationSigmas": 0.0
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 1560.0,
+      "cvdSlope": 38.2857,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": {
+      "side": "BUY",
+      "price": 100.0,
+      "volume": 500.0,
+      "strength": 1.0,
+      "barAge": 3
+    },
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "INSIDE_VA",
+      "nearestLevel": 100.01,
+      "distanceToLevel": 0.01
+    },
+    "tripleAPhase": "ACCUMULATING",
+    "tripleASignal": null
+  },
+  {
+    "time": "t59",
+    "close": 104.0,
+    "volumeProfile": {
+      "poc": 99.99,
+      "vah": 100.98,
+      "val": 99.6,
+      "step": 0.06,
+      "totalVolume": 6400.0
+    },
+    "vwap": {
+      "value": 100.0625,
+      "upper1": 100.5586,
+      "lower1": 99.5664,
+      "upper2": 101.0547,
+      "lower2": 99.0703,
+      "std": 0.4961,
+      "deviationSigmas": 7.9373
+    },
+    "orderFlow": {
+      "delta": 20.0,
+      "cvd": 1580.0,
+      "cvdSlope": 41.4286,
+      "cvdDivergence": "NONE"
+    },
+    "absorption": {
+      "side": "BUY",
+      "price": 100.0,
+      "volume": 500.0,
+      "strength": 1.0,
+      "barAge": 4
+    },
+    "location": {
+      "ibHigh": 101.0,
+      "ibLow": 99.0,
+      "ibComplete": true,
+      "zone": "ABOVE_VA",
+      "nearestLevel": 100.98,
+      "distanceToLevel": 3.02
+    },
+    "tripleAPhase": "AGGRESSION",
+    "tripleASignal": "LONG"
+  }
+]
