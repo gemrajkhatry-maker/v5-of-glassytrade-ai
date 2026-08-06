@@ -52,7 +52,7 @@ class SignalBuilder:
         if direction == "LONG":
             monotonic = sl < entry < tp
         else:
-            monotonic = entry > sl > tp
+            monotonic = sl > entry > tp  # SL above entry, TP below
         try:
             assert monotonic, f"inverted signal: direction={direction} entry={entry} sl={sl} tp={tp}"
         except AssertionError:

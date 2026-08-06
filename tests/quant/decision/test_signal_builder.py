@@ -19,10 +19,10 @@ def _ctx(**kw):
         absorption=kw.get("absorption"),
         location=LocationState(ib_high=105, ib_low=95, ib_complete=True, zone="INSIDE_VA",
                                nearest_level=kw.get("nearest", 100), distance_to_level=0),
-        triple_a_phase="AGGRESSION", triple_a_signal="LONG",
+        triple_a_phase="AGGRESSION", triple_a_signal=kw.get("triple_a_signal", "LONG"),
     )
     return DecisionContext(state=state, bar=None, symbol="SYM",
-                           agent_direction="LONG", agent_probability=0.7)
+                           agent_direction=kw.get("direction", "LONG"), agent_probability=0.7)
 
 def _pass_results():
     return [GateResult(i, True) for i in range(1, 6)]
@@ -61,3 +61,16 @@ def test_build_returns_none_when_sl_on_wrong_side_of_entry():
         levels=(), poc=100, vah=102, val=110, step=1, total_volume=100),
         nearest=105)
     assert sb.build(ctx, _pass_results()) is None
+
+def test_build_emits_short_with_sl_above_entry():
+    sb = SignalBuilder()
+    # SHORT: entry 100 < vah 102 -> SL = vah + step = 103 (above entry),
+    # TP below entry. The correct invariant is sl > entry > tp.
+    ctx = _ctx(direction="SHORT", close=100.0, volume_profile=VolumeProfile(
+        levels=(), poc=98, vah=102, val=99, step=1, total_volume=100),
+        nearest=101)
+    results = _pass_results()
+    s = sb.build(ctx, results)
+    assert s is not None and s.type == "SHORT"
+    assert s.sl > s.entry > s.tp
+    assert s.sl == pytest.approx(102.0 + 1.0)
