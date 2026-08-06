@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from app.application.services.trading_session import TradingSessionService
 
 from app.api.dependencies import get_storage, get_trade_journal, get_trading_session
-from app.domain.ports.storage import IStorage
+from quant.contracts.ports.storage import IStorage
 from app.application.services.trading_query_service import TradingQueryService
 from app.core.async_boundary import ensure_sync_adapter_result
 from app.infrastructure.serialization.schemas import (

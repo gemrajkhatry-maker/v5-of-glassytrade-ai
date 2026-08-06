@@ -30,7 +30,7 @@ def _get_trainer():
     global _trainer
     if _trainer is None:
         try:
-            from app.domain.fabio_ai.rl.trainer import ValentiniTrainer
+            from quant.inference.rl.trainer import ValentiniTrainer
             _trainer = ValentiniTrainer()
         except ImportError as exc:
             raise HTTPException(
@@ -91,8 +91,8 @@ class ModelInfo(BaseModel):
 @router.post("/train", response_model=StatusResponse)
 async def start_training(req: TrainRequest, background_tasks: BackgroundTasks):
     """Start an RL training run in the background."""
-    from app.domain.fabio_ai.rl.trainer import ValentiniTrainer, TrainingConfig
-    from app.domain.fabio_ai.rl.data_loader import load_from_csv
+    from quant.inference.rl.trainer import ValentiniTrainer, TrainingConfig
+    from quant.inference.rl.data_loader import load_from_csv
 
     global _trainer
     trainer = _get_trainer()
@@ -165,7 +165,7 @@ async def get_training_status():
 async def predict(req: PredictRequest):
     """Run inference with the trained model."""
     import numpy as np
-    from app.domain.fabio_ai.rl.valentini_env import ACTION_NAMES
+    from quant.inference.rl.valentini_env import ACTION_NAMES
 
     trainer = _get_trainer()
     obs = np.array(req.observation, dtype=np.float32)

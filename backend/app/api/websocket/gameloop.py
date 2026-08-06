@@ -22,7 +22,7 @@ import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
+from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
 from app.shared.depth_dto import order_book_to_dto
 
 router = APIRouter(prefix="/trading", tags=["trading"])

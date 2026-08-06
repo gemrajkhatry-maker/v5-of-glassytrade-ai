@@ -13,11 +13,11 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, HTTPException, Query, Request
 from app.infrastructure.metrics import MetricsCollector
 from app.config import settings
-from app.domain.fabio_ai.services.llm_contract import (
+from quant.inference.llm_contract import (
     CANONICAL_RUNTIME_MODEL_FAMILY,
     ENTRY_CONTRACT_VERSION,
 )
-from app.domain.probability.features import (
+from quant.probability.features import (
     FEATURE_NAMES,
     PROBABILITY_FEATURE_SCHEMA_VERSION,
 )
@@ -400,7 +400,7 @@ async def system_config(request: Request):
 @router.post("/scanner/rescan")
 async def scanner_rescan(request: Request):
     """Trigger a fresh option scan and update active symbols."""
-    from app.domain.fabio_ai.services.option_scanner import OptionScannerService
+    from quant.amt.session.scanner import OptionScannerService
 
     market_data = get_market_data()
     scanner = OptionScannerService(market_data)
