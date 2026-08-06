@@ -3,7 +3,7 @@
 import pytest
 from datetime import datetime
 
-from app.domain.services.risk_sizing_engine import (
+from quant.execution.risk_sizing import (
     RiskSizingEngine,
     KellySizingTier,
     ExchangeConfig,

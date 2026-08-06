@@ -487,3 +487,34 @@ def test_circuit_breakers_parity():
         lambda: _run_circuit_breakers(legacy_mod.CircuitBreakers, legacy_mod.BreakerReason),
         lambda: _run_circuit_breakers(QuantCircuitBreakers, QuantBreakerReason),
     )
+
+
+# ---------------------------------------------------------------------------
+# RiskSizingEngine
+# ---------------------------------------------------------------------------
+
+
+def _run_risk_sizing(engine_cls) -> dict:
+    engine = engine_cls()
+    result = engine.calculate(
+        equity=1_000_000,
+        session_pnl=0,
+        consecutive_losses=0,
+        underlying="NIFTY",
+        entry_price=24000,
+        stop_price=23900,
+        target_price=24400,
+        direction="LONG",
+    )
+    import dataclasses
+    return dataclasses.asdict(result)
+
+
+def test_risk_sizing_calculate_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.services.risk_sizing_engine").RiskSizingEngine
+    from quant.execution.risk_sizing import RiskSizingEngine as QuantRiskSizing
+    assert_parity(
+        lambda: _run_risk_sizing(legacy),
+        lambda: _run_risk_sizing(QuantRiskSizing),
+    )
