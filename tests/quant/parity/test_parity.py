@@ -32,3 +32,13 @@ def test_parity_nested_structures():
     leg = {"a": [1, 2.00000001, (3, "x")], "b": {"c": None}, "d": True}
     qnt = {"a": [1, 2.0, (3, "x")], "b": {"c": None}, "d": True}
     assert_parity(lambda: leg, lambda: qnt)
+
+
+def test_parity_rejects_float_int_type_drift():
+    with pytest.raises(AssertionError):
+        assert_parity(lambda: 1.0, lambda: 1)
+
+
+def test_parity_rejects_bool_int_type_drift():
+    with pytest.raises(AssertionError):
+        assert_parity(lambda: True, lambda: 1)

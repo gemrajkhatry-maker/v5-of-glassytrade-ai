@@ -30,6 +30,7 @@ def _eq(a: Any, b: Any, tol: float, path: str) -> None:
         for f in fields(a):
             _eq(getattr(a, f.name), getattr(b, f.name), tol, f"{path}.{f.name}")
         return
+    assert type(a) is type(b), f"{path}: {type(a)} != {type(b)}"
     assert a == b, f"{path}: {a!r} != {b!r}"
 
 
