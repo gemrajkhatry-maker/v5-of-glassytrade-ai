@@ -141,6 +141,12 @@ class GateContext:
     # Quorum configuration (overridable per exchange/session)
     soft_gate_quorum: int = SOFT_GATE_QUORUM  # Minimum soft gates that must pass
 
+    # Triple-A (aggression/absorption/agreement) context
+    triple_a_phase: str = ""
+    absorption_detected: bool = False
+    absorption_bar_age: int = 0
+    vwap_breakout: str | None = None
+
 
 @dataclass
 class GateResult:
