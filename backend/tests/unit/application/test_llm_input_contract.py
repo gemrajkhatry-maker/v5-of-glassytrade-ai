@@ -21,7 +21,8 @@ from app.domain.trading.models.enums import SetupType
 from app.domain.trading.models.value_objects import AMTResult, OHLC
 
 # Keys verified (grep) as never read by any prompt block / parser. delta is
-# deliberately NOT here: prompt_builder reads data.get("delta", 0).
+# deliberately NOT here: the key is still emitted by _build_market_data_ai
+# (only its prompt_builder read was removed).
 NEVER_READ_KEYS = (
     "volume",
     "session_elapsed_minutes",
@@ -142,8 +143,6 @@ def _build_md(
     session,
     amt,
     symbol: str = "NIFTY 30 JAN 24000 CALL",
-    gate_context: str = "",
-    session_ctx_for_llm: str = "Trend setups allowed. ",
 ):
     return handler._build_market_data_ai(
         symbol,
@@ -152,12 +151,9 @@ def _build_md(
         amt,
         _session_info(),
         SetupType.MEAN_REVERSION,
-        "hint",
         "D",
         "Balanced",
-        gate_context,
         False,
-        session_ctx_for_llm,
     )
 
 
@@ -180,17 +176,11 @@ class TestVWAPKeys:
 
 
 class TestContextPropagation:
-    def test_market_data_ai_includes_session_gate_and_option_context(self):
+    def test_market_data_ai_includes_session_and_option_context(self):
         handler, _ = _handler()
-        md, _ = _build_md(
-            handler,
-            _session_stub(),
-            _amt(),
-            gate_context="[GATE WARNING] Three-Align NOT MET",
-        )
+        md, _ = _build_md(handler, _session_stub(), _amt())
         assert md["session_name"] == "NSE_PRIMARY"
         assert md["favor_strategy"] == "TREND_CONTINUATION"
-        assert "[GATE WARNING]" in md["gate_context"]
         assert md["dev_poc"] == 24010.0
         assert md["dev_vah"] == 24060.0
         assert md["dev_val"] == 23950.0
@@ -212,6 +202,14 @@ class TestNeverReadKeys:
         md, _ = _build_md(handler, _session_stub(), _amt())
         for key in NEVER_READ_KEYS:
             assert key not in md, f"dead key {key!r} still present"
+
+
+class TestNoDeadPromptKeys:
+    def test_market_data_ai_has_no_dead_keys(self):
+        handler, _ = _handler()
+        md, _ = _build_md(handler, _session_stub(), _amt())
+        for dead in ("gate_context", "session_context_for_llm", "strategy_hint"):
+            assert dead not in md, f"dead prompt key {dead!r} still in market_data_ai"
 
 
 class TestPostTradeContext:

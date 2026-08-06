@@ -202,7 +202,6 @@ def _build_narrative_order_flow(data: Dict[str, Any]) -> list[str]:
     parts.append("--- ORDER FLOW & AGGRESSION ---")
 
     cvd_raw = data.get("cvd_slope", data.get("cvd", 0))
-    delta = data.get("delta", 0)
     aggression_score = data.get("aggression", 0)
     if aggression_score is None:
         aggression_score = 0.0

@@ -241,8 +241,8 @@ class LLMEntryHandler:
         ), is_second_drive
 
     def _build_market_data_ai(self, symbol, session, tick, amt_result, session_info,
-                               setup_type, strategy_hint, profile_shape_str, market_state_str,
-                               gate_context, is_second_drive, session_context_for_llm) -> dict:
+                               setup_type, profile_shape_str, market_state_str,
+                               is_second_drive) -> dict:
         """Build the complete market data dictionary for LLM inference.
 
         Every key mirrors what prompt_builder reads; the worker must NOT hot-
@@ -288,7 +288,6 @@ class LLMEntryHandler:
             "leg_vah": float(amt_result.leg_vah),
             "leg_val": float(amt_result.leg_val),
             "market_structure": amt_result.market_structure,
-            "gate_context": session_context_for_llm + gate_context,
             "ib_high": float(amt_result.ib_high),
             "ib_low": float(amt_result.ib_low),
             "ib_complete": amt_result.ib_complete,
@@ -708,16 +707,11 @@ class LLMEntryHandler:
             self._save_session_block_decision(symbol, market_state_str, amt_result, tick)
             return
 
-        # Session context for LLM
-        session_context_for_llm = (
-            "Trend setups allowed. " if session_info.allow_trend else "Mean-reversion only. "
-        )
-
         # Gate checking
         agg_levels = cluster_aggressive_prints(amt_result.aggressive_prints)
         prior_prints = getattr(session, "_prior_print_levels", [])
         fp_domain = getattr(session, "_last_fp_domain", None)
-        gate_context, is_second_drive = self._build_gate_context(
+        _, is_second_drive = self._build_gate_context(
             amt_result, tick, session, session_info, agg_levels + prior_prints, fp_domain
         )
 
@@ -733,8 +727,7 @@ class LLMEntryHandler:
         # Build market data for LLM
         market_data_ai, regime_status = self._build_market_data_ai(
             symbol, session, tick, amt_result, session_info, setup_type,
-            strategy_hint, profile_shape_str, market_state_str,
-            gate_context, is_second_drive, session_context_for_llm,
+            profile_shape_str, market_state_str, is_second_drive,
         )
 
         if regime_status == "DEAD":
