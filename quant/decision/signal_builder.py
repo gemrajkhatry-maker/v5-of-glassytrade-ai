@@ -45,6 +45,15 @@ class SignalBuilder:
             sl = vah if entry < vah else nearest_level
             tp = entry - (sl - entry) * self.tp_multiplier
 
+        if direction == "LONG":
+            monotonic = sl < entry < tp
+        else:
+            monotonic = entry > sl > tp
+        try:
+            assert monotonic, f"inverted signal: direction={direction} entry={entry} sl={sl} tp={tp}"
+        except AssertionError:
+            return None
+
         risk = abs(entry - sl)
         rr = abs(tp - entry) / risk if risk > 0 else 0.0
 

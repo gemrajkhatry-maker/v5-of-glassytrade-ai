@@ -42,21 +42,34 @@ def test_gate3_cvd_conflict_blocks_long():
 
 def test_gate4_passes_on_aggression_signal():
     r = gate_triple_a_edge(DecisionContext(state=_state(triple_a_phase="AGGRESSION",
-        triple_a_signal="LONG"), bar=None))
+        triple_a_signal="LONG"), bar=None, agent_direction="LONG"))
     assert r.passed and r.gate == 4
 
 def test_gate4_passes_on_fresh_absorption_breakout():
     r = gate_triple_a_edge(DecisionContext(state=_state(
         absorption=Absorption(0, 100, 500, "BUY", 0.5, 0), upper_1=99.0, close=100.5),
-        bar=None))
+        bar=None, agent_direction="LONG"))
     assert r.passed
 
+def test_gate4_rejects_triple_a_direction_divergence():
+    r = gate_triple_a_edge(DecisionContext(state=_state(triple_a_phase="AGGRESSION",
+        triple_a_signal="SHORT"), bar=None, agent_direction="LONG"))
+    assert not r.passed
+    assert "direction" in r.reason.lower()
+
+def test_gate4_rejects_absorption_direction_conflict():
+    r = gate_triple_a_edge(DecisionContext(state=_state(
+        absorption=Absorption(0, 100, 500, "BUY", 0.5, 0), upper_1=99.0, close=100.5),
+        bar=None, agent_direction="SHORT"))
+    assert not r.passed
+    assert "direction" in r.reason.lower()
+
 def test_gate4_fails_no_edge():
-    r = gate_triple_a_edge(DecisionContext(state=_state(), bar=None))
+    r = gate_triple_a_edge(DecisionContext(state=_state(), bar=None, agent_direction="LONG"))
     assert not r.passed and r.gate == 4
 
 def test_gate4_stale_absorption_no_edge():
     r = gate_triple_a_edge(DecisionContext(state=_state(
         absorption=Absorption(0, 100, 500, "BUY", 0.5, 10), upper_1=99.0, close=100.5),
-        bar=None))
+        bar=None, agent_direction="LONG"))
     assert not r.passed

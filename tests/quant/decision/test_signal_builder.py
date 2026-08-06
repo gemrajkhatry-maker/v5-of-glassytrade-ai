@@ -12,7 +12,8 @@ from quant.absorption import Absorption
 def _ctx(**kw):
     state = AuctionState(
         time="t", close=kw.get("close", 100.0),
-        volume_profile=VolumeProfile(levels=(), poc=100, vah=102, val=98, step=1, total_volume=100),
+        volume_profile=kw.get("volume_profile", VolumeProfile(
+            levels=(), poc=100, vah=102, val=98, step=1, total_volume=100)),
         vwap=VWAPState(value=100, upper_1=101, lower_1=99, upper_2=102, lower_2=98, std=1, deviation_sigmas=0),
         order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=0, cvd_divergence="NONE", aggressive_prints=()),
         absorption=kw.get("absorption"),
@@ -49,3 +50,9 @@ def test_confidence_from_absorption():
     sb = SignalBuilder()
     s = sb.build(_ctx(absorption=Absorption(0, 100, 500, "BUY", 0.8, 0)), _pass_results())
     assert s.confidence == pytest.approx(0.8)
+
+def test_build_returns_none_when_sl_on_wrong_side_of_entry():
+    sb = SignalBuilder()
+    ctx = _ctx(volume_profile=VolumeProfile(
+        levels=(), poc=100, vah=102, val=110, step=1, total_volume=100))
+    assert sb.build(ctx, _pass_results()) is None
