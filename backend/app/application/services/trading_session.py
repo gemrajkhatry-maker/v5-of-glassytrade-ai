@@ -446,7 +446,7 @@ class TradingSessionService:
 
         pending_symbol, pending_signal = pending
 
-        # Signal TTL — ignore stale signals older than 10 minutes
+        # Signal TTL — ignore stale signals older than SIGNAL_STALE_SECONDS
         if self._is_signal_stale(pending_signal, tick.time):
             log.warning(
                 "Discarding stale signal for %s", pending_symbol
@@ -463,14 +463,15 @@ class TradingSessionService:
             )
 
     def _is_signal_stale(self, signal, tick_time: str) -> bool:
-        """Check if signal is older than 10 minutes."""
+        """Check if signal is older than the stale-signal TTL."""
+        stale_seconds = settings.SIGNAL_STALE_SECONDS
         try:
             sig_time = datetime.fromisoformat(
                 signal.timestamp.replace("Z", "+00:00")
             )
             curr_time = datetime.fromisoformat(tick_time.replace("Z", "+00:00"))
             signal_age = (curr_time - sig_time).total_seconds()
-            return signal_age > 600
+            return signal_age > stale_seconds
         except (ValueError, KeyError) as e:
             log.debug("Signal age check error: %s", e, exc_info=True)
             return False

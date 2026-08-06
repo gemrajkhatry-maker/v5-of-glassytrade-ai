@@ -8,9 +8,11 @@ prior profile loading, state snapshot keys, quant entry, and factory methods.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -612,3 +614,42 @@ class TestPositionConsistencyAudit:
         assert hasattr(svc, '_lifecycle_handler')
         assert hasattr(svc._lifecycle_handler, 'check_exits')
         assert hasattr(svc._lifecycle_handler, 'has_managed_positions')
+
+
+# =====================================================================
+# TestSignalStaleTTL
+# =====================================================================
+
+class TestSignalStaleTTL:
+    """B-13: stale-signal TTL is configurable (default 60s, env override)."""
+
+    def _stale(self, mock_deps, cleanup_service_handlers, age_seconds, env_value):
+        with patch.dict(os.environ, {"SIGNAL_STALE_SECONDS": str(env_value)}):
+            svc = _make_service(mock_deps)
+            cleanup_service_handlers.append(svc)
+            signal = _make_signal()
+            tick_time = "2026-01-15T10:30:00Z"
+            sig_time = datetime.fromisoformat(signal.timestamp.replace("Z", "+00:00"))
+            shifted = (sig_time + timedelta(seconds=age_seconds)).isoformat().replace("+00:00", "Z")
+            return svc._is_signal_stale(signal, shifted)
+
+    def test_default_ttl_marks_signal_stale_after_60s(self, mock_deps, cleanup_service_handlers):
+        # Default (no env): 61s old => stale, 30s old => fresh
+        with patch.dict(os.environ, {}, clear=False):
+            if "SIGNAL_STALE_SECONDS" in os.environ:
+                os.environ.pop("SIGNAL_STALE_SECONDS")
+            svc = _make_service(mock_deps)
+            cleanup_service_handlers.append(svc)
+            signal = _make_signal()
+            sig_time = datetime.fromisoformat(signal.timestamp.replace("Z", "+00:00"))
+            fresh = (sig_time + timedelta(seconds=30)).isoformat().replace("+00:00", "Z")
+            stale = (sig_time + timedelta(seconds=61)).isoformat().replace("+00:00", "Z")
+            assert svc._is_signal_stale(signal, fresh) is False
+            assert svc._is_signal_stale(signal, stale) is True
+
+    def test_env_override_increases_ttl(self, mock_deps, cleanup_service_handlers):
+        assert self._stale(mock_deps, cleanup_service_handlers, age_seconds=120, env_value=300) is False
+        assert self._stale(mock_deps, cleanup_service_handlers, age_seconds=301, env_value=300) is True
+
+    def test_env_override_reduces_ttl(self, mock_deps, cleanup_service_handlers):
+        assert self._stale(mock_deps, cleanup_service_handlers, age_seconds=30, env_value=20) is True
