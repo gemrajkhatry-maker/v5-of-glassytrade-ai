@@ -50,3 +50,13 @@ def test_bounded_queue_drops_busy():
     a2 = o.evaluate(_state(), _pos())
     a3 = o.evaluate(_state(), _pos())   # third is dropped
     assert fc.calls <= 2
+
+def test_overseer_recovers_after_cooldown():
+    fc = FakeClient()
+    o = Overseer(fc, cooldown_seconds=0.05, queue_size=2)
+    o.evaluate(_state(), _pos())
+    time.sleep(0.06)
+    o.evaluate(_state(), _pos())
+    time.sleep(0.06)
+    o.evaluate(_state(), _pos())
+    assert fc.calls == 3

@@ -49,9 +49,11 @@ class Overseer:
 
     def evaluate(self, state: AuctionState, position: Position) -> OverseerAction | None:
         """Returns None when throttled or queue full."""
+        now = time.time()
+        if self._cooldown_seconds > 0:
+            while self._recent_runs and now - self._recent_runs[0] >= self._cooldown_seconds:
+                self._recent_runs.popleft()
         if len(self._recent_runs) >= self._queue_size:
-            return None
-        if self._recent_runs and time.time() - self._recent_runs[-1] < self._cooldown_seconds:
             return None
 
         prompt = self._build_prompt(state, position)
@@ -62,7 +64,7 @@ class Overseer:
         except Exception:
             return None
 
-        self._recent_runs.append(time.time())
+        self._recent_runs.append(now)
 
         action, rationale = self._parse(raw)
         return OverseerAction(action=action, rationale=rationale)

@@ -41,6 +41,15 @@ def test_invalid_json_falls_back_to_flat():
     e = j.analyze(_state())
     assert e.decision == "FLAT" and e.confidence == 0.0
 
+def test_confidence_clamped():
+    for raw, expected in (
+        ('{"direction":"LONG","confidence":7.0}', 1.0),
+        ('{"direction":"LONG","confidence":-3.0}', 0.0),
+    ):
+        fc = FakeClient(response=raw)
+        e = EntryJournal(fc).analyze(_state())
+        assert e.confidence == expected
+
 def test_never_executes():
     # advisory is journaled-only: analyze must not mutate anything outside the journal
     fc = FakeClient()

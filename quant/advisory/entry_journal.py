@@ -61,7 +61,7 @@ class EntryJournal:
             direction = str(payload["direction"]).upper()
             if direction not in ("LONG", "SHORT", "FLAT"):
                 direction = "FLAT"
-            confidence = float(payload["confidence"])
+            confidence = max(0.0, min(1.0, float(payload["confidence"])))
         except (ValueError, TypeError, KeyError, json.JSONDecodeError):
             return "FLAT", 0.0
         return direction, confidence
