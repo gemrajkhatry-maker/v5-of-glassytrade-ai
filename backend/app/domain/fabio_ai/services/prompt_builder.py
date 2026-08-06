@@ -168,6 +168,20 @@ def _build_narrative_market_state(data: Dict[str, Any]) -> list[str]:
             parts.append(
                 f"LOCATION: Price {price:.0f}. POC={poc:.0f}, VAH={vah:.0f}, VAL={val:.0f}."
             )
+    elif (
+        isinstance(price, (int, float))
+        and price > 0
+        and not (
+            isinstance(vah, (int, float))
+            and isinstance(val, (int, float))
+            and vah > 0
+            and val > 0
+        )
+    ):
+        # Dataset-only fallback: nifty_amt_data rows carry `price` but no VA
+        # levels, so the location math above is skipped — still emit the price.
+        # Live always sends vah/val > 0, so this branch never fires live.
+        parts.append(f"LOCATION: Price {price:.0f}.")
     lvns = data.get("lvns", [])
     if lvns:
         parts.append(
