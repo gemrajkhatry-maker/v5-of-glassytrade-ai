@@ -16,16 +16,16 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
-from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import (
+from quant.decision.gates.three_align import three_align_check
+from quant.decision.gates.confirmation_bundle import (
     check_momentum_fade,
     check_confirmation_bundle,
 )
-from app.domain.fabio_ai.services.entry_gates.gate_runner import run_gate_pipeline
-from app.domain.constants import CVD_SLOPE_EXTREME, CVD_SLOPE_HARD_BLOCK
+from quant.decision.gates.gate_runner import run_gate_pipeline
+from quant.contracts.constants import CVD_SLOPE_EXTREME, CVD_SLOPE_HARD_BLOCK
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.value_objects import OHLC, AMTResult, OrderBook
+    from quant.contracts.value_objects import OHLC, AMTResult, OrderBook
 
 logger = logging.getLogger(__name__)
 

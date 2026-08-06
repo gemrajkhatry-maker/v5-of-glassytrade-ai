@@ -16,17 +16,17 @@ import time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Callable
 
-from app.domain.fabio_ai.services.exit_engine import ExitEngine, ExitReason, ExitSignal
-from app.domain.fabio_ai.services.partition_exit_manager import (
+from quant.execution.exit_engine import ExitEngine, ExitReason, ExitSignal
+from quant.execution.partition import (
     PartitionExitManager,
     PartitionState,
 )
-from app.domain.trading.models.enums import CushionState, Side
+from quant.contracts.enums import CushionState, Side
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.aggregates import Portfolio
-    from app.domain.trading.models.entities import Signal, Position
-    from app.domain.trading.models.value_objects import OHLC
+    from quant.contracts.aggregates import Portfolio
+    from quant.contracts.entities import Signal, Position
+    from quant.contracts.value_objects import OHLC
 
 logger = logging.getLogger(__name__)
 

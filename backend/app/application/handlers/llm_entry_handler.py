@@ -17,27 +17,27 @@ from datetime import datetime, timedelta
 import queue
 from typing import TYPE_CHECKING, Callable, Optional
 
-from app.domain.trading.models.enums import (
+from quant.contracts.enums import (
     MarketStateCodec,
     SignalType,
     Source,
     SetupType,
 )
-from app.domain.trading.models.entities import Signal
+from quant.contracts.entities import Signal
 from app.config import settings
-from app.domain.fabio_ai.services.regime_detector import RegimeDetector
-from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
+from quant.amt.market.regime import RegimeDetector
+from quant.execution.exit_engine import ExitEngine as TradeManager
 
-from app.domain.fabio_ai.services.session_context import get_session_info
+from quant.amt.session.context import get_session_info
 from app.shared.parsing import resolve_session_market
-from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
-from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints
+from quant.decision.gates.signal_builder import build_entry_signal
+from quant.decision.gates.three_align import cluster_aggressive_prints
 
 # Import delegated modules
 from app.application.handlers.entry_gate_coordinator import EntryGateCoordinator
 # SignalConstructor removed - use build_entry_signal directly
 
-from app.domain.fabio_ai.services.position_sizer import PositionSizer
+from quant.decision.sizer import PositionSizer
 
 # Import error handling utilities
 from shared.error_handling import (
@@ -52,9 +52,9 @@ from shared.error_handling import (
 from app.core.llm_circuit_breaker import LLMCircuitBreaker
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.value_objects import OHLC, AMTResult
-    from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    from app.domain.ports.storage import IStorage
+    from quant.contracts.value_objects import OHLC, AMTResult
+    from quant.inference.generative_ai import GenerativeAIService
+    from quant.contracts.ports.storage import IStorage
 
 logger = logging.getLogger(__name__)
 
@@ -512,7 +512,7 @@ class LLMEntryHandler:
 
                 # Re-entry gate check
                 _squeeze = _det.detect_squeeze(session.data, amt_result)
-                from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import compute_atr
+                from quant.decision.gates.confirmation_bundle import compute_atr
                 _atr = compute_atr(session.data, 14)
 
                 if _det.is_re_entry_blocked(
@@ -548,7 +548,7 @@ class LLMEntryHandler:
                     return False
 
                 _cushion_sl = _risk_mgr.stop_loss_pct if _risk_mgr else None
-                from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
+                from quant.execution.exit_engine import ExitEngine as TradeManager
                 from app.config import settings
 
                 entry_signal = build_entry_signal(

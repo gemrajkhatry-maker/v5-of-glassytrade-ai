@@ -7,7 +7,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 try:
-    from app.domain.fabio_ai.rl.trainer import ValentiniTrainer
+    from quant.inference.rl.trainer import ValentiniTrainer
     _RL_AVAILABLE = True
 except ImportError:
     _RL_AVAILABLE = False
