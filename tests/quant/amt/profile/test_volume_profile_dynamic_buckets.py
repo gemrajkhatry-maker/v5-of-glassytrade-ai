@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from dataclasses import dataclass
 
-from app.domain.services.volume_profile import (
+from quant.amt.profile.volume_profile import (
     compute_optimal_buckets,
     create_profile,
     IncrementalVolumeProfile,

@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.domain.services.volume_profile import (
+from quant.amt.profile.volume_profile import (
     VolumeProfileSnapshot,
     build_snapshot,
     compute_bucket_index,
@@ -10,7 +10,7 @@ from app.domain.services.volume_profile import (
     compute_value_area,
     create_profile,
 )
-from app.domain.trading.models.value_objects import OHLC, VolumeProfileLevel
+from quant.contracts.value_objects import OHLC, VolumeProfileLevel
 
 
 def _make_candle(time: str, o: float, h: float, l: float, c: float, v: float) -> OHLC:
