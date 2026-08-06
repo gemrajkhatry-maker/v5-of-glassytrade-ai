@@ -111,6 +111,31 @@ class TestComputeValueArea:
         assert vah == 0.0
         assert val == 0.0
 
+    def test_partial_pair_not_underweighted(self):
+        # POC at index 1 (near the bottom edge). Below it only ONE row exists
+        # (index 0, dense vol 900); above there are TWO rows (indices 2,3,
+        # ~455 each). Old sum-comparison: up_sum(910) >= down_sum(900) -> drift
+        # UP first. Average-weighted must favor the single dense down row
+        # (down_avg 900 >> up_avg 455), keeping VAH tighter.
+        profile = [
+            VolumeProfileLevel(price=90, volume=900),   # dense single below row
+            VolumeProfileLevel(price=91, volume=1000),  # POC
+            VolumeProfileLevel(price=92, volume=460),
+            VolumeProfileLevel(price=93, volume=450),
+        ]
+        vah, val = compute_value_area(profile, poc_index=1, value_area_pct=0.70)
+        # 70% of 2810 = 1967; POC(1000)+down(900)=1900 < 1967 -> one more up row.
+        # New logic: down first (avg 900 > avg 455), then up one row -> VAH=92.5.
+        # Old logic: up first (sum 910 >= 900), two up rows -> VAH=93.5.
+        assert vah < 93.0
+        assert val == 89.5
+
+    def test_default_pct_from_config(self):
+        # value_area_pct omitted -> falls back to constants.VALUE_AREA_PCT (0.70)
+        profile = [VolumeProfileLevel(price=float(i), volume=100) for i in range(10)]
+        vah, val = compute_value_area(profile, poc_index=5)
+        assert vah > val
+
 
 class TestBuildSnapshot:
     def test_empty_profile(self):

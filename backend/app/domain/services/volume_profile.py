@@ -69,7 +69,7 @@ def compute_poc(
 def compute_value_area(
     profile: list[VolumeProfileLevel],
     poc_index: int,
-    value_area_pct: float = 0.70,
+    value_area_pct: float | None = None,
 ) -> tuple[float, float]:
     """Compute Value Area High/Low via CME Two-Row Pairs Method.
 
@@ -78,15 +78,15 @@ def compute_value_area(
            target = total_volume × value_area_pct
 
     LOOP while va_volume < target:
-      top_add = histogram[upper_idx+1] + histogram[upper_idx+2]
-      bot_add = histogram[lower_idx-1] + histogram[lower_idx-2]
-
-      IF top_add >= bot_add:
+      top_avg = avg(histogram[upper_idx+1..+2])   # average, not sum — a
+      bot_avg = avg(histogram[lower_idx-1..-2])   # partial boundary pair
+                                                   # must not be underweighted
+      IF top_avg >= bot_avg:
         upper_idx += 2 (expand up 2 rows)
-        va_volume += top_add
+        va_volume += top rows
       ELSE:
         lower_idx -= 2 (expand down 2 rows)
-        va_volume += bot_add
+        va_volume += bot rows
 
       GUARD: if upper_idx = max OR lower_idx = 0 → break
 
@@ -96,6 +96,11 @@ def compute_value_area(
     if not profile:
         return 0.0, 0.0
 
+    if value_area_pct is None:
+        from app.domain.constants import VALUE_AREA_PCT
+
+        value_area_pct = VALUE_AREA_PCT
+
     total_volume = sum(p.volume for p in profile)
     target_volume = total_volume * value_area_pct
 
@@ -104,7 +109,9 @@ def compute_value_area(
     down_idx = poc_index
 
     while current_volume < target_volume:
-        # Sum the next TWO rows above (CME standard)
+        # Sum the next TWO rows above (CME standard). Compare AVERAGES so a
+        # boundary pair with only 1 available row isn't biased against a
+        # full 2-row pair on the other side.
         up_pair = 0.0
         up_count = 0
         for k in range(1, 3):
@@ -126,7 +133,10 @@ def compute_value_area(
         if not can_go_up and not can_go_down:
             break
 
-        if can_go_up and (not can_go_down or up_pair >= down_pair):
+        up_avg = up_pair / up_count if up_count else 0.0
+        down_avg = down_pair / down_count if down_count else 0.0
+
+        if can_go_up and (not can_go_down or up_avg >= down_avg):
             # Expand upward by up to 2 rows
             for k in range(1, up_count + 1):
                 if up_idx + k < len(profile):

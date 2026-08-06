@@ -88,6 +88,7 @@ from app.domain.services.break_detector import (
 )
 from app.domain.services.lvn_play_detector import detect_lvn_play
 from app.domain.services.volume_profile import create_profile
+from app.domain.services.volume_profile import compute_value_area
 from app.domain.services.displacement_detector import (
     detect_displacement,
     detect_acceptance,
@@ -944,47 +945,8 @@ class AMTAnalyzer:
         poc_index = min(poc_candidates, key=lambda i: abs(profile[i].price - vwap_ref))
         poc = profile[poc_index].price
 
-        # Value Area (70%) — CME two-row pairs method
-        total_volume = sum(p.volume for p in profile)
-        target_volume = total_volume * VALUE_AREA_PCT
-        current_volume = max_vol
-        up_idx, down_idx = poc_index, poc_index
-
-        while current_volume < target_volume:
-            up_pair = 0.0
-            up_count = 0
-            for k in range(1, 3):
-                if up_idx + k < len(profile):
-                    up_pair += profile[up_idx + k].volume
-                    up_count += 1
-            down_pair = 0.0
-            down_count = 0
-            for k in range(1, 3):
-                if down_idx - k >= 0:
-                    down_pair += profile[down_idx - k].volume
-                    down_count += 1
-
-            can_go_up = up_count > 0
-            can_go_down = down_count > 0
-
-            if not can_go_up and not can_go_down:
-                break
-
-            if can_go_up and (not can_go_down or up_pair >= down_pair):
-                for k in range(1, up_count + 1):
-                    if up_idx + k < len(profile):
-                        up_idx += 1
-                        current_volume += profile[up_idx].volume
-            elif can_go_down:
-                for k in range(1, down_count + 1):
-                    if down_idx - k >= 0:
-                        down_idx -= 1
-                        current_volume += profile[down_idx].volume
-
-        step = profile[1].price - profile[0].price if len(profile) > 1 else 0
-        half_step = step / 2
-        vah = profile[up_idx].price + half_step
-        val = profile[down_idx].price - half_step
+        # Value Area — CME two-row pairs method (shared impl, average-weighted)
+        vah, val = compute_value_area(profile, poc_index, VALUE_AREA_PCT)
 
         # LVN detection with persistence filter
         raw_lvns = find_lvns(profile, self.config)
