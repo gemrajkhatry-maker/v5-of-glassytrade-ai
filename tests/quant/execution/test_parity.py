@@ -280,3 +280,34 @@ def test_loss_tracker_dynamic_risk_parity():
         lambda: _dynamic_risk(legacy),
         lambda: _dynamic_risk(QuantLossTracker),
     )
+
+
+# ---------------------------------------------------------------------------
+# SessionRiskManager
+# ---------------------------------------------------------------------------
+
+
+def _session_sequence(engine_cls) -> dict:
+    mgr = engine_cls()
+    mgr.record_trade(-10)
+    mgr.record_trade(-10)
+    halted = mgr.can_trade
+    mgr.record_trade(50)
+    return {
+        "tier": mgr.risk_tier.value,
+        "halted": halted,
+        "can_trade": mgr.can_trade,
+        "sl_pct": mgr.stop_loss_pct,
+        "consec_losses": mgr.consecutive_losses,
+        "state": mgr.to_dict(),
+    }
+
+
+def test_session_risk_manager_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.fabio_ai.services.session_risk_manager").SessionRiskManager
+    from quant.execution.session_risk_manager import SessionRiskManager as QuantSrm
+    assert_parity(
+        lambda: _session_sequence(legacy),
+        lambda: _session_sequence(QuantSrm),
+    )
