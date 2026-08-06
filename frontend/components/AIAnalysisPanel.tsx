@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook } from '../types';
-import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Settings, Zap, AlertTriangle, Clock, BarChart3, Shield, Eye, Layers, ArrowUpDown, Crosshair, Navigation } from 'lucide-react';
+import { Brain, TrendingUp, TrendingDown, MinusCircle, Target, Activity, Settings, Zap, AlertTriangle, Clock, BarChart3, Shield, Eye, ArrowUpDown, Crosshair, Navigation } from 'lucide-react';
 import { EquityPanel, RiskStateDisplay, DecisionHistoryPanel } from './ai';
 import { sanitizeLlmText, sanitizeRationale, extractDecisionText } from '../utils/textSanitizer';
 
@@ -139,48 +139,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     </div>
                 </div>
 
-                {/* Engine Bar */}
-                <div className="mb-3 px-3 py-2 bg-glassy-bg-elevated/50 border-y border-glassy-border-subtle flex flex-col justify-between items-center text-xs backdrop-blur-sm gap-2">
-                    <div className="flex justify-between items-center w-full">
-                        <div className="flex items-center gap-2 px-1.5 py-0.5 bg-glassy-bull-primary/10 border border-glassy-bull-primary/20 rounded-sm">
-                            <Shield className="w-3 h-3 text-glassy-bull-primary" />
-                            <span className="text-glassy-bull-primary font-bold tracking-wider text-[8px]">[ENGINE ARMED]</span>
-                        </div>
-                        <span className="text-glassy-text-tertiary text-[8px] uppercase tracking-wider cursor-pointer hover:text-glassy-text-secondary transition-colors">Target vs Circuit</span>
-                    </div>
-                    {/* Target / Circuit Mini Progress Bar */}
-                    <div className="w-full">
-                        <div className="flex justify-between text-[7px] font-mono text-glassy-text-tertiary mb-1">
-                            <span>-₹30K (Circuit)</span>
-                            <span>+₹15K (Target)</span>
-                        </div>
-                        <div className="h-1 bg-glassy-text-disabled/20 rounded-full overflow-hidden flex relative">
-                            <div className="absolute top-0 left-1/2 w-px h-full bg-glassy-text-disabled/30 z-10" />
-                            {(() => {
-                                const maxAbs = 30000;
-                                const totalPartialPnl = (portfolio.positions as any[]).reduce(
-                                    (sum: number, p: any) => sum + (p.partialRealizedPnl || 0), 0
-                                );
-                                const closedPnl = (portfolio.closedTrades || []).reduce(
-                                    (sum: number, t: any) => {
-                                        const tradePnl = t.pnl || 0;
-                                        return sum + tradePnl;
-                                    }, 0
-                                );
-                                const currentPnl = closedPnl + totalPartialPnl;
-                                const norm = Math.min(Math.abs(currentPnl) / maxAbs, 1);
-                                return (
-                                    <div className="h-full absolute transition-all duration-500 rounded-full" style={{
-                                        width: `${norm * 50}%`,
-                                        left: currentPnl > 0 ? '50%' : `${50 - norm * 50}%`,
-                                        backgroundColor: currentPnl > 0 ? '#00c896' : '#ff4757'
-                                    }} />
-                                );
-                            })()}
-                        </div>
-                    </div>
-                </div>
-
                 {/* Equity Panel (Header) */}
                 <EquityPanel portfolio={portfolio} openPnl={openPnl} />
 
@@ -237,35 +195,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                         </div>
                     </div>
                     
-                    {/* Item 2.15: Session Gap Info */}
-                    {(() => {
-                        const gapType = amtResult?.gapType;
-                        const openingBias = amtResult?.openingBias;
-                        if (!gapType && !openingBias) return null;
-                        
-                        return (
-                            <div className="flex items-center gap-2 px-2 pt-1 border-t border-glassy-border-subtle">
-                                {gapType && (
-                                    <div className={`px-1.5 py-0.5 rounded-sm text-[7px] font-bold tracking-wide ${
-                                        gapType.includes('UP') || gapType.includes('BULL') ? 'bg-glassy-bull-primary/15 text-glassy-bull-primary border border-glassy-bull-primary/30' :
-                                        gapType.includes('DOWN') || gapType.includes('BEAR') ? 'bg-glassy-bear-primary/15 text-glassy-bear-primary border border-glassy-bear-primary/30' :
-                                        'bg-glassy-bg-elevated text-glassy-text-tertiary border border-glassy-border-subtle'
-                                    }`}>
-                                        GAP: {gapType}
-                                    </div>
-                                )}
-                                {openingBias && (
-                                    <div className={`px-1.5 py-0.5 rounded-sm text-[7px] font-bold tracking-wide ${
-                                        openingBias.includes('BULL') || openingBias.includes('UP') ? 'bg-glassy-bull-primary/15 text-glassy-bull-primary border border-glassy-bull-primary/30' :
-                                        openingBias.includes('BEAR') || openingBias.includes('DOWN') ? 'bg-glassy-bear-primary/15 text-glassy-bear-primary border border-glassy-bear-primary/30' :
-                                        'bg-glassy-bg-elevated text-glassy-text-tertiary border border-glassy-border-subtle'
-                                    }`}>
-                                        OPEN: {openingBias}
-                                    </div>
-                                )}
-                            </div>
-                        );
-                    })()}
                 </div>
             </div>
 
@@ -398,29 +327,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             <span className={`text-xs font-mono font-bold tabular-nums ${deltaScore > 0 ? 'text-glassy-bull-primary' : deltaScore < 0 ? 'text-glassy-bear-primary' : 'text-glassy-text-disabled'}`}>
                                 {deltaScore > 0 ? '+' : ''}{deltaScore.toFixed(2)}
                             </span>
-                            {agentDecision && (() => {
-                                // Delta confidence: strength of delta signal (0-100%)
-                                // When delta is near-zero, show ~50% (neutral/no edge)
-                                const isDeltaNeutral = Math.abs(deltaScore) < 0.05;
-                                const deltaConfidence = isDeltaNeutral 
-                                    ? 50 
-                                    : Math.min(100, Math.abs(deltaScore) * 100);
-                                const confColor = isDeltaNeutral 
-                                    ? 'text-glassy-warning' 
-                                    : agentDecision.probability >= 0.6 
-                                        ? 'text-glassy-bull-primary' 
-                                        : agentDecision.probability > 0.45 
-                                            ? 'text-glassy-warning' 
-                                            : agentDecision.probability > 0 
-                                                ? 'text-glassy-bear-primary' 
-                                                : 'text-glassy-text-disabled';
-                                
-                                return (
-                                    <span className={`text-[9px] font-mono font-bold tabular-nums ${confColor}`}>
-                                        {isDeltaNeutral ? '~50%' : `${deltaConfidence.toFixed(1)}%`}
-                                    </span>
-                                );
-                            })()}
                         </div>
                     </div>
                     {/* Progress Bar */}
@@ -505,67 +411,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             })()}
                         </div>
                     </div>
-                    {/* Item 3.13: CVD Sparkline */}
-                    {(() => {
-                        // Create a simple sparkline from CVD slope value
-                        // Since we only have current CVD slope, we'll simulate a mini trend
-                        const cvd = amtResult?.cvdSlope ?? 0;
-                        const cvdAbs = Math.abs(cvd);
-                        const cvdDirection = cvd > 0 ? 1 : cvd < 0 ? -1 : 0;
-                        
-                        if (cvdAbs < 0.01) return null;
-                        
-                        // Generate a simple 10-point sparkline showing recent trend
-                        const points = 10;
-                        const width = 60;
-                        const height = 20;
-                        const strokeWidth = 1.5;
-                        
-                        // Simulate trend: recent values leading to current CVD
-                        const sparkData: number[] = [];
-                        for (let i = 0; i < points; i++) {
-                            // Linear progression from 0 to current value with slight noise
-                            const progress = i / (points - 1);
-                            const noise = (Math.sin(i * 1.5) * 0.1) * cvd; // 10% noise
-                            sparkData.push(cvd * progress + noise);
-                        }
-                        
-                        const minVal = Math.min(...sparkData);
-                        const maxVal = Math.max(...sparkData);
-                        const range = maxVal - minVal || 1;
-                        
-                        // Convert to SVG path
-                        const pathPoints = sparkData.map((val, i) => {
-                            const x = (i / (points - 1)) * width;
-                            const y = height - ((val - minVal) / range) * (height - 4) - 2; // 2px padding
-                            return `${x.toFixed(1)},${y.toFixed(1)}`;
-                        });
-                        const pathD = `M ${pathPoints.join(' L ')}`;
-                        
-                        const strokeColor = cvdDirection > 0 ? '#4ade80' : '#f87171';
-                        
-                        return (
-                            <div className="flex items-center gap-2 mt-2 pt-2 border-t border-white/5">
-                                <span className="text-[8px] text-white/40">CVD Trend</span>
-                                <svg width={width} height={height} className="flex-shrink-0">
-                                    {/* Grid line */}
-                                    <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="rgba(255,255,255,0.1)" strokeWidth="0.5" />
-                                    {/* Sparkline */}
-                                    <path d={pathD} fill="none" stroke={strokeColor} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
-                                    {/* End dot */}
-                                    <circle 
-                                        cx={width} 
-                                        cy={height - ((sparkData[sparkData.length - 1] - minVal) / range) * (height - 4) - 2} 
-                                        r="2" 
-                                        fill={strokeColor} 
-                                    />
-                                </svg>
-                                <span className={`text-[8px] font-mono ${cvdDirection > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                                    {cvdDirection > 0 ? '↗' : '↘'} {cvdAbs > 1000 ? `${(cvdAbs / 1000).toFixed(1)}K` : cvdAbs.toFixed(0)}
-                                </span>
-                            </div>
-                        );
-                    })()}
                     {/* Aggression Divergence Check */}
                     {(() => {
                         const delta = amtResult?.deltaNormalizedOption ?? 0;
@@ -668,87 +513,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                             })()}
                         </div>
                     </div>
-                </div>
-            </div>
-
-            {/* 03c. MARKET STRUCTURE */}
-            <div className="flex flex-col gap-2">
-                <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
-                    <span>03c. Structure</span>
-                    <Layers className="w-3 h-3 hover:text-white/80 transition-colors" />
-                </div>
-                <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2 relative overflow-hidden">
-                    <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                            {/* CSS Donut Chart */}
-                            {(() => {
-                                const conf = amtResult?.structureConfidence ?? 0;
-                                const color = conf >= 70 ? '#4ade80' : conf >= 40 ? '#facc15' : '#f87171';
-                                return (
-                                    <div className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" 
-                                         style={{ background: `conic-gradient(${color} ${conf}%, rgba(255,255,255,0.05) 0)` }}>
-                                        <div className="absolute inset-1 bg-[#202532] rounded-full flex items-center justify-center">
-                                            <span className="text-[10px] font-mono font-bold text-white/90">{conf}%</span>
-                                        </div>
-                                    </div>
-                                );
-                            })()}
-                            <div className="flex flex-col">
-                                <span className={`text-xs font-bold tracking-wider ${amtResult?.marketStructure === 'TREND_UP' ? 'text-emerald-400' :
-                                    amtResult?.marketStructure === 'TREND_DOWN' ? 'text-red-400' :
-                                        amtResult?.marketStructure === 'BREAKOUT' ? 'text-orange-400' :
-                                            amtResult?.marketStructure === 'BREAKDOWN' ? 'text-rose-400' :
-                                                'text-blue-300'
-                                    }`}>
-                                    {amtResult?.marketStructure || 'BALANCE'}
-                                </span>
-                                <span className="text-[9px] text-white/40 uppercase">Structure</span>
-                            </div>
-                        </div>
-                        {((amtResult?.structureConfidence ?? 0) >= 70 && (amtResult?.structureConfidence ?? 0) <= 80) && (
-                            <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded text-[8px] text-yellow-400 font-bold animate-pulse">
-                                WAIT FOR REJECTION
-                            </div>
-                        )}
-                    </div>
-                    {/* Acceptance / Rejection signals */}
-                    <div className="flex gap-2 flex-wrap pt-1">
-                        {amtResult?.acceptanceAbove && (
-                            <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/20">ACCEPTANCE ↑</span>
-                        )}
-                        {amtResult?.acceptanceBelow && (
-                            <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/20">ACCEPTANCE ↓</span>
-                        )}
-                        {amtResult?.rejectionAtHigh && (
-                            <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/20">REJECTION @ HIGH</span>
-                        )}
-                        {amtResult?.rejectionAtLow && (
-                            <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/20">REJECTION @ LOW</span>
-                        )}
-                        {!amtResult?.acceptanceAbove && !amtResult?.acceptanceBelow && !amtResult?.rejectionAtHigh && !amtResult?.rejectionAtLow && (
-                            <span className="text-[8px] text-white/20">No acceptance/rejection signals</span>
-                        )}
-                    </div>
-                    {/* Item 2.14: VA Acceptance Duration (simplified - based on current state) */}
-                    {(() => {
-                        const isAccepted = amtResult?.acceptanceAbove || amtResult?.acceptanceBelow;
-                        if (!isAccepted) return null;
-                        
-                        // Simplified: estimate duration based on current market state
-                        // In reality, this requires server-side timestamp tracking
-                        const direction = amtResult?.acceptanceAbove ? 'above VAH' : 'below VAL';
-                        const estimatedDuration = amtResult?.marketState === 'IMBALANCED' ? 'Extended' : 'Developing';
-                        const durationColor = estimatedDuration === 'Extended' ? 'text-orange-400' : 'text-blue-400';
-                        
-                        return (
-                            <div className="flex justify-between items-center px-1 py-0.5 bg-white/5 rounded border border-white/10">
-                                <span className="text-[8px] text-white/40">VA Acceptance</span>
-                                <span className={`text-[8px] font-bold ${durationColor}`}>
-                                    {direction} — {estimatedDuration}
-                                </span>
-                            </div>
-                        );
-                    })()}
                 </div>
             </div>
 
@@ -902,24 +666,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                         }
                         return null;
                     })()}
-                    {/* POC Migration */}
-                    {amtResult?.pocSignal && (
-                        <div className="flex justify-between items-center pt-1 border-t border-white/5">
-                            <span className="text-[10px] text-white/40">POC Signal</span>
-                            <span className={`text-[9px] font-mono font-bold ${amtResult.pocSignal.includes('BULLISH') ? 'text-emerald-400' :
-                                amtResult.pocSignal.includes('BEARISH') ? 'text-red-400' :
-                                    'text-yellow-400'
-                                }`}>{amtResult.pocSignal.replace('POC_', '').replace('_', ' ')}</span>
-                        </div>
-                    )}
-                    {amtResult?.pocVsPrice && (
-                        <div className="flex justify-between items-center">
-                            <span className="text-[10px] text-white/40">POC vs Price</span>
-                            <span className={`text-[9px] font-mono ${amtResult.pocVsPrice === 'ALIGNED' ? 'text-green-400' : 'text-yellow-400'}`}>
-                                {amtResult.pocVsPrice}
-                            </span>
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -1128,20 +874,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                 </>
                             );
                         })()}
-                        {(amtResult?.priorPoc ?? 0) > 0 && (
-                            <>
-                                <div className="border-t border-white/5 pt-1.5 flex justify-between">
-                                    <span className="text-white/40">Prior POC</span>
-                                    <span className="font-mono text-yellow-400/70">{amtResult?.priorPoc?.toFixed(2)}</span>
-                                </div>
-                                <div className="flex justify-between">
-                                    <span className="text-white/30">Prior VA</span>
-                                    <span className="font-mono text-white/30">
-                                        {amtResult?.priorVal?.toFixed(2)} — {amtResult?.priorVah?.toFixed(2)}
-                                    </span>
-                                </div>
-                            </>
-                        )}
                         {amtResult?.gapType && (
                             <div className="flex justify-between">
                                 <span className="text-white/40">Gap</span>
@@ -1164,183 +896,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                 <span className="font-mono text-white/50">{amtResult?.priceVelocity?.toFixed(4)}/s</span>
                             </div>
                         )}
-                        
-                        {/* Items 5.12-5.14: VWAP Events & AVWAP Detection */}
-                        {(() => {
-                            const vwap = amtResult?.sessionVwap ?? 0;
-                            const ltp = currentLtp;
-                            if (vwap <= 0 || ltp <= 0) return null;
-                            
-                            // Detect VWAP cross direction
-                            const distFromVwap = ((ltp - vwap) / vwap) * 100;
-                            const vwapCrossThreshold = 0.3; // 0.3% from VWAP
-                            const isNearVwap = Math.abs(distFromVwap) < vwapCrossThreshold;
-                            
-                            // Check if price is at VWAP sigma bands
-                            const upper1 = amtResult?.vwapUpper1 ?? 0;
-                            const lower1 = amtResult?.vwapLower1 ?? 0;
-                            const upper2 = amtResult?.vwapUpper2 ?? 0;
-                            const lower2 = amtResult?.vwapLower2 ?? 0;
-                            
-                            const atUpper1 = upper1 > 0 && Math.abs((ltp - upper1) / upper1) < 0.002;
-                            const atLower1 = lower1 > 0 && Math.abs((ltp - lower1) / lower1) < 0.002;
-                            const atUpper2 = upper2 > 0 && Math.abs((ltp - upper2) / upper2) < 0.002;
-                            const atLower2 = lower2 > 0 && Math.abs((ltp - lower2) / lower2) < 0.002;
-                            
-                            const hasVWAPEvent = isNearVwap || atUpper1 || atLower1 || atUpper2 || atLower2;
-
-                            if (!hasVWAPEvent) return null;
-
-                            const sig = amtResult?.vwapDeviationSigmas;
-                            let primary: 'u2' | 'l2' | 'u1' | 'l1' | 'near' | null = null;
-                            if (typeof sig === 'number' && Number.isFinite(sig)) {
-                                if (sig >= 1.65 && atUpper2) primary = 'u2';
-                                else if (sig <= -1.65 && atLower2) primary = 'l2';
-                                else if (sig >= 0.8 && atUpper1) primary = 'u1';
-                                else if (sig <= -0.8 && atLower1) primary = 'l1';
-                                else if (Math.abs(sig) < 0.5 && isNearVwap) primary = 'near';
-                            }
-                            if (!primary) {
-                                if (atUpper2) primary = 'u2';
-                                else if (atLower2) primary = 'l2';
-                                else if (atUpper1) primary = 'u1';
-                                else if (atLower1) primary = 'l1';
-                                else if (isNearVwap) primary = 'near';
-                            }
-
-                            const activeCount = [isNearVwap, atUpper1, atLower1, atUpper2, atLower2].filter(Boolean).length;
-                            const ambiguous = activeCount > 2 && primary === 'near';
-                            if (ambiguous) {
-                                return (
-                                    <div className="border-t border-white/5 pt-2 space-y-1.5">
-                                        <div className="text-[8px] text-white/40 font-bold tracking-wide">VWAP EVENTS</div>
-                                        <div className="px-1.5 py-1 bg-white/5 border border-white/10 rounded text-[8px] text-white/55 font-mono">
-                                            Between VWAP bands — no single active touch (see sigma meter above)
-                                        </div>
-                                    </div>
-                                );
-                            }
-
-                            const rowCls = (id: NonNullable<typeof primary>) =>
-                                id === primary ? 'opacity-100' : 'opacity-35 saturate-50 pointer-events-none';
-
-                            return (
-                                <div className="border-t border-white/5 pt-2 space-y-1.5">
-                                    <div className="text-[8px] text-white/40 font-bold tracking-wide">VWAP EVENTS</div>
-
-                                    {isNearVwap && (
-                                        <div className={`px-1.5 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded transition-opacity ${rowCls('near')}`}>
-                                            <div className="text-[8px] font-bold text-cyan-400">
-                                                AT VWAP — Decision Zone
-                                            </div>
-                                            <div className="text-[7px] text-white/40 mt-0.5">
-                                                Price testing session fair value — watch for bounce/break
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {atUpper1 && (
-                                        <div className={`px-1.5 py-0.5 bg-orange-500/10 border border-orange-500/30 rounded text-[8px] font-bold text-orange-400 transition-opacity ${rowCls('u1')}`}>
-                                            Testing +1σ VWAP — Resistance
-                                        </div>
-                                    )}
-                                    {atLower1 && (
-                                        <div className={`px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded text-[8px] font-bold text-emerald-400 transition-opacity ${rowCls('l1')}`}>
-                                            Testing -1σ VWAP — Support
-                                        </div>
-                                    )}
-                                    {atUpper2 && (
-                                        <div className={`px-1.5 py-0.5 bg-red-500/10 border border-red-500/30 rounded text-[8px] font-bold text-red-400 transition-opacity ${rowCls('u2')} ${primary === 'u2' ? 'animate-pulse' : ''}`}>
-                                            Testing +2σ VWAP — Extreme Overbought
-                                        </div>
-                                    )}
-                                    {atLower2 && (
-                                        <div className={`px-1.5 py-0.5 bg-green-500/10 border border-green-500/30 rounded text-[8px] font-bold text-green-400 transition-opacity ${rowCls('l2')} ${primary === 'l2' ? 'animate-pulse' : ''}`}>
-                                            Testing -2σ VWAP — Extreme Oversold
-                                        </div>
-                                    )}
-                                </div>
-                            );
-                        })()}
-                    </div>
-                </div>
-            )}
-
-            {/* Items 6.6-6.8: Market Structure Panel */}
-            {amtResult?.marketStructure && (
-                <div className="flex flex-col gap-2">
-                    <div className="flex justify-between items-center text-[10px] text-white/40 uppercase tracking-widest">
-                        <span>05. Market Structure</span>
-                    </div>
-                    <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2">
-                        {(() => {
-                            const structure = amtResult.marketStructure;
-                            const confidence = amtResult.structureConfidence ?? 0;
-                            
-                            // Structure color coding
-                            const structureConfig: Record<string, { color: string; bg: string; icon: string; desc: string }> = {
-                                'TREND_UP': { color: 'text-green-400', bg: 'bg-green-500/10 border-green-500/30', icon: '↗', desc: 'Higher highs & higher lows — bullish trend' },
-                                'TREND_DOWN': { color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/30', icon: '↘', desc: 'Lower highs & lower lows — bearish trend' },
-                                'RANGE': { color: 'text-yellow-400', bg: 'bg-yellow-500/10 border-yellow-500/30', icon: '⟷', desc: 'Price rotating between support/resistance' },
-                                'BREAKOUT': { color: 'text-orange-400', bg: 'bg-orange-500/10 border-orange-500/30', icon: '⚡', desc: 'Price breaking out of range — potential trend start' },
-                                'REVERSAL': { color: 'text-purple-400', bg: 'bg-purple-500/10 border-purple-500/30', icon: '↺', desc: 'Trend reversal in progress' },
-                            };
-                            
-                            const config = structureConfig[structure] || { color: 'text-white/60', bg: 'bg-white/5 border-white/10', icon: '●', desc: 'Unknown structure' };
-                            
-                            return (
-                                <>
-                                    <div className={`px-2 py-1.5 rounded border ${config.bg}`}>
-                                        <div className="flex items-center justify-between">
-                                            <span className={`text-[10px] font-bold ${config.color}`}>
-                                                {config.icon} {structure.replace('_', ' ')}
-                                            </span>
-                                            <span className="text-[8px] font-mono text-white/50">
-                                                {confidence}% confidence
-                                            </span>
-                                        </div>
-                                        <div className="text-[8px] text-white/40 mt-1">
-                                            {config.desc}
-                                        </div>
-                                    </div>
-                                    
-                                    {/* Confidence bar */}
-                                    <div className="space-y-1">
-                                        <div className="flex justify-between text-[8px]">
-                                            <span className="text-white/40">Structure Strength</span>
-                                            <span className={`font-mono ${
-                                                confidence >= 70 ? 'text-green-400' : 
-                                                confidence >= 50 ? 'text-yellow-400' : 
-                                                'text-red-400'
-                                            }`}>
-                                                {confidence >= 70 ? 'STRONG' : confidence >= 50 ? 'MODERATE' : 'WEAK'}
-                                            </span>
-                                        </div>
-                                        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-                                            <div 
-                                                className="h-full rounded-full transition-all duration-300"
-                                                style={{
-                                                    width: `${confidence}%`,
-                                                    backgroundColor: confidence >= 70 ? '#4ade80' : confidence >= 50 ? '#fbbf24' : '#f87171',
-                                                }}
-                                            />
-                                        </div>
-                                    </div>
-                                    
-                                    {/* Structure-based trading guidance */}
-                                    <div className="px-1.5 py-1 bg-white/5 rounded border border-white/10">
-                                        <div className="text-[8px] text-white/40 font-bold mb-1">TRADING CONTEXT</div>
-                                        <div className="text-[8px] text-white/50">
-                                            {structure === 'TREND_UP' && 'Look for pullback entries in direction of trend'}
-                                            {structure === 'TREND_DOWN' && 'Look for rally entries to short in direction of trend'}
-                                            {structure === 'RANGE' && 'Fade extremes — buy support, sell resistance'}
-                                            {structure === 'BREAKOUT' && 'Wait for acceptance before entering — avoid false breaks'}
-                                            {structure === 'REVERSAL' && 'High risk/reward — confirm with volume & CVD'}
-                                        </div>
-                                    </div>
-                                </>
-                            );
-                        })()}
                     </div>
                 </div>
             )}
@@ -1418,20 +973,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                                 </div>
                             )}
                             
-                            {/* Fabio Playbook: LVN Play Indicator */}
-                            {amtResult?.lvnPlay && (
-                                <div className="flex justify-between items-center pl-2 pt-1">
-                                    <span className="text-[10px] text-white/40">LVN Entry</span>
-                                    <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30">
-                                        <span>🎯 LVN PLAY</span>
-                                        <span className="text-[8px] font-mono font-normal text-white/50">@ {amtResult.lvnPlay.lvn_price.toFixed(1)}</span>
-                                        <span className={`text-[8px] font-bold ${amtResult.lvnPlay.direction === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
-                                            {amtResult.lvnPlay.direction}
-                                        </span>
-                                    </div>
-                                </div>
-                            )}
-                            
+                            {/* Logic Formulas */}
                             <details className="group mt-2 pt-2 border-t border-white/5 pl-2 cursor-pointer">
                                 <summary className="list-none flex justify-between items-center text-[9px] text-white/40 uppercase tracking-widest font-bold">
                                     <span>Logic Formulas</span>
@@ -1616,7 +1158,205 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                 </div>
             )}
 
-            {/* 05. RULE CHECKLIST */}
+            {/* DIAGNOSTICS TIER — collapsed by default */}
+            <details className="mt-2 group rounded-md bg-white/5 border border-white/5 cursor-pointer">
+                <summary className="list-none flex justify-between items-center px-3 py-2 text-[10px] text-white/40 uppercase tracking-widest font-bold">
+                    <span>Diagnostics</span>
+                    <span className="group-open:hidden">Expand</span>
+                    <span className="hidden group-open:block">Collapse</span>
+                </summary>
+                <div className="px-3 pb-3 pt-1 flex flex-col gap-2">
+                    {/* Market Structure */}
+                    <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-2 relative overflow-hidden">
+                        <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                                {/* CSS Donut Chart */}
+                                {(() => {
+                                    const conf = amtResult?.structureConfidence ?? 0;
+                                    const color = conf >= 70 ? '#4ade80' : conf >= 40 ? '#facc15' : '#f87171';
+                                    return (
+                                        <div className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0" 
+                                             style={{ background: `conic-gradient(${color} ${conf}%, rgba(255,255,255,0.05) 0)` }}>
+                                            <div className="absolute inset-1 bg-[#202532] rounded-full flex items-center justify-center">
+                                                <span className="text-[10px] font-mono font-bold text-white/90">{conf}%</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })()}
+                                <div className="flex flex-col">
+                                    <span className={`text-xs font-bold tracking-wider ${amtResult?.marketStructure === 'TREND_UP' ? 'text-emerald-400' :
+                                        amtResult?.marketStructure === 'TREND_DOWN' ? 'text-red-400' :
+                                            amtResult?.marketStructure === 'BREAKOUT' ? 'text-orange-400' :
+                                                amtResult?.marketStructure === 'BREAKDOWN' ? 'text-rose-400' :
+                                                    'text-blue-300'
+                                        }`}>
+                                        {amtResult?.marketStructure || 'BALANCE'}
+                                    </span>
+                                    <span className="text-[9px] text-white/40 uppercase">Structure</span>
+                                </div>
+                            </div>
+                            {((amtResult?.structureConfidence ?? 0) >= 70 && (amtResult?.structureConfidence ?? 0) <= 80) && (
+                                <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded text-[8px] text-yellow-400 font-bold animate-pulse">
+                                    WAIT FOR REJECTION
+                                </div>
+                            )}
+                        </div>
+                        {/* Acceptance / Rejection signals */}
+                        <div className="flex gap-2 flex-wrap pt-1">
+                            {amtResult?.acceptanceAbove && (
+                                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/20">ACCEPTANCE ↑</span>
+                            )}
+                            {amtResult?.acceptanceBelow && (
+                                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/20">ACCEPTANCE ↓</span>
+                            )}
+                            {amtResult?.rejectionAtHigh && (
+                                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/20">REJECTION @ HIGH</span>
+                            )}
+                            {amtResult?.rejectionAtLow && (
+                                <span className="text-[8px] font-mono px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/20">REJECTION @ LOW</span>
+                            )}
+                            {!amtResult?.acceptanceAbove && !amtResult?.acceptanceBelow && !amtResult?.rejectionAtHigh && !amtResult?.rejectionAtLow && (
+                                <span className="text-[8px] text-white/20">No acceptance/rejection signals</span>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* POC Signal / POC vs Price / Prior POC-VA */}
+                    {(amtResult?.pocSignal || amtResult?.pocVsPrice || (amtResult?.priorPoc ?? 0) > 0) && (
+                        <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-1.5">
+                            {amtResult?.pocSignal && (
+                                <div className="flex justify-between items-center">
+                                    <span className="text-[10px] text-white/40">POC Signal</span>
+                                    <span className={`text-[9px] font-mono font-bold ${amtResult.pocSignal.includes('BULLISH') ? 'text-emerald-400' :
+                                        amtResult.pocSignal.includes('BEARISH') ? 'text-red-400' :
+                                            'text-yellow-400'
+                                        }`}>{amtResult.pocSignal.replace('POC_', '').replace('_', ' ')}</span>
+                                </div>
+                            )}
+                            {amtResult?.pocVsPrice && (
+                                <div className="flex justify-between items-center">
+                                    <span className="text-[10px] text-white/40">POC vs Price</span>
+                                    <span className={`text-[9px] font-mono ${amtResult.pocVsPrice === 'ALIGNED' ? 'text-green-400' : 'text-yellow-400'}`}>
+                                        {amtResult.pocVsPrice}
+                                    </span>
+                                </div>
+                            )}
+                            {(amtResult?.priorPoc ?? 0) > 0 && (
+                                <>
+                                    <div className="flex justify-between items-center pt-1.5 border-t border-white/5">
+                                        <span className="text-white/40">Prior POC</span>
+                                        <span className="font-mono text-yellow-400/70">{amtResult?.priorPoc?.toFixed(2)}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-white/30">Prior VA</span>
+                                        <span className="font-mono text-white/30">
+                                            {amtResult?.priorVal?.toFixed(2)} — {amtResult?.priorVah?.toFixed(2)}
+                                        </span>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    )}
+
+                    {/* VWAP Events & AVWAP Detection */}
+                    {(() => {
+                        const vwap = amtResult?.sessionVwap ?? 0;
+                        const ltp = currentLtp;
+                        if (vwap <= 0 || ltp <= 0) return null;
+                        
+                        // Detect VWAP cross direction
+                        const distFromVwap = ((ltp - vwap) / vwap) * 100;
+                        const vwapCrossThreshold = 0.3; // 0.3% from VWAP
+                        const isNearVwap = Math.abs(distFromVwap) < vwapCrossThreshold;
+                        
+                        // Check if price is at VWAP sigma bands
+                        const upper1 = amtResult?.vwapUpper1 ?? 0;
+                        const lower1 = amtResult?.vwapLower1 ?? 0;
+                        const upper2 = amtResult?.vwapUpper2 ?? 0;
+                        const lower2 = amtResult?.vwapLower2 ?? 0;
+                        
+                        const atUpper1 = upper1 > 0 && Math.abs((ltp - upper1) / upper1) < 0.002;
+                        const atLower1 = lower1 > 0 && Math.abs((ltp - lower1) / lower1) < 0.002;
+                        const atUpper2 = upper2 > 0 && Math.abs((ltp - upper2) / upper2) < 0.002;
+                        const atLower2 = lower2 > 0 && Math.abs((ltp - lower2) / lower2) < 0.002;
+                        
+                        const hasVWAPEvent = isNearVwap || atUpper1 || atLower1 || atUpper2 || atLower2;
+
+                        if (!hasVWAPEvent) return null;
+
+                        const sig = amtResult?.vwapDeviationSigmas;
+                        let primary: 'u2' | 'l2' | 'u1' | 'l1' | 'near' | null = null;
+                        if (typeof sig === 'number' && Number.isFinite(sig)) {
+                            if (sig >= 1.65 && atUpper2) primary = 'u2';
+                            else if (sig <= -1.65 && atLower2) primary = 'l2';
+                            else if (sig >= 0.8 && atUpper1) primary = 'u1';
+                            else if (sig <= -0.8 && atLower1) primary = 'l1';
+                            else if (Math.abs(sig) < 0.5 && isNearVwap) primary = 'near';
+                        }
+                        if (!primary) {
+                            if (atUpper2) primary = 'u2';
+                            else if (atLower2) primary = 'l2';
+                            else if (atUpper1) primary = 'u1';
+                            else if (atLower1) primary = 'l1';
+                            else if (isNearVwap) primary = 'near';
+                        }
+
+                        const activeCount = [isNearVwap, atUpper1, atLower1, atUpper2, atLower2].filter(Boolean).length;
+                        const ambiguous = activeCount > 2 && primary === 'near';
+                        if (ambiguous) {
+                            return (
+                                <div className="border-t border-white/5 pt-2 space-y-1.5">
+                                    <div className="text-[8px] text-white/40 font-bold tracking-wide">VWAP EVENTS</div>
+                                    <div className="px-1.5 py-1 bg-white/5 border border-white/10 rounded text-[8px] text-white/55 font-mono">
+                                        Between VWAP bands — no single active touch (see sigma meter above)
+                                    </div>
+                                </div>
+                            );
+                        }
+
+                        const rowCls = (id: NonNullable<typeof primary>) =>
+                            id === primary ? 'opacity-100' : 'opacity-35 saturate-50 pointer-events-none';
+
+                        return (
+                            <div className="border-t border-white/5 pt-2 space-y-1.5">
+                                <div className="text-[8px] text-white/40 font-bold tracking-wide">VWAP EVENTS</div>
+
+                                {isNearVwap && (
+                                    <div className={`px-1.5 py-1 bg-cyan-500/10 border border-cyan-500/30 rounded transition-opacity ${rowCls('near')}`}>
+                                        <div className="text-[8px] font-bold text-cyan-400">
+                                            AT VWAP — Decision Zone
+                                        </div>
+                                        <div className="text-[7px] text-white/40 mt-0.5">
+                                            Price testing session fair value — watch for bounce/break
+                                        </div>
+                                    </div>
+                                )}
+
+                                {atUpper1 && (
+                                    <div className={`px-1.5 py-0.5 bg-orange-500/10 border border-orange-500/30 rounded text-[8px] font-bold text-orange-400 transition-opacity ${rowCls('u1')}`}>
+                                        Testing +1σ VWAP — Resistance
+                                    </div>
+                                )}
+                                {atLower1 && (
+                                    <div className={`px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/30 rounded text-[8px] font-bold text-emerald-400 transition-opacity ${rowCls('l1')}`}>
+                                        Testing -1σ VWAP — Support
+                                    </div>
+                                )}
+                                {atUpper2 && (
+                                    <div className={`px-1.5 py-0.5 bg-red-500/10 border border-red-500/30 rounded text-[8px] font-bold text-red-400 transition-opacity ${rowCls('u2')} ${primary === 'u2' ? 'animate-pulse' : ''}`}>
+                                        Testing +2σ VWAP — Extreme Overbought
+                                    </div>
+                                )}
+                                {atLower2 && (
+                                    <div className={`px-1.5 py-0.5 bg-green-500/10 border border-green-500/30 rounded text-[8px] font-bold text-green-400 transition-opacity ${rowCls('l2')} ${primary === 'l2' ? 'animate-pulse' : ''}`}>
+                                        Testing -2σ VWAP — Extreme Oversold
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })()}
+
+                    {/* 05. RULE CHECKLIST */}
             <div className="flex flex-col gap-2 mt-2">
                 {(() => {
                     let passedCount = 0;
@@ -1624,9 +1364,8 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     const distThreshold = 5 * ts;
                     if (amtResult?.marketState !== 'DEAD') passedCount++;
                     if (currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold) passedCount++;
-                    if (amtResult?.marketState !== 'DEAD') passedCount++;
                     if (agentDecision?.timing === 'ENTER_NOW') passedCount++;
-                    const totalRules = 4;
+                    const totalRules = 3;
                     const sigmaV = amtResult?.vwapDeviationSigmas || 0;
                     const verdictText =
                         Math.abs(sigmaV) >= 3.0
@@ -1746,7 +1485,9 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                         </details>
                     );
                 })()}
-            </div>
+                </div>
+                </div>
+            </details>
 
             {/* MODEL I/O Footer */}
             <details className="mt-2 group border-t border-white/5 pt-2 cursor-pointer">
