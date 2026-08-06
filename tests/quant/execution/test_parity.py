@@ -311,3 +311,26 @@ def test_session_risk_manager_parity():
         lambda: _session_sequence(legacy),
         lambda: _session_sequence(QuantSrm),
     )
+
+
+# ---------------------------------------------------------------------------
+# KillSwitch
+# ---------------------------------------------------------------------------
+
+
+def _kill_switch_sequence(engine_cls) -> dict:
+    ks = engine_cls()
+    ks.halt()
+    halted = ks.is_halted
+    ks.resume()
+    return {"halted": halted, "resumed": ks.is_halted}
+
+
+def test_kill_switch_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.trading.services.kill_switch").KillSwitch
+    from quant.execution.kill_switch import KillSwitch as QuantKillSwitch
+    assert_parity(
+        lambda: _kill_switch_sequence(legacy),
+        lambda: _kill_switch_sequence(QuantKillSwitch),
+    )
