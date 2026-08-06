@@ -1,4 +1,4 @@
-from app.domain.fabio_ai.services.vwap_breakout import detect_vwap_breakout
+from quant.decision.vwap_breakout import detect_vwap_breakout
 
 
 def test_long_on_breakout_with_volume():
