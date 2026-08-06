@@ -92,8 +92,8 @@ _LONG_FACTS = {
 }
 
 
-def test_bridge_decision_stored_when_flag_on(monkeypatch):
-    monkeypatch.setattr(SettingsAdapter, "QUANT_DECISION_ENABLED", True)
+def test_bridge_decision_stored_when_mode_shadow(monkeypatch):
+    monkeypatch.setattr(SettingsAdapter, "QUANT_EXECUTION_MODE", "shadow")
     br = QuantBridge()
     session = SessionState(symbol="SYM")
     last_dto = {}
@@ -107,15 +107,15 @@ def test_bridge_decision_stored_when_flag_on(monkeypatch):
     assert session.last_quant_decision["signal"]["entry"] == pytest.approx(104.0)
 
 
-def test_bridge_decision_skipped_when_flag_off(monkeypatch):
-    monkeypatch.setattr(SettingsAdapter, "QUANT_DECISION_ENABLED", False)
+def test_bridge_decision_skipped_when_mode_off(monkeypatch):
+    monkeypatch.setattr(SettingsAdapter, "QUANT_EXECUTION_MODE", "off")
     br = QuantBridge()
     session = SessionState(symbol="SYM")
     last_dto = {}
     for bar in _aggression_long_ohlc():
         last_dto = br.on_bar_close_with_decision("SYM", bar, session, _LONG_FACTS)
     assert last_dto["tripleAPhase"] == "AGGRESSION"
-    assert session.last_quant_decision is None  # flag off -> legacy path untouched
+    assert session.last_quant_decision is None  # off -> legacy path untouched
 
 
 def test_quant_decision_to_dto_serializes_signal_and_skip():

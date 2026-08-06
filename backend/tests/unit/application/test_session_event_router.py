@@ -1,4 +1,4 @@
-"""SessionEventRouter routing — quant decision drives execution when the flag is on."""
+"""SessionEventRouter routing — quant decision drives execution when mode is paper/live."""
 
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -93,8 +93,8 @@ def _call_execute_entry_path(router, session, entry_coordinator):
     return entry_coordinator
 
 
-def test_router_uses_quant_when_flag_on(monkeypatch):
-    monkeypatch.setattr(SettingsAdapter, "QUANT_DECISION_ENABLED", True)
+def test_router_uses_quant_when_mode_live(monkeypatch):
+    monkeypatch.setattr(SettingsAdapter, "QUANT_EXECUTION_MODE", "live")
     monkeypatch.setattr(
         "app.application.services.session_event_router.run_gate_pipeline",
         Mock(),
@@ -123,8 +123,8 @@ def test_router_uses_quant_when_flag_on(monkeypatch):
     router_mod.run_gate_pipeline.assert_not_called()
 
 
-def test_router_legacy_path_unchanged_when_flag_off(monkeypatch):
-    monkeypatch.setattr(SettingsAdapter, "QUANT_DECISION_ENABLED", False)
+def test_router_legacy_path_unchanged_when_mode_off(monkeypatch):
+    monkeypatch.setattr(SettingsAdapter, "QUANT_EXECUTION_MODE", "off")
     gate_pipeline = Mock(return_value=(False, "GATE_BLOCKED", "test", 0, 0))
     monkeypatch.setattr(
         "app.application.services.session_event_router.run_gate_pipeline",
@@ -136,7 +136,7 @@ def test_router_legacy_path_unchanged_when_flag_off(monkeypatch):
     router = _build_router(entry_coordinator, risk_coordinator)
 
     session = SessionState(symbol="SYM")
-    session.last_quant_decision = _approved_long_decision()  # present but flag off
+    session.last_quant_decision = _approved_long_decision()  # present but mode off
 
     _call_execute_entry_path(router, session, entry_coordinator)
 

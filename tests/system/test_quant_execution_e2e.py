@@ -1,11 +1,12 @@
-"""System E2E: quant decision drives EntryCoordinator.execute_signal.
+"""System E2E: quant decision drives EntryCoordinator.execute_signal per mode.
 
 Feeds the 60-bar synthetic AGGRESSION-LONG session through QuantBridge with
-QUANT_DECISION_ENABLED on, then routes the stored quant decision via
+QUANT_EXECUTION_MODE paper/live, then routes the stored quant decision via
 SessionEventRouter._try_execute_quant_decision and asserts the (mocked)
 EntryCoordinator received a domain BUY Signal whose entry/stop/take-profit
-match the quant Signal exactly. Also proves the flag-off path never touches
-the entry coordinator.
+match the quant Signal exactly. Also proves the mode ``off`` path never touches
+the entry coordinator and that ``shadow`` computes + broadcasts but never
+executes.
 """
 
 import pathlib
@@ -22,6 +23,7 @@ if str(_BACKEND) not in sys.path:
 from app.application.services.quant_bridge import QuantBridge
 from app.application.services.session_event_router import SessionEventRouter
 from app.application.services.session_state_manager import SessionState
+from app.config import settings
 from app.config_models.settings_adapter import SettingsAdapter
 from quant.contracts.entities import Signal as DomainSignal
 from quant.contracts.enums import SignalType
@@ -90,8 +92,8 @@ def _build_router(entry_coordinator, risk_coordinator):
     )
 
 
-def test_quant_decision_drives_execution_when_flag_on(monkeypatch):
-    monkeypatch.setattr(SettingsAdapter, "QUANT_DECISION_ENABLED", True)
+def test_quant_decision_drives_execution_when_mode_paper(monkeypatch):
+    monkeypatch.setattr(SettingsAdapter, "QUANT_EXECUTION_MODE", "paper")
     bridge = QuantBridge()
     session = SessionState(symbol=SYMBOL)
 
@@ -122,17 +124,58 @@ def test_quant_decision_drives_execution_when_flag_on(monkeypatch):
     assert signal.metadata["quant_rr"] == pytest.approx(decision["signal"]["rr"])
 
 
-def test_quant_decision_ignored_when_flag_off(monkeypatch):
-    monkeypatch.setattr(SettingsAdapter, "QUANT_DECISION_ENABLED", False)
+def test_quant_decision_live_shares_paper_code_path(monkeypatch):
+    monkeypatch.setattr(SettingsAdapter, "QUANT_EXECUTION_MODE", "live")
+    bridge = QuantBridge()
+    session = SessionState(symbol=SYMBOL)
+
+    _feed_session(bridge, session)
+    assert session.last_quant_decision is not None
+    assert session.last_quant_decision["approved"] is True
+
+    entry_coordinator = Mock()
+    router = _build_router(entry_coordinator, Mock())
+    assert router._try_execute_quant_decision(SYMBOL, session) is True
+    entry_coordinator.execute_signal.assert_called_once()
+
+
+def test_quant_decision_shadow_computes_but_never_executes(monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(SettingsAdapter, "QUANT_EXECUTION_MODE", "shadow")
     bridge = QuantBridge()
     session = SessionState(symbol=SYMBOL)
 
     _feed_session(bridge, session)
 
-    # Flag off -> bridge stores nothing; the legacy path stays byte-identical.
+    # Shadow computes + stores the decision (broadcastable as quantDecision)...
+    assert session.last_quant_decision is not None
+    assert session.last_quant_decision["approved"] is True
+
+    entry_coordinator = Mock()
+    router = _build_router(entry_coordinator, Mock())
+    with caplog.at_level(
+        logging.INFO, logger="app.application.services.session_event_router"
+    ):
+        executed = router._try_execute_quant_decision(SYMBOL, session)
+
+    # ...but the entry coordinator is never touched; legacy path still skipped.
+    assert executed is True
+    entry_coordinator.execute_signal.assert_not_called()
+    assert any("SHADOW quant execution would execute" in r.message for r in caplog.records)
+
+
+def test_quant_decision_ignored_when_mode_off(monkeypatch):
+    monkeypatch.setattr(SettingsAdapter, "QUANT_EXECUTION_MODE", "off")
+    bridge = QuantBridge()
+    session = SessionState(symbol=SYMBOL)
+
+    _feed_session(bridge, session)
+
+    # Mode off -> bridge stores nothing; the legacy path stays byte-identical.
     assert session.last_quant_decision is None
 
-    # Even a stale approved decision is ignored by the router when the flag is off.
+    # Even a stale approved decision is ignored by the router when the mode is off.
     session.last_quant_decision = {
         "approved": True,
         "reason": "Triple-A",
@@ -153,3 +196,31 @@ def test_quant_decision_ignored_when_flag_off(monkeypatch):
 
     assert executed is False
     entry_coordinator.execute_signal.assert_not_called()
+
+
+def test_quant_decision_legacy_flag_true_without_explicit_mode_is_shadow(monkeypatch, caplog):
+    """Back-compat: QUANT_DECISION_ENABLED=true (no mode set) behaves as shadow."""
+    import logging
+
+    monkeypatch.delenv("QUANT_EXECUTION_MODE", raising=False)
+    monkeypatch.setattr(SettingsAdapter, "_feature_flags_yaml", lambda self: {})
+    monkeypatch.setattr(SettingsAdapter, "QUANT_DECISION_ENABLED", True)
+
+    assert settings.QUANT_EXECUTION_MODE == "shadow"
+
+    bridge = QuantBridge()
+    session = SessionState(symbol=SYMBOL)
+    _feed_session(bridge, session)
+    assert session.last_quant_decision is not None
+    assert session.last_quant_decision["approved"] is True
+
+    entry_coordinator = Mock()
+    router = _build_router(entry_coordinator, Mock())
+    with caplog.at_level(
+        logging.INFO, logger="app.application.services.session_event_router"
+    ):
+        executed = router._try_execute_quant_decision(SYMBOL, session)
+
+    assert executed is True
+    entry_coordinator.execute_signal.assert_not_called()
+    assert any("SHADOW quant execution would execute" in r.message for r in caplog.records)
