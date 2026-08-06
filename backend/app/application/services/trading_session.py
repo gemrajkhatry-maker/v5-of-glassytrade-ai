@@ -509,7 +509,13 @@ class TradingSessionService:
     def _record_and_persist_closed_trade(
         self, symbol: str, pos, session
     ) -> None:
-        """Record trade result and persist to storage."""
+        """Record trade result and persist to storage.
+
+        Shared lifecycle finalizer used by BOTH the tick path
+        (``_handle_closed_positions``) and the SL watchdog force-close path:
+        dedup on ``_recorded_trade_ids`` guarantees a single ``trades`` row and
+        a single run of learning / post-trade / risk recording per position.
+        """
         if pos.id in self._recorded_trade_ids:
             return
         self._recorded_trade_ids.add(pos.id)

@@ -87,6 +87,10 @@ class ExitCoordinator:
         self._risk_coordinator = risk_coordinator
         self._post_trade_analyst = post_trade_analyst
 
+        # Idempotency guard: on_position_closed may be reached from both the
+        # tick path and the SL watchdog force-close path for the same close.
+        self._recorded_close_ids: set[str] = set()
+
     @staticmethod
     def _metadata_dict(metadata: object) -> dict:
         """Normalize metadata to a dict to avoid RuntimeError in heterogeneous callers."""
@@ -217,6 +221,14 @@ class ExitCoordinator:
             return
         if resolved_symbol:
             symbol = resolved_symbol
+
+        # Idempotency: the SL watchdog force-close and the tick path can both
+        # observe the same close — learning, post-trade and persistence must run
+        # exactly once per position.
+        if pos.id in self._recorded_close_ids:
+            log.debug("on_position_closed already handled for %s — skipping", pos.id)
+            return
+        self._recorded_close_ids.add(pos.id)
 
         # Cancel broker hardware SL
         _metadata = self._metadata_dict(pos.metadata)

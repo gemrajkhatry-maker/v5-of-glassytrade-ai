@@ -89,6 +89,13 @@ class TradingEngine:
         except Exception:
             pass
 
+        # Wire the engine into the overseer's immediate-broadcast path.
+        # The engine is constructed after the session service (main.py), so the
+        # composition root injects a settable bridge — bind ourselves here.
+        bridge = getattr(self._session_service, "_overseer_broadcast_bridge", None)
+        if bridge is not None and hasattr(bridge, "bind"):
+            bridge.bind(self)
+
         # Build futures routing (for AMT underlying feeds)
         from app.domain.services.underlying_futures_provider import UnderlyingFuturesProvider
         self._underlying_futures_provider = UnderlyingFuturesProvider()

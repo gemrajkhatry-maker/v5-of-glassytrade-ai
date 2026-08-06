@@ -617,6 +617,16 @@ class LLMOverseerHandler:
         else:
             logger.info("Overseer: ADD rejected — not profitable or partial already taken")
 
+    def set_engine(self, engine) -> None:
+        """Wire a broadcast trigger for immediate UI updates post-construction.
+
+        The ``TradingEngine`` is built after the session service (circular
+        dependency), so the composition root injects the engine/bridge here
+        after ``__init__``; the worker's ``trigger_immediate_update`` guard
+        becomes live once this is set.
+        """
+        self._engine = engine
+
     def cleanup(self) -> None:
         """Shutdown thread pools on handler destruction."""
         for pool_attr in ("_executor", "_predict_executor"):

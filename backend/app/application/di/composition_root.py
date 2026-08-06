@@ -144,6 +144,46 @@ def _trading_session_service():
 # Factory functions
 # ---------------------------------------------------------------------------
 
+
+class _OverseerBroadcastBridge:
+    """Lazily-bound bridge so the overseer can push immediate UI updates.
+
+    The ``TradingEngine`` is constructed AFTER the ``TradingSessionService``
+    (main.py builds the engine from the container), so we inject a settable
+    bridge at composition time and bind the real engine in
+    ``TradingEngine.__init__`` via ``bridge.bind(engine)``.
+    """
+
+    def __init__(self) -> None:
+        self._target = None
+
+    def bind(self, engine) -> None:
+        self._target = engine
+
+    def trigger_immediate_update(self, symbol: str) -> None:
+        target = self._target
+        if target is not None:
+            target.trigger_immediate_update(symbol)
+
+
+def _wire_overseer_broadcast(session_service) -> None:
+    """Inject a lazily-bound broadcast bridge into the overseer handler.
+
+    The overseer's ``_engine`` slot was previously never populated, so
+    ``trigger_immediate_update`` was dead. We give it a bridge here (non-None)
+    and expose it on the session service so ``TradingEngine.__init__`` can bind
+    the real engine reference after construction.
+    """
+    bridge = _OverseerBroadcastBridge()
+    overseer = getattr(session_service, "_overseer_handler", None)
+    if overseer is not None:
+        if hasattr(overseer, "set_engine"):
+            overseer.set_engine(bridge)
+        else:
+            overseer._engine = bridge
+    session_service._overseer_broadcast_bridge = bridge
+
+
 def _create_market_data_adapter(container: DIContainer, config: "Configuration"):
     from app.infrastructure.adapters.dhan_adapter import DhanMarketDataAdapter
     return DhanMarketDataAdapter(config)
@@ -250,7 +290,7 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
     latency_tracker = LatencyTracker()
 
     from app.application.services.trading_session import TradingSessionService
-    return TradingSessionService(
+    session_service = TradingSessionService(
         broker=broker,
         gen_ai_service=gen_ai_service,
         storage=storage,
@@ -260,6 +300,8 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
         gate_tracker=gate_tracker,
         latency_tracker=latency_tracker,
     )
+    _wire_overseer_broadcast(session_service)
+    return session_service
 
 
 # ---------------------------------------------------------------------------

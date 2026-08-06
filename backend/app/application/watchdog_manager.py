@@ -80,70 +80,67 @@ class WatchdogManager:
             try:
                 await asyncio.sleep(1.0)
                 for sym in list(self._active_symbols):
-                    session = self._session_service.get_or_create_session(sym)
-                    if not session:
-                        continue
-
-                    cached_state = (
-                        self._state_broadcaster.get_latest_state(sym)
-                        if self._state_broadcaster
-                        else None
-                    ) or {}
-                    ltp = cached_state.get("ltp", 0)
-                    if ltp <= 0:
-                        continue
-
-                    with session._lock:
-                        open_positions = [
-                            p for p in session.portfolio.positions if p.is_open
-                        ]
-                        if not open_positions:
-                            continue
-
-                        for pos in open_positions:
-                            should_close, reason = pos.should_close(ltp)
-                            if should_close:
-                                logger.warning(
-                                    "WATCHDOG: Force-closing %s %s @ %.2f "
-                                    "(SL=%.2f, TP=%.2f, LTP=%.2f) — %s",
-                                    pos.side, sym, pos.entry_price,
-                                    pos.stop_loss, pos.take_profit, ltp, reason,
-                                )
-                                closed = session.portfolio.close_position(
-                                    pos.id, ltp, f"WATCHDOG_{reason}",
-                                )
-                                if closed:
-                                    # Persist trade close
-                                    if self._session_service._storage:
-                                        ensure_sync_adapter_result(
-                                            "storage.delete_open_position",
-                                            self._session_service._storage.delete_open_position,
-                                            pos.id,
-                                        )
-                                        ensure_sync_adapter_result(
-                                            "storage.save_trade",
-                                            self._session_service._storage.save_trade,
-                                            {
-                                                "position_id": pos.id,
-                                                "symbol": sym,
-                                                "side": _safe_side(pos.side),
-                                                "entry_price": pos.entry_price,
-                                                "exit_price": ltp,
-                                                "size": pos.size,
-                                                "pnl": pos.pnl,
-                                                "source": pos.source.value
-                                                if hasattr(pos.source, "value")
-                                                else str(pos.source),
-                                                "reason": f"WATCHDOG_{reason}",
-                                                "opened_at": pos.entry_time,
-                                                "closed_at": pos.exit_time,
-                                            },
-                                        )
+                    self._sl_check_symbol(sym)
             except asyncio.CancelledError:
                 break
             except Exception:
                 logger.error("SL watchdog error", exc_info=True)
         logger.info("Watchdog: SL watchdog stopped")
+
+    def _sl_check_symbol(self, symbol: str) -> None:
+        """Check one symbol's open positions against the last cached LTP.
+
+        Force-closes any position breaching SL/TP. Closes are routed through
+        the same dedup + lifecycle helper as the tick path
+        (``TradingSessionService._record_and_persist_closed_trade``) so risk
+        recording, exit-coordinator learning/post-trade and storage persistence
+        run exactly once per position and a single ``trades`` row is written.
+        """
+        session = self._session_service.get_or_create_session(symbol)
+        if not session:
+            return
+
+        cached_state = (
+            self._state_broadcaster.get_latest_state(symbol)
+            if self._state_broadcaster
+            else None
+        ) or {}
+        ltp = cached_state.get("ltp", 0)
+        if ltp <= 0:
+            return
+
+        closed: list = []
+        with session._lock:
+            open_positions = [
+                p for p in session.portfolio.positions if p.is_open
+            ]
+            for pos in open_positions:
+                should_close, reason = pos.should_close(ltp)
+                if not should_close:
+                    continue
+                logger.warning(
+                    "WATCHDOG: Force-closing %s %s @ %.2f "
+                    "(SL=%.2f, TP=%.2f, LTP=%.2f) — %s",
+                    pos.side, symbol, pos.entry_price,
+                    pos.stop_loss, pos.take_profit, ltp, reason,
+                )
+                closed_pos = session.portfolio.close_position(
+                    pos.id, ltp, f"WATCHDOG_{reason}",
+                )
+                if closed_pos:
+                    closed_pos.close_reason = f"WATCHDOG_{reason}"
+                    closed.append((closed_pos, reason))
+
+        for closed_pos, reason in closed:
+            try:
+                self._session_service._record_and_persist_closed_trade(
+                    symbol, closed_pos, session,
+                )
+            except Exception:
+                logger.error(
+                    "Watchdog: lifecycle finalize failed for %s", closed_pos.id,
+                    exc_info=True,
+                )
 
     async def reconciliation_loop(self) -> None:
         """Periodic position reconciliation loop (every 30 seconds in live mode)."""
