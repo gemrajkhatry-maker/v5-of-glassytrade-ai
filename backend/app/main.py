@@ -49,11 +49,11 @@ from app.core.startup_telemetry import (
 from app.core.async_boundary import ensure_sync_adapter_result
 from app.application.services.startup_contracts import build_startup_contracts
 from config.consolidated import ConsolidatedConfig as Configuration
-from app.domain.ports.broker import IBroker
-from app.domain.ports.storage import IStorage
-from app.domain.ports.market_data import IMarketData
-from app.domain.ports.llm_inference import ILLMInference
-from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+from quant.contracts.ports.broker import IBroker
+from quant.contracts.ports.storage import IStorage
+from quant.contracts.ports.market_data import IMarketData
+from quant.contracts.ports.llm_inference import ILLMInference
+from quant.inference.generative_ai import GenerativeAIService
 from app.application.services.trading_session import TradingSessionService
 from app.domain.services.startup_reconciliation import StartupReconciliation
 
@@ -97,7 +97,7 @@ def create_application() -> FastAPI:
         logger.info("Running option scanner to select contracts...")
         begin_phase("option_scanner")
         try:
-            from app.domain.fabio_ai.services.option_scanner import OptionScannerService
+            from quant.amt.session.scanner import OptionScannerService
             from app.config import settings
             import concurrent.futures
 

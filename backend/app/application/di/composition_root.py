@@ -111,27 +111,27 @@ def compose_container(config: "Configuration") -> DIContainer:
 # ---------------------------------------------------------------------------
 
 def _market_data_port():
-    from app.domain.ports.market_data import IMarketData
+    from quant.contracts.ports.market_data import IMarketData
     return IMarketData
 
 
 def _broker_port():
-    from app.domain.ports.broker import IBroker
+    from quant.contracts.ports.broker import IBroker
     return IBroker
 
 
 def _storage_port():
-    from app.domain.ports.storage import IStorage
+    from quant.contracts.ports.storage import IStorage
     return IStorage
 
 
 def _llm_inference_port():
-    from app.domain.ports.llm_inference import ILLMInference
+    from quant.contracts.ports.llm_inference import ILLMInference
     return ILLMInference
 
 
 def _probability_inference_port():
-    from app.domain.ports.probability_inference import IProbabilityInference
+    from quant.contracts.ports.probability_inference import IProbabilityInference
     return IProbabilityInference
 
 
@@ -207,7 +207,7 @@ def _create_storage_adapter(container: DIContainer, config: "Configuration"):
 def _create_llm_adapter(container: DIContainer, config: "Configuration"):
     llm_config = getattr(config, "llm", None)
     if llm_config is None:
-        from app.domain.ports.llm_inference import LLMNotReadyError
+        from quant.contracts.ports.llm_inference import LLMNotReadyError
         raise LLMNotReadyError("LLM config not available")
 
     model_path = getattr(llm_config, "model_path", "") or os.environ.get("MLX_MODEL_PATH", "")
@@ -239,16 +239,16 @@ def _create_probability_adapter(container: DIContainer, config: "Configuration")
             raise RuntimeError(
                 "Probability model failed in live mode"
             ) from exc
-        from app.domain.ports.probability_inference import NoOpProbabilityAdapter
+        from quant.contracts.ports.probability_inference import NoOpProbabilityAdapter
         return NoOpProbabilityAdapter()
 
 
 def _create_trading_session(container: DIContainer, config: "Configuration"):
     """Create TradingSessionService with all dependencies from the container."""
-    from app.domain.ports.broker import IBroker
-    from app.domain.ports.storage import IStorage
-    from app.domain.ports.llm_inference import ILLMInference
-    from app.domain.ports.probability_inference import IProbabilityInference
+    from quant.contracts.ports.broker import IBroker
+    from quant.contracts.ports.storage import IStorage
+    from quant.contracts.ports.llm_inference import ILLMInference
+    from quant.contracts.ports.probability_inference import IProbabilityInference
 
     broker = container.resolve(IBroker)
     storage = container.resolve(IStorage)
@@ -257,7 +257,7 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
 
     # Build GenerativeAIService wrapper
     try:
-        from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+        from quant.inference.generative_ai import GenerativeAIService
         gen_ai_service = GenerativeAIService(llm_adapter=llm_adapter)
     except Exception as exc:
         if is_live_mode():
@@ -270,7 +270,7 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
     # Exchange config
     exchange_config = None
     try:
-        from app.domain.models.exchange_config import ExchangeConfig
+        from quant.contracts.exchange_config import ExchangeConfig
         from app.domain.models.exchange import Exchange
 
         exchange = Exchange.normalize(
@@ -325,32 +325,32 @@ def _resolve_allow_short() -> bool:
 
 
 def _notification_port():
-    from app.domain.ports.notifications import INotification
+    from quant.contracts.ports.notifications import INotification
     return INotification
 
 
 def _delta_profile_port():
-    from app.domain.ports.delta_profile import IDeltaProfile
+    from quant.contracts.ports.delta_profile import IDeltaProfile
     return IDeltaProfile
 
 
 def _npoc_port():
-    from app.domain.ports.npoc import INPOC
+    from quant.contracts.ports.npoc import INPOC
     return INPOC
 
 
 def _exchange_strategy_port():
-    from app.domain.ports.exchange_strategy import IExchangeStrategy
+    from quant.contracts.ports.exchange_strategy import IExchangeStrategy
     return IExchangeStrategy
 
 
 def _gate_pipeline():
-    from app.domain.fabio_ai.services.gate_pipeline import GatePipeline
+    from quant.decision.gates.legacy_gate_pipeline import GatePipeline
     return GatePipeline
 
 
 def _generative_ai_service():
-    from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+    from quant.inference.generative_ai import GenerativeAIService
     return GenerativeAIService
 
 
@@ -374,7 +374,7 @@ def _create_npoc_adapter(container: DIContainer):
 
 
 def _create_exchange_strategy(container: DIContainer, config: "Configuration"):
-    from app.domain.models.exchange_config import ExchangeConfig
+    from quant.contracts.exchange_config import ExchangeConfig
     from app.domain.models.exchange import Exchange
 
     exchange_name = (getattr(config, "default_exchange", None) or "MCX").upper()
@@ -391,11 +391,11 @@ def _create_exchange_strategy(container: DIContainer, config: "Configuration"):
 
 
 def _create_gate_pipeline(container: DIContainer, config: "Configuration"):
-    from app.domain.fabio_ai.services.gate_pipeline import GatePipeline
-    from app.domain.ports.market_data import IMarketData
-    from app.domain.ports.storage import IStorage
-    from app.domain.ports.llm_inference import ILLMInference
-    from app.domain.ports.probability_inference import IProbabilityInference
+    from quant.decision.gates.legacy_gate_pipeline import GatePipeline
+    from quant.contracts.ports.market_data import IMarketData
+    from quant.contracts.ports.storage import IStorage
+    from quant.contracts.ports.llm_inference import ILLMInference
+    from quant.contracts.ports.probability_inference import IProbabilityInference
 
     return GatePipeline(
         config=config,
@@ -407,8 +407,8 @@ def _create_gate_pipeline(container: DIContainer, config: "Configuration"):
 
 
 def _create_generative_ai_service(container: DIContainer):
-    from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-    from app.domain.ports.llm_inference import ILLMInference
+    from quant.inference.generative_ai import GenerativeAIService
+    from quant.contracts.ports.llm_inference import ILLMInference
 
     llm_adapter = container.resolve(ILLMInference)
     return GenerativeAIService(llm_adapter=llm_adapter)
