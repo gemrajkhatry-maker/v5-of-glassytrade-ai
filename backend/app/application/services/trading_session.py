@@ -163,6 +163,7 @@ class TradingSessionService:
         self._amt_service = AMTService(exchange=self._exchange)
         self._entry_coordinator = self._create_entry_coordinator(broker, storage)
         self._pre_candle_advisor = self._create_pre_candle_advisor(gen_ai_service)
+        self._pre_candle_advisor.set_callback(self._on_pre_candle_advisory)
         self._scalp_enabled = feature_enabled(settings, Feature.SCALP_ENGINE)
         self._one_min_engines: dict = {}
         self._fifteen_sec_engines: dict = {}
@@ -317,6 +318,26 @@ class TradingSessionService:
             gen_ai_service=gen_ai_service,
             enabled=feature_enabled(settings, Feature.LLM_PRE_CANDLE_ADVISORY),
         )
+
+    def _on_pre_candle_advisory(self, advisory) -> None:
+        """Persist a pre-candle advisory into the session for the dashboard.
+
+        Advisory-only (never a trade signal). Stored under
+        ``session.last_ai_analysis["pre_candle_advisory"]`` so state snapshots
+        assembled by the broadcaster surface it to viewers.
+        """
+        try:
+            session = self.get_or_create_session(advisory.symbol)
+            with session._lock:
+                advisory_state = session.last_ai_analysis or {}
+                advisory_state["pre_candle_advisory"] = {
+                    "scenario": advisory.scenario,
+                    "expected_setup": advisory.expected_setup,
+                    "key_levels": advisory.key_levels,
+                }
+                session.last_ai_analysis = advisory_state
+        except Exception:
+            log.debug("Pre-candle advisory callback failed (non-critical)", exc_info=True)
 
     def _create_event_router(self, broker, storage, exchange_config, probability_engine):
         return SessionEventRouter(

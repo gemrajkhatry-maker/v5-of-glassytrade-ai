@@ -98,6 +98,8 @@ class LLMOverseerHandler:
         has_position: bool,
     ) -> bool:
         """Check if overseer should fire."""
+        if not self._overseer_enabled():
+            return False
         if not has_position:
             return False
         if overseer_running or ai_running:
@@ -106,6 +108,27 @@ class LLMOverseerHandler:
             return False
         if (time.time() - last_overseer_time) < OVERSEER_COOLDOWN:
             return False
+        return True
+
+    def _overseer_enabled(self) -> bool:
+        """Honor the ``llm_overseer`` feature flag from the config model.
+
+        The flag lives in ``config/feature_flags.yaml`` and is exposed as
+        ``SystemConfig.flags.llm_overseer``. Falls back to enabled when the
+        config cannot be read so an existing deployment never silently loses
+        position monitoring.
+        """
+        try:
+            from app.config import settings as _settings
+
+            mode_config = _settings.get_mode_config()
+            if mode_config is not None:
+                return bool(mode_config.system_config.flags.llm_overseer)
+        except Exception:
+            logger.debug(
+                "llm_overseer flag not readable — defaulting to enabled",
+                exc_info=True,
+            )
         return True
 
     def run_overseer(
@@ -118,6 +141,10 @@ class LLMOverseerHandler:
         footprint_candle=None,
     ) -> None:
         """Run overseer analysis in background thread."""
+        if not self._overseer_enabled():
+            logger.info("LLM overseer disabled via feature flag — skipping %s", symbol)
+            return
+
         with session._lock:
             session._last_overseer_time = time.time()
             session._overseer_running = True

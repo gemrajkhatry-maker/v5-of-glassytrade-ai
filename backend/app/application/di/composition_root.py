@@ -241,13 +241,7 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
         logger.warning("Exchange config loading failed — using defaults", exc_info=True)
 
     # Allow short config
-    allow_short = False
-    try:
-        from app.config import settings as _settings
-        from app.config.features import Feature, feature_enabled
-        allow_short = feature_enabled(_settings, Feature.ALLOW_SHORT)
-    except Exception:
-        logger.debug("ALLOW_SHORT setting not available — defaulting to False")
+    allow_short = _resolve_allow_short()
 
     # Observability trackers
     from app.domain.services.gate_rejection_tracker import GateRejectionTracker
@@ -271,6 +265,22 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
 # ---------------------------------------------------------------------------
 # Additional port type getters
 # ---------------------------------------------------------------------------
+
+def _resolve_allow_short() -> bool:
+    """Resolve the ALLOW_SHORT feature flag, defaulting to False on error.
+
+    Reads the flag through ``app.shared.config_features`` (the live registry);
+    historically this imported the nonexistent ``app.config.features`` module,
+    which the try/except silently swallowed and pinned ``allow_short`` False.
+    """
+    from app.config import settings as _settings
+    from app.shared.config_features import Feature, feature_enabled
+    try:
+        return feature_enabled(_settings, Feature.ALLOW_SHORT)
+    except Exception:
+        logger.debug("ALLOW_SHORT setting not available — defaulting to False", exc_info=True)
+        return False
+
 
 def _notification_port():
     from app.domain.ports.notifications import INotification

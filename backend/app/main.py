@@ -53,6 +53,7 @@ from app.domain.ports.broker import IBroker
 from app.domain.ports.storage import IStorage
 from app.domain.ports.market_data import IMarketData
 from app.domain.ports.llm_inference import ILLMInference
+from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
 from app.application.services.trading_session import TradingSessionService
 from app.domain.services.startup_reconciliation import StartupReconciliation
 
@@ -302,7 +303,9 @@ def create_application() -> FastAPI:
             trading_session=trading_session,
             broker=broker,
             storage=storage,
-            gen_ai_service=container.resolve(ILLMInference),
+            gen_ai_service=GenerativeAIService(
+                llm_adapter=container.resolve(ILLMInference)
+            ),
             market_data=market_data,
             configuration=config,
             active_symbols=active_symbols,
