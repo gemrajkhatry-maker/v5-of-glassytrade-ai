@@ -15,10 +15,10 @@ import math
 from datetime import datetime, timezone, timedelta
 from typing import TYPE_CHECKING
 
-from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
-from app.domain.fabio_ai.services.footprint_analyzer import TickFootprintAccumulator
-from app.domain.services.tick_delta import TickDeltaClassifier, candle_delta_proxy
-from app.shared.timezones import IST
+from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
+from quant.amt.orderflow.footprint import TickFootprintAccumulator
+from quant.amt.orderflow.tick_delta import TickDeltaClassifier, candle_delta_proxy
+from quant.contracts.timezones import IST
 
 logger = logging.getLogger(__name__)
 

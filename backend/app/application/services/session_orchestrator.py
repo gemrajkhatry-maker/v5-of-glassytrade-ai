@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.domain.constants import AGENT_DECISION_THRESHOLD
+from quant.contracts.constants import AGENT_DECISION_THRESHOLD
 from app.application.services.session_runtime_contracts import (
     EntryDecisionContract,
     LLMTriggerContract,

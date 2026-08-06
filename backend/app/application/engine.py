@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from shared.resilience import PerEntityCircuitBreaker
 from app.config import settings
 from app.application.utils import is_market_open
-from app.domain.trading.models.value_objects import OHLC, OrderBook, OrderBookLevel
+from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
 
 # Import delegated modules
 from app.application.stream_manager import StreamManager
@@ -39,13 +39,13 @@ from app.application.services.state_broadcaster import StateBroadcaster
 from app.application.services.engine_lifecycle import EngineLifecycle
 
 from app.application.di.container import DIContainer
-from app.domain.ports.market_data import IMarketData
-from app.domain.ports.broker import IBroker
+from quant.contracts.ports.market_data import IMarketData
+from quant.contracts.ports.broker import IBroker
 from app.application.services.trading_session import TradingSessionService
 
 logger = logging.getLogger(__name__)
 
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 
 
 def _depth_to_dto(book: OrderBook | None) -> dict | None:
@@ -96,7 +96,7 @@ class TradingEngine:
             bridge.bind(self)
 
         # Build futures routing (for AMT underlying feeds)
-        from app.domain.services.underlying_futures_provider import UnderlyingFuturesProvider
+        from quant.amt.session.futures_provider import UnderlyingFuturesProvider
         self._underlying_futures_provider = UnderlyingFuturesProvider()
         self._fut_to_options, futures_roots = self._underlying_futures_provider.build_futures_routing(
             self._active_symbols
@@ -128,7 +128,7 @@ class TradingEngine:
         ):
             """Fetch historical candles for gap filling."""
             try:
-                from app.domain.trading.models.value_objects import OHLC
+                from quant.contracts.value_objects import OHLC
                 from datetime import datetime
 
                 # Get broker from market data adapter
@@ -158,7 +158,7 @@ class TradingEngine:
                 for timestamp, row in df.iterrows():
                     # Ensure timestamp is timezone-aware
                     if timestamp.tzinfo is None:
-                        from app.shared.timezones import IST
+                        from quant.contracts.timezones import IST
                         timestamp = timestamp.replace(tzinfo=IST)
 
                     candle = OHLC(
