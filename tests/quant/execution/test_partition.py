@@ -4,7 +4,7 @@ Fabio spec partition sizes: P1=30% @ 1R, P2=40% @ 2R, P3=30% trail
 """
 
 import pytest
-from app.domain.fabio_ai.services.partition_exit_manager import (
+from quant.execution.partition import (
     PartitionExitManager,
     PartitionState,
 )

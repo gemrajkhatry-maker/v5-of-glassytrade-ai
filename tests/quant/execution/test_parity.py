@@ -199,3 +199,37 @@ def test_pyramid_parity():
         lambda: _run_pyramid(legacy),
         lambda: _run_pyramid(QuantPyramid),
     )
+
+
+# ---------------------------------------------------------------------------
+# PartitionExitManager
+# ---------------------------------------------------------------------------
+
+
+def _run_partition(engine_cls, state_cls) -> dict:
+    engine = engine_cls()
+    state = state_cls()
+    signals = engine.check_exits(
+        entry_price=100.0, initial_stop=99.0, take_profit=102.0,
+        current_price=101.0, is_long=True, cvd_slope=1.0, state=state,
+    )
+    return {
+        "types": [s.exit_type for s in signals],
+        "p1_taken": state.p1_taken,
+        "p2_taken": state.p2_taken,
+        "trail_sl": state.trail_sl,
+        "be_set": state.breakeven_set,
+    }
+
+
+def test_partition_parity():
+    import importlib
+    legacy_mod = importlib.import_module("app.domain.fabio_ai.services.partition_exit_manager")
+    from quant.execution.partition import (
+        PartitionExitManager as QuantPartition,
+        PartitionState as QuantState,
+    )
+    assert_parity(
+        lambda: _run_partition(legacy_mod.PartitionExitManager, legacy_mod.PartitionState),
+        lambda: _run_partition(QuantPartition, QuantState),
+    )
