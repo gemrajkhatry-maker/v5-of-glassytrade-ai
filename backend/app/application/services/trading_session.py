@@ -37,32 +37,32 @@ from datetime import datetime
 from app.config import settings
 from app.shared.config_features import Feature, feature_enabled
 from app.shared.mode import is_live_mode
-from app.domain.constants import (
+from quant.contracts.constants import (
     AGENT_DECISION_THRESHOLD,
     CANDLE_INTERVAL_MINUTES,
     IB_MINUTES,
 )
-from app.domain.trading.models.value_objects import OHLC, OrderBook
-from app.domain.trading.models.aggregates import Portfolio
-from app.domain.trading.models.enums import Source, MarketState
-from app.domain.trading.events import (
+from quant.contracts.value_objects import OHLC, OrderBook
+from quant.contracts.aggregates import Portfolio
+from quant.contracts.enums import Source, MarketState
+from quant.contracts.events import (
     TickReceived,
     SignalGenerated,
     PositionOpened,
     PositionClosed,
 )
-from app.domain.trading.event_store import EventBus
-from app.domain.ports.broker import IBroker
-from app.domain.ports.storage import IStorage
-from app.domain.ports.notification_adapter import INotificationAdapter
-from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
-from app.domain.ports.probability_inference import (
+from quant.contracts.event_store import EventBus
+from quant.contracts.ports.broker import IBroker
+from quant.contracts.ports.storage import IStorage
+from quant.contracts.ports.notification_adapter import INotificationAdapter
+from quant.inference.generative_ai import GenerativeAIService
+from quant.contracts.ports.probability_inference import (
     IProbabilityInference,
     NoOpProbabilityAdapter,
 )
-from app.domain.services.initial_balance_engine import InitialBalanceEngine
-from app.domain.services.ib_breakout_scalp import IBBreakoutScalpEngine
-from app.domain.services.one_min_bar_engine import OneMinBarEngine
+from quant.amt.session.ib_engine import InitialBalanceEngine
+from quant.amt.session.ib_scalp import IBBreakoutScalpEngine
+from quant.amt.session.one_min_bar import OneMinBarEngine
 from app.domain.services.mobile_alerts import MobileAlertSystem
 from app.domain.services.self_healing import OrderRejectionHandler, DBFallbackBuffer
 from app.application.handlers.post_trade_analyst import PostTradeAnalyst
@@ -72,10 +72,10 @@ from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandl
 from app.application.handlers.rl_handler import RLHandler
 from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
 from app.application.handlers.pre_candle_advisor import PreCandleAdvisor
-from app.domain.fabio_ai.services.option_selector import OptionSelector
+from quant.amt.session.selector import OptionSelector
 from app.application.services.entry_coordinator import EntryCoordinator
 from app.application.services.exit_coordinator import ExitCoordinator
-from app.domain.services.risk_sizing_engine import RiskSizingEngine
+from quant.execution.risk_sizing import RiskSizingEngine
 from app.core.async_boundary import ensure_sync_adapter_result
 
 # Import delegated modules (SessionStateManager already imported at top)
@@ -96,7 +96,7 @@ from app.application.services.session_orchestrator import SessionOrchestrator
 
 # Import safe parsing utilities
 from app.shared.parsing import extract_bar_minute
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 
 log = logging.getLogger(__name__)
 
@@ -577,7 +577,7 @@ class TradingSessionService:
         self, symbol: str, session
     ) -> None:
         """Record stop-out losses and save performance snapshot."""
-        from app.domain.trading.models.enums import Source
+        from quant.contracts.enums import Source
 
         for pos in session.portfolio.positions:
             if pos.status == "CLOSED" and pos.close_reason and "Stop" in pos.close_reason:

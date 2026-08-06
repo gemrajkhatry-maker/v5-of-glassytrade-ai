@@ -16,31 +16,31 @@ from typing import TYPE_CHECKING, Any
 
 from app.config import settings
 from app.shared.config_features import Feature, feature_enabled
-from app.domain.constants import (
+from quant.contracts.constants import (
     AGENT_DECISION_THRESHOLD,
     CONFIDENCE_HIGH_THRESHOLD,
 )
 from app.core.async_boundary import ensure_sync_adapter_result
 from app.shared.parsing import is_mcx_symbol
-from app.domain.probability.features import extract_features
-from app.domain.probability.agent_pipeline import run_agent_pipeline
-from app.domain.probability.regime_hysteresis_store import RegimeHysteresisStore
-from app.domain.constants import MIN_AGGRESSION_SCORE, MAX_CUSHION_TICKS, MIN_RR_RATIO
-from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
-from app.domain.fabio_ai.services.entry_gates.gate_runner import run_gate_pipeline
-from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
-from app.domain.services.short_signal_gates import evaluate_short_gates
+from quant.probability.features import extract_features
+from quant.probability.agent_pipeline import run_agent_pipeline
+from quant.probability.regime_hysteresis import RegimeHysteresisStore
+from quant.contracts.constants import MIN_AGGRESSION_SCORE, MAX_CUSHION_TICKS, MIN_RR_RATIO
+from quant.amt.session.context import get_session_info as _get_si
+from quant.decision.gates.gate_runner import run_gate_pipeline
+from quant.decision.gates.signal_builder import build_entry_signal
+from quant.decision.gates.short import evaluate_short_gates
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.value_objects import OHLC, OrderBook, AMTResult
+    from quant.contracts.value_objects import OHLC, OrderBook, AMTResult
     from app.application.handlers.llm_entry_handler import LLMEntryHandler
     from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
     from app.application.handlers.llm_overseer_handler import LLMOverseerHandler
     from app.application.services.session_cache import SessionCache
     from app.application.services.entry_coordinator import EntryCoordinator
     from app.application.services.exit_coordinator import ExitCoordinator
-    from app.domain.ports.broker import IBroker
-    from app.domain.ports.storage import IStorage
+    from quant.contracts.ports.broker import IBroker
+    from quant.contracts.ports.storage import IStorage
     from app.application.services.session_risk_coordinator import SessionRiskCoordinator
 
 log = logging.getLogger(__name__)
@@ -482,7 +482,7 @@ class SessionEventRouter:
 
             if gate_passed:
                 if scalp_enabled:
-                    from app.domain.services.scalp_gate_pipeline import ScalpContext, evaluate_scalp_gates
+                    from quant.decision.gates.scalp import ScalpContext, evaluate_scalp_gates
 
                     mtf_bias = getattr(amt_result, "mtf_alignment", "")
                     if not mtf_bias:

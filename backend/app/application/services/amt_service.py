@@ -12,8 +12,8 @@ import threading
 import time
 from typing import Optional
 
-from app.domain.trading.models.value_objects import AMTResult
-from app.domain.trading.models.enums import MarketState
+from quant.contracts.value_objects import AMTResult
+from quant.contracts.enums import MarketState
 from app.application.handlers.amt_handler import AMTHandler
 
 log = logging.getLogger(__name__)

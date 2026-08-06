@@ -9,10 +9,10 @@ import logging
 from datetime import datetime
 
 from app.core.async_boundary import ensure_sync_adapter_result
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 from app.shared.parsing import resolve_session_market
-from app.domain.trading.models.enums import Source
-from app.domain.trading.events import TickReceived
+from quant.contracts.enums import Source
+from quant.contracts.events import TickReceived
 
 log = logging.getLogger(__name__)
 
@@ -104,7 +104,7 @@ def check_session_phase(
 
 def get_session_info(timestamp, market):
     """Get session info for given timestamp."""
-    from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
+    from quant.amt.session.context import get_session_info as _get_si
     return _get_si(timestamp=timestamp, market=market)
 
 
@@ -128,10 +128,10 @@ def save_session_profile(
     storage,
 ) -> None:
     """Save session profile to storage."""
-    from app.domain.fabio_ai.services.entry_gates.three_align import (
+    from quant.decision.gates.three_align import (
         cluster_aggressive_prints
     )
-    from app.domain.constants import RECENT_DATA_WINDOW
+    from quant.contracts.constants import RECENT_DATA_WINDOW
     
     try:
         _print_clusters = (

@@ -19,17 +19,17 @@ from typing import TYPE_CHECKING
 
 from app.core.async_boundary import ensure_sync_adapter_result
 
-from app.domain.trading.services.risk_manager import RiskManager
-from app.domain.trading.services.kill_switch import KillSwitch
-from app.domain.fabio_ai.services.session_risk_manager import SessionRiskManager
-from app.domain.services.risk_tier_engine import RiskTierEngine, TierAPremiumCheck
-from app.domain.services.circuit_breakers import CircuitBreakers, BreakerReason, BreakerResult
-from app.domain.constants import ACCOUNT_MAX_LOSS_ABSOLUTE
-from app.domain.constants import MIN_GRADE_SCORE_THRESHOLD
+from quant.execution.risk_manager import RiskManager
+from quant.execution.kill_switch import KillSwitch
+from quant.execution.session_risk_manager import SessionRiskManager
+from quant.execution.risk_tier import RiskTierEngine, TierAPremiumCheck
+from quant.execution.circuit_breakers import CircuitBreakers, BreakerReason, BreakerResult
+from quant.contracts.constants import ACCOUNT_MAX_LOSS_ABSOLUTE
+from quant.contracts.constants import MIN_GRADE_SCORE_THRESHOLD
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.entities import Signal
-    from app.domain.trading.models.aggregates import Portfolio
+    from quant.contracts.entities import Signal
+    from quant.contracts.aggregates import Portfolio
 
 logger = logging.getLogger(__name__)
 

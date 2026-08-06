@@ -9,8 +9,8 @@ Closest-enum mapping (documented choices):
   quant Signal does not carry AuctionState.triple_a_phase.
 """
 
-from app.domain.trading.models.entities import Signal as DomainSignal
-from app.domain.trading.models.enums import SetupType, SignalType, Source
+from quant.contracts.entities import Signal as DomainSignal
+from quant.contracts.enums import SetupType, SignalType, Source
 from quant.decision.signal_builder import Signal as QuantSignal
 
 _SETUP_BY_REASON: dict[str, SetupType] = {
@@ -24,7 +24,7 @@ def _normalize_reason(reason: str) -> str:
 
 
 def quant_signal_to_domain(qs: QuantSignal, symbol: str) -> DomainSignal:
-    """Map quant.decision.signal_builder.Signal -> app.domain.trading.models.entities.Signal.
+    """Map quant.decision.signal_builder.Signal -> quant.contracts.entities.Signal.
 
     type LONG/SHORT -> SignalType.BUY/SELL; price=entry; stop_loss=sl; take_profit=tp;
     setup = closest SetupType; source = closest Source; metadata = {quant_rr, confidence,

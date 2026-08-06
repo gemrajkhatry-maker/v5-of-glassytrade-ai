@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from app.domain.trading.models.aggregates import Portfolio
-from app.domain.trading.models.entities import Position
-from app.domain.trading.models.enums import Side, PositionStatus, Source
+from quant.contracts.aggregates import Portfolio
+from quant.contracts.entities import Position
+from quant.contracts.enums import Side, PositionStatus, Source
 from app.infrastructure.serialization.schemas import position_event_to_dto
 
 

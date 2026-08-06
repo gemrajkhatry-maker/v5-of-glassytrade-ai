@@ -9,11 +9,11 @@ from datetime import datetime, timezone
 
 from app.shared.config_features import Feature, feature_enabled
 from app.config import settings
-from app.domain.fabio_ai.services.llm_contract import (
+from quant.inference.llm_contract import (
     CANONICAL_RUNTIME_MODEL_FAMILY,
     ENTRY_CONTRACT_VERSION,
 )
-from app.domain.probability.features import PROBABILITY_FEATURE_SCHEMA_VERSION
+from quant.probability.features import PROBABILITY_FEATURE_SCHEMA_VERSION
 
 
 @dataclass(frozen=True)

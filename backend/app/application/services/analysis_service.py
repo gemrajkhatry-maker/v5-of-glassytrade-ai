@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from app.domain.fabio_ai.services.amt_analyzer import AMTAnalyzer
-from app.domain.fabio_ai.services.prediction_engine import PredictionEngine
-from app.domain.fabio_ai.services.footprint_analyzer import FootprintAnalyzer
+from quant.amt.analyzer import AMTAnalyzer
+from quant.inference.prediction import PredictionEngine
+from quant.amt.orderflow.footprint import FootprintAnalyzer
 from app.infrastructure.serialization.schemas import (
     dto_to_ohlc,
     dto_to_order_book,

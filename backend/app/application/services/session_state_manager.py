@@ -20,10 +20,10 @@ from typing import TYPE_CHECKING
 from app.config import settings
 
 if TYPE_CHECKING:
-    from app.domain.trading.models.value_objects import OHLC, OrderBook
-    from app.domain.trading.models.aggregates import Portfolio
-    from app.domain.fabio_ai.services.learning_engine import LearningEngine
-from app.shared.timezones import IST
+    from quant.contracts.value_objects import OHLC, OrderBook
+    from quant.contracts.aggregates import Portfolio
+    from quant.inference.learning_engine import LearningEngine
+from quant.contracts.timezones import IST
 
 logger = logging.getLogger(__name__)
 

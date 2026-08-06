@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from app.infrastructure.serialization.schemas import portfolio_to_dto
 
 if TYPE_CHECKING:
-    from app.domain.fabio_ai.services.exit_engine import ExitEngine as TradeManager
+    from quant.execution.exit_engine import ExitEngine as TradeManager
     from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
 
 

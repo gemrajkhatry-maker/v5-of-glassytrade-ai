@@ -20,17 +20,17 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from app.core.async_boundary import ensure_sync_adapter_result
-from app.domain.ports.storage import IStorage
-from app.domain.ports.broker import IBroker
-from app.domain.constants import MIN_GRADE_SCORE_THRESHOLD
-from app.domain.services.risk_sizing_engine import RiskSizingEngine, SizingResult
+from quant.contracts.ports.storage import IStorage
+from quant.contracts.ports.broker import IBroker
+from quant.contracts.constants import MIN_GRADE_SCORE_THRESHOLD
+from quant.execution.risk_sizing import RiskSizingEngine, SizingResult
 
 if TYPE_CHECKING:
     from app.application.handlers.trade_lifecycle_handler import TradeLifecycleHandler
     from app.application.services.session_state_manager import SessionStateManager
     from app.application.services.session_event_logger import SessionEventLogger
     from app.application.services.session_state_manager import SessionState
-    from app.domain.trading.models.entities import Signal
+    from quant.contracts.entities import Signal
 
 log = logging.getLogger(__name__)
 
@@ -103,7 +103,7 @@ class EntryCoordinator:
         7. Publish PositionOpened event
         8. Persist to storage
         """
-        from app.domain.fabio_ai.services.trade_thesis import validate_trade_thesis
+        from quant.decision.trade_thesis import validate_trade_thesis
 
         # Guard: confluence grade score must meet minimum threshold.
         # Each signal that has traversed an AMT analysis carries a grade_score

@@ -13,12 +13,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from app.domain.ports.storage import IStorage
-from app.domain.ports.broker import IBroker
-from app.domain.trading.events import PositionClosed
+from quant.contracts.ports.storage import IStorage
+from quant.contracts.ports.broker import IBroker
+from quant.contracts.events import PositionClosed
 from app.application.handlers.post_trade_analyst import PostTradeAnalyst
 from app.core.async_boundary import ensure_sync_adapter_result
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 from datetime import datetime
 
 
@@ -222,7 +222,7 @@ class ExitCoordinator:
 
     def on_stop_out(self, level: float, direction: str, symbol: str, exchange: str) -> None:
         """Handle stop out — record session phase for pattern learning."""
-        from app.domain.fabio_ai.services.session_context import (
+        from quant.amt.session.context import (
             get_session_info as _get_si,
         )
 

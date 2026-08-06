@@ -23,12 +23,12 @@ from app.application.protocols import (
     ITickProcessor,
 )
 from app.config import settings
-from app.domain.trading.models.value_objects import OHLC
+from quant.contracts.value_objects import OHLC
 from app.infrastructure.serialization.schemas import ohlc_to_dto
 from app.core.startup_telemetry import record_symbol_resolution
 from app.core.async_boundary import ensure_sync_adapter_result
 from app.shared.parsing import resolve_session_market
-from app.shared.timezones import IST
+from quant.contracts.timezones import IST
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class EngineLifecycle:
             tick_processor: Tick processor for market data processing
         """
         self._container = container
-        from app.domain.ports.market_data import IMarketData
+        from quant.contracts.ports.market_data import IMarketData
         from app.application.services.trading_session import TradingSessionService
         self._market_data = container.resolve(IMarketData)
         self._session_service = container.resolve(TradingSessionService)
@@ -454,7 +454,7 @@ class EngineLifecycle:
                 )
 
         # Underlying futures history — warms AMT/regime buffers before live ticks
-        from app.domain.services.underlying_futures_provider import UnderlyingFuturesProvider
+        from quant.amt.session.futures_provider import UnderlyingFuturesProvider
         provider = UnderlyingFuturesProvider()
         if provider:
             seen_fut: set[str] = set()

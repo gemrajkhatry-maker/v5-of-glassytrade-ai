@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 
 from app.core.async_boundary import ensure_sync_adapter_result
 from app.shared.parsing import resolve_session_market
-from app.domain.fabio_ai.services.entry_gates.three_align import cluster_aggressive_prints
-from app.domain.constants import RECENT_DATA_WINDOW
+from quant.decision.gates.three_align import cluster_aggressive_prints
+from quant.contracts.constants import RECENT_DATA_WINDOW
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class PhaseManager:
         """Check session phase and force-exit positions if Phase 5 (15:15-15:30 IST)."""
         try:
             _market = resolve_session_market(self._exchange, event.symbol)
-            from app.domain.fabio_ai.services.session_context import get_session_info as _get_si
+            from quant.amt.session.context import get_session_info as _get_si
             session_phase = _get_si(timestamp=event.tick.time, market=_market)
             cache.set_last_session_info(session_phase)
             
@@ -51,7 +51,7 @@ class PhaseManager:
 
     def _handle_force_exit(self, event, session, cache) -> None:
         """Execute force-exit for Phase 5 positions."""
-        from app.domain.trading.models.enums import MarketStateCodec
+        from quant.contracts.enums import MarketStateCodec
         
         with session._lock:
             open_positions = [
@@ -106,7 +106,7 @@ class PhaseManager:
 
     def _save_session_profile_if_needed(self, event, cache, session) -> None:
         """Save session profile if we have AMT data and haven't already saved."""
-        from app.shared.timezones import IST
+        from quant.contracts.timezones import IST
         from datetime import datetime
         
         if (
