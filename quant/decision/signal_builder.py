@@ -38,11 +38,15 @@ class SignalBuilder:
 
         if direction == "LONG":
             val = float(state.volume_profile.val)
-            sl = val if entry > val else nearest_level
+            step = float(state.volume_profile.step)
+            anchor = val if entry > val else nearest_level
+            sl = anchor - step if step > 0 else anchor
             tp = entry + (entry - sl) * self.tp_multiplier
         else:
             vah = float(state.volume_profile.vah)
-            sl = vah if entry < vah else nearest_level
+            step = float(state.volume_profile.step)
+            anchor = vah if entry < vah else nearest_level
+            sl = anchor + step if step > 0 else anchor
             tp = entry - (sl - entry) * self.tp_multiplier
 
         if direction == "LONG":
