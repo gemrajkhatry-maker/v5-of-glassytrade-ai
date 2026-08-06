@@ -256,6 +256,40 @@ class SessionEventRouter:
         ):
             return
 
+        with session._lock:
+            last_overseer_time = session._last_overseer_time
+            overseer_running = session._overseer_running
+            ai_running = session._ai_running
+
+        # Enforce the 15s cooldown + single-flight guard BEFORE enqueuing.
+        # Previously the old unused run_overseer var (trading_session.py:839)
+        # computed this but nothing consumed it — overseer fired every tick.
+        if not self._overseer_handler.should_run(
+            last_overseer_time=last_overseer_time,
+            overseer_running=overseer_running,
+            ai_running=ai_running,
+            has_position=True,
+        ):
+            return
+
+        # Snapshot session risk state so the worker can render a complete
+        # [Risk] section in the overseer prompt (risk_tier, daily_pnl,
+        # consecutive_losses, daily_loss_pct).
+        risk_state: dict = {}
+        try:
+            srm = self._risk_coordinator.get_session_risk_manager(event.symbol)
+            capital = float(getattr(settings, "CAPITAL", 0.0) or 0.0)
+            risk_state = {
+                "risk_tier": srm.risk_tier.name,
+                "daily_pnl": float(srm.session_pnl),
+                "consecutive_losses": int(srm.consecutive_losses),
+                "daily_loss_pct": (
+                    float(srm.session_pnl) / capital if capital > 0 else 0.0
+                ),
+            }
+        except Exception:
+            log.debug("Risk state unavailable for overseer — using defaults", exc_info=True)
+
         _mkt = exchange
         if _mkt in ("NFO", "BSE"):
             _mkt = "NSE"
@@ -279,6 +313,7 @@ class SessionEventRouter:
             amt_result,
             session_info=_si,
             footprint_candle=_fp_candle,
+            risk_state=risk_state,
         )
 
     # ----- LLM Trigger Check -----

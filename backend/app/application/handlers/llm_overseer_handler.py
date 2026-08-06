@@ -22,6 +22,7 @@ import logging
 import time
 import queue
 import threading
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from app.config import settings
@@ -45,8 +46,9 @@ from app.shared.parsing import is_mcx_symbol
 logger = logging.getLogger(__name__)
 
 # Minimum seconds between overseer calls
-# Fabio Gap #3: Reduced from 10s to 3s for faster position management
-OVERSEER_COOLDOWN = 3.0
+# AMT cleanup Task 4: 15s floor enforced by should_run() in the trigger path,
+# bounding LLM cadence to ~240/hr/symbol max (down from firing every tick).
+OVERSEER_COOLDOWN = 15.0
 
 # ADD rate-limiting
 ADD_COOLDOWN = 120.0  # 2 minutes between ADD actions
@@ -139,8 +141,14 @@ class LLMOverseerHandler:
         amt_result: AMTResult,
         session_info=None,
         footprint_candle=None,
+        risk_state: dict | None = None,
     ) -> None:
-        """Run overseer analysis in background thread."""
+        """Run overseer analysis in background thread.
+
+        ``risk_state`` is a small dict (risk_tier, daily_pnl, consecutive_losses,
+        daily_loss_pct) captured by the caller from the session risk coordinator
+        so the worker can build a complete pos_state for the prompt.
+        """
         if not self._overseer_enabled():
             logger.info("LLM overseer disabled via feature flag — skipping %s", symbol)
             return
@@ -171,7 +179,7 @@ class LLMOverseerHandler:
         # Ensure per-symbol queue and worker exist
         with self._workers_lock:
             if symbol not in self._llm_queues:
-                self._llm_queues[symbol] = queue.Queue()
+                self._llm_queues[symbol] = queue.Queue(maxsize=2)
                 wt = threading.Thread(
                     target=self._llm_worker_loop,
                     args=(symbol,),
@@ -190,6 +198,7 @@ class LLMOverseerHandler:
             "footprint_candle": footprint_candle,
             "position_id": position_id,
             "tick_trace_id": _tick_trace_id,
+            "risk_state": risk_state,
             "enqueue_time": time.time(),
         }
         try:
@@ -199,6 +208,61 @@ class LLMOverseerHandler:
             logger.warning(f"LLM Overseer queue full, dropping tracking for {symbol}")
             with session._lock:
                 session._overseer_running = False
+
+    def _build_pos_state(
+        self,
+        position,
+        tick: OHLC,
+        amt_result: AMTResult | None,
+        risk_state: dict | None,
+    ) -> dict:
+        """Build the full overseer pos_state consumed by build_overseer_prompt.
+
+        Combines live position fields (SL/TP/entry/current/hold time) with the
+        session risk snapshot (risk_tier, daily_pnl, consecutive_losses,
+        daily_loss_pct) captured by the trigger path. Risk fields fall back to
+        safe defaults (Tier=C, zero) when no snapshot is provided so the worker
+        never crashes on callers that skip the router.
+        """
+        risk_state = risk_state or {}
+        direction_mult = 1.0 if position.side.value == "LONG" else -1.0
+        pnl_pct = (
+            (float(tick.close) - float(position.entry_price))
+            / float(position.entry_price)
+            * direction_mult
+        )
+        pos_state = {
+            "position_id": position.id,
+            "side": position.side.value,
+            "symbol": position.symbol,
+            "entry_price": float(position.entry_price),
+            "current_price": float(tick.close),
+            "unrealized_pnl_pct": pnl_pct,
+            "partial_taken": position.partial_taken,
+            "market_state": getattr(amt_result, "state", "") if amt_result else "",
+            "stop_loss": float(position.stop_loss),
+            "take_profit": float(position.take_profit),
+            "hold_time_seconds": self._hold_time_seconds(position),
+            "risk_tier": risk_state.get("risk_tier", "C"),
+            "daily_pnl": risk_state.get("daily_pnl", 0.0),
+            "consecutive_losses": risk_state.get("consecutive_losses", 0),
+            "daily_loss_pct": risk_state.get("daily_loss_pct", 0.0),
+        }
+        pos_state.update(self._trade_manager.get_position_metrics(position))
+        return pos_state
+
+    @staticmethod
+    def _hold_time_seconds(position) -> float:
+        """Seconds since the position opened, 0 when entry_time is unset/unparsable."""
+        entry_time = getattr(position, "entry_time", "") or ""
+        if not entry_time:
+            return 0.0
+        try:
+            dt = datetime.fromisoformat(str(entry_time).replace("Z", "+00:00"))
+            return max(0.0, time.time() - dt.timestamp())
+        except Exception:
+            logger.debug("Could not parse entry_time %r for hold time", entry_time)
+            return 0.0
 
     def _llm_worker_loop(self, queue_symbol: str) -> None:
         """Dedicated background thread that processes LLM overseer requests sequentially for a specific symbol."""
@@ -229,6 +293,7 @@ class LLMOverseerHandler:
                 footprint_candle = item["footprint_candle"]
                 position_id = item["position_id"]
                 tick_trace_id = item.get("tick_trace_id", "")
+                risk_state = item.get("risk_state")
 
                 # Staleness check: Drop if sitting in queue > 30 seconds
                 if time.time() - enqueue_time > 30.0:
@@ -248,18 +313,9 @@ class LLMOverseerHandler:
                 if position is None or not position.is_open:
                     pos_state = None
                 else:
-                    direction_mult = 1.0 if position.side.value == "LONG" else -1.0
-                    pnl_pct = (float(tick.close) - float(position.entry_price)) / float(position.entry_price) * direction_mult
-                    pos_state = {
-                        "position_id": position.id,
-                        "side": position.side.value,
-                        "entry_price": float(position.entry_price),
-                        "current_price": float(tick.close),
-                        "unrealized_pnl_pct": pnl_pct,
-                        "partial_taken": position.partial_taken,
-                        "market_state": getattr(amt_result, "state", "") if amt_result else "",
-                    }
-                    pos_state.update(self._trade_manager.get_position_metrics(position))
+                    pos_state = self._build_pos_state(
+                        position, tick, amt_result, risk_state
+                    )
 
                 if pos_state is None:
                     logger.debug(
