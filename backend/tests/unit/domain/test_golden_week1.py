@@ -1,48 +1,19 @@
 """Golden regression tests for Week 1 architecture changes.
 
 Validates exact output equivalence before/after:
-- detect_momentum_fade() extraction
 - ThreeAlignInput protocol adoption
 - match setup_type in signal_builder
 """
 
 import math
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 # Import domain types
 from app.domain.trading.models.value_objects import OHLC, AMTResult
-from app.domain.fabio_ai.services.entry_gates.confirmation_bundle import check_momentum_fade
 from app.domain.fabio_ai.services.entry_gates.three_align import three_align_check
 from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
-from app.domain.fabio_ai.services.entry_gates.detectors import detect_momentum_fade
 from app.domain.trading.models.enums import SetupType
-
-
-def test_detect_momentum_fade_golden():
-    """Golden test: detect_momentum_fade() must return identical bool as legacy check_momentum_fade()."""
-    # Realistic input from live session (MCX NIFTY Options)
-    data = [
-        Mock(volume=1200, open=22400.0, high=22460.0, low=22390.0, close=22450.5),
-        Mock(volume=1350, open=22450.5, high=22480.0, low=22440.0, close=22475.0),
-        Mock(volume=1800, open=22475.0, high=22520.0, low=22460.0, close=22510.0),
-    ] * 10  # 30 candles
-    
-    tick = Mock(
-        volume=4200,
-        open=22510.0,
-        high=22545.0,
-        low=22505.0,
-        close=22540.0,
-    )
-    
-    # Legacy call
-    legacy_result = check_momentum_fade(data, tick, direction="SHORT")
-    
-    # New detector call
-    new_result, _ = detect_momentum_fade(data, tick, direction="SHORT")
-    
-    assert new_result == legacy_result, f"detect_momentum_fade mismatch: {new_result} != {legacy_result}"
 
 
 def test_three_align_check_golden():

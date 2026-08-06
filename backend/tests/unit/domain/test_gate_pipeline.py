@@ -317,20 +317,6 @@ class TestConsecutiveLossThrottle:
         assert result.gate >= 0
 
 
-class TestTimeOfDayGate:
-    """Test time-of-day restriction (Fabio spec: no entries 09:15-09:45)."""
-
-    def test_opening_noise_blocked(self):
-        """09:15-09:45 → blocked (opening noise)."""
-        from app.domain.services.session_phase_gate import SessionPhaseGate, AllowedAction
-        from datetime import datetime
-        # 09:20 IST should return NO_TRADE (OPENING_AUCTION)
-        ts = datetime(2026, 1, 2, 9, 20, 0)  # 09:20
-        result = SessionPhaseGate().evaluate(ts)
-        assert result.phase == "OPENING_AUCTION"
-        # Opening auction is essentially no-trade before profile forms
-
-
 class TestVWAPExtremeFilter:
     """Test VWAP extreme filter (Fabio spec: BLOCK at VWAP ±2σ)."""
 

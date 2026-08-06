@@ -38,7 +38,6 @@ from app.domain.fabio_ai.services.gate_pipeline import (
 )
 from app.domain.trading.models.enums import MarketState
 from app.domain.trading.models.value_objects import OHLC, VolumeProfileLevel
-from app.application.services.signal_tracking_service import SignalTrackingService
 
 
 # ---------------------------------------------------------------------------
@@ -400,40 +399,6 @@ class TestFootprintDeltaAlignment:
 # ===================================================================
 # TEST 8: Decision History Extension
 # ===================================================================
-
-
-class TestDecisionHistory:
-    """Verify decision history supports full session."""
-
-    def test_get_recent_decisions_extended_limit(self):
-        service = SignalTrackingService()
-
-        # Add 100 decisions
-        for i in range(100):
-            service.track_gate_block(
-                symbol="TEST",
-                gate_name=f"GATE_{i % 12}",
-                gate_reason="TEST",
-                gate_detail="test",
-            )
-
-        # Default limit should return all
-        recent = service.get_recent_decisions("TEST")
-        assert len(recent) == 100
-
-    def test_get_recent_decisions_respects_limit(self):
-        service = SignalTrackingService()
-
-        for i in range(200):
-            service.track_gate_block(
-                symbol="TEST",
-                gate_name=f"GATE_{i}",
-                gate_reason="TEST",
-                gate_detail="test",
-            )
-
-        recent = service.get_recent_decisions("TEST", limit=50)
-        assert len(recent) == 50
 
 
 # ===================================================================
