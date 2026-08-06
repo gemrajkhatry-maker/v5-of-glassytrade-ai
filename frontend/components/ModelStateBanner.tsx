@@ -19,7 +19,7 @@ const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, 
             genAI?.rawOutput?.includes('QUANT_DEAD_MARKET') ||
             amtResult?.marketState === 'DEAD';
         const volLow = amtResult?.aggression != null && amtResult.aggression < 0.2;
-        const volMsg = volLow ? 'Vol below prior session avg — edge may be thin' : 'Vol healthy vs prior session avg';
+        const volMsg = volLow ? 'Low aggression — edge may be thin' : 'Aggression healthy';
         const armed = agentDecision?.timing === 'ENTER_NOW';
         const dir = genAI?.direction;
         const hasEntry = dir && dir !== 'FLAT';

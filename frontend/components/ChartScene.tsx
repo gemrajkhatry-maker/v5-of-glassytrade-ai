@@ -451,12 +451,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         
         // Show side (B/S) + volume
         ctx.fillText(`${print.side === 'BUY' ? 'B' : 'S'} ${formatK(print.volume)}`, x, y);
-        
-        // Context label for very large prints
-        if (radius > 15) {
-          ctx.font = '7px sans-serif';
-          ctx.fillText(`INSTITUTIONAL`, x, y + 8);
-        }
       }
     });
   };
