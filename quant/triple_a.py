@@ -57,7 +57,7 @@ class TripleAStateMachine:
         return self._resolve_aggression(bar, vwap)
 
     def _rearm(self, absorption: Absorption) -> None:
-        if absorption.side == self._absorption_side:
+        if self._phase != "WAITING" and absorption.side == self._absorption_side:
             self._absorption_price = absorption.price
             self._absorb_bars = 0
             return

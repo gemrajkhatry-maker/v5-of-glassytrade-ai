@@ -37,6 +37,20 @@ def test_resets_after_signal():
     m.update(_bar(105), _vp(), _vwap(), None)  # AGGRESSION -> LONG
     assert m.update(_bar(106), _vp(), _vwap(), None) == "WAITING"
 
+def test_same_side_rearms_after_signal():
+    m = TripleAStateMachine()
+    m.update(_bar(100), _vp(), _vwap(), None)
+    m.update(_bar(100), _vp(), _vwap(), Absorption(0, 100, 500, "BUY", 0.5, 0))
+    m.update(_bar(101), _vp(), _vwap(), None)
+    assert m.update(_bar(105), _vp(), _vwap(), None) == "AGGRESSION"  # LONG
+    # fresh SAME-side absorption after AGGRESSION->WAITING must re-arm
+    assert m.update(_bar(106), _vp(), _vwap(),
+                    Absorption(0, 106, 500, "BUY", 0.5, 0)) == "ABSORBING"
+    # and a subsequent breakout reaches AGGRESSION/LONG again
+    m.update(_bar(106), _vp(), _vwap(), None)
+    assert m.update(_bar(110), _vp(), _vwap(), None) == "AGGRESSION"
+    assert m.last_signal == "LONG"
+
 def test_short_path():
     m = TripleAStateMachine()
     m.update(_bar(100), _vp(), _vwap(), None)
