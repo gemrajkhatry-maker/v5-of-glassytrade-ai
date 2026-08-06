@@ -489,6 +489,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 const hasAnalytics = state.portfolio !== undefined ||
                     state.amt !== undefined ||
                     state.auction !== undefined ||
+                    state.quantDecision !== undefined ||
                     state.genAIAnalysis !== undefined ||
                     state.riskState !== undefined ||
                     state.agentDecision !== undefined ||
@@ -527,6 +528,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         merged.amtAnalysis = state.amt === null ? null : { ...existing.amtAnalysis, ...state.amt };
                     }
                     if (state.auction !== undefined) merged.auctionAnalysis = { ...existing.auctionAnalysis, ...state.auction };
+                    if (state.quantDecision !== undefined) merged.quantDecisionAnalysis = { ...existing.quantDecisionAnalysis, ...state.quantDecision };
                     if (state.genAIAnalysis !== undefined) merged.genAIAnalysis = { ...existing.genAIAnalysis, ...state.genAIAnalysis };
                     if (state.riskState !== undefined) merged.riskState = { ...existing.riskState, ...state.riskState };
                     if (state.agentDecision !== undefined) merged.agentDecision = state.agentDecision;
@@ -601,6 +603,9 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 const newAuctionAnalysis = 'auction' in state
                     ? (state.auction ?? null)
                     : inst.auctionAnalysis;
+                const newQuantDecisionAnalysis = 'quantDecision' in state
+                    ? (state.quantDecision ?? null)
+                    : inst.quantDecisionAnalysis;
                 const newGenAIAnalysis = state.genAIAnalysis ?? inst.genAIAnalysis;
                 const newRiskState = state.riskState ?? inst.riskState;
                 const newAgentDecision = state.agentDecision ?? inst.agentDecision;
@@ -615,6 +620,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         portfolio: newPortfolio,
                         amtAnalysis: newAmtAnalysis,
                         auctionAnalysis: newAuctionAnalysis,
+                        quantDecisionAnalysis: newQuantDecisionAnalysis,
                         aiAnalysis: inst.aiAnalysis,
                         genAIAnalysis: newGenAIAnalysis,
                         llmHistory: (() => {

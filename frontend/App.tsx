@@ -215,6 +215,7 @@ function App() {
                             amtResult={activeInstrument.amtAnalysis}
                             agentDecision={activeInstrument.agentDecision}
                             auction={activeInstrument.auctionAnalysis}
+                            quantDecision={activeInstrument.quantDecisionAnalysis}
                             symbol={activeInstrument.symbol}
                         />
                     </div>

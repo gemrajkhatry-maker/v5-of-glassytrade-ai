@@ -1,19 +1,20 @@
 import React, { useMemo } from 'react';
 import { Brain } from 'lucide-react';
-import type { GenAIAnalysis, AMTAnalysis, AgentDecision, AuctionAnalysis } from '../types';
+import type { GenAIAnalysis, AMTAnalysis, AgentDecision, AuctionAnalysis, QuantDecisionAnalysis } from '../types';
 
 export interface ModelStateBannerProps {
     genAI: GenAIAnalysis | null | undefined;
     amtResult: AMTAnalysis | null | undefined;
     agentDecision: AgentDecision | null | undefined;
     auction: AuctionAnalysis | null | undefined;
+    quantDecision: QuantDecisionAnalysis | null | undefined;
     symbol: string;
 }
 
 /**
  * Single primary status strip for the active symbol: monitoring, dead, advisory entry, or armed (ENTER_NOW).
  */
-const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, agentDecision, auction, symbol }) => {
+const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, agentDecision, auction, quantDecision, symbol }) => {
     const { title, subtitle, barClass, accentClass } = useMemo(() => {
         const isDead =
             genAI?.rationale?.includes('DEAD') ||
@@ -96,6 +97,11 @@ const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, 
                     {auction?.absorption && (
                         <span className="px-1.5 py-0.5 rounded-sm border border-amber-500/40 text-amber-300">
                             {auction.absorption.side} ABSORPTION
+                        </span>
+                    )}
+                    {quantDecision?.approved && quantDecision.signal && (
+                        <span className={`px-1.5 py-0.5 rounded-sm border ${quantDecision.signal.type === 'LONG' ? 'border-emerald-500/40 text-emerald-300' : 'border-rose-500/40 text-rose-300'} font-bold`}>
+                            DECISION {quantDecision.signal.type} @{quantDecision.signal.entry.toFixed(2)} (RR {quantDecision.signal.rr.toFixed(1)})
                         </span>
                     )}
                     <span className="flex items-center gap-1">

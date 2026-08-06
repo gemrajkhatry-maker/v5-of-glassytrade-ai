@@ -86,6 +86,7 @@ const Harness = () => {
             amtResult={activeInstrument.amtAnalysis}
             agentDecision={activeInstrument.agentDecision}
             auction={activeInstrument.auctionAnalysis}
+            quantDecision={activeInstrument.quantDecisionAnalysis}
             symbol={activeInstrument.symbol}
         />
     );
@@ -167,5 +168,45 @@ describe('auction WS → Triple-A render', () => {
         expect(screen.getByText(/TRIPLE-A SHORT \(ACCUMULATING\)/i)).toBeInTheDocument();
         expect(screen.queryByText(/TRIPLE-A LONG/i)).not.toBeInTheDocument();
         expect(screen.queryByText(/BUY ABSORPTION/i)).not.toBeInTheDocument();
+    });
+
+    it('renders an approved quant decision from a full WS message carrying quantDecision', async () => {
+        const { ws } = await connect();
+        expect(ws).toBeDefined();
+
+        await pushMessage(ws, {
+            _type: 'full',
+            _symbol: 'SYM',
+            auction: auctionFixture(),
+            quantDecision: {
+                approved: true,
+                reason: 'Triple-A',
+                phase: 'AGGRESSION',
+                signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, confidence: 1.0 },
+            },
+        });
+
+        expect(screen.getByText(/DECISION LONG @104\.00 \(RR 2\.0\)/i)).toBeInTheDocument();
+    });
+
+    it('clears the decision badge when quantDecision is not approved', async () => {
+        const { ws } = await connect();
+        expect(ws).toBeDefined();
+
+        await pushMessage(ws, {
+            _type: 'full',
+            _symbol: 'SYM',
+            auction: auctionFixture(),
+            quantDecision: { approved: true, reason: 'Triple-A', phase: 'AGGRESSION',
+                signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, confidence: 1.0 } },
+        });
+        expect(screen.getByText(/DECISION LONG/i)).toBeInTheDocument();
+
+        await pushMessage(ws, {
+            _type: 'delta',
+            _symbol: 'SYM',
+            quantDecision: { approved: false, reason: 'NO_EDGE', phase: 'WAITING', signal: null },
+        });
+        expect(screen.queryByText(/DECISION LONG/i)).not.toBeInTheDocument();
     });
 });

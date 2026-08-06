@@ -124,6 +124,7 @@ export interface InstrumentState {
   genAIAnalysis: GenAIAnalysis | null;
   amtAnalysis: AMTAnalysis | null;
   auctionAnalysis: AuctionAnalysis | null;
+  quantDecisionAnalysis: QuantDecisionAnalysis | null;
   riskState: RiskState | null;
   agentDecision: AgentDecision | null;
   llmHistory: LLMHistoryEntry[];
@@ -169,6 +170,20 @@ export interface AggressivePrint {
   side: 'BUY' | 'SELL';
   volume: number;
   delta: number;
+}
+
+export interface QuantDecisionAnalysis {
+  approved: boolean;
+  reason: string;
+  phase: string;
+  signal: {
+    type: string;
+    entry: number;
+    sl: number;
+    tp: number;
+    rr: number;
+    confidence: number;
+  } | null;
 }
 
 export interface AuctionAnalysis {
