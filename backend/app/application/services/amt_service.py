@@ -6,6 +6,7 @@ from the main trading pipeline.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import time
 from typing import Optional
@@ -128,7 +129,7 @@ class AMTService:
                         _underlying, _current_ms, _cached_ms,
                     )
                     _current_ms = _cached_ms
-                    amt_result = amt_result.__replace__(market_state=_cached_ms)
+                    amt_result = dataclasses.replace(amt_result, market_state=_cached_ms)
                     amt_dto["marketState"] = _cached_ms
         
         self._underlying_state_cache[_underlying] = (_now, _current_ms)
