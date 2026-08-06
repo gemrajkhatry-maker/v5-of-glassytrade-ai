@@ -13,8 +13,7 @@ from __future__ import annotations
 
 import logging
 
-# TODO(migration): switch to quant.amt.analyzer once Track A5 lands
-from app.domain.fabio_ai.services.amt_analyzer import IncrementalVolumeProfile
+from quant.amt.analyzer import IncrementalVolumeProfile
 
 logger = logging.getLogger(__name__)
 
