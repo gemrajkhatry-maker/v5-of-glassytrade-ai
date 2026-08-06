@@ -93,6 +93,29 @@ def auction_state_to_dto(state: Any) -> dict:
     }
 
 
+def quant_decision_to_dto(decision: Any) -> dict:
+    """Serialize a ``QuantDecision`` to the stored/WS quant-decision DTO."""
+    sig = decision.signal
+    return {
+        "approved": bool(decision.approved),
+        "reason": decision.reason,
+        "phase": decision.phase,
+        "timestamp": sig.timestamp if sig is not None else None,
+        "signal": (
+            {
+                "type": sig.type,
+                "entry": round(float(sig.entry), 4),
+                "sl": round(float(sig.sl), 4),
+                "tp": round(float(sig.tp), 4),
+                "rr": round(float(sig.rr), 4),
+                "confidence": round(float(sig.confidence), 4),
+            }
+            if sig is not None
+            else None
+        ),
+    }
+
+
 class QuantBridge:
     """Holds one AuctionCoordinator per symbol; safe for concurrent symbols."""
 
@@ -120,14 +143,100 @@ class QuantBridge:
         Dedup: a bar is only fed once per (symbol, bar-time). Returns {} on a
         duplicate bar time so callers can skip rebroadcast cheaply.
         """
-        if getattr(self._last_bar_time, "get", None) is not None:
-            last_t = self._last_bar_time.get(symbol)
-            if last_t == ohlc.time:
-                return {}
+        _, _, dto = self._feed_bar(symbol, ohlc)
+        return dto
+
+    def _feed_bar(self, symbol: str, ohlc: Any) -> tuple[Any | None, Any | None, dict]:
+        """Feed one closed bar; returns ``(AuctionState, quant Bar, DTO)``.
+
+        Returns ``(None, None, {})`` for a duplicate bar time so callers can
+        skip rebroadcast cheaply. Shared by the legacy ``on_bar_close`` and the
+        decision path so both always see the exact same dedup semantics.
+        """
+        if self._last_bar_time.get(symbol) == ohlc.time:
+            return None, None, {}
         self._last_bar_time[symbol] = ohlc.time
+        bar = ohlc_to_quant_bar(ohlc)
         coord = self._coordinator(symbol)
-        state = coord.on_bar_close(ohlc_to_quant_bar(ohlc))
-        return auction_state_to_dto(state)
+        state = coord.on_bar_close(bar)
+        return state, bar, auction_state_to_dto(state)
+
+    def on_bar_close_with_decision(
+        self,
+        symbol: str,
+        ohlc: Any,
+        session: Any,
+        ctx_facts: dict | None = None,
+    ) -> dict:
+        """Feed one closed bar, run the quant decision, and store it on the session.
+
+        The auction DTO is identical to ``on_bar_close``. When
+        ``QUANT_DECISION_ENABLED`` is set, the ``DecisionService`` is evaluated
+        against the resulting ``AuctionState`` and ``session.last_quant_decision``
+        (a DTO: {approved, reason, phase, timestamp, signal:{type,entry,sl,tp,rr,
+        confidence}|None}) is stored so ``session_event_router`` can route
+        execution from the quant signal. When the flag is off, nothing is stored
+        and the legacy path is byte-identical.
+        """
+        from app.config import settings
+
+        state, bar, dto = self._feed_bar(symbol, ohlc)
+        if state is None:
+            return dto  # duplicate bar time — nothing new to decide
+
+        if not settings.QUANT_DECISION_ENABLED:
+            return dto
+
+        from quant.decision.decision_service import DecisionService
+
+        ctx = self._build_decision_context(symbol, state, bar, session, ctx_facts or {})
+        decision = DecisionService().evaluate(ctx)
+        with session._lock:
+            session.last_quant_decision = quant_decision_to_dto(decision)
+        return dto
+
+    def _build_decision_context(
+        self,
+        symbol: str,
+        state: Any,
+        bar: Any,
+        session: Any,
+        facts: dict,
+    ) -> Any:
+        """Assemble a ``DecisionContext`` from the session + caller facts."""
+        from quant.decision.context import DecisionContext
+
+        agent_direction = facts.get("agent_direction")
+        if agent_direction is None:
+            agent_direction = getattr(
+                getattr(session, "_agent_decision", None), "direction", None
+            )
+
+        position_open = facts.get("position_open")
+        if position_open is None:
+            try:
+                position_open = bool(
+                    session.portfolio
+                    and any(p.is_open for p in session.portfolio.positions)
+                )
+            except Exception:
+                position_open = False
+
+        return DecisionContext(
+            state=state,
+            bar=bar,
+            symbol=symbol,
+            session_open=facts.get("session_open", True),
+            warmup_complete=facts.get("warmup_complete", True),
+            position_open=bool(position_open),
+            cooldown_remaining_sec=int(facts.get("cooldown_remaining_sec", 0)),
+            risk_halted=bool(facts.get("risk_halted", False)),
+            agent_direction=agent_direction,
+            agent_probability=float(facts.get("agent_probability", 0.0)),
+            equity=float(facts.get("equity", 100000.0)),
+            risk_per_trade_pct=float(facts.get("risk_per_trade_pct", 0.01)),
+            tick_size=float(facts.get("tick_size", 0.05)),
+        )
 
 
 bridge = QuantBridge()

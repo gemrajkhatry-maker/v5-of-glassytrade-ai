@@ -77,6 +77,15 @@ class SessionCache:
         """Get the latest quant AuctionState DTO."""
         return self._session.last_auction
 
+    def update_quant_decision(self, decision_dto: dict) -> None:
+        """Store the latest quant DecisionService result (DTO) for the session."""
+        with self._session._lock:
+            self._session.last_quant_decision = decision_dto
+
+    def get_latest_quant_decision(self) -> dict | None:
+        """Get the latest quant decision DTO."""
+        return self._session.last_quant_decision
+
     def get_latest_footprint(self) -> dict | None:
         """Get the latest footprint data."""
         return self._session.last_footprint

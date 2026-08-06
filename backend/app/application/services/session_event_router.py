@@ -421,6 +421,12 @@ class SessionEventRouter:
                 )
                 return
 
+            # Quant decision engine of record: when the flag is on and the latest
+            # quant decision is approved, the quant signal drives execution and
+            # the legacy AMT gate path is bypassed entirely.
+            if self._try_execute_quant_decision(event.symbol, session):
+                return
+
             tick_size = (
                 exchange_config.get_tick_size(event.symbol)
                 if exchange_config
@@ -637,6 +643,47 @@ class SessionEventRouter:
                 event.symbol,
                 60 - _time_since_last,
             )
+
+    def _try_execute_quant_decision(self, symbol: str, session: Any) -> bool:
+        """Route execution from a stored quant decision (flag on + approved).
+
+        Maps the stored quant signal DTO to a domain ``Signal`` via
+        ``quant_signal_to_domain`` and hands it to ``EntryCoordinator``. Returns
+        True when a quant signal was executed so the legacy gate path is skipped.
+        """
+        if not settings.QUANT_DECISION_ENABLED:
+            return False
+        decision = getattr(session, "last_quant_decision", None)
+        if not decision or not decision.get("approved"):
+            return False
+        sig_dto = decision.get("signal")
+        if not sig_dto or sig_dto.get("type") not in ("LONG", "SHORT"):
+            return False
+
+        from app.application.services.quant_signal_mapper import quant_signal_to_domain
+        from quant.decision.signal_builder import Signal as QuantSignal
+
+        qs = QuantSignal(
+            type=sig_dto["type"],
+            reason=str(decision.get("reason", "")),
+            entry=float(sig_dto["entry"]),
+            sl=float(sig_dto["sl"]),
+            tp=float(sig_dto["tp"]),
+            rr=float(sig_dto.get("rr", 0.0)),
+            confidence=float(sig_dto.get("confidence", 0.0)),
+            symbol=symbol,
+            timestamp=str(decision.get("timestamp") or ""),
+        )
+        mapped = quant_signal_to_domain(qs, symbol)
+        session._last_exec_mono = _time_mod.monotonic()
+        log.info(
+            "EXECUTING quant decision: %s dir=%s entry=%.4f (bypassing legacy gates)",
+            symbol,
+            qs.type,
+            qs.entry,
+        )
+        self._entry_coordinator.execute_signal(symbol, mapped, session)
+        return True
 
     def _build_entry_signal(
         self,

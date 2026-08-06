@@ -242,6 +242,14 @@ class SettingsAdapter:
             flags = self._mode_config.scanner_config.get("feature_flags", {})
             return flags.get("scalp_ib_breakout", False)
         return os.getenv("SCALP_IB_BREAKOUT", "false").lower() == "true"
+
+    @property
+    def QUANT_DECISION_ENABLED(self) -> bool:
+        """Get the quant decision engine-of-record flag from YAML config."""
+        if self._mode_config:
+            flags = self._mode_config.scanner_config.get("feature_flags", {})
+            return flags.get("quant_decision_enabled", False)
+        return os.getenv("QUANT_DECISION_ENABLED", "false").lower() == "true"
     
     @property
     def REALISTIC_COST_MODEL(self) -> bool:
