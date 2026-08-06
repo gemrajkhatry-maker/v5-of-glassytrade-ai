@@ -1,8 +1,8 @@
 """Unit tests for MarketStructureClassifier — regime detection from candle data."""
 
 import pytest
-from app.domain.trading.models.value_objects import OHLC
-from app.domain.fabio_ai.services.market_structure_classifier import (
+from quant.contracts.value_objects import OHLC
+from quant.amt.market.structure import (
     MarketStructureClassifier,
     MarketStructure,
 )
