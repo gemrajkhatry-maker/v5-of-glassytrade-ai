@@ -5,14 +5,14 @@ These tests assert the new 5-gate semantics.
 """
 
 import pytest
-from app.domain.fabio_ai.services.gate_pipeline import (
+from quant.decision.gates.legacy_gate_pipeline import (
     GatePipeline,
     GateContext,
     GateResult,
     GateReason,
     GateType,
 )
-from app.domain.trading.models.enums import MarketState
+from quant.contracts.enums import MarketState
 
 
 class TestGatePipelineSequential:

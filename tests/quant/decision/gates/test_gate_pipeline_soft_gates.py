@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain.fabio_ai.services.gate_pipeline import GatePipeline, GateContext
-from app.domain.trading.models.enums import MarketState
+from quant.decision.gates.legacy_gate_pipeline import GatePipeline, GateContext
+from quant.contracts.enums import MarketState
 
 
 def _default_context(**overrides) -> GateContext:

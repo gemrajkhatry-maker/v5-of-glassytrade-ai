@@ -1,7 +1,7 @@
 import pytest
 
-from app.domain.fabio_ai.services.gate_pipeline import GateContext, GatePipeline, GateReason
-from app.domain.trading.models.enums import MarketState
+from quant.decision.gates.legacy_gate_pipeline import GateContext, GatePipeline, GateReason
+from quant.contracts.enums import MarketState
 
 
 def test_gate_context_has_triple_a_fields_with_defaults():
