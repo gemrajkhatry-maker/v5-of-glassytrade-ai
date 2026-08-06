@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.domain.fabio_ai.strategy.squeeze_detector import (
+from quant.amt.market.squeeze import (
     MomentumSqueezeDetector,
     SqueezeState,
 )
