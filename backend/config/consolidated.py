@@ -181,6 +181,8 @@ class FeatureFlags(BaseModel):
     llm_execution_enabled: bool = Field(default=True, description="Enable LLM execution")
     llm_pre_candle_advisory: bool = Field(default=True, description="Enable LLM pre-candle advisory")
     llm_post_trade: bool = Field(default=True, description="Enable LLM post-trade analysis")
+    llm_entry_gate: bool = Field(default=False, description="Enable LLM entry gate")
+    llm_overseer: bool = Field(default=True, description="Enable LLM overseer")
     realistic_cost_model: bool = Field(default=True, description="Use realistic cost model")
 
 
@@ -437,6 +439,8 @@ class ConsolidatedConfig(BaseModel):
                 "risk_tier_engine": bool(feat.get("risk_tier_engine", base.feature_flags.risk_tier_engine)),
                 "llm_pre_candle_advisory": bool(feat.get("llm_pre_candle_advisory", base.feature_flags.llm_pre_candle_advisory)),
                 "llm_post_trade": bool(feat.get("llm_post_trade", base.feature_flags.llm_post_trade)),
+                "llm_entry_gate": bool(feat.get("llm_entry_gate", base.feature_flags.llm_entry_gate)),
+                "llm_overseer": bool(feat.get("llm_overseer", base.feature_flags.llm_overseer)),
                 "realistic_cost_model": bool(feat.get("realistic_cost_model", base.feature_flags.realistic_cost_model)),
             }
         )

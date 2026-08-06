@@ -203,7 +203,7 @@ def load_config(
         iv_vix_features=flags_raw.get("iv_vix_features", False),
         walk_forward_validation=flags_raw.get("walk_forward_validation", False),
         shap_feature_pruning=flags_raw.get("shap_feature_pruning", False),
-        llm_entry_gate=False,  # HARDCODED false
+        llm_entry_gate=flags_raw.get("llm_entry_gate", False),
         llm_pre_candle_advisory=flags_raw.get("llm_pre_candle_advisory", True),
         llm_overseer=flags_raw.get("llm_overseer", True),
         llm_post_trade=flags_raw.get("llm_post_trade", True),
