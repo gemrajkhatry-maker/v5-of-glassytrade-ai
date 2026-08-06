@@ -1,7 +1,11 @@
 """Unit tests for the quant→backend bridge + AuctionState serializer."""
 
+import json
+import pathlib
+
 import pytest
 
+import app.application.services.quant_bridge as quant_bridge_module
 from app.application.services.quant_bridge import (
     QuantBridge,
     auction_state_to_dto,
@@ -154,3 +158,51 @@ def test_quant_decision_to_dto_serializes_signal_and_skip():
                         "signal": None})()
     )
     assert rejected["approved"] is False and rejected["signal"] is None
+
+
+def test_replay_recorder_writes_when_env_set(monkeypatch, tmp_path):
+    monkeypatch.setenv("QUANT_RECORD_REPLAY", "1")
+    monkeypatch.setattr(quant_bridge_module, "_REPLAY_LOG_DIR", pathlib.Path(tmp_path))
+    br = QuantBridge()
+    br.on_bar_close("SYM", _ohlc())
+    files = list(pathlib.Path(tmp_path).glob("replay_SYM_*.jsonl"))
+    assert len(files) == 1
+    records = [json.loads(line) for line in files[0].read_text().splitlines()]
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["symbol"] == "SYM"
+    assert rec["time"] == "t1"
+    assert rec["close"] == 100.0
+    assert rec["volume"] == 100.0
+    assert rec["buy_volume"] == 60.0
+    assert rec["delta"] == 20.0
+    assert rec["oi"] == 0.0
+    assert rec["auction"]["tripleAPhase"] in ("WAITING", "ABSORBING", "ACCUMULATING", "AGGRESSION")
+
+
+def test_replay_recorder_skips_duplicate_bar(monkeypatch, tmp_path):
+    monkeypatch.setenv("QUANT_RECORD_REPLAY", "1")
+    monkeypatch.setattr(quant_bridge_module, "_REPLAY_LOG_DIR", pathlib.Path(tmp_path))
+    br = QuantBridge()
+    br.on_bar_close("SYM", _ohlc(time="t1"))
+    assert br.on_bar_close("SYM", _ohlc(time="t1")) == {}  # duplicate -> no-op
+    br.on_bar_close("SYM", _ohlc(time="t2"))
+    files = list(pathlib.Path(tmp_path).glob("replay_SYM_*.jsonl"))
+    assert len(files) == 1
+    assert len(files[0].read_text().splitlines()) == 2  # only t1 + t2 recorded
+
+
+def test_replay_recorder_no_write_when_env_unset(monkeypatch, tmp_path):
+    monkeypatch.delenv("QUANT_RECORD_REPLAY", raising=False)
+    monkeypatch.setattr(quant_bridge_module, "_REPLAY_LOG_DIR", pathlib.Path(tmp_path))
+    br = QuantBridge()
+    br.on_bar_close("SYM", _ohlc())
+    assert list(pathlib.Path(tmp_path).iterdir()) == []
+
+
+def test_replay_recorder_uses_iso_date_in_filename(monkeypatch, tmp_path):
+    monkeypatch.setenv("QUANT_RECORD_REPLAY", "1")
+    monkeypatch.setattr(quant_bridge_module, "_REPLAY_LOG_DIR", pathlib.Path(tmp_path))
+    br = QuantBridge()
+    br.on_bar_close("SYM", _ohlc(time="2024-05-01T14:30:00+05:30"))
+    assert list(pathlib.Path(tmp_path).glob("replay_SYM_2024-05-01.jsonl"))

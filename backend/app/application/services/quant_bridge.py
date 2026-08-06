@@ -8,11 +8,26 @@ AMT path is untouched; this is the *decision engine of record* in parallel.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import threading
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# WS-REPLAY live-capture directory (guarded by QUANT_RECORD_REPLAY=1).
+_REPLAY_LOG_DIR = Path(__file__).resolve().parents[3] / "live_trading_logs"
+_replay_lock = threading.Lock()
+
+
+def _replay_date(time_str: str) -> str:
+    """Extract the YYYY-MM-DD date from an ISO-ish bar time, ``na`` otherwise."""
+    head = str(time_str or "")[:10]
+    if len(head) == 10 and head[4] == "-" and head[7] == "-":
+        return head
+    return "na"
 
 
 def ohlc_to_quant_bar(ohlc: Any) -> "Bar":
@@ -143,8 +158,37 @@ class QuantBridge:
         Dedup: a bar is only fed once per (symbol, bar-time). Returns {} on a
         duplicate bar time so callers can skip rebroadcast cheaply.
         """
-        _, _, dto = self._feed_bar(symbol, ohlc)
+        state, bar, dto = self._feed_bar(symbol, ohlc)
+        if state is not None and os.environ.get("QUANT_RECORD_REPLAY") == "1":
+            self._record_replay(symbol, ohlc, bar, dto)
         return dto
+
+    def _record_replay(self, symbol: str, ohlc: Any, bar: Any, dto: dict) -> None:
+        """Append one (bar, AuctionState) record to the replay capture file.
+
+        Guarded by the caller (env ``QUANT_RECORD_REPLAY=1``); the main path is
+        byte-identical when the env is unset. Writes one JSONL line to
+        ``backend/live_trading_logs/replay_<symbol>_<date>.jsonl``.
+        """
+        with _replay_lock:
+            _REPLAY_LOG_DIR.mkdir(parents=True, exist_ok=True)
+            path = _REPLAY_LOG_DIR / f"replay_{symbol}_{_replay_date(ohlc.time)}.jsonl"
+            record = {
+                "symbol": symbol,
+                "time": bar.time,
+                "open": bar.open,
+                "high": bar.high,
+                "low": bar.low,
+                "close": bar.close,
+                "volume": bar.volume,
+                "buy_volume": bar.buy_volume,
+                "delta": bar.delta,
+                "oi": float(getattr(ohlc, "oi", 0.0)),
+                "auction": dto,
+            }
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, sort_keys=True))
+                fh.write("\n")
 
     def _feed_bar(self, symbol: str, ohlc: Any) -> tuple[Any | None, Any | None, dict]:
         """Feed one closed bar; returns ``(AuctionState, quant Bar, DTO)``.
