@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import threading
 import time
 from typing import Optional
 
@@ -30,6 +31,9 @@ class AMTService:
         self._amt_handlers: dict[str, AMTHandler] = {}
         self._underlying_state_cache: dict[str, tuple[float, str]] = {}
         self._underlying_state_ttl = 60.0  # seconds
+        # Guards the _underlying_state_cache read-modify-write in
+        # _sync_underlying_state (C6) — concurrent per-symbol ticks may sync.
+        self._state_lock = threading.Lock()
 
     def _select_amt_data_source(self, cache, min_candles: int = 5) -> tuple[list, str]:
         """Select appropriate data source for AMT analysis."""
@@ -115,25 +119,26 @@ class AMTService:
 
     def _sync_underlying_state(self, symbol: str, amt_result, amt_dto) -> AMTResult:
         """Sync market state across options on the same underlying."""
-        _underlying = symbol.split(" ")[0].split("-")[0].upper()
-        _current_ms = amt_result.market_state
-        _now = time.time()
-        _cached = self._underlying_state_cache.get(_underlying)
-        
-        if _cached:
-            _cached_ts, _cached_ms = _cached
-            if (_now - _cached_ts) < self._underlying_state_ttl:
-                if _cached_ms != _current_ms:
-                    log.info(
-                        "Underlying state sync: %s overriding %s → %s (from sibling option)",
-                        _underlying, _current_ms, _cached_ms,
-                    )
-                    _current_ms = _cached_ms
-                    amt_result = dataclasses.replace(amt_result, market_state=_cached_ms)
-                    amt_dto["marketState"] = _cached_ms
-        
-        self._underlying_state_cache[_underlying] = (_now, _current_ms)
-        return amt_result
+        with self._state_lock:
+            _underlying = symbol.split(" ")[0].split("-")[0].upper()
+            _current_ms = amt_result.market_state
+            _now = time.time()
+            _cached = self._underlying_state_cache.get(_underlying)
+            
+            if _cached:
+                _cached_ts, _cached_ms = _cached
+                if (_now - _cached_ts) < self._underlying_state_ttl:
+                    if _cached_ms != _current_ms:
+                        log.info(
+                            "Underlying state sync: %s overriding %s → %s (from sibling option)",
+                            _underlying, _current_ms, _cached_ms,
+                        )
+                        _current_ms = _cached_ms
+                        amt_result = dataclasses.replace(amt_result, market_state=_cached_ms)
+                        amt_dto["marketState"] = _cached_ms
+            
+            self._underlying_state_cache[_underlying] = (_now, _current_ms)
+            return amt_result
 
     def get_handler(self, symbol: str) -> AMTHandler:
         """Get or create AMT handler for symbol."""

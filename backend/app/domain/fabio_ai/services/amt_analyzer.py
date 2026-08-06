@@ -240,6 +240,10 @@ class AMTAnalyzer:
 
     Enhanced with Valentini AMT features: CVD tracking, profile shape
     classification, POC migration, session context, and 2.5σ aggression.
+
+    NOTE: This analyzer is NOT internally thread-safe (it mutates session data,
+    VWAP accumulators, and the IB/aggression trackers across calls). Callers must
+    serialize access per symbol — AMTHandler does this via its ``_analyze_lock``.
     """
 
     def __init__(

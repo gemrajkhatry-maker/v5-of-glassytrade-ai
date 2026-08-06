@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
@@ -68,6 +69,11 @@ class AMTHandler:
     _DEV_LOOKBACK: int = 20  # Developing VA — adapts in ~100min at 5m interval
 
     def __init__(self, session_only_vp: bool = True) -> None:
+        # Serializes analyze() for this symbol: the engine worker thread, the
+        # legacy WS path, and gap-fill may call it concurrently. The analyzer
+        # below is NOT internally thread-safe, so all mutable per-symbol state
+        # must be mutated under this lock (RLock allows nested re-entry).
+        self._analyze_lock = threading.RLock()
         self._amt_analyzer = AMTAnalyzer()
         self._footprint_analyzer = FootprintAnalyzer()
         self._inc_profile = IncrementalVolumeProfile()
@@ -126,83 +132,84 @@ class AMTHandler:
         Returns:
             (amt_result, amt_dto, footprint_dto)
         """
-        # Convert to float-based OHLC to prevent Decimal/float mismatch errors in analysis
-        data = self._to_float_ohlc(data)
-        # Detect day boundary — force full VP rebuild when trading date changes
-        current_date = datetime.now(IST).strftime("%Y-%m-%d")
-        if current_date != self._trading_date:
-            logger.info("Trading day changed %s → %s, resetting VP", self._trading_date, current_date)
-            self._inc_profile = IncrementalVolumeProfile()
-            self._dev_profile = IncrementalVolumeProfile()
-            self._prev_data_len = 0
-            self._trading_date = current_date
+        with self._analyze_lock:
+            # Convert to float-based OHLC to prevent Decimal/float mismatch errors in analysis
+            data = self._to_float_ohlc(data)
+            # Detect day boundary — force full VP rebuild when trading date changes
+            current_date = datetime.now(IST).strftime("%Y-%m-%d")
+            if current_date != self._trading_date:
+                logger.info("Trading day changed %s → %s, resetting VP", self._trading_date, current_date)
+                self._inc_profile = IncrementalVolumeProfile()
+                self._dev_profile = IncrementalVolumeProfile()
+                self._prev_data_len = 0
+                self._trading_date = current_date
 
-        # For intraday options, use only today's session candles for VP
-        vp_data = _filter_today_session(data) if self._session_only_vp else data
+            # For intraday options, use only today's session candles for VP
+            vp_data = _filter_today_session(data) if self._session_only_vp else data
 
-        # Incrementally update the volume profile with the latest candle.
-        lookback = min(len(vp_data), self._LOOKBACK)
-        recent_data = vp_data[-lookback:]
+            # Incrementally update the volume profile with the latest candle.
+            lookback = min(len(vp_data), self._LOOKBACK)
+            recent_data = vp_data[-lookback:]
 
-        vp_len = len(vp_data)
-        data_len = len(data)
-        data_grew_by = data_len - self._prev_data_len
+            vp_len = len(vp_data)
+            data_len = len(data)
+            data_grew_by = data_len - self._prev_data_len
 
-        # Developing VA: short lookback for fast adaptation
-        dev_lookback = min(len(vp_data), self._DEV_LOOKBACK)
-        dev_recent = vp_data[-dev_lookback:]
+            # Developing VA: short lookback for fast adaptation
+            dev_lookback = min(len(vp_data), self._DEV_LOOKBACK)
+            dev_recent = vp_data[-dev_lookback:]
 
-        if data_grew_by > 1 or data_grew_by < 0 or (self._prev_data_len == 0 and data_len > 0):
-            # Bulk load, data reset, or first call — full rebuild
-            self._inc_profile = IncrementalVolumeProfile()
-            for candle in recent_data:
-                self._inc_profile.update(candle)
-            self._dev_profile = IncrementalVolumeProfile()
-            for candle in dev_recent:
-                self._dev_profile.update(candle)
-            if data_grew_by > 1:
-                logger.info("VP full rebuild: %d candles (session_filtered=%d)", len(recent_data), vp_len)
-        elif data_grew_by == 1 and recent_data:
-            # New candle arrived
-            new_candle = recent_data[-1]
-            oldest = None
-            if vp_len > self._LOOKBACK:
-                oldest = vp_data[-(lookback + 1)]
-            self._inc_profile.update(new_candle, oldest)
-            # Developing VP: shorter window
-            dev_oldest = None
-            if vp_len > self._DEV_LOOKBACK:
-                dev_oldest = vp_data[-(dev_lookback + 1)]
-            self._dev_profile.update(new_candle, dev_oldest)
-        # data_grew_by == 0: sub-candle update — skip VP rebuild (noise)
+            if data_grew_by > 1 or data_grew_by < 0 or (self._prev_data_len == 0 and data_len > 0):
+                # Bulk load, data reset, or first call — full rebuild
+                self._inc_profile = IncrementalVolumeProfile()
+                for candle in recent_data:
+                    self._inc_profile.update(candle)
+                self._dev_profile = IncrementalVolumeProfile()
+                for candle in dev_recent:
+                    self._dev_profile.update(candle)
+                if data_grew_by > 1:
+                    logger.info("VP full rebuild: %d candles (session_filtered=%d)", len(recent_data), vp_len)
+            elif data_grew_by == 1 and recent_data:
+                # New candle arrived
+                new_candle = recent_data[-1]
+                oldest = None
+                if vp_len > self._LOOKBACK:
+                    oldest = vp_data[-(lookback + 1)]
+                self._inc_profile.update(new_candle, oldest)
+                # Developing VP: shorter window
+                dev_oldest = None
+                if vp_len > self._DEV_LOOKBACK:
+                    dev_oldest = vp_data[-(dev_lookback + 1)]
+                self._dev_profile.update(new_candle, dev_oldest)
+            # data_grew_by == 0: sub-candle update — skip VP rebuild (noise)
 
-        is_new_candle = data_grew_by != 0
-        self._prev_data_len = data_len
+            is_new_candle = data_grew_by != 0
+            self._prev_data_len = data_len
 
-        amt_result = self._amt_analyzer.analyze(
-            data, order_book, incremental_profile=self._inc_profile,
-            prior_poc=prior_poc, prior_vah=prior_vah, prior_val=prior_val,
-            developing_profile=self._dev_profile,
-            cushion_tier=cushion_tier, session_pnl=session_pnl,
-            option_tick=option_tick,
-            cvd_source=cvd_source,
-            prior_avg_volume=prior_avg_volume,
-        )
+            amt_result = self._amt_analyzer.analyze(
+                data, order_book, incremental_profile=self._inc_profile,
+                prior_poc=prior_poc, prior_vah=prior_vah, prior_val=prior_val,
+                developing_profile=self._dev_profile,
+                cushion_tier=cushion_tier, session_pnl=session_pnl,
+                option_tick=option_tick,
+                cvd_source=cvd_source,
+                prior_avg_volume=prior_avg_volume,
+            )
 
-        amt_dto = amt_result_to_dto(amt_result)
+            amt_dto = amt_result_to_dto(amt_result)
 
-        # On sub-candle updates, reuse cached profile arrays to prevent
-        # unnecessary delta diffs and frontend redraws (profiles don't change
-        # until a new candle arrives).
-        if is_new_candle:
-            self._cached_profile = amt_dto.get("profile")
-            self._cached_leg_profile = amt_dto.get("legProfile")
-        elif self._cached_profile is not None:
-            amt_dto["profile"] = self._cached_profile
-            amt_dto["legProfile"] = self._cached_leg_profile
+            # On sub-candle updates, reuse cached profile arrays to prevent
+            # unnecessary delta diffs and frontend redraws (profiles don't change
+            # until a new candle arrives).
+            if is_new_candle:
+                self._cached_profile = amt_dto.get("profile")
+                self._cached_leg_profile = amt_dto.get("legProfile")
+            elif self._cached_profile is not None:
+                amt_dto["profile"] = self._cached_profile
+                amt_dto["legProfile"] = self._cached_leg_profile
 
-        fp_data = data[-50:] if len(data) >= 50 else data
-        fp_result = self._footprint_analyzer.generate(fp_data)
-        fp_dto = {k: footprint_to_dto(v) for k, v in fp_result.items()}
+            fp_data = data[-50:] if len(data) >= 50 else data
+            fp_result = self._footprint_analyzer.generate(fp_data)
+            fp_dto = {k: footprint_to_dto(v) for k, v in fp_result.items()}
 
-        return amt_result, amt_dto, fp_dto
+            return amt_result, amt_dto, fp_dto
