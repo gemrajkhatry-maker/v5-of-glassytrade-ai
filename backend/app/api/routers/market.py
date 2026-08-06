@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, Query
 
 from app.api.dependencies import get_market_data
-from app.domain.ports.market_data import IMarketData
+from quant.contracts.ports.market_data import IMarketData
 from app.infrastructure.serialization.schemas import ohlc_to_dto
 
 router = APIRouter(prefix="/market", tags=["market"])

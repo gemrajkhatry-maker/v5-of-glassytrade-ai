@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.api.dependencies import get_active_symbols, get_gen_ai_service, get_storage, get_trade_journal
 from app.application.services.ai_command_service import AiCommandService
-from app.domain.fabio_ai.services.generative_ai_service import GenerativeAIService
+from quant.inference.generative_ai import GenerativeAIService
 from app.infrastructure.storage.database import SQLiteStorageAdapter
 
 logger = logging.getLogger(__name__)
