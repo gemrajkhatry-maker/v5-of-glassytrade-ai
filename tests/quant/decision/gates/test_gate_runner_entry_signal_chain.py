@@ -6,10 +6,10 @@ Uses the same loose gate thresholds as SessionEventRouter.execute_entry_path.
 
 from __future__ import annotations
 
-from app.domain.fabio_ai.services.entry_gates.gate_runner import run_gate_pipeline
-from app.domain.fabio_ai.services.entry_gates.signal_builder import build_entry_signal
-from app.domain.trading.models.enums import SetupType
-from app.domain.trading.models.value_objects import AMTResult, OHLC
+from quant.decision.gates.gate_runner import run_gate_pipeline
+from quant.decision.gates.signal_builder import build_entry_signal
+from quant.contracts.enums import SetupType
+from quant.contracts.value_objects import AMTResult, OHLC
 
 
 def _session_candles() -> list[OHLC]:

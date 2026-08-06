@@ -7,7 +7,7 @@ gate_runner.calculate_position_size via an optional ``session_realized_pnl``.
 
 import pytest
 
-from app.domain.fabio_ai.services.entry_gates.gate_runner import calculate_position_size
+from quant.decision.gates.gate_runner import calculate_position_size
 
 
 def _size(session_realized_pnl=None, price_velocity: float = 0.0):
