@@ -66,6 +66,9 @@ backend/.vite/
 **/*.jsonl
 **/*.csv
 !backend/tests/**/*.csv
+# WS-replay golden fixtures are small and versioned so a fresh clone can
+# re-run the drift gate without regenerating them
+!tests/fixtures/replay/*.jsonl
 # AMT training datasets are small and versioned so a fresh clone can retrain
 !amt_dataset/**/*.jsonl
 
