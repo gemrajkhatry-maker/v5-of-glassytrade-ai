@@ -105,7 +105,7 @@ export function getHotkeyHints(hotkeys: HotkeyConfig[]): Record<string, string> 
  * Default trading terminal hotkeys
  */
 export function getDefaultTradingHotkeys(options: {
-    onChartModeChange?: (mode: 'STANDARD' | 'FOOTPRINT' | 'RANGE') => void;
+    onChartModeChange?: (mode: 'STANDARD') => void;
     onVpModeChange?: (mode: 'session' | 'leg' | 'combined' | 'off') => void;
     onToggleSidebar?: () => void;
     onToggleRightSidebar?: () => void;
@@ -117,21 +117,11 @@ export function getDefaultTradingHotkeys(options: {
     onClosePanels?: () => void;
 }): HotkeyConfig[] {
     return [
-        // Chart Modes (1-3)
+        // Chart Modes (1)
         {
             key: '1',
             description: 'Candles mode',
             handler: () => options.onChartModeChange?.('STANDARD'),
-        },
-        {
-            key: '2',
-            description: 'Footprint mode',
-            handler: () => options.onChartModeChange?.('FOOTPRINT'),
-        },
-        {
-            key: '3',
-            description: 'Range bars mode',
-            handler: () => options.onChartModeChange?.('RANGE'),
         },
         
         // Volume Profile Overlays (4-7)

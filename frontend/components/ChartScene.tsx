@@ -10,9 +10,8 @@ import {
   LineStyle,
   IPriceLine,
   SeriesMarker,
-  Logical
 } from 'lightweight-charts';
-import { OHLCData, ChartConfig, TradeSignal, TradePosition, AIAnalysis, AMTAnalysis, ChartMode, FootprintCandle, AggressivePrint, RangeBarData } from '../types';
+import { OHLCData, ChartConfig, TradeSignal, TradePosition, AIAnalysis, AMTAnalysis, ChartMode, AggressivePrint } from '../types';
 import { Brain, Cpu, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 import { sanitizeRationale } from '../utils/textSanitizer';
 import DecisionCard from './chart/DecisionCard';
@@ -65,11 +64,8 @@ interface ChartSceneProps {
   aiAnalysis?: AIAnalysis | null;
   amtAnalysis?: AMTAnalysis | null;
   mode?: ChartMode;
-  footprintData: Record<string, FootprintCandle> | null;
-  cumulativeDeltas: number[];
   tickBus?: EventTarget;
   symbol?: string;
-  rangeBarData?: RangeBarData | null;
 }
 
 // Helper to convert Hex to RGBA for intensity
@@ -113,11 +109,8 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   aiAnalysis,
   amtAnalysis,
   mode = 'STANDARD',
-  footprintData,
-  cumulativeDeltas,
   tickBus,
   symbol,
-  rangeBarData = null
 }) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -226,22 +219,17 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     volumeSeriesRef.current = volumeSeries;
     predictionSeriesRef.current = predSeries;
 
-    const isFootprint = mode === 'FOOTPRINT';
-    const isRange = mode === 'RANGE';
-
-    // Reserve space for Bottom Summary in Footprint/RANGE mode
-    // P0: Center price range (avoid extreme top/bottom edges)
     chartRef.current.priceScale('right').applyOptions({
       scaleMargins: {
         top: 0.15,
-        bottom: (isFootprint || isRange) ? 0.35 : 0.15,
+        bottom: 0.15,
       }
     });
 
     chartRef.current.applyOptions({
       timeScale: {
-        barSpacing: isFootprint ? 160 : (isRange ? 40 : 6),
-        minBarSpacing: isFootprint ? 100 : (isRange ? 20 : 2),
+        barSpacing: 6,
+        minBarSpacing: 2,
         // Allow free scrolling on both sides
         fixLeftEdge: false,
         fixRightEdge: false,
@@ -253,30 +241,8 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       }
     });
 
-    if (isFootprint) {
-      candleSeries.applyOptions({
-        visible: true,
-        upColor: 'rgba(0,0,0,0)',
-        downColor: 'rgba(0,0,0,0)',
-        wickUpColor: 'rgba(0,0,0,0)',
-        wickDownColor: 'rgba(0,0,0,0)',
-        borderVisible: false
-      });
-      predSeries.applyOptions({ visible: false });
-    } else if (isRange) {
-      candleSeries.applyOptions({
-        visible: true,
-        upColor: config.bullColor,
-        downColor: config.bearColor,
-        wickUpColor: config.bullColor,
-        wickDownColor: config.bearColor,
-        borderVisible: false
-      });
-      predSeries.applyOptions({ visible: false });
-    } else {
-      candleSeries.applyOptions({ visible: true });
-      predSeries.applyOptions({ visible: true });
-    }
+    candleSeries.applyOptions({ visible: true });
+    predSeries.applyOptions({ visible: true });
 
     const resizeObserver = new ResizeObserver(entries => {
       if (entries.length === 0 || !entries[0].contentRect) return;
@@ -294,36 +260,20 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     resizeObserver.observe(chartContainerRef.current);
 
     // Initial Data Load
-    if (isRange && rangeBarData && rangeBarData.bars.length > 0) {
-      // RANGE mode: synth_time is a plain monotonic integer — do NOT add IST offset
-      candleSeries.setData(rangeBarData.bars.map(b => ({
-        time: b.time as any,
-        open: b.open,
-        high: b.high,
-        low: b.low,
-        close: b.close,
-      })));
-      volumeSeries.setData(rangeBarData.bars.map(b => ({
-        time: b.time as any,
-        value: b.volume,
-        color: b.close >= b.open ? 'rgba(0, 200, 150, 0.6)' : 'rgba(255, 71, 87, 0.6)', // Institutional colors
-      })));
-    } else {
-      // Use extracted CandleSeriesManager for data transformation
-      const validation = validateCandleData(data as any);
-      if (!validation.isValid) {
-        console.error('Invalid candle data:', validation.errors);
-      }
+    // Use extracted CandleSeriesManager for data transformation
+    const validation = validateCandleData(data as any);
+    if (!validation.isValid) {
+      console.error('Invalid candle data:', validation.errors);
+    }
 
-      const candleData = transformToCandleData(data);
-      candleSeries.setData(candleData.map(d => ({ ...d, time: d.time as any })));
+    const candleData = transformToCandleData(data);
+    candleSeries.setData(candleData.map(d => ({ ...d, time: d.time as any })));
 
-      // Use extracted VolumeSeriesManager for volume data
-      const volumeData = transformToVolumeData(data);
-      const volumeValidation = validateVolumeData(volumeData);
-      if (!volumeValidation.length) {
-        volumeSeries.setData(volumeData.map(d => ({ ...d, time: d.time as any })));
-      }
+    // Use extracted VolumeSeriesManager for volume data
+    const volumeData = transformToVolumeData(data);
+    const volumeValidation = validateVolumeData(volumeData);
+    if (!volumeValidation.length) {
+      volumeSeries.setData(volumeData.map(d => ({ ...d, time: d.time as any })));
     }
 
     return () => {
@@ -338,10 +288,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     if (!tickBus || !symbol || !candleSeriesRef.current || !volumeSeriesRef.current) return;
 
     const handleTick = (e: Event) => {
-      // CRITICAL: Do not inject standard UNIX timestamps into the chart if it's currently
-      // rendering RANGE bars (which use small synthetic integer timestamps).
-      if (mode === 'RANGE') return;
-
       const customEvent = e as CustomEvent;
       if (customEvent.detail.symbol !== symbol) return;
 
@@ -375,8 +321,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     // Gap fill event handler - updates chart with historical candles
     const handleGapFill = (e: Event) => {
-      if (mode === 'RANGE') return;
-
       const customEvent = e as CustomEvent;
       if (customEvent.detail.symbol !== symbol) return;
 
@@ -417,38 +361,18 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     };
   }, [tickBus, symbol, mode]);
 
-  // Handle mode switches dynamically without remount
+  // Handle mode/config changes dynamically without remount
   useEffect(() => {
     if (!candleSeriesRef.current || !predictionSeriesRef.current) return;
-    
-    if (mode === 'FOOTPRINT') {
-      candleSeriesRef.current.applyOptions({
-        upColor: 'rgba(0,0,0,0)',
-        downColor: 'rgba(0,0,0,0)',
-        wickUpColor: 'rgba(0,0,0,0)',
-        wickDownColor: 'rgba(0,0,0,0)',
-        borderVisible: false
-      });
-      predictionSeriesRef.current.applyOptions({ visible: false });
-    } else if (mode === 'RANGE') {
-      candleSeriesRef.current.applyOptions({
-        upColor: config.bullColor,
-        downColor: config.bearColor,
-        wickUpColor: config.bullColor,
-        wickDownColor: config.bearColor,
-        borderVisible: false
-      });
-      predictionSeriesRef.current.applyOptions({ visible: false });
-    } else {
-      candleSeriesRef.current.applyOptions({
-        upColor: config.bullColor,
-        downColor: config.bearColor,
-        wickUpColor: config.bullColor,
-        wickDownColor: config.bearColor,
-        borderVisible: false
-      });
-      predictionSeriesRef.current.applyOptions({ visible: true });
-    }
+
+    candleSeriesRef.current.applyOptions({
+      upColor: config.bullColor,
+      downColor: config.bearColor,
+      wickUpColor: config.bullColor,
+      wickDownColor: config.bearColor,
+      borderVisible: false
+    });
+    predictionSeriesRef.current.applyOptions({ visible: true });
   }, [mode, config.bullColor, config.bearColor]);
 
   // 3. Canvas Overlay Drawing
@@ -465,36 +389,25 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       try {
-        if (mode === 'RANGE' && rangeBarData && rangeBarData.bars.length > 0) {
+        if (stableAmtAnalysis) {
+          // P1-1: VA shaded box (VAH-VAL fill) — draw FIRST as background layer
+          if (stableAmtAnalysis.valueAreaHigh > 0 && stableAmtAnalysis.valueAreaLow > 0) {
+            drawVAShadedBox(ctx, canvas, chart, series, stableAmtAnalysis);
+          }
+          // P1-6: Session Open + IB Close vertical markers — also background layer
+          if (stableData.length > 0) {
+            drawTimeMarkers(ctx, canvas, chart, series, stableData, stableAmtAnalysis);
+          }
+          // P2: IB Break Retest Zone Box — forward-looking box after IB break
+          if (stableAmtAnalysis.breakDirection && stableAmtAnalysis.breakLevel > 0 && stableData.length > 0) {
+            drawIBRetestZone(ctx, canvas, chart, series, stableData, stableAmtAnalysis);
+          }
           if (config.showVolumeProfile) {
-            drawRangeVolumeProfile(ctx, canvas, series, rangeBarData, config);
+            drawVolumeProfile(ctx, canvas, series, stableAmtAnalysis, config);
           }
-          drawRangeBars(ctx, canvas, chart, series, rangeBarData, config);
-        } else {
-          if (stableAmtAnalysis) {
-            // P1-1: VA shaded box (VAH-VAL fill) — draw FIRST as background layer
-            if (stableAmtAnalysis.valueAreaHigh > 0 && stableAmtAnalysis.valueAreaLow > 0) {
-              drawVAShadedBox(ctx, canvas, chart, series, stableAmtAnalysis);
-            }
-            // P1-6: Session Open + IB Close vertical markers — also background layer
-            if (stableData.length > 0) {
-              drawTimeMarkers(ctx, canvas, chart, series, stableData, stableAmtAnalysis);
-            }
-            // P2: IB Break Retest Zone Box — forward-looking box after IB break
-            if (stableAmtAnalysis.breakDirection && stableAmtAnalysis.breakLevel > 0 && stableData.length > 0) {
-              drawIBRetestZone(ctx, canvas, chart, series, stableData, stableAmtAnalysis);
-            }
-            if (config.showVolumeProfile) {
-              drawVolumeProfile(ctx, canvas, series, stableAmtAnalysis, config);
-            }
-            // Render Aggressive Bubbles (Fabio Valentini Style)
-            if (stableAmtAnalysis.aggressivePrints && stableAmtAnalysis.aggressivePrints.length > 0) {
-              drawAggressiveBubbles(ctx, canvas, chart, series, stableAmtAnalysis.aggressivePrints, config);
-            }
-          }
-
-          if (mode === 'FOOTPRINT' && footprintData && stableData.length > 0) {
-            drawFootprint(ctx, canvas, chart, series, stableData, footprintData, cumulativeDeltas, config, stableAmtAnalysis);
+          // Render Aggressive Bubbles (Fabio Valentini Style)
+          if (stableAmtAnalysis.aggressivePrints && stableAmtAnalysis.aggressivePrints.length > 0) {
+            drawAggressiveBubbles(ctx, canvas, chart, series, stableAmtAnalysis.aggressivePrints, config);
           }
         }
       } catch (e) {
@@ -513,7 +426,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRangeChange);
     };
 
-  }, [stableAmtAnalysis, stableData, footprintData, cumulativeDeltas, config, mode]);
+  }, [stableAmtAnalysis, stableData, config, mode]);
 
 
   // Helper: Draw Aggressive Bubbles
@@ -970,440 +883,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     }
   };
 
-  const drawRangeVolumeProfile = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, series: ISeriesApi<"Candlestick">, rangeData: RangeBarData, cfg: ChartConfig) => {
-    const mode = cfg.vpMode || 'combined';
-    const session = rangeData.sessionProfile || rangeData.volumeProfile;
-    const leg = rangeData.legProfile;
-    const hasLeg = leg && leg.levels && leg.levels.length > 0;
-    const rightEdge = canvas.width - 50;
-
-    if (session && session.levels) {
-      if (mode === 'session' || mode === 'combined') {
-        const sessionOffset = (hasLeg && mode === 'combined') ? canvas.width * 0.12 : 0;
-        drawProfileBars(ctx, canvas, series, session.levels, 0.15, sessionOffset, '#4488cc', '#cc4444', true,
-          undefined, undefined, session.vah, session.val, session.poc);
-        drawVerticalLabel(ctx, canvas, 'RANGE SESSION', rightEdge - sessionOffset - canvas.width * 0.08, '#6699cc');
-      }
-    }
-
-    if (leg && leg.levels) {
-      if (hasLeg && (mode === 'leg' || mode === 'combined')) {
-        drawProfileBars(ctx, canvas, series, leg.levels, 0.10, 0, '#FF9900', '#FF6600', false,
-          undefined, undefined, leg.vah > 0 ? leg.vah : undefined, leg.val > 0 ? leg.val : undefined, leg.poc > 0 ? leg.poc : undefined);
-        drawVerticalLabel(ctx, canvas, 'RANGE LEG', rightEdge - canvas.width * 0.05, '#FF9900');
-      }
-    }
-    
-    if (!hasLeg && mode === 'leg') {
-      ctx.fillStyle = '#FF990060';
-      ctx.font = '11px monospace';
-      ctx.fillText('No range displacement leg', rightEdge - 200, 20);
-    }
-  };
-
-  // Helper: Draw Footprint
-  const drawFootprint = (
-    ctx: CanvasRenderingContext2D,
-    canvas: HTMLCanvasElement,
-    chart: IChartApi,
-    series: ISeriesApi<"Candlestick">,
-    data: OHLCData[],
-    fpMap: Record<string, FootprintCandle>,
-    cvdData: number[],
-    cfg: ChartConfig,
-    amt: AMTAnalysis | null
-  ) => {
-    const visibleRange = chart.timeScale().getVisibleLogicalRange();
-    if (!visibleRange) return;
-
-    const timeScale = chart.timeScale();
-    const barSpacing = timeScale.options().barSpacing;
-
-    // Layout
-    const colWidth = barSpacing * 0.95;
-    const deltaSpineWidth = colWidth > 60 ? 20 : 6; // Wider spine for delta text when room allows
-    const spineWidth = 6; // Visual spine (candle body) stays narrow
-    const sideWidth = (colWidth - deltaSpineWidth) / 2;
-    const textPadding = 4;
-
-    // Bottom Section Bounds
-    const summaryHeight = canvas.height * 0.15;
-    const summaryY = canvas.height - summaryHeight;
-
-    // Draw Separator Line
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(0, summaryY);
-    ctx.lineTo(canvas.width, summaryY);
-    ctx.stroke();
-
-    // --- 0. Draw Global Levels (VAH/VAL/POC) ---
-    // We draw these on the canvas for the footprint chart to ensure they are visible
-    if (amt) {
-      const drawLevel = (price: number, color: string, label: string, isDashed: boolean = true) => {
-        const y = series.priceToCoordinate(price);
-        if (y === null || y > summaryY) return;
-
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.setLineDash(isDashed ? [4, 4] : []);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvas.width, y);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Label
-        ctx.fillStyle = color;
-        ctx.font = '9px sans-serif';
-        ctx.textAlign = 'right';
-        ctx.fillText(label, canvas.width - 5, y - 4);
-      };
-
-      drawLevel(amt.poc, '#facc15', 'POC', false);
-      drawLevel(amt.valueAreaHigh, '#3b82f6', 'VAH');
-      drawLevel(amt.valueAreaLow, '#3b82f6', 'VAL');
-    }
-
-
-    // Render Loop
-    for (let i = Math.floor(visibleRange.from); i < Math.ceil(visibleRange.to); i++) {
-      if (i < 0 || i >= data.length) continue;
-
-      const candle = data[i];
-      const fp = fpMap[candle.time];
-      if (!fp) continue;
-
-      const centerX = timeScale.logicalToCoordinate(i as Logical);
-      if (centerX === null || centerX < -100 || centerX > canvas.width + 100) continue;
-
-      // --- 1. SPINE (Candle Body) ---
-      const isBullish = candle.close >= candle.open;
-      const bodyColor = isBullish ? cfg.bullColor : cfg.bearColor;
-
-      const openY = series.priceToCoordinate(candle.open);
-      const closeY = series.priceToCoordinate(candle.close);
-      const highY = series.priceToCoordinate(candle.high);
-      const lowY = series.priceToCoordinate(candle.low);
-
-      if (openY !== null && closeY !== null && highY !== null && lowY !== null) {
-        // Wick
-        ctx.strokeStyle = bodyColor;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(centerX, highY);
-        ctx.lineTo(centerX, lowY);
-        ctx.stroke();
-
-        // Body
-        const bodyTop = Math.min(openY, closeY);
-        const bodyHeight = Math.max(2, Math.abs(closeY - openY));
-        ctx.fillStyle = bodyColor;
-        ctx.fillRect(centerX - spineWidth / 2, bodyTop, spineWidth, bodyHeight);
-      }
-
-      // --- 2. FOOTPRINT CELLS ---
-      const bidX = centerX - deltaSpineWidth / 2 - sideWidth;
-      const askX = centerX + deltaSpineWidth / 2;
-
-      // Calculate max volume for this specific candle (for profile bars)
-      let maxVolInCandle = 0;
-      let totalBid = 0;
-      let totalAsk = 0;
-
-      fp.levels.forEach(l => {
-        maxVolInCandle = Math.max(maxVolInCandle, l.bid, l.ask);
-        totalBid += l.bid;
-        totalAsk += l.ask;
-      });
-
-      // Dynamic Grid Height
-      let cellHeight = 14;
-      if (fp.levels.length > 0) {
-        const topY = series.priceToCoordinate(fp.levels[0].price + fp.stepPrice / 2);
-        const bottomY = series.priceToCoordinate(fp.levels[0].price - fp.stepPrice / 2);
-        if (topY !== null && bottomY !== null) {
-          cellHeight = Math.abs(bottomY - topY);
-        }
-      }
-      cellHeight = Math.max(2, cellHeight);
-      const showText = cellHeight > 10 && sideWidth > 30;
-      ctx.font = `${Math.min(11, cellHeight - 3)}px monospace`;
-      ctx.textBaseline = 'middle';
-
-      // Draw Levels
-      fp.levels.forEach((level) => {
-        const y = series.priceToCoordinate(level.price);
-        if (y === null || y > summaryY) return;
-
-        const lvlTop = series.priceToCoordinate(level.price + fp.stepPrice / 2) ?? (y - cellHeight / 2);
-        const lvlBot = series.priceToCoordinate(level.price - fp.stepPrice / 2) ?? (y + cellHeight / 2);
-        const h = Math.abs(lvlBot - lvlTop);
-        const drawY = Math.min(lvlTop, lvlBot);
-
-        // 1px gap for grid look
-        const drawH = Math.max(1, h - 1);
-
-        // --- INTENSITY LOGIC ---
-        // Calculate alpha based on ratio of volume to max volume in candle
-        // Base alpha 0.2, scales up to 0.9
-        const isBuyImbalance = level.imbalance && level.ask > level.bid;
-        const isSellImbalance = level.imbalance && level.bid > level.ask;
-
-        // Bid Bar (Left Side - Grows Right to Left)
-        const bidRatio = maxVolInCandle > 0 ? level.bid / maxVolInCandle : 0;
-        const bidBarW = bidRatio * sideWidth;
-        const bidAlpha = 0.2 + (bidRatio * 0.7);
-
-        // Use bright red for sell imbalance bars, normal bearColor otherwise
-        const bidBarColor = isSellImbalance ? '#ef4444' : cfg.bearColor;
-        ctx.fillStyle = hexToRgba(bidBarColor, bidAlpha);
-        ctx.fillRect(bidX + sideWidth - bidBarW, drawY, bidBarW, drawH);
-
-        // Ask Bar (Right Side - Grows Left to Right)
-        const askRatio = maxVolInCandle > 0 ? level.ask / maxVolInCandle : 0;
-        const askBarW = askRatio * sideWidth;
-        const askAlpha = 0.2 + (askRatio * 0.7);
-
-        // Use bright green for buy imbalance bars, normal bullColor otherwise
-        const askBarColor = isBuyImbalance ? '#22c55e' : cfg.bullColor;
-        ctx.fillStyle = hexToRgba(askBarColor, askAlpha);
-        ctx.fillRect(askX, drawY, askBarW, drawH);
-
-        // Stacked imbalance border (3+ consecutive imbalances)
-        if (level.stacked) {
-          const stackedBorderColor = level.ask > level.bid ? '#f59e0b' : '#ec4899'; // Gold for buy, magenta for sell
-          ctx.strokeStyle = stackedBorderColor;
-          ctx.lineWidth = 2;
-          ctx.strokeRect(bidX, drawY, sideWidth * 2 + deltaSpineWidth, drawH);
-        }
-
-        // POC Highlight (Within Candle)
-        const isPOC = Math.abs(level.price - fp.pocPrice) < 0.00001;
-        if (isPOC) {
-          ctx.strokeStyle = '#facc15';
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(bidX, drawY, (sideWidth * 2) + deltaSpineWidth, drawH);
-        }
-
-        if (showText) {
-          const midY = drawY + drawH / 2;
-
-          // Bid Text (Right Aligned in Left Column)
-          ctx.fillStyle = isSellImbalance ? '#22d3ee' : '#ffffff'; // Cyan for aggressive sell imb
-          ctx.textAlign = 'right';
-          ctx.fillText(formatK(level.bid), bidX + sideWidth - textPadding, midY);
-
-          // Ask Text (Left Aligned in Right Column)
-          ctx.fillStyle = isBuyImbalance ? '#bef264' : '#ffffff'; // Lime for aggressive buy imb
-          ctx.textAlign = 'left';
-          ctx.fillText(formatK(level.ask), askX + textPadding, midY);
-
-          // Per-level delta in the spine area (between bid and ask columns)
-          if (cellHeight > 12 && sideWidth > 25) {
-            ctx.fillStyle = level.delta >= 0 ? '#22c55e' : '#ef4444';
-            ctx.textAlign = 'center';
-            ctx.font = `${Math.min(9, cellHeight - 4)}px monospace`;
-            ctx.fillText(formatK(level.delta), centerX, midY);
-            ctx.font = `${Math.min(11, cellHeight - 3)}px monospace`; // Restore font
-          }
-        }
-      });
-
-      // --- 3. BOTTOM SUMMARY ---
-      // Totals
-      const textY = summaryY + 16;
-      ctx.font = 'bold 11px monospace';
-      ctx.textAlign = 'center';
-
-      // Total Bid (Red)
-      ctx.fillStyle = cfg.bearColor;
-      ctx.fillText(formatK(totalBid), bidX + sideWidth / 2, textY);
-
-      // Total Ask (Green)
-      ctx.fillStyle = cfg.bullColor;
-      ctx.fillText(formatK(totalAsk), askX + sideWidth / 2, textY);
-
-      // Delta Card
-      const cardY = textY + 14;
-      const cardH = 34;
-      const cardW = colWidth;
-
-      // Card Background
-      ctx.fillStyle = '#1e293b';
-      ctx.strokeStyle = '#334155';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') {
-        ctx.roundRect(centerX - cardW / 2, cardY, cardW, cardH, 4);
-      } else {
-        ctx.rect(centerX - cardW / 2, cardY, cardW, cardH);
-      }
-      ctx.fill();
-      ctx.stroke();
-
-      // Card Text
-      ctx.font = '10px sans-serif';
-      ctx.fillStyle = '#94a3b8';
-      ctx.fillText('Delta', centerX, cardY + 10);
-
-      ctx.font = 'bold 10px monospace';
-      ctx.fillStyle = fp.totalDelta > 0 ? cfg.bullColor : cfg.bearColor;
-      ctx.fillText((fp.totalDelta > 0 ? '+' : '') + formatK(fp.totalDelta), centerX, cardY + 24);
-    }
-
-    // --- 4. CVD LINE (drawn in summary area below separator) ---
-    if (cvdData.length > 0) {
-      const cvdTop = summaryY + 4;
-      const cvdBottom = canvas.height - 4;
-      const cvdHeight = cvdBottom - cvdTop;
-
-      // Collect visible CVD points
-      const cvdPoints: { x: number; val: number }[] = [];
-      for (let i = Math.floor(visibleRange.from); i < Math.ceil(visibleRange.to); i++) {
-        if (i < 0 || i >= data.length || i >= cvdData.length) continue;
-        const x = timeScale.logicalToCoordinate(i as Logical);
-        if (x === null) continue;
-        cvdPoints.push({ x, val: cvdData[i] });
-      }
-
-      if (cvdPoints.length > 1) {
-        // Normalize CVD values to available height
-        let minCvd = Infinity, maxCvd = -Infinity;
-        cvdPoints.forEach(p => { minCvd = Math.min(minCvd, p.val); maxCvd = Math.max(maxCvd, p.val); });
-        const cvdRange = maxCvd - minCvd || 1;
-
-        // Draw CVD line segments: green when rising, red when falling
-        ctx.lineWidth = 1.5;
-        for (let j = 1; j < cvdPoints.length; j++) {
-          const prev = cvdPoints[j - 1];
-          const curr = cvdPoints[j];
-          const prevY = cvdBottom - ((prev.val - minCvd) / cvdRange) * cvdHeight;
-          const currY = cvdBottom - ((curr.val - minCvd) / cvdRange) * cvdHeight;
-
-          ctx.strokeStyle = curr.val >= prev.val ? '#22c55e' : '#ef4444';
-          ctx.beginPath();
-          ctx.moveTo(prev.x, prevY);
-          ctx.lineTo(curr.x, currY);
-          ctx.stroke();
-        }
-
-        // Label
-        ctx.fillStyle = '#64748b';
-        ctx.font = '9px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText('CVD', 5, cvdTop + 10);
-      }
-    }
-  };
-
-  // Helper: Draw Range Bar Overlays (VP, VWAP, Triple-A markers)
-  // Range bars themselves render on the candlestick series via setData
-  const drawRangeBars = (
-    ctx: CanvasRenderingContext2D,
-    canvas: HTMLCanvasElement,
-    chart: IChartApi,
-    series: ISeriesApi<"Candlestick">,
-    rangeData: RangeBarData,
-    cfg: ChartConfig,
-  ) => {
-    if (!rangeData.bars.length) return;
-
-    const vp = rangeData.volumeProfile;
-    const tripleA = rangeData.tripleA;
-    const chartWidth = canvas.width;
-
-    // Use series coordinateToPrice for correct Y mapping
-    const priceToY = (price: number): number => {
-      const y = series.priceToCoordinate(price);
-      return y !== null ? y : 0;
-    };
-
-    // Draw VWAP line
-    if (rangeData.vwap > 0) {
-      const vwapY = priceToY(rangeData.vwap);
-      if (vwapY > 0) {
-        ctx.strokeStyle = 'rgba(255, 165, 0, 0.8)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
-        ctx.beginPath();
-        ctx.moveTo(0, vwapY);
-        ctx.lineTo(chartWidth, vwapY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(255, 165, 0, 0.9)';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText(`VWAP ${rangeData.vwap.toFixed(1)}`, chartWidth - 100, vwapY - 5);
-      }
-    }
-
-    // Draw POC/VAH/VAL lines
-    if (vp.poc > 0) {
-      const pocY = priceToY(vp.poc);
-      if (pocY > 0) {
-        ctx.strokeStyle = 'rgba(255, 255, 0, 0.8)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
-        ctx.moveTo(0, pocY);
-        ctx.lineTo(chartWidth, pocY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(255, 255, 0, 0.9)';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText(`POC ${vp.poc.toFixed(1)}`, 10, pocY - 5);
-      }
-    }
-    if (vp.vah > 0) {
-      const vahY = priceToY(vp.vah);
-      if (vahY > 0) {
-        ctx.strokeStyle = 'rgba(0, 200, 255, 0.6)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
-        ctx.moveTo(0, vahY);
-        ctx.lineTo(chartWidth, vahY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(0, 200, 255, 0.8)';
-        ctx.font = '10px sans-serif';
-        ctx.fillText(`VAH ${vp.vah.toFixed(1)}`, 10, vahY - 3);
-      }
-    }
-    if (vp.val > 0) {
-      const valY = priceToY(vp.val);
-      if (valY > 0) {
-        ctx.strokeStyle = 'rgba(0, 200, 255, 0.6)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 3]);
-        ctx.beginPath();
-        ctx.moveTo(0, valY);
-        ctx.lineTo(chartWidth, valY);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = 'rgba(0, 200, 255, 0.8)';
-        ctx.font = '10px sans-serif';
-        ctx.fillText(`VAL ${vp.val.toFixed(1)}`, 10, valY + 12);
-      }
-    }
-
-    // Title
-    ctx.fillStyle = 'rgba(139, 92, 246, 0.9)';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.fillText(`RANGE BARS (${rangeData.rangeSize} pts) — Cum. Delta: ${rangeData.cumulativeDelta.toFixed(0)}`, 10, 20);
-
-    if (tripleA.detected) {
-      ctx.fillStyle = 'rgba(168, 85, 247, 0.9)';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.fillText(`TRIPLE-A: ${tripleA.phase} ${tripleA.direction}`, 10, 36);
-    } else if (tripleA.phase) {
-      ctx.fillStyle = 'rgba(255, 215, 0, 0.7)';
-      ctx.font = '11px sans-serif';
-      ctx.fillText(`Triple-A: ${tripleA.phase}...`, 10, 36);
-    }
-  };
-
   const formatK = (val: number) => {
     if (isNaN(val)) return '0';
     if (val >= 1000000) return (val / 1000000).toFixed(2) + 'M';
@@ -1413,7 +892,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
   // 4a. Update Candlestick Series (STANDARD mode)
   useEffect(() => {
-    if (mode === 'RANGE') return; // Do not overwrite chart with standard candles if in Range mode
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !predictionSeriesRef.current) return;
 
     // Offset UTC → IST (+5:30) so chart axis shows Indian Standard Time
@@ -1456,58 +934,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     }
   }, [data, predictions, config.bullColor, config.bearColor, mode]);
 
-  // 4b. Reload range bars when data arrives or updates.
-  // Only call setData() when the number of CLOSED bars changes (new bar finalized).
-  // For the forming bar, call update() to avoid wiping historical data on every tick.
-  const prevRangeBarCountRef = useRef<number>(0);
-  // Reset count when leaving RANGE mode so next entry always does a full setData().
-  useEffect(() => {
-    if (mode !== 'RANGE') { prevRangeBarCountRef.current = 0; }
-  }, [mode]);
-  useEffect(() => {
-    if (mode !== 'RANGE' || !rangeBarData || !rangeBarData.bars.length) return;
-    if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
-
-    const bars = rangeBarData.bars;
-    const barCount = bars.length;
-    const prevCount = prevRangeBarCountRef.current;
-
-    if (barCount !== prevCount) {
-      // Bar count changed: a new bar was closed (or mode just switched) — full reload.
-      prevRangeBarCountRef.current = barCount;
-      candleSeriesRef.current.setData(bars.map(b => ({
-        time: b.time as any,
-        open: b.open,
-        high: b.high,
-        low: b.low,
-        close: b.close,
-      })));
-      volumeSeriesRef.current.setData(bars.map(b => ({
-        time: b.time as any,
-        value: b.volume,
-        // P2: Colour volume bars by delta sign for range bars too
-        color: Math.abs(b.delta || 0) / Math.max(b.volume || 1, 1) > 0.02
-          ? (b.delta > 0 ? 'rgba(0, 200, 150, 0.6)' : 'rgba(255, 71, 87, 0.6)') // Institutional colors
-          : 'rgba(107, 122, 153, 0.3)', // glassy-text-tertiary
-      })));
-    } else if (barCount > 0) {
-      // Same bar count: only the forming bar changed — update() the last entry.
-      const last = bars[barCount - 1];
-      candleSeriesRef.current.update({
-        time: last.time as any,
-        open: last.open,
-        high: last.high,
-        low: last.low,
-        close: last.close,
-      });
-      volumeSeriesRef.current.update({
-        time: last.time as any,
-        value: last.volume,
-        color: last.close >= last.open ? 'rgba(34, 197, 94, 0.5)' : 'rgba(239, 68, 68, 0.5)',
-      });
-    }
-  }, [mode, rangeBarData]);
-
   // 5. Update Markers & Lines
   useEffect(() => {
     if (!candleSeriesRef.current || !chartRef.current) return;
@@ -1515,9 +941,9 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     amtLinesRef.current.forEach(l => candleSeriesRef.current?.removePriceLine(l));
     amtLinesRef.current = [];
 
-    // Only add lightweight-chart pricelines if NOT in footprint mode
+    // Add lightweight-chart pricelines
     const vpMode = config.vpMode || 'combined';
-    if (stableAmtAnalysis && config.showVolumeProfile && mode !== 'FOOTPRINT') {
+    if (stableAmtAnalysis && config.showVolumeProfile) {
       // Use extracted AMTLevelsOverlay component for price line generation
       const amtOptions: AMTLevelsOverlayOptions = {
         mode: mode as any,
@@ -1541,36 +967,32 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       });
     }
 
-    if (mode === 'STANDARD') {
-      // Use extracted ExecutionMarkersManager for all marker generation
-      const markerOptions: ExecutionMarkersOptions = {
-        mode: mode as any,
-        maxMarkers: 100,
-      };
+    // Use extracted ExecutionMarkersManager for all marker generation
+    const markerOptions: ExecutionMarkersOptions = {
+      mode: mode as any,
+      maxMarkers: 100,
+    };
 
-      const allMarkers = generateAllExecutionMarkers(
-        positions,
-        closedTrades || [],
-        stableData,
-        stableAmtAnalysis,
-        markerOptions
-      );
+    const allMarkers = generateAllExecutionMarkers(
+      positions,
+      closedTrades || [],
+      stableData,
+      stableAmtAnalysis,
+      markerOptions
+    );
 
-      // Convert to TradingView format and set markers
-      const tvMarkers = allMarkers.map(m => ({
-        time: m.time as any,
-        position: m.position,
-        color: m.color,
-        shape: m.shape === 'diamond' ? 'square' : m.shape, // TradingView doesn't support diamond
-        text: m.text,
-        size: m.size as any,
-      }));
+    // Convert to TradingView format and set markers
+    const tvMarkers = allMarkers.map(m => ({
+      time: m.time as any,
+      position: m.position,
+      color: m.color,
+      shape: m.shape === 'diamond' ? 'square' : m.shape, // TradingView doesn't support diamond
+      text: m.text,
+      size: m.size as any,
+    }));
 
-      tvMarkers.sort((a, b) => (a.time as number) - (b.time as number));
-      candleSeriesRef.current.setMarkers(tvMarkers);
-    } else {
-      candleSeriesRef.current.setMarkers([]);
-    }
+    tvMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+    candleSeriesRef.current.setMarkers(tvMarkers);
 
     const currentPosIds = new Set(positions.map(p => p.id));
     activePriceLinesRef.current.forEach((lines, id) => {
@@ -1625,7 +1047,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
       {/* Chart Mode Indicator */}
       <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur px-3 py-1 rounded-full border border-white/5 text-[10px] text-white/50 z-30 pointer-events-none uppercase tracking-wider">
-        {mode === 'FOOTPRINT' ? 'ORDERFLOW FOOTPRINT' : mode === 'RANGE' ? 'RANGE BARS' : 'STANDARD CANDLESTICKS'}
+        STANDARD CANDLESTICKS
       </div>
 
       {/* Current Decision Card */}
@@ -1658,10 +1080,7 @@ function chartSceneAreEqual(prev: ChartSceneProps, next: ChartSceneProps): boole
     if (prev.data.length !== next.data.length) return false;
     if (prev.positions.length !== next.positions.length) return false;
     if ((prev.closedTrades?.length ?? 0) !== (next.closedTrades?.length ?? 0)) return false;
-    if (prev.cumulativeDeltas.length !== next.cumulativeDeltas.length) return false;
     if (prev.amtAnalysis !== next.amtAnalysis) return false;
-    if (prev.footprintData !== next.footprintData) return false;
-    if (prev.rangeBarData !== next.rangeBarData) return false;
     return true;
 }
 

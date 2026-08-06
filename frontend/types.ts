@@ -152,61 +152,10 @@ export interface InstrumentState {
   runtimeSafety?: RuntimeSafetyState;
   ltp?: number;
   oi?: number;
-  rangeBars?: RangeBarData;
   lastUpdate: number;
 }
 
-export type ChartMode = 'STANDARD' | 'FOOTPRINT' | 'RANGE';
-
-// Range Bar types (price-movement-based bars)
-export interface RangeBar {
-  time: number;  // synthetic timestamp for chart rendering
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-  buyVolume: number;
-  sellVolume: number;
-  delta: number;
-  tickCount: number;
-}
-
-export interface RangeBarVPLevel {
-  price: number;
-  volume: number;
-  buyVolume: number;
-  sellVolume: number;
-}
-
-export interface RangeBarVP {
-  poc: number;
-  vah: number;
-  val: number;
-  levels: RangeBarVPLevel[];
-}
-
-export interface TripleAPattern {
-  detected: boolean;
-  phase: string;
-  direction: string;
-  absorptionBarIndex: number;
-  aggressionBarIndex: number;
-  pocAtDetection: number;
-  vahAtDetection: number;
-  valAtDetection: number;
-}
-
-export interface RangeBarData {
-  bars: RangeBar[];
-  volumeProfile: RangeBarVP;
-  sessionProfile?: RangeBarVP;
-  legProfile?: RangeBarVP;
-  vwap: number;
-  cumulativeDelta: number;
-  tripleA: TripleAPattern;
-  rangeSize: number;
-}
+export type ChartMode = 'STANDARD';
 
 export interface AppState {
   config: ChartConfig; // Global visual config
@@ -411,22 +360,4 @@ export interface VolumeProfileLevel {
   sellVolume: number;
 }
 
-/**
- * Footprint Data Structures
- */
-export interface FootprintLevel {
-  price: number;
-  bid: number; // Sell volume
-  ask: number; // Buy volume
-  delta: number;
-  imbalance: boolean; // True if significant imbalance
-  stacked: boolean; // Part of stacked imbalance (3+ consecutive)
-}
 
-export interface FootprintCandle {
-  time: string;
-  levels: FootprintLevel[];
-  pocPrice: number;
-  totalDelta: number;
-  stepPrice: number; // Size of each price level (bucket)
-}

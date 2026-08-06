@@ -26,7 +26,7 @@ interface ExecutionMarkersProps {
   positions: TradePosition[];
   closedTrades: TradePosition[];
   config: ChartConfig;
-  mode: 'STANDARD' | 'FOOTPRINT' | 'RANGE';
+  mode: 'STANDARD';
 }
 
 interface MarkerRefs {
@@ -48,7 +48,6 @@ export const updateExecutionMarkers = (
     positions,
     closedTrades,
     config,
-    mode,
   } = props;
 
   const { amtLinesRef, activePriceLinesRef } = refs;
@@ -59,18 +58,14 @@ export const updateExecutionMarkers = (
   amtLinesRef.current.forEach(l => candleSeries.removePriceLine(l));
   amtLinesRef.current = [];
 
-  // Only add lightweight-chart pricelines if NOT in footprint mode
+  // Add lightweight-chart pricelines
   const vpMode = config.vpMode || 'combined';
-  if (stableAmtAnalysis && config.showVolumeProfile && mode !== 'FOOTPRINT') {
+  if (stableAmtAnalysis && config.showVolumeProfile) {
     updateAMTLines(candleSeries, stableAmtAnalysis, stableData, vpMode, config, amtLinesRef);
   }
 
-  // Update trade markers (only in STANDARD mode)
-  if (mode === 'STANDARD') {
-    updateTradeMarkers(candleSeries, stableData, stableAmtAnalysis, positions, closedTrades);
-  } else {
-    candleSeries.setMarkers([]);
-  }
+  // Update trade markers
+  updateTradeMarkers(candleSeries, stableData, stableAmtAnalysis, positions, closedTrades);
 
   // Update position price lines
   updatePositionLines(candleSeries, positions, activePriceLinesRef);

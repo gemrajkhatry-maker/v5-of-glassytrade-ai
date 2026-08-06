@@ -23,7 +23,7 @@ export interface ChartMarker {
 }
 
 export interface ExecutionMarkersOptions {
-  mode: 'STANDARD' | 'FOOTPRINT' | 'RANGE';
+  mode: 'STANDARD';
   maxMarkers?: number; // Limit markers for performance
 }
 
@@ -253,11 +253,6 @@ export function generateAllExecutionMarkers(
   amt: AMTAnalysis | null,
   options: ExecutionMarkersOptions
 ): ChartMarker[] {
-  // Only generate markers in STANDARD mode
-  if (options.mode !== 'STANDARD') {
-    return [];
-  }
-
   const markers: ChartMarker[] = [];
 
   // Entry markers from open positions

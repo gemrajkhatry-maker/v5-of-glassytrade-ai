@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ChartScene from '../../components/ChartScene';
-import { OHLCData, ChartConfig, ChartMode } from '../../types';
+import { OHLCData, ChartConfig } from '../../types';
 
 // Mock lightweight-charts
 vi.mock('lightweight-charts', () => ({
@@ -79,8 +79,6 @@ describe('ChartScene', () => {
         predictions={[]}
         config={defaultConfig}
         positions={[]}
-        footprintData={{}}
-        cumulativeDeltas={[]}
       />
     );
     expect(container).toBeInTheDocument();
@@ -93,8 +91,6 @@ describe('ChartScene', () => {
         predictions={[]}
         config={defaultConfig}
         positions={[]}
-        footprintData={{}}
-        cumulativeDeltas={[]}
       />
     );
     // Chart renders with a container that has ref
@@ -109,8 +105,6 @@ describe('ChartScene', () => {
         predictions={[]}
         config={defaultConfig}
         positions={[]}
-        footprintData={{}}
-        cumulativeDeltas={[]}
       />
     );
     expect(container).toBeInTheDocument();
@@ -123,8 +117,6 @@ describe('ChartScene', () => {
         predictions={[]}
         config={defaultConfig}
         positions={[]}
-        footprintData={{}}
-        cumulativeDeltas={[]}
       />
     );
     expect(container).toBeInTheDocument();
@@ -137,27 +129,10 @@ describe('ChartScene', () => {
         predictions={[]}
         config={defaultConfig}
         positions={[]}
-        footprintData={{}}
-        cumulativeDeltas={[]}
         mode="STANDARD"
       />
     );
     expect(screen.getByText('STANDARD CANDLESTICKS')).toBeInTheDocument();
-  });
-
-  it('renders with footprint mode indicator', () => {
-    render(
-      <ChartScene
-        data={mockData}
-        predictions={[]}
-        config={defaultConfig}
-        positions={[]}
-        footprintData={{}}
-        cumulativeDeltas={[]}
-        mode="FOOTPRINT"
-      />
-    );
-    expect(screen.getByText('ORDERFLOW FOOTPRINT')).toBeInTheDocument();
   });
 
   it('renders with positions', () => {
@@ -186,8 +161,6 @@ describe('ChartScene', () => {
         predictions={[]}
         config={defaultConfig}
         positions={positions}
-        footprintData={{}}
-        cumulativeDeltas={[]}
       />
     );
     expect(screen.getByText('STANDARD CANDLESTICKS')).toBeInTheDocument();
@@ -200,8 +173,6 @@ describe('ChartScene', () => {
         predictions={[]}
         config={defaultConfig}
         positions={[]}
-        footprintData={{}}
-        cumulativeDeltas={[]}
         symbol="NIFTY 25500 CE"
       />
     );
@@ -215,8 +186,6 @@ describe('ChartScene', () => {
         predictions={[]}
         config={defaultConfig}
         positions={[]}
-        footprintData={{}}
-        cumulativeDeltas={[]}
       />
     );
     const canvas = document.querySelector('canvas');

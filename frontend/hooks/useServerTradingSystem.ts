@@ -1,10 +1,9 @@
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
     InstrumentState,
     ChartConfig,
     OHLCData,
-    FootprintCandle,
     OrderBook,
     ModelWeights,
     LLMHistoryEntry,
@@ -197,7 +196,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const heartbeatTimer = useRef<ReturnType<typeof setInterval> | null>(null);
     const lastPongRef = useRef<number>(Date.now());
-    const latestFootprint = useRef<Record<string, FootprintCandle> | null>(null);
     const activeSymbolRef = useRef<string>(activeSymbol);
     const parseErrorCount = useRef<number>(0);
     const pendingSubscribeRef = useRef<string | null>(null);
@@ -549,9 +547,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         detail: { symbol, tick: state.tick }
                     }));
                 }
-                if (state.footprint) {
-                    latestFootprint.current = state.footprint;
-                }
 
                 // Tick-only delta (no analytics) — skip React state update.
                 // Chart already updated natively via tickBus; state syncs on next analytics delta (~500ms).
@@ -607,7 +602,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.depth20Active !== undefined) merged.depth20Active = state.depth20Active;
                     if (state.ltp !== undefined) merged.ltp = state.ltp;
                     if (state.oi !== undefined) merged.oi = state.oi;
-                    if (state.rangeBars !== undefined) merged.rangeBars = state.rangeBars;
                     if (state.feed !== undefined || state.execution !== undefined || state.state_digest !== undefined) {
                         merged.runtimeSafety = runtimeSafetyFromState(state, existing.runtimeSafety);
                         merged.stale = merged.runtimeSafety.feedStale;
@@ -651,9 +645,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 tickBusRef.current.dispatchEvent(new CustomEvent('tick', {
                     detail: { symbol, tick: state.tick }
                 }));
-            }
-            if (state.footprint) {
-                latestFootprint.current = state.footprint;
             }
 
             // Full state (_type === 'full' or no _type) — batch into next animation frame
@@ -716,7 +707,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         overseerReason: newOverseerReason,
                         orderBook: state.depth ?? inst.orderBook,
                         depth20Active: state.depth20Active ?? inst.depth20Active,
-                        rangeBars: state.rangeBars ?? inst.rangeBars,
                         runtimeSafety: newRuntimeSafety,
                         stale: newRuntimeSafety.feedStale,
                         lastUpdate: Date.now(),
@@ -873,28 +863,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // ----------------------------------------------------------------
     const activeInstrument = instruments[activeSymbol];
 
-    const footprintData = useMemo<Record<string, FootprintCandle> | null>(() => {
-        return latestFootprint.current;
-    }, [activeInstrument?.data?.length]);
-
-    const cumulativeDeltas = useMemo(() => {
-        if (!activeInstrument) return [];
-        let runningDelta = 0;
-        return activeInstrument.data.map(d => {
-            runningDelta += d.delta;
-            return runningDelta;
-        });
-    }, [activeInstrument?.data?.length, activeInstrument?.data?.[activeInstrument?.data?.length - 1]?.delta]);
-
     return {
         instruments,
         activeSymbol,
         setActiveSymbol,
         activeInstrument,
-        activeFootprint: {
-            data: footprintData,
-            cumulativeDeltas,
-        },
         connected,
         connectionStatus,
         tickBus: tickBusRef.current,

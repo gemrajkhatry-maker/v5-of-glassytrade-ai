@@ -235,11 +235,6 @@ describe('ExecutionMarkersManager', () => {
   });
 
   describe('generateAllExecutionMarkers', () => {
-    it('returns empty array in FOOTPRINT mode', () => {
-      const markers = generateAllExecutionMarkers([], [], [], null, { mode: 'FOOTPRINT' });
-      expect(markers).toHaveLength(0);
-    });
-
     it('generates markers in STANDARD mode', () => {
       const positions = [{ side: 'LONG', entryPrice: 50000, entryTime: '2024-01-01T09:30:00Z' } as any];
       const data = [{ time: '2024-01-01T09:15:00Z', close: 50000 }] as any[];

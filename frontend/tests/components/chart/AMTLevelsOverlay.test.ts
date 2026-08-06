@@ -242,11 +242,6 @@ describe('AMTLevelsOverlay', () => {
   });
 
   describe('generateAMTPriceLines - Mode Filtering', () => {
-    it('returns empty array in FOOTPRINT mode', () => {
-      const lines = generateAMTPriceLines(defaultAmt, { ...defaultOptions, mode: 'FOOTPRINT' });
-      expect(lines).toHaveLength(0);
-    });
-
     it('returns empty array when showVolumeProfile is false', () => {
       const lines = generateAMTPriceLines(defaultAmt, { ...defaultOptions, showVolumeProfile: false });
       expect(lines).toHaveLength(0);

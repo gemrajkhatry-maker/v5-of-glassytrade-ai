@@ -24,7 +24,7 @@ export interface PriceLineConfig {
 }
 
 export interface AMTLevelsOverlayOptions {
-  mode: 'STANDARD' | 'FOOTPRINT' | 'RANGE';
+  mode: 'STANDARD';
   showVolumeProfile: boolean;
   vpMode: 'session' | 'combined' | 'daily' | 'leg';
   bullColor?: string;
@@ -88,8 +88,8 @@ export function generateAMTPriceLines(
 ): PriceLineConfig[] {
   const lines: PriceLineConfig[] = [];
 
-  // Skip if footprint mode or VP disabled
-  if (options.mode === 'FOOTPRINT' || !options.showVolumeProfile) {
+  // Skip if VP disabled
+  if (!options.showVolumeProfile) {
     return lines;
   }
 

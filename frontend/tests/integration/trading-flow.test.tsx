@@ -141,8 +141,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
           predictions={[]}
           config={defaultConfig}
           positions={[]}
-          footprintData={{}}
-          cumulativeDeltas={[]}
           symbol={activeSymbol}
         />
       </>
@@ -168,8 +166,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
           predictions={[]}
           config={defaultConfig}
           positions={[]}
-          footprintData={{}}
-          cumulativeDeltas={[]}
           symbol={activeSymbol}
         />
       </>
@@ -209,8 +205,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
           predictions={[]}
           config={defaultConfig}
           positions={[]}
-          footprintData={{}}
-          cumulativeDeltas={[]}
           symbol={activeSymbol}
         />
       </>
@@ -233,8 +227,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
           predictions={[]}
           config={defaultConfig}
           positions={[]}
-          footprintData={{}}
-          cumulativeDeltas={[]}
           symbol={newActiveSymbol}
         />
       </>
@@ -259,8 +251,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
           predictions={[]}
           config={defaultConfig}
           positions={[]}
-          footprintData={{}}
-          cumulativeDeltas={[]}
           symbol={activeSymbol}
         />
       </>
@@ -290,8 +280,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
           predictions={[]}
           config={defaultConfig}
           positions={[]}
-          footprintData={{}}
-          cumulativeDeltas={[]}
           symbol={activeSymbol}
         />
       </>
@@ -302,7 +290,7 @@ describe('MarketSidebar to ChartScene Integration', () => {
     expect(screen.getByText(/2 visible/i)).toBeInTheDocument();
   });
 
-  it('switches between STANDARD and FOOTPRINT modes', () => {
+  it('renders ChartScene in STANDARD mode', () => {
     const { rerender } = render(
       <>
         <MarketSidebar 
@@ -315,8 +303,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
           predictions={[]}
           config={defaultConfig}
           positions={[]}
-          footprintData={{}}
-          cumulativeDeltas={[]}
           symbol={activeSymbol}
           mode="STANDARD"
         />
@@ -326,7 +312,7 @@ describe('MarketSidebar to ChartScene Integration', () => {
     // Verify STANDARD mode
     expect(screen.getByText('STANDARD CANDLESTICKS')).toBeInTheDocument();
 
-    // Switch to FOOTPRINT mode
+    // Rerender with STANDARD mode again — remains candles-only
     rerender(
       <>
         <MarketSidebar 
@@ -339,15 +325,13 @@ describe('MarketSidebar to ChartScene Integration', () => {
           predictions={[]}
           config={defaultConfig}
           positions={[]}
-          footprintData={{}}
-          cumulativeDeltas={[]}
           symbol={activeSymbol}
-          mode="FOOTPRINT"
+          mode="STANDARD"
         />
       </>
     );
 
-    // Verify FOOTPRINT mode
-    expect(screen.getByText('ORDERFLOW FOOTPRINT')).toBeInTheDocument();
+    // Verify STANDARD mode persists
+    expect(screen.getByText('STANDARD CANDLESTICKS')).toBeInTheDocument();
   });
 });

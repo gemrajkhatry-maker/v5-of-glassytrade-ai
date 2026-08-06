@@ -6,8 +6,8 @@ import { AIAnalysisPanel } from './components/AIAnalysisPanel';
 import MarketSidebar from './components/MarketSidebar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { DEFAULT_CONFIG } from './constants';
-import { ChartConfig, ChartMode, AgentDecision } from './types';
-import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, Grid, BookOpen, Eye, TrendingUp } from 'lucide-react';
+import { ChartConfig, AgentDecision } from './types';
+import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, BookOpen, Eye } from 'lucide-react';
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
 import JournalPage from './components/JournalPage';
 import ModelStateBanner from './components/ModelStateBanner';
@@ -80,7 +80,6 @@ function App() {
         activeSymbol,
         setActiveSymbol,
         activeInstrument,
-        activeFootprint,
         connected,
         connectionStatus,
         tickBus,
@@ -218,9 +217,6 @@ function App() {
                             closedTrades={activeInstrument.portfolio.closedTrades}
                             amtAnalysis={activeInstrument.amtAnalysis}
                             mode={chartMode}
-                            footprintData={chartMode === 'FOOTPRINT' ? activeFootprint.data : null}
-                            cumulativeDeltas={chartMode === 'FOOTPRINT' ? activeFootprint.cumulativeDeltas : []}
-                            rangeBarData={chartMode === 'RANGE' ? (activeInstrument.rangeBars ?? null) : null}
                         />
                     </ErrorBoundary>
                 </div>
@@ -261,22 +257,6 @@ function App() {
                                 >
                                     <span className="flex items-center gap-1.5">
                                         <BarChart2 size={14} /> Candles
-                                    </span>
-                                </button>
-                                <button
-                                    onClick={() => setChartMode('FOOTPRINT')}
-                                    className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${chartMode === 'FOOTPRINT' ? 'bg-glassy-bg-active text-glassy-text-primary' : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'}`}
-                                >
-                                    <span className="flex items-center gap-1.5">
-                                        <Grid size={14} /> Footprint
-                                    </span>
-                                </button>
-                                <button
-                                    onClick={() => setChartMode('RANGE')}
-                                    className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${chartMode === 'RANGE' ? 'bg-glassy-bg-active text-glassy-text-primary' : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'}`}
-                                >
-                                    <span className="flex items-center gap-1.5">
-                                        <TrendingUp size={14} /> Range bars
                                     </span>
                                 </button>
                                 </div>

@@ -119,7 +119,6 @@ describe('InstrumentState defaults', () => {
     expect(result.current).toHaveProperty('activeSymbol');
     expect(result.current).toHaveProperty('setActiveSymbol');
     expect(result.current).toHaveProperty('activeInstrument');
-    expect(result.current).toHaveProperty('activeFootprint');
     expect(result.current).toHaveProperty('connected');
     expect(result.current).toHaveProperty('connectionStatus');
     expect(result.current).toHaveProperty('tickBus');
