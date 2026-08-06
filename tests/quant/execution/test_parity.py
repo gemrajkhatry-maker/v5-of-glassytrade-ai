@@ -126,3 +126,49 @@ def test_trail_adjust_sl_parity():
         lambda: _run_adjust_sl(legacy),
         lambda: _run_adjust_sl(QuantTrailEngine),
     )
+
+
+# ---------------------------------------------------------------------------
+# ScaleManager
+# ---------------------------------------------------------------------------
+
+
+def _scale_position() -> Position:
+    pos = Position(
+        id="test_scale",
+        symbol="NIFTY",
+        side=Side.LONG,
+        entry_price=Decimal("24800"),
+        stop_loss=Decimal("24700"),
+        take_profit=Decimal("24900"),
+    )
+    pos.scale_step = 1
+    pos.scale_confirm_price = Decimal("24850")
+    pos.scale_breakout_price = Decimal("24900")
+    return pos
+
+
+def _run_scale_sequence(engine_cls) -> dict:
+    engine = engine_cls()
+    pos = _scale_position()
+    step2 = engine.check_scale_in(pos, 24850.0)
+    status2 = engine.get_scale_status(pos)
+    step3 = engine.check_scale_in(pos, 24900.0)
+    status3 = engine.get_scale_status(pos)
+    return {
+        "step2": step2,
+        "step3": step3,
+        "scale_step": pos.scale_step,
+        "remaining2": status2["remaining_fraction"],
+        "remaining3": status3["remaining_fraction"],
+    }
+
+
+def test_scale_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.fabio_ai.services.scale_manager").ScaleManager
+    from quant.execution.scale import ScaleManager as QuantScale
+    assert_parity(
+        lambda: _run_scale_sequence(legacy),
+        lambda: _run_scale_sequence(QuantScale),
+    )

@@ -8,9 +8,9 @@ from __future__ import annotations
 import pytest
 from decimal import Decimal
 
-from app.domain.fabio_ai.services.scale_manager import ScaleManager
-from app.domain.trading.models.entities import Position
-from app.domain.trading.models.enums import Side
+from quant.execution.scale import ScaleManager
+from quant.contracts.entities import Position
+from quant.contracts.enums import Side
 
 
 class TestScaleInConditions:
