@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from app.domain.trading.models.value_objects import OHLC
 from app.domain.trading.models.enums import MarketStateCodec
-from app.domain.fabio_ai.services.amt_pipeline import AMTResult
+from app.domain.trading.models.value_objects import AMTResult
 
 logger = logging.getLogger(__name__)
 

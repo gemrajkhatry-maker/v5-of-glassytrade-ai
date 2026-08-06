@@ -42,13 +42,13 @@ __all__ = [
 ]
 
 # For backwards compatibility, also expose from fabio_ai services
-from app.domain.fabio_ai.services.narrative_builder import (
+from app.domain.fabio_ai.services.prompt_builder import (
     _build_narrative_session_context,
     _build_narrative_market_state,
     _build_narrative_order_flow,
     _build_core_amt_narrative,
 )
-from app.domain.fabio_ai.services.response_parser import (
+from app.domain.fabio_ai.services.prompt_builder import (
     parse_entry_response,
     parse_overseer_response,
     compute_tighten_sl,

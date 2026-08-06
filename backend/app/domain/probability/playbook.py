@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.domain.fabio_ai.services.amt_pipeline import AMTResult
+from app.domain.trading.models.value_objects import AMTResult
 from app.domain.probability.regime_classifier import RegimeState
 
 
