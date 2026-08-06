@@ -39,9 +39,14 @@ class VWAPBuilder:
             return VWAPState(value=0.0, upper_1=0.0, lower_1=0.0,
                              upper_2=0.0, lower_2=0.0, std=0.0,
                              deviation_sigmas=0.0)
+        if self._cum_vol <= 0:
+            value = self._last_close
+            return VWAPState(value=value, upper_1=value, lower_1=value,
+                             upper_2=value, lower_2=value, std=0.0,
+                             deviation_sigmas=0.0)
         value = self._prev_vwap
-        std = sqrt(max(0.0, self._cum_sq_vol / self._cum_vol)) if self._cum_vol > 0 else 0.0
-        deviation_sigmas = (self._last_close - value) / max(std, 1e-9)
+        std = sqrt(max(0.0, self._cum_sq_vol / self._cum_vol))
+        deviation_sigmas = (self._last_close - value) / std if std > 0 else 0.0
         return VWAPState(value=value,
                          upper_1=value + std,
                          lower_1=value - std,

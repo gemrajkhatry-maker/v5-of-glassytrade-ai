@@ -24,3 +24,19 @@ def test_bands_monotonic():
                       close=100+i, volume=100))
     v = vb.snapshot()
     assert v.lower_2 < v.lower_1 < v.value < v.upper_1 < v.upper_2
+
+def test_vwap_zero_volume_first_bar_safe():
+    vb = VWAPBuilder()
+    vb.update(Bar(time="t1", open=100, high=100, low=100, close=100, volume=0))
+    v = vb.snapshot()
+    assert v.deviation_sigmas == 0.0
+    assert v.value == 100.0
+    assert v.std == 0.0
+    assert v.upper_1 == v.lower_1 == v.value
+
+def test_vwap_zero_volume_after_volume_safe():
+    vb = VWAPBuilder()
+    vb.update(Bar(time="t1", open=100, high=100, low=100, close=100, volume=100))
+    vb.update(Bar(time="t2", open=110, high=110, low=110, close=110, volume=0))
+    v = vb.snapshot()
+    assert v.deviation_sigmas == 0.0

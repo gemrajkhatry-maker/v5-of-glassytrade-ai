@@ -37,3 +37,16 @@ def test_bullish_divergence_when_cvd_up_price_down():
         of.update(Bar(time=f"t{i}", open=100-i, high=101-i, low=99-i, close=100-i,
                       volume=100, buy_volume=60, sell_volume=40, delta=20))
     assert of.snapshot().cvd_divergence == "BULLISH"
+
+
+def test_no_spurious_print_when_no_breakdown():
+    of = OrderFlowBuilder()
+    of.update(Bar(time="t0", open=100, high=101, low=99, close=100, volume=100))
+    assert of.snapshot().aggressive_prints == ()
+
+
+def test_aggressive_print_still_fires_on_real_imbalance():
+    of = OrderFlowBuilder()
+    of.update(Bar(time="t0", open=100, high=101, low=99, close=100, volume=100,
+                  buy_volume=80, sell_volume=20))
+    assert of.snapshot().aggressive_prints == ((100, 80, "BUY"),)

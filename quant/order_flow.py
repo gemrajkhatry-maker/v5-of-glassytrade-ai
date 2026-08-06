@@ -65,9 +65,9 @@ class OrderFlowBuilder:
         if self._last is not None:
             bv = self._last.buy_volume
             sv = self._last.sell_volume
-            if bv >= 2 * sv:
+            if bv > 0 and bv >= 2 * sv:
                 prints = ((self._last.close, bv, "BUY"),)
-            elif sv >= 2 * bv:
+            elif sv > 0 and sv >= 2 * bv:
                 prints = ((self._last.close, sv, "SELL"),)
 
         return OrderFlowState(
