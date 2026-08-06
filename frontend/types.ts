@@ -102,21 +102,6 @@ export interface TradePosition {
   closeReason?: string;
   partialRealizedPnl?: number;
   originalSize?: number;
-  metadata?: {
-    factorBreakdown: FactorBreakdown;
-    generation: number;
-  };
-
-  // Lifecycle fields (from consolidated Position entity)
-  cushionState?: 'OPEN' | 'CUSHIONED' | 'TRAILING' | 'CLOSED';
-  atrTrailActive?: boolean;
-  peakProfit?: number;
-  mae?: number;
-  mfe?: number;
-  partialTaken?: boolean;
-  runnerActive?: boolean;
-  breakEvenSet?: boolean;
-  tickCount?: number;
 }
 
 export interface Portfolio {
@@ -135,18 +120,14 @@ export interface InstrumentState {
   data: OHLCData[];
   orderBook: OrderBook | null;
   portfolio: Portfolio;
-  modelWeights: ModelWeights;
-  generation: number;
   aiAnalysis: AIAnalysis | null;
   genAIAnalysis: GenAIAnalysis | null;
   amtAnalysis: AMTAnalysis | null;
   riskState: RiskState | null;
   agentDecision: AgentDecision | null;
   llmHistory: LLMHistoryEntry[];
-  predictions: OHLCData[];
   overseerAction: string;
   overseerReason: string;
-  stats: StrategyStats | null;
   depth20Active: boolean;
   stale?: boolean;
   runtimeSafety?: RuntimeSafetyState;
@@ -176,7 +157,6 @@ export interface ChartConfig {
   transmission: number;
   showGrid: boolean;
   autoRotate: boolean;
-  showPredictions: boolean;
   showVolumeProfile: boolean;
   vpMode: 'session' | 'leg' | 'combined' | 'off';
   trend: 'bullish' | 'bearish' | 'sideways' | 'volatile';
@@ -258,20 +238,8 @@ export interface AMTAnalysis {
     has_delta_flip: boolean;
   } | null;
   llmThinking?: string;
-  tickSize?: number;
-  // Decision card fields (from backend agent)
-  direction?: 'LONG' | 'SHORT' | 'FLAT';
-  pLong?: number;
-  pShort?: number;
-  agentRegime?: string;
-  agentTiming?: string;
-  agentKelly?: number;
-  agentRationale?: string;
   // Fabio playbook: Second drive detection (reclaim leg confirmation)
   isSecondDrive?: boolean;
-  // Session identity and freshness (Phase 1, Task 1.6)
-  sessionId?: string;
-  computedAt?: string;
   // Multi-timeframe levels (used by location bar)
   dailyVal?: number;
   dailyVah?: number;
@@ -282,72 +250,6 @@ export interface AMTAnalysis {
   absorptionRangeRatio?: number;
   absorptionVolRatio?: number;
   swingDelta?: number;
-  // Fix 1: Option type for direction labeling
-  optionType?: string;
-  // Underlying futures LTP used for context (MCX/NSE)
-  underlyingPrice?: number;
-  // Fix 4: AMT time window for timing transparency
-  amtTimeWindow?: {
-    window: string;
-    label: string;
-    rule: string;
-    allowEntries: boolean;
-  };
-  // Fix 6: AMT structure label
-  amtStructureLabel?: string;
-  // Fix 7: Kelly breakdown
-  kellyBreakdown?: {
-    fullKelly: number;
-    appliedKelly: number;
-    fraction: string;
-    capReason: string;
-  };
-  // Fix 5: CVD divergence playbook
-  cvdDivPlaybook?: string;
-}
-
-export interface TradeSignal {
-  type: 'BUY' | 'SELL';
-  price: number;
-  reason: string;
-  stopLoss: number;
-  takeProfit: number;
-  timestamp: string;
-  setup: 'TREND_MODEL' | 'MEAN_REVERSION' | 'PREDICTION_ENTRY';
-  source: 'AMT' | 'PREDICTION' | 'LLM';
-  metadata?: any;
-}
-
-export interface StrategyStats {
-  totalTrades: number;
-  wins: number;
-  losses: number;
-  winRate: number;
-  netProfit: number;
-  avgProfit: number;
-  largestWin: number;
-  largestLoss: number;
-}
-
-/**
- * MessageRole enum for type-safe chat history management
- */
-export enum MessageRole {
-  USER = 'user',
-  ASSISTANT = 'assistant',
-  SYSTEM = 'system'
-}
-
-export interface ChatMessage {
-  id: string;
-  role: MessageRole;
-  text: string;
-}
-
-export interface AICommandResponse {
-  message: string;
-  configUpdates?: Partial<ChartConfig>;
-  action?: 'UPDATE_CONFIG' | 'GENERATE_DATA' | 'RESET';
 }
 
 /**
