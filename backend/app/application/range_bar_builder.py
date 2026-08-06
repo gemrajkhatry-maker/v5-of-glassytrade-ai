@@ -226,16 +226,8 @@ class RangeBarBuilder:
         if len(self._bars) > self._max_bars:
             del self._bars[:-self._max_bars]
 
-        # Update volume profile
-        # Use tick-sized price buckets
+        # Update volume profile — distribute volume across the bar's range
         step = self._tick_size
-        mid_price = (bar.high + bar.low) / 2.0
-        bucket = round(mid_price / step) * step
-        self._vp_levels[bucket] = self._vp_levels.get(bucket, 0.0) + bar.volume
-        self._vp_buy[bucket] = self._vp_buy.get(bucket, 0.0) + bar.buy_volume
-        self._vp_sell[bucket] = self._vp_sell.get(bucket, 0.0) + bar.sell_volume
-
-        # Also distribute across the bar's range
         price = bar.low
         while price <= bar.high:
             bkt = round(price / step) * step
