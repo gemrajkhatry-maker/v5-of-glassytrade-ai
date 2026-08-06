@@ -6,7 +6,6 @@ interface DecisionCardProps {
   direction: string;
   probability: number;
   regime: string;
-  timing: string;
   rationale: string;
 }
 
@@ -19,7 +18,6 @@ const DecisionCard: React.FC<DecisionCardProps> = ({
   direction, 
   probability, 
   regime, 
-  timing, 
   rationale 
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);

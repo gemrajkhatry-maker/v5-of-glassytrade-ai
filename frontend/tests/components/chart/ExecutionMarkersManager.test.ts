@@ -6,9 +6,6 @@ import {
   generateCVDDivergenceMarkers,
   generateAcceptanceRejectionMarkers,
   generateAllExecutionMarkers,
-  countMarkersByType,
-  filterMarkersByTimeRange,
-  validateMarkers,
   ChartMarker,
 } from '../../../components/chart/ExecutionMarkersManager';
 
@@ -257,80 +254,6 @@ describe('ExecutionMarkersManager', () => {
       });
 
       expect(markers.length).toBeLessThanOrEqual(10);
-    });
-  });
-
-  describe('countMarkersByType', () => {
-    it('counts entries, exits, and events', () => {
-      const markers: ChartMarker[] = [
-        { time: 1, position: 'belowBar', color: '#10b981', shape: 'arrowUp', text: 'LONG @50000', size: 2 },
-        { time: 2, position: 'aboveBar', color: '#10b981', shape: 'circle', text: 'EXIT +200', size: 1 },
-        { time: 3, position: 'aboveBar', color: '#f97316', shape: 'circle', text: '⚡CVD DIV', size: 1 },
-      ];
-
-      const counts = countMarkersByType(markers);
-      expect(counts.entries).toBe(1);
-      expect(counts.exits).toBe(1);
-      expect(counts.events).toBe(1);
-    });
-
-    it('handles empty array', () => {
-      const counts = countMarkersByType([]);
-      expect(counts.entries).toBe(0);
-    });
-  });
-
-  describe('filterMarkersByTimeRange', () => {
-    const markers: ChartMarker[] = [
-      { time: 1000, position: 'belowBar', color: '', shape: 'arrowUp', text: 'M1', size: 2 },
-      { time: 2000, position: 'belowBar', color: '', shape: 'arrowUp', text: 'M2', size: 2 },
-      { time: 3000, position: 'belowBar', color: '', shape: 'arrowUp', text: 'M3', size: 2 },
-    ];
-
-    it('filters markers within time range', () => {
-      const filtered = filterMarkersByTimeRange(markers, 1500, 2500);
-      expect(filtered).toHaveLength(1);
-      expect(filtered[0].time).toBe(2000);
-    });
-
-    it('returns empty array when no markers in range', () => {
-      const filtered = filterMarkersByTimeRange(markers, 5000, 6000);
-      expect(filtered).toHaveLength(0);
-    });
-  });
-
-  describe('validateMarkers', () => {
-    it('returns empty array for valid markers', () => {
-      const markers: ChartMarker[] = [
-        { time: 1000, position: 'belowBar', color: '#10b981', shape: 'arrowUp', text: 'LONG', size: 2 },
-      ];
-
-      const errors = validateMarkers(markers);
-      expect(errors).toHaveLength(0);
-    });
-
-    it('detects invalid timestamp', () => {
-      const markers: any = [{ time: -1, position: 'belowBar', color: '', shape: 'arrowUp', text: 'Test', size: 2 }];
-      const errors = validateMarkers(markers);
-      expect(errors.length).toBeGreaterThan(0);
-    });
-
-    it('detects missing color', () => {
-      const markers: any = [{ time: 1000, position: 'belowBar', color: null, shape: 'arrowUp', text: 'Test', size: 2 }];
-      const errors = validateMarkers(markers);
-      expect(errors.length).toBeGreaterThan(0);
-    });
-
-    it('detects empty text', () => {
-      const markers: any = [{ time: 1000, position: 'belowBar', color: '#10b981', shape: 'arrowUp', text: '', size: 2 }];
-      const errors = validateMarkers(markers);
-      expect(errors.length).toBeGreaterThan(0);
-    });
-
-    it('detects invalid size', () => {
-      const markers: any = [{ time: 1000, position: 'belowBar', color: '#10b981', shape: 'arrowUp', text: 'Test', size: 5 }];
-      const errors = validateMarkers(markers);
-      expect(errors.length).toBeGreaterThan(0);
     });
   });
 });

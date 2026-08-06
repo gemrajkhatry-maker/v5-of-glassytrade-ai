@@ -1017,7 +1017,6 @@ const ChartScene: React.FC<ChartSceneProps> = ({
             direction={agentDecision.direction || 'FLAT'}
             probability={agentDecision.probability || 0}
             regime={agentDecision.regime || ''}
-            timing={agentDecision.timing || ''}
             rationale={agentDecision.rationale || ''}
           />
         </div>

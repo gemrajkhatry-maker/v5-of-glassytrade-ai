@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   generateAMTPriceLines,
   calculateVWAPColor,
-  filterPriceLinesByRange,
-  countPriceLinesByType,
   PriceLineConfig,
   AMTLevelsOverlayOptions,
 } from '../../../components/chart/AMTLevelsOverlay';
@@ -333,50 +331,6 @@ describe('AMTLevelsOverlay', () => {
       const result = calculateVWAPColor(data);
       expect(result.color).toBe('#06b6d4');
       expect(result.label).toBe('VWAP');
-    });
-  });
-
-  describe('filterPriceLinesByRange', () => {
-    const lines: PriceLineConfig[] = [
-      { price: 49000, color: '', lineWidth: 1, lineStyle: 'Solid', axisLabelVisible: true, title: 'Low' },
-      { price: 50000, color: '', lineWidth: 1, lineStyle: 'Solid', axisLabelVisible: true, title: 'Mid' },
-      { price: 51000, color: '', lineWidth: 1, lineStyle: 'Solid', axisLabelVisible: true, title: 'High' },
-    ];
-
-    it('filters lines within range', () => {
-      const filtered = filterPriceLinesByRange(lines, 49500, 50500);
-      expect(filtered).toHaveLength(1);
-      expect(filtered[0].price).toBe(50000);
-    });
-
-    it('includes boundary values', () => {
-      const filtered = filterPriceLinesByRange(lines, 49000, 50000);
-      expect(filtered).toHaveLength(2);
-    });
-
-    it('returns empty array when no lines in range', () => {
-      const filtered = filterPriceLinesByRange(lines, 52000, 53000);
-      expect(filtered).toHaveLength(0);
-    });
-  });
-
-  describe('countPriceLinesByType', () => {
-    it('counts lines by title prefix', () => {
-      const lines: PriceLineConfig[] = [
-        { price: 50000, color: '', lineWidth: 1, lineStyle: 'Solid', axisLabelVisible: true, title: 'S-POC' },
-        { price: 50500, color: '', lineWidth: 1, lineStyle: 'Solid', axisLabelVisible: true, title: 'S-VAH' },
-        { price: 50000, color: '', lineWidth: 1, lineStyle: 'Solid', axisLabelVisible: true, title: 'VWAP' },
-      ];
-      
-      const counts = countPriceLinesByType(lines);
-      expect(counts['S-POC']).toBe(1);
-      expect(counts['S-VAH']).toBe(1);
-      expect(counts['VWAP']).toBe(1);
-    });
-
-    it('handles empty array', () => {
-      const counts = countPriceLinesByType([]);
-      expect(counts).toEqual({});
     });
   });
 });

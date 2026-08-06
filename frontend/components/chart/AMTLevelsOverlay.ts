@@ -319,38 +319,3 @@ export function generateAMTPriceLines(
 
   return lines;
 }
-
-/**
- * Filter price lines by visible price range (optimization)
- * 
- * @param lines - Price line configurations
- * @param minPrice - Minimum visible price
- * @param maxPrice - Maximum visible price
- * @returns Filtered price lines within range
- */
-export function filterPriceLinesByRange(
-  lines: PriceLineConfig[],
-  minPrice: number,
-  maxPrice: number
-): PriceLineConfig[] {
-  return lines.filter(line => 
-    line.price >= minPrice && line.price <= maxPrice
-  );
-}
-
-/**
- * Count price lines by type
- * 
- * @param lines - Price line configurations
- * @returns Count breakdown by type
- */
-export function countPriceLinesByType(lines: PriceLineConfig[]): Record<string, number> {
-  const counts: Record<string, number> = {};
-  
-  lines.forEach(line => {
-    const type = line.title.split(' ')[0]; // Get first word (S-POC → S-POC, VWAP → VWAP)
-    counts[type] = (counts[type] || 0) + 1;
-  });
-  
-  return counts;
-}

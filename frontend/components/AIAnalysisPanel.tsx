@@ -1039,7 +1039,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
                     </div>
                     <div className="p-3 rounded-lg bg-white/5 border border-white/5 space-y-1.5 text-[9px]">
                         {(() => {
-                            const vwapStd = (amtResult.vwapUpper1 ?? 0) - (amtResult.sessionVwap ?? 0);
                             const isVwapFlat = amtResult.vwapDeviationSigmas === null || amtResult.vwapDeviationSigmas === undefined;
                             return (
                                 <>
