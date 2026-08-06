@@ -518,3 +518,49 @@ def test_risk_sizing_calculate_parity():
         lambda: _run_risk_sizing(legacy),
         lambda: _run_risk_sizing(QuantRiskSizing),
     )
+
+
+# ---------------------------------------------------------------------------
+# RiskTierEngine
+# ---------------------------------------------------------------------------
+
+
+def _run_risk_tier(engine_cls, premium_cls) -> dict:
+    engine = engine_cls(capital=5_000_000)
+    engine.record_trade(1.5)
+    engine.record_trade(1.5)
+    premium = premium_cls(
+        aggression_score=4.0,
+        lvn_strength=0.9,
+        cvd_divergence=True,
+        is_second_drive=True,
+        ml_probability=0.70,
+    )
+    engine.record_trade(0.5, premium_check=premium)
+    state_a = engine.get_state()
+    engine.record_trade(-1.0)
+    engine.record_trade(-1.0)
+    engine.record_trade(-1.0)
+    return {
+        "tier": engine.tier.value,
+        "risk_pct": engine.risk_pct,
+        "risk_amount": engine.risk_amount,
+        "is_halted": engine.is_halted,
+        "halt_reason": engine.halt_reason,
+        "state_a_tier": state_a.tier.value,
+        "state_a_pct": state_a.risk_pct,
+        "state": engine.get_state(),
+    }
+
+
+def test_risk_tier_parity():
+    import importlib
+    legacy_mod = importlib.import_module("app.domain.services.risk_tier_engine")
+    from quant.execution.risk_tier import (
+        RiskTierEngine as QuantRiskTier,
+        TierAPremiumCheck as QuantPremium,
+    )
+    assert_parity(
+        lambda: _run_risk_tier(legacy_mod.RiskTierEngine, legacy_mod.TierAPremiumCheck),
+        lambda: _run_risk_tier(QuantRiskTier, QuantPremium),
+    )
