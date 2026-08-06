@@ -185,6 +185,13 @@ class TradingEngine:
             fetch_historical_callback=fetch_historical_callback,
         )
         self._candle_aggregator = CandleAggregator(interval=settings.STREAM_INTERVAL)
+
+        # Enable Lee-Ready tick-level delta classification (audit P0-1).
+        # Flag not yet exposed via Feature registry; default ON.
+        use_lee_ready = True
+        self._candle_aggregator.set_delta_mode(use_lee_ready)
+        self._futures_aggregator.set_delta_mode(use_lee_ready)
+
         self._watchdog_manager = WatchdogManager(
             session_service=self._session_service,
             stream_manager=self._stream_manager,

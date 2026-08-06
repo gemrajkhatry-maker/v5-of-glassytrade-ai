@@ -169,7 +169,7 @@ class CandleAggregator:
             )
             if candle_vol > vol_cap:
                 cs["prev_cum_vol"] = vol
-                candle_vol = 0
+                candle_vol = vol_cap
             else:
                 cs["prev_cum_vol"] = vol
 
