@@ -165,6 +165,7 @@ class SessionEventLogger:
             mfe=mfe,
             mae=mae,
             tick_count=tick_count,
+            entry_timestamp=position.entry_time,
             amt=amt,
             decision_source="lifecycle",
             attribution="managed_exit",

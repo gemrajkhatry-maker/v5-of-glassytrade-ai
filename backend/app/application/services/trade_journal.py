@@ -6,6 +6,7 @@ import logging
 import os
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone, timedelta
+from decimal import Decimal
 from threading import Lock
 from typing import Any
 from app.shared.timezones import IST
@@ -21,6 +22,7 @@ class JournalEntry:
     event_type: str = ""  # SIGNAL_GENERATED | ENTRY_EXECUTED | ENTRY_REJECTED | EXIT | OVERSEER_ACTION
     symbol: str = ""
     run_id: str = ""
+    entry_timestamp: str = ""  # entry time carried on EXIT events (self-contained trades)
     config_fingerprint: str = ""
     decision_source: str = ""
     attribution: str = ""
@@ -105,6 +107,24 @@ class TradeJournal:
     @staticmethod
     def _safe_div(numerator: float, denominator: float) -> float:
         return numerator / denominator if denominator else 0.0
+
+    @staticmethod
+    def _to_float(value: Any, default: float = 0.0) -> float:
+        """Coerce journal numerics (float/int/str/Decimal) to float."""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _json_default(obj: Any) -> Any:
+        """JSON default for journal writes — Decimals become real numbers so
+        downstream consumers don't see stringified numerics."""
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return str(obj)
 
     def _performance_metrics(self, trades: list[dict]) -> dict[str, float]:
         pnls = [float(t.get("pnl", 0.0)) for t in trades]
@@ -421,9 +441,16 @@ class TradeJournal:
         amt: dict | None = None,
         decision_source: str = "",
         attribution: str = "",
+        entry_timestamp: str = "",
     ) -> None:
         """Log when a position is closed."""
-        pnl_pct = (pnl / entry_price * 100) if entry_price > 0 else 0.0
+        entry_price_f = self._to_float(entry_price)
+        exit_price_f = self._to_float(exit_price)
+        pnl_f = self._to_float(pnl)
+        if side and str(side).upper() == "SHORT":
+            pnl_pct = ((entry_price_f - exit_price_f) / entry_price_f * 100) if entry_price_f > 0 else 0.0
+        else:
+            pnl_pct = ((exit_price_f - entry_price_f) / entry_price_f * 100) if entry_price_f > 0 else 0.0
         entry = JournalEntry(
             timestamp=self._now_ist(),
             event_type="EXIT",
@@ -431,15 +458,16 @@ class TradeJournal:
             position_id=position_id,
             tick_trace_id=tick_trace_id,
             side=side,
-            entry_price=entry_price,
-            exit_price=exit_price,
+            entry_price=round(entry_price_f, 4),
+            exit_price=round(exit_price_f, 4),
             exit_reason=exit_reason,
-            pnl=round(pnl, 4),
+            pnl=round(pnl_f, 4),
             pnl_pct=round(pnl_pct, 4),
-            time_in_trade_s=round(time_in_trade_s, 1),
-            mfe=round(mfe, 4),
-            mae=round(mae, 4),
+            time_in_trade_s=round(self._to_float(time_in_trade_s), 1),
+            mfe=round(self._to_float(mfe), 4),
+            mae=round(self._to_float(mae), 4),
             tick_count=tick_count,
+            entry_timestamp=entry_timestamp,
             decision_source=decision_source,
             attribution=attribution,
             **self._market_fields(amt),
@@ -465,7 +493,12 @@ class TradeJournal:
         attribution: str = "",
     ) -> None:
         """Log a partial position close (e.g. 50% at TP1)."""
-        pnl_pct = (realized_pnl / entry_price * 100) if entry_price > 0 else 0.0
+        entry_price_f = self._to_float(entry_price)
+        exit_price_f = self._to_float(exit_price)
+        if side and str(side).upper() == "SHORT":
+            pnl_pct = ((entry_price_f - exit_price_f) / entry_price_f * 100) if entry_price_f > 0 else 0.0
+        else:
+            pnl_pct = ((exit_price_f - entry_price_f) / entry_price_f * 100) if entry_price_f > 0 else 0.0
         entry = JournalEntry(
             timestamp=self._now_ist(),
             event_type="PARTIAL_EXIT",
@@ -473,10 +506,10 @@ class TradeJournal:
             position_id=position_id,
             tick_trace_id=tick_trace_id,
             side=side,
-            entry_price=entry_price,
-            exit_price=exit_price,
+            entry_price=round(entry_price_f, 4),
+            exit_price=round(exit_price_f, 4),
             exit_reason=f"PARTIAL_{partial_pct:.0%}",
-            pnl=round(realized_pnl, 4),
+            pnl=round(self._to_float(realized_pnl), 4),
             pnl_pct=round(pnl_pct, 4),
             decision_source=decision_source,
             attribution=attribution,
@@ -567,7 +600,7 @@ class TradeJournal:
             self._log_dir,
             f"journal_{date.today().isoformat()}.jsonl",
         )
-        line = json.dumps(asdict(entry), default=str)
+        line = json.dumps(asdict(entry), default=self._json_default)
         with self._lock:
             try:
                 with open(fname, "a") as f:
@@ -817,41 +850,83 @@ class TradeJournal:
         }
 
     def get_completed_trades_for_entries(self, entries: list[dict]) -> list[dict]:
-        """Return completed trades from an in-memory entry set."""
+        """Return completed trades from an in-memory entry set.
+
+        An EXIT event is the authoritative record of a completed trade: it
+        carries its own entry/exit price, pnl and duration. A matching
+        ENTRY_EXECUTED (same position_id) enriches the trade with thesis,
+        stop/target and entry timestamp when present.
+        """
         entries_by_pid: dict[str, dict] = {}
         trades: list[dict] = []
         for e in entries:
             if e.get("event_type") == "ENTRY_EXECUTED" and e.get("position_id"):
                 entries_by_pid[e["position_id"]] = e
             elif e.get("event_type") == "EXIT" and e.get("position_id"):
-                entry_ev = entries_by_pid.get(e["position_id"])
-                trades.append({
-                    "symbol": e.get("symbol", ""),
-                    "side": e.get("side") or (entry_ev or {}).get("side", ""),
-                    "entry_time": (entry_ev or {}).get("timestamp", ""),
-                    "exit_time": e.get("timestamp", ""),
-                    "entry_price": (entry_ev or {}).get("entry_price", 0),
-                    "exit_price": e.get("exit_price", 0),
-                    "stop_loss": (entry_ev or {}).get("stop_loss", 0),
-                    "take_profit": (entry_ev or {}).get("take_profit", 0),
-                    "pnl": e.get("pnl", 0),
-                    "pnl_pct": e.get("pnl_pct", 0),
-                    "duration_s": e.get("time_in_trade_s", 0),
-                    "exit_reason": e.get("exit_reason", ""),
-                    "mfe": e.get("mfe", 0),
-                    "mae": e.get("mae", 0),
-                    "market_state": (entry_ev or {}).get("market_state", ""),
-                    "session_name": (entry_ev or {}).get("session_name", ""),
-                    "llm_rationale": (entry_ev or {}).get("llm_rationale", ""),
-                    "run_id": e.get("run_id", ""),
-                    "attribution": (entry_ev or {}).get("attribution", ""),
-                    "thesis_location_type": (entry_ev or {}).get("thesis_location_type", ""),
-                    "thesis_aggression_trigger": (entry_ev or {}).get("thesis_aggression_trigger", ""),
-                    "thesis_setup_family": (entry_ev or {}).get("thesis_setup_family", ""),
-                    "agent_feature_drivers": (entry_ev or {}).get("agent_feature_drivers", []),
-                    "position_id": e["position_id"],
-                })
+                trades.append(self._build_completed_trade(e, entries_by_pid.get(e["position_id"])))
         return trades
+
+    def _build_completed_trade(self, exit_ev: dict, entry_ev: dict | None) -> dict:
+        """Build a trade payload from an EXIT event, enriched by a matched ENTRY."""
+        entry_ev = entry_ev or {}
+        entry_price = self._to_float(exit_ev.get("entry_price")) or self._to_float(entry_ev.get("entry_price")) or 0.0
+        exit_price = self._to_float(exit_ev.get("exit_price")) or self._to_float(entry_ev.get("exit_price")) or entry_price
+        exit_time = exit_ev.get("timestamp", "")
+        entry_time = exit_ev.get("entry_timestamp") or entry_ev.get("timestamp", "")
+        side = exit_ev.get("side") or entry_ev.get("side", "")
+        return {
+            "symbol": exit_ev.get("symbol", ""),
+            "side": side,
+            "entry_time": entry_time,
+            "exit_time": exit_time,
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "stop_loss": self._to_float(entry_ev.get("stop_loss")) or self._to_float(exit_ev.get("stop_loss")),
+            "take_profit": self._to_float(entry_ev.get("take_profit")) or self._to_float(exit_ev.get("take_profit")),
+            "pnl": self._to_float(exit_ev.get("pnl")),
+            "pnl_pct": self._trade_pnl_pct(entry_price, exit_price, side, exit_ev),
+            "duration_s": self._trade_duration_s(entry_time, exit_time, exit_ev),
+            "exit_reason": exit_ev.get("exit_reason", ""),
+            "mfe": self._to_float(exit_ev.get("mfe")),
+            "mae": self._to_float(exit_ev.get("mae")),
+            "market_state": entry_ev.get("market_state") or exit_ev.get("market_state", ""),
+            "session_name": entry_ev.get("session_name") or exit_ev.get("session_name", ""),
+            "llm_rationale": entry_ev.get("llm_rationale", ""),
+            "run_id": exit_ev.get("run_id", ""),
+            "attribution": entry_ev.get("attribution") or exit_ev.get("attribution", ""),
+            "thesis_location_type": entry_ev.get("thesis_location_type", ""),
+            "thesis_aggression_trigger": entry_ev.get("thesis_aggression_trigger", ""),
+            "thesis_setup_family": entry_ev.get("thesis_setup_family", ""),
+            "agent_feature_drivers": entry_ev.get("agent_feature_drivers", []),
+            "position_id": exit_ev["position_id"],
+        }
+
+    @classmethod
+    def _trade_pnl_pct(cls, entry_price: float, exit_price: float, side: str, exit_ev: dict) -> float:
+        """Return a sane per-unit % return. Legacy journal rows stored a
+        rupee-denominated pnl/entry ratio (absurd percentages); recompute from
+        prices instead, falling back to the stored value."""
+        if entry_price > 0 and exit_price > 0:
+            if side and str(side).upper() == "SHORT":
+                return round((entry_price - exit_price) / entry_price * 100, 4)
+            return round((exit_price - entry_price) / entry_price * 100, 4)
+        return round(cls._to_float(exit_ev.get("pnl_pct")), 4)
+
+    @classmethod
+    def _trade_duration_s(cls, entry_time: str, exit_time: str, exit_ev: dict) -> float:
+        """Positive duration in seconds. Prefers timestamps; falls back to the
+        stored duration and never leaks a negative value."""
+        duration = cls._to_float(exit_ev.get("time_in_trade_s"))
+        if entry_time and exit_time:
+            try:
+                entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
+                exit_dt = datetime.fromisoformat(exit_time.replace("Z", "+00:00"))
+                computed = (exit_dt - entry_dt).total_seconds()
+                if computed > 0:
+                    duration = computed
+            except (TypeError, ValueError):
+                pass
+        return max(round(duration, 1), 0.0)
 
     def summary_from_entries(self, entries: list[dict], *, run_id: str = "") -> dict:
         """Return summary metrics from a preloaded entry set."""
@@ -860,9 +935,9 @@ class TradeJournal:
         signals = [e for e in entries if e.get("event_type") == "SIGNAL_GENERATED"]
         rejections = [e for e in entries if e.get("event_type") == "ENTRY_REJECTED"]
 
-        total_pnl = sum(e.get("pnl", 0) for e in exits)
-        wins = [e for e in exits if e.get("pnl", 0) > 0]
-        losses = [e for e in exits if e.get("pnl", 0) < 0]
+        total_pnl = sum(self._to_float(e.get("pnl")) for e in exits)
+        wins = [e for e in exits if self._to_float(e.get("pnl")) > 0]
+        losses = [e for e in exits if self._to_float(e.get("pnl")) < 0]
         win_rate = len(wins) / len(exits) * 100 if exits else 0.0
 
         first_ts = entries[0].get("timestamp", "") if entries else ""
@@ -879,12 +954,13 @@ class TradeJournal:
             "losses": len(losses),
             "win_rate": round(win_rate, 1),
             "avg_time_in_trade_s": round(
-                sum(e.get("time_in_trade_s", 0) for e in exits) / len(exits), 1
+                sum(self._to_float(e.get("time_in_trade_s")) for e in exits) / len(exits), 1
             ) if exits else 0.0,
-            "avg_mfe": round(sum(e.get("mfe", 0) for e in exits) / len(exits), 4) if exits else 0.0,
-            "avg_mae": round(sum(e.get("mae", 0) for e in exits) / len(exits), 4) if exits else 0.0,
+            "avg_mfe": round(sum(self._to_float(e.get("mfe")) for e in exits) / len(exits), 4) if exits else 0.0,
+            "avg_mae": round(sum(self._to_float(e.get("mae")) for e in exits) / len(exits), 4) if exits else 0.0,
+            "avg_r": self._avg_r_multiple_from_exits(exits),
             "total_partial_exits": len(partials),
-            "total_partial_pnl": round(sum(e.get("pnl", 0) for e in partials), 4),
+            "total_partial_pnl": round(sum(self._to_float(e.get("pnl")) for e in partials), 4),
             "entries_with_thesis": len([
                 e for e in entries
                 if e.get("event_type") == "ENTRY_EXECUTED"
@@ -893,6 +969,27 @@ class TradeJournal:
                 and e.get("thesis_aggression_trigger")
             ]),
         }
+
+    def _avg_r_multiple_from_exits(self, exits: list[dict]) -> float:
+        """Average R-multiple = per-unit profit / per-unit risk, using the
+        EXIT's own entry/exit price and the paired stop level."""
+        rs: list[float] = []
+        for e in exits:
+            entry_price = self._to_float(e.get("entry_price"))
+            exit_price = self._to_float(e.get("exit_price"))
+            stop_loss = self._to_float(e.get("stop_loss"))
+            if entry_price <= 0 or stop_loss <= 0:
+                continue
+            side = str(e.get("side", "LONG")).upper()
+            if side == "SHORT":
+                risk = stop_loss - entry_price
+                profit = entry_price - exit_price
+            else:
+                risk = entry_price - stop_loss
+                profit = exit_price - entry_price
+            if risk > 0:
+                rs.append(profit / risk)
+        return round(sum(rs) / len(rs), 4) if rs else 0.0
 
     def report_from_entries(self, entries: list[dict], trades: list[dict], summary: dict) -> dict:
         """Build a report from preloaded entries/trades/summary."""

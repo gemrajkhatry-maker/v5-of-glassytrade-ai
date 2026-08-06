@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
+
 import pytest
 from dataclasses import replace
 
@@ -652,3 +657,190 @@ def test_trade_journal_assess_promotion_fails_low_aggression_driver_rate(tmp_pat
     assert result["eligible"] is False
     assert result["checks"]["aggression_driver_rate"] is False
     assert "aggression_driver_rate" in result["blockers"]
+
+
+# ---------------------------------------------------------------------------
+# API-visible journal fixes: completed trades, summary, and numeric writes
+# ---------------------------------------------------------------------------
+
+
+def test_journal_writes_decimal_values_as_numbers_not_strings(tmp_path):
+    """Decimal trade values (from Position) must serialize as JSON numbers,
+    not strings — string numerics crash summary() and break trades payloads."""
+    journal = TradeJournal(log_dir=str(tmp_path))
+    journal.log_exit(
+        symbol="NIFTY",
+        position_id="P1",
+        side="LONG",
+        entry_price=Decimal("100.1500"),
+        exit_price=Decimal("93.06020"),
+        exit_reason="SL",
+        pnl=Decimal("-24864.3000"),
+        time_in_trade_s=333.2,
+    )
+
+    fname = Path(tmp_path) / f"journal_{date.today().isoformat()}.jsonl"
+    raw = fname.read_text()
+    assert '"pnl": "-24864' not in raw
+    assert '"entry_price": "100' not in raw
+
+    trades = journal.get_completed_trades()
+    assert trades[0]["entry_price"] == 100.15
+    assert trades[0]["pnl"] == -24864.3
+
+
+def test_completed_trades_use_exit_own_entry_data_when_no_entry_matches(tmp_path):
+    """A completed trade must be readable from the EXIT event alone (the
+    journal can hold EXIT events with no paired ENTRY_EXECUTED)."""
+    journal = TradeJournal(log_dir=str(tmp_path))
+    journal.log_entry(
+        symbol="NIFTY",
+        position_id="P1",
+        side="LONG",
+        entry_price=100.0,
+        stop_loss=95.0,
+        take_profit=110.0,
+    )
+    journal.log_exit(
+        symbol="NIFTY",
+        position_id="P2",
+        side="LONG",
+        entry_price=100.0,
+        exit_price=102.0,
+        exit_reason="TP",
+        pnl=20.0,
+        time_in_trade_s=300.0,
+    )
+
+    trades = journal.get_completed_trades()
+    assert len(trades) == 1
+    trade = trades[0]
+    assert trade["position_id"] == "P2"
+    assert trade["entry_price"] == 100.0
+    assert trade["exit_price"] == 102.0
+    assert trade["pnl"] == 20.0
+    assert trade["pnl_pct"] == 2.0
+    assert trade["duration_s"] == 300.0
+
+
+def test_completed_trades_prefer_entry_timestamp_for_duration(tmp_path):
+    """When an EXIT carries an entry_timestamp, entry_time is populated and
+    duration_s is derived from the timestamps (positive)."""
+    journal = TradeJournal(log_dir=str(tmp_path))
+    journal.log_exit(
+        symbol="NIFTY",
+        position_id="P3",
+        side="LONG",
+        entry_price=100.0,
+        exit_price=104.0,
+        exit_reason="TP",
+        pnl=4.0,
+        time_in_trade_s=-18663300.0,
+        entry_timestamp="2026-08-06T11:14:18+05:30",
+    )
+
+    trades = journal.get_completed_trades()
+    assert len(trades) == 1
+    trade = trades[0]
+    assert trade["entry_time"] == "2026-08-06T11:14:18+05:30"
+    assert trade["exit_time"].startswith("2026-08-06")
+    assert trade["duration_s"] > 0
+    assert trade["duration_s"] < 86400.0
+    assert trade["pnl_pct"] == 4.0
+
+
+def test_completed_trades_clamp_negative_duration(tmp_path):
+    """A stored negative duration must never leak to the API as negative."""
+    journal = TradeJournal(log_dir=str(tmp_path))
+    journal.log_exit(
+        symbol="NIFTY",
+        position_id="P4",
+        side="LONG",
+        entry_price=100.0,
+        exit_price=93.86,
+        exit_reason="SL",
+        pnl=-6.14,
+        time_in_trade_s=-18663300.0,
+    )
+
+    trade = journal.get_completed_trades()[0]
+    assert trade["duration_s"] >= 0.0
+
+
+def test_summary_handles_string_valued_exit_events_and_reports_avg_r(tmp_path):
+    """summary() must not crash on string-valued EXIT rows (legacy journal
+    data written with default=str) and must report total trades, win rate,
+    net pnl, and avg R."""
+    rows = [
+        {
+            "timestamp": "2026-08-06T11:19:51+05:30",
+            "event_type": "EXIT",
+            "symbol": "CRUDEOIL",
+            "position_id": "X1",
+            "side": "LONG",
+            "entry_price": "100.1500",
+            "exit_price": "93.06020",
+            "pnl": "-24864.3000",
+            "pnl_pct": "-24827.0594",
+            "time_in_trade_s": -18663300.0,
+            "mfe": 0.0,
+            "mae": 0.0,
+            "exit_reason": "SL",
+        },
+        {
+            "timestamp": "2026-08-06T11:20:51+05:30",
+            "event_type": "EXIT",
+            "symbol": "CRUDEOIL",
+            "position_id": "X2",
+            "side": "LONG",
+            "entry_price": "100.0000",
+            "exit_price": "103.0000",
+            "stop_loss": "95.0000",
+            "pnl": "3.0000",
+            "pnl_pct": "3.0000",
+            "time_in_trade_s": 60.0,
+            "mfe": 0.0,
+            "mae": 0.0,
+            "exit_reason": "TP",
+        },
+    ]
+    fname = Path(tmp_path) / f"journal_{date.today().isoformat()}.jsonl"
+    fname.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+
+    journal = TradeJournal(log_dir=str(tmp_path))
+    summary = journal.summary()
+
+    assert summary["total_exits"] == 2
+    assert summary["total_pnl"] == -24861.3
+    assert summary["win_rate"] == 50.0
+    assert "avg_r" in summary
+    assert summary["avg_r"] == 0.6
+
+
+def test_get_completed_trades_returns_numbers_for_legacy_string_rows(tmp_path):
+    """Trades built from legacy string-valued EXIT rows must coerce numerics."""
+    rows = [
+        {
+            "timestamp": "2026-08-06T11:19:51+05:30",
+            "event_type": "EXIT",
+            "symbol": "CRUDEOIL 17 AUG 7200 CALL",
+            "position_id": "X1",
+            "side": "LONG",
+            "entry_price": "100.1500",
+            "exit_price": "93.06020",
+            "pnl": "-24864.3000",
+            "pnl_pct": "-24827.0594",
+            "time_in_trade_s": -18663300.0,
+            "mfe": 0.0,
+            "mae": 0.0,
+            "exit_reason": "SL",
+        }
+    ]
+    fname = Path(tmp_path) / f"journal_{date.today().isoformat()}.jsonl"
+    fname.write_text("\n".join(json.dumps(row) for row in rows) + "\n")
+
+    trade = TradeJournal(log_dir=str(tmp_path)).get_completed_trades()[0]
+    assert trade["entry_price"] == 100.15
+    assert trade["exit_price"] == 93.0602
+    assert trade["pnl"] == -24864.3
+    assert trade["pnl_pct"] == round((93.0602 - 100.15) / 100.15 * 100, 4)

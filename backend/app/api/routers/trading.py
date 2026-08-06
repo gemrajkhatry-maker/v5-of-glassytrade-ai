@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.application.services.trading_session import TradingSessionService
 
-from app.api.dependencies import get_storage, get_trading_session
+from app.api.dependencies import get_storage, get_trade_journal, get_trading_session
 from app.domain.ports.storage import IStorage
 from app.application.services.trading_query_service import TradingQueryService
 from app.core.async_boundary import ensure_sync_adapter_result
@@ -30,9 +30,26 @@ async def create_portfolio(
 
 
 @router.post("/stats")
-async def compute_stats(req: StatsRequestDTO):
-    """Legacy stats endpoint — compute from a list of closed trades."""
-    return _trading_query_service.build_stats_from_closed_trades(req)
+async def compute_stats(
+    req: StatsRequestDTO,
+    journal = Depends(get_trade_journal),
+):
+    """Stats endpoint — compute from the paper journal's closed trades.
+
+    Legacy callers may POST a closedTrades list; when the body is empty the
+    stats are derived from the same journal store that backs /ai/journal.
+    """
+    if req.closed_trades:
+        return _trading_query_service.build_stats_from_closed_trades(req)
+    return _trading_query_service.build_stats_from_journal(journal, source=req.source)
+
+
+@router.get("/stats")
+async def get_stats(
+    journal = Depends(get_trade_journal),
+):
+    """Stats derived from the paper journal's completed trades."""
+    return _trading_query_service.build_stats_from_journal(journal, source="AMT")
 
 
 @router.get("/positions/events")

@@ -61,3 +61,36 @@ class TradingQueryService:
 
         stats = portfolio.get_stats(Source(request.source))
         return stats_to_dto(stats)
+
+    def build_stats_from_journal(self, journal, source: str = "AMT") -> dict:
+        """Derive stats from the paper journal's completed trades.
+
+        When the frontend calls /trading/stats with an empty body, the legacy
+        closed_trades payload is absent — stats must come from the same trade
+        store the rest of the app reads (the TradeJournal).
+        """
+        from app.infrastructure.serialization.schemas import StatsRequestDTO, TradePositionDTO
+
+        trades = journal.get_completed_trades()
+        closed_trades = [
+            TradePositionDTO(
+                id=t.get("position_id", f"journal-trade-{i}"),
+                symbol=t.get("symbol", ""),
+                side=t.get("side", "LONG"),
+                source=source,
+                entryPrice=t.get("entry_price", 0),
+                size=1.0,
+                stopLoss=t.get("stop_loss", 0),
+                takeProfit=t.get("take_profit", 0),
+                pnl=t.get("pnl", 0),
+                entryTime=t.get("entry_time", ""),
+                status="CLOSED",
+                exitPrice=t.get("exit_price"),
+                exitTime=t.get("exit_time"),
+                closeReason=t.get("exit_reason"),
+            )
+            for i, t in enumerate(trades)
+        ]
+        return self.build_stats_from_closed_trades(
+            StatsRequestDTO(closedTrades=closed_trades, source=source)
+        )
