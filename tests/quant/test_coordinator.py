@@ -51,9 +51,15 @@ def _long_sequence():
 
 
 def test_triple_a_signal_flows_through():
+    """A BUY absorption followed by a rising market reaches AGGRESSION -> LONG."""
     c = AuctionCoordinator()
-    last = None
+    phases, signals = [], []
     for b in _long_sequence():
-        last = c.on_bar_close(b)
-    assert last.triple_a_phase == "ABSORBING"
-    assert last.triple_a_signal is None
+        st = c.on_bar_close(b)
+        phases.append(st.triple_a_phase)
+        signals.append(st.triple_a_signal)
+    assert "AGGRESSION" in phases
+    assert "LONG" in signals
+    # and it resets after the signal bar (next bar back to WAITING)
+    sig_idx = signals.index("LONG")
+    assert phases[sig_idx + 1] == "WAITING"

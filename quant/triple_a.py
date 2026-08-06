@@ -36,7 +36,10 @@ class TripleAStateMachine:
             self._phase = "WAITING"
             self._last_signal = None
 
-        if absorption is not None:
+        # Only a FRESH detection (bar_age == 0) re-arms the machine. A stale
+        # carry-over (bar_age > 0) is just context — it must count as an
+        # elapsed bar so accumulation can progress to AGGRESSION.
+        if absorption is not None and absorption.bar_age == 0:
             self._rearm(absorption)
             return self._phase
 
