@@ -456,3 +456,34 @@ def test_signal_validator_parity():
         lambda: _run_signal_validator(legacy),
         lambda: _run_signal_validator(QuantSignalValidator),
     )
+
+
+# ---------------------------------------------------------------------------
+# CircuitBreakers
+# ---------------------------------------------------------------------------
+
+
+def _run_circuit_breakers(engine_cls, reason_cls) -> dict:
+    cb = engine_cls(equity=1_000_000.0)
+    results = []
+    for losses, pnl, cumulative in [(3, -100.0, 0.0), (2, -100.0, 0.0), (5, 100.0, 0.0)]:
+        r = cb.evaluate(consecutive_losses=losses, session_pnl=pnl, cumulative_account_pnl=cumulative)
+        results.append({"locked": r.is_locked, "reason": r.reason.value, "detail": r.detail})
+    account_breach = cb.evaluate(
+        consecutive_losses=1, session_pnl=1000.0, cumulative_account_pnl=-30_000.0
+    )
+    results.append({"locked": account_breach.is_locked, "reason": account_breach.reason.value})
+    return {"results": results}
+
+
+def test_circuit_breakers_parity():
+    import importlib
+    legacy_mod = importlib.import_module("app.domain.services.circuit_breakers")
+    from quant.execution.circuit_breakers import (
+        CircuitBreakers as QuantCircuitBreakers,
+        BreakerReason as QuantBreakerReason,
+    )
+    assert_parity(
+        lambda: _run_circuit_breakers(legacy_mod.CircuitBreakers, legacy_mod.BreakerReason),
+        lambda: _run_circuit_breakers(QuantCircuitBreakers, QuantBreakerReason),
+    )

@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.domain.services.circuit_breakers import BreakerReason, CircuitBreakers
+from quant.execution.circuit_breakers import BreakerReason, CircuitBreakers
 
 
 class TestCircuitBreakerThresholds:
