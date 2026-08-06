@@ -214,6 +214,7 @@ function App() {
                             genAI={activeInstrument.genAIAnalysis}
                             amtResult={activeInstrument.amtAnalysis}
                             agentDecision={activeInstrument.agentDecision}
+                            auction={activeInstrument.auctionAnalysis}
                             symbol={activeInstrument.symbol}
                         />
                     </div>

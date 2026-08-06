@@ -68,6 +68,15 @@ class SessionCache:
         """Get the latest AMT analysis result."""
         return self._session.last_amt
 
+    def update_auction(self, auction_dto: dict) -> None:
+        """Update the greenfield quant AuctionState DTO for the session."""
+        with self._session._lock:
+            self._session.last_auction = auction_dto
+
+    def get_latest_auction(self) -> dict | None:
+        """Get the latest quant AuctionState DTO."""
+        return self._session.last_auction
+
     def get_latest_footprint(self) -> dict | None:
         """Get the latest footprint data."""
         return self._session.last_footprint

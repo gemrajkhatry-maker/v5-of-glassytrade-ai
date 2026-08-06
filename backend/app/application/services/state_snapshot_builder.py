@@ -39,6 +39,7 @@ def build_state_snapshot(
         "_symbol": session.symbol,
         "portfolio": portfolio_dto,
         "amt": session.last_amt,
+        "auction": session.last_auction,
         "genAIAnalysis": _camel_case_ai(ai_analysis),
         "overseerAction": (ai_analysis or {}).get("overseer_action", ""),
         "overseerReason": (ai_analysis or {}).get("overseer_reason", ""),

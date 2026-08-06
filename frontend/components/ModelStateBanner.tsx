@@ -1,18 +1,19 @@
 import React, { useMemo } from 'react';
 import { Brain } from 'lucide-react';
-import type { GenAIAnalysis, AMTAnalysis, AgentDecision } from '../types';
+import type { GenAIAnalysis, AMTAnalysis, AgentDecision, AuctionAnalysis } from '../types';
 
 export interface ModelStateBannerProps {
     genAI: GenAIAnalysis | null | undefined;
     amtResult: AMTAnalysis | null | undefined;
     agentDecision: AgentDecision | null | undefined;
+    auction: AuctionAnalysis | null | undefined;
     symbol: string;
 }
 
 /**
  * Single primary status strip for the active symbol: monitoring, dead, advisory entry, or armed (ENTER_NOW).
  */
-const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, agentDecision, symbol }) => {
+const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, agentDecision, auction, symbol }) => {
     const { title, subtitle, barClass, accentClass } = useMemo(() => {
         const isDead =
             genAI?.rationale?.includes('DEAD') ||
@@ -87,6 +88,16 @@ const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, 
                     <div className="text-[10px] text-white/55 font-mono truncate mt-0.5">{subtitle}</div>
                 </div>
                 <div className="hidden sm:flex items-center gap-2 shrink-0 text-[9px] font-mono text-white/40 uppercase">
+                    {auction?.tripleASignal && (
+                        <span className={`px-1.5 py-0.5 rounded-sm border ${auction.tripleASignal === 'LONG' ? 'border-emerald-500/40 text-emerald-300' : 'border-rose-500/40 text-rose-300'}`}>
+                            TRIPLE-A {auction.tripleASignal} ({auction.tripleAPhase})
+                        </span>
+                    )}
+                    {auction?.absorption && (
+                        <span className="px-1.5 py-0.5 rounded-sm border border-amber-500/40 text-amber-300">
+                            {auction.absorption.side} ABSORPTION
+                        </span>
+                    )}
                     <span className="flex items-center gap-1">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                         Live

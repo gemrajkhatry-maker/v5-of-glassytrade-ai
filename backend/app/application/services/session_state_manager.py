@@ -48,6 +48,7 @@ class SessionState:
 
     # Cached latest results for query access
     last_amt: dict | None = None
+    last_auction: dict | None = None
     last_prediction: dict | None = None
     last_footprint: dict | None = None
     last_ai_analysis: dict | None = None

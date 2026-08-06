@@ -488,6 +488,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 // Chart already updated natively via tickBus; state syncs on next analytics delta (~500ms).
                 const hasAnalytics = state.portfolio !== undefined ||
                     state.amt !== undefined ||
+                    state.auction !== undefined ||
                     state.genAIAnalysis !== undefined ||
                     state.riskState !== undefined ||
                     state.agentDecision !== undefined ||
@@ -525,6 +526,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.amt !== undefined) {
                         merged.amtAnalysis = state.amt === null ? null : { ...existing.amtAnalysis, ...state.amt };
                     }
+                    if (state.auction !== undefined) merged.auctionAnalysis = { ...existing.auctionAnalysis, ...state.auction };
                     if (state.genAIAnalysis !== undefined) merged.genAIAnalysis = { ...existing.genAIAnalysis, ...state.genAIAnalysis };
                     if (state.riskState !== undefined) merged.riskState = { ...existing.riskState, ...state.riskState };
                     if (state.agentDecision !== undefined) merged.agentDecision = state.agentDecision;
@@ -596,6 +598,9 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 const newAmtAnalysis = 'amt' in state
                     ? (state.amt ?? null)
                     : inst.amtAnalysis;
+                const newAuctionAnalysis = 'auction' in state
+                    ? (state.auction ?? null)
+                    : inst.auctionAnalysis;
                 const newGenAIAnalysis = state.genAIAnalysis ?? inst.genAIAnalysis;
                 const newRiskState = state.riskState ?? inst.riskState;
                 const newAgentDecision = state.agentDecision ?? inst.agentDecision;
@@ -609,6 +614,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         data: newData,
                         portfolio: newPortfolio,
                         amtAnalysis: newAmtAnalysis,
+                        auctionAnalysis: newAuctionAnalysis,
                         aiAnalysis: inst.aiAnalysis,
                         genAIAnalysis: newGenAIAnalysis,
                         llmHistory: (() => {

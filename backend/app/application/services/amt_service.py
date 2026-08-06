@@ -98,6 +98,18 @@ class AMTService:
         # Update cache with AMT results
         cache.update_amt(amt_result, amt_dto, fp_dto)
 
+        # Greenfield quant engine (decision engine of record, parallel): feed the
+        # latest closed bar and broadcast the AuctionState as the `auction` field.
+        try:
+            if amt_data:
+                from app.application.services.quant_bridge import bridge
+
+                auction_dto = bridge.on_bar_close(event.symbol, amt_data[-1])
+                if auction_dto:
+                    cache.update_auction(auction_dto)
+        except Exception:
+            log.warning("quant bridge failed for %s", event.symbol, exc_info=True)
+
         # Bug #4 fix: Share market state across options on the same underlying.
         amt_result = self._sync_underlying_state(event.symbol, amt_result, amt_dto)
 

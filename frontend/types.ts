@@ -123,6 +123,7 @@ export interface InstrumentState {
   aiAnalysis: AIAnalysis | null;
   genAIAnalysis: GenAIAnalysis | null;
   amtAnalysis: AMTAnalysis | null;
+  auctionAnalysis: AuctionAnalysis | null;
   riskState: RiskState | null;
   agentDecision: AgentDecision | null;
   llmHistory: LLMHistoryEntry[];
@@ -168,6 +169,50 @@ export interface AggressivePrint {
   side: 'BUY' | 'SELL';
   volume: number;
   delta: number;
+}
+
+export interface AuctionAnalysis {
+  time: string;
+  close: number;
+  volumeProfile: {
+    poc: number;
+    vah: number;
+    val: number;
+    step: number;
+    totalVolume: number;
+  };
+  vwap: {
+    value: number;
+    upper1: number;
+    lower1: number;
+    upper2: number;
+    lower2: number;
+    std: number;
+    deviationSigmas: number;
+  };
+  orderFlow: {
+    delta: number;
+    cvd: number;
+    cvdSlope: number;
+    cvdDivergence: string;
+  };
+  absorption: {
+    side: string;
+    price: number;
+    volume: number;
+    strength: number;
+    barAge: number;
+  } | null;
+  location: {
+    ibHigh: number;
+    ibLow: number;
+    ibComplete: boolean;
+    zone: string;
+    nearestLevel: number;
+    distanceToLevel: number;
+  };
+  tripleAPhase: string;
+  tripleASignal: string | null;
 }
 
 export interface AMTAnalysis {
