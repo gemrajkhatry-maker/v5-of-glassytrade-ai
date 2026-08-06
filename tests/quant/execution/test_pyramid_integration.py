@@ -4,8 +4,8 @@ import pytest
 from decimal import Decimal
 from unittest.mock import MagicMock
 
-from app.domain.fabio_ai.services.pyramid_manager import PyramidManager, PyramidSignal
-from app.domain.trading.models.entities import Position, Side, PositionStatus
+from quant.execution.pyramid import PyramidManager, PyramidSignal
+from quant.contracts.entities import Position, Side, PositionStatus
 
 
 class TestPyramidIntegration:

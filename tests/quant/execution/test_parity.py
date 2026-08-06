@@ -172,3 +172,30 @@ def test_scale_parity():
         lambda: _run_scale_sequence(legacy),
         lambda: _run_scale_sequence(QuantScale),
     )
+
+
+# ---------------------------------------------------------------------------
+# PyramidManager
+# ---------------------------------------------------------------------------
+
+
+def _run_pyramid(engine_cls) -> dict:
+    engine = engine_cls()
+    result = engine.check_pyramid(
+        entry_price=100.0, current_price=101.0, is_long=True,
+        aggression_score=3.5, add_count=0, entry_lvns=[99.0],
+        current_lvn=101.0, current_sl=99.0,
+    )
+    if result is None:
+        return {"none": True}
+    return {"mult": result.size_multiplier, "level": result.level, "sl": result.unified_sl}
+
+
+def test_pyramid_parity():
+    import importlib
+    legacy = importlib.import_module("app.domain.fabio_ai.services.pyramid_manager").PyramidManager
+    from quant.execution.pyramid import PyramidManager as QuantPyramid
+    assert_parity(
+        lambda: _run_pyramid(legacy),
+        lambda: _run_pyramid(QuantPyramid),
+    )
