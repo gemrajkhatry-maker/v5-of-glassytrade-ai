@@ -11,10 +11,16 @@ def _session():
     # gate's structural stop is within its max stop distance)
     out = [Bar(time=f"t{i}", open=100, high=101, low=99, close=100, volume=100)
            for i in range(25)]
-    out.append(Bar(time="t25", open=100, high=100.2, low=99.8, close=100,
+    out.append(Bar(time="t25", open=100, high=100, low=100, close=100,
                    volume=500, buy_volume=450, sell_volume=50, delta=400))
-    for i in range(26, 30):
-        close = 100.3 + (i - 26) * 0.1
+    # absorption spike + two accumulation bars as zero-range bars AT the POC
+    # bucket, so the profile peak is a single bucket and POC sits at 100
+    out.append(Bar(time="t26", open=100, high=100, low=100, close=100,
+                   volume=100, buy_volume=60, sell_volume=40))
+    out.append(Bar(time="t27", open=100, high=100, low=100, close=100,
+                   volume=100, buy_volume=60, sell_volume=40))
+    for i in range(28, 32):
+        close = 100.3 + (i - 28) * 0.1
         out.append(Bar(time=f"t{i}", open=close - 0.2, high=close + 0.2,
                        low=close - 0.2, close=close, volume=100))
     return out

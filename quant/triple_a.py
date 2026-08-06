@@ -9,7 +9,8 @@ from quant.vwap import VWAPState
 
 
 class TripleAStateMachine:
-    def __init__(self) -> None:
+    def __init__(self, near_poc_step_mult: float = 2.0) -> None:
+        self._near_poc_step_mult = near_poc_step_mult
         self._phase = "WAITING"
         self._last_signal: str | None = None
         self._absorption_side: str | None = None
@@ -47,10 +48,13 @@ class TripleAStateMachine:
             return "WAITING"
 
         if self._phase == "ABSORBING":
-            if vp.poc == 0 and vp.step <= 0:
+            if vp.step <= 0 or vp.poc <= 0:
                 return "ABSORBING"
             self._absorb_bars += 1
             if self._absorb_bars < 2:
+                return "ABSORBING"
+            near_poc = abs(bar.close - vp.poc) <= self._near_poc_step_mult * vp.step
+            if not near_poc:
                 return "ABSORBING"
             self._phase = "ACCUMULATING"
 

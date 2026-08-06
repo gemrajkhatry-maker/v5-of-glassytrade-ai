@@ -41,10 +41,16 @@ def test_determinism_same_input_same_output():
 def _long_sequence():
     out = [Bar(time=f"t{i}", open=100, high=101, low=99, close=100, volume=100)
            for i in range(25)]
-    out.append(Bar(time="t25", open=100, high=100.2, low=99.8, close=100,
+    # absorption spike + two accumulation bars as zero-range bars AT the POC
+    # bucket, so the profile peak is a single bucket and POC sits at 100
+    out.append(Bar(time="t25", open=100, high=100, low=100, close=100,
                    volume=500, buy_volume=450, sell_volume=50))
-    for i in range(26, 31):
-        close = 100 + (i - 25) * 4
+    out.append(Bar(time="t26", open=100, high=100, low=100, close=100,
+                   volume=100, buy_volume=60, sell_volume=40))
+    out.append(Bar(time="t27", open=100, high=100, low=100, close=100,
+                   volume=100, buy_volume=60, sell_volume=40))
+    for i in range(28, 33):
+        close = 100 + (i - 27) * 4
         out.append(Bar(time=f"t{i}", open=close - 0.5, high=close + 1, low=close - 1,
                        close=close, volume=100))
     return out

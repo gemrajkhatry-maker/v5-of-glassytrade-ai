@@ -24,6 +24,42 @@ def test_phases_progress_in_order():
     assert m.update(_bar(105), _vp(), _vwap(), None) == "AGGRESSION"    # above VWAP+σ
     assert m.last_signal == "LONG"
 
+def test_accumulation_requires_near_poc():
+    m = TripleAStateMachine()
+    m.update(_bar(100), _vp(poc=100), _vwap(), None)
+    m.update(_bar(100), _vp(poc=100), _vwap(), Absorption(0, 100, 500, "BUY", 0.5, 0))
+    assert m.update(_bar(108), _vp(poc=100), _vwap(), None) == "ABSORBING"
+    # 2 bars elapsed but closes far from POC (>= 4 steps) -> cannot accumulate
+    assert m.update(_bar(110), _vp(poc=100), _vwap(), None) == "ABSORBING"
+    assert m.phase == "ABSORBING"
+    assert m.last_signal is None
+
+def test_accumulation_near_poc():
+    m = TripleAStateMachine()
+    m.update(_bar(100), _vp(), _vwap(), None)
+    m.update(_bar(100), _vp(), _vwap(), Absorption(0, 100, 500, "BUY", 0.5, 0))
+    assert m.update(_bar(101), _vp(), _vwap(), None) == "ABSORBING"
+    # 2 bars elapsed and close within 2 steps of POC
+    assert m.update(_bar(102), _vp(), _vwap(), None) == "ACCUMULATING"
+
+def test_accumulation_requires_poc_anchor():
+    empty = VolumeProfile(levels=(), poc=0.0, vah=0.0, val=0.0, step=0.0,
+                          total_volume=0.0)
+    m = TripleAStateMachine()
+    m.update(_bar(100), empty, _vwap(), None)
+    m.update(_bar(100), empty, _vwap(), Absorption(0, 100, 500, "BUY", 0.5, 0))
+    m.update(_bar(100), empty, _vwap(), None)
+    # no POC anchor -> never near POC, stays ABSORBING even after 2 bars
+    assert m.update(_bar(100), empty, _vwap(), None) == "ABSORBING"
+
+def test_near_poc_step_mult_override():
+    m = TripleAStateMachine(near_poc_step_mult=1.0)
+    m.update(_bar(100), _vp(), _vwap(), None)
+    m.update(_bar(100), _vp(), _vwap(), Absorption(0, 100, 500, "BUY", 0.5, 0))
+    m.update(_bar(102), _vp(), _vwap(), None)
+    # 2 steps from POC > mult=1 -> still ABSORBING
+    assert m.update(_bar(103), _vp(), _vwap(), None) == "ABSORBING"
+
 def test_cannot_skip_to_aggression():
     m = TripleAStateMachine()
     m.update(_bar(100), _vp(), _vwap(), None)
@@ -34,7 +70,8 @@ def test_resets_after_signal():
     m.update(_bar(100), _vp(), _vwap(), None)
     m.update(_bar(100), _vp(), _vwap(), Absorption(0, 100, 500, "BUY", 0.5, 0))
     m.update(_bar(101), _vp(), _vwap(), None)
-    m.update(_bar(105), _vp(), _vwap(), None)  # AGGRESSION -> LONG
+    m.update(_bar(102), _vp(), _vwap(), None)  # near POC -> ACCUMULATING
+    m.update(_bar(105), _vp(), _vwap(), None)  # breakout -> AGGRESSION -> LONG
     assert m.update(_bar(106), _vp(), _vwap(), None) == "WAITING"
 
 def test_same_side_rearms_after_signal():
@@ -42,12 +79,14 @@ def test_same_side_rearms_after_signal():
     m.update(_bar(100), _vp(), _vwap(), None)
     m.update(_bar(100), _vp(), _vwap(), Absorption(0, 100, 500, "BUY", 0.5, 0))
     m.update(_bar(101), _vp(), _vwap(), None)
+    m.update(_bar(102), _vp(), _vwap(), None)  # near POC -> ACCUMULATING
     assert m.update(_bar(105), _vp(), _vwap(), None) == "AGGRESSION"  # LONG
     # fresh SAME-side absorption after AGGRESSION->WAITING must re-arm
     assert m.update(_bar(106), _vp(), _vwap(),
                     Absorption(0, 106, 500, "BUY", 0.5, 0)) == "ABSORBING"
-    # and a subsequent breakout reaches AGGRESSION/LONG again
-    m.update(_bar(106), _vp(), _vwap(), None)
+    # and a subsequent near-POC accumulation + breakout reaches AGGRESSION/LONG again
+    m.update(_bar(101), _vp(), _vwap(), None)
+    m.update(_bar(102), _vp(), _vwap(), None)  # near POC -> ACCUMULATING
     assert m.update(_bar(110), _vp(), _vwap(), None) == "AGGRESSION"
     assert m.last_signal == "LONG"
 
@@ -55,6 +94,7 @@ def test_short_path():
     m = TripleAStateMachine()
     m.update(_bar(100), _vp(), _vwap(), None)
     m.update(_bar(100), _vp(), _vwap(), Absorption(0, 100, 500, "SELL", 0.5, 0))
-    m.update(_bar(99), _vp(), _vwap(), None)
-    m.update(_bar(95), _vp(), _vwap(), None)  # below VWAP-σ
+    m.update(_bar(100), _vp(), _vwap(), None)  # 1st elapsed bar
+    m.update(_bar(100), _vp(), _vwap(), None)  # 2nd elapsed bar near POC -> ACCUMULATING
+    assert m.update(_bar(95), _vp(), _vwap(), None) == "AGGRESSION"  # far below VWAP-σ
     assert m.last_signal == "SHORT"

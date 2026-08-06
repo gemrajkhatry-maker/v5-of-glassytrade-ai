@@ -24,15 +24,20 @@ class FakeChat:
 def _ticks():
     out = [Tick(f"t{i}", 100.0, 10, 6, 4) for i in range(300)]
     out.append(Tick("t300", 100.0, 500, 450, 50))
+    # two bars of accumulation at POC so ABSORBING -> ACCUMULATING can fire
+    out.append(Tick("t301", 100.0, 10, 6, 4))
+    out.append(Tick("t302", 100.0, 10, 6, 4))
     for i in range(1, 9):
-        out.append(Tick(f"t{300+i}", 100.0 + i * 0.2, 10, 6, 4))
+        out.append(Tick(f"t{302+i}", 100.0 + i * 0.2, 10, 6, 4))
     return out
 
 
 def _bar(tick, spike=False):
     if spike:
-        return Bar(time=tick.time, open=tick.price - 0.1, high=tick.price + 0.15,
-                   low=tick.price - 0.15, close=tick.price, volume=tick.volume,
+        # zero-range bar AT price: single-bucket POC so near-POC accumulation
+        # holds and AGGRESSION can fire on the breakout bar
+        return Bar(time=tick.time, open=tick.price, high=tick.price,
+                   low=tick.price, close=tick.price, volume=tick.volume,
                    buy_volume=tick.buy_volume, sell_volume=tick.sell_volume,
                    delta=tick.buy_volume - tick.sell_volume)
     return Bar(time=tick.time, open=tick.price, high=tick.price + 0.5,

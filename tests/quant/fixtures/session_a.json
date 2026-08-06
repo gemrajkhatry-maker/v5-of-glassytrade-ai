@@ -132,27 +132,27 @@
   {
     "time": "t26",
     "phase": "ABSORBING",
-    "vwap": 100.129
+    "vwap": 100.0
   },
   {
     "time": "t27",
-    "phase": "AGGRESSION",
-    "vwap": 100.375
+    "phase": "ACCUMULATING",
+    "vwap": 100.0
   },
   {
     "time": "t28",
-    "phase": "WAITING",
-    "vwap": 100.7273
+    "phase": "AGGRESSION",
+    "vwap": 100.1212
   },
   {
     "time": "t29",
     "phase": "WAITING",
-    "vwap": 101.1765
+    "vwap": 100.3529
   },
   {
     "time": "t30",
     "phase": "WAITING",
-    "vwap": 101.1429
+    "vwap": 100.6857
   },
   {
     "time": "t31",
@@ -201,43 +201,43 @@
   },
   {
     "time": "t40",
-    "phase": "ABSORBING",
-    "vwap": 100.8163
+    "phase": "WAITING",
+    "vwap": 100.8889
   },
   {
     "time": "t41",
-    "phase": "ABSORBING",
-    "vwap": 100.72
+    "phase": "WAITING",
+    "vwap": 100.8696
   },
   {
     "time": "t42",
-    "phase": "AGGRESSION",
-    "vwap": 100.549
+    "phase": "ABSORBING",
+    "vwap": 100.7843
   },
   {
     "time": "t43",
-    "phase": "WAITING",
-    "vwap": 100.3077
+    "phase": "ABSORBING",
+    "vwap": 100.7692
   },
   {
     "time": "t44",
-    "phase": "WAITING",
-    "vwap": 100.0
+    "phase": "ACCUMULATING",
+    "vwap": 100.7547
   },
   {
     "time": "t45",
-    "phase": "WAITING",
-    "vwap": 100.0
+    "phase": "AGGRESSION",
+    "vwap": 100.6667
   },
   {
     "time": "t46",
     "phase": "WAITING",
-    "vwap": 100.0
+    "vwap": 100.5091
   },
   {
     "time": "t47",
     "phase": "WAITING",
-    "vwap": 100.0
+    "vwap": 100.2857
   },
   {
     "time": "t48",
