@@ -8,6 +8,7 @@ This module sets up the dependency injection graph and starts the FastAPI applic
 """
 
 import faulthandler
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import MappingProxyType

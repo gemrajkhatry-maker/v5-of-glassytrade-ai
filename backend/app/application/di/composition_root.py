@@ -66,6 +66,11 @@ def compose_container(config: "Configuration") -> DIContainer:
         lambda c: _create_probability_adapter(c, config),
     )
 
+    container.register_singleton(
+        _quant_coordinator(),
+        lambda c: _create_quant_coordinator(c, config),
+    )
+
     # --- Additional Infrastructure Adapters ---
     container.register_singleton(
         _delta_profile_port(),
@@ -124,6 +129,11 @@ def _llm_inference_port():
 def _probability_inference_port():
     from quant.contracts.ports.probability_inference import IProbabilityInference
     return IProbabilityInference
+
+
+def _quant_coordinator():
+    from quant.coordinator import QuantCoordinator
+    return QuantCoordinator
 
 
 def _trading_session_service():
@@ -242,6 +252,54 @@ def _create_probability_adapter(container: DIContainer, config: "Configuration")
             ) from exc
         from quant.contracts.ports.probability_inference import NoOpProbabilityAdapter
         return NoOpProbabilityAdapter()
+
+
+def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
+    """Build the greenfield QuantCoordinator — the source of truth for the
+    WS viewer + REST shell. Reuses the same market-data / LLM / broker
+    adapters registered for the legacy engine; the coordinator only starts
+    its engines when main.py gates it via GREENFIELD_ENGINE=1."""
+    from quant.coordinator import QuantCoordinator
+    from quant.contracts.ports.market_data import IMarketData
+    from quant.contracts.ports.broker import IBroker
+    from quant.contracts.ports.llm_inference import ILLMInference
+
+    market_data = container.resolve(IMarketData)
+    broker = container.resolve(IBroker)
+    try:
+        llm_adapter = container.resolve(ILLMInference)
+    except Exception:
+        logger.warning(
+            "QuantCoordinator: LLM adapter unavailable — running without inference",
+            exc_info=True,
+        )
+        llm_adapter = None
+
+    candle_minutes = int(getattr(config, "candle_timeframe_minutes", 5) or 5)
+    coord_config = {
+        "underlyings": list(_settings.SCANNER_UNDERLYINGS or []),
+        "n": int(_settings.SCANNER_TOP_N or 4),
+        "exchange": _settings.DEFAULT_EXCHANGE or "NSE",
+        "expiry_index": int(_settings.SCANNER_EXPIRY_INDEX or 0),
+        "strikes_around_atm": int(_settings.STRIKES_AROUND_ATM or 2),
+        "interval_seconds": candle_minutes * 60,
+    }
+    logger.info(
+        "QuantCoordinator config: underlyings=%s n=%d exchange=%s expiry_index=%d "
+        "strikes_around_atm=%d interval_seconds=%d",
+        coord_config["underlyings"],
+        coord_config["n"],
+        coord_config["exchange"],
+        coord_config["expiry_index"],
+        coord_config["strikes_around_atm"],
+        coord_config["interval_seconds"],
+    )
+    return QuantCoordinator(
+        market_data=market_data,
+        inference=llm_adapter,
+        broker=broker,
+        config=coord_config,
+    )
 
 
 def _create_trading_session(container: DIContainer, config: "Configuration"):

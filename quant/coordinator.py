@@ -98,10 +98,12 @@ class QuantCoordinator:
         self._history: dict[str, list[dict]] = {}
         self._decisions: queue.Queue = queue.Queue()
         self._stop = threading.Event()
+        self.started = False
 
     def start(self) -> None:
         for symbol in self._scan():
             self._spawn_engine(symbol)
+        self.started = True
 
     def rescan(self) -> list[str]:
         self._stop_engines()
@@ -120,6 +122,7 @@ class QuantCoordinator:
     def stop(self) -> None:
         self._stop.set()
         self._stop_engines()
+        self.started = False
 
     def snapshot(self, symbol: str) -> dict:
         engine = self._engines.get(symbol)
