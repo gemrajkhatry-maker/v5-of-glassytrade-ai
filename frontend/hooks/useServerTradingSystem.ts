@@ -26,6 +26,8 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
     aiAnalysis: null,
     genAIAnalysis: null,
     amtAnalysis: null,
+    auctionAnalysis: null,
+    quantDecisionAnalysis: null,
     riskState: null,
     agentDecision: null,
     llmHistory: [],

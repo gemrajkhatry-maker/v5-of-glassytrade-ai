@@ -112,6 +112,17 @@ export interface Portfolio {
   closedTrades: TradePosition[];
 }
 
+export interface InstrumentStats {
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  netProfit: number;
+  avgProfit: number;
+  largestWin: number;
+  largestLoss: number;
+}
+
 /**
  * Encapsulates the complete state of a single trading instrument.
  */
@@ -130,7 +141,11 @@ export interface InstrumentState {
   llmHistory: LLMHistoryEntry[];
   overseerAction: string;
   overseerReason: string;
-  depth20Active: boolean;
+  depth20Active?: boolean;
+  modelWeights?: ModelWeights;
+  generation?: number;
+  predictions?: OHLCData[];
+  stats?: InstrumentStats | null;
   stale?: boolean;
   runtimeSafety?: RuntimeSafetyState;
   ltp?: number;
@@ -159,6 +174,7 @@ export interface ChartConfig {
   transmission: number;
   showGrid: boolean;
   autoRotate: boolean;
+  showPredictions: boolean;
   showVolumeProfile: boolean;
   vpMode: 'session' | 'leg' | 'combined' | 'off';
   trend: 'bullish' | 'bearish' | 'sideways' | 'volatile';
