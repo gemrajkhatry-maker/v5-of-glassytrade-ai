@@ -40,11 +40,6 @@ from .http_client import (
     DhanHttpClient,
 )
 
-# Sync HTTP client (legacy/sync-only helper; main path uses async DhanHttpClient)
-from .http_client_sync import (
-    DhanHttpClientSync,
-)
-
 # =============================================================================
 # WebSocket Client
 # =============================================================================
@@ -72,11 +67,6 @@ from .auth_provider import (
     DhanAuthProvider,
 )
 
-from .totp_generator import (
-    TOTPGenerator,
-    TOTPGenerationError,
-)
-
 # =============================================================================
 # Resilience
 # =============================================================================
@@ -98,7 +88,6 @@ __all__ = [
     # HTTP
     "RetryConfig",
     "DhanHttpClient",
-    "DhanHttpClientSync",
     # WebSocket
     "DhanWebSocketClient",
     "DepthWebSocketClient",
@@ -106,8 +95,6 @@ __all__ = [
     "DhanSymbolMapper",
     # Auth
     "DhanAuthProvider",
-    "TOTPGenerator",
-    "TOTPGenerationError",
     # Resilience
     "TokenBucketRateLimiter",
     "DhanCircuitBreaker",
