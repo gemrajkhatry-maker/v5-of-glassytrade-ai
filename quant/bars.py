@@ -16,3 +16,4 @@ class Bar:
     buy_volume: float = 0.0
     sell_volume: float = 0.0
     delta: float = 0.0
+    oi: float = 0.0

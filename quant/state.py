@@ -190,6 +190,7 @@ class StateProjector:
         s = self._symbol_state(event.symbol)
         if isinstance(event, BarClosed):
             s["ltp"] = float(event.bar.close)
+            s["oi"] = float(getattr(event.bar, "oi", 0.0) or 0.0)
             s["tick"] = _bar_to_tick(event.bar)
         elif isinstance(event, AuctionUpdated):
             s["auction"] = _auction_to_view(event.auction)

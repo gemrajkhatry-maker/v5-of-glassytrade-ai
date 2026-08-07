@@ -62,7 +62,8 @@ class BarAggregator:
         self._bar = Bar(time=tick.time, open=tick.price, high=tick.price,
                         low=tick.price, close=tick.price, volume=tick.volume,
                         buy_volume=tick.buy_volume, sell_volume=tick.sell_volume,
-                        delta=tick.buy_volume - tick.sell_volume)
+                        delta=tick.buy_volume - tick.sell_volume,
+                        oi=tick.oi)
 
     def _accumulate(self, tick: Tick, window: int | None) -> None:
         if self._bar is None:
@@ -79,4 +80,5 @@ class BarAggregator:
             sell_volume=bar.sell_volume + tick.sell_volume,
             delta=(bar.buy_volume + tick.buy_volume)
                   - (bar.sell_volume + tick.sell_volume),
+            oi=tick.oi,
         )
