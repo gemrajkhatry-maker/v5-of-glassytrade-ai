@@ -13,6 +13,8 @@ class Tick:
     volume: float
     buy_volume: float = 0.0
     sell_volume: float = 0.0
+    oi: float = 0.0
+    depth: dict | None = None
 
 
 class BrokerGateway(Protocol):

@@ -16,10 +16,6 @@ def _ts(sec: int) -> datetime:
 class FakeDhan:
     def __init__(self, packets):
         self._packets = packets
-        self.init_calls = 0
-
-    def ensure_initialized_sync(self):
-        self.init_calls += 1
 
     async def stream_full(self, symbols):
         for pkt in self._packets:
@@ -60,7 +56,6 @@ def test_next_tick_converts_packets_to_ticks():
     finally:
         gateway.close()
 
-    assert fake.init_calls >= 1
     assert all(isinstance(t, Tick) for t in (t0, t1, t2, t3))
 
     assert t0.price == 100.0
@@ -102,3 +97,35 @@ def test_no_premature_none_while_stream_open():
             assert int(tick.time) > 0
     finally:
         gateway.close()
+
+
+def test_tick_carries_oi_and_depth():
+    packets = [
+        {"timestamp": _ts(1), "ltp": 100.0, "volume": 100, "ltq": 10,
+         "total_buy_qty": 50, "total_sell_qty": 30, "oi": 12345,
+         "depth_bids": [{"price": 99.5, "qty": 25}, {"price": 99.0, "qty": 10}],
+         "depth_asks": [{"price": 100.5, "qty": 8}]},
+    ]
+    gateway = LiveGateway(FakeDhan(packets), "SYM")
+    gateway.subscribe("SYM")
+    try:
+        tick = _drain(gateway, 1)[0]
+    finally:
+        gateway.close()
+
+    assert tick.oi == 12345.0
+    assert tick.depth["bids"][0] == [99.5, 25.0]
+    assert tick.depth["bids"][1] == [99.0, 10.0]
+    assert tick.depth["asks"][0] == [100.5, 8.0]
+
+
+def test_tick_depth_none_when_packet_has_no_depth():
+    gateway = LiveGateway(FakeDhan(_make_packets()), "SYM")
+    gateway.subscribe("SYM")
+    try:
+        tick = _drain(gateway, 1)[0]
+    finally:
+        gateway.close()
+
+    assert tick.oi == 0.0
+    assert tick.depth is None

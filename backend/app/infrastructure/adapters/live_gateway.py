@@ -102,12 +102,23 @@ class LiveGateway:
                 max(0.0, cum_sell - prev_sell) if prev_sell is not None else 0.0
             )
 
+            depth = None
+            db = pkt.get("depth_bids") or []
+            da = pkt.get("depth_asks") or []
+            if db or da:
+                depth = {
+                    "bids": [[float(b["price"]), float(b["qty"])] for b in db[:5]],
+                    "asks": [[float(a["price"]), float(a["qty"])] for a in da[:5]],
+                }
+
             tick = Tick(
                 time=str(int(pkt["timestamp"].timestamp())),
                 price=float(pkt["ltp"]),
                 volume=volume,
                 buy_volume=buy_volume,
                 sell_volume=sell_volume,
+                oi=float(pkt.get("oi") or 0),
+                depth=depth,
             )
             return tick, cum_vol, cum_buy, cum_sell
         except Exception:
