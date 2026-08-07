@@ -1,127 +1,179 @@
-"""Prometheus-style metrics registry for trading system."""
+"""Prometheus-style metrics registry for trading system.
+
+Backed by ``prometheus_client`` (v0.26+). The public surface is identical to
+the previous hand-rolled registry: the module exposes ``metrics`` (a
+``MetricsRegistry`` singleton), the ``Metric``/``Counter``/``Histogram``/
+``Gauge`` wrapper classes and the convenience metric objects, so existing
+consumers do not need to change.
+"""
+
+from __future__ import annotations
 
 import threading
-import time
-from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Callable
+from typing import Any
+
+from prometheus_client import (
+    CollectorRegistry,
+    Counter as _PromCounter,
+    Gauge as _PromGauge,
+    Histogram as _PromHistogram,
+    disable_created_metrics,
+    generate_latest,
+)
+
+# Bucket boundaries matching the previous hand-rolled implementation.
+# prometheus_client appends the +Inf bucket automatically.
+_HISTOGRAM_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
+
+# Keep the exposition surface identical to the old registry (no _created series).
+disable_created_metrics()
+
+_FACTORIES = {"counter": _PromCounter, "gauge": _PromGauge, "histogram": _PromHistogram}
 
 
-@dataclass
+def _create_family(kind: str, name: str, help: str, labelnames: tuple[str, ...]) -> Any:
+    kwargs: dict[str, Any] = {
+        "name": name,
+        "documentation": help,
+        "registry": CollectorRegistry(),
+    }
+    if labelnames:
+        kwargs["labelnames"] = list(labelnames)
+    if kind == "histogram":
+        kwargs["buckets"] = list(_HISTOGRAM_BUCKETS)
+    return _FACTORIES[kind](**kwargs)
+
+
 class Metric:
-    """Base metric class."""
-    name: str
-    help: str
-    labels: dict[str, str] = field(default_factory=dict)
+    """Base metric wrapper around a prometheus_client metric."""
+
+    def __init__(self, name: str, help: str, labels: dict[str, str], child: Any) -> None:
+        self.name = name
+        self.help = help
+        self.labels = dict(labels)
+        self._child = child
 
 
-@dataclass
 class Counter(Metric):
     """Counter metric - only increases."""
-    value: float = 0.0
-    
+
     def inc(self, amount: float = 1.0) -> None:
-        self.value += amount
+        self._child.inc(amount)
+
+    @property
+    def value(self) -> float:
+        for family in self._child.collect():
+            for sample in family.samples:
+                if not sample.name.endswith("_created"):
+                    return sample.value
+        return 0.0
 
 
-@dataclass
 class Histogram(Metric):
     """Histogram metric for distributions."""
-    buckets: dict[float, int] = field(default_factory=lambda: defaultdict(int))
-    sum_val: float = 0.0
-    count: int = 0
-    
+
     def observe(self, value: float) -> None:
-        self.sum_val += value
-        self.count += 1
-        # Standard buckets: 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10
-        for bucket in [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, float('inf')]:
-            if value <= bucket:
-                self.buckets[bucket] += 1
-                break
+        self._child.observe(value)
+
+    @property
+    def count(self) -> float:
+        for family in self._child.collect():
+            for sample in family.samples:
+                if sample.name.endswith("_count"):
+                    return sample.value
+        return 0.0
+
+    @property
+    def sum_val(self) -> float:
+        for family in self._child.collect():
+            for sample in family.samples:
+                if sample.name.endswith("_sum"):
+                    return sample.value
+        return 0.0
 
 
-@dataclass
 class Gauge(Metric):
     """Gauge metric - can go up or down."""
-    value: float = 0.0
-    
+
     def set(self, value: float) -> None:
-        self.value = value
+        self._child.set(value)
+
+    @property
+    def value(self) -> float:
+        for family in self._child.collect():
+            for sample in family.samples:
+                if not sample.name.endswith("_created"):
+                    return sample.value
+        return 0.0
 
 
 class MetricsRegistry:
-    """Thread-safe metrics registry."""
-    
+    """Thread-safe metrics registry backed by prometheus_client."""
+
     _instance: "MetricsRegistry | None" = None
     _lock = threading.Lock()
-    
+
     def __new__(cls) -> "MetricsRegistry":
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
         return cls._instance
-    
+
     def __init__(self):
-        if hasattr(self, '_initialized'):
+        if hasattr(self, "_initialized"):
             return
         self._initialized = True
         self._metrics: dict[str, Metric] = {}
+        self._families: dict[tuple[str, tuple[str, ...]], Any] = {}
         self._lock = threading.Lock()
-    
+
     def counter(self, name: str, help: str, labels: dict[str, str] | None = None) -> Counter:
         """Get or create a counter."""
-        key = self._metric_key(name, labels)
-        with self._lock:
-            if key not in self._metrics:
-                self._metrics[key] = Counter(name=name, help=help, labels=labels or {})
-            return self._metrics[key]
-    
+        return self._get(name, help, labels, "counter")
+
     def histogram(self, name: str, help: str, labels: dict[str, str] | None = None) -> Histogram:
         """Get or create a histogram."""
-        key = self._metric_key(name, labels)
-        with self._lock:
-            if key not in self._metrics:
-                self._metrics[key] = Histogram(name=name, help=help, labels=labels or {})
-            return self._metrics[key]
-    
+        return self._get(name, help, labels, "histogram")
+
     def gauge(self, name: str, help: str, labels: dict[str, str] | None = None) -> Gauge:
         """Get or create a gauge."""
+        return self._get(name, help, labels, "gauge")
+
+    def _get(self, name: str, help: str, labels: dict[str, str] | None, kind: str) -> Metric:
+        labels = dict(labels) if labels else {}
         key = self._metric_key(name, labels)
         with self._lock:
-            if key not in self._metrics:
-                self._metrics[key] = Gauge(name=name, help=help, labels=labels or {})
-            return self._metrics[key]
-    
-    def _metric_key(self, name: str, labels: dict[str, str] | None) -> str:
+            existing = self._metrics.get(key)
+            if existing is not None:
+                return existing
+
+            sig = tuple(sorted(labels))
+            fam_key = (name, sig)
+            family = self._families.get(fam_key)
+            if family is None:
+                family = _create_family(kind, name, help, sig)
+                self._families[fam_key] = family
+
+            child = family.labels(**labels) if labels else family
+            wrapper = {"counter": Counter, "gauge": Gauge, "histogram": Histogram}[kind](
+                name, help, labels, child
+            )
+            self._metrics[key] = wrapper
+            return wrapper
+
+    def _metric_key(self, name: str, labels: dict[str, str]) -> str:
         if not labels:
             return name
         label_str = ",".join(f"{k}={v}" for k, v in sorted(labels.items()))
         return f"{name}{{{label_str}}}"
-    
+
     def to_prometheus(self) -> str:
-        """Export metrics in Prometheus format."""
-        lines = []
+        """Export metrics in Prometheus text format."""
         with self._lock:
-            for metric in self._metrics.values():
-                lines.append(f"# HELP {metric.name} {metric.help}")
-                lines.append(f"# TYPE {metric.name} {type(metric).__name__.lower()}")
-                
-                if isinstance(metric, Counter):
-                    lines.append(f"{self._metric_key(metric.name, metric.labels)} {metric.value}")
-                
-                elif isinstance(metric, Gauge):
-                    lines.append(f"{self._metric_key(metric.name, metric.labels)} {metric.value}")
-                
-                elif isinstance(metric, Histogram):
-                    for bucket, count in metric.buckets.items():
-                        le = "+Inf" if bucket == float('inf') else bucket
-                        lines.append(f'{self._metric_key(metric.name, metric.labels)}_bucket{{le="{le}"}} {count}')
-                    lines.append(f"{self._metric_key(metric.name, metric.labels)}_sum {metric.sum_val}")
-                    lines.append(f"{self._metric_key(metric.name, metric.labels)}_count {metric.count}")
-        
-        return "\n".join(lines)
+            families = list(self._families.values())
+        blocks = [generate_latest(family).decode().rstrip("\n") for family in families]
+        return "\n".join(blocks)
 
 
 # Global metrics registry
