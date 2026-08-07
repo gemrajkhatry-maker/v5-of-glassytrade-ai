@@ -33,10 +33,6 @@ def validate_config(config: SystemConfig) -> None:
     if config.is_live() and config.broker_mode != "live":
         errors.append("RULE-2: live environment requires broker_mode='live'.")
 
-    # RULE-3: In live mode: llm_entry_gate must be false
-    if config.is_live() and config.flags.llm_entry_gate:
-        errors.append("RULE-3: live environment requires llm_entry_gate=false.")
-
     # RULE-4: In live mode: capital ≥ ₹10,00,000
     if config.is_live() and config.capital < 1000000:
         errors.append(

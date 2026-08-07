@@ -119,20 +119,6 @@ class TestConfigValidator:
         with pytest.raises(ConfigValidationError, match="RULE-2"):
             validate_config(config)
 
-    def test_rule3_live_requires_llm_entry_gate_false(self):
-        config = SystemConfig(
-            environment="live",
-            broker_mode="live",
-            flags=FeatureFlags(llm_entry_gate=True),
-            exchanges={
-                "NSE": ExchangeConfig(
-                    name="NSE", symbols={"NIFTY": SymbolConfig(name="NIFTY")}
-                )
-            },
-        )
-        with pytest.raises(ConfigValidationError, match="RULE-3"):
-            validate_config(config)
-
     def test_rule5_risk_per_trade_too_high(self):
         config = SystemConfig(
             risk=RiskConfig(risk_per_trade_pct=0.05),
@@ -233,14 +219,13 @@ class TestFeatureFlags:
     def test_defaults(self):
         flags = FeatureFlags()
         assert flags.true_delta_lee_ready is False
-        assert flags.llm_entry_gate is False
         assert flags.llm_overseer is True
         assert flags.realistic_cost_model is False
 
     def test_immutable(self):
         flags = FeatureFlags()
         with pytest.raises(AttributeError):
-            flags.llm_entry_gate = True
+            flags.llm_overseer = False
 
 
 class TestMLThresholds:
