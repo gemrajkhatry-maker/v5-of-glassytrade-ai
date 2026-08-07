@@ -18,6 +18,8 @@ import asyncio
 import pytest
 from datetime import datetime, timedelta
 
+from quant.contracts.timezones import IST
+
 # ---------------------------------------------------------------------------
 # Skip all tests in this file when credentials are absent
 # ---------------------------------------------------------------------------
@@ -31,6 +33,32 @@ def _skip_if_no_creds():
     if not (os.environ.get("DHAN_CLIENT_ID") and os.environ.get("DHAN_ACCESS_TOKEN")):
         pytest.skip(
             "Set DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN to run integration tests"
+        )
+
+
+def _market_hours():
+    """Return (NSE open, NSE close, MCX evening open, MCX evening close) in IST."""
+    nse_open = datetime.now(IST).replace(hour=9, minute=15, second=0, microsecond=0)
+    nse_close = datetime.now(IST).replace(hour=15, minute=30, second=0, microsecond=0)
+    mcx_open = datetime.now(IST).replace(hour=17, minute=0, second=0, microsecond=0)
+    mcx_close = datetime.now(IST).replace(hour=23, minute=0, second=0, microsecond=0)
+    return nse_open, nse_close, mcx_open, mcx_close
+
+
+def _skip_if_market_closed(market: str = "NSE"):
+    """Skip live-data tests when the relevant exchange market is closed (IST)."""
+    now = datetime.now(IST)
+    nse_open, nse_close, mcx_open, mcx_close = _market_hours()
+    if market == "NSE":
+        open_time, close_time = nse_open, nse_close
+    elif market == "MCX":
+        open_time, close_time = mcx_open, mcx_close
+    else:
+        pytest.skip(f"Unknown market {market!r}")
+    if not (open_time <= now <= close_time):
+        pytest.skip(
+            f"{market} market closed (IST {now:%H:%M}) — live data tests "
+            f"only run during {open_time:%H:%M}–{close_time:%H:%M} IST"
         )
 
 
@@ -147,6 +175,7 @@ class TestDhanGetQuote:
     def test_get_quote_nifty(self, gateway):
         """get_quote for NIFTY returns a valid Quote with ltp > 0."""
         _skip_if_no_creds()
+        _skip_if_market_closed("NSE")
         from brokers.broker.entities import Quote
         from brokers.broker.types import Exchange
 
@@ -159,6 +188,7 @@ class TestDhanGetQuote:
     def test_get_quotes_batch(self, gateway):
         """get_quotes returns a dict of Quotes."""
         _skip_if_no_creds()
+        _skip_if_market_closed("NSE")
         import time
         from brokers.broker.entities import Quote
         from brokers.broker.types import Exchange
@@ -179,6 +209,7 @@ class TestDhanOptionChain:
     def test_get_option_chain_nifty(self, gateway):
         """get_option_chain for NIFTY returns chain with ATM > 0 and non-empty calls/puts."""
         _skip_if_no_creds()
+        _skip_if_market_closed("NSE")
         from brokers.broker.entities import OptionChain
         from brokers.broker.types import Exchange
 
@@ -243,6 +274,7 @@ class TestDhanStreaming:
     async def test_stream_ticker_2_ticks(self, gateway):
         """stream_ticker yields at least 2 ticks during market hours."""
         _skip_if_no_creds()
+        _skip_if_market_closed("MCX")
         from brokers.broker.entities import Tick
         from brokers.broker.types import Exchange
 
