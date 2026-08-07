@@ -10,7 +10,6 @@ from fastapi import Depends, Request
 from typing import Annotated
 
 # Module-level singletons (created by init_singletons() in main.py)
-_trading_session = None
 _broker = None
 _storage = None
 _gen_ai_service = None
@@ -20,7 +19,6 @@ _active_symbols = []
 
 
 def init_singletons(
-    trading_session,
     broker,
     storage,
     gen_ai_service,
@@ -29,10 +27,9 @@ def init_singletons(
     active_symbols,
 ) -> None:
     """Initialize module-level singletons at startup (called from main.py)."""
-    global _trading_session, _broker, _storage, _gen_ai_service
+    global _broker, _storage, _gen_ai_service
     global _market_data, _configuration, _active_symbols
 
-    _trading_session = trading_session
     _broker = broker
     _storage = storage
     _gen_ai_service = gen_ai_service
@@ -42,11 +39,6 @@ def init_singletons(
 
 
 # FastAPI dependency functions
-def get_trading_session() -> "TradingSessionService":
-    """Dependency: Trading session service."""
-    return _trading_session
-
-
 def get_broker() -> "IBroker":
     """Dependency: Broker adapter."""
     return _broker
@@ -78,7 +70,6 @@ def get_active_symbols() -> list:
 
 
 # Annotated types for FastAPI
-TradingSessionDep = Annotated["TradingSessionService", Depends(get_trading_session)]
 BrokerDep = Annotated["IBroker", Depends(get_broker)]
 StorageDep = Annotated["IStorage", Depends(get_storage)]
 GenAIDep = Annotated["GenerativeAIService", Depends(get_gen_ai_service)]

@@ -22,12 +22,10 @@ from quant.probability.features import (
     PROBABILITY_FEATURE_SCHEMA_VERSION,
 )
 from app.api.dependencies import (
-    TradingSessionDep,
     BrokerDep,
     StorageDep,
     ConfigDep,
     ActiveSymbolsDep,
-    get_trading_session,
     get_broker,
     get_storage,
     get_configuration,
@@ -72,7 +70,6 @@ def _bootstrap_active_symbols(graph) -> list[str]:
 @router.get("/health")
 async def health_check(
     request: Request,
-    trading_session: TradingSessionDep, 
     broker: BrokerDep, 
     storage: StorageDep, 
     config: ConfigDep
@@ -88,14 +85,10 @@ async def health_check(
         logger.warning("Health check: database failed: %s", e)
         checks["database"] = f"error: {e}"
 
-    # LLM check (critical for trading) - use gen_ai_service from the llm_handler
+    # LLM check (critical for trading) - use the DI gen_ai_service directly
     try:
         runtime_state: dict[str, object] | None = None
-        # Get gen_ai_service from llm_handler since TradingSessionService doesn't expose it directly
-        llm_handler = getattr(trading_session, "_llm_handler", None)
-        gen_ai = getattr(llm_handler, "_gen_ai_service", None) if llm_handler else None
-        if gen_ai is None:
-            gen_ai = getattr(trading_session, "_gen_ai_service", None)
+        gen_ai = get_gen_ai_service()
         if gen_ai is not None:
             llm_ready = gen_ai.is_ready() if hasattr(gen_ai, "is_ready") else False
             load_error = getattr(gen_ai, '_load_error', None)
@@ -183,7 +176,6 @@ async def readiness_check(request: Request):
     checks: dict[str, str] = {}
     
     # Resolve dependencies directly since we don't have them injected in this route
-    trading_session = get_trading_session()
     storage = get_storage()
 
     # Database
@@ -200,7 +192,7 @@ async def readiness_check(request: Request):
 
     # LLM
     try:
-        gen_ai_service = getattr(trading_session, "_gen_ai_service", None)
+        gen_ai_service = get_gen_ai_service()
         llm_state = None
         llm_ready = gen_ai_service.is_ready() if gen_ai_service else False
         llm_state = (
@@ -222,10 +214,10 @@ async def readiness_check(request: Request):
         if reason:
             checks["llm_state_reason"] = str(reason)
 
-    # Trading engine
+    # QuantCoordinator (the decision brain — replaces the legacy engine)
     try:
-        engine = getattr(request.app.state, "engine", None)
-        running = getattr(engine, "_lifecycle", None) and getattr(engine._lifecycle, "running", False)
+        coordinator = getattr(request.app.state, "coordinator", None)
+        running = bool(coordinator) and bool(getattr(coordinator, "started", False))
         checks["engine"] = "ok" if running else "not_started"
     except Exception as e:
         checks["engine"] = f"error: {e}"
@@ -313,64 +305,9 @@ async def metrics():
     return MetricsCollector().snapshot()
 
 
-@router.post("/system/halt")
-async def system_halt(request: Request):
-    """Emergency kill switch — immediately halt all trading."""
-    try:
-        trading_session = get_trading_session()
-        trading_session.halt_trading()
-        return {"status": "halted"}
-    except Exception as e:
-        logger.error("Halt failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/system/resume")
-async def system_resume(request: Request):
-    """Clear the emergency kill switch and resume trading."""
-    try:
-        trading_session = get_trading_session()
-        trading_session.resume_trading()
-        return {"status": "resumed"}
-    except Exception as e:
-        logger.error("Resume failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/system/playbook-guard/reset")
-async def system_playbook_guard_reset(request: Request, symbol: str | None = Query(None)):
-    """Clear playbook-guard rejections for one symbol or all active sessions."""
-    trading_session = get_trading_session()
-    result = trading_session.reset_playbook_guard(symbol=symbol)
-    return {"status": "reset", **result}
-
-
-@router.get("/system/risk-state")
-async def system_risk_state(request: Request):
-    """Return current risk manager state."""
-    trading_session = get_trading_session()
-    state = trading_session.get_system_risk_state()
-    return {
-        "halted": state.halted,
-        "haltReason": state.halt_reason,
-        "dailyDrawdownPct": round(state.daily_drawdown_pct, 6),
-        "consecutiveLosses": state.consecutive_losses,
-        "peakEquity": state.peak_equity,
-        "currentEquity": state.current_equity,
-        "driftAlert": state.drift_alert,
-        "driftMessage": state.drift_message,
-    }
-
-
 @router.get("/system/config")
 async def system_config(request: Request):
     """Return backend configuration for frontend auto-detection."""
-    trading_session = get_trading_session()
-    if trading_session is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Trading session unavailable; backend not ready for trading.",
-        )
     gen_ai_service = get_gen_ai_service()
     llm_ready = gen_ai_service.is_ready() if hasattr(gen_ai_service, 'is_ready') else False
     prob_ready = True
@@ -409,8 +346,8 @@ async def system_config(request: Request):
         "llmEntryOutputFormat": "json",
         "llmModelPath": settings.MLX_MODEL_PATH,
         "llmDevice": llm_device,
-        "runId": getattr(trading_session, "_experiment", None).run_id if getattr(trading_session, "_experiment", None) else "",
-        "configFingerprint": getattr(trading_session, "_experiment", None).config_fingerprint if getattr(trading_session, "_experiment", None) else "",
+        "runId": "",
+        "configFingerprint": "",
         "serverDriven": bool(settings.DHAN_CLIENT_ID),
         "backendPort": settings.PORT,
     }

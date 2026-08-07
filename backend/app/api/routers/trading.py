@@ -1,14 +1,13 @@
 """Trading router — portfolio, stats, and lifecycle REST endpoints."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from app.application.services.trading_session import TradingSessionService
-
-from app.api.dependencies import get_storage, get_trade_journal, get_trading_session
+from app.api.dependencies import get_storage, get_trade_journal
 from quant.contracts.ports.storage import IStorage
+from quant.contracts.aggregates import Portfolio
 from app.application.services.trading_query_service import TradingQueryService
 from app.core.async_boundary import ensure_sync_adapter_result
 from app.infrastructure.serialization.schemas import (
@@ -22,10 +21,11 @@ router = APIRouter(prefix="/trading", tags=["trading"])
 
 
 @router.post("/portfolio/create")
-async def create_portfolio(
-    session: TradingSessionService = Depends(get_trading_session),
-):
-    portfolio = session.create_portfolio()
+async def create_portfolio():
+    """Create a default greenfield portfolio (legacy session service removed)."""
+    from app.config import settings
+
+    portfolio = Portfolio.create_default(Decimal(str(settings.CAPITAL)))
     return portfolio_to_dto(portfolio)
 
 

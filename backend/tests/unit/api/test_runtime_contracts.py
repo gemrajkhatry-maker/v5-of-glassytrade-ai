@@ -24,19 +24,11 @@ def _load_module(name: str, relative_path: str):
 
 
 health = _load_module("health_router_test_mod", "app/api/routers/health.py")
-gameloop = _load_module("gameloop_ws_test_mod", "app/api/websocket/gameloop.py")
 
 
 class _ReadyAdapter:
     def is_ready(self) -> bool:
         return True
-
-
-class _StubTradingSession:
-    _experiment = None
-    
-    def cleanup(self):
-        pass
 
 
 @pytest.mark.asyncio
@@ -45,14 +37,9 @@ async def test_system_config_reports_runtime_port_and_symbols(monkeypatch):
         llm_inference=_ReadyAdapter(),
         probability_engine=_ReadyAdapter(),
         active_symbols=["NIFTY25000CE", "NIFTY25000PE"],
-        trading_session=_StubTradingSession(),
     )
     fake_app = SimpleNamespace(state=SimpleNamespace(service_graph=graph))
     fake_request = SimpleNamespace(app=fake_app)
-    
-    # Mock get_trading_session to return the stub session
-    def _mock_get_session():
-        return graph.trading_session
     
     # Mock get_active_symbols to return the graph's active symbols
     def _mock_get_active_symbols():
@@ -62,7 +49,6 @@ async def test_system_config_reports_runtime_port_and_symbols(monkeypatch):
     def _mock_get_gen_ai():
         return _ReadyAdapter()
     
-    monkeypatch.setattr(health, "get_trading_session", _mock_get_session)
     monkeypatch.setattr(health, "get_active_symbols", _mock_get_active_symbols)
     monkeypatch.setattr(health, "get_gen_ai_service", _mock_get_gen_ai)
 
@@ -84,49 +70,6 @@ def test_bootstrap_active_symbols_never_empty(monkeypatch):
     )
     assert health._bootstrap_active_symbols(graph) == ["CRUDEOIL"]
 
-
-class _FakeWebSocket:
-    def __init__(self) -> None:
-        self.sent: list[dict] = []
-
-    async def send_json(self, data: dict) -> None:
-        self.sent.append(data)
-
-
-class _FakeEngine:
-    generation = 1
-
-    def get_active_symbols(self) -> list[str]:
-        return ["NIFTY25000CE"]
-
-    def get_history(self, _sym: str):
-        return []
-
-    def get_latest_state(self, sym: str):
-        return {"_symbol": sym, "lastPrice": 100.0}
-
-    async def wait_for_update(self, known_gen: int, timeout: float = 5.0) -> int:
-        await asyncio.sleep(0)
-        return known_gen
-
-
-@pytest.mark.asyncio
-async def test_viewer_loop_sends_server_mode_and_full_snapshot(monkeypatch):
-    async def _stop_client_listener(_ws):
-        return
-
-    monkeypatch.setattr(gameloop, "_listen_for_client", _stop_client_listener)
-
-    ws = _FakeWebSocket()
-    graph = SimpleNamespace(engine=_FakeEngine())
-
-    await gameloop._viewer_loop(ws, graph, "NIFTY25000CE")
-
-    assert ws.sent
-    first = ws.sent[0]
-    assert first["status"] == "server_mode"
-    assert "activeSymbols" in first
-    assert any(msg.get("_type") == "full" for msg in ws.sent)
 
 
 @pytest.mark.asyncio

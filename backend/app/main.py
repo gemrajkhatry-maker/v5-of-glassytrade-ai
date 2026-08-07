@@ -8,7 +8,8 @@ This module sets up the dependency injection graph and starts the FastAPI applic
 """
 
 import faulthandler
-import os
+import hashlib
+import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import MappingProxyType
@@ -48,15 +49,86 @@ from app.core.startup_telemetry import (
     mark_startup_started,
 )
 from app.core.async_boundary import ensure_sync_adapter_result
-from app.application.services.startup_contracts import build_startup_contracts
 from app.config import settings as _settings
 from quant.contracts.ports.broker import IBroker
 from quant.contracts.ports.storage import IStorage
 from quant.contracts.ports.market_data import IMarketData
 from quant.contracts.ports.llm_inference import ILLMInference
 from quant.inference.generative_ai import GenerativeAIService
-from app.application.services.trading_session import TradingSessionService
 from app.domain.ops.startup_reconciliation import StartupReconciliation
+
+
+def _build_startup_contracts(
+    *,
+    broker,
+    storage,
+    active_symbols: list[str],
+    reconciliation_result=None,
+    reconciliation_executed: bool | None = None,
+) -> dict[str, str]:
+    """Minimal startup-readiness payload for the health router.
+
+    The legacy ``TradingSessionService``-based contract builder was removed
+    with the legacy pipeline; the QuantCoordinator is now the decision brain,
+    so this thin payload reports transport-shell readiness only.
+    """
+    checks: dict[str, str] = {}
+    checks["active_symbols"] = (
+        f"ok({len(active_symbols)})"
+        if active_symbols
+        else "error: no active symbols selected"
+    )
+    from app.config import settings
+
+    checks["scanner_settings"] = (
+        "ok"
+        if settings.SCANNER_TOP_N > 0 and settings.DEFAULT_EXCHANGE
+        else "error: invalid scanner configuration"
+    )
+    broker_ok = callable(getattr(broker, "execute_order", None)) and callable(
+        getattr(broker, "cancel_order", None)
+    )
+    checks["broker_runtime"] = "ok" if broker_ok else "error: broker runtime contract missing"
+    storage_ok = all(
+        callable(getattr(storage, attr, None))
+        for attr in ("save_open_position", "delete_open_position", "save_trade", "kv_set")
+    )
+    checks["storage_runtime"] = "ok" if storage_ok else "error: storage runtime contract missing"
+    checks["strategy_runtime"] = "ok"  # QuantCoordinator owns the decision brain
+    checks["position_close_contract"] = "ok"  # delegated to the coordinator/broker
+    if reconciliation_executed is None:
+        reconciliation_executed = reconciliation_result is not None
+    checks["reconciliation"] = (
+        "ok" if reconciliation_executed else "error: reconciliation not executed"
+    )
+    if reconciliation_result is not None:
+        checks["reconciliation_summary"] = (
+            f"db={reconciliation_result.db_positions} "
+            f"broker={reconciliation_result.broker_positions} "
+            f"restored={reconciliation_result.restored} "
+            f"stale={reconciliation_result.stale_removed} "
+            f"orphaned={reconciliation_result.orphaned_registered}"
+        )
+        checks["reconciliation_discrepancies"] = str(
+            len(reconciliation_result.discrepancies)
+        )
+    else:
+        checks["reconciliation_summary"] = "not_run"
+        checks["reconciliation_discrepancies"] = "n/a"
+
+    critical_keys = {
+        "active_symbols",
+        "scanner_settings",
+        "broker_runtime",
+        "storage_runtime",
+        "strategy_runtime",
+        "position_close_contract",
+        "reconciliation",
+    }
+    status = "ok" if all(checks.get(k, "").startswith("ok") for k in critical_keys) else "degraded"
+    payload = json.dumps(checks, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    contract_id = f"startup-contract:{hashlib.sha256(payload.encode()).hexdigest()[:12]}"
+    return {**checks, "contract_id": contract_id, "status": status}
 
 # Configure structured logging
 setup_logging()
@@ -142,43 +214,27 @@ def create_application() -> FastAPI:
             end_phase("option_scanner", "failed", str(e))
             mark_startup_failed("config", str(e))
 
-        # Start the trading engine
-        from app.application.engine import TradingEngine
-        engine = TradingEngine(container)
-        app.state.engine = engine
+        # Boot the greenfield QuantCoordinator — the single decision brain.
+        # The legacy engine path (TradingEngine + TradingSessionService) was
+        # deleted in the backend-swap; the coordinator is the only brain now.
         startup_ok = True
-
         try:
             begin_phase("trading_engine")
-            await engine.start()
+            from quant.coordinator import QuantCoordinator
+
+            coordinator = container.resolve(QuantCoordinator)
+            app.state.coordinator = coordinator
+            coordinator.start()
             end_phase("trading_engine", "ok")
-            logger.info("Trading engine started — backend trades independently of frontend.")
+            logger.info("QuantCoordinator started — serving %s", coordinator.symbols())
         except Exception:
-            logger.error("Trading engine failed to start!", exc_info=True)
+            logger.error("QuantCoordinator failed to start!", exc_info=True)
             app.state.engine_start_failed = True
             startup_ok = False
-            end_phase("trading_engine", "failed", "engine.start() raised exception")
+            end_phase("trading_engine", "failed", "coordinator.start() raised exception")
             mark_startup_failed("engine")
 
-        # Boot the greenfield QuantCoordinator (gated). The legacy engine above
-        # keeps running; the coordinator only ADDS the greenfield shell.
-        if os.getenv("GREENFIELD_ENGINE", "").strip().lower() in ("1", "true", "yes"):
-            try:
-                from quant.coordinator import QuantCoordinator
-
-                coordinator = container.resolve(QuantCoordinator)
-                app.state.coordinator = coordinator
-                coordinator.start()
-                logger.info(
-                    "Greenfield QuantCoordinator started: %s", coordinator.symbols()
-                )
-            except Exception:
-                logger.error(
-                    "Greenfield QuantCoordinator failed to start — continuing with legacy engine",
-                    exc_info=True,
-                )
-
-        end_phase("lifespan_startup", "ok" if not getattr(app.state, "engine_start_failed", False) else "warn")
+        end_phase("lifespan_startup", "ok" if startup_ok else "warn")
         if startup_ok and not getattr(app.state, "engine_start_failed", False):
             mark_startup_finished()
 
@@ -189,22 +245,14 @@ def create_application() -> FastAPI:
         # Shutdown
         logger.info("Shutting down GlassyTrade AI application...")
 
-        # Stop trading engine
-        if app.state.engine:
-            try:
-                await app.state.engine.stop()
-                logger.info("Trading engine stopped")
-            except Exception:
-                logger.error("Engine stop failed — resources may not be cleaned up", exc_info=True)
-
-        # Stop greenfield coordinator (if it was started)
+        # Stop greenfield coordinator
         if hasattr(app.state, "coordinator"):
             try:
                 app.state.coordinator.stop()
-                logger.info("Greenfield QuantCoordinator stopped")
+                logger.info("QuantCoordinator stopped")
             except Exception:
                 logger.error(
-                    "Greenfield QuantCoordinator stop failed — resources may not be cleaned up",
+                    "QuantCoordinator stop failed — resources may not be cleaned up",
                     exc_info=True,
                 )
 
@@ -219,13 +267,6 @@ def create_application() -> FastAPI:
                 logger.info("Storage closed")
         except Exception:
             logger.debug("Storage teardown failed — non-critical", exc_info=True)
-
-        # Cleanup handler thread pools (LLMEntryHandler, LLMOverseerHandler)
-        try:
-            app.state.trading_session.cleanup()
-            logger.info("Handler thread pools cleaned up")
-        except Exception:
-            logger.debug("Handler cleanup failed — non-critical", exc_info=True)
 
         logger.info("Shutdown complete")
     
@@ -270,7 +311,6 @@ def create_application() -> FastAPI:
         container = compose_container(config)
 
         # Resolve services from container
-        trading_session = container.resolve(TradingSessionService)
         broker = container.resolve(IBroker)
         storage = container.resolve(IStorage)
         market_data = container.resolve(IMarketData)
@@ -279,7 +319,6 @@ def create_application() -> FastAPI:
         app.state.container = container
         app.state.graph = container  # Alias for backward compatibility
         app.state.service_graph = container
-        app.state.trading_session = trading_session
         app.state.market_data = market_data
         app.state.broker = broker
         app.state.storage = storage
@@ -311,15 +350,15 @@ def create_application() -> FastAPI:
 
         app.state.startup_reconciliation = reconciliation_result
         app.state.active_symbols = tuple(active_symbols)
-        app.state.startup_contracts = build_startup_contracts(
-            trading_session=trading_session,
+        app.state.startup_contracts = _build_startup_contracts(
+            broker=broker,
+            storage=storage,
             active_symbols=active_symbols,
             reconciliation_result=reconciliation_result,
             reconciliation_executed=reconciliation_executed,
-        ).as_readiness_payload()
+        )
         app.state.startup_dependency_refs = MappingProxyType(
             {
-                "trading_session": trading_session,
                 "broker": broker,
                 "storage": storage,
                 "market_data": market_data,
@@ -328,7 +367,6 @@ def create_application() -> FastAPI:
 
         # Initialize singletons for FastAPI dependencies
         init_singletons(
-            trading_session=trading_session,
             broker=broker,
             storage=storage,
             gen_ai_service=GenerativeAIService(

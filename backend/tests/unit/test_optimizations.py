@@ -10,60 +10,7 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# 1. Candle history trimming (MAX_CANDLES_PER_SYMBOL = 2000)
-# ---------------------------------------------------------------------------
-
-class TestCandleHistoryTrimming:
-    """Verify session.data is capped at MAX_CANDLES_PER_SYMBOL."""
-
-    def _make_ohlc(self, time_str: str):
-        from quant.contracts.value_objects import OHLC
-        return OHLC(
-            time=time_str, open=100, high=101, low=99,
-            close=100, volume=10, vwap=100, taker_buy_volume=5, delta=1,
-        )
-
-    def test_trim_candles_over_2000(self):
-        """OPT-01: Adding >2000 candles trims to exactly 2000."""
-        from app.application.services.trading_session import (
-            MAX_CANDLES_PER_SYMBOL, SessionState,
-        )
-        session = SessionState(symbol="TEST")
-        # Pre-fill with 2100 candles (each with unique time so they append)
-        for i in range(2100):
-            session.data.append(self._make_ohlc(f"2026-01-01T00:{i:05d}"))
-
-        # Simulate the trim logic from process_tick
-        if len(session.data) > MAX_CANDLES_PER_SYMBOL:
-            del session.data[:len(session.data) - MAX_CANDLES_PER_SYMBOL]
-
-        assert len(session.data) == 2000
-        # Oldest candle should be index 100 from original
-        assert session.data[0].time == "2026-01-01T00:00100"
-
-    def test_no_trim_under_2000(self):
-        """OPT-02: Under 2000 candles, no trimming occurs."""
-        from app.application.services.trading_session import (
-            MAX_CANDLES_PER_SYMBOL, SessionState,
-        )
-        session = SessionState(symbol="TEST")
-        for i in range(500):
-            session.data.append(self._make_ohlc(f"T{i}"))
-
-        original_len = len(session.data)
-        if len(session.data) > MAX_CANDLES_PER_SYMBOL:
-            del session.data[:len(session.data) - MAX_CANDLES_PER_SYMBOL]
-
-        assert len(session.data) == original_len == 500
-
-    def test_constant_value(self):
-        """OPT-03: MAX_CANDLES_PER_SYMBOL is 2000."""
-        from app.application.services.trading_session import MAX_CANDLES_PER_SYMBOL
-        assert MAX_CANDLES_PER_SYMBOL == 2000
-
-
-# ---------------------------------------------------------------------------
-# 2. _compute_delta function (WebSocket delta compression)
+# 1. _compute_delta function (WebSocket delta compression)
 # ---------------------------------------------------------------------------
 
 class TestComputeDelta:
@@ -115,7 +62,7 @@ class TestComputeDelta:
 
 
 # ---------------------------------------------------------------------------
-# 3. /api/debug/memory endpoint
+# 2. /api/debug/memory endpoint
 # ---------------------------------------------------------------------------
 
 class TestDebugMemoryEndpoint:

@@ -93,12 +93,6 @@ def compose_container(config: "Configuration") -> DIContainer:
         lambda c: _create_generative_ai_service(c),
     )
 
-    # --- Application Services ---
-    container.register_singleton(
-        _trading_session_service(),
-        lambda c: _create_trading_session(c, config),
-    )
-
     return container
 
 
@@ -136,53 +130,9 @@ def _quant_coordinator():
     return QuantCoordinator
 
 
-def _trading_session_service():
-    from app.application.services.trading_session import TradingSessionService
-    return TradingSessionService
-
-
 # ---------------------------------------------------------------------------
 # Factory functions
 # ---------------------------------------------------------------------------
-
-
-class _OverseerBroadcastBridge:
-    """Lazily-bound bridge so the overseer can push immediate UI updates.
-
-    The ``TradingEngine`` is constructed AFTER the ``TradingSessionService``
-    (main.py builds the engine from the container), so we inject a settable
-    bridge at composition time and bind the real engine in
-    ``TradingEngine.__init__`` via ``bridge.bind(engine)``.
-    """
-
-    def __init__(self) -> None:
-        self._target = None
-
-    def bind(self, engine) -> None:
-        self._target = engine
-
-    def trigger_immediate_update(self, symbol: str) -> None:
-        target = self._target
-        if target is not None:
-            target.trigger_immediate_update(symbol)
-
-
-def _wire_overseer_broadcast(session_service) -> None:
-    """Inject a lazily-bound broadcast bridge into the overseer handler.
-
-    The overseer's ``_engine`` slot was previously never populated, so
-    ``trigger_immediate_update`` was dead. We give it a bridge here (non-None)
-    and expose it on the session service so ``TradingEngine.__init__`` can bind
-    the real engine reference after construction.
-    """
-    bridge = _OverseerBroadcastBridge()
-    overseer = getattr(session_service, "_overseer_handler", None)
-    if overseer is not None:
-        if hasattr(overseer, "set_engine"):
-            overseer.set_engine(bridge)
-        else:
-            overseer._engine = bridge
-    session_service._overseer_broadcast_bridge = bridge
 
 
 def _create_market_data_adapter(container: DIContainer, config: "Configuration"):
@@ -302,85 +252,9 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     )
 
 
-def _create_trading_session(container: DIContainer, config: "Configuration"):
-    """Create TradingSessionService with all dependencies from the container."""
-    from quant.contracts.ports.broker import IBroker
-    from quant.contracts.ports.storage import IStorage
-    from quant.contracts.ports.llm_inference import ILLMInference
-    from quant.contracts.ports.probability_inference import IProbabilityInference
-
-    broker = container.resolve(IBroker)
-    storage = container.resolve(IStorage)
-    llm_adapter = container.resolve(ILLMInference)
-    probability_engine = container.resolve(IProbabilityInference)
-
-    # Build GenerativeAIService wrapper
-    try:
-        from quant.inference.generative_ai import GenerativeAIService
-        gen_ai_service = GenerativeAIService(llm_adapter=llm_adapter)
-    except Exception as exc:
-        if is_live_mode():
-            raise RuntimeError(
-                "GenerativeAIService failed in live mode"
-            ) from exc
-        logger.error("GenerativeAIService failed to initialize — LLM features disabled", exc_info=True)
-        gen_ai_service = None
-
-    # Exchange config
-    exchange_config = None
-    try:
-        from quant.contracts.exchange_config import ExchangeConfig
-        from app.domain.models.exchange import Exchange
-
-        exchange = Exchange.normalize(
-            getattr(config, "default_exchange", None) or _settings.DEFAULT_EXCHANGE or "MCX"
-        )
-        exchange_config = ExchangeConfig.for_exchange(exchange.value)
-    except Exception:
-        logger.warning("Exchange config loading failed — using defaults", exc_info=True)
-
-    # Allow short config
-    allow_short = _resolve_allow_short()
-
-    # Observability trackers
-    from app.domain.ops.gate_rejection_tracker import GateRejectionTracker
-    from app.domain.ops.latency_tracker import LatencyTracker
-    gate_tracker = GateRejectionTracker()
-    latency_tracker = LatencyTracker()
-
-    from app.application.services.trading_session import TradingSessionService
-    session_service = TradingSessionService(
-        broker=broker,
-        gen_ai_service=gen_ai_service,
-        storage=storage,
-        probability_engine=probability_engine,
-        exchange_config=exchange_config,
-        allow_short=allow_short,
-        gate_tracker=gate_tracker,
-        latency_tracker=latency_tracker,
-    )
-    _wire_overseer_broadcast(session_service)
-    return session_service
-
-
 # ---------------------------------------------------------------------------
 # Additional port type getters
 # ---------------------------------------------------------------------------
-
-def _resolve_allow_short() -> bool:
-    """Resolve the ALLOW_SHORT feature flag, defaulting to False on error.
-
-    Reads the flag through ``app.shared.config_features`` (the live registry);
-    historically this imported the nonexistent ``app.config.features`` module,
-    which the try/except silently swallowed and pinned ``allow_short`` False.
-    """
-    from app.shared.config_features import Feature, feature_enabled
-    try:
-        return feature_enabled(_settings, Feature.ALLOW_SHORT)
-    except Exception:
-        logger.debug("ALLOW_SHORT setting not available — defaulting to False", exc_info=True)
-        return False
-
 
 def _delta_profile_port():
     from quant.contracts.ports.delta_profile import IDeltaProfile

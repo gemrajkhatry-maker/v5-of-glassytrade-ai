@@ -8,10 +8,23 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
-from app.application.services.experiment_context import build_experiment_context
 from app.application.services.trade_journal import TradeJournal
+
+
+@dataclass(frozen=True)
+class _ExperimentContext:
+    """Minimal experiment-context double (legacy experiment_context removed)."""
+    run_id: str = "test-run"
+    config_fingerprint: str = "test-fp"
+    llm_model_family: str = "test-model"
+    llm_entry_contract_version: str = "1"
+    probability_feature_schema_version: str = "1"
+
+
+def build_experiment_context() -> _ExperimentContext:
+    return _ExperimentContext()
 
 
 def _thesis(state: str, location: str, level: float, aggression: str, session: str, invalidation: float, setup: str):

@@ -82,106 +82,20 @@ class TestAIHistory:
 # =====================================================================
 
 class TestWebSocketGameloop:
-    def test_client_driven_tick(self, client):
-        """Test client-driven mode: send tick, get state snapshot back."""
-        c, mock = client
+    """WebSocket viewer contract.
 
-        # Mock process_tick to return a valid state snapshot
-        mock.trading_session.process_tick.return_value = {
-            "_symbol": "NIFTY",
-            "portfolio": {
-                "balance": 1_000_000,
-                "equity": 1_000_000,
-                "leverage": 10,
-                "positions": [],
-                "closedTrades": [],
-            },
-            "amt": {
-                "marketState": "BALANCED",
-                "poc": 67500,
-                "valueAreaHigh": 67600,
-                "valueAreaLow": 67400,
-                "lvns": [],
-                "hvns": [],
-                "aggression": 0.5,
-                "signal": None,
-                "setup": None,
-                "profile": [],
-                "aggressivePrints": [],
-            },
-            "genAIAnalysis": {
-                "direction": "FLAT",
-                "rationale": "Waiting",
-                "confidence": "Low",
-                "inputPrompt": "",
-                "rawOutput": "",
-            },
-            "riskState": {
-                "halted": False,
-                "haltReason": "",
-                "consecutiveLosses": 0,
-                "dailyPnl": 0,
-            },
-            "overseerAction": "",
-            "overseerReason": "",
-        }
+    The legacy client-driven mode (process_tick / history seeding via the
+    TradingSessionService) was removed in the backend swap — the WS is now a
+    read-only viewer over QuantCoordinator snapshots. These tests verify the
+    viewer rejects unsupported payloads cleanly.
+    """
 
-        with c.websocket_connect("/api/trading/ws/gameloop") as ws:
-            # Send a valid tick
-            ws.send_json({
-                "symbol": "NIFTY",
-                "tick": {
-                    "time": "2026-02-23T10:00:00Z",
-                    "open": 67500,
-                    "high": 67600,
-                    "low": 67400,
-                    "close": 67550,
-                    "volume": 1000,
-                    "vwap": 67500,
-                    "takerBuyVolume": 600,
-                    "delta": 200,
-                },
-            })
-
-            state = ws.receive_json()
-
-            # Verify frontend-expected keys
-            assert state["_symbol"] == "NIFTY"
-            assert "portfolio" in state
-            assert "balance" in state["portfolio"]
-            assert "equity" in state["portfolio"]
-            assert "positions" in state["portfolio"]
-            assert "closedTrades" in state["portfolio"]
-            assert "amt" in state
-            assert "genAIAnalysis" in state
-            assert "riskState" in state
-            assert "overseerAction" in state
-            assert "overseerReason" in state
-
-    def test_history_seeding(self, client):
-        """Test history seeding message."""
-        c, mock = client
-        mock.trading_session.get_or_create_session.return_value = MagicMock(data=[])
-
-        with c.websocket_connect("/api/trading/ws/gameloop") as ws:
-            ws.send_json({
-                "symbol": "NIFTY",
-                "history": [
-                    {"time": "2026-02-23T09:00:00Z", "open": 67000, "high": 67100,
-                     "low": 66900, "close": 67050, "volume": 500, "vwap": 67000,
-                     "takerBuyVolume": 300, "delta": 100},
-                ],
-            })
-
-            response = ws.receive_json()
-            assert response["status"] == "history_loaded"
-
-    def test_invalid_tick_rejected(self, client):
-        """Test that invalid ticks are rejected with error."""
+    def test_invalid_payload_rejected(self, client):
+        """Test that a non-subscribe payload is rejected with an error."""
         c, mock = client
 
         with c.websocket_connect("/api/trading/ws/gameloop") as ws:
-            # Send tick with high < low
+            # Client-driven tick mode no longer exists — must be rejected
             ws.send_json({
                 "symbol": "NIFTY",
                 "tick": {
@@ -288,18 +202,33 @@ class TestDTOContract:
         assert "largestLoss" in dto
 
     def test_genai_analysis_camelcase(self):
-        """Verify _camel_case_ai produces keys matching frontend GenAIAnalysis."""
-        from app.application.services.state_snapshot_builder import _camel_case_ai
+        """Frontend GenAIAnalysis keys are produced by the greenfield projector.
 
-        result = _camel_case_ai({
-            "direction": "LONG",
-            "rationale": "test",
-            "confidence": "High",
-            "input_prompt": "prompt...",
-            "raw_output": "output...",
-            "market_state": "BALANCED",
-            "aggression": "0.50",
-        })
+        The legacy ``_camel_case_ai`` DTO converter (state_snapshot_builder) was
+        removed with the legacy pipeline; the QuantCoordinator folds the LLM
+        analysis dict into the snapshot ``gen_ai`` key with the same camelCase
+        contract (inputPrompt / rawOutput / marketState).
+        """
+        from quant.state import StateProjector
+        from quant.events import LLMAnalysisProduced
+
+        projector = StateProjector()
+        projector.on_event(
+            LLMAnalysisProduced(
+                symbol="SYM",
+                time="2026-08-07T10:00:00Z",
+                analysis={
+                    "direction": "LONG",
+                    "rationale": "test",
+                    "confidence": "High",
+                    "inputPrompt": "prompt...",
+                    "rawOutput": "output...",
+                    "marketState": "BALANCED",
+                    "aggression": "0.50",
+                },
+            )
+        )
+        result = projector.snapshot("SYM").gen_ai
 
         # Frontend GenAIAnalysis interface
         assert result["direction"] == "LONG"
