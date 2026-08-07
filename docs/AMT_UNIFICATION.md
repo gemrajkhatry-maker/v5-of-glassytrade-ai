@@ -177,3 +177,7 @@ cd /Users/apple/Documents/wt-gt-P27
 ```
 
 (`-s` prints the delta table in §3.)
+
+## Out of scope
+
+**AI command/reply mode: REMOVED (out of scope).** The NL command overlay (`/command`, `AiCommandService.parse_market_command`) was dead code with no frontend caller or tests; deleted per the delete-over-add rule. Interactive AI that 'replies' to trader commands is not part of the edge — the LLM remains advisory-only (entry journal + overseer).
