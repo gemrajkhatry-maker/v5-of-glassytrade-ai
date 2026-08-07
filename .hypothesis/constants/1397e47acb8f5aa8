@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/di/composition_root.py
-# hypothesis_version: 6.152.4
-
-[0.7, 512, '..', '.gguf', 'Configuration', 'MCX', 'MLX_MODEL_PATH', 'NFO', 'NSE', 'db_path', 'default_exchange', 'glassytrade.db', 'llm', 'max_new_tokens', 'model_path', 'models', 'temperature']

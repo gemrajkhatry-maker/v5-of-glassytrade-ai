@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/infrastructure/storage/database.py
-# hypothesis_version: 6.152.4
-
-[0.0, 5.0, 1000, ' AND closed_at <= ?', ' AND closed_at >= ?', ' AND created_at <= ?', ' AND created_at >= ?', ' AND position_id = ?', ' AND symbol = ?', ' AND time <= ?', ' AND time >= ?', ',', '?', 'NSE', '__float__', 'aggression', 'balance', 'close', 'closed_at', 'confidence', 'delta', 'direction', 'entry_price', 'equity', 'event_id', 'event_time', 'event_type', 'exit_price', 'extra', 'flush commit failed', 'glassytrade.db', 'high', 'id', 'input_prompt', 'low', 'market', 'market_state', 'open', 'open_pnl', 'open_positions', 'opened_at', 'pnl', 'poc', 'position_id', 'price', 'profile_shape', 'rationale', 'raw_output', 'reason', 'session_date', 'side', 'size', 'source', 'stop_loss', 'symbol', 'take_profit', 'time', 'total_trades', 'total_volume', 'vah', 'val', 'volume', 'win_rate', '{}']

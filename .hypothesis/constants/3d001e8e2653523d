@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/infrastructure/event_bus.py
-# hypothesis_version: 6.152.4
-
-[0.0, 'NEW', 'candle', 'event_count', 'orderbook', 'risk', 'sequence', 'signal', 'subscribers', 'system', 'tick', 'trade']

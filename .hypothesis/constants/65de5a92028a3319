@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/llm_contract.py
-# hypothesis_version: 6.152.4
-
-['"LONG" | "FLAT"', 'confidence', 'direction', 'entry-json-v1', 'gemma-mlx', 'market_state', 'rationale']

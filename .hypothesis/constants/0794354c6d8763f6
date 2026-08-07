@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/utils.py
-# hypothesis_version: 6.152.4
-
-[-1.0, 0.0, 1.0, 30.0, '+00:00', 'APR', 'AUG', 'Asia/Kolkata', 'BSE', 'CALL', 'DEC', 'FEB', 'JAN', 'JUL', 'JUN', 'MAR', 'MAY', 'MCX', 'NFO', 'NOV', 'NSE', 'NSE_EQ', 'OCT', 'SEP', 'Z', 'dte', 'dte_normalized', 'moneyness_pct', 'option_type_flag', 'strike']

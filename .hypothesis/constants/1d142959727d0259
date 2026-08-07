@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/routers/ai.py
-# hypothesis_version: 6.152.4
-
-[0.0, 1.1, 10.0, 70.0, 75.0, 90.0, 95.0, 500, 1000, ',', '/ai', '/analyze', '/command', '/history', '/journal', '/journal/compare', '/journal/promotion', '/journal/report', '/journal/summary', '/journal/trades', 'Neutral', 'ai', 'currentConfig', 'entries', 'error', 'maxDrawdown', 'minExpectancy', 'minProfitFactor', 'minTrades', 'minTradingDays', 'populate_by_name', 'requireMultiSession', 'runId', 'runIds', 'summary', 'trades', 'type']

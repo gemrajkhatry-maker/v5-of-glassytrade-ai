@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/entry_gates/__init__.py
-# hypothesis_version: 6.152.4
-
-['build_entry_signal', 'check_momentum_fade', 'check_vwap_bias', 'compute_atr', 'compute_grade_score', 'full_body_close_gate', 'min_candles_gate', 'nearest_round_number', 'run_gate_pipeline', 'three_align_check']

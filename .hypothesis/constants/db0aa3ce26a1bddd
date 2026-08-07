@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/routers/trading.py
-# hypothesis_version: 6.152.4
-
-[404, '/portfolio/create', '/positions/events', '/stats', '/trading', 'count', 'events', 'positionId', 'trading']

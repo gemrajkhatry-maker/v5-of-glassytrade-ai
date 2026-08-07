@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/core/alerts.py
-# hypothesis_version: 6.152.4
-
-[0.02, 0.03, 'alerts', 'circuit_breaker', 'critical', 'data', 'drawdown', 'drawdown_pct', 'error', 'failure_count', 'id', 'info', 'loss_streak', 'message', 'open', 'severity', 'signal_quality', 'state', 'streak', 'symbol', 'system', 'threshold', 'timestamp', 'type', 'warning']

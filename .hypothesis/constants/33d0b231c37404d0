@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/core/types.py
-# hypothesis_version: 6.152.4
-
-['ACKNOWLEDGED', 'BFO', 'BSE', 'BUY', 'CANCELLED', 'CANCEL_PENDING', 'CDS', 'CE', 'CNC', 'COMM', 'COMMODITY', 'CURRENCY', 'CorrelationId', 'DAY', 'EQUITY', 'EXPIRED', 'FILLED', 'FNO', 'FUTURE', 'INDEX', 'INTRADAY', 'IOC', 'InternalUid', 'LIMIT', 'MARGIN', 'MARKET', 'MCX', 'MTF', 'NEW', 'NFO', 'NSE', 'OPEN', 'OPEN_30', 'OPEN_60', 'OPTION', 'OrderId', 'PARTIALLY_FILLED', 'PE', 'PRE_OPEN', 'PositionId', 'REJECTED', 'SELL', 'SENT', 'SL', 'SLM', 'SecurityId', 'Symbol', 'VALIDATED']

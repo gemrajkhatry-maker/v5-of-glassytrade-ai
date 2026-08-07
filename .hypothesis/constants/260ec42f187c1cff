@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/domain/trading/models/__init__.py
-# hypothesis_version: 6.152.4
-
-['CloseReason', 'Confidence', 'Direction', 'EntrySignal', 'Fill', 'FillType', 'Position', 'Trade', 'TradeEvent', 'TradeStatus', 'TradeThesis', 'create_trade']

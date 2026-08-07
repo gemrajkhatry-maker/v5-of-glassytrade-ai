@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/startup_contracts.py
-# hypothesis_version: 6.152.4
-
-[',', ':', '_broker', '_event_router', '_exit_coordinator', '_resolve_position', '_storage', 'active_symbols', 'broker_runtime', 'cancel_order', 'contract_id', 'degraded', 'delete_open_position', 'execute_entry_path', 'execute_order', 'get_positions', 'kv_set', 'load_open_positions', 'n/a', 'not_run', 'ok', 'on_position_closed', 'process_tick', 'reconciliation', 'save_open_position', 'save_trade', 'scanner_settings', 'should_trigger_llm', 'status', 'storage_runtime', 'strategy_runtime', 'trigger_llm_entry', 'utf-8']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/application/handlers/llm_overseer_handler.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.02, 0.5, 0.65, 0.7, 0.8, 1.0, 2.0, 3.0, 30.0, 120.0, 100, 500, 'ADD', 'CAUTIOUS', 'COPPER', 'CRUDEOIL', 'DEFENSIVE', 'FULL_EXIT', 'GOLD', 'HOLD', 'LONG', 'NATURALGAS', 'OPEN', 'Overseer', 'PARTIAL_EXIT', 'SILVER', 'TIGHTEN_SL', '_executor', '_predict_executor', 'amt_result', 'confidence', 'data', 'direction', 'enqueue_time', 'entry_price', 'exit_probability', 'footprint_candle', 'input_prompt', 'market_state', 'name', 'order_book', 'overseer_action', 'overseer_reason', 'p_long_target', 'p_short_target', 'partial_taken', 'position_id', 'price', 'rationale', 'raw_output', 'session', 'session_info', 'side', 'symbol', 'tick', 'unrealized_pnl_pct']

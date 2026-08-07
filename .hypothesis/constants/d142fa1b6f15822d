@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/market_structure_classifier.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.05, 0.08, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.8, 1.0, 1.1, 1.2, 1.3, 1.5, 2.0, 2.5, 100.0, 100, 170, 200, 'BALANCE', 'CHOP', 'EXPANSION', 'IMBALANCE', 'TRANSITION', 'atr', 'overlap_pct', 'poc_migration', 'range_atr', 'vol_accel', 'vwap_slope']

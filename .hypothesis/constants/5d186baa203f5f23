@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/domain/fabio_ai/services/option_scanner.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.4, 0.5, 0.6, 1.5, 2.5, 100, 300, 500, 1000, 5000, 50000, 300000, 500000, ',', 'BANKNIFTY', 'BEARISH', 'BULLISH', 'CE', 'CRUDEOIL', 'FINNIFTY', 'GOLD', 'MCX', 'NATURALGAS', 'NEUTRAL', 'NFO', 'NIFTY', 'PE', 'SILVER', 'date', 'iv']

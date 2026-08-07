@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/self_healing.py
-# hypothesis_version: 6.152.4
-
-[10000, 'ALERT', 'RETRY', 'SKIP', 'buffer_size', 'consecutive_timeouts', 'data', 'disabled_symbols', 'flush_attempts', 'flush_successes', 'key', 'save_tick', 'save_trade', 'storage.save_tick', 'storage.save_trade', 'symbol', 'time', 'write_failures']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/post_trade_analytics.py
-# hypothesis_version: 6.152.4
-
-[0.5, 'duration_minutes', 'entry_price', 'inf', 'net_pnl', 'quantity', 'realized_pnl', 'stop_loss']

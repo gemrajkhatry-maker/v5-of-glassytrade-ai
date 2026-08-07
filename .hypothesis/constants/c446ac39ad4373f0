@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/application/data_pipeline.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.05, 'current_candle', 'cvd', 'cvd_slope', 'poc', 'ready', 'symbol', 'vah', 'val', 'vp_candle_count', 'vp_total_volume', 'vwap', 'vwap_sigma']

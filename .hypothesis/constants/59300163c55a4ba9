@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/ai_command_service.py
-# hypothesis_version: 6.152.4
-
-[200, ' | ', '#06b6d4', '#10b981', '#39ff14', '#3b82f6', '#8b5cf6', '#ec4899', '#ef4444', '#f59e0b', '#ffffff', '15m', '1d', '1h', '1m', '4h', '5m', 'BANKNIFTY', 'CRUDEOIL', 'FINNIFTY', 'GOLD', 'NATURALGAS', 'NIFTY', 'SILVER', 'UPDATE_CONFIG', 'Unknown action', 'action', 'amber', 'banknifty', 'bear', 'bearColor', 'blue', 'bull', 'bullColor', 'compare', 'configUpdates', 'crude', 'crudeoil', 'cyan', 'decisions', 'direction', 'entries', 'finnifty', 'footprint', 'ghost', 'gold', 'green', 'hide', 'interval', 'message', 'natural gas', 'neon', 'nifty', 'off', 'pink', 'predictions', 'promotion', 'purple', 'rationale', 'raw_output', 'red', 'session', 'showPredictions', 'showVolumeProfile', 'signal_decisions', 'silver', 'summary', 'symbol', 'trades', 'volume profile', 'vpMode', 'white']

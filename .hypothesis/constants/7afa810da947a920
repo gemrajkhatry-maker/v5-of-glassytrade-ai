@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/routers/market.py
-# hypothesis_version: 6.152.4
-
-[500, 1000, '/history/{symbol}', '/lot-size/{symbol}', '/market', '/orderbook/{symbol}', '/scan', '5m', 'asks', 'bids', 'candidates', 'data', 'lotSize', 'market', 'orderBook', 'price', 'quantity', 'symbol']

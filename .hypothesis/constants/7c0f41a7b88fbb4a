@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/probability/playbook.py
-# hypothesis_version: 6.152.4
-
-[0.5, 0.6, 0.7, 0.8, 'BALANCED', 'TRENDING', 'above_vah_volume', 'acceptance_above', 'acceptance_below', 'below_val_volume', 'cvd_slope', 'delta_imbalance', 'return_to_value']

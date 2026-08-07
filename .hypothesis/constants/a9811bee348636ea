@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/cross_index_correlation.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.0001, 0.4, 0.5, 0.6, 0.7, 0.8, 5.0, 10.0, 15.0, 30.0, 'BANKNIFTY', 'CRUDEOIL', 'DOWN', 'FINNIFTY', 'NATURALGAS', 'NIFTY', 'UP', 'expected_lag', 'strength']

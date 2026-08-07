@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/trade_journal.py
-# hypothesis_version: 6.152.4
-
-['%Y-%m-%d', 'DAILY_SUMMARY', 'GATE_REJECTED', 'POSITION_CLOSED', 'POSITION_OPENED', 'SIGNAL_GENERATED', 'a', 'avg_loss', 'avg_win', 'date', 'datetime', 'event', 'expectancy', 'gate', 'logs', 'losses', 'max_drawdown', 'reason', 'symbol', 'timestamp', 'total_pnl', 'total_trades', 'utf-8', 'win_rate', 'wins']

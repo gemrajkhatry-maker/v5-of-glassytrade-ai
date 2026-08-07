@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/brokers_backup/broker/ports.py
-# hypothesis_version: 6.152.4
-
-[0.0, 2.0, 5.0, 30.0, 60.0, '1d', 'CE', 'T', 'closed', 'half_open', 'open', 'threading']

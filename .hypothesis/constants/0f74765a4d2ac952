@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/lvn_play_detector.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.003, 2.0, 'LONG', 'SHORT', 'direction', 'has_delta_flip', 'has_rejection', 'inf', 'lvn_price', 'target', 'velocity_ratio']

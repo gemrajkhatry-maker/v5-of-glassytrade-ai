@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/session_phase_gate.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.5, 1.0, '%A', '%Y-%m-%d', 'AAA_ONLY', 'AAA_WINDOW', 'ALL_MODELS', 'CLOSED', 'CLOSE_PROTECTION', 'EXIT_ONLY', 'FRIDAY', 'MIDDAY', 'MONDAY', 'MR_ONLY', 'NO_TRADE', 'OPENING_AUCTION', 'POWER_HOUR', 'THURSDAY']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/enums/signal_type.py
-# hypothesis_version: 6.152.4
-
-['BRACKET', 'BUY', 'CANCELLED', 'CLOSED', 'DRIVE_CONTINUATION', 'DRIVE_REVERSAL', 'EXPIRED', 'FILLED', 'IB_BREAK', 'LIMIT', 'LONG', 'LVN_RETEST', 'MARKET', 'OPEN', 'PARTIALLY_CLOSED', 'PENDING', 'PLACED', 'POC_SHIFT', 'REJECTED', 'SELL', 'SHORT', 'SL', 'SL-M', 'STOPPED_OUT', 'VA_BOUNCE']

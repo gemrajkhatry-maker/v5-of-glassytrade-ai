@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/trading/services/signal_validator.py
-# hypothesis_version: 6.152.4
-
-[0.0, '+00:00', 'ALL_VALID', 'DIRECTION_MISMATCH', 'FLAT', 'LONG', 'SHORT', 'SIGNAL_STALE', 'VWAP_EXTREME', 'Z', 'timestamp']

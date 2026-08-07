@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/domain/risk/models.py
-# hypothesis_version: 6.147.0
-
-[100, '0', '0.01', '10', '1000000', '50000', 'CanonicalInstrument', 'daily_loss', 'duplicate_order', 'freeze_quantity', 'position_limit']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/gate_pipeline.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.1, 1.5, 2.0, 3.0, 10.0, 'ALERT', 'AT_POC', 'Aggression minimum', 'BLOCKED', 'Cushion ticks', 'FLAT', 'HARD', 'INVALID', 'MET', 'NEUTRAL', 'NONE', 'NOT MET', 'No candles yet', 'Price at entry zone', 'R:R ratio', 'Risk limit hit', 'SESSION_STOPPED', 'SKIP', 'SOFT', 'STALE', 'SUPPRESSED', 'TRADE', 'WAIT']

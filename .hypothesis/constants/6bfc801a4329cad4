@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/option_selection_engine.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.02, 0.05, 0.5, 0.85, 1.0, 1.15, 100, 1440, 15000, 25000, 'AAA', 'ATM', 'CE', 'HIGH_SPREAD', 'ITM1', 'ITM2', 'LONG', 'LOW_OI', 'NO_CANDIDATES', 'OTM1', 'OTM2', 'PE', 'SHORT', 'THETA_KILL', 'ask', 'bid', 'expiry', 'ltp', 'oi', 'spread', 'strike', 'symbol', 'theta', 'volume']

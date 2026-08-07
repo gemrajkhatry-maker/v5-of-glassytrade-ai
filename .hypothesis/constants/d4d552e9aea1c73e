@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/initial_balance_engine.py
-# hypothesis_version: 6.152.4
-
-[0.0, 50.0, 100.0, 100, 'ABOVE', 'BELOW', 'BUILDING', 'INSIDE', 'LONG_BREAKOUT', 'SHORT_BREAKOUT', 'ib_high', 'ib_low', 'ib_mid', 'ib_width', 'inf', 'is_complete']

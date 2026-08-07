@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/oi_wall_engine.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.1, 0.2, 0.3, 0.5, 1.0, 2.5, 10000, 25000, 50000, 'BANKNIFTY', 'CALL_WALL', 'LONG', 'NIFTY', 'PUT_WALL', 'ce_oi', 'ce_oi_change', 'ce_volume', 'pe_oi', 'pe_oi_change', 'pe_volume', 'strike']

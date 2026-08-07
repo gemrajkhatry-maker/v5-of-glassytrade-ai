@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/session_event_logger.py
-# hypothesis_version: 6.152.4
-
-[0.0, 200, 'BUY', 'FLAT', 'LONG', 'PARTIAL_TAKE_PROFIT', 'SELL', 'SHORT', 'UNKNOWN', 'agent_entry', 'direction', 'event_id', 'event_time', 'event_type', 'feature_drivers', 'is_buy', 'lifecycle', 'llm', 'llm_only', 'llm_override_quant', 'llm_plus_quant_agree', 'managed_exit', 'metadata', 'position_id', 'probability', 'quant', 'quant_only', 'save_position_event', 'symbol', 'trade_thesis']

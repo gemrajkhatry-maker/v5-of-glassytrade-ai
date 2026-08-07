@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/session_cache.py
-# hypothesis_version: 6.152.4
-
-[0.0, 2000, '_agent_decision', '_ib_state', '_last_candle_time', '_last_exec_mono', '_last_fp_domain', '_last_session_info', '_last_tick_trace_id', '_llm_priority_score', '_pending_amt', '_pending_decision', '_pending_tick', '_underlying_data', 'close', 'delta', 'high', 'low', 'open', 'storage.save_tick', 'time', 'volume']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/mcx_futures.py
-# hypothesis_version: 6.152.4
-
-['ALUMINIUM', 'COPPER', 'CRUDEOIL', 'CRUDEOILM', 'FUTCOM', 'GOLD', 'GOLDM', 'LEAD', 'MCX', 'NATURALGAS', 'NICKEL', 'SEM_CUSTOM_SYMBOL', 'SEM_EXM_EXCH_ID', 'SEM_EXPIRY_CODE', 'SEM_EXPIRY_DATE', 'SEM_INSTRUMENT_NAME', 'SEM_LOT_SIZE', 'SEM_SMST_SECURITY_ID', 'SEM_TRADING_SYMBOL', 'SILVER', 'SILVERM', 'SM_SYMBOL_NAME', 'ZINC', 'coerce', 'mcx_futures']

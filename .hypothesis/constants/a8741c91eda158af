@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/routers/__init__.py
-# hypothesis_version: 6.152.4
-
-['ai_router', 'health_router', 'market_router', 'metrics_router', 'rl_router', 'trading_router']

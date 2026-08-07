@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/application/broker.py
-# hypothesis_version: 6.147.0
-
-[5.0, '-', '1d', 'DhanBroker', 'DhanBroker closed', 'DhanExchangeConfig', 'MCX:', 'NSE:', 'TIMEOUT', '_closed', '_loop', '_loop_thread', 'close', 'commodity', 'dhan-broker-loop', 'dhan.broker', 'equity', 'exchange', 'from_date', 'future', 'index', 'index_option', 'interval', 'pin', 'stock_option', 'symbol', 'timeout', 'to_date', 'totp_secret']

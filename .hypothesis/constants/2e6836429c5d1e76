@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/domain/constants.py
-# hypothesis_version: 6.147.0
-
-[0.33, 0.5, 5.0, 10.0, 25.0, 30.0, 50.0, 100.0, 100, 125, 150, 250, 300, 550, 600, 700, 750, 1000, 1200, 1500, 2300, 2500, 2600, 86400, 'ADANIENT', 'AXISBANK', 'BAJFINANCE', 'BANKEX', 'BANKNIFTY', 'BHARTIARTL', 'BO', 'BUY', 'C', 'CANCELLED', 'CO', 'DAY', 'DEFAULT', 'DH-1001', 'DH-1002', 'DH-1003', 'DH-2001', 'DH-2002', 'DH-3001', 'DH-3002', 'DH-3003', 'DH-4001', 'DH-4002', 'DH-5001', 'DH-5002', 'DH-5003', 'FINNIFTY', 'GTC', 'HDFCBANK', 'HINDUNILVR', 'I', 'ICICIBANK', 'INFY', 'IOC', 'KOTAKBANK', 'LIMIT', 'LT', 'M', 'MARKET', 'MARUTI', 'MIDCPNIFTY', 'NIFTY', 'NIFTY 50', 'NIFTY BANK', 'NTPC', 'PARTIALLY_FILLED', 'PENDING', 'POWERGRID', 'REJECTED', 'RELIANCE', 'SBIN', 'SELL', 'SENSEX', 'SL', 'SL-M', 'TATAMOTORS', 'TATASTEEL', 'TCS', 'TRADED', 'TRANSIT', 'ULTRACEMCO', 'WIPRO', 'https://api.dhan.co', 'v2']

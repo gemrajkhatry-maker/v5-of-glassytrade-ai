@@ -107,3 +107,7 @@ htmlcov/
 
 # Skills lock file
 skills-lock.json
+
+# Agent/test caches (not project code)
+.hypothesis/
+.superpowers/

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/logging/logging_context.py
-# hypothesis_version: 6.147.0
-
-[' > ', 'correlation_id', 'error', 'execution_context', 'execution_path', 'execution_stack', 'no-corr-id', 'root']

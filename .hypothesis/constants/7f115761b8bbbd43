@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/domain/errors.py
-# hypothesis_version: 6.147.0
-
-['Access denied', 'DH-1001', 'DH-1002', 'DH-1003', 'DH-2001', 'DH-2002', 'DH-2003', 'DH-3001', 'DH-3002', 'DH-3003', 'DH-4001', 'DH-4002', 'DH-5001', 'DH-5002', 'DH-5003', 'DH-5004', 'Order not found', 'Order was rejected', 'Rate limit exceeded', 'Request timed out', 'Symbol not found']

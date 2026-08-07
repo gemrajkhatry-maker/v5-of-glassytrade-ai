@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/trading/models/aggregates.py
-# hypothesis_version: 6.152.4
-
-[0.0, 1.0, 60.0, -200, 100, 200, 1000, '+00:00', '-', '.', '0', '0.0015', '0.0025', '0.0035', '0.005', '0.01', '0.02', '0.5', '1', '50.0', '5000000', 'AMT', 'High', 'LLM_EXIT', 'LONG', 'Low', 'Medium', 'Portfolio', 'Position | None', 'T', 'Z', '__float__', 'confidence', 'deployed_fraction', 'entry_price', 'extra', 'full_size', 'id', 'metadata', 'opened_at', 'option_lot_size', 'partial_realized_pnl', 'pnl', 'session_risk_pct', 'side', 'size', 'source', 'stop_loss', 'strike', 'symbol', 'take_profit', 'time', 'value']

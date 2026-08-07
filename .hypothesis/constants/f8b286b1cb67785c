@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/trail_engine.py
-# hypothesis_version: 6.152.4
-
-[0.05, 0.2, 0.3, 0.5, 1.0, 1.5, 'BEARISH_DIV', 'BULLISH_DIV', 'BUY', 'ExitSignal | None', 'LONG', 'Position', 'SCRATCH', 'SELL', 'SHORT']

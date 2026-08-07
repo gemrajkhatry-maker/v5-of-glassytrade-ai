@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/replay/event_capture.py
-# hypothesis_version: 6.147.0
-
-[100, 1024, '%Y%m%d_%H%M%S', '/tmp/events.jsonl', '_', '__dict__', '_asdict', 'a', 'event_type', 'live', 'payload', 'sequence_id', 'source', 'timestamp', 'value']

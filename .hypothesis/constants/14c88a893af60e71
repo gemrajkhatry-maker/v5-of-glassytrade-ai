@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/config/settings.py
-# hypothesis_version: 6.152.4
-
-[0.15, 0.7, 1.0, 1.5, 2.0, 2.5, 3.0, 20.0, 50.0, 5000000.0, 100, 8001, 10000, 65535, 100000, ',', '.env', '0.0.0.0', 'ATM', 'Bind address', 'Dhan client ID', 'Exchange: NSE or MCX', 'INFO', 'Log directory', 'Logging level', 'NIFTY,BANKNIFTY', 'NSE', 'Port to bind', '^(ATM|ITM)$', '^(NSE|MCX)$', 'env_file', 'env_file_encoding', 'extra', 'ignore', 'logs', 'utf-8']

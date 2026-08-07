@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/drive_decay.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.05, 'direction', 'level', 'max_rotation', 'tick_size', 'timestamp']

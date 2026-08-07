@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/orderflow_detectors.py
-# hypothesis_version: 6.152.4
-
-[-1.0, 0.0, 0.001, 0.5, 1.0, 'BUY', 'BUY_ABSORBED', 'MIXED', 'NEUTRAL', 'SELL', 'SELL_ABSORBED']

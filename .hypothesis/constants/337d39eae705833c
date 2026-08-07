@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/lookahead_bias_checker.py
-# hypothesis_version: 6.152.4
-
-[0.01, '-inf', '; ', 'BALANCED', 'BIAS DETECTED', 'IMBALANCED', 'NO BIAS', 'NO_TRADE', 'No data to check', 'No signals to check', 'OK', 'PROBING', 'cvd_integrity', 'entry_price', 'entry_time', 'high', 'inf', 'low', 'ltp', 'ltt', 'market_state', 'time', 'volume', 'vwap_integrity']

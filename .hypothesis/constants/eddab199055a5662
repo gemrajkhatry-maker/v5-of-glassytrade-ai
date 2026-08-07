@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/one_min_bar_engine.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.15, 0.3, 0.5, 1.0, 1.5, 2.0, 4.5, 'bar_time', 'buy_vol', 'close', 'delta', 'high', 'low', 'open', 'sell_vol', 'started', 'volume']

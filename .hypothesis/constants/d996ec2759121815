@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/domain/fabio_ai/services/session_risk_manager.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.0025, 0.0035, 0.004, 0.005, 0.3, 'CONSERVATIVE', 'CUSHION', 'DEFENSIVE', 'MOMENTUM', 'NORMAL', '_halted', 'consecutive_losses', 'consecutive_wins', 'session_pnl', 'trade_count']

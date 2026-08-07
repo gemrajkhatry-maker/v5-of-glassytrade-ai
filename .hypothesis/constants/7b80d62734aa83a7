@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/monte_carlo_simulator.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.3, 0.5, 0.95, 1.0, 100000.0, 100, 250, 252, 1000, 'BUY', 'entry_price', 'exit_price', 'inf', 'net_pnl', 'quantity', 'realized_pnl', 'shuffle', 'side', 'skip', 'skip_prob', 'slippage', 'slippage_pct', 'timing', 'timing_noise_pct', 'total_return']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/shared/error_handling.py
-# hypothesis_version: 6.152.4
-
-[200, '%s: %s', 'Error during %s: %s', 'Error in %s.%s: %s', 'F', 'GATE_ERROR', 'LLM_ERROR', 'Operation failed', 'RISK_ERROR', 'SIGNAL_ERROR', 'STORAGE_ERROR', 'TRADING_ERROR', 'args', 'context', 'function', 'gate_name', 'kwargs', 'module']

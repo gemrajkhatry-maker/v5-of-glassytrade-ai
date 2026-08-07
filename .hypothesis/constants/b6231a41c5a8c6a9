@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/shared/config_features.py
-# hypothesis_version: 6.152.4
-
-['allow_short', 'llm_post_trade', 'realistic_cost_model', 'risk_tier_engine', 'scalp_engine_enabled', 'scalp_ib_breakout']

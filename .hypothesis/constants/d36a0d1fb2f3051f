@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/domain/fabio_ai/services/entry_gate.py
-# hypothesis_version: 6.152.4
-
-[-50.0, -0.3, 0.0, 0.001, 0.003, 0.005, 0.01, 0.015, 0.02, 0.03, 0.15, 0.3, 0.5, 0.7, 0.75, 0.98, 0.99, 0.995, 1.0, 1.005, 1.01, 1.02, 1.25, 1.5, 2.0, 2.5, 5.0, 50.0, 100.0, 100, 200, 500, 1000, 10000, 'BALANCED', 'BEARISH_DIV', 'BULLISH_DIV', 'BUY', 'High', 'IMBALANCED', 'LONG', 'MEAN_REVERSION', 'MeanRev', 'Medium', 'NSE_MIDDAY', 'P', 'SELL', 'SHORT', 'TREND_CONTINUATION', 'Trend', 'Unknown', 'allow_trail', 'b', 'confidence', 'cvd_divergence', 'cvd_slope', 'dev_poc', 'direction', 'leg_lvns', 'leg_poc', 'levels', 'llm_entry', 'lvn_play_boost', 'lvns', 'market_state', 'market_state_model', 'overextended', 'price', 'raw_output', 'scale_in', 'session_risk_pct', 'session_vwap', 'stacked', 'trade_thesis', 'vwap_lower_2', 'vwap_upper_2', 'warning']

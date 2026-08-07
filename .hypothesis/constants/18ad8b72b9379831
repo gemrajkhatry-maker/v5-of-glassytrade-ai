@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/mobile_alerts.py
-# hypothesis_version: 6.152.4
-
-['ALERT: %s', 'CRITICAL', 'INFO', 'WARNING', 'critical', 'info', 'last_critical', 'total', 'warning', 'ℹ️', '⚠️', '🚨']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/circuit_breakers.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.005, 1000000.0, 'CONSECUTIVE_LOSS', 'DAILY_DRAWDOWN', 'NONE', 'PROFIT_TARGET']

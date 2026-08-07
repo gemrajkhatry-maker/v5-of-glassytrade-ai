@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/probability/direction_timing.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0, 'CLOSE', 'ENTER_NOW', 'FLAT', 'GREEN', 'LONG', 'No setup detected', 'OPEN', 'RED', 'SHORT', 'SKIP', 'TRENDING', 'WAIT']

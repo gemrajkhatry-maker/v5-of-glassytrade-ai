@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/infrastructure/dhan_adapter/auth_provider.py
-# hypothesis_version: 6.152.4
-
-['=', 'DHAN_ACCESS_TOKEN=', 'No token available', 'access_token', 'r', 'status', 'success', 'w']

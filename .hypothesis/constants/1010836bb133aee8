@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/oms/order_manager.py
-# hypothesis_version: 6.147.0
-
-['0', 'BUY', 'CANCELLED', 'Cancel requested', 'CanonicalInstrument', 'EventBus', 'IBrokerAdapter', 'PENDING', 'REJECTED', 'Risk rejected', 'RiskGateway', 'Sent to broker', 'TRADED', 'checked', 'discrepancies', 'message', 'resolved']

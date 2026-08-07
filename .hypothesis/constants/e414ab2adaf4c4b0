@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/engine.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.5, 3.0, 5.0, 300.0, '%H:%M:%S', '+00:00', '1m', 'Z', '_stream_dead', '_symbol', 'asks', 'bids', 'book', 'close', 'depth', 'depth_asks', 'depth_bids', 'footprint', 'high', 'low', 'ltp', 'ltq', 'oi', 'open', 'price', 'quantity', 'rangeBars', 'symbol', 'tick', 'timestamp', 'total_buy_qty', 'total_sell_qty', 'volume']

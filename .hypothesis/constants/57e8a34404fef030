@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/shared/mode.py
-# hypothesis_version: 6.152.4
-
-['GLASSYTRADE_ENV', 'TRADING_MODE', 'live']

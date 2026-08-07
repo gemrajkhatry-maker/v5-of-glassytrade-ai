@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/partition_exit_manager.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.3, 0.4, 1.5, 100.0, 100, 'FULL_EXIT', 'INITIAL', 'PARTIAL_15R', 'PARTIAL_1R', 'TRAILING', '_partial_at_1r']

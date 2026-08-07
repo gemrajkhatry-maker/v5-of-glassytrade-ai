@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/testing/mocks.py
-# hypothesis_version: 6.152.4
-
-[0.95, 0.97, 0.98, 0.99, 1.01, 1.02, 1.03, 1.05, 1000.0, 1500.0, 1600.0, 2500.0, 3500.0, 22000.0, 48000.0, 10000, 100000, 1000000, '1d', ':', 'BANKNIFTY', 'COMPLETED', 'HDFCBANK', 'INFY', 'NIFTY', 'RELIANCE', 'TCS', 'cancel_order', 'cancelled', 'candles', 'close', 'count', 'dry_run', 'exchange', 'from_date', 'high', 'interval', 'low', 'ltp', 'open', 'operation', 'order_id', 'order_type', 'place_order', 'price', 'quantity', 'side', 'status', 'symbol', 'timestamp', 'to_date', 'volume']

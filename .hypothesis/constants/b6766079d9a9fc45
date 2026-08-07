@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/websocket/connection/manager.py
-# hypothesis_version: 6.147.0
-
-[0.0, 0.5, 0.8, 1.0, 5000, 'CONNECTED', 'DISCONNECTED', 'FAILED', 'Manager not running', 'RECONNECTING', 'connected', 'messages_received', 'reconnections', 'subscriptions_active', 'zombies_detected']

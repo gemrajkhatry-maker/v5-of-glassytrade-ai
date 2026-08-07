@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/backend_v2/src/core/tick_processor.py
-# hypothesis_version: 6.152.4
-
-['LTP', 'ask_vol', 'bid_vol', 'buy_qty', 'exchange', 'price', 'sell_qty', 'symbol', 'timestamp', 'trade_size', 'volume']

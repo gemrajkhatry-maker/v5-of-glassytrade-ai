@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/entry_gates/confirmation_bundle.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.15, 0.3, 0.7, 1.0, 1.5, 2.0, 2.5, 5.0, 10000, '+05:30', 'LONG', 'SHORT', 'Z', 'close', 'delta', 'high', 'low', 'open', 'volume']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/routers/alerts.py
-# hypothesis_version: 6.152.4
-
-['/alerts', '/test', '/ws', 'Test alert', 'alerts', 'info', 'ping', 'pong', 'system', 'test']

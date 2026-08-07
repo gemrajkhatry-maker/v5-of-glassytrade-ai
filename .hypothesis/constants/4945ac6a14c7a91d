@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/routers/analysis.py
-# hypothesis_version: 6.152.4
-
-['/amt', '/analysis', '/footprint', '/predict', 'analysis']

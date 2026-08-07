@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/response_parser.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.5, 1.0, 100, '(\\d+)%?', ':', 'ADD', 'ADJUST', 'BUY', 'EXIT', 'FLAT', 'HOLD', 'LONG', 'MOVE', 'MOVE_SL', 'NORMAL', 'NOW', 'SCALE', 'SELL', 'SHORT', 'URGENT', '\\{[^{}]*\\}', 'action', 'confidence', 'direction', 'entry_price', 'mfe', 'probability', 'rationale', 'signal', 'stop_loss', 'urgency']

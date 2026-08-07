@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/trading_query_service.py
-# hypothesis_version: 6.152.4
-
-['CLOSED', 'OPEN', 'OPENED', 'PARTIAL_EXIT', 'RECONCILED_STALE', 'RECOVERED', 'closedAt', 'entryPrice', 'entry_price', 'eventCount', 'eventTypes', 'event_time', 'event_type', 'events', 'exitPrice', 'exit_price', 'openedAt', 'partialExitCount', 'pnl', 'positionId', 'position_id', 'side', 'source', 'status', 'symbol']

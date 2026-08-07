@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/scripts/amt_dataset_generator.py
-# hypothesis_version: 6.152.4
-
-[0.3, -5000, 100, 4500, 4900, 5000, 5100, 5200, 5500, 10000, 21800, 21900, 22000, 22100, 22200, 25000, 60000, 61000, 64000, 65000, 68000, 70000, '$', '--count', '--format', '--output', '--profile', 'BALANCE_ROTATION', 'CRYPTO', 'Crypto', 'D', 'ES', 'ES Futures', 'Enter Long', 'LONG_ABSORPTION', 'NSE', 'NSE Options', 'P', 'STAY_FLAT_RISK', 'Stay Flat', '__main__', 'assistant', 'b', 'chatml', 'consecutive_losses', 'content', 'cvd_trend', 'down', 'flat', 'is_second_drive', 'messages', 'mlx', 'poc', 'price', 'profile_shape', 'role', 'session_pl', 'system', 'text', 'training_data.jsonl', 'up', 'user', 'vah', 'val', 'vwap', 'w', '₹']

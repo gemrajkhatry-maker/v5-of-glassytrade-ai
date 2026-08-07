@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/scalp_gate_pipeline.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.7, 5.0, '%H:%M:%S', '+00:00', 'ALIGNED_BEARISH', 'ALIGNED_BULLISH', 'BEARISH', 'BULLISH', 'CAUTIOUS', 'DEFENSIVE', 'LEVEL_PROXIMITY', 'MTF_ALIGNMENT', 'NEUTRAL', 'NORMAL', 'NO_DOUBLE_EXPOSURE', 'PORTFOLIO_HEADROOM', 'RISK_TIER', 'SESSION_TIMING', 'Z', 'name', 'value']

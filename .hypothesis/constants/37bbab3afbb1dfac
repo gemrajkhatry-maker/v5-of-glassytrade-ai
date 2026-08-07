@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/entry_gates/grading.py
-# hypothesis_version: 6.152.4
-
-[-0.3, 0.0, 0.3, 'BEARISH_DIV', 'BULLISH_DIV', 'BUY', 'LONG', 'MEAN_REVERSION', 'NSE_MIDDAY', 'P', 'SELL', 'SHORT', 'TREND_CONTINUATION', 'b', 'levels', 'overextended', 'session_vwap', 'stacked', 'vwap', 'vwap_lower_2', 'vwap_upper_2', 'warning']

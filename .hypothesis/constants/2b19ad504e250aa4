@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/routers/metrics.py
-# hypothesis_version: 6.152.4
-
-['/gates', '/latency', '/session-health', '/v1/metrics', 'error', 'gates', 'latency', 'metrics']

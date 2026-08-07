@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/gate_rejection_tracker.py
-# hypothesis_version: 6.152.4
-
-[0.0, 'evaluated', 'gate', 'passed', 'rejected', 'rejection_rate', 'symbols', 'top_killers', 'total_evaluated', 'total_rejected']

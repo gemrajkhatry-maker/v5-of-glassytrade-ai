@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/phase_manager.py
-# hypothesis_version: 6.152.4
-
-['%Y-%m-%d', 'LONG', 'MIXED', 'OPEN', '_profile_saved', 'close', 'is_underlying', 'market', 'poc', 'price', 'print_levels', 'profileShape', 'profile_shape', 'session_date', 'side', 'symbol', 'total_volume', 'vah', 'val']

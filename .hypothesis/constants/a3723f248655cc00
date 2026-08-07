@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/narrative_builder.py
-# hypothesis_version: 6.152.4
-
-['BALANCED', 'IN_BALANCE', 'MEAN REVERSION', 'NEUTRAL', 'TREND CONTINUATION', 'TREND_CONTINUATION', 'complete', 'cvd_slope', 'delta', 'favor_strategy', 'forming', 'gap_type', 'ib_complete', 'ib_high', 'ib_low', 'ltp', 'market_state', 'opening_bias', 'poc', 'prior_poc', 'prior_vah', 'prior_val', 'session_name', 'vah', 'val']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/incremental_volume_profile.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.05, 'bucket_size', 'candle_count', 'poc', 'price', 'profile', 'total_volume', 'volume']

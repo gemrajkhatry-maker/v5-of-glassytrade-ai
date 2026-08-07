@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/session_event_router.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.01, 0.05, 1.0, 2.0, 3.0, 100, '; ', 'BSE', 'FLAT', 'GATE_BLOCKED', 'High', 'LONG', 'MEAN_REVERSION', 'Medium', 'NEUTRAL', 'NFO', 'NORMAL', 'NSE', 'PE', 'SHORT', '_agent_decision', '_last_exec_mono', '_last_fp_domain', 'agent_series', 'aggression', 'ask_volume', 'bid_volume', 'confidence', 'cushion_ticks', 'cvd_slope', 'delta_normalized', 'drive_entry_valid', 'drive_number', 'failed_breakout', 'gate_pipeline', 'market_state', 'mtf_alignment', 'name', 'oi_walls', 'passed', 'pcr', 'rationale', 'return_to_value', 'scalp_gate_pipeline', 'session', 'size', 'stop_loss_pct', 'tick_trace_id', 'total', 'utilization']

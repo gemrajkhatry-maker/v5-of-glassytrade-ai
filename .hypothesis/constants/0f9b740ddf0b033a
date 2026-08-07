@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/strategy/setup_detector.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.015, 0.02, 0.03, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.99, 1.0, 1.01, 30.0, 50.0, 'AAA', 'AAA_SHORT', 'BALANCED', 'FAILED_AUCTION', 'IMBALANCED', 'LONG', 'MEAN_REVERSION', 'MOMENTUM', 'NO_TRADE', 'POC', 'PROBING', 'SHORT', 'VAH', 'VAL', 'amt', 'entry', 'pos', 'positive', 'price_beyond_va', 'probe_bars_confirmed', 'rejection_detected', 'stop', 'stop_loss', 'target', 'target_poc']

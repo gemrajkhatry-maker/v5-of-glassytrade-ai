@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/exposure_monitor.py
-# hypothesis_version: 6.152.4
-
-[0.0, 10.0, 30.0, 100, 'avg_price', 'quantity']

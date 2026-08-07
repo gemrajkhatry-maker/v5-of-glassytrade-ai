@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/config/strategy_resolve.py
-# hypothesis_version: 6.152.4
-
-['-', '_', 'commodities', 'commodity', 'index_options', 'mcx', 'mcx_options', 'mcxcommodity', 'nifty_options', 'nse_index', 'nse_index_options', 'nse_options', 'strategies']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/brokers_backup/broker/entities.py
-# hypothesis_version: 6.152.4
-
-[0.0, 100.0, 100, 'CE', 'INTRADAY', 'PE', 'atm_strike', 'spot_price', 'step_size']

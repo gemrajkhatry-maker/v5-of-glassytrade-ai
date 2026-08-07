@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/startup_reconciliation.py
-# hypothesis_version: 6.152.4
-
-['broker.get_positions', 'get_positions', 'id', 'symbol', 'trading_symbol']

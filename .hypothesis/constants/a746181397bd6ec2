@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/backups/backups/backend_backup_20260319_124426/app/domain/fabio_ai/services/regime_detector.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.001, 0.002, 0.003, 0.005, 0.015, 0.3, 0.5, 0.7, 0.8, 3.0, 5.0, 900.0, 100, ', ', 'ABOVE_VAH', 'AT_POC', 'BELOW_VAL', 'CONSOLIDATION', 'CONTINUATION', 'INSIDE_VA', 'LONG', 'REVERSAL', 'SHORT', 'outcome', 'strength']

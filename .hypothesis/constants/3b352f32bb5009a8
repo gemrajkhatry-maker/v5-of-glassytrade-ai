@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/entry_gates/detectors.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.3, 0.7, 1.0, 2.0, 2.5, 'LONG', 'SHORT', 'body_ratio', 'ema_ratio', 'wick_ratio']

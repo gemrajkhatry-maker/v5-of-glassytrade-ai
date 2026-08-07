@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/constants.py
-# hypothesis_version: 6.152.4
-
-[0.005, 0.01, 0.02, 0.03, 0.05, 0.15, 0.2, 0.3, 0.4, 0.5, 0.55, 0.65, 0.7, 1.0, 1.01, 1.5, 2.0, 2.5, 3.0, 5.0, 20.0, 30.0, 50.0, 80.0, 85.0, 100.0, 30000.0, 100, 200, 600, 1000, 5000, '..', 'absorption_range_atr', 'absorption_vol_mult', 'base.yaml', 'big_trade_multiplier', 'config', 'cvd_slope_window', 'cvd_strong_slope', 'globals', 'hvn_min_separation', 'hvn_percentile', 'hvn_threshold', 'lvn_min_separation', 'lvn_percentile', 'lvn_smoothing', 'lvn_threshold', 'max_daily_loss_pct', 'min_aggression_score', 'ofi_window', 'risk_per_trade_pct', 'value_area_pct', 'volume_bubble_sigma']

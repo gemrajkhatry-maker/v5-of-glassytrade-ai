@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/core/logging.py
-# hypothesis_version: 6.152.4
-
-['component', 'correlation_id', 'duration_ms', 'error_type', 'exc_info', 'exception', 'extra', 'level', 'logger', 'message', 'phase', 'stage', 'symbol', 'timestamp', 'uvicorn', 'websockets']

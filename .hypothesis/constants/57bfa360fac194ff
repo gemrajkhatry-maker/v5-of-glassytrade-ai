@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/forward_test_logger.py
-# hypothesis_version: 6.152.4
-
-['a', 'attribution', 'config_fingerprint', 'direction', 'dte_normalized', 'exit_price', 'exit_reason', 'exits', 'live_trading_logs', 'llm_confidence', 'llm_direction', 'mae', 'mfe', 'moneyness_pct', 'option_type_flag', 'p_long', 'p_short', 'partial_exits', 'partial_pct', 'pnl', 'position_id', 'realized_pnl', 'run_id', 'signals', 'size_closed', 'size_remaining', 'source', 'symbol', 'time_in_trade_s', 'timestamp']

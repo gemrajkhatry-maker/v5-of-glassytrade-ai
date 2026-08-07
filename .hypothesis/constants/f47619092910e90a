@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/ib_breakout_scalp.py
-# hypothesis_version: 6.152.4
-
-[1.5, 'FAILED_BREAKOUT', 'IB not complete', 'IB width is zero', 'LONG', 'NONE', 'No breakout detected', 'SHORT', 'Volume not confirmed']

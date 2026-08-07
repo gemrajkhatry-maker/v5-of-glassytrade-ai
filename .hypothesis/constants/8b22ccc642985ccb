@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/trading_session.py
-# hypothesis_version: 6.152.4
-
-[0.05, 600, 1000, 2000, ' [Cooldown', '+00:00', 'CLOSED', 'COOLDOWN', 'FLAT', 'MCX', 'OPEN', 'RUNNING', 'SessionCache', 'SessionEventLogger', 'SessionState', 'SessionStateManager', 'Stop', 'SystemRiskState', 'TRADABLE', 'TickReceived', 'Z', '_ib_engines', '_prior_profile', '_tick_trace_sequence', 'amt_analysis', 'balance', 'baseline_volume', 'closed_at', 'cvd_slope', 'delta_normalized', 'direction', 'entry_execution', 'entry_price', 'equity', 'exit_price', 'get_exchange_config', 'kv_set', 'llm_status', 'llm_trigger', 'micro_agents', 'open_pnl', 'open_positions', 'opened_at', 'phase_check', 'pnl', 'position_id', 'rationale', 'reason', 'side', 'size', 'source', 'storage.kv_get', 'storage.kv_set', 'storage.save_trade', 'symbol', 'tick_trace_id', 'total_tick', 'total_trades', 'trading_state', 'value', 'win_rate']

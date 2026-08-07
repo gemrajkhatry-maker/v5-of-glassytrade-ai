@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokers/broker/dhan/infrastructure/symbol_mapper.py
-# hypothesis_version: 6.147.0
-
-[0.0, 0.05, 0.1, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 1.0, 200, '%Y%m%d', '%Y-%m-%d', '%d%b%Y', '%d-%m-%Y', '-', '.cache', ':', 'BANKNIFTY', 'BSE', 'CE', 'EQ', 'EQUITY', 'ExchangeSegment', 'FINNIFTY', 'FUTCOM', 'FUTCUR', 'FUTIDX', 'FUTSTK', 'INDEX', 'InstrumentTypeEnum', 'MCX', 'MIDCPNIFTY', 'NFO', 'NIFTY', 'NSE', 'OPTCUR', 'OPTFUT', 'OPTIDX', 'OPTSTK', 'PE', 'SEM_CUSTOM_SYMBOL', 'SEM_EXM_EXCH_ID', 'SEM_EXPIRY_DATE', 'SEM_INSTRUMENT_NAME', 'SEM_LOT_UNITS', 'SEM_OPTION_TYPE', 'SEM_SEGMENT_NAME', 'SEM_SMST_ISIN', 'SEM_SMST_SECURITY_ID', 'SEM_SMST_SYMBOL_NAME', 'SEM_STRIKE_PRICE', 'SEM_TICK_SIZE', 'SEM_TRADING_SYMBOL', 'SM_SYMBOL_NAME', '\\s+', 'commodity', 'derivative', 'dhan.symbol_mapper', 'dhan_broker', 'error', 'fno', 'index', 'instruments', 'mcx', 'nan', 'records']

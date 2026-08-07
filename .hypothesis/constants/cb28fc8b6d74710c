@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/trading/models/trade_aggregate.py
-# hypothesis_version: 6.152.4
-
-[0.0, '0', 'BROKER_REJECTED', 'CLOSED', 'ENTRY', 'EXIT', 'FILL_RECEIVED', 'FLAT', 'HIGH', 'LONG', 'LOW', 'MANUAL', 'MEDIUM', 'OPEN', 'PARTIAL', 'PARTIAL_TP', 'PENDING', 'SCALE_IN', 'SCALE_OUT', 'SHORT', 'SIGNAL_REJECTED', 'STOP_LOSS', 'TAKE_PROFIT', 'TIME_STOP', 'TRADE_CANCELLED', 'TRADE_CLOSED', 'TRADE_OPENED', 'aggression_trigger', 'avg_entry_price', 'cancel_reason', 'close_reason', 'close_time', 'commission', 'confidence', 'direction', 'entry_price', 'entry_signal', 'entry_time', 'fill_id', 'fill_type', 'fills', 'invalidation_level', 'location_level', 'location_type', 'market_state', 'position', 'position_size', 'price', 'quantity', 'realized_pnl', 'session_context', 'signal_id', 'status', 'stop_loss', 'symbol', 'take_profit', 'thesis', 'timestamp', 'total_commission', 'total_slippage', 'trade_id', 'unrealized_pnl', 'value']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/marketdata/sequence_validator.py
-# hypothesis_version: 6.147.0
-
-[0.0, 100, 300, 1000, 'active_streams', 'duplicate', 'error_rate', 'errors_detected', 'gap', 'initial_gap', 'is_active', 'last_sequence', 'messages_received', 'out_of_order', 'overall_error_rate', 'stream_id', 'streams', 'total_errors', 'total_streams', 'total_validated']

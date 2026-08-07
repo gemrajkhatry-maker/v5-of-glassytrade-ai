@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/trade_thesis.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.0025, 0.015, 0.15, 0.2, 0.3, 0.35, 0.5, 100, 'BALANCED', 'CVD_EXPANSION', 'DELTA_ACTIVITY', 'DELTA_EXPANSION', 'DELTA_PRESSURE', 'DEV_POC', 'DEV_VAH', 'DEV_VAL', 'HVN', 'IB_HIGH', 'IB_LOW', 'IMBALANCED', 'LEG_POC', 'LEG_VAH', 'LEG_VAL', 'LVN', 'LVN_REACTION', 'MARKET_ACTIVE', 'MID_RANGE', 'ORDER_BOOK_IMBALANCE', 'POC', 'PRICE_MOVEMENT', 'PRIOR_POC', 'PRIOR_VAH', 'PRIOR_VAL', 'VAH', 'VAL', 'VOLUME_PRESENT', 'aggression_trigger', 'delta', 'high', 'invalidation_level', 'location_level', 'location_type', 'low', 'market_state', 'mid_range_entry', 'missing_aggression', 'missing_invalidation', 'missing_state', 'return_to_value', 'session_context', 'setup_family', 'volume', 'wrong_session']

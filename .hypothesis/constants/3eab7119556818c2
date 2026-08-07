@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/engine_lifecycle.py
-# hypothesis_version: 6.152.4
-
-[0.0, 1.0, 500, '%Y-%m-%d', '?', 'BANKNIFTY', 'FINNIFTY', 'MCX', 'NIFTY', 'NSE', 'TRADABLE', 'UNTRADABLE_NOW', '_exchange', '_exchange_config', '_profile_saved', '_state_manager', '_symbol', 'active_symbols', 'close', 'delta', 'entry_price', 'high', 'id', 'low', 'ltp', 'open', 'running', 'seeded', 'side', 'status', 'stop_loss', 'storage.query_ticks', 'stream_task_running', 'symbol', 'take_profit', 'tick', 'time', 'underlying_history', 'underlying_mapping', 'uptime_seconds', 'volume']

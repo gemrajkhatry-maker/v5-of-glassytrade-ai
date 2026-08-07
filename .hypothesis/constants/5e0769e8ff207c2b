@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/structural_stop_engine.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.015, 0.05, 2.0, 'AAA', 'ATR_CAP', 'FAILED_AUCTION', 'FALLBACK', 'HVN', 'IB_EXTREME', 'LONG', 'LVN', 'MEAN_REVERSION', 'MOMENTUM', 'PROBE_EXTREME', 'VA_BOUNDARY', 'inf']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/api/routers/observability.py
-# hypothesis_version: 6.152.4
-
-['/', '/circuit-breakers', '/metrics', '/startup', '/startup/runbook', '/summary', 'amt', 'crash_summary', 'errors_total', 'metrics', 'runbook', 'session', 'signals_generated', 'startup', 'ticks_processed']

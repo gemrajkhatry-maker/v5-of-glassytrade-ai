@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/probability/regime_classifier.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.01, 0.5, 1.0, 2.0, 3.0, 'BALANCED', 'DEAD', 'TRENDING', 'VOLATILE', 'market_state']

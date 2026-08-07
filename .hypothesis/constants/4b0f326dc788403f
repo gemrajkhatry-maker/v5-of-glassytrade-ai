@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/fabio_ai/services/exit_rules.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.001, 0.03, 0.5, 1.0, 1.3, 300.0, 1800.0, 7200.0, 100, 600, 900, 1200, 1800, 2700, 7200, 'ADVERSE_EXIT', 'AFTERNOON', 'BALANCED', 'BREAK_EVEN', 'ExitSignal | None', 'IMBALANCED', 'LONG', 'MANUAL_EXIT', 'MORNING', 'OVERSEER_EXIT', 'OVERSEER_PARTIAL', 'PARTIAL_TAKE_PROFIT', 'Position', 'SCRATCH', 'SPREAD_BLOWOUT', 'STOP_LOSS', 'TAKE_PROFIT', 'TIME_STOP', 'TRAILING_STOP', 'imbalance', 'market_state_model', 'trend', 'value']

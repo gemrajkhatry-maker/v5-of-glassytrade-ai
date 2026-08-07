@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/api/state_broadcaster.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.2, 0.5, 1.0, 5.0, '_previous_state', 'data', 'delta', 'generation', 'keyframe', 'no state', 'timeout', 'type']

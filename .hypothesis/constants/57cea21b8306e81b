@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/domain/services/short_signal_gates.py
-# hypothesis_version: 6.152.4
-
-[0.51, 0.58, 'BALANCED', 'DOWN', 'IMBALANCED', 'PE', 'S1_DIRECTION', 'S2_MARKET_STATE', 'S3_ML_PROB', 'S4_AGGRESSION', 'S5_CONTRACT', 'probing_breakout', 'return_to_value']

@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/infrastructure/dhan_adapter/factory.py
-# hypothesis_version: 6.152.4
-
-['.env', '1d', '30', 'DHAN_', 'PIN', 'TOTP_SECRET', 'access_token', 'base_url', 'client_id', 'enable_ws', 'expiry_index', 'https://api.dhan.co', 'security_id', 'symbol', 'timeout', 'true', 'underlying', 'ws_url', 'wss://api.dhan.co/ws']

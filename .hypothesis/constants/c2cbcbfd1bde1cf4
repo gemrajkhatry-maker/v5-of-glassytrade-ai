@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/transaction_cost_model.py
-# hypothesis_version: 6.152.4
-
-[0.0, 1e-08, 2.5e-06, 3.75e-06, 3e-05, 0.0005, 0.000625, 0.18, 1.1, 20.0, 10000, 'BUY', 'MCX', 'NSE', 'SELL', 'discount']

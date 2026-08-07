@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/brokersv2/providers/warmup.py
-# hypothesis_version: 6.147.0
-
-['%Y-%m-%d', '.', 'Warmup cache cleared', 'duration_seconds', 'entries', 'failed', 'failures', 'instruments', 'successful', 'timeframes', 'total_candles', 'total_combinations']

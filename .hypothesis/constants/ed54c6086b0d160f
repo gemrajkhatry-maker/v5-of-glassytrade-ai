@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/domain/services/exit_engine.py
-# hypothesis_version: 6.152.4
-
-[0.0, 60.0, 'SESSION_EXIT', 'SL_HIT', 'TIME_STOP', 'TP_HIT', 'TRAIL_HIT']

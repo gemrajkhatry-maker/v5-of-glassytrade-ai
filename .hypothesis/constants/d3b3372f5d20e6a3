@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/backend/app/application/services/tick_processor.py
-# hypothesis_version: 6.152.4
-
-[0.0, 3.0, 200, 'CandleAggregator', 'FALLING', 'FLAT', 'RISING', 'RangeBarBuilder', '_agent_decision', '_symbol', 'agentDecision', 'amt', 'depth', 'direction', 'genAIAnalysis', 'latencyUs', 'ltp', 'oi', 'oi_change', 'oi_trend', 'price', 'probability', 'qty', 'rationale', 'regime', 'sizeFraction', 'slAdjust', 'stopLoss', 'stop_loss', 'takeProfit', 'take_profit', 'taker_buy_volume', 'tick', 'time', 'timing', 'tpAdjust']

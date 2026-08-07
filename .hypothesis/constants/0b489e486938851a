@@ -1,4 +1,0 @@
-# file: /Users/apple/Downloads/v5-of-glassytrade-ai/archive/appv2/backend/appv2/application/strategy_orchestrator.py
-# hypothesis_version: 6.152.4
-
-[0.0, 0.05, 0.5, 1.0, 1.5, 5.0, 'LONG', 'NO_TRADE', 'No observation', 'VA_BOUNCE']
