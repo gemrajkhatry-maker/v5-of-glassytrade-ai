@@ -123,6 +123,7 @@ class TestDebugMemoryEndpoint:
 
     @pytest.fixture
     def client(self):
+        pytest.importorskip("httpx")
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
         from app.api.routers.health import router
