@@ -400,7 +400,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument(
         "--capital",
         type=float,
-        default=10_000_000,
+        default=1_000_000,
         help="starting equity for drawdown/sharpe (default 10,000,000)",
     )
     parser.add_argument("--json", default=None, help="write machine-readable result here")

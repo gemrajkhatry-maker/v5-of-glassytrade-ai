@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Configuration (could be injected; kept as module-level for simplicity)
 # ---------------------------------------------------------------------------
 
-INITIAL_CAPITAL: Decimal = Decimal("5000000")  # 50 lakhs INR
+INITIAL_CAPITAL: Decimal = Decimal("1000000")  # 10 lakhs INR (1M)
 LEVERAGE: int = 1
 RISK_PER_TRADE: Decimal = Decimal("0.01")
 MAX_HISTORY: int = 1000

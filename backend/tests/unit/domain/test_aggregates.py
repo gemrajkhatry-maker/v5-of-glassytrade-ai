@@ -73,9 +73,9 @@ class TestPortfolioOpenPosition:
         sig = _make_signal(price=100, sl=95, tp=110)
         pos = p.open_position(sig, "BTCUSDT")
         # No metadata → confidence="Medium" → risk=0.35%
-        # risk_amount = 5M (INITIAL_CAPITAL) * 0.0035 = 17.5K
-        # risk_per_unit = 5; size = 17.5K / 5 = 3500
-        assert pos.size == pytest.approx(3500, rel=0.01)
+        # risk_amount = 1M (INITIAL_CAPITAL) * 0.0035 = 3.5K
+        # risk_per_unit = 5; size = 3.5K / 5 = 700
+        assert pos.size == pytest.approx(700, rel=0.01)
 
 
 class TestPortfolioProcessTick:

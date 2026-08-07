@@ -11,7 +11,7 @@ class RiskState:
 
 
 class SessionRisk:
-    def __init__(self, starting_equity: float = 100000.0,
+    def __init__(self, starting_equity: float = 1_000_000.0,
                  base_risk_pct: float = 0.01,
                  max_daily_loss_pct: float = 0.03,
                  max_consecutive_losses: int = 3) -> None:

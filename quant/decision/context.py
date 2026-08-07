@@ -21,6 +21,6 @@ class DecisionContext:
     agent_direction: Optional[str] = None   # "LONG" | "SHORT" | "FLAT" | None
     agent_probability: float = 0.0
     # capital for sizing
-    equity: float = 100000.0
+    equity: float = 1_000_000.0
     risk_per_trade_pct: float = 0.01
     tick_size: float = 0.05

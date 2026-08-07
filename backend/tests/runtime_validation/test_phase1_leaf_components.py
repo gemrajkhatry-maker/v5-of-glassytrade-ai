@@ -167,15 +167,16 @@ class TestRiskSizing:
         sig = _signal(price=100, sl=95, tp=110)  # no metadata -> Medium -> 0.35%
         pos = p.open_position(sig, "NIFTY")
         assert pos is not None
-        # risk_amount = 5,000,000 * 0.0035 = 17,500 ; risk_per_unit = 5 -> 3,500
-        assert float(pos.size) == pytest.approx(3500, rel=0.01)
+        # risk_amount = 1,000,000 * 0.0035 = 3,500 ; risk_per_unit = 5 -> 700
+        assert float(pos.size) == pytest.approx(700, rel=0.01)
 
     def test_high_confidence_sizes_larger(self):
         p = Portfolio.create_default()
         sig = _signal(price=100, sl=95, tp=110, confidence="High")  # 0.5%
         pos = p.open_position(sig, "NIFTY")
         assert pos is not None
-        assert float(pos.size) == pytest.approx(5000, rel=0.01)
+        # risk_amount = 1,000,000 * 0.005 = 5,000 ; risk_per_unit = 5 -> 1,000
+        assert float(pos.size) == pytest.approx(1000, rel=0.01)
 
     def test_zero_risk_rejected(self):
         p = Portfolio.create_default()

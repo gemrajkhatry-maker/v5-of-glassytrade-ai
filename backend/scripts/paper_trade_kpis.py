@@ -40,7 +40,7 @@ class KpiResult:
     sharpe_ratio: float
 
 
-def compute_kpis(trades: list, initial_capital: float = 10_000_000) -> KpiResult:
+def compute_kpis(trades: list, initial_capital: float = 1_000_000) -> KpiResult:
     """Compute KPIs from closed trades list."""
     if not trades:
         return KpiResult(0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
@@ -100,7 +100,7 @@ def main() -> None:
     parser.add_argument(
         "--capital",
         type=float,
-        default=10_000_000,
+        default=1_000_000,
         help="Starting equity for drawdown curve (reporting only)",
     )
     parser.add_argument("--json", default=None, help="Write full KPI dict to this path")
