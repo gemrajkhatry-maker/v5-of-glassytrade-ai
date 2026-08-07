@@ -40,11 +40,6 @@ from .http_client import (
     DhanHttpClient,
 )
 
-# Sync HTTP client (legacy/sync-only helper; main path uses async DhanHttpClient)
-from .http_client_sync import (
-    DhanHttpClientSync,
-)
-
 # =============================================================================
 # WebSocket Client
 # =============================================================================
@@ -98,7 +93,6 @@ __all__ = [
     # HTTP
     "RetryConfig",
     "DhanHttpClient",
-    "DhanHttpClientSync",
     # WebSocket
     "DhanWebSocketClient",
     "DepthWebSocketClient",

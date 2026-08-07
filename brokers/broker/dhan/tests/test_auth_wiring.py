@@ -90,15 +90,3 @@ class TestWebSocketAuthRefresh:
         mock_auth.ensure_valid_token.assert_called_once()
         assert ws._access_token == "NEW_TOKEN"
 
-
-class TestSyncClientSetToken:
-    """Sync HTTP client should support token update."""
-
-    def test_set_access_token(self):
-        from brokers.broker.dhan.infrastructure.http_client_sync import DhanHttpClientSync
-        client = DhanHttpClientSync(client_id="C1", access_token="OLD")
-        assert client._session.headers["access-token"] == "OLD"
-
-        client.set_access_token("NEW")
-        assert client._access_token == "NEW"
-        assert client._session.headers["access-token"] == "NEW"
