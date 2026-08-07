@@ -18,6 +18,17 @@ def is_stop_too_thin(
     return abs(entry - sl) < abs(entry) * (min_stop_distance_pct / 100.0)
 
 
+def is_min_stop_met(
+    entry: float, sl: float, min_stop_distance_pct: float = MIN_STOP_DISTANCE_PCT
+) -> bool:
+    """True when the stop distance meets ``min_stop_distance_pct``% of price.
+
+    Positive form of ``is_stop_too_thin`` for callers that express the guard as
+    "require a structural stop" (e.g. the VA-fade fallback).
+    """
+    return not is_stop_too_thin(entry, sl, min_stop_distance_pct)
+
+
 def clamp_quantity(
     quantity: float, max_quantity: float = MAX_POSITION_QUANTITY
 ) -> float:
