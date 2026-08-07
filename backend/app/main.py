@@ -160,6 +160,24 @@ def create_application() -> FastAPI:
             end_phase("trading_engine", "failed", "engine.start() raised exception")
             mark_startup_failed("engine")
 
+        # Boot the greenfield QuantCoordinator (gated). The legacy engine above
+        # keeps running; the coordinator only ADDS the greenfield shell.
+        if os.getenv("GREENFIELD_ENGINE", "").strip().lower() in ("1", "true", "yes"):
+            try:
+                from quant.coordinator import QuantCoordinator
+
+                coordinator = container.resolve(QuantCoordinator)
+                app.state.coordinator = coordinator
+                coordinator.start()
+                logger.info(
+                    "Greenfield QuantCoordinator started: %s", coordinator.symbols()
+                )
+            except Exception:
+                logger.error(
+                    "Greenfield QuantCoordinator failed to start — continuing with legacy engine",
+                    exc_info=True,
+                )
+
         end_phase("lifespan_startup", "ok" if not getattr(app.state, "engine_start_failed", False) else "warn")
         if startup_ok and not getattr(app.state, "engine_start_failed", False):
             mark_startup_finished()
@@ -178,6 +196,17 @@ def create_application() -> FastAPI:
                 logger.info("Trading engine stopped")
             except Exception:
                 logger.error("Engine stop failed — resources may not be cleaned up", exc_info=True)
+
+        # Stop greenfield coordinator (if it was started)
+        if hasattr(app.state, "coordinator"):
+            try:
+                app.state.coordinator.stop()
+                logger.info("Greenfield QuantCoordinator stopped")
+            except Exception:
+                logger.error(
+                    "Greenfield QuantCoordinator stop failed — resources may not be cleaned up",
+                    exc_info=True,
+                )
 
         # Persist pending in-memory data and release storage resources
         try:

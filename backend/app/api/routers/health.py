@@ -127,6 +127,25 @@ async def health_check(
     except Exception as e:
         checks["probability"] = f"error: {e}"
 
+    # Greenfield QuantCoordinator check (additive — does not gate overall health)
+    coordinator = getattr(request.app.state, "coordinator", None)
+    if coordinator is not None:
+        try:
+            started = bool(getattr(coordinator, "started", False))
+            symbols = list(coordinator.symbols() or [])
+            checks["coordinator"] = {
+                "started": started,
+                "symbols": symbols,
+                "status": "ok" if started else "not_started",
+            }
+        except Exception as e:
+            logger.warning("Health check: coordinator check failed: %s", e)
+            checks["coordinator"] = {
+                "started": False,
+                "symbols": [],
+                "status": f"error: {e}",
+            }
+
     # Determine overall status
     # Database is strictly critical
     # LLM/Probability are allowed to be 'not_ready' (still loading) without failing health
@@ -137,7 +156,7 @@ async def health_check(
     elif all(
         v in ["ok", "not_ready", "degraded"]
         for k, v in checks.items()
-        if k not in {"llm_state", "llm_state_reason"}
+        if k not in {"llm_state", "llm_state_reason", "coordinator"}
     ):
         overall = "ok"
     else:
@@ -400,6 +419,26 @@ async def system_config(request: Request):
 @router.post("/scanner/rescan")
 async def scanner_rescan(request: Request):
     """Trigger a fresh option scan and update active symbols."""
+    coordinator = getattr(request.app.state, "coordinator", None)
+    if coordinator is not None:
+        try:
+            syms = await asyncio.to_thread(coordinator.rescan)
+        except Exception as e:
+            logger.error("scanner_rescan via coordinator failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e)) from e
+        contracts = []
+        for s in syms:
+            snap = coordinator.snapshot(s)
+            contracts.append(
+                {
+                    "symbol": s,
+                    "ltp": snap.get("ltp"),
+                    "oi": snap.get("oi"),
+                    "tick": snap.get("tick"),
+                }
+            )
+        return {"count": len(syms), "contracts": contracts}
+
     from quant.amt.session.scanner import OptionScannerService
 
     market_data = get_market_data()

@@ -226,6 +226,11 @@ async def gameloop_ws(ws: WebSocket):
 
 async def _viewer_loop(ws: WebSocket, app_state, symbol: str) -> None:
     """Read-only viewer: streams engine state to frontend via delta compression."""
+    if hasattr(app_state, "coordinator"):
+        logger.info("Viewer loop: streaming from greenfield QuantCoordinator")
+        await _coordinator_viewer_loop(ws, app_state.coordinator, symbol)
+        return
+
     from app.config import settings
     from app.infrastructure.serialization.schemas import ohlc_to_dto
 
@@ -394,3 +399,124 @@ async def _listen_for_client(ws: WebSocket) -> None:
             # ping is handled passively — viewer loop sends pong on its own schedule
     except (WebSocketDisconnect, Exception):
         return
+
+
+async def _coordinator_listener(ws: WebSocket, commands: asyncio.Queue) -> None:
+    """Read client messages for the greenfield viewer loop.
+
+    NOTE: never writes to the WS here — commands are queued and the viewer
+    loop replies, preserving single-writer semantics (concurrent WS writes
+    cause broken pipe errors).
+    """
+    try:
+        while True:
+            raw = await ws.receive_text()
+            data = json.loads(raw)
+            if data.get("unsubscribe"):
+                await commands.put(("unsubscribe", None))
+                return
+            if data.get("ping"):
+                await commands.put(("pong", None))
+            if data.get("subscribe"):
+                await commands.put(("subscribe", data["subscribe"]))
+    except (WebSocketDisconnect, Exception):
+        return
+
+
+async def _coordinator_viewer_loop(
+    ws: WebSocket, coordinator, symbol: str
+) -> None:
+    """Greenfield viewer: streams QuantCoordinator snapshots via delta compression.
+
+    Control protocol mirrors the legacy engine loop so the frontend sees the
+    same ``server_mode`` / ``history_loaded`` messages:
+      1. server_mode (exchange/interval/activeSymbols)
+      2. history_loaded (LLM decision history per symbol)
+      3. full snapshot, then 0.5s delta-compressed snapshots
+      4. client ping -> {"type": "pong"}; subscribe -> symbol_switched + re-enter
+    """
+    from app.config import settings
+
+    commands: asyncio.Queue = asyncio.Queue()
+    listener = asyncio.create_task(_coordinator_listener(ws, commands))
+    previous: str | None = None
+
+    try:
+        while True:
+            symbols = coordinator.symbols()
+            if symbol not in symbols:
+                if previous is not None and previous in symbols:
+                    coordinator.switch_symbol(previous, symbol)
+                else:
+                    await _safe_send(ws, {"error": f"symbol not found: {symbol}"})
+                    return
+            previous = symbol
+
+            # 1. Send config
+            if not await _safe_send(
+                ws,
+                {
+                    "status": "server_mode",
+                    "symbol": symbol,
+                    "activeSymbols": coordinator.symbols(),
+                    "exchange": settings.DEFAULT_EXCHANGE,
+                    "interval": settings.STREAM_INTERVAL,
+                },
+            ):
+                return
+
+            # 2. Send history
+            history = coordinator.llm_history(symbol)
+            if not await _safe_send(
+                ws,
+                {
+                    "status": "history_loaded",
+                    "symbol": symbol,
+                    "_symbol": symbol,
+                    "history": list(history),
+                    "count": len(history),
+                },
+            ):
+                return
+
+            # 3. Send current full snapshot
+            previous_state: dict = dict(coordinator.snapshot(symbol))
+            if not await _safe_send(ws, {**previous_state, "_type": "full"}):
+                return
+
+            # 4. Stream delta-compressed updates every 0.5s
+            while True:
+                if listener.done():
+                    return
+                await asyncio.sleep(0.5)
+
+                switched: str | None = None
+                while not commands.empty():
+                    kind, payload = commands.get_nowait()
+                    if kind == "pong":
+                        if not await _safe_send(ws, {"type": "pong"}):
+                            return
+                    elif kind == "subscribe":
+                        switched = payload
+                    elif kind == "unsubscribe":
+                        return
+                if switched is not None:
+                    if not await _safe_send(
+                        ws, {"status": "symbol_switched", "symbol": switched}
+                    ):
+                        return
+                    symbol = switched
+                    break
+
+                snap = coordinator.snapshot(symbol)
+                delta = _compute_delta(previous_state, snap)
+                if delta:
+                    if not await _safe_send(ws, delta):
+                        return
+                    previous_state = dict(snap)
+    finally:
+        listener.cancel()
+        try:
+            await listener
+        except (asyncio.CancelledError, Exception):
+            pass

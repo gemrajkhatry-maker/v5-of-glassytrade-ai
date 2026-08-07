@@ -17,7 +17,6 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 
 from quant.aggregator import BarAggregator
-from quant.coordinator import AuctionCoordinator
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
 from quant.decision.signal_builder import clamp_quantity
@@ -62,6 +61,8 @@ class QuantEngine:
         self.symbol = symbol
         self._tick_size = tick_size
         self._aggregator = BarAggregator(interval_seconds=interval_seconds)
+        from quant.coordinator import AuctionCoordinator
+
         self._coordinator = AuctionCoordinator()
         self._decision_service = DecisionService(min_rr=min_rr)
         self._oms = PaperOMS()

@@ -3,7 +3,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from app.api.dependencies import get_active_symbols, get_gen_ai_service, get_storage, get_trade_journal
@@ -38,13 +38,20 @@ async def analyze_market(
 
 @router.get("/history")
 async def get_decision_history(
+    request: Request,
+    symbol: str = Query(""),
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
     limit: int = Query(1000),
     storage: SQLiteStorageAdapter = Depends(get_storage),
     active_symbols: list[str] = Depends(get_active_symbols),
 ):
-    """Returns persisted decision history from SQLite — LLM and signal decisions."""
+    """Returns decision history — greenfield LLM history when a coordinator is running."""
+    coordinator = getattr(request.app.state, "coordinator", None)
+    if coordinator is not None:
+        syms = coordinator.symbols()
+        target = symbol or (syms[0] if syms else "")
+        return {"history": coordinator.llm_history(target)}
     try:
         return _command_service.get_decision_history(
             storage=storage,
