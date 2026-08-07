@@ -1,5 +1,11 @@
+import queue
+import time
+
+import pytest
+
 from quant.bars import Bar
-from quant.coordinator import AuctionCoordinator
+from quant.brokers.gateway import Tick
+from quant.coordinator import AuctionCoordinator, QuantCoordinator
 
 
 def _session_bars():
@@ -69,3 +75,118 @@ def test_triple_a_signal_flows_through():
     # and it resets after the signal bar (next bar back to WAITING)
     sig_idx = signals.index("LONG")
     assert phases[sig_idx + 1] == "WAITING"
+
+
+# ---------------------------------------------------------------------------
+# QuantCoordinator — multi-symbol orchestrator
+# ---------------------------------------------------------------------------
+
+
+class _FakeGateway:
+    """BrokerGateway-compatible stub: a few ticks then None (mirror
+    SyntheticGateway). Accepts the (market_data, symbol) factory args."""
+
+    def __init__(self, market_data, symbol):
+        self.market_data = market_data
+        self.symbol = symbol
+        self.closed = False
+        self._ticks = [
+            Tick("t0", 100.0, 10, 6, 4),
+            Tick("t1", 100.5, 10, 6, 4),
+            Tick("t2", 101.0, 10, 6, 4),
+        ]
+        self._index = 0
+
+    def subscribe(self, symbol):
+        self._index = 0
+
+    def next_tick(self):
+        if self._index >= len(self._ticks):
+            return None
+        tick = self._ticks[self._index]
+        self._index += 1
+        return tick
+
+    def close(self):
+        self.closed = True
+
+
+_SYM_A = "NIFTY 11 AUG 24600 CALL"
+_SYM_B = "BANKNIFTY 11 AUG 50000 PUT"
+
+
+@pytest.fixture
+def coordinator(monkeypatch):
+    monkeypatch.setattr("quant.coordinator.LiveGateway", _FakeGateway)
+    c = QuantCoordinator(market_data=object(), config={"interval_seconds": 1})
+    monkeypatch.setattr(c, "_scan", lambda: [_SYM_A, _SYM_B])
+    c.start()
+    return c
+
+
+def test_start_spawns_engines(coordinator):
+    assert coordinator.symbols() == [_SYM_A, _SYM_B]
+
+
+def test_snapshot_contract_keys(coordinator):
+    snap = coordinator.snapshot(_SYM_A)
+    assert snap["_symbol"] == _SYM_A
+    for key in (
+        "portfolio", "amt", "auction", "quantDecision", "genAIAnalysis",
+        "overseerAction", "overseerReason", "agentDecision", "riskState",
+        "tick", "ltp", "oi", "depth",
+    ):
+        assert key in snap
+    # unknown symbol yields a minimal stub snapshot
+    assert coordinator.snapshot("missing") == {"_symbol": "missing"}
+
+
+def test_rescan_returns_new_symbols(coordinator, monkeypatch):
+    new = ["FINNIFTY 11 AUG 20000 CALL"]
+    monkeypatch.setattr(coordinator, "_scan", lambda: new)
+    assert coordinator.rescan() == new
+    assert coordinator.symbols() == new
+    time.sleep(0.1)  # let respawned engine thread spin up
+
+
+def test_switch_symbol(coordinator):
+    new = "NIFTY 11 AUG 24700 CE"
+    assert coordinator.switch_symbol(_SYM_A, new) is True
+    assert new in coordinator.symbols()
+    assert _SYM_A not in coordinator.symbols()
+    assert _SYM_B in coordinator.symbols()
+    assert coordinator.switch_symbol("no-such-symbol", new) is False
+
+
+def test_llm_history(coordinator):
+    coordinator._history[_SYM_A].append({"direction": "LONG", "confidence": "High"})
+    assert coordinator.llm_history(_SYM_A) == [
+        {"direction": "LONG", "confidence": "High"}
+    ]
+    assert coordinator.llm_history("missing") == []
+    # llm_history returns a copy — mutating it must not leak into the buffer
+    history = coordinator.llm_history(_SYM_A)
+    history.append({"direction": "FLAT"})
+    assert len(coordinator.llm_history(_SYM_A)) == 1
+
+
+def test_decisions_queue(coordinator):
+    q = coordinator.decisions()
+    assert isinstance(q, queue.Queue)
+    # each engine closed a bar -> DecisionProduced lands on the shared queue
+    deadline = time.monotonic() + 2.0
+    while q.empty() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not q.empty(), "expected an engine decision on the shared queue"
+    # drain engine events, tolerating in-flight emits until the engine threads exit
+    for _ in range(20):
+        while not q.empty():
+            event = q.get_nowait()
+            assert event.__class__.__name__ in {"DecisionProduced", "SignalApproved"}
+        if all(not t.is_alive() for t in coordinator._threads.values()):
+            break
+        time.sleep(0.05)
+    assert q.empty()
+    # ... and it remains a plain, usable queue
+    q.put("dummy")
+    assert q.get_nowait() == "dummy"
