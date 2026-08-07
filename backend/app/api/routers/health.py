@@ -321,8 +321,18 @@ async def system_config(request: Request):
     class _MockGraph:
         active_symbols = get_active_symbols()
         _config = get_configuration()
-        
-    active_syms = _bootstrap_active_symbols(_MockGraph())
+
+    # Prefer the greenfield coordinator's live contracts so the frontend
+    # subscribes to symbols the coordinator can actually stream (base
+    # underlyings like "NIFTY" are not engine keys — contracts are).
+    coordinator = getattr(request.app.state, "coordinator", None)
+    coordinator_symbols: list[str] = []
+    if coordinator is not None:
+        try:
+            coordinator_symbols = list(coordinator.symbols() or [])
+        except Exception:
+            coordinator_symbols = []
+    active_syms = coordinator_symbols or _bootstrap_active_symbols(_MockGraph())
     return {
         "dataSource": "DHAN",
         "exchange": settings.DEFAULT_EXCHANGE,

@@ -158,17 +158,67 @@ async def _coordinator_listener(ws: WebSocket, commands: asyncio.Queue) -> None:
         return
 
 
+def _resolve_symbol(requested: str, available: list[str]) -> str | None:
+    """Map a client-requested symbol to a live coordinator contract.
+
+    Exact match wins; otherwise a base underlying (e.g. ``NIFTY``) resolves to
+    the first scanned contract for that underlying (e.g. ``NIFTY 11 AUG 24550
+    CALL``). Returns ``None`` when nothing matches.
+    """
+    if requested in available:
+        return requested
+    prefix = f"{requested.upper()} "
+    for sym in available:
+        if sym.upper().startswith(prefix):
+            return sym
+    return None
+
+
+async def _wait_for_subscribe(
+    ws: WebSocket, commands: asyncio.Queue, listener: asyncio.Task
+) -> str | None:
+    """Wait for the client to (re-)subscribe, answering pings meanwhile.
+
+    Returns the newly requested symbol, or ``None`` when the client
+    disconnected or sent an unsubscribe.
+    """
+    while True:
+        if listener.done():
+            return None
+        try:
+            kind, payload = await asyncio.wait_for(commands.get(), timeout=0.5)
+        except asyncio.TimeoutError:
+            continue
+        if kind == "pong":
+            if not await _safe_send(ws, {"type": "pong"}):
+                return None
+        elif kind == "subscribe":
+            return payload
+        elif kind == "unsubscribe":
+            return None
+
+
 async def _coordinator_viewer_loop(
     ws: WebSocket, coordinator, symbol: str
 ) -> None:
     """Greenfield viewer: streams QuantCoordinator snapshots via delta compression.
 
     Control protocol mirrors the legacy engine loop so the frontend sees the
-    same ``server_mode`` / ``history_loaded`` messages:
+    same ``server_mode`` messages:
       1. server_mode (exchange/interval/activeSymbols)
-      2. history_loaded (LLM decision history per symbol)
+      2. llm_history_loaded (LLM decision history per symbol) — deliberately
+         NOT ``history_loaded``: the frontend treats that status as chart
+         candle data (the legacy protocol sent OHLC there). LLM decisions are
+         raw analysis JSON with no OHLC shape, so they get their own status
+         and are routed to the decision-history panel, never into the chart.
       3. full snapshot, then 0.5s delta-compressed snapshots
       4. client ping -> {"type": "pong"}; subscribe -> symbol_switched + re-enter
+
+    The requested symbol is resolved against the coordinator's live contracts
+    (base underlying -> first matching contract). An unknown symbol no longer
+    closes the socket: the error is sent with the available symbols and the
+    connection stays open waiting for a valid re-subscribe, so the frontend
+    cannot spin in a reconnect loop.
     """
     from app.config import settings
 
@@ -179,12 +229,36 @@ async def _coordinator_viewer_loop(
     try:
         while True:
             symbols = coordinator.symbols()
-            if symbol not in symbols:
+            resolved = _resolve_symbol(symbol, symbols)
+            if resolved is None:
+                # Preserve the coordinator's engine-switch capability: a client
+                # may request a specific new contract not in the live scan, in
+                # which case the coordinator swaps its engine over to it.
                 if previous is not None and previous in symbols:
-                    coordinator.switch_symbol(previous, symbol)
-                else:
-                    await _safe_send(ws, {"error": f"symbol not found: {symbol}"})
+                    try:
+                        if coordinator.switch_symbol(previous, symbol):
+                            resolved = symbol
+                    except Exception:
+                        logger.warning(
+                            "coordinator.switch_symbol(%s, %s) failed",
+                            previous,
+                            symbol,
+                            exc_info=True,
+                        )
+            if resolved is None:
+                if not await _safe_send(
+                    ws,
+                    {
+                        "error": f"symbol not found: {symbol}",
+                        "availableSymbols": symbols,
+                    },
+                ):
                     return
+                symbol = await _wait_for_subscribe(ws, commands, listener)
+                if symbol is None:
+                    return
+                continue
+            symbol = resolved
             previous = symbol
 
             # 1. Send config
@@ -200,12 +274,15 @@ async def _coordinator_viewer_loop(
             ):
                 return
 
-            # 2. Send history
+            # 2. Send LLM decision history under its own status — this is NOT
+            # candle history (the coordinator keeps no OHLC history in the
+            # greenfield shell), so it must never ride the ``history_loaded``
+            # status the frontend maps to chart data.
             history = coordinator.llm_history(symbol)
             if not await _safe_send(
                 ws,
                 {
-                    "status": "history_loaded",
+                    "status": "llm_history_loaded",
                     "symbol": symbol,
                     "_symbol": symbol,
                     "history": list(history),

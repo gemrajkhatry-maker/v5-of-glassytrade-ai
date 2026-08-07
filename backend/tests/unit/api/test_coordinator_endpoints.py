@@ -11,6 +11,28 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+class _RawView:
+    """Shim exposing a fake snapshot dict as a ViewState-like object so the
+    fake coordinator can route through ``view_state_to_ws`` exactly like the
+    real ``QuantCoordinator.snapshot`` does."""
+
+    def __init__(self, d: dict) -> None:
+        self.symbol = d["_symbol"]
+        self.tick = d.get("tick")
+        self.ltp = d.get("ltp")
+        self.oi = d.get("oi")
+        self.auction = d.get("auction")
+        self.quant_decision = d.get("quantDecision")
+        self.risk_state = d.get("riskState")
+        self.portfolio = d.get("portfolio")
+        self.depth = d.get("depth")
+        self.amt = d.get("amt")
+        self.gen_ai = d.get("genAIAnalysis")
+        self.overseer_action = d.get("overseerAction", "")
+        self.overseer_reason = d.get("overseerReason", "")
+        self.agent_decision = d.get("agentDecision")
+
+
 class _FakeCoordinator:
     """Minimal double matching the QuantCoordinator surface the shell uses."""
 
@@ -44,7 +66,14 @@ class _FakeCoordinator:
         return list(self._symbols)
 
     def snapshot(self, symbol: str) -> dict:
-        return dict(self._snapshots.get(symbol, {"_symbol": symbol}))
+        # Mirror the real QuantCoordinator: route the projector state through
+        # view_state_to_ws so the portfolio always carries the full contract.
+        from quant.ws_adapter import view_state_to_ws
+
+        raw = self._snapshots.get(symbol, {"_symbol": symbol})
+        if "_symbol" not in raw:
+            return raw
+        return view_state_to_ws(_RawView(raw))
 
     def llm_history(self, symbol: str) -> list[dict]:
         return list(self._history.get(symbol, []))
@@ -128,7 +157,9 @@ def test_ws_gameloop_streams_coordinator_snapshot(client):
         assert first["activeSymbols"] == ["SYM"]
 
         second = ws.receive_json()
-        assert second["status"] == "history_loaded"
+        # LLM decision history rides its own status — never ``history_loaded``
+        # (that status means candle data to the frontend chart).
+        assert second["status"] == "llm_history_loaded"
         assert second["symbol"] == "SYM"
 
         full = ws.receive_json()
@@ -140,3 +171,32 @@ def test_ws_gameloop_streams_coordinator_snapshot(client):
         ws.send_json({"ping": True})
         pong = ws.receive_json()
         assert pong == {"type": "pong"}
+
+
+def test_ws_portfolio_always_full_contract_shape(client):
+    """The portfolio DTO must carry balance/equity/leverage + arrays on EVERY
+    message — the frontend reduces over these fields unconditionally."""
+    c, app, fake = client
+    fake._snapshots["SYM"]["portfolio"] = {"positions": []}  # partial backend object
+    with c.websocket_connect("/api/trading/ws/gameloop") as ws:
+        ws.send_json({"subscribe": "SYM"})
+        ws.receive_json()  # server_mode
+        ws.receive_json()  # llm_history_loaded
+        full = ws.receive_json()
+        p = full["portfolio"]
+        assert "balance" in p and "equity" in p and "leverage" in p
+        assert isinstance(p["positions"], list)
+        assert isinstance(p["closedTrades"], list)
+
+
+def test_ws_llm_history_never_rides_history_loaded(client):
+    """LLM decision history is delivered under llm_history_loaded only."""
+    c, app, fake = client
+    fake._history["SYM"] = [{"direction": "LONG", "confidence": "High"}]
+    with c.websocket_connect("/api/trading/ws/gameloop") as ws:
+        ws.send_json({"subscribe": "SYM"})
+        ws.receive_json()  # server_mode
+        second = ws.receive_json()
+        assert second["status"] == "llm_history_loaded"
+        assert second["count"] == 1
+        assert second["history"][0]["direction"] == "LONG"
