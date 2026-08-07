@@ -15,6 +15,8 @@ import math
 import pytest
 import numpy as np
 
+gymnasium = pytest.importorskip("gymnasium")
+
 from quant.contracts.value_objects import (
     OHLC,
     VolumeProfileLevel,
