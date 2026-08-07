@@ -96,4 +96,4 @@ afterAll(() => {
 });
 
 // Mock vi.fn() globally for tests
-global.vi = vi;
+Object.assign(globalThis, { vi });

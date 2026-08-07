@@ -73,6 +73,8 @@ describe('MarketSidebar to ChartScene Integration', () => {
     aiAnalysis: null,
     genAIAnalysis: null,
     amtAnalysis: null,
+    auctionAnalysis: null,
+    quantDecisionAnalysis: null,
     riskState: null,
     agentDecision: null,
     llmHistory: [],
