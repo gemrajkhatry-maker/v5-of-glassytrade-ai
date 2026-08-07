@@ -16,6 +16,7 @@ from quant.aggregator import BarAggregator
 from quant.coordinator import AuctionCoordinator
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
+from quant.decision.signal_builder import clamp_quantity
 from quant.events import (
     AuctionUpdated,
     BarClosed,
@@ -121,7 +122,7 @@ class QuantEngine:
         if decision.approved and decision.signal is not None:
             signal = decision.signal
             self._emit(SignalApproved(symbol=self.symbol, time=bar.time, signal=signal))
-            quantity = self._risk.position_size(signal.entry, signal.sl)
+            quantity = clamp_quantity(self._risk.position_size(signal.entry, signal.sl))
             position = self._oms.submit(signal, quantity)
             self._entry_bar_index = self._bar_index
             self._position = position
