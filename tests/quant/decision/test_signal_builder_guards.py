@@ -10,6 +10,7 @@ from quant.decision.signal_builder import (
     MIN_STOP_DISTANCE_PCT,
     SignalBuilder,
     clamp_quantity,
+    is_min_stop_met,
     is_stop_too_thin,
 )
 from quant.location import LocationState
@@ -102,3 +103,27 @@ def test_max_quantity_override():
     qty = sb.size(equity=100_000.0, entry=104.92, sl=104.90,
                   risk_per_trade_pct=0.01)
     assert qty == 500
+
+
+def test_is_min_stop_met_defaults_match_constant():
+    # Positive form of is_stop_too_thin with the same 0.1% default.
+    assert is_min_stop_met(100.0, 99.89) is True
+    assert is_min_stop_met(100.0, 97.0) is True
+    assert is_min_stop_met(104.92, 104.90) is False
+    assert is_min_stop_met(100.0, 99.9) is False
+
+
+def test_is_min_stop_met_negates_is_stop_too_thin():
+    assert is_min_stop_met(100.0, 99.9) is not is_stop_too_thin(100.0, 99.9)
+    assert is_min_stop_met(100.0, 99.89) is not is_stop_too_thin(100.0, 99.89)
+
+
+def test_is_min_stop_met_override():
+    assert is_min_stop_met(104.92, 104.90, min_stop_distance_pct=0.0) is True
+
+
+def test_clamp_quantity_defaults_match_constant():
+    assert clamp_quantity(MAX_POSITION_QUANTITY + 1) == MAX_POSITION_QUANTITY
+    assert clamp_quantity(MAX_POSITION_QUANTITY) == MAX_POSITION_QUANTITY
+    assert clamp_quantity(1.0) == 1.0
+    assert clamp_quantity(MAX_POSITION_QUANTITY + 1, max_quantity=0) == MAX_POSITION_QUANTITY + 1

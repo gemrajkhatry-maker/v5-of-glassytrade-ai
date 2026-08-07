@@ -39,6 +39,23 @@ def _va_fade_state():
     )
 
 
+def _thin_va_fade_state():
+    # Same setup but step shrinks SL to 99.61 (0.01% stop, sub-0.1% -> rejected).
+    return AuctionState(
+        time="t", close=99.6,
+        volume_profile=VolumeProfile(levels=(), poc=101.0, vah=102.0, val=100.0,
+                                     step=0.39, total_volume=100),
+        vwap=VWAPState(value=99.0, upper_1=100.0, lower_1=98.0,
+                       upper_2=101.0, lower_2=97.0, std=1, deviation_sigmas=0),
+        order_flow=OrderFlowState(delta=0, cvd=50.0, cvd_slope=0.0,
+                                  cvd_divergence="NONE", aggressive_prints=()),
+        absorption=None,
+        location=LocationState(ib_high=105, ib_low=95, ib_complete=True,
+                               zone="BELOW_VA", nearest_level=100.0, distance_to_level=0),
+        triple_a_phase="", triple_a_signal=None,
+    )
+
+
 def _quiet_state():
     return AuctionState(
         time="t", close=100.0,
@@ -64,6 +81,20 @@ def test_aggression_long_approved():
 
 
 def test_va_fade_fallback():
+    ctx = DecisionContext(state=_va_fade_state(), bar=None, agent_direction="LONG", agent_probability=0.7)
+    d = DecisionService().evaluate(ctx)
+    assert d.approved and d.signal is not None and d.reason == "VA_FADE"
+
+
+def test_va_fade_thin_stop_rejected():
+    # entry 99.6, SL at VAL - step = 99.61 -> ~0.01% stop -> rejected as NO_EDGE.
+    ctx = DecisionContext(state=_thin_va_fade_state(), bar=None, agent_direction="LONG", agent_probability=0.7)
+    d = DecisionService().evaluate(ctx)
+    assert not d.approved and d.signal is None and d.reason == "NO_EDGE"
+
+
+def test_va_fade_healthy_stop_passes():
+    # entry 99.6, SL at VAL - step = 99.5 -> ~0.1% stop -> guard met, fade passes.
     ctx = DecisionContext(state=_va_fade_state(), bar=None, agent_direction="LONG", agent_probability=0.7)
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None and d.reason == "VA_FADE"

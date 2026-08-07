@@ -2,9 +2,13 @@
 """QuantEngine runtime tests: ticks -> bars -> coordinator -> decision ->
 OMS -> exit -> risk -> journal, all driven deterministically by the engine."""
 
+import pytest
+
 from quant.brokers.gateway import Tick
 from quant.brokers.synthetic import SyntheticGateway
-from quant.events import SignalApproved
+from quant.decision.decision_service import QuantDecision
+from quant.decision.signal_builder import MAX_POSITION_QUANTITY, Signal
+from quant.events import PositionOpened, SignalApproved
 from quant.runtime import QuantEngine
 
 
@@ -41,3 +45,42 @@ def test_engine_trace_is_deterministic():
     t1 = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1).run()
     t2 = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1).run()
     assert t1 == t2
+
+
+class _FixedDecisionService:
+    """Returns a canned approved decision for the thin/healthy stop cases."""
+
+    def __init__(self, signal: Signal) -> None:
+        self._signal = signal
+
+    def evaluate(self, ctx):
+        return QuantDecision(True, self._signal, "Triple-A", "AGGRESSION", ())
+
+
+def _run_with_signal(signal: Signal):
+    eng = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1)
+    eng._decision_service = _FixedDecisionService(signal)
+    trace = eng.run()
+    return next(e for e in trace if isinstance(e, PositionOpened))
+
+
+def _thin_stop_signal() -> Signal:
+    # 0.02% stop -> SessionRisk would size 50_000 units; clamp caps at 1000.
+    return Signal(type="LONG", reason="test", entry=100.0, sl=99.98, tp=100.06,
+                  rr=3.0, confidence=0.7, symbol="SYM", timestamp="t")
+
+
+def _healthy_stop_signal() -> Signal:
+    # 3% stop -> 100k * 1% / 3.0 = 333 units, under the ceiling.
+    return Signal(type="LONG", reason="test", entry=100.0, sl=97.0, tp=106.0,
+                  rr=2.0, confidence=0.7, symbol="SYM", timestamp="t")
+
+
+def test_runtime_clamps_thin_stop_quantity_to_max():
+    opened = _run_with_signal(_thin_stop_signal())
+    assert opened.position.order.quantity == MAX_POSITION_QUANTITY
+
+
+def test_runtime_leaves_healthy_stop_quantity_unclamped():
+    opened = _run_with_signal(_healthy_stop_signal())
+    assert opened.position.order.quantity == pytest.approx(100_000.0 * 0.01 / 3.0)
