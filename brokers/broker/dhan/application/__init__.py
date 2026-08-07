@@ -9,7 +9,6 @@ Public API:
     Config: DhanConfig
     Broker: DhanBroker
     Converter: DhanConverter
-    Facade: DhanFacade (one-liner API)
 
 Example:
     >>> from brokers.broker.dhan.application import DhanBroker, DhanConfig
@@ -29,11 +28,6 @@ Example:
     ...     quote = broker.get_quote(instrument)
     ...     async for tick in broker.stream_ticker([instrument]):
     ...         print(tick.price)
-    >>> 
-    >>> # Or use the simple facade for one-liners
-    >>> from brokers.broker.dhan.application import DhanFacade
-    >>> dhan = DhanFacade()
-    >>> df = dhan.historical("NIFTY", "2024-01-01", "2024-01-31")
 """
 
 # =============================================================================
@@ -53,16 +47,6 @@ from .converters import DhanConverter, to_segment
 # =============================================================================
 
 from .broker import DhanBroker
-
-# =============================================================================
-# Facade (One-liner API)
-# =============================================================================
-
-from .facade import (
-    DhanFacade,
-    Trade,
-    PnLReport,
-)
 
 # Exchange Resolver (for auto-detection)
 from .exchange_resolver import (
@@ -86,10 +70,7 @@ __all__ = [
     # Broker
     "DhanBroker",
     
-    # Facade
-    "DhanFacade",
+    # Exchange Resolver
     "DhanExchangeResolver",
     "ResolvedExchange",
-    "Trade",
-    "PnLReport",
 ]

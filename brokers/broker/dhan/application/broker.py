@@ -744,7 +744,7 @@ class DhanBroker(IBrokerPort):
     # Async Compatibility Aliases
     # =========================================================================
     # These delegate to the service layer and preserve the internal async API
-    # used by DhanFacade and tests.
+    # used by the backend adapters and tests.
 
     async def _get_quote_async(self, instrument: Instrument) -> Quote:
         return await self._market_data.get_quote_async(instrument)

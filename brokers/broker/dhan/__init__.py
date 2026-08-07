@@ -16,11 +16,6 @@ Usage:
     # Or from environment
     config = DhanConfig.from_env()
     broker = DhanBroker(config=config)
-    
-    # Or use the simple facade for one-liners
-    from brokers.broker.dhan import DhanFacade
-    dhan = DhanFacade()
-    df = dhan.historical("NIFTY", "2024-01-01", "2024-01-31")
 """
 
 # Application Layer (main public API)
@@ -29,11 +24,8 @@ from brokers.broker.dhan.application import (
     DhanConfig,
     DhanConverter,
     to_segment,
-    DhanFacade,
     DhanExchangeResolver,
     ResolvedExchange,
-    Trade,
-    PnLReport,
 )
 
 # Domain Layer (for advanced usage)
@@ -106,12 +98,9 @@ __all__ = [
     "DhanConverter",
     "to_segment",
     
-    # Facade
-    "DhanFacade",
+    # Exchange Resolver
     "DhanExchangeResolver",
     "ResolvedExchange",
-    "Trade",
-    "PnLReport",
     
     # Domain Entities
     "DhanInstrument",
