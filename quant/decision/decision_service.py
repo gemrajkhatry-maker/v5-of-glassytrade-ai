@@ -14,7 +14,7 @@ from typing import Optional
 from quant.decision.context import DecisionContext
 from quant.decision.pipeline import GatePipeline
 from quant.decision.result import GateResult
-from quant.decision.signal_builder import Signal, SignalBuilder
+from quant.decision.signal_builder import Signal, SignalBuilder, is_min_stop_met
 from quant.decision.va_fade import detect_va_fade
 
 
@@ -43,6 +43,8 @@ class DecisionService:
         # VA-fade fallback
         fade = detect_va_fade(ctx.state, ctx)
         if fade and ctx.agent_direction == fade.direction and fade.rr >= self.min_rr:
+            if not is_min_stop_met(fade.entry, fade.sl):
+                return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results))
             sig = Signal(type=fade.direction, reason="Value-Area fade", entry=fade.entry,
                          sl=fade.sl, tp=fade.tp, rr=fade.rr, confidence=0.5,
                          symbol=ctx.symbol, timestamp=ctx.state.time)
