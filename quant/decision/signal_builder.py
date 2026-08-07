@@ -3,6 +3,33 @@ from dataclasses import dataclass
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 
+MIN_STOP_DISTANCE_PCT = 0.1
+MAX_POSITION_QUANTITY = 1000
+
+
+def is_stop_too_thin(
+    entry: float, sl: float, min_stop_distance_pct: float = MIN_STOP_DISTANCE_PCT
+) -> bool:
+    """True when the stop distance is below ``min_stop_distance_pct``% of price.
+
+    A sub-0.1% stop (e.g. VA-fade razor-thin SL at VAL-step) is noise, not a
+    structural stop, so it must not be emitted as a tradeable Signal.
+    """
+    return abs(entry - sl) < abs(entry) * (min_stop_distance_pct / 100.0)
+
+
+def clamp_quantity(
+    quantity: float, max_quantity: float = MAX_POSITION_QUANTITY
+) -> float:
+    """Clamp a computed position quantity to ``max_quantity`` (sizing step).
+
+    Passing ``max_quantity <= 0`` disables the clamp for callers that explicitly
+    override the ceiling.
+    """
+    if max_quantity is None or max_quantity <= 0:
+        return quantity
+    return min(quantity, max_quantity)
+
 
 @dataclass(frozen=True)
 class Signal:
@@ -18,8 +45,15 @@ class Signal:
 
 
 class SignalBuilder:
-    def __init__(self, tp_multiplier: float = 2.0) -> None:
+    def __init__(
+        self,
+        tp_multiplier: float = 2.0,
+        min_stop_distance_pct: float = MIN_STOP_DISTANCE_PCT,
+        max_position_quantity: float = MAX_POSITION_QUANTITY,
+    ) -> None:
         self.tp_multiplier = tp_multiplier
+        self.min_stop_distance_pct = min_stop_distance_pct
+        self.max_position_quantity = max_position_quantity
 
     def build(self, ctx: DecisionContext, pipeline_results: list[GateResult]) -> Signal | None:
         if any(not r.passed for r in pipeline_results):
@@ -59,6 +93,9 @@ class SignalBuilder:
             return None
 
         risk = abs(entry - sl)
+        if is_stop_too_thin(entry, sl, self.min_stop_distance_pct):
+            return None
+
         rr = abs(tp - entry) / risk if risk > 0 else 0.0
 
         confidence = (
@@ -78,3 +115,22 @@ class SignalBuilder:
             symbol=ctx.symbol,
             timestamp=state.time,
         )
+
+    def size(
+        self,
+        equity: float,
+        entry: float,
+        sl: float,
+        risk_per_trade_pct: float,
+    ) -> float:
+        """Compute fixed-fractional quantity and clamp to the max ceiling.
+
+        The clamp is applied in the sizing step (never silently in fills):
+        ``equity * risk_pct / |entry - sl|`` may explode on razor-thin stops,
+        so the result is capped at ``max_position_quantity``.
+        """
+        risk = abs(entry - sl)
+        if equity <= 0 or risk <= 0:
+            return 0.0
+        quantity = equity * risk_per_trade_pct / risk
+        return clamp_quantity(quantity, self.max_position_quantity)
