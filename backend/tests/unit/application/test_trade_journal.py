@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -727,6 +727,8 @@ def test_completed_trades_prefer_entry_timestamp_for_duration(tmp_path):
     """When an EXIT carries an entry_timestamp, entry_time is populated and
     duration_s is derived from the timestamps (positive)."""
     journal = TradeJournal(log_dir=str(tmp_path))
+    now = datetime.fromisoformat(journal._now_ist())
+    entry_ts = (now - timedelta(seconds=60)).isoformat()
     journal.log_exit(
         symbol="NIFTY",
         position_id="P3",
@@ -736,14 +738,14 @@ def test_completed_trades_prefer_entry_timestamp_for_duration(tmp_path):
         exit_reason="TP",
         pnl=4.0,
         time_in_trade_s=-18663300.0,
-        entry_timestamp="2026-08-06T11:14:18+05:30",
+        entry_timestamp=entry_ts,
     )
 
     trades = journal.get_completed_trades()
     assert len(trades) == 1
     trade = trades[0]
-    assert trade["entry_time"] == "2026-08-06T11:14:18+05:30"
-    assert trade["exit_time"].startswith("2026-08-06")
+    assert trade["entry_time"] == entry_ts
+    assert trade["exit_time"].startswith(now.date().isoformat())
     assert trade["duration_s"] > 0
     assert trade["duration_s"] < 86400.0
     assert trade["pnl_pct"] == 4.0
