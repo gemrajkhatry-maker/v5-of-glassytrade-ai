@@ -4,15 +4,65 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from dotenv import load_dotenv
 from quant.inference.llm_contract import ENTRY_JSON_RUNTIME_REMINDER
 from quant.contracts.ports.llm_inference import ILLMInference, LLMNotReadyError
-from app.infrastructure.mlx_gpu_lock import MLX_GPU_LOCK
-from app.infrastructure.transformers_quiet import quiet_gemma4_tokenizer_config_warning
 
 logger = logging.getLogger(__name__)
 
+MLX_GPU_LOCK = threading.Lock()
+
 _DEFAULT_OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+_configured_tokenizer_filter = False
+
+
+def quiet_gemma4_tokenizer_config_warning() -> None:
+    """Drop the bogus mismatch log when AutoTokenizer loads a Gemma4 MLX folder.
+
+    Transformers compares config.json ``model_type`` (e.g. ``gemma4``) to the
+    tokenizer config class's ``model_type`` (often empty), and emits::
+
+        You are using a model of type `gemma4` to instantiate a model of type ``.
+
+    Loading still succeeds; this is safe to silence for our MLX + local path flow.
+    """
+    global _configured_tokenizer_filter
+    if _configured_tokenizer_filter:
+        return
+
+    class _Filter(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            try:
+                msg = record.getMessage()
+            except Exception:
+                return True
+            if "You are using a model of type `" not in msg:
+                return True
+            if "to instantiate a model of type ``" in msg:
+                return False
+            return True
+
+    logging.getLogger("transformers.configuration_utils").addFilter(_Filter())
+    _configured_tokenizer_filter = True
+
+
+def _load_env_file(path: Path) -> None:
+    """Minimal .env loader (no override), stdlib-only stand-in for python-dotenv."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key = key.strip()
+                value = value.strip()
+                if value.startswith('"') and value.endswith('"'):
+                    value = value[1:-1]
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except OSError:
+        pass
 
 
 def _cloud_fallback_enabled() -> bool:
@@ -262,7 +312,7 @@ class MLXInferenceAdapter(ILLMInference):
         candidates = [raw_path]
 
         if not raw_path.is_absolute():
-            repo_root = Path(__file__).resolve().parents[4]
+            repo_root = Path(__file__).resolve().parents[2]
             candidates.append(repo_root / raw_path)
 
         for candidate in candidates:
@@ -314,7 +364,7 @@ class MLXInferenceAdapter(ILLMInference):
             return str(raw.resolve())
         candidates: list[Path] = [raw, Path.cwd() / raw]
         if not raw.is_absolute():
-            repo_root = Path(__file__).resolve().parents[4]
+            repo_root = Path(__file__).resolve().parents[2]
             candidates.append(repo_root / raw)
         for candidate in candidates:
             if candidate.exists():
@@ -332,10 +382,10 @@ class MLXInferenceAdapter(ILLMInference):
         if cls._env_loaded:
             return
 
-        # Look for .env in backend directory (3 levels up from adapter)
-        backend_env_path = Path(__file__).resolve().parents[3] / ".env"
-        # Also look in project root (4 levels up from adapter)
-        root_env_path = Path(__file__).resolve().parents[4] / ".env"
+        # Look for .env in backend directory (up from quant/inference/)
+        backend_env_path = Path(__file__).resolve().parents[2] / "backend" / ".env"
+        # Also look in project root (up from quant/inference/)
+        root_env_path = Path(__file__).resolve().parents[2] / ".env"
         
         # Check backend directory first, then project root
         if backend_env_path.exists():
@@ -346,7 +396,7 @@ class MLXInferenceAdapter(ILLMInference):
             # Fallback to project root
             env_path = root_env_path
         if env_path.exists():
-            load_dotenv(env_path, override=False)
+            _load_env_file(env_path)
         cls._env_loaded = True
 
     # ------------------------------------------------------------------

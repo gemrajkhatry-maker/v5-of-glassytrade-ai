@@ -2,7 +2,7 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 import pytest
-from app.infrastructure.adapters.mlx_inference_adapter import MLXInferenceAdapter
+from quant.inference.mlx_inference_adapter import MLXInferenceAdapter
 from quant.contracts.ports.llm_inference import LLMNotReadyError
 
 @pytest.fixture
@@ -39,7 +39,7 @@ class TestMLXInferenceAdapter:
         text_nested = 'Pre-text {"outer": {"inner": 1}} post-text'
         assert adapter._extract_json_candidate(text_nested) == '{"outer": {"inner": 1}}'
 
-    @patch("app.infrastructure.adapters.mlx_inference_adapter.settings")
+    @patch("quant.inference.mlx_inference_adapter.settings")
     def test_predict_system_prompt_selection(self, mock_settings, mock_mlx):
         mock_load, mock_generate, mock_sampler = mock_mlx
         mock_settings.LLM_TEMPERATURE = 0.3
@@ -68,7 +68,7 @@ class TestMLXInferenceAdapter:
         args, kwargs = mock_generate.call_args
         assert "assistant\n{" in kwargs["prompt"]
 
-    @patch("app.infrastructure.adapters.mlx_inference_adapter.settings")
+    @patch("quant.inference.mlx_inference_adapter.settings")
     def test_predict_serialization_lock(self, mock_settings, mock_mlx):
         mock_load, mock_generate, mock_sampler = mock_mlx
         mock_settings.LLM_TEMPERATURE = 0.3

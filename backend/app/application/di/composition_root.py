@@ -208,7 +208,7 @@ def _create_llm_adapter(container: DIContainer, config: "Configuration"):
         from app.infrastructure.adapters.gguf_inference_adapter import GGUFInferenceAdapter
         return GGUFInferenceAdapter(model_path=model_path)
 
-    from app.infrastructure.adapters.mlx_inference_adapter import MLXInferenceAdapter
+    from quant.inference.mlx_inference_adapter import MLXInferenceAdapter
     return MLXInferenceAdapter(
         model_path=model_path,
         temperature=_resolve_llm_temperature(llm_config),
