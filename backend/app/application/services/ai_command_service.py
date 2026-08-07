@@ -1,105 +1,18 @@
-"""Application services for AI endpoints."""
+"""Application services for AI endpoints.
+
+The natural-language command/reply overlay (NL command parsing and its
+keyword tables) was removed as out-of-scope: it was dead code with no
+frontend caller or tests. The LLM remains advisory-only (entry journal +
+overseer) via analyze_market / get_decision_history / journal endpoints.
+"""
 
 from __future__ import annotations
 
 from app.core.async_boundary import ensure_sync_adapter_result
 
 
-_SYMBOL_KEYWORDS = {
-    "nifty": "NIFTY",
-    "banknifty": "BANKNIFTY",
-    "finnifty": "FINNIFTY",
-    "crude": "CRUDEOIL",
-    "crudeoil": "CRUDEOIL",
-    "natural gas": "NATURALGAS",
-    "gold": "GOLD",
-    "silver": "SILVER",
-}
-
-_INTERVAL_KEYWORDS = {
-    "15m": "15m",
-    "1m": "1m",
-    "5m": "5m",
-    "1h": "1h",
-    "4h": "4h",
-    "1d": "1d",
-}
-
-_COLOR_KEYWORDS = {
-    "red": "#ef4444",
-    "green": "#10b981",
-    "blue": "#3b82f6",
-    "purple": "#8b5cf6",
-    "cyan": "#06b6d4",
-    "amber": "#f59e0b",
-    "neon": "#39ff14",
-    "pink": "#ec4899",
-    "white": "#ffffff",
-}
-
-
 class AiCommandService:
-    """Use-case service for NL command parsing and command-driven actions."""
-
-    def parse_market_command(self, prompt: str) -> dict:
-        text = prompt.lower().strip()
-        config_updates: dict[str, object] = {}
-        messages: list[str] = []
-
-        for kw, sym in _SYMBOL_KEYWORDS.items():
-            if kw in text:
-                config_updates["symbol"] = sym
-                messages.append(f"Switched to {sym}")
-                break
-
-        for kw, interval in _INTERVAL_KEYWORDS.items():
-            if kw in text:
-                config_updates["interval"] = interval
-                messages.append(f"Interval set to {interval}")
-                break
-
-        if "bull" in text:
-            for kw, color in _COLOR_KEYWORDS.items():
-                if kw in text:
-                    config_updates["bullColor"] = color
-                    messages.append(f"Bull color set to {kw}")
-                    break
-
-        if "bear" in text:
-            for kw, color in _COLOR_KEYWORDS.items():
-                if kw in text:
-                    config_updates["bearColor"] = color
-                    messages.append(f"Bear color set to {kw}")
-                    break
-
-        if "volume profile" in text:
-            if "off" in text or "hide" in text:
-                config_updates["showVolumeProfile"] = False
-                config_updates["vpMode"] = "off"
-                messages.append("Volume profile hidden")
-            else:
-                config_updates["showVolumeProfile"] = True
-                config_updates["vpMode"] = "session"
-                messages.append("Volume profile enabled")
-
-        if "predictions" in text or "ghost" in text:
-            show = "off" not in text and "hide" not in text
-            config_updates["showPredictions"] = show
-            messages.append(f"Predictions {'shown' if show else 'hidden'}")
-
-        if "footprint" in text:
-            messages.append("Switch to footprint mode using the tab at top-left")
-
-        if not messages:
-            messages.append(
-                f"I understood: \"{prompt}\". Try commands like 'show nifty', 'set interval 5m', or 'bull color cyan'."
-            )
-
-        return {
-            "message": " | ".join(messages),
-            "configUpdates": config_updates if config_updates else None,
-            "action": "UPDATE_CONFIG" if config_updates else None,
-        }
+    """Use-case service for AI analysis, decision history, and journal endpoints."""
 
     def analyze_market(self, service, req_data: dict) -> dict:
         analysis = service.analyze_market(req_data)

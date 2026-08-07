@@ -67,49 +67,6 @@ class TestHealthEndpoints:
         assert "explainabilityMinAggressionRate" in data
 
 
-class TestAICommand:
-    def test_command_symbol_switch(self, client):
-        c, _ = client
-        res = c.post("/api/ai/command", json={
-            "prompt": "show me nifty",
-            "currentConfig": {"symbol": "NIFTY"},
-        })
-        assert res.status_code == 200
-        data = res.json()
-        assert "message" in data
-        assert data["configUpdates"]["symbol"] == "NIFTY"
-        assert data["action"] == "UPDATE_CONFIG"
-
-    def test_command_interval(self, client):
-        c, _ = client
-        res = c.post("/api/ai/command", json={
-            "prompt": "set interval 15m",
-            "currentConfig": {},
-        })
-        data = res.json()
-        assert data["configUpdates"]["interval"] == "15m"
-
-    def test_command_unknown(self, client):
-        c, _ = client
-        res = c.post("/api/ai/command", json={
-            "prompt": "xyzzy foobar",
-            "currentConfig": {},
-        })
-        data = res.json()
-        assert data["configUpdates"] is None
-        assert data["action"] is None
-
-    def test_command_volume_profile_toggle(self, client):
-        c, _ = client
-        res = c.post("/api/ai/command", json={
-            "prompt": "hide volume profile",
-            "currentConfig": {},
-        })
-        data = res.json()
-        assert data["configUpdates"]["showVolumeProfile"] == False
-        assert data["configUpdates"]["vpMode"] == "off"
-
-
 class TestAIHistory:
     def test_history_endpoint_exists(self, client):
         c, mock = client

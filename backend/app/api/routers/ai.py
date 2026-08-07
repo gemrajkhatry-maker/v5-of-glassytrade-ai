@@ -1,10 +1,10 @@
 """AI analysis router — market analysis via fine-tuned LLM."""
 
 import logging
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.api.dependencies import get_active_symbols, get_gen_ai_service, get_storage, get_trade_journal
 from app.application.services.ai_command_service import AiCommandService
@@ -34,18 +34,6 @@ async def analyze_market(
     """Analyzes market data using the fine-tuned model."""
     market_data = req.model_dump()
     return _command_service.analyze_market(service, market_data)
-
-
-class CommandRequest(BaseModel):
-    prompt: str
-    current_config: dict[str, Any] = Field(alias="currentConfig", default={})
-    model_config = {"populate_by_name": True}
-
-
-@router.post("/command")
-async def process_command(req: CommandRequest):
-    """Process natural-language chart/config commands from frontend chat overlay."""
-    return _command_service.parse_market_command(req.prompt)
 
 
 @router.get("/history")

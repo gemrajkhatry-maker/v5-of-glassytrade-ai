@@ -299,7 +299,7 @@ class FootprintCandleDTO(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Chat / AI Command DTOs
+# Chat DTOs
 # ---------------------------------------------------------------------------
 
 
@@ -308,16 +308,6 @@ class ChatMessageDTO(BaseModel):
     role: MessageRoleDTO
     text: str
     timestamp: Optional[str] = None
-
-
-class AICommandResponseDTO(BaseModel):
-    message: str
-    config_updates: Optional[dict[str, Any]] = Field(
-        alias="configUpdates", default=None
-    )
-    action: Optional[str] = None
-
-    model_config = {"populate_by_name": True}
 
 
 # ---------------------------------------------------------------------------
@@ -348,13 +338,6 @@ class FootprintRequestDTO(BaseModel):
 class StatsRequestDTO(BaseModel):
     closed_trades: list[TradePositionDTO] = Field(alias="closedTrades", default=[])
     source: str = "AMT"
-
-    model_config = {"populate_by_name": True}
-
-
-class CommandRequestDTO(BaseModel):
-    prompt: str
-    current_config: dict[str, Any] = Field(alias="currentConfig", default={})
 
     model_config = {"populate_by_name": True}
 
