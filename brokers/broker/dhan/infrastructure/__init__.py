@@ -67,11 +67,6 @@ from .auth_provider import (
     DhanAuthProvider,
 )
 
-from .totp_generator import (
-    TOTPGenerator,
-    TOTPGenerationError,
-)
-
 # =============================================================================
 # Resilience
 # =============================================================================
@@ -100,8 +95,6 @@ __all__ = [
     "DhanSymbolMapper",
     # Auth
     "DhanAuthProvider",
-    "TOTPGenerator",
-    "TOTPGenerationError",
     # Resilience
     "TokenBucketRateLimiter",
     "DhanCircuitBreaker",

@@ -43,6 +43,12 @@ from typing import Optional, Callable, Awaitable
 
 import requests as _requests  # sync HTTP for auth endpoints (rare, once/day)
 
+try:
+    import pyotp
+    PYOTP_AVAILABLE = True
+except ImportError:
+    PYOTP_AVAILABLE = False
+
 from brokers.broker.dhan.ports import (
     IHttpClient,
     IAuthProvider,
@@ -53,12 +59,9 @@ from brokers.broker.dhan.domain import (
     DhanTokenInvalidError,
     AUTH_GENERATE_TOKEN_URL,
     RENEW_TOKEN_URL,
+    TOTP_TIME_WINDOW_SECONDS,
 )
 from brokers.broker.logging import get_logger
-from brokers.broker.dhan.infrastructure.totp_generator import (
-    TOTPGenerator,
-    TOTPGenerationError,
-)
 
 
 # =============================================================================
@@ -155,7 +158,7 @@ class DhanAuthProvider(IAuthProvider):
         
         # TOTP secret for auto-regeneration
         self._totp_secret: Optional[str] = None
-        self._totp_generator: Optional[TOTPGenerator] = None
+        self._totp: Optional[pyotp.TOTP] = None
         self._pin: Optional[str] = None
         
         # Lock for thread-safe operations
@@ -349,12 +352,27 @@ class DhanAuthProvider(IAuthProvider):
             totp_secret: The TOTP secret key.
         """
         self._totp_secret = totp_secret
+        if not PYOTP_AVAILABLE:
+            logger.warning("pyotp not installed; TOTP auto-generation disabled")
+            self._totp = None
+            return
         try:
-            self._totp_generator = TOTPGenerator(totp_secret)
+            if not totp_secret or not totp_secret.strip():
+                raise ValueError("TOTP secret cannot be empty")
+            self._totp = pyotp.TOTP(totp_secret)
             logger.debug("TOTP secret configured for auto-regeneration")
-        except (ImportError, ValueError) as e:
+        except ValueError as e:
             logger.warning(f"Failed to initialize TOTP generator: {e}")
-            self._totp_generator = None
+            self._totp = None
+
+    def _generate_totp_code(self, window_offset: int = 0) -> str:
+        """Generate TOTP code via pyotp, with window offset for clock drift."""
+        if not self._totp:
+            raise ValueError("TOTP secret not configured")
+        if window_offset == 0:
+            return self._totp.now()
+        time_window = int(time.time() // TOTP_TIME_WINDOW_SECONDS) + window_offset
+        return self._totp.at(time_window)
     
     def set_pin(self, pin: str) -> None:
         """Set the PIN for token generation (required by Dhan API)."""
@@ -642,7 +660,7 @@ class DhanAuthProvider(IAuthProvider):
 
             # 1. No token → generate
             if not access_token:
-                if self._totp_generator and self._client_id:
+                if self._totp and self._client_id:
                     logger.info("No token available, generating via TOTP...")
                     return await self._generate_token_unlocked(self._client_id)
                 raise DhanAuthError(
@@ -657,7 +675,7 @@ class DhanAuthProvider(IAuthProvider):
             if exp_ts is None:
                 # Not a JWT or can't parse — fall back to time-based check
                 if self.is_expired:
-                    if self._totp_generator and self._client_id:
+                    if self._totp and self._client_id:
                         return await self._generate_token_unlocked(self._client_id)
                     raise DhanTokenExpiredError(message="Token expired and cannot regenerate")
                 # Near expiry (time-based) → try renew
@@ -673,7 +691,7 @@ class DhanAuthProvider(IAuthProvider):
 
             # 3. Expired → generate
             if seconds_to_expiry <= 0:
-                if self._totp_generator and self._client_id:
+                if self._totp and self._client_id:
                     logger.info(f"Token expired ({-seconds_to_expiry}s ago), generating new token...")
                     return await self._generate_token_unlocked(self._client_id)
                 raise DhanTokenExpiredError(
@@ -699,7 +717,7 @@ class DhanAuthProvider(IAuthProvider):
                         logger.info(f"Using current token ({seconds_to_expiry}s remaining)")
                         return access_token
                     # Almost expired, try generate
-                    if self._totp_generator and self._client_id:
+                    if self._totp and self._client_id:
                         return await self._generate_token_unlocked(self._client_id)
 
             return access_token
@@ -714,7 +732,7 @@ class DhanAuthProvider(IAuthProvider):
         - On rate limit response, sets cooldown timer
         - Saves new token to .env on success
         """
-        if not self._totp_generator:
+        if not self._totp:
             raise DhanAuthError(
                 message="TOTP secret not configured",
                 details={"hint": "Call set_totp_secret() first"},
@@ -735,7 +753,7 @@ class DhanAuthProvider(IAuthProvider):
 
         for offset in offsets_to_try:
             try:
-                totp_code = self._totp_generator.generate(window_offset=offset)
+                totp_code = self._generate_totp_code(window_offset=offset)
                 if offset != 0:
                     logger.debug(f"Retrying TOTP with window_offset={offset}")
                 token = await self._authenticate_unlocked(client_id, totp_code)
@@ -754,7 +772,7 @@ class DhanAuthProvider(IAuthProvider):
                     continue
                 # Other auth error — don't retry
                 raise
-            except TOTPGenerationError as e:
+            except Exception as e:
                 raise DhanAuthError(
                     message=f"Failed to generate TOTP: {e}",
                     details={"error": str(e)},
@@ -834,7 +852,7 @@ class DhanAuthProvider(IAuthProvider):
 
     def _generate_token_sync(self) -> str:
         """Synchronous token generation via TOTP+PIN."""
-        if not self._totp_generator:
+        if not self._totp:
             raise DhanAuthError(
                 message="Cannot generate token: TOTP secret not configured",
                 details={"hint": "Set TOTP_SECRET in .env"},
@@ -861,7 +879,7 @@ class DhanAuthProvider(IAuthProvider):
 
         for offset in offsets:
             try:
-                totp_code = self._totp_generator.generate(window_offset=offset)
+                totp_code = self._generate_totp_code(window_offset=offset)
                 if offset != 0:
                     logger.debug(f"Retrying TOTP with window_offset={offset}")
 
@@ -1007,7 +1025,7 @@ class DhanAuthProvider(IAuthProvider):
                 # Invalidate current token inside the lock
                 self._access_token = None
                 self._authenticated_at = None
-                if self._totp_generator and self._client_id:
+                if self._totp and self._client_id:
                     try:
                         await self._generate_token_unlocked(self._client_id)
                         logger.info("Token regenerated after auth error")
@@ -1029,7 +1047,7 @@ class DhanAuthProvider(IAuthProvider):
         self._client_id = None
         self._authenticated_at = None
         self._totp_secret = None
-        self._totp_generator = None
+        self._totp = None
         self._refresh_attempt_count = 0
         
         logger.info("Authentication data cleared")
@@ -1041,5 +1059,5 @@ class DhanAuthProvider(IAuthProvider):
             f"client_id={self._client_id!r}, "
             f"token_age={self.token_age}, "
             f"needs_refresh={self.needs_refresh}, "
-            f"has_totp={self._totp_generator is not None})"
+            f"has_totp={self._totp is not None})"
         )

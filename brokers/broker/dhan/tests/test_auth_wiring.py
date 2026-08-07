@@ -63,7 +63,7 @@ class TestBrokerCreateAuthWiring:
         broker = DhanBroker.create(
             client_id="C1", access_token="TOKEN123", totp_secret="TOTP_SEC"
         )
-        assert broker._auth_provider._totp_generator is not None
+        assert broker._auth_provider._totp is not None
 
 
 class TestWebSocketAuthRefresh:

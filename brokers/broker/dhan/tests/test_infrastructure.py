@@ -913,14 +913,14 @@ class TestDhanAuthProviderTOTPGeneration:
         assert auth.access_token == "regenerated_token"
     
     def test_set_totp_secret_initializes_generator(self, totp_secret):
-        """Test set_totp_secret initializes TOTPGenerator."""
+        """Test set_totp_secret initializes the pyotp TOTP instance."""
         from brokers.broker.dhan.infrastructure import DhanAuthProvider
         
         auth = DhanAuthProvider()
         auth.set_totp_secret(totp_secret)
         
         assert auth._totp_secret == totp_secret
-        assert auth._totp_generator is not None
+        assert auth._totp is not None
     
     def test_set_token_with_totp_secret(self, totp_secret):
         """Test set_token with TOTP secret initializes generator."""
@@ -930,7 +930,7 @@ class TestDhanAuthProviderTOTPGeneration:
         auth.set_token("test_token", client_id="CLIENT123", totp_secret=totp_secret)
         
         assert auth._totp_secret == totp_secret
-        assert auth._totp_generator is not None
+        assert auth._totp is not None
 
 
 class TestDhanAuthProviderRefreshToken:

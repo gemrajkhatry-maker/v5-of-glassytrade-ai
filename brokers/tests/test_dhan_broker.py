@@ -444,7 +444,6 @@ class TestDhanConfig:
         assert config.base_url == "https://api.dhan.co/v2"
         assert config.ws_url == "wss://api-feed.dhan.co"
         assert config.timeout == 10.0  # Default is 10 seconds
-        assert config.rate_limit_per_second == 10
     
     def test_config_custom_values(self):
         """DhanConfig should accept custom values."""
@@ -459,35 +458,6 @@ class TestDhanConfig:
         
         assert config.timeout == 60.0
         assert config.base_url == "https://custom.api.com"
-
-
-class TestTOTPGenerator:
-    """Test TOTP generator for auto-authentication."""
-    
-    def test_totp_generator_exists(self):
-        """TOTPGenerator class should exist."""
-        from brokers.broker.dhan import TOTPGenerator
-        assert TOTPGenerator is not None
-    
-    def test_totp_generator_requires_secret(self):
-        """TOTPGenerator should require a secret."""
-        from brokers.broker.dhan import TOTPGenerator, TOTPGenerationError
-        
-        # Should raise error with empty secret in constructor
-        with pytest.raises(ValueError):
-            TOTPGenerator("")
-    
-    def test_totp_generator_produces_code(self):
-        """TOTPGenerator should produce a 6-digit code."""
-        from brokers.broker.dhan import TOTPGenerator
-        
-        # Use a known test secret
-        generator = TOTPGenerator("JBSWY3DPEHPK3PXP")  # Test secret
-        code = generator.generate()
-        
-        assert isinstance(code, str)
-        assert len(code) == 6
-        assert code.isdigit()
 
 
 class TestHistoricalDataAutoBatching:

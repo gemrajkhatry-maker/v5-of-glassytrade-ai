@@ -392,10 +392,6 @@ def dhan_config() -> DhanConfig:
         ws_url="wss://api.dhan.co/ws",
         timeout=10.0,
         max_retries=3,
-        retry_delay=1.0,
-        rate_limit_per_second=10.0,
-        circuit_breaker_threshold=5,
-        circuit_breaker_timeout=60.0,
     )
 
 

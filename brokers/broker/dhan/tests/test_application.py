@@ -77,9 +77,6 @@ class TestDhanConfig:
         assert config.ws_url == "wss://api-feed.dhan.co"
         assert config.timeout == 10.0
         assert config.max_retries == 3
-        assert config.rate_limit_per_second == 10.0
-        assert config.circuit_breaker_threshold == 5
-        assert config.circuit_breaker_timeout == 60.0
     
     def test_from_env_success(self, clean_env):
         """Test creating DhanConfig from environment variables."""
@@ -127,13 +124,11 @@ class TestDhanConfig:
         os.environ["DHAN_ACCESS_TOKEN"] = "token"
         os.environ["DHAN_TIMEOUT"] = "30.0"
         os.environ["DHAN_MAX_RETRIES"] = "5"
-        os.environ["DHAN_RATE_LIMIT"] = "20.0"
         
         config = DhanConfig.from_env()
         
         assert config.timeout == 30.0
         assert config.max_retries == 5
-        assert config.rate_limit_per_second == 20.0
     
     def test_with_access_token(self, dhan_config):
         """Test with_access_token method creates new config."""

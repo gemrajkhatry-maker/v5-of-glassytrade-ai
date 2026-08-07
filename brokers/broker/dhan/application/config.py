@@ -28,7 +28,6 @@ from brokers.broker.dhan.domain import (
     WS_URL,
     DEFAULT_TIMEOUT_SECONDS,
     DEFAULT_MAX_RETRIES,
-    RATE_LIMIT_DEFAULT,
 )
 
 
@@ -51,10 +50,6 @@ class DhanConfig:
         ws_url: WebSocket URL for real-time data streaming.
         timeout: Request timeout in seconds.
         max_retries: Maximum number of retry attempts for failed requests.
-        retry_delay: Initial delay between retries in seconds.
-        rate_limit_per_second: Maximum API calls per second.
-        circuit_breaker_threshold: Number of failures before circuit opens.
-        circuit_breaker_timeout: Time in seconds before circuit attempts to close.
     
     Example:
         >>> # Create with explicit credentials
@@ -80,14 +75,6 @@ class DhanConfig:
     # Timeouts and retries
     timeout: float = DEFAULT_TIMEOUT_SECONDS
     max_retries: int = DEFAULT_MAX_RETRIES
-    retry_delay: float = 1.0
-    
-    # Rate limiting
-    rate_limit_per_second: float = RATE_LIMIT_DEFAULT
-    
-    # Circuit breaker
-    circuit_breaker_threshold: int = 5
-    circuit_breaker_timeout: float = 60.0
 
     # Auth
     totp_secret: str = ""
@@ -107,7 +94,6 @@ class DhanConfig:
             - {prefix}WS_URL: WebSocket URL (optional)
             - {prefix}TIMEOUT: Request timeout in seconds (optional)
             - {prefix}MAX_RETRIES: Maximum retry attempts (optional)
-            - {prefix}RATE_LIMIT: Rate limit per second (optional)
 
         Args:
             prefix: Environment variable prefix (default: "DHAN_").
@@ -148,10 +134,6 @@ class DhanConfig:
         ws_url = os.environ.get(f"{prefix}WS_URL", WS_URL)
         timeout = float(os.environ.get(f"{prefix}TIMEOUT", str(DEFAULT_TIMEOUT_SECONDS)))
         max_retries = int(os.environ.get(f"{prefix}MAX_RETRIES", str(DEFAULT_MAX_RETRIES)))
-        retry_delay = float(os.environ.get(f"{prefix}RETRY_DELAY", "1.0"))
-        rate_limit = float(os.environ.get(f"{prefix}RATE_LIMIT", str(RATE_LIMIT_DEFAULT)))
-        cb_threshold = int(os.environ.get(f"{prefix}CIRCUIT_BREAKER_THRESHOLD", "5"))
-        cb_timeout = float(os.environ.get(f"{prefix}CIRCUIT_BREAKER_TIMEOUT", "60.0"))
 
         return cls(
             client_id=client_id,
@@ -160,10 +142,6 @@ class DhanConfig:
             ws_url=ws_url,
             timeout=timeout,
             max_retries=max_retries,
-            retry_delay=retry_delay,
-            rate_limit_per_second=rate_limit,
-            circuit_breaker_threshold=cb_threshold,
-            circuit_breaker_timeout=cb_timeout,
             totp_secret=totp_secret,
             pin=pin,
         )
@@ -190,10 +168,6 @@ class DhanConfig:
             ws_url=self.ws_url,
             timeout=self.timeout,
             max_retries=self.max_retries,
-            retry_delay=self.retry_delay,
-            rate_limit_per_second=self.rate_limit_per_second,
-            circuit_breaker_threshold=self.circuit_breaker_threshold,
-            circuit_breaker_timeout=self.circuit_breaker_timeout,
             totp_secret=self.totp_secret,
             pin=self.pin,
         )
