@@ -67,18 +67,8 @@ def compose_container(config: "Configuration") -> DIContainer:
 
     # --- Additional Infrastructure Adapters ---
     container.register_singleton(
-        _notification_port(),
-        lambda c: _create_notification_adapter(c),
-    )
-
-    container.register_singleton(
         _delta_profile_port(),
         lambda c: _create_delta_profile_adapter(c),
-    )
-
-    container.register_singleton(
-        _npoc_port(),
-        lambda c: _create_npoc_adapter(c),
     )
 
     container.register_singleton(
@@ -324,19 +314,9 @@ def _resolve_allow_short() -> bool:
         return False
 
 
-def _notification_port():
-    from quant.contracts.ports.notifications import INotification
-    return INotification
-
-
 def _delta_profile_port():
     from quant.contracts.ports.delta_profile import IDeltaProfile
     return IDeltaProfile
-
-
-def _npoc_port():
-    from quant.contracts.ports.npoc import INPOC
-    return INPOC
 
 
 def _exchange_strategy_port():
@@ -358,19 +338,9 @@ def _generative_ai_service():
 # Additional factory functions
 # ---------------------------------------------------------------------------
 
-def _create_notification_adapter(container: DIContainer):
-    from app.infrastructure.adapters.null_notification_adapter import NullNotificationAdapter
-    return NullNotificationAdapter()
-
-
 def _create_delta_profile_adapter(container: DIContainer):
     from app.infrastructure.adapters.delta_profile_adapter import DeltaProfileAdapter
     return DeltaProfileAdapter()
-
-
-def _create_npoc_adapter(container: DIContainer):
-    from app.infrastructure.adapters.npoc_adapter import NPOCAdapter
-    return NPOCAdapter()
 
 
 def _create_exchange_strategy(container: DIContainer, config: "Configuration"):

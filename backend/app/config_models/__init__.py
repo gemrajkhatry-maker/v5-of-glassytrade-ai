@@ -134,21 +134,15 @@ class FeatureFlags:
 
     # Phase 1 flags
     parallel_symbol_sessions: bool = False
-    duckdb_storage: bool = False
 
     # Phase 2 flags
     short_signals_enabled: bool = False
     risk_tier_engine: bool = False
-    initial_balance_engine: bool = False
-    correlation_guard: bool = True
 
     # Phase 3 flags
-    iv_vix_features: bool = False
     walk_forward_validation: bool = False
-    shap_feature_pruning: bool = False
 
     # LLM role flags
-    llm_entry_gate: bool = False  # HARDCODED false — never enabled
     llm_pre_candle_advisory: bool = True
     llm_overseer: bool = True
     llm_post_trade: bool = True

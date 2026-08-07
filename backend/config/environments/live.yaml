@@ -46,4 +46,3 @@ feature_flags:
   llm_pre_candle_advisory: true
   scalp_engine_enabled: false  # Disable scalping in production initially
   realistic_cost_model: true
-  correlation_guard: true
