@@ -1,13 +1,15 @@
 """Volume profile — uniform distribution across [low, high], POC, average-weighted
-CME two-row value area (68%)."""
+CME two-row value area. The value-area percentage is configurable via
+``globals.value_area_pct`` (backend/config/base.yaml) and shared with the AMT
+analyzer's profile path so the trade engine's SL/TP anchors (SignalBuilder,
+Gate 5, VA-fade) always match what the UI renders."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from quant.bars import Bar
-
-VALUE_AREA_PCT = 0.68
+from quant.contracts.constants import VALUE_AREA_PCT
 
 
 @dataclass(frozen=True)

@@ -62,7 +62,11 @@ def test_amt_populated_without_inference():
     eng.run()
     ws = view_state_to_ws(eng.projector.snapshot("SYM"))
     assert ws["amt"] is not None
-    assert set(ws["amt"]) >= {"poc", "vah", "val", "delta"}
+    # Full AMTAnalysis contract — profile histogram, market state, VWAP bands.
+    assert set(ws["amt"]) >= {
+        "marketState", "poc", "valueAreaHigh", "valueAreaLow",
+        "profile", "legProfile", "lvns", "hvns", "sessionVwap",
+    }
 
 
 def test_bar_decision_trace_identical_with_and_without_inference():

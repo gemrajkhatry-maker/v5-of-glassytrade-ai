@@ -94,5 +94,13 @@ def test_ws_snapshot_empty_state_does_not_crash():
     assert ws["auction"] is None
     assert ws["quantDecision"] is None
     assert ws["riskState"] is None
-    assert ws["portfolio"] == {}
+    # Portfolio is ALWAYS the full frontend contract shape (never `{}`) so
+    # the React layer never reduces over undefined positions/closedTrades.
+    assert ws["portfolio"] == {
+        "balance": 1_000_000.0,
+        "equity": 1_000_000.0,
+        "leverage": 10,
+        "positions": [],
+        "closedTrades": [],
+    }
     assert ws["depth"] == {}

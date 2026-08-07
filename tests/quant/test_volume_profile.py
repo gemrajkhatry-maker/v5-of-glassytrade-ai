@@ -25,13 +25,15 @@ def test_poc_is_max_volume_bucket():
     assert vp.poc == max(vp.levels, key=lambda l: l.volume).price
     assert 104.5 <= vp.poc <= 105.5  # within the heavy bar's range
 
-def test_value_area_captures_68_percent():
-    assert VALUE_AREA_PCT == 0.68
+def test_value_area_captures_config_percent():
+    # VALUE_AREA_PCT is config-driven (globals.value_area_pct) and shared with
+    # the AMT analyzer — decision-side SL/TP anchors must match the UI profile.
+    assert VALUE_AREA_PCT == pytest.approx(0.70)
     vb = VolumeProfileBuilder()
     for b in _bars():
         vb.update(b)
     vp = vb.snapshot()
     va_vol = sum(l.volume for l in vp.levels
                  if vp.val <= l.price <= vp.vah)
-    assert va_vol >= 0.68 * vp.total_volume
+    assert va_vol >= 0.70 * vp.total_volume
     assert vp.vah > vp.val

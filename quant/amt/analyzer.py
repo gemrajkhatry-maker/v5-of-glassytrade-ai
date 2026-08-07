@@ -459,17 +459,21 @@ class AMTAnalyzer:
         _is_new_candle = current.time != self._vwap_last_time
         self._vwap_last_time = current.time
         
-        # Accumulate volume and quote volume (typical_price * volume)
-        # MUST happen on every tick for accuracy, not just new candles
-        self._vwap_cum_vol += float(current.volume)
-        self._vwap_cum_quote_vol += float(quote_vol)
-        
-        # Shifted variance calculation for better numerical stability
-        if self._vwap_shift == 0.0:
-            self._vwap_shift = typical_price  # anchor to first tick
-        
-        shifted = typical_price - self._vwap_shift
-        self._vwap_cum_sq_vol += float(shifted * shifted * current.volume)
+        # Accumulate volume and quote volume (typical_price * volume) ONLY for
+        # a NEW candle. Sub-candle re-feeds pass the same candle as data[-1]
+        # again; accumulating its volume unconditionally would double-count it
+        # and inflate the session VWAP (audit B-20). The bar-history dedup
+        # below already follows this rule — the accumulators must too.
+        if _is_new_candle:
+            self._vwap_cum_vol += float(current.volume)
+            self._vwap_cum_quote_vol += float(quote_vol)
+            
+            # Shifted variance calculation for better numerical stability
+            if self._vwap_shift == 0.0:
+                self._vwap_shift = typical_price  # anchor to first tick
+            
+            shifted = typical_price - self._vwap_shift
+            self._vwap_cum_sq_vol += float(shifted * shifted * current.volume)
         
         # Accumulate bar history for True Range ATR (dedup: analyze() re-feeds
         # the same candle on sub-candle ticks)

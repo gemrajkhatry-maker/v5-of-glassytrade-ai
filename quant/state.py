@@ -9,8 +9,10 @@ which is the WS contract the frontend already reads.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 
 from quant.auction_state import AuctionState
+from quant.contracts.timezones import IST
 from quant.decision.decision_service import QuantDecision
 from quant.events import (
     AgentDecisionProduced,
@@ -61,7 +63,7 @@ def _auction_to_view(state: AuctionState) -> dict:
     loc = state.location
     ab = state.absorption
     return {
-        "time": state.time,
+        "time": _epoch_to_iso(state.time),
         "close": round(float(state.close), 4),
         "volumeProfile": {
             "poc": round(vp.poc, 4),
@@ -109,20 +111,41 @@ def _auction_to_view(state: AuctionState) -> dict:
     }
 
 
+def _epoch_to_iso(time_str: str) -> str:
+    """Normalize a quant tick/bar time to the WS ISO-8601 IST contract.
+
+    The live gateway emits unix-epoch strings (e.g. ``"1786095001"``); the
+    frontend parses every ``time`` with ``new Date()``, which returns NaN for
+    bare epoch strings — silently dropping live ticks from the chart. The REST
+    history endpoint (``ohlc_to_dto``) already emits ISO ``+05:30`` times, so
+    ticks are normalized to the same format here at the serialization
+    boundary. Values that are already ISO (or not epoch-parseable) pass
+    through unchanged.
+    """
+    try:
+        epoch = int(str(time_str).strip())
+    except (TypeError, ValueError):
+        return time_str
+    return datetime.fromtimestamp(epoch, tz=IST).isoformat()
+
+
 def _bar_to_tick(bar) -> dict:
     """Map a closed quant Bar to the frontend OHLCData tick shape.
 
-    ``vwap`` is a required schema field but a Bar carries no vwap — it is left
-    as 0.0; the engine/ws-adapter may enrich it later.
+    ``vwap`` is a required schema field — BarAggregator now accumulates a real
+    per-bar VWAP (``bar.vwap``); older Bar constructions default to 0.0.
+    ``time`` is normalized to the ISO-8601 IST string the WS contract
+    guarantees (see ``_epoch_to_iso``) so the chart can merge it with REST
+    history candles.
     """
     return {
-        "time": bar.time,
+        "time": _epoch_to_iso(bar.time),
         "open": float(bar.open),
         "high": float(bar.high),
         "low": float(bar.low),
         "close": float(bar.close),
         "volume": float(bar.volume),
-        "vwap": 0.0,
+        "vwap": float(getattr(bar, "vwap", 0.0) or 0.0),
         "takerBuyVolume": float(bar.buy_volume),
         "delta": float(bar.delta),
     }
@@ -134,6 +157,10 @@ def _decision_to_view(decision: QuantDecision) -> dict:
         "approved": bool(decision.approved),
         "reason": decision.reason,
         "phase": decision.phase,
+        "gateResults": [
+            {"gate": g.gate, "passed": bool(g.passed), "reason": g.reason}
+            for g in decision.gate_results
+        ],
         "signal": (
             {
                 "type": sig.type,
@@ -155,6 +182,10 @@ def _risk_to_view(risk: RiskState) -> dict:
         "haltReason": risk.halt_reason,
         "consecutiveLosses": risk.consecutive_losses,
         "dailyPnl": risk.daily_pnl,
+        # Contract parity with the legacy risk DTO — SessionRisk does not yet
+        # track drift, so these default off until a drift source exists.
+        "driftAlert": False,
+        "driftMessage": "",
     }
 
 
@@ -170,12 +201,14 @@ def _position_to_view(position: Position, fill: Fill | None = None) -> dict:
         "stopLoss": float(sig.sl),
         "takeProfit": float(sig.tp),
         "pnl": float(fill.pnl if fill is not None else position.realized_pnl),
-        "entryTime": position.open_time,
+        # Times are normalized to the WS ISO contract — chart markers parse
+        # entryTime/exitTime with new Date() and would NaN on epoch strings.
+        "entryTime": _epoch_to_iso(position.open_time),
         "status": "CLOSED" if fill is not None else "OPEN",
     }
     if fill is not None:
         dto["exitPrice"] = float(fill.close_price)
-        dto["exitTime"] = fill.close_time
+        dto["exitTime"] = _epoch_to_iso(fill.close_time)
         dto["closeReason"] = fill.reason
     return dto
 
@@ -185,6 +218,19 @@ class StateProjector:
 
     def __init__(self) -> None:
         self._state: dict[str, dict] = {}
+
+    def on_quote(self, symbol: str, tick) -> None:
+        """Per-tick LTP/OI/depth refresh (not an Event — bypasses bus/journal).
+
+        Called by the engine on every raw tick so the WS snapshot carries a
+        live ``ltp``/``oi``/``depth`` between bar closes (the gameloop polls
+        snapshots every 0.5s, so the sidebar and order-flow cards stay live).
+        """
+        s = self._symbol_state(symbol)
+        s["ltp"] = float(tick.price)
+        s["oi"] = float(tick.oi)
+        if tick.depth is not None:
+            s["depth"] = tick.depth
 
     def on_event(self, event: Event) -> None:
         s = self._symbol_state(event.symbol)
@@ -228,7 +274,7 @@ class StateProjector:
             auction=s["auction"],
             quant_decision=s["quant_decision"],
             risk_state=s["risk_state"],
-            portfolio=s["portfolio"],
+            portfolio=self._portfolio(s["portfolio"]),
             depth=s["depth"],
             amt=s["amt"],
             gen_ai=s["gen_ai"],
@@ -258,14 +304,40 @@ class StateProjector:
 
     @staticmethod
     def _portfolio(current: dict | None) -> dict:
+        """Portfolio DTO — ALWAYS the full frontend contract shape.
+
+        The WS snapshot protocol the frontend was built against guarantees
+        ``balance/equity/leverage`` plus ``positions``/``closedTrades`` arrays on
+        every message (legacy ``portfolio_to_dto``). The greenfield projector
+        only tracks positions; the monetary fields default to the paper-account
+        values until a real portfolio source exists.
+        """
+        # Contract defaults — MUST mirror quant/ws_adapter.view_state_to_ws and
+        # the frontend createInstrumentState (hooks/useServerTradingSystem.ts).
+        # Paper account capital: ₹10 lakh (1M).
+        base = {
+            "balance": 1_000_000.0,
+            "equity": 1_000_000.0,
+            "leverage": 10,
+            "positions": [],
+            "closedTrades": [],
+        }
         if current is None:
-            return {"positions": [], "closedTrades": []}
-        return current
+            return base
+        return {
+            **base,
+            **current,
+            "positions": current.get("positions", base["positions"]),
+            "closedTrades": current.get("closedTrades", base["closedTrades"]),
+        }
 
     @staticmethod
     def _remove_open(open_time: str, portfolio: dict) -> None:
+        # entryTime is stored ISO-normalized (see _position_to_view) — normalize
+        # the lookup key the same way so open positions match their closes.
+        key = _epoch_to_iso(open_time)
         positions = portfolio["positions"]
         for i, p in enumerate(positions):
-            if p["entryTime"] == open_time:
+            if p["entryTime"] == key:
                 del positions[i]
                 break

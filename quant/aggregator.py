@@ -5,6 +5,13 @@ from __future__ import annotations
 from quant.bars import Bar
 from quant.brokers.gateway import Tick
 
+# Live ticks carry unix epochs (~1.78e9). Test fixtures use small synthetic
+# ids ("t0", "t1", ...) that must pass through unchanged — only floor bar
+# times for realistic epochs (>= year 2000) so the live bar time aligns with
+# the REST history candle open time (both IST, minute-aligned) and the
+# frontend's replace-by-time merge works instead of shadow-appending candles.
+_EPOCH_2000 = 946684800
+
 
 class BarAggregator:
     def __init__(self, interval_seconds: int = 60,
@@ -14,6 +21,8 @@ class BarAggregator:
         self._open_key: int | None = None
         self._fallback_counter = 0
         self._bar: Bar | None = None
+        self._vwap_num = 0.0
+        self._vwap_den = 0.0
 
     def _tick_epoch(self, tick: Tick) -> int:
         try:
@@ -57,19 +66,32 @@ class BarAggregator:
             return closed
         return None
 
+    def _bar_time(self, tick: Tick, window: int | None) -> str:
+        """Floor live epochs to the window start; keep synthetic ids as-is."""
+        if (self.interval_seconds and window is not None
+                and self._tick_epoch(tick) >= _EPOCH_2000):
+            return str(window * self.interval_seconds)
+        return tick.time
+
     def _start(self, tick: Tick, window: int | None) -> None:
         self._open_key = window
-        self._bar = Bar(time=tick.time, open=tick.price, high=tick.price,
-                        low=tick.price, close=tick.price, volume=tick.volume,
+        self._vwap_num = tick.price * tick.volume
+        self._vwap_den = tick.volume
+        self._bar = Bar(time=self._bar_time(tick, window), open=tick.price,
+                        high=tick.price, low=tick.price, close=tick.price,
+                        volume=tick.volume,
                         buy_volume=tick.buy_volume, sell_volume=tick.sell_volume,
                         delta=tick.buy_volume - tick.sell_volume,
-                        oi=tick.oi)
+                        oi=tick.oi,
+                        vwap=self._vwap() if self._vwap_den > 0 else tick.price)
 
     def _accumulate(self, tick: Tick, window: int | None) -> None:
         if self._bar is None:
             self._start(tick, window)
             return
         bar = self._bar
+        self._vwap_num += tick.price * tick.volume
+        self._vwap_den += tick.volume
         self._bar = Bar(
             time=bar.time, open=bar.open,
             high=max(bar.high, tick.price),
@@ -81,4 +103,8 @@ class BarAggregator:
             delta=(bar.buy_volume + tick.buy_volume)
                   - (bar.sell_volume + tick.sell_volume),
             oi=tick.oi,
+            vwap=self._vwap() if self._vwap_den > 0 else tick.price,
         )
+
+    def _vwap(self) -> float:
+        return self._vwap_num / self._vwap_den

@@ -14,9 +14,14 @@ import json
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 
 from quant.aggregator import BarAggregator
+from quant.amt.analyzer import AMTAnalyzer
+from quant.amt.dto import amt_result_to_dto, empty_amt_dto
+from quant.amt.profile.volume_profile import IncrementalVolumeProfile
+from quant.bars import Bar
+from quant.contracts.value_objects import OrderBook, OrderBookLevel
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
 from quant.decision.signal_builder import clamp_quantity
@@ -39,9 +44,29 @@ from quant.execution.exits import ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.risk import SessionRisk
 from quant.persistence import Journal
-from quant.state import StateProjector
+from quant.state import StateProjector, _epoch_to_iso
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class FloatOHLC:
+    """Float-based candle for AMTAnalyzer input.
+
+    The legacy AMTHandler converted Decimal-based OHLC to float before
+    analyzing (``FloatOHLC``); the analyzer does float arithmetic against
+    float profile levels, so Decimal inputs crash on mixed-type ops.
+    """
+
+    time: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    vwap: float = 0.0
+    taker_buy_volume: float = 0.0
+    delta: float = 0.0
 
 
 class QuantEngine:
@@ -56,6 +81,7 @@ class QuantEngine:
         time_stop_bars: int = 60,
         inference=None,
         llm_history=None,
+        history_source=None,
     ) -> None:
         self._gateway = gateway
         self.symbol = symbol
@@ -64,6 +90,24 @@ class QuantEngine:
         from quant.coordinator import AuctionCoordinator
 
         self._coordinator = AuctionCoordinator()
+        # Full AMT analysis (the legacy AMTHandler pipeline) — one analyzer per
+        # engine keeps session-continuous state (rolling VWAP, LVN tracker,
+        # acceptance/rejection, displacement legs, ...). ``history_source`` is
+        # the coordinator's IMarketData adapter, used once to seed the candle
+        # ring so the profile/levels are meaningful from session start.
+        self._amt_analyzer = AMTAnalyzer()
+        self._amt_candles: list[OHLC] = []
+        self._amt_lock = threading.Lock()
+        # Incremental volume profile kept in lock-step with ``_amt_candles``
+        # (seeded from the same session-scoped history, then updated per live
+        # bar close) — passed to the analyzer so it does not rebuild the full
+        # histogram from scratch on every bar.
+        self._amt_incremental: IncrementalVolumeProfile | None = None
+        self._coord_lock = threading.Lock()  # guards AuctionCoordinator builders
+        self._history_source = history_source
+        self._last_depth: OrderBook | None = None
+        self._last_amt_dto: dict | None = None
+        self._amt_fail_logged = False
         self._decision_service = DecisionService(min_rr=min_rr)
         self._oms = PaperOMS()
         self._exits = ExitEngine(time_stop_bars=time_stop_bars)
@@ -89,6 +133,7 @@ class QuantEngine:
         if not self._subscribed:
             self._gateway.subscribe(self.symbol)
             self._subscribed = True
+        self._start_amt_seed()
         steps = 0
         while True:
             if max_steps is not None and steps >= max_steps:
@@ -97,6 +142,11 @@ class QuantEngine:
             if tick is None:
                 break
             steps += 1
+            # Per-tick live LTP/OI/depth — the gameloop polls snapshots at
+            # 0.5s, so the sidebar/order-flow stay live between bar closes.
+            self._projector.on_quote(self.symbol, tick)
+            if tick.depth is not None:
+                self._last_depth = self._depth_to_book(tick.depth)
             bar = self._aggregator.add_tick(tick)
             if bar is not None:
                 self._on_bar_closed(bar)
@@ -111,12 +161,13 @@ class QuantEngine:
         return self._projector
 
     def _on_bar_closed(self, bar) -> None:
-        state = self._coordinator.on_bar_close(bar)
+        with self._coord_lock:
+            state = self._coordinator.on_bar_close(bar)
         self._bar_index += 1
         self._emit(BarClosed(symbol=self.symbol, time=bar.time, bar=bar))
         self._emit(AuctionUpdated(symbol=self.symbol, time=bar.time, auction=state))
         self._emit(AmtUpdated(symbol=self.symbol, time=bar.time,
-                              amt=self._amt_from_state(state)))
+                              amt=self._amt_analyze(bar)))
 
         if self._inference is not None and self._inference.is_ready():
             self._llm_executor.submit(self._schedule_llm, state, bar)
@@ -179,18 +230,174 @@ class QuantEngine:
                     {"type": event.__class__.__name__, **asdict(event)}
                 )
 
+    # ------------------------------------------------------------------
+    # Full AMT analysis (legacy AMTHandler pipeline restored)
+    # ------------------------------------------------------------------
+
     @staticmethod
-    def _amt_from_state(state) -> dict:
-        """Small ``amt`` DTO derived from the auction state so the field is
-        always populated even without an LLM."""
-        vp = state.volume_profile
-        of = state.order_flow
-        return {
-            "poc": vp.poc,
-            "vah": vp.vah,
-            "val": vp.val,
-            "delta": of.delta,
-        }
+    def _session_scope(candles) -> list:
+        """Keep only candles from the most recent session (the calendar date
+        of the newest candle) so POC/VA/VWAP reflect today's auction instead
+        of multi-day history.
+
+        Today's candles are kept even when thin (< 5): the AMT analyzer's
+        ``len(data) >= 5`` guard then returns an empty result early, which is
+        the correct behaviour for a session that has barely started — never
+        mix prior-day levels into the session profile.
+        """
+        if not candles:
+            return candles
+        newest = candles[-1]
+        date = str(newest.time)[:10]
+        return [c for c in candles if str(c.time)[:10] == date]
+
+    def _start_amt_seed(self) -> None:
+        """Best-effort: seed the AMT candle ring AND the decision profile from
+        REST history so POC/VA/VWAP/IB are meaningful from the first bar close.
+
+        The fetched history is session-scoped (today's candles only) so the
+        "session" profile is genuinely today's auction. Runs on its own daemon
+        thread; ``fetch_history`` is internally sync-safe to run under
+        ``asyncio.run`` on a worker thread (the Dhan adapter calls the sync
+        ``broker.get_historical``)."""
+        if self._history_source is None:
+            return
+
+        def run() -> None:
+            try:
+                import asyncio
+
+                candles = asyncio.run(
+                    self._history_source.fetch_history(self.symbol, "5m", 500)
+                )
+            except Exception:
+                logger.warning(
+                    "AMT history seed failed for %s", self.symbol, exc_info=True
+                )
+                return
+            if not candles:
+                return
+            scoped = self._session_scope(candles)
+            with self._coord_lock:
+                with self._amt_lock:
+                    if self._amt_candles:
+                        return  # live bars already flowing — keep them
+                    ohlcs = [self._to_float_ohlc(c) for c in scoped]
+                    self._amt_candles = ohlcs
+                    inc = IncrementalVolumeProfile()
+                    for c in ohlcs:
+                        inc.update(c)
+                    self._amt_incremental = inc
+                    self._coordinator.seed_history(
+                        [self._to_bar(c) for c in scoped]
+                    )
+            logger.info(
+                "AMT seeded %d session candles for %s", len(scoped), self.symbol
+            )
+
+        threading.Thread(
+            target=run, daemon=True, name=f"amt-seed-{self.symbol}"
+        ).start()
+
+    def _amt_analyze(self, bar) -> dict:
+        """Append the closed bar to the AMT ring and run the full AMTAnalyzer.
+
+        Emits the complete 60-field ``amt`` DTO (profile histogram, market
+        state, VWAP bands, LVNs/HVNs, absorption, ...) that the frontend
+        ``AMTAnalysis`` contract expects. Called once per bar close on the
+        engine thread — the analyzer's rolling session state accumulates
+        exactly one candle per call.
+        """
+        try:
+            ohlc = FloatOHLC(
+                time=_epoch_to_iso(bar.time),
+                open=float(bar.open), high=float(bar.high),
+                low=float(bar.low), close=float(bar.close),
+                volume=float(bar.volume), vwap=float(bar.vwap or 0.0),
+                taker_buy_volume=float(bar.buy_volume), delta=float(bar.delta),
+            )
+        except Exception:
+            logger.warning("AMT bar->OHLC mapping failed: %r", bar, exc_info=True)
+            ohlc = None
+        if ohlc is not None:
+            with self._amt_lock:
+                self._amt_candles.append(ohlc)
+                oldest: FloatOHLC | None = None
+                if len(self._amt_candles) > 1000:
+                    oldest = self._amt_candles[0]
+                    self._amt_candles = self._amt_candles[-1000:]
+                if self._amt_incremental is not None:
+                    self._amt_incremental.update(ohlc, oldest)
+        try:
+            with self._amt_lock:
+                candles = list(self._amt_candles)
+                incremental = self._amt_incremental
+            result = self._amt_analyzer.analyze(
+                candles,
+                order_book=self._last_depth,
+                incremental_profile=incremental,
+                cushion_tier="Conservative",
+                session_pnl=self._risk.state().daily_pnl,
+                underlying=self._underlying(),
+                symbol=self.symbol,
+            )
+        except Exception:
+            if not self._amt_fail_logged:
+                logger.warning(
+                    "AMT analyze failed for %s — keeping last good DTO",
+                    self.symbol, exc_info=True,
+                )
+                self._amt_fail_logged = True
+            return self._last_amt_dto if self._last_amt_dto is not None else empty_amt_dto()
+        # NB: llmThinking stays empty — the amt DTO must be deterministic and
+        # independent of the async LLM fold-back (see test_llm_hook).
+        dto = amt_result_to_dto(result)
+        self._last_amt_dto = dto
+        return dto
+
+    @staticmethod
+    def _to_float_ohlc(c) -> FloatOHLC:
+        return FloatOHLC(
+            time=str(c.time),
+            open=float(c.open), high=float(c.high), low=float(c.low),
+            close=float(c.close), volume=float(c.volume),
+            vwap=float(getattr(c, "vwap", 0.0) or 0.0),
+            taker_buy_volume=float(getattr(c, "taker_buy_volume", 0.0) or 0.0),
+            delta=float(getattr(c, "delta", 0.0) or 0.0),
+        )
+
+    @staticmethod
+    def _to_bar(c) -> Bar:
+        """History OHLC -> decision-path Bar (buy_volume from taker_buy_volume)."""
+        vol = float(getattr(c, "volume", 0.0) or 0.0)
+        buy = float(getattr(c, "taker_buy_volume", 0.0) or 0.0)
+        return Bar(
+            time=str(c.time),
+            open=float(c.open), high=float(c.high), low=float(c.low),
+            close=float(c.close), volume=vol,
+            buy_volume=buy, sell_volume=max(0.0, vol - buy),
+            delta=float(getattr(c, "delta", 0.0) or 0.0),
+            vwap=float(getattr(c, "vwap", 0.0) or 0.0),
+        )
+
+    def _underlying(self) -> str:
+        head = (self.symbol or "").split()
+        return head[0] if head else "NIFTY"
+
+    @staticmethod
+    def _depth_to_book(depth: dict) -> OrderBook | None:
+        if not depth:
+            return None
+        return OrderBook(
+            bids=tuple(
+                OrderBookLevel(float(l["price"]), float(l["quantity"]))
+                for l in depth.get("bids", [])
+            ),
+            asks=tuple(
+                OrderBookLevel(float(a["price"]), float(a["quantity"]))
+                for a in depth.get("asks", [])
+            ),
+        )
 
     def _schedule_llm(self, state, bar) -> None:
         """Run on the llm-fold thread: predict, parse JSON, fold events back.

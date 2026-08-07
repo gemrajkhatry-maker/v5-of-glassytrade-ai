@@ -17,3 +17,4 @@ class Bar:
     sell_volume: float = 0.0
     delta: float = 0.0
     oi: float = 0.0
+    vwap: float = 0.0  # volume-weighted average price accumulated by BarAggregator

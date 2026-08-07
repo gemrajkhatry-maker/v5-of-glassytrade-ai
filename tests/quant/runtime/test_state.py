@@ -72,8 +72,16 @@ def test_snapshot_defaults_empty_state():
     assert v.auction is None
     assert v.quant_decision is None
     assert v.risk_state is None
-    assert v.portfolio is None
     assert v.depth is None
+    # Portfolio is always materialized as the full contract shape — the WS
+    # layer and React reduce over balance/equity/positions unconditionally.
+    assert v.portfolio == {
+        "balance": 1_000_000.0,
+        "equity": 1_000_000.0,
+        "leverage": 10,
+        "positions": [],
+        "closedTrades": [],
+    }
     assert v.amt is None
     assert v.gen_ai is None
     assert v.overseer_action == ""
@@ -88,6 +96,7 @@ def test_bar_fold_sets_ohlc_tick():
                                  volume=100, buy_volume=60, sell_volume=40, delta=20)))
     v = p.snapshot("S")
     assert v.ltp == 100.5
+    # Non-epoch bar times (test fixtures) pass through unchanged.
     assert v.tick == {
         "time": "t1",
         "open": 100.0,
@@ -99,6 +108,24 @@ def test_bar_fold_sets_ohlc_tick():
         "takerBuyVolume": 60.0,
         "delta": 20.0,
     }
+
+
+def test_bar_tick_time_normalized_to_iso_for_epoch():
+    """Live gateway emits unix-epoch strings; the WS contract requires ISO.
+
+    ``new Date("1786095001")`` is NaN in the frontend, which silently drops
+    live ticks from the chart. The serializer must emit the same ISO +05:30
+    format the REST history endpoint uses so the chart can merge both.
+    """
+    p = StateProjector()
+    p.on_event(BarClosed(symbol="S", time="1786095001",
+                         bar=Bar(time="1786095001", open=100, high=101, low=99,
+                                 close=100.5, volume=100)))
+    tick = p.snapshot("S").tick
+    assert tick["time"] == "2026-08-07T15:00:01+05:30"
+    # Must be parseable by JS Date (round-trips to the same epoch).
+    from datetime import datetime
+    assert int(datetime.fromisoformat(tick["time"]).timestamp()) == 1786095001
 
 
 def test_auction_keys_match_backend_serializer():
@@ -139,6 +166,7 @@ def test_decision_fold():
         "approved": True,
         "reason": "Triple-A",
         "phase": "AGGRESSION",
+        "gateResults": [],
         "signal": {"type": "LONG", "entry": 100.0, "sl": 99.0, "tp": 102.0,
                    "rr": 2.0, "confidence": 0.8},
     }
@@ -154,6 +182,27 @@ def test_decision_fold_no_signal():
     assert qd["signal"] is None
 
 
+def test_decision_fold_gate_results():
+    from quant.decision.result import GateResult
+
+    p = StateProjector()
+    p.on_event(DecisionProduced(
+        symbol="S", time="t1",
+        decision=QuantDecision(
+            False, None, "GATE_REJECTED", "ABSORBING",
+            (GateResult(1, True, "session phase ok"),
+             GateResult(2, True),
+             GateResult(3, False, "probability below threshold", "0.42")),
+        ),
+    ))
+    qd = p.snapshot("S").quant_decision
+    assert qd["gateResults"] == [
+        {"gate": 1, "passed": True, "reason": "session phase ok"},
+        {"gate": 2, "passed": True, "reason": ""},
+        {"gate": 3, "passed": False, "reason": "probability below threshold"},
+    ]
+
+
 def test_risk_fold():
     p = StateProjector()
     p.on_event(RiskUpdated(symbol="S", time="t1",
@@ -165,7 +214,30 @@ def test_risk_fold():
         "haltReason": "daily loss limit reached",
         "consecutiveLosses": 2,
         "dailyPnl": -50.0,
+        "driftAlert": False,
+        "driftMessage": "",
     }
+
+
+def test_quote_updates_ltp_oi_depth_per_tick():
+    """Per-tick LTP/OI/depth refresh between bar closes (Phase E)."""
+    from quant.brokers.gateway import Tick
+
+    p = StateProjector()
+    p.on_quote("S", Tick(time="1", price=105.0, volume=0, oi=42.0,
+                         depth={"bids": [{"price": 104.5, "quantity": 10}],
+                                "asks": [{"price": 105.5, "quantity": 8}]}))
+    v = p.snapshot("S")
+    assert v.ltp == 105.0
+    assert v.oi == 42.0
+    assert v.depth == {"bids": [{"price": 104.5, "quantity": 10}],
+                       "asks": [{"price": 105.5, "quantity": 8}]}
+    # Depth is sticky across ticks without depth; ltp/oi keep updating.
+    p.on_quote("S", Tick(time="2", price=106.0, volume=0, oi=43.0))
+    v2 = p.snapshot("S")
+    assert v2.ltp == 106.0
+    assert v2.oi == 43.0
+    assert v2.depth == v.depth
 
 
 def test_portfolio_open_then_close():
@@ -174,6 +246,9 @@ def test_portfolio_open_then_close():
     p.on_event(PositionOpened(symbol="S", time="t1", position=pos))
     port = p.snapshot("S").portfolio
     assert port == {
+        "balance": 1_000_000.0,
+        "equity": 1_000_000.0,
+        "leverage": 10,
         "positions": [{
             "id": "t1", "symbol": "S", "side": "LONG", "source": "AMT",
             "entryPrice": 100.0, "size": 10.0, "stopLoss": 99.0, "takeProfit": 102.0,

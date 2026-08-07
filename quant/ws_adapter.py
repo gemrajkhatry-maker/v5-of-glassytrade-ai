@@ -10,10 +10,26 @@ from __future__ import annotations
 
 
 def view_state_to_ws(vs) -> dict:
-    """Map StateProjector.ViewState -> the existing WS snapshot shape."""
+    """Map StateProjector.ViewState -> the existing WS snapshot shape.
+
+    Portfolio is ALWAYS the full contract shape (balance/equity/leverage +
+    positions/closedTrades arrays) — the frontend reduces over these fields
+    unconditionally and treats a partial/empty object as a full replacement.
+    """
+    portfolio = vs.portfolio or {}
+    # Defaults MUST mirror quant/state.py StateProjector._portfolio and the
+    # frontend createInstrumentState (hooks/useServerTradingSystem.ts).
+    # Paper account capital: ₹10 lakh (1M) — mirrors quant/state.py
+    # StateProjector._portfolio and the frontend createInstrumentState.
     return {
         "_symbol": vs.symbol,
-        "portfolio": vs.portfolio or {},
+        "portfolio": {
+            "balance": portfolio.get("balance", 1_000_000.0),
+            "equity": portfolio.get("equity", 1_000_000.0),
+            "leverage": portfolio.get("leverage", 10),
+            "positions": portfolio.get("positions", []),
+            "closedTrades": portfolio.get("closedTrades", []),
+        },
         "amt": vs.amt,
         "auction": vs.auction,
         "quantDecision": vs.quant_decision,

@@ -585,6 +585,61 @@ class TestVWAPDoubleAccumulationRegression:
         assert analyzer._vwap_cum_quote_vol == pytest.approx(100 * 100 + 120 * 100)
         assert result.session_vwap == pytest.approx((100 * 100 + 120 * 100) / 200.0)
 
+    def test_re_fed_candle_is_not_re_accumulated(self):
+        """Re-feeding the SAME candle (e.g. a sub-candle tick where data[-1]
+        has not changed) must NOT re-add its volume/quote-volume/variance to
+        the session VWAP accumulators.
+
+        The analyzer is called once per bar close in the runtime path, but the
+        legacy handler re-fed the same candle on sub-candle ticks — the
+        ``_is_new_candle`` guard must make the accumulators idempotent per
+        candle regardless of call cadence.
+        """
+        analyzer = AMTAnalyzer()
+        base = [
+            _make_candle_timed(100.0, f"2026-01-01T09:{i:02d}:00Z", volume=100)
+            for i in range(4)
+        ]
+        c5 = _make_candle_timed(100.0, "2026-01-01T09:04:00Z", volume=100)
+        c6 = _make_candle_timed(120.0, "2026-01-01T09:05:00Z", volume=100)
+
+        analyzer.analyze(base + [c5])
+        # Re-feed the same trailing candle (sub-candle update): nothing new.
+        analyzer.analyze(base + [c5])
+        assert analyzer._vwap_cum_vol == pytest.approx(100.0)
+        assert analyzer._vwap_cum_quote_vol == pytest.approx(100 * 100)
+        # Shifted-variance accumulator is gated identically — a re-feed must
+        # not widen the σ bands (both numerator and denominator stay exact).
+        sq_after_refeed = analyzer._vwap_cum_sq_vol
+
+        # New candle arrives — accumulated exactly once.
+        result = analyzer.analyze(base + [c5, c6])
+        assert analyzer._vwap_cum_vol == pytest.approx(200.0)
+        assert analyzer._vwap_cum_quote_vol == pytest.approx(100 * 100 + 120 * 100)
+        assert analyzer._vwap_cum_sq_vol > sq_after_refeed  # c6 adds variance
+        assert result.session_vwap == pytest.approx((100 * 100 + 120 * 100) / 200.0)
+
+    def test_session_reset_then_new_candle_accumulated(self):
+        """After a session reset, the first candle of the new session must be
+        accumulated (``_reset_session`` zeroes accumulators but leaves
+        ``_vwap_last_time`` set — ``_is_new_candle`` must still be True)."""
+        analyzer = AMTAnalyzer()
+        base = [
+            _make_candle_timed(100.0, f"2026-01-01T09:{i:02d}:00Z", volume=100)
+            for i in range(4)
+        ]
+        last_old = _make_candle_timed(100.0, "2026-01-01T09:04:00Z", volume=100)
+        first_new = _make_candle_timed(110.0, "2026-01-02T09:00:00Z", volume=200)
+
+        analyzer.analyze(base + [last_old])
+        assert analyzer._vwap_cum_vol == pytest.approx(100.0)
+
+        # New session: accumulators reset, then first candle counted once.
+        result = analyzer.analyze(base + [last_old, first_new])
+        assert analyzer._vwap_cum_vol == pytest.approx(200.0)
+        assert analyzer._vwap_cum_quote_vol == pytest.approx(110 * 200)
+        assert result.session_vwap == pytest.approx(110.0)
+
 
 class TestDayTypeClassification:
     def test_normal_day_type(self):

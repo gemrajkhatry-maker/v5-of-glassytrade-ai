@@ -33,6 +33,39 @@ def _ticks():
     return out
 
 
+def test_session_scope_keeps_latest_date_only():
+    from quant.runtime import QuantEngine
+    from quant.contracts.value_objects import OHLC
+
+    # Two sessions: yesterday (2026-08-06) and today (2026-08-07, 6 candles)
+    candles = [
+        OHLC(time=f"2026-08-06T09:{i:02d}:00+05:30", open=100, high=101, low=99, close=100, volume=10)
+        for i in range(3)
+    ] + [
+        OHLC(time=f"2026-08-07T09:{i:02d}:00+05:30", open=100, high=101, low=99, close=100, volume=10)
+        for i in range(6)
+    ]
+    scoped = QuantEngine._session_scope(candles)
+    assert len(scoped) == 6
+    assert all(c.time.startswith("2026-08-07") for c in scoped)
+
+
+def test_session_scope_keeps_only_today_when_thin():
+    from quant.runtime import QuantEngine
+    from quant.contracts.value_objects import OHLC
+
+    # Today has only 2 candles (< 5) — still keep ONLY today's, never pull
+    # prior-day candles back into the "session" profile.
+    candles = [
+        OHLC(time=f"2026-08-0{6 if i < 4 else 7}T09:{i:02d}:00+05:30",
+             open=100, high=101, low=99, close=100, volume=10)
+        for i in range(6)
+    ]
+    scoped = QuantEngine._session_scope(candles)
+    assert len(scoped) == 2
+    assert all(c.time.startswith("2026-08-07") for c in scoped)
+
+
 def test_engine_emits_signal_event_for_long():
     eng = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1)
     trace = eng.run()
@@ -65,14 +98,14 @@ def _run_with_signal(signal: Signal):
 
 
 def _thin_stop_signal() -> Signal:
-    # 0.02% stop -> SessionRisk would size 50_000 units; clamp caps at 1000.
+    # 0.02% stop -> SessionRisk would size 500_000 units; clamp caps at 1000.
     return Signal(type="LONG", reason="test", entry=100.0, sl=99.98, tp=100.06,
                   rr=3.0, confidence=0.7, symbol="SYM", timestamp="t")
 
 
 def _healthy_stop_signal() -> Signal:
-    # 3% stop -> 100k * 1% / 3.0 = 333 units, under the ceiling.
-    return Signal(type="LONG", reason="test", entry=100.0, sl=97.0, tp=106.0,
+    # 20% stop -> 1M (SessionRisk default) * 1% / 20.0 = 500 units, under the ceiling.
+    return Signal(type="LONG", reason="test", entry=100.0, sl=80.0, tp=140.0,
                   rr=2.0, confidence=0.7, symbol="SYM", timestamp="t")
 
 
@@ -83,4 +116,4 @@ def test_runtime_clamps_thin_stop_quantity_to_max():
 
 def test_runtime_leaves_healthy_stop_quantity_unclamped():
     opened = _run_with_signal(_healthy_stop_signal())
-    assert opened.position.order.quantity == pytest.approx(100_000.0 * 0.01 / 3.0)
+    assert opened.position.order.quantity == pytest.approx(1_000_000.0 * 0.01 / 20.0)
