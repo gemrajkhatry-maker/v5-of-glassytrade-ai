@@ -18,6 +18,33 @@ def _session_bars():
     return out
 
 
+def _history_bars():
+    """Two days of 5m bars; today (2026-08-07) spans a wide range."""
+    out = []
+    for day in ("2026-08-06", "2026-08-07"):
+        for i in range(10):
+            close = 100 + (i % 5) * 2 if day == "2026-08-07" else 90 + i
+            out.append(Bar(time=f"{day}T09:{i:02d}:00+05:30",
+                           open=close - 0.5, high=close + 1.5, low=close - 1.5,
+                           close=close, volume=100 + (i % 4) * 40,
+                           buy_volume=60, sell_volume=40, delta=20))
+    return out
+
+
+def test_seed_history_primes_builders_for_first_live_bar():
+    c = AuctionCoordinator()
+    c.seed_history(_history_bars())
+    state = c.on_bar_close(Bar(time="2026-08-07T10:00:00+05:30", open=103, high=104,
+                                low=102, close=103, volume=200,
+                                buy_volume=120, sell_volume=80, delta=40))
+    # First live bar already sees a meaningful profile, not zeros.
+    assert state.volume_profile.poc > 0
+    assert state.volume_profile.vah > state.volume_profile.val > 0
+    assert state.vwap.value > 0
+    assert state.location.ib_complete is True
+    assert state.triple_a_phase == "WAITING"  # machine re-arms on fresh detection only
+
+
 def test_on_bar_close_returns_complete_state():
     c = AuctionCoordinator()
     trace = [c.on_bar_close(b) for b in _session_bars()]
@@ -84,10 +111,10 @@ def test_triple_a_signal_flows_through():
 
 class _FakeGateway:
     """BrokerGateway-compatible stub: a few ticks then None (mirror
-    SyntheticGateway). Accepts the (market_data, symbol) factory args."""
+    SyntheticGateway). Accepts the (feed, symbol) factory args."""
 
-    def __init__(self, market_data, symbol):
-        self.market_data = market_data
+    def __init__(self, feed, symbol):
+        self.feed = feed
         self.symbol = symbol
         self.closed = False
         self._ticks = [
@@ -111,6 +138,28 @@ class _FakeGateway:
         self.closed = True
 
 
+class _FakeFeed:
+    """MultiplexedMarketFeed stub — no threads, no network."""
+
+    def __init__(self, market_data):
+        self.market_data = market_data
+
+    def set_symbols(self, symbols):
+        pass
+
+    def subscribe(self, symbol):
+        pass
+
+    def unsubscribe(self, symbol):
+        pass
+
+    def next_tick(self, symbol):
+        return None
+
+    def close(self):
+        pass
+
+
 _SYM_A = "NIFTY 11 AUG 24600 CALL"
 _SYM_B = "BANKNIFTY 11 AUG 50000 PUT"
 
@@ -118,6 +167,7 @@ _SYM_B = "BANKNIFTY 11 AUG 50000 PUT"
 @pytest.fixture
 def coordinator(monkeypatch):
     monkeypatch.setattr("quant.coordinator.LiveGateway", _FakeGateway)
+    monkeypatch.setattr("quant.coordinator.MultiplexedMarketFeed", _FakeFeed)
     c = QuantCoordinator(market_data=object(), config={"interval_seconds": 1})
     monkeypatch.setattr(c, "_scan", lambda: [_SYM_A, _SYM_B])
     c.start()

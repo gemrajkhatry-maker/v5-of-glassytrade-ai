@@ -23,6 +23,21 @@ class AuctionCoordinator:
         self._loc_builder = LocationBuilder()
         self._triple_a = TripleAStateMachine()
 
+    def seed_history(self, bars: list[Bar]) -> None:
+        """Pre-feed the data builders with session history so the first live
+        bar's snapshot (POC/VA/VWAP/IB/zone) is meaningful instead of empty.
+
+        Fed on the engine's seed thread BEFORE live bars start closing; the
+        Triple-A machine is intentionally left WAITING (it re-arms only on a
+        fresh absorption detection with ``bar_age == 0``).
+        """
+        for bar in bars:
+            self._vp_builder.update(bar)
+            self._vwap_builder.update(bar)
+            self._of_builder.update(bar)
+            self._abs_detector.update(bar)
+            self._loc_builder.update(bar)
+
     def on_bar_close(self, bar: Bar) -> AuctionState:
         self._vp_builder.update(bar)
         self._vwap_builder.update(bar)
@@ -63,6 +78,7 @@ class AuctionCoordinator:
 
 from quant.amt.session.scanner import OptionScannerService
 from quant.brokers.live_gateway import LiveGateway
+from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 from quant.events import DecisionProduced, SignalApproved
 from quant.runtime import QuantEngine
 from quant.ws_adapter import view_state_to_ws
@@ -84,14 +100,17 @@ _DEFAULT_CONFIG = {
 
 
 class QuantCoordinator:
-    """Owns one :class:`QuantEngine` per scanned contract, each behind a
-    per-symbol :class:`LiveGateway`, plus a shared decision queue."""
+    """Owns one :class:`QuantEngine` per scanned contract, all fed by a
+    single multiplexed :class:`MultiplexedMarketFeed` — one WebSocket
+    connection for every symbol (Dhan allows up to 1000 instruments per
+    connection). Plus a shared decision queue."""
 
     def __init__(self, market_data, inference=None, broker=None, config=None) -> None:
         self.market_data = market_data
         self.inference = inference
         self.broker = broker
         self.config = {**_DEFAULT_CONFIG, **(config or {})}
+        self._feed = MultiplexedMarketFeed(market_data)
         self._engines: dict[str, QuantEngine] = {}
         self._gateways: dict[str, LiveGateway] = {}
         self._threads: dict[str, threading.Thread] = {}
@@ -101,13 +120,16 @@ class QuantCoordinator:
         self.started = False
 
     def start(self) -> None:
-        for symbol in self._scan():
+        symbols = self._scan()
+        self._feed.set_symbols(symbols)
+        for symbol in symbols:
             self._spawn_engine(symbol)
         self.started = True
 
     def rescan(self) -> list[str]:
         self._stop_engines()
         symbols = self._scan()
+        self._feed.set_symbols(symbols)
         for symbol in symbols:
             self._spawn_engine(symbol)
         return symbols
@@ -116,12 +138,14 @@ class QuantCoordinator:
         if old not in self._engines:
             return False
         self._stop_engine(old)
+        self._feed.subscribe(new)
         self._spawn_engine(new)
         return True
 
     def stop(self) -> None:
         self._stop.set()
         self._stop_engines()
+        self._feed.close()
         self.started = False
 
     def snapshot(self, symbol: str) -> dict:
@@ -151,13 +175,14 @@ class QuantCoordinator:
         return [r.symbol for r in results if (r.ltp or 0) > 0]
 
     def _spawn_engine(self, symbol: str) -> None:
-        gateway = LiveGateway(self.market_data, symbol)
+        gateway = LiveGateway(self._feed, symbol)
         engine = QuantEngine(
             gateway,
             symbol,
             interval_seconds=self.config["interval_seconds"],
             inference=self.inference,
             llm_history=self._history.setdefault(symbol, []),
+            history_source=self.market_data,
         )
         engine._bus.subscribe(DecisionProduced, self._on_decision)
         engine._bus.subscribe(SignalApproved, self._on_decision)
