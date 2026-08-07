@@ -26,6 +26,8 @@ dist-ssr
 # Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+*.bak
 venv/
 .env
 
