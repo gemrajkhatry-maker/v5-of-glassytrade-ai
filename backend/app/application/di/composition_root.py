@@ -13,7 +13,8 @@ from __future__ import annotations
 import logging
 import os
 
-from config.consolidated import ConsolidatedConfig as Configuration
+from app.config_models import SystemConfig as Configuration
+from app.config import settings as _settings
 
 from app.shared.mode import is_live_mode
 
@@ -210,9 +211,19 @@ def _create_llm_adapter(container: DIContainer, config: "Configuration"):
     from app.infrastructure.adapters.mlx_inference_adapter import MLXInferenceAdapter
     return MLXInferenceAdapter(
         model_path=model_path,
-        temperature=getattr(llm_config, "temperature", 0.7),
-        max_new_tokens=getattr(llm_config, "max_new_tokens", 512),
+        temperature=_resolve_llm_temperature(llm_config),
+        max_new_tokens=int(getattr(llm_config, "max_tokens", 512)),
     )
+
+
+def _resolve_llm_temperature(llm_config) -> float:
+    """Resolve LLM temperature from env override or mid of entry/overseer."""
+    raw = os.getenv("LLM_TEMPERATURE")
+    if raw is not None and str(raw).strip() != "":
+        return float(raw)
+    entry = float(getattr(llm_config, "temperature_entry", 0.4))
+    overseer = float(getattr(llm_config, "temperature_overseer", 0.3))
+    return (entry + overseer) / 2.0
 
 
 def _create_probability_adapter(container: DIContainer, config: "Configuration"):
@@ -264,7 +275,7 @@ def _create_trading_session(container: DIContainer, config: "Configuration"):
         from app.domain.models.exchange import Exchange
 
         exchange = Exchange.normalize(
-            getattr(config, "default_exchange", "MCX") or "MCX"
+            getattr(config, "default_exchange", None) or _settings.DEFAULT_EXCHANGE or "MCX"
         )
         exchange_config = ExchangeConfig.for_exchange(exchange.value)
     except Exception:
@@ -305,7 +316,6 @@ def _resolve_allow_short() -> bool:
     historically this imported the nonexistent ``app.config.features`` module,
     which the try/except silently swallowed and pinned ``allow_short`` False.
     """
-    from app.config import settings as _settings
     from app.shared.config_features import Feature, feature_enabled
     try:
         return feature_enabled(_settings, Feature.ALLOW_SHORT)
@@ -347,7 +357,7 @@ def _create_exchange_strategy(container: DIContainer, config: "Configuration"):
     from quant.contracts.exchange_config import ExchangeConfig
     from app.domain.models.exchange import Exchange
 
-    exchange_name = (getattr(config, "default_exchange", None) or "MCX").upper()
+    exchange_name = (getattr(config, "default_exchange", None) or _settings.DEFAULT_EXCHANGE or "MCX").upper()
     exchange = Exchange.normalize(exchange_name)
     exc_config = ExchangeConfig.for_exchange(exchange.value)
 

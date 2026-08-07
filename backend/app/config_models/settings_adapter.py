@@ -254,6 +254,12 @@ class SettingsAdapter:
         return os.getenv("QUANT_DECISION_ENABLED", "false").lower() == "true"
 
     @property
+    def CORS_ORIGINS(self) -> List[str]:
+        """Get allowed CORS origins from env (comma-separated)."""
+        raw = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+        return [o.strip() for o in raw.split(",") if o.strip()]
+
+    @property
     def QUANT_EXECUTION_MODE(self) -> str:
         """Get the quant decision execution gate: ``off|shadow|paper|live``.
 

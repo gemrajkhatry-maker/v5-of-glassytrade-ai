@@ -31,8 +31,8 @@ Quick Start:
 # This maintains 100% backward compatibility - all existing imports work
 from app.config_models.settings_adapter import settings
 
-# Keep Configuration class for ServiceGraph (transitional)
-# This is used by ServiceGraph for dependency injection
-from config.consolidated import ConsolidatedConfig as Configuration
+# Configuration is the canonical typed model (config_models.SystemConfig),
+# built by the YAML loader and consumed by the DI composition root.
+from app.config_models import SystemConfig as Configuration
 
 __all__ = ["settings", "Configuration"]

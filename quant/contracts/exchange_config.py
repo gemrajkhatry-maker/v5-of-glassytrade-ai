@@ -32,7 +32,7 @@ class ExchangeConfig:
     scanner_underlying: str
     scanner_underlyings: FrozenSet[str]
 
-    # AMT thresholds (from market_config.yaml / consolidated.py)
+    # AMT thresholds (exchange-specific defaults / YAML overrides)
     aggression_sigma: float
     displacement_multiplier: float
     balance_ratio_threshold: float

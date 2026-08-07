@@ -48,7 +48,7 @@ from app.core.startup_telemetry import (
 )
 from app.core.async_boundary import ensure_sync_adapter_result
 from app.application.services.startup_contracts import build_startup_contracts
-from config.consolidated import ConsolidatedConfig as Configuration
+from app.config import settings as _settings
 from quant.contracts.ports.broker import IBroker
 from quant.contracts.ports.storage import IStorage
 from quant.contracts.ports.market_data import IMarketData
@@ -215,15 +215,17 @@ def create_application() -> FastAPI:
 
     begin_phase("dependency_bootstrap")
     try:
-        # Load configuration — must match app.config.settings (YAML strategy + MCX/NSE), not env-only.
-        config = Configuration.from_unified()
-        logger.info(f"Loaded configuration (unified): {config}")
+        # Load configuration — canonical SystemConfig from the YAML loader,
+        # identical to app.config.settings (env + strategy), not env-only.
+        mode = _settings.get_mode_config()
+        config = mode.system_config if mode is not None else None
+        logger.info(f"Loaded configuration: {config}")
 
         # Add CORS middleware
-        # Origins loaded from configuration (consolidated.py)
+        # Origins loaded from the settings adapter (env CORS_ORIGINS)
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=config.cors_origins,
+            allow_origins=_settings.CORS_ORIGINS,
             allow_credentials=False,
             allow_methods=["*"],
             allow_headers=["*"],
@@ -275,11 +277,7 @@ def create_application() -> FastAPI:
         # Get active symbols from service or config
         active_symbols = list(getattr(app.state, "active_symbols", []))
         if not active_symbols:
-            active_symbols = list(getattr(config, "dhan_symbols", []))
-        if not active_symbols:
-            from app.config import settings as _settings
-
-            active_symbols = list(getattr(_settings, "DHAN_SYMBOLS", []))
+            active_symbols = list(_settings.DHAN_SYMBOLS)
 
         app.state.startup_reconciliation = reconciliation_result
         app.state.active_symbols = tuple(active_symbols)

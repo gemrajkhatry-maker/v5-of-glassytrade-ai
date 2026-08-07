@@ -21,7 +21,7 @@ for _ancestor in _this_file.parents:
             sys.path.insert(0, root)
         break
 
-from app.config import Configuration
+from app.config import Configuration, settings
 from quant.contracts.ports.broker import IBroker
 from quant.contracts.aggregates import (
     RISK_BY_CONFIDENCE,
@@ -112,10 +112,13 @@ class DhanBrokerAdapter(IBroker):
         )
 
         client_id = str(
-            getattr(self._config, "dhan_client_id", None) or os.getenv("DHAN_CLIENT_ID", "")
+            getattr(self._config, "dhan_client_id", None)
+            or getattr(settings, "DHAN_CLIENT_ID", None)
+            or os.getenv("DHAN_CLIENT_ID", "")
         ).strip()
         access_token = str(
             getattr(self._config, "dhan_access_token", None)
+            or getattr(settings, "DHAN_ACCESS_TOKEN", None)
             or os.getenv("DHAN_ACCESS_TOKEN", "")
         ).strip()
         if not client_id:

@@ -5,7 +5,7 @@ Tests:
   - SymbolRegistry (exchange detection, deduplication)
   - ExchangeStrategy port + NSE/MCX implementations
   - SessionContextFactory (DIP-compliant construction)
-  - consolidated.py YAML parsing + get_exchange_config bridge
+  - Canonical ExchangeConfig bridge (quant.contracts.exchange_config)
 """
 
 from __future__ import annotations
@@ -325,54 +325,39 @@ class TestSessionContextFactory:
 
 
 # ======================================================================
-# ConsolidatedConfig YAML Bridge Tests
+# Canonical ExchangeConfig (quant.contracts) bridge tests
 # ======================================================================
 
 
-class TestConsolidatedConfigBridge:
-    """Test config/consolidated.py YAML parsing and get_exchange_config bridge."""
+class TestExchangeConfigBridge:
+    """Canonical ExchangeConfig (quant.contracts) — the single exchange-config source."""
 
-    def test_get_exchange_config_returns_valid_config(self):
-        from config.consolidated import get_exchange_config
-
-        mcx = get_exchange_config("MCX")
+    def test_for_exchange_returns_valid_config(self):
+        mcx = ExchangeConfig.for_exchange("MCX")
         assert mcx.exchange == "MCX"
         assert "CRUDEOIL" in mcx.underlyings
 
-        nse = get_exchange_config("NSE")
+        nse = ExchangeConfig.for_exchange("NSE")
         assert nse.exchange == "NSE"
         assert "NIFTY" in nse.underlyings
 
-    def test_get_exchange_config_idempotent(self):
-        from config.consolidated import get_exchange_config
-
-        a = get_exchange_config("MCX")
-        b = get_exchange_config("MCX")
+    def test_for_exchange_idempotent(self):
+        a = ExchangeConfig.for_exchange("MCX")
+        b = ExchangeConfig.for_exchange("MCX")
         assert a == b  # same values
 
-    def test_from_yaml_with_existing_file(self):
-        """YAML file exists at app/market_config.yaml — should parse NFO/MCX."""
-        from config.consolidated import ConsolidatedConfig
+    def test_from_dict_overrides_defaults(self):
+        """from_dict builds from YAML dict, falling back to exchange defaults."""
+        cfg = ExchangeConfig.from_dict("MCX", {"aggression_sigma": 1.5})
+        assert cfg.exchange == "MCX"
+        assert cfg.aggression_sigma == 1.5
+        assert "CRUDEOIL" in cfg.underlyings
 
-        cfg = ConsolidatedConfig.from_yaml()
-        mcx_data = cfg.get_exchange_config_dict("MCX")
-        nse_data = cfg.get_exchange_config_dict("NSE")
-
-        # market_config.yaml has NFO and MCX sections
-        assert isinstance(mcx_data, dict)
-        assert isinstance(nse_data, dict)
-        # MCX should have aggression_sigma from YAML
-        if mcx_data:
-            assert "aggression_sigma" in mcx_data or mcx_data == {}
-
-    def test_nfo_maps_to_nse(self):
-        """NFO key in YAML should map to NSE."""
-        from config.consolidated import ConsolidatedConfig
-
-        cfg = ConsolidatedConfig.from_yaml()
-        nse_data = cfg.get_exchange_config_dict("NSE")
-        # NFO section in YAML should be accessible as NSE
-        assert isinstance(nse_data, dict)
+    def test_from_dict_nfo_maps_to_nse_defaults(self):
+        """Non-MCX exchange keys (e.g. NFO) resolve to NSE defaults."""
+        cfg = ExchangeConfig.for_exchange("NFO")
+        assert cfg.exchange == "NSE"
+        assert "NIFTY" in cfg.underlyings
 
 
 # ======================================================================
@@ -414,9 +399,10 @@ class TestAbstractionLayerConsistency:
     def test_di_container_wiring(self):
         """DIContainer should wire all exchange abstractions."""
         from app.application.di.composition_root import compose_container
-        from config.consolidated import ConsolidatedConfig as Configuration
+        from app.config import settings
 
-        config = Configuration.from_unified()
+        mode = settings.get_mode_config()
+        config = mode.system_config if mode is not None else None
         container = compose_container(config)
 
         from quant.contracts.ports import IExchangeStrategy
