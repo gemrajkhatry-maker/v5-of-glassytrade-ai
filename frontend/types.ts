@@ -125,6 +125,11 @@ export interface QuantDecisionAnalysis {
   approved: boolean;
   reason: string;
   phase: string;
+  gateResults?: {
+    gate: number;
+    passed: boolean;
+    reason: string;
+  }[];
   signal: {
     type: string;
     entry: number;

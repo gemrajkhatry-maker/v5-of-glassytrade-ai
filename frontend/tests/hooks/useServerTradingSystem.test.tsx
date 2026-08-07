@@ -195,6 +195,7 @@ describe('phantom field removal (backend never sends these)', () => {
   });
 });
 
+
 describe('no gap-filling fabrication (F-03/F-05)', () => {
   const connectHook = async () => {
     const instances: MockWebSocket[] = [];
@@ -305,5 +306,179 @@ describe('no gap-filling fabrication (F-03/F-05)', () => {
       history: [candle('2024-01-01T09:15:00Z', 104), candle('2024-01-01T09:45:00Z', 109)],
     });
     expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+describe('llm_history_loaded routing (greenfield protocol)', () => {
+  const connectHook = async () => {
+    const instances: MockWebSocket[] = [];
+    class TrackingWS extends MockWebSocket {
+      constructor(url: string) {
+        super(url);
+        instances.push(this);
+      }
+    }
+    const realFetch = global.fetch;
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ activeSymbols: ['NIFTY'] }),
+    })) as any;
+    global.WebSocket = TrackingWS as any;
+
+    const rendered = renderHook(() => useServerTradingSystem(DEFAULT_CONFIG));
+
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await new Promise(r => setTimeout(r, 20));
+      });
+    }
+
+    global.fetch = realFetch;
+    return { ...rendered, ws: instances[0] };
+  };
+
+  const pushMessage = async (ws: MockWebSocket, msg: Record<string, unknown>) => {
+    await act(async () => {
+      ws.onmessage?.({ data: JSON.stringify(msg) } as any);
+      await new Promise(r => setTimeout(r, 30));
+    });
+  };
+
+  it('routes LLM decision history to llmHistory, never into chart data', async () => {
+    const { result, ws } = await connectHook();
+    expect(ws).toBeDefined();
+
+    // The greenfield backend streams coordinator.llm_history (raw analysis JSON
+    // with no OHLC `time`) under the dedicated llm_history_loaded status.
+    await pushMessage(ws, {
+      status: 'llm_history_loaded',
+      symbol: 'NIFTY',
+      count: 2,
+      history: [
+        { direction: 'LONG', confidence: 'High', rationale: 'strong push', raw_output: 'a' },
+        { direction: 'FLAT', confidence: 'Low', rationale: 'range', raw_output: 'b' },
+      ],
+    });
+
+    const inst = result.current.instruments['NIFTY'];
+    expect(inst).toBeDefined();
+    // Chart data stays empty — LLM decisions are NOT candles.
+    expect(inst.data).toHaveLength(0);
+    // They land in the decision-history panel feed instead.
+    expect(inst.llmHistory.length).toBeGreaterThanOrEqual(2);
+    expect(inst.llmHistory.map(e => e.direction)).toContain('LONG');
+    expect(inst.llmHistory.map(e => e.rawOutput)).toEqual(expect.arrayContaining(['a', 'b']));
+  });
+});
+
+describe('warm chart history via /api/market/history (Phase 2)', () => {
+  const connectWithHistory = async (historyCandles: unknown[]) => {
+    const instances: MockWebSocket[] = [];
+    class TrackingWS extends MockWebSocket {
+      constructor(url: string) {
+        super(url);
+        instances.push(this);
+      }
+    }
+    const realFetch = global.fetch;
+    // Keep fetch mocked for the WHOLE test: the warm-history REST call is
+    // triggered from the server_mode WS message, not during mount.
+    global.fetch = vi.fn(async (url: any) => {
+      const u = String(url);
+      if (u.includes('/api/system/config')) {
+        return { ok: true, json: async () => ({ activeSymbols: ['NIFTY'] }) } as any;
+      }
+      if (u.includes('/api/market/history/')) {
+        return { ok: true, json: async () => ({ data: historyCandles }) } as any;
+      }
+      return { ok: false, json: async () => ({}) } as any;
+    }) as any;
+    global.WebSocket = TrackingWS as any;
+
+    const rendered = renderHook(() => useServerTradingSystem(DEFAULT_CONFIG));
+
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await new Promise(r => setTimeout(r, 20));
+      });
+    }
+
+    const restoreFetch = () => { global.fetch = realFetch; };
+    return { ...rendered, ws: instances[0], restoreFetch };
+  };
+
+  const pushMessage = async (ws: MockWebSocket, msg: Record<string, unknown>) => {
+    await act(async () => {
+      ws.onmessage?.({ data: JSON.stringify(msg) } as any);
+      await new Promise(r => setTimeout(r, 30));
+    });
+  };
+
+  it('fetches REST history on server_mode and warms instrument.data', async () => {
+    const candles = [
+      { time: '2026-08-07T14:50:00+05:30', open: 126, high: 128, low: 125, close: 127,
+        volume: 1000, vwap: 126.5, takerBuyVolume: 400, delta: 50 },
+      { time: '2026-08-07T14:55:00+05:30', open: 127, high: 130, low: 126, close: 129,
+        volume: 1500, vwap: 128, takerBuyVolume: 600, delta: 80 },
+    ];
+    const { result, ws, restoreFetch } = await connectWithHistory(candles);
+    try {
+      expect(ws).toBeDefined();
+
+      await pushMessage(ws, {
+        status: 'server_mode',
+        symbol: 'NIFTY',
+        activeSymbols: ['NIFTY'],
+        interval: '5m',
+      });
+
+      const inst = result.current.instruments['NIFTY'];
+      expect(inst).toBeDefined();
+      // REST candles land in chart data, sorted ascending by time.
+      expect(inst.data).toHaveLength(2);
+      expect(inst.data[0].time).toBe('2026-08-07T14:50:00+05:30');
+      expect(inst.data[1].close).toBe(129);
+      expect(inst.data[0].takerBuyVolume).toBe(400);
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it('merges warm history with already-streamed live ticks without duplicates', async () => {
+    const candles = [
+      { time: '2026-08-07T14:50:00+05:30', open: 126, high: 128, low: 125, close: 127,
+        volume: 1000 },
+      { time: '2026-08-07T14:55:00+05:30', open: 127, high: 130, low: 126, close: 129,
+        volume: 1500 },
+    ];
+    const { result, ws, restoreFetch } = await connectWithHistory(candles);
+    try {
+      expect(ws).toBeDefined();
+
+      // Live bars arrive via the full snapshot BEFORE the REST history resolves.
+      await pushMessage(ws, {
+        _type: 'full',
+        _symbol: 'NIFTY',
+        tick: {
+          time: '2026-08-07T14:55:00+05:30', open: 127, high: 130, low: 126,
+          close: 129, volume: 1500, vwap: 0, takerBuyVolume: 600, delta: 80,
+        },
+      });
+      await pushMessage(ws, {
+        status: 'server_mode',
+        symbol: 'NIFTY',
+        activeSymbols: ['NIFTY'],
+        interval: '5m',
+      });
+
+      const inst = result.current.instruments['NIFTY'];
+      expect(inst).toBeDefined();
+      expect(inst.data).toHaveLength(2);
+      // Same timestamp from history and live stream dedupes to a single bar.
+      const times = inst.data.map(c => c.time);
+      expect(new Set(times).size).toBe(times.length);
+    } finally {
+      restoreFetch();
+    }
   });
 });

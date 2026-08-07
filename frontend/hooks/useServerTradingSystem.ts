@@ -15,9 +15,13 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
     symbol,
     data: [],
     orderBook: null,
+    // Contract: these defaults MUST mirror the backend's portfolio DTO
+    // (quant/state.py StateProjector._portfolio + quant/ws_adapter.py
+    // view_state_to_ws) — the WS delta-merge treats the backend portfolio as
+    // authoritative and replaces these values on the first snapshot.
     portfolio: {
-        balance: 10_000_000,
-        equity: 10_000_000,
+        balance: 1_000_000,
+        equity: 1_000_000,
         leverage: 10,
         positions: [],
         closedTrades: [],
@@ -276,6 +280,55 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     }, []);
 
     // ----------------------------------------------------------------
+    // 2a. Warm chart history from REST /api/market/history/{symbol}
+    // ----------------------------------------------------------------
+    // The greenfield backend streams live bars over the WS but keeps no OHLC
+    // ring buffer server-side. Fetch the Dhan history REST endpoint once per
+    // symbol after server_mode so the chart has a warm background of real
+    // candles instead of starting empty and filling in tick-by-tick.
+    // Candles are merged with any live ticks that already streamed in.
+    const warmHistoryForSymbols = useCallback((symbols: string[], interval: string) => {
+        for (const sym of symbols) {
+            const path = `/api/market/history/${encodeURIComponent(sym)}`;
+            const url = `${backendUrl(path)}?interval=${encodeURIComponent(interval || '5m')}&limit=500`;
+            fetch(url)
+                .then(res => (res.ok ? res.json() : null))
+                .then(body => {
+                    const candles = body?.data;
+                    if (!Array.isArray(candles) || candles.length === 0) return;
+                    const history: OHLCData[] = candles.map((c: any) => ({
+                        time: String(c.time),
+                        open: Number(c.open),
+                        high: Number(c.high),
+                        low: Number(c.low),
+                        close: Number(c.close),
+                        volume: Number(c.volume ?? 0),
+                        vwap: Number(c.vwap ?? 0),
+                        takerBuyVolume: Number(c.takerBuyVolume ?? 0),
+                        delta: Number(c.delta ?? 0),
+                    }));
+                    setInstruments(prev => {
+                        const inst = prev[sym];
+                        if (!inst) return prev;
+                        // Union warm history + any already-streamed live bars,
+                        // sorted ascending and deduped by time.
+                        const byTime = new Map<string, OHLCData>();
+                        for (const c of history) byTime.set(c.time, c);
+                        for (const c of inst.data) byTime.set(c.time, c);
+                        const merged = [...byTime.values()].sort(
+                            (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
+                        );
+                        return { ...prev, [sym]: { ...inst, data: merged } };
+                    });
+                })
+                .catch(() => {
+                    // Backend not ready or symbol unsupported — chart warms from live ticks.
+                });
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // ----------------------------------------------------------------
     // 2.  WebSocket message handler
     // ----------------------------------------------------------------
     const handleWsMessage = useCallback((event: MessageEvent) => {
@@ -325,6 +378,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (prev && symbols.includes(prev)) return prev;
                     return symbols[0];
                 });
+
+                // Phase 2: warm the chart with REST history for every symbol.
+                // The WS tick stream only carries the live bar; this fills the
+                // background with real Dhan candles matching the live interval.
+                warmHistoryForSymbols(symbols, String(state.interval || ''));
                 return;
             }
 
@@ -349,6 +407,49 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     });
                 }
                 console.log(`[TradingSystem] History loaded: ${state.count} candles`);
+                return;
+            }
+
+            // LLM decision history (backend sends raw analysis JSON under this
+            // dedicated status — it is NOT candle data and must never reach the
+            // chart. The DecisionHistoryPanel reads it from llmHistory.)
+            if (state.status === 'llm_history_loaded') {
+                if (state.history && state.symbol) {
+                    const sym = state.symbol;
+                    // Guard against non-object entries: a throw inside this
+                    // try/catch increments parseErrorCount and force-reconnects.
+                    const entries: LLMHistoryEntry[] = state.history
+                        .filter((d: any) => !!d && typeof d === 'object')
+                        .map((d: any) => ({
+                            timestamp: typeof d.timestamp === 'number'
+                                ? d.timestamp
+                                : new Date(d.created_at || d.time || Date.now()).getTime() || Date.now(),
+                            direction: d.direction || 'FLAT',
+                            confidence: d.confidence || 'Medium',
+                            rationale: d.rationale || '',
+                            inputPrompt: d.input_prompt || d.inputPrompt || '',
+                            rawOutput: d.raw_output || d.rawOutput || '',
+                        }))
+                        .sort((a: LLMHistoryEntry, b: LLMHistoryEntry) => a.timestamp - b.timestamp);
+                    if (entries.length > 0) {
+                        setInstruments(prev => {
+                            const inst = prev[sym] || createInstrumentState(sym);
+                            // Dedup: the backend re-sends its ring buffer on every
+                            // subscribe/reconnect — key on content so repeated
+                            // subscribes don't stack duplicates in the panel.
+                            const seen = new Set(inst.llmHistory.map(e =>
+                                `${e.direction}|${e.confidence}|${e.rationale}|${e.timestamp}`
+                            ));
+                            const fresh = entries.filter(e => !seen.has(
+                                `${e.direction}|${e.confidence}|${e.rationale}|${e.timestamp}`
+                            ));
+                            const merged = [...inst.llmHistory, ...fresh]
+                                .sort((a, b) => a.timestamp - b.timestamp)
+                                .slice(-20);
+                            return { ...prev, [sym]: { ...inst, llmHistory: merged } };
+                        });
+                    }
+                }
                 return;
             }
 

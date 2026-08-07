@@ -120,6 +120,42 @@ describe('auction WS → Triple-A render', () => {
         });
     };
 
+    it('renders 3A phase, model type, and balance chips even without a signal', async () => {
+        const { ws } = await connect();
+        expect(ws).toBeDefined();
+
+        await pushMessage(ws, {
+            _type: 'full',
+            _symbol: 'SYM',
+            auction: auctionFixture({
+                tripleASignal: null,
+                tripleAPhase: 'ABSORBING',
+            }),
+            amt: {
+                marketState: 'IMBALANCED',
+                setup: 'MEAN_REVERSION',
+                poc: 100,
+                valueAreaHigh: 102,
+                valueAreaLow: 98,
+                lvns: [],
+                hvns: [],
+                aggression: 0.5,
+                profile: [],
+                aggressivePrints: [],
+                legProfile: [],
+                legLvns: [],
+                legPoc: 0,
+                legVah: 0,
+                legVal: 0,
+                hasDisplacement: false,
+            },
+        });
+
+        expect(screen.getByText(/3A ABSORBING/i)).toBeInTheDocument();
+        expect(screen.getByText(/MODEL MEAN-REV/i)).toBeInTheDocument();
+        expect(screen.getByText(/IMBALANCED/i)).toBeInTheDocument();
+    });
+
     it('renders the TRIPLE-A LONG decision from a full WS message carrying auction', async () => {
         const { ws } = await connect();
         expect(ws).toBeDefined();
@@ -130,7 +166,7 @@ describe('auction WS → Triple-A render', () => {
             auction: auctionFixture(),
         });
 
-        expect(screen.getByText(/TRIPLE-A LONG \(AGGRESSION\)/i)).toBeInTheDocument();
+        expect(screen.getByText(/3A LONG · AGGRESSION/i)).toBeInTheDocument();
         expect(screen.getByText(/BUY ABSORPTION/i)).toBeInTheDocument();
     });
 
@@ -143,7 +179,7 @@ describe('auction WS → Triple-A render', () => {
             _symbol: 'SYM',
             auction: auctionFixture(),
         });
-        expect(screen.getByText(/TRIPLE-A LONG \(AGGRESSION\)/i)).toBeInTheDocument();
+        expect(screen.getByText(/3A LONG · AGGRESSION/i)).toBeInTheDocument();
 
         // Delta: only auction changed → auctionAnalysis merged (LONG→SHORT, absorption cleared).
         await pushMessage(ws, {
@@ -156,8 +192,8 @@ describe('auction WS → Triple-A render', () => {
             }),
         });
 
-        expect(screen.getByText(/TRIPLE-A SHORT \(ACCUMULATING\)/i)).toBeInTheDocument();
-        expect(screen.queryByText(/TRIPLE-A LONG/i)).not.toBeInTheDocument();
+        expect(screen.getByText(/3A SHORT · ACCUMULATING/i)).toBeInTheDocument();
+        expect(screen.queryByText(/3A LONG/i)).not.toBeInTheDocument();
         expect(screen.queryByText(/BUY ABSORPTION/i)).not.toBeInTheDocument();
     });
 

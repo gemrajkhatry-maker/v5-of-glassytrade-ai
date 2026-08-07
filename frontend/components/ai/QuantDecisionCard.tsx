@@ -43,6 +43,23 @@ const QuantDecisionCard = React.memo<QuantDecisionCardProps>(({ quantDecision })
                     {quantDecision.reason && !quantDecision.signal && <span className="ml-2">{quantDecision.reason}</span>}
                 </div>
             )}
+            {quantDecision.gateResults && quantDecision.gateResults.length > 0 && (
+                <div className="mt-2.5">
+                    <div className="text-[9px] uppercase tracking-widest text-glassy-text-tertiary mb-1.5">Triple-A Gates</div>
+                    <div className="grid grid-cols-5 gap-1">
+                        {quantDecision.gateResults.map(g => (
+                            <div
+                                key={g.gate}
+                                title={`Gate ${g.gate}: ${g.reason || (g.passed ? 'passed' : 'blocked')}`}
+                                className={`rounded-sm border px-1 py-1 text-center ${g.passed ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-rose-500/40 bg-rose-500/10 text-rose-400'}`}
+                            >
+                                <div className="text-[7px] font-bold leading-none">G{g.gate}</div>
+                                <div className="text-[9px] font-bold leading-tight mt-0.5">{g.passed ? 'PASS' : 'BLOCK'}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 });

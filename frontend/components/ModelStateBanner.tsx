@@ -14,7 +14,40 @@ export interface ModelStateBannerProps {
 /**
  * Single primary status strip for the active symbol: monitoring, dead, advisory entry, or armed (ENTER_NOW).
  */
+/** Phase-colored chip for the Triple-A gate machine. */
+function tripleAClass(phase: string, signal: string | null | undefined): string {
+    if (signal === 'LONG') return 'border-emerald-500/40 text-emerald-300';
+    if (signal === 'SHORT') return 'border-rose-500/40 text-rose-300';
+    switch (phase) {
+        case 'ABSORBING': return 'border-amber-500/40 text-amber-300';
+        case 'ACCUMULATING': return 'border-cyan-500/40 text-cyan-300';
+        case 'AGGRESSION': return 'border-violet-500/40 text-violet-300';
+        default: return 'border-white/25 text-white/40';
+    }
+}
+
+/** Model-type label from the AMT setup classifier. */
+function modelLabelFor(setup: AMTAnalysis['setup']): string | null {
+    if (!setup) return null;
+    return setup === 'TREND_MODEL' ? 'MODEL TREND' : 'MODEL MEAN-REV';
+}
+
+function balanceClass(state: string): string {
+    if (state === 'IMBALANCED') return 'border-orange-500/40 text-orange-300';
+    if (state === 'DEAD') return 'border-red-500/40 text-red-300';
+    if (state === 'PROBING') return 'border-sky-500/40 text-sky-300';
+    return 'border-emerald-500/30 text-emerald-200/70';
+}
+
+function balanceDot(state: string): string {
+    if (state === 'IMBALANCED') return 'bg-orange-400';
+    if (state === 'DEAD') return 'bg-red-400';
+    if (state === 'PROBING') return 'bg-sky-400';
+    return 'bg-emerald-400';
+}
+
 const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, agentDecision, auction, quantDecision, symbol }) => {
+    const modelLabel = useMemo(() => modelLabelFor(amtResult?.setup), [amtResult?.setup]);
     const { title, subtitle, barClass, accentClass } = useMemo(() => {
         const isDead =
             genAI?.rationale?.includes('DEAD') ||
@@ -88,10 +121,30 @@ const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, 
                     <div className={`text-sm font-bold tracking-wide uppercase ${accentClass}`}>{title}</div>
                     <div className="text-[10px] text-white/55 font-mono truncate mt-0.5">{subtitle}</div>
                 </div>
-                <div className="hidden sm:flex items-center gap-2 shrink-0 text-[9px] font-mono text-white/40 uppercase">
-                    {auction?.tripleASignal && (
-                        <span className={`px-1.5 py-0.5 rounded-sm border ${auction.tripleASignal === 'LONG' ? 'border-emerald-500/40 text-emerald-300' : 'border-rose-500/40 text-rose-300'}`}>
-                            TRIPLE-A {auction.tripleASignal} ({auction.tripleAPhase})
+                <div className="hidden sm:flex flex-wrap items-center gap-2 shrink-0 text-[9px] font-mono text-white/40 uppercase">
+                    {/* Triple-A gate state — always shown, phase-colored. */}
+                    {auction?.tripleAPhase && (
+                        <span
+                            className={`px-1.5 py-0.5 rounded-sm border ${tripleAClass(auction.tripleAPhase, auction.tripleASignal)}`}
+                            title={`Triple-A gate: ${auction.tripleAPhase}`}
+                        >
+                            {auction.tripleASignal ? `3A ${auction.tripleASignal} · ${auction.tripleAPhase}` : `3A ${auction.tripleAPhase}`}
+                        </span>
+                    )}
+                    {/* Model type in play — AMT setup classifier. */}
+                    {modelLabel && (
+                        <span className="px-1.5 py-0.5 rounded-sm border border-sky-500/40 text-sky-300" title="Model type selected">
+                            {modelLabel}
+                        </span>
+                    )}
+                    {/* Balance / imbalance regime from live AMT. */}
+                    {amtResult?.marketState && (
+                        <span
+                            className={`px-1.5 py-0.5 rounded-sm border flex items-center gap-1 ${balanceClass(amtResult.marketState)}`}
+                            title={`Auction regime: ${amtResult.marketState}`}
+                        >
+                            <span className={`w-1.5 h-1.5 rounded-full ${balanceDot(amtResult.marketState)}`} />
+                            {amtResult.marketState}
                         </span>
                     )}
                     {auction?.absorption && (
