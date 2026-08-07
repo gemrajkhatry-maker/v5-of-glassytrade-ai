@@ -122,7 +122,8 @@ STRUCTURE_BYPASS_CONFIDENCE = 70
 # ============================================================================
 MIN_RR_RATIO = 1.5
 MAX_CUSHION_TICKS = 10
-SIGNAL_TTL_SECONDS = 600
+# 60s scalar-session default; runtime override via SIGNAL_STALE_SECONDS setting
+SIGNAL_TTL_SECONDS = 60
 VWAP_EXTREME_MULTIPLIER = 1.01
 DECISION_HISTORY_LIMIT = 1000
 

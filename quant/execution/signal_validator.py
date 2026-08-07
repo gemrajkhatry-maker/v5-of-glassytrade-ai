@@ -41,7 +41,7 @@ class SignalValidator:
         Args:
             signal: The signal to validate.
             current_tick: Current market tick.
-            max_age_seconds: Maximum age in seconds (default: 600s = 10min).
+            max_age_seconds: Maximum age in seconds (default: 60s = 1min).
 
         Returns:
             True if signal is fresh, False if stale.
