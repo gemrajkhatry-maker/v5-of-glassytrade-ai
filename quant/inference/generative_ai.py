@@ -1,6 +1,5 @@
-import hashlib
 import logging
-from collections import OrderedDict
+from functools import lru_cache
 from typing import Dict, Any
 
 from quant.contracts.ports.llm_inference import ILLMInference
@@ -49,7 +48,7 @@ class GenerativeAIService:
     def __init__(self, llm_adapter: ILLMInference, instruction: str = ""):
         self.llm_adapter = llm_adapter
         self._instruction = instruction or _DEFAULT_INSTRUCTION
-        self._cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
+        self._analyze_cached = lru_cache(maxsize=self._CACHE_SIZE)(self._analyze_uncached)
 
     # ------------------------------------------------------------------
     # Public API
@@ -77,37 +76,34 @@ class GenerativeAIService:
         """
         prompt_input = build_entry_prompt(market_data)
 
-        # Check cache (avoids redundant inference for identical market state)
-        cache_key = hashlib.md5(prompt_input.encode()).hexdigest()
-        if cache_key in self._cache:
-            self._cache.move_to_end(cache_key)
-            return self._cache[cache_key]
-
         try:
-            raw_response = self.llm_adapter.predict(self._instruction, prompt_input)
-            # Fix-NoneType: Guard against None from LLM adapter
-            if raw_response is None:
-                logger.warning("LLM adapter returned None — returning FLAT")
-                parsed = {
-                    "direction": "FLAT",
-                    "rationale": "LLM returned None",
-                    "confidence": "High",
-                }
-            else:
-                parsed = parse_entry_response(raw_response)
-            parsed["input_prompt"] = prompt_input
-            parsed["market_state"] = market_data.get("market_state", "Unknown")
-            parsed["aggression"] = market_data.get("aggression", "0.00")
-
-            # Cache result
-            self._cache[cache_key] = parsed
-            if len(self._cache) > self._CACHE_SIZE:
-                self._cache.popitem(last=False)
-
-            return parsed
+            parsed = self._analyze_cached(prompt_input)
         except Exception as e:
             logger.error(f"Error during AI analysis: {e}")
             return {"direction": "FLAT", "rationale": f"Error: {e}"}
+
+        # Cache key is the prompt only (matches the legacy md5-of-prompt key);
+        # market_state/aggression are baked into the prompt, so re-deriving them
+        # from market_data on a hit is value-identical.
+        parsed["market_state"] = market_data.get("market_state", "Unknown")
+        parsed["aggression"] = market_data.get("aggression", "0.00")
+        return parsed
+
+    def _analyze_uncached(self, prompt_input: str) -> Dict[str, Any]:
+        """Compute the entry decision for a prompt; failures are NOT cached."""
+        raw_response = self.llm_adapter.predict(self._instruction, prompt_input)
+        # Fix-NoneType: Guard against None from LLM adapter
+        if raw_response is None:
+            logger.warning("LLM adapter returned None — returning FLAT")
+            parsed = {
+                "direction": "FLAT",
+                "rationale": "LLM returned None",
+                "confidence": "High",
+            }
+        else:
+            parsed = parse_entry_response(raw_response)
+        parsed["input_prompt"] = prompt_input
+        return parsed
 
     # Prompt building and response parsing extracted to prompt_builder.py
     # Delegated via: build_entry_prompt(), parse_entry_response()
