@@ -13,14 +13,10 @@
     "gen-types": "python scripts/generate_types.py"
   },
   "dependencies": {
-    "expo": "^54.0.33",
-    "immer": "^11.1.7",
     "lightweight-charts": "4.1.1",
     "lucide-react": "^0.555.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "react-native-web": "^0.21.0",
-    "uuid": "^13.0.0",
     "zustand": "^5.0.13"
   },
   "devDependencies": {

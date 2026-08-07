@@ -19,9 +19,6 @@ const createMockInstrument = (symbol?: string, overrides: Partial<InstrumentStat
     equity: 100000,
     leverage: 10,
   },
-  modelWeights: { trend: 0.2, momentum: 0.2, delta: 0.2, orderBook: 0.2, volatility: 0.2 },
-  generation: 0,
-  aiAnalysis: null,
   genAIAnalysis: null,
   amtAnalysis: null,
   auctionAnalysis: null,
@@ -29,11 +26,8 @@ const createMockInstrument = (symbol?: string, overrides: Partial<InstrumentStat
   riskState: null,
   agentDecision: null,
   llmHistory: [],
-  predictions: [],
   overseerAction: '',
   overseerReason: '',
-  stats: null,
-  depth20Active: false,
   lastUpdate: Date.now(),
   ...overrides,
 });
@@ -166,29 +160,5 @@ describe('MarketSidebar', () => {
     render(<MarketSidebar {...props} />);
     expect(screen.queryByText(/Prob/i)).toBeNull();
     expect(screen.queryByText(/60%/)).toBeNull();
-  });
-
-  it('does not show UNSAFE badge even when runtimeSafety.unsafeToTrade is set', () => {
-    // Backend never sends runtimeSafety, so no symbol may ever show UNSAFE.
-    const props = {
-      ...defaultProps,
-      instruments: {
-        'NIFTY 27 FEB 25500 CALL': createMockInstrument('NIFTY 27 FEB 25500 CALL', {
-          agentDecision: {
-            direction: 'LONG' as const,
-            probability: 0.6,
-            regime: 'TRENDING',
-            timing: 'MONITOR',
-            sizeFraction: 0.5,
-            latencyUs: 0,
-            rationale: 'x',
-          },
-          runtimeSafety: { brokerBound: false, feedStale: true, unsafeToTrade: true },
-        }),
-      },
-    };
-
-    render(<MarketSidebar {...props} />);
-    expect(screen.queryByText(/UNSAFE/)).not.toBeInTheDocument();
   });
 });

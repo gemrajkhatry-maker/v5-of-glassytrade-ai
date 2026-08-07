@@ -18,24 +18,19 @@ import DecisionCard from './chart/DecisionCard';
 // Extracted chart components (Phase 3)
 import {
   generateAMTPriceLines,
-  PriceLineConfig,
   AMTLevelsOverlayOptions,
 } from './chart/AMTLevelsOverlay';
 import {
   generateAllExecutionMarkers,
-  ChartMarker,
   ExecutionMarkersOptions,
 } from './chart/ExecutionMarkersManager';
 import {
   transformToCandleData,
   validateCandleData,
-  CandleDataPoint,
 } from './chart/CandleSeriesManager';
 import {
   transformToVolumeData,
   validateVolumeData,
-  getVolumeSeriesConfig,
-  VolumeDataPoint,
 } from './chart/VolumeSeriesManager';
 interface ChartSceneProps {
   data: OHLCData[];

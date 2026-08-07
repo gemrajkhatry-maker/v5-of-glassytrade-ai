@@ -247,4 +247,50 @@ def test_goldm_mcx_mini_configured_like_gold_chain():
     """GOLDM is a separate Dhan chain; same 100 strike step and loose OI as GOLD."""
     assert "GOLDM" in OptionScannerService._SCAN_MCX_UNDERLYINGS
     assert OptionScannerService._STRIKE_INTERVALS["GOLDM"] == 100
+
+
+def _chain_with_calls_puts():
+    """Build a chain with one CE and one PE at the ATM strike."""
+    atm = 23400.0
+    calls = {atm: _make_option(symbol="NIFTY 20 MAR 23400 CALL", strike=atm)}
+    puts = {atm: _make_option(symbol="NIFTY 20 MAR 23400 PUT", strike=atm)}
+    return _make_chain(atm=atm, expiry_iso="2026-03-20", calls=calls, puts=puts)
+
+
+def test_momentum_bias_aligns_option_type():
+    """BULLISH bias should outrank CE over PE at equal liquidity."""
+    scanner = OptionScannerService(MagicMock())
+    broker = MagicMock()
+    broker.get_option_chain.return_value = _chain_with_calls_puts()
+
+    # Force BULLISH: monkeypatch volume on both sides so CE > PE * 1.5
+    from unittest.mock import patch
+    scanner._broker = broker
+    chain = _chain_with_calls_puts()
+    ce = list(chain.calls.values())[0]
+    pe = list(chain.puts.values())[0]
+    ce.volume = 3000
+    pe.volume = 1000
+    broker.get_option_chain.return_value = chain
+
+    results = scanner.scan_top_n(underlyings=["NIFTY"], n=1)
+    assert results, "expected at least one contract"
+    assert results[0].option_type == "CE"
+
+
+def test_preferred_option_type_filters():
+    """preferred_option_type='PE' should return only PE contracts."""
+    scanner = OptionScannerService(MagicMock())
+    broker = MagicMock()
+    chain = _chain_with_calls_puts()
+    for o in list(chain.calls.values()) + list(chain.puts.values()):
+        o.volume = 5000
+    broker.get_option_chain.return_value = chain
+    scanner._broker = broker
+
+    results = scanner.scan_top_n(
+        underlyings=["NIFTY"], n=1, preferred_option_type="PE"
+    )
+    assert results
+    assert all(r.option_type == "PE" for r in results)
     assert OptionScannerService._MIN_OI["GOLDM"] == 0

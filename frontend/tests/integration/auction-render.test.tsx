@@ -29,19 +29,10 @@ class MockWebSocket {
 
 const CONFIG: ChartConfig = {
     symbol: 'SYM',
-    interval: '5',
-    dataSource: 'SERVER',
     bullColor: '#22c55e',
     bearColor: '#ef4444',
-    glassOpacity: 0.3,
-    roughness: 0.5,
-    transmission: 0.5,
-    showGrid: true,
-    autoRotate: false,
-    showPredictions: false,
     showVolumeProfile: false,
     vpMode: 'session',
-    trend: 'sideways',
 };
 
 /**

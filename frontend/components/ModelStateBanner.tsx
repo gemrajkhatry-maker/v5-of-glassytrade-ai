@@ -78,7 +78,7 @@ const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, 
 
     return (
         <div
-            className={`w-full rounded-lg border px-4 py-2.5 shadow-lg backdrop-blur-md ${barClass}`}
+            className={`w-fit max-w-[560px] rounded-lg border px-4 py-2.5 shadow-lg backdrop-blur-md ${barClass}`}
             role="status"
             aria-live="polite"
         >

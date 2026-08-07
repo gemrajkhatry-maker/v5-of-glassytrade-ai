@@ -56,19 +56,10 @@ const mockData: OHLCData[] = [
 
 const defaultConfig: ChartConfig = {
   symbol: 'NIFTY',
-  interval: '5m',
-  dataSource: 'SERVER',
   bullColor: '#22c55e',
   bearColor: '#ef4444',
   showVolumeProfile: true,
   vpMode: 'combined',
-  glassOpacity: 0.5,
-  roughness: 0.5,
-  transmission: 0.5,
-  showGrid: true,
-  autoRotate: false,
-  showPredictions: true,
-  trend: 'sideways',
 };
 
 describe('ChartScene', () => {

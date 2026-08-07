@@ -4,7 +4,6 @@ import {
     InstrumentState,
     ChartConfig,
     OHLCData,
-    OrderBook,
     LLMHistoryEntry,
 } from '../types';
 
@@ -23,7 +22,6 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
         positions: [],
         closedTrades: [],
     },
-    aiAnalysis: null,
     genAIAnalysis: null,
     amtAnalysis: null,
     auctionAnalysis: null,
@@ -33,11 +31,6 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
     llmHistory: [],
     overseerAction: '',
     overseerReason: '',
-    runtimeSafety: {
-        brokerBound: false,
-        feedStale: false,
-        unsafeToTrade: false,
-    },
     lastUpdate: Date.now(),
 });
 
@@ -515,7 +508,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         amtAnalysis: newAmtAnalysis,
                         auctionAnalysis: newAuctionAnalysis,
                         quantDecisionAnalysis: newQuantDecisionAnalysis,
-                        aiAnalysis: inst.aiAnalysis,
                         genAIAnalysis: newGenAIAnalysis,
                         llmHistory: (() => {
                             const newAi = state.genAIAnalysis;
@@ -537,7 +529,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         overseerAction: newOverseerAction,
                         overseerReason: newOverseerReason,
                         orderBook: state.depth ?? inst.orderBook,
-                        runtimeSafety: inst.runtimeSafety,
                         lastUpdate: Date.now(),
                     },
                 };
@@ -565,12 +556,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // 3.  WebSocket connection
     // ----------------------------------------------------------------
     const retryCountRef = useRef(0);
-    
-    // Tick buffer for reconnect (Block 4.2)
-    const tickBufferRef = useRef<OHLCData[]>([]);
-    const lastSequenceRef = useRef<number>(0);
-    const maxBufferSize = 1000;
-    const isConnectedRef = useRef(false);  // Track connection state for buffering
 
     const connect = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -580,7 +565,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         ws.onopen = () => {
             console.log('[TradingSystem] WS connected');
             retryCountRef.current = 0;
-            isConnectedRef.current = true;
             setConnected(true);
             setConnectionStatus('');
             lastPongRef.current = Date.now();
@@ -614,7 +598,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
 
         ws.onclose = (e) => {
             setConnected(false);
-            isConnectedRef.current = false;
             if (heartbeatTimer.current) {
                 clearInterval(heartbeatTimer.current);
                 heartbeatTimer.current = null;

@@ -16,27 +16,6 @@ export interface OrderBook {
   asks: { price: number; quantity: number }[];
 }
 
-export interface ModelWeights {
-  trend: number;
-  momentum: number;
-  delta: number;
-  orderBook: number;
-  volatility: number;
-}
-
-export interface FactorBreakdown extends ModelWeights { }
-
-export interface AIAnalysis {
-  sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-  confidence: number;
-  longTermTrend: 'UP' | 'DOWN' | 'SIDEWAYS';
-  volatilityScore: number;
-  quantScore: number;
-  projectedPrice: number;
-  reasoning: string[];
-  factorBreakdown: FactorBreakdown;
-}
-
 export interface GenAIAnalysis {
   direction: 'LONG' | 'SHORT' | 'FLAT';
   rationale: string;
@@ -64,16 +43,6 @@ export interface RiskState {
   dailyPnl: number;
   driftAlert?: boolean;
   driftMessage?: string;
-}
-
-export interface RuntimeSafetyState {
-  brokerBound: boolean;
-  feedStale: boolean;
-  unsafeToTrade: boolean;
-  feed?: Record<string, unknown>;
-  execution?: Record<string, unknown>;
-  stateDigest?: string;
-  readiness?: Record<string, unknown>;
 }
 
 export interface LLMHistoryEntry {
@@ -112,17 +81,6 @@ export interface Portfolio {
   closedTrades: TradePosition[];
 }
 
-export interface InstrumentStats {
-  totalTrades: number;
-  wins: number;
-  losses: number;
-  winRate: number;
-  netProfit: number;
-  avgProfit: number;
-  largestWin: number;
-  largestLoss: number;
-}
-
 /**
  * Encapsulates the complete state of a single trading instrument.
  */
@@ -131,7 +89,6 @@ export interface InstrumentState {
   data: OHLCData[];
   orderBook: OrderBook | null;
   portfolio: Portfolio;
-  aiAnalysis: AIAnalysis | null;
   genAIAnalysis: GenAIAnalysis | null;
   amtAnalysis: AMTAnalysis | null;
   auctionAnalysis: AuctionAnalysis | null;
@@ -141,13 +98,6 @@ export interface InstrumentState {
   llmHistory: LLMHistoryEntry[];
   overseerAction: string;
   overseerReason: string;
-  depth20Active?: boolean;
-  modelWeights?: ModelWeights;
-  generation?: number;
-  predictions?: OHLCData[];
-  stats?: InstrumentStats | null;
-  stale?: boolean;
-  runtimeSafety?: RuntimeSafetyState;
   ltp?: number;
   oi?: number;
   lastUpdate: number;
@@ -155,29 +105,12 @@ export interface InstrumentState {
 
 export type ChartMode = 'STANDARD';
 
-export interface AppState {
-  config: ChartConfig; // Global visual config
-  instruments: Record<string, InstrumentState>;
-  activeSymbol: string;
-  isScanning: boolean;
-  chartMode: ChartMode;
-}
-
 export interface ChartConfig {
   symbol: string; // Used for display/API context
-  interval: string;
-  dataSource: 'DHAN' | 'SERVER';
   bullColor: string;
   bearColor: string;
-  glassOpacity: number;
-  roughness: number;
-  transmission: number;
-  showGrid: boolean;
-  autoRotate: boolean;
-  showPredictions: boolean;
   showVolumeProfile: boolean;
   vpMode: 'session' | 'leg' | 'combined' | 'off';
-  trend: 'bullish' | 'bearish' | 'sideways' | 'volatile';
 }
 
 export interface AggressivePrint {

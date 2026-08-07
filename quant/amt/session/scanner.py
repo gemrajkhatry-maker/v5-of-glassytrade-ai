@@ -84,13 +84,9 @@ class OptionScannerService:
     def __init__(self, broker, default_underlyings: list[str] | None = None) -> None:
         self._broker = broker
         self._default_underlyings = default_underlyings
-        self._ib_high = 0.0
-        self._ib_low = 0.0
-        self._session_vwap = 0.0
-        self._session_poc = 0.0
 
     @staticmethod
-    def _score_contract(strike, atm, interval, oi, vol, opt, ltp, bid, ask, underlying_upper, bias=None) -> tuple:
+    def _score_contract(strike, atm, interval, oi, vol, opt, ltp, bid, ask, underlying_upper, bias=None, opt_type=None, median_vol=1000) -> tuple:
         """Score an option contract based on ATM proximity, liquidity, and momentum.
         
         Returns (score, atm_dist, delta_val).
@@ -111,12 +107,19 @@ class OptionScannerService:
             score += min(30, (oi / min_oi) * 10)
         else:
             score += 15
-        # Volume momentum scaling (20 pts max)
-        score += min(20, (vol / 1000) * 5)
+        # Volume momentum scaling (20 pts max) — relative to chain median, not absolute
+        if median_vol > 0:
+            score += min(20, (vol / median_vol) * 5)
 
         # Delta sweet spot +10 pts
         if 0.40 <= delta_val <= 0.60:
             score += 10
+
+        # Momentum alignment (15 pts): CE with BULLISH bias, PE with BEARISH bias
+        if bias == "BULLISH":
+            score += 15 if opt_type == "CE" else -5
+        elif bias == "BEARISH":
+            score += 15 if opt_type == "PE" else -5
 
         # Dynamic Spread Penalty (-20 pts max)
         if ltp > 0 and bid > 0 and ask > 0:
@@ -127,7 +130,7 @@ class OptionScannerService:
         return score, atm_dist, delta_val
 
     def _process_contract(self, u, opt_type, strike, atm, interval, option_map,
-                          bullish_only, bias, bias_reason, chain, is_mcx):
+                          bullish_only, bias, bias_reason, chain, is_mcx, median_vol=1000):
         """Process a single option contract — applies filters, scores, returns ScanResult or None."""
         # Bullish-only filter: skip OTM
         if bullish_only:
@@ -164,6 +167,7 @@ class OptionScannerService:
         score, _, delta_val = self._score_contract(
             strike, atm, interval, oi, vol,
             opt, ltp, bid, ask, u.upper(), bias,
+            opt_type=opt_type, median_vol=median_vol,
         )
         logger.debug(
             "SCORED: %s %s %d: ltp=%.2f oi=%d vol=%d score=%.0f sym=%s",
@@ -193,6 +197,7 @@ class OptionScannerService:
         expiry_index: int,
         strikes_around_atm: int,
         bullish_only: bool,
+        preferred_option_type: str | None = None,
     ) -> list[ScanResult]:
         """Fetch chain for one underlying and return scored contracts (CE+PE near ATM)."""
         out: list[ScanResult] = []
@@ -278,7 +283,24 @@ class OptionScannerService:
             "NATURALGAS",
             "COPPER",
         )
-        for opt_type, option_map in [("CE", chain.calls), ("PE", chain.puts)]:
+
+        # ponytail: relative liquidity — normalize vol against chain median so
+        # BANKNIFTY's naturally larger volumes don't outrank FINNIFTY. Compute
+        # median once per chain instead of scoring absolute volume.
+        all_vols = sorted(
+            int(o.volume or 0)
+            for opt_map in (chain.calls, chain.puts)
+            for o in opt_map.values()
+            if (o.volume or 0) > 0
+        )
+        median_vol = all_vols[len(all_vols) // 2] if all_vols else 1000
+
+        option_types = [("CE", chain.calls), ("PE", chain.puts)]
+        if preferred_option_type:
+            pref = preferred_option_type.upper()
+            option_types = [t for t in option_types if t[0] == pref]
+
+        for opt_type, option_map in option_types:
             for strike in strikes:
                 result = self._process_contract(
                     u,
@@ -292,6 +314,7 @@ class OptionScannerService:
                     bias_reason,
                     chain,
                     is_mcx=is_mcx,
+                    median_vol=median_vol,
                 )
                 if result:
                     out.append(result)
@@ -352,6 +375,7 @@ class OptionScannerService:
                         expiry_index,
                         strikes_around_atm,
                         bullish_only,
+                        preferred_option_type,
                     ): u
                     for u in underlyings
                 }
@@ -374,6 +398,7 @@ class OptionScannerService:
                             expiry_index,
                             strikes_around_atm,
                             bullish_only,
+                            preferred_option_type,
                         )
                     )
                 except Exception as e:
@@ -525,13 +550,6 @@ class OptionScannerService:
             return "BEARISH", 3, f"PE volume {pe_vol} > CE volume {ce_vol}"
         else:
             return "NEUTRAL", 0, f"Balanced CE={ce_vol} PE={pe_vol}"
-
-    def update_market_context(self, ib_high, ib_low, vwap, session_poc):
-        """Update context for scoring."""
-        self._ib_high = ib_high
-        self._ib_low = ib_low
-        self._session_vwap = vwap
-        self._session_poc = session_poc
 
 
 class ContractSwitchGuard:

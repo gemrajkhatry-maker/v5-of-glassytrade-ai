@@ -1,19 +1,17 @@
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
 import ChartScene from './components/ChartScene';
 import { AIAnalysisPanel } from './components/AIAnalysisPanel';
 import MarketSidebar from './components/MarketSidebar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { DEFAULT_CONFIG } from './constants';
 import { ChartConfig } from './types';
-import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, BookOpen, Eye } from 'lucide-react';
+import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, BookOpen } from 'lucide-react';
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
 import JournalPage from './components/JournalPage';
 import ModelStateBanner from './components/ModelStateBanner';
 import { useKeyboardNavigation, getDefaultTradingHotkeys } from './hooks/useKeyboardNavigation';
-import { useUIStore, selectChartMode, selectSidebarOpen, selectRightSidebarOpen, selectVpMode } from './stores/ui';
-
-const simpleId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
+import { useUIStore, selectChartMode, selectSidebarOpen, selectRightSidebarOpen } from './stores/ui';
 
 function App() {
     // 1. UI State - Using Zustand for persistence
@@ -28,46 +26,7 @@ function App() {
     const setRightSidebarOpen = useUIStore(s => s.setRightSidebarOpen);
     const currentPage = useUIStore(s => s.currentPage);
     const setCurrentPage = useUIStore(s => s.setCurrentPage);
-    const vpMode = useUIStore(selectVpMode) as 'session' | 'leg' | 'combined' | 'off';
-    const setVpMode = useUIStore(s => s.setVpMode);
     const currentSymbolIndex = useRef(0);
-    // Draggable overseer box
-    const [overseerPos, setOverseerPos] = useState({ x: -1, y: 16 }); // -1 = auto right
-    const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
-    const overseerBoxRef = useRef<HTMLDivElement>(null);
-    // Track active drag listeners for cleanup on unmount
-    const dragCleanupRef = useRef<(() => void) | null>(null);
-    const onOverseerMouseDown = useCallback((e: React.MouseEvent) => {
-        e.preventDefault();
-        const box = overseerBoxRef.current;
-        if (!box) return;
-        const rect = box.getBoundingClientRect();
-        const parentRect = box.parentElement?.getBoundingClientRect();
-        if (!parentRect) return;
-        const curX = rect.left - parentRect.left;
-        const curY = rect.top - parentRect.top;
-        dragRef.current = { startX: e.clientX, startY: e.clientY, origX: curX, origY: curY };
-        const onMove = (ev: MouseEvent) => {
-            if (!dragRef.current) return;
-            setOverseerPos({
-                x: dragRef.current.origX + (ev.clientX - dragRef.current.startX),
-                y: dragRef.current.origY + (ev.clientY - dragRef.current.startY),
-            });
-        };
-        const cleanup = () => {
-            dragRef.current = null;
-            window.removeEventListener('mousemove', onMove);
-            window.removeEventListener('mouseup', cleanup);
-            dragCleanupRef.current = null;
-        };
-        dragCleanupRef.current = cleanup;
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('mouseup', cleanup);
-    }, []);
-    // Clean up drag listeners on unmount to prevent memory leaks
-    useEffect(() => {
-        return () => { dragCleanupRef.current?.(); };
-    }, []);
 
     // 2. Server-driven trading system (all logic on backend)
     const {
@@ -101,6 +60,10 @@ function App() {
         setShowControls(false);
     }, [setShowControls]);
 
+    const handleVpModeChange = useCallback((mode: 'session' | 'leg' | 'combined' | 'off') => {
+        setConfig(s => ({ ...s, vpMode: mode, showVolumeProfile: mode !== 'off' }));
+    }, []);
+
     const handleSaveWorkspace = useCallback(() => {
         // Workspace auto-saves via Zustand persist middleware
         console.log('[Keyboard] Workspace saved to localStorage');
@@ -113,7 +76,7 @@ function App() {
     // Setup keyboard hotkeys
     useKeyboardNavigation(getDefaultTradingHotkeys({
         onChartModeChange: setChartMode,
-        onVpModeChange: setVpMode,
+        onVpModeChange: handleVpModeChange,
         onToggleSidebar: () => setSidebarOpen(!sidebarOpen),
         onToggleRightSidebar: () => setRightSidebarOpen(!rightSidebarOpen),
         onToggleControls: () => setShowControls(!showControls),
@@ -208,7 +171,7 @@ function App() {
                 {/* Overlay UI Layer */}
                 <div className="absolute inset-0 z-10 flex flex-col pointer-events-none">
 
-                    {/* Primary model state — full width of chart area */}
+                    {/* Primary model state — compact, fits content */}
                     <div className="shrink-0 px-3 pt-3 pointer-events-auto">
                         <ModelStateBanner
                             genAI={activeInstrument.genAIAnalysis}
@@ -260,7 +223,7 @@ function App() {
                                 ] as const).map(({ key, label }) => (
                                     <button
                                         key={key}
-                                        onClick={() => setConfig(s => ({ ...s, vpMode: key, showVolumeProfile: key !== 'off' }))}
+                                        onClick={() => handleVpModeChange(key)}
                                         className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${config.vpMode === key
                                             ? 'bg-glassy-neutral-cool/20 text-glassy-neutral-cool border border-glassy-neutral-cool/30'
                                             : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'

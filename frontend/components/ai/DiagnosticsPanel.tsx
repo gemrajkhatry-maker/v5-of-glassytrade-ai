@@ -211,8 +211,7 @@ const DiagnosticsPanel = React.memo<DiagnosticsPanelProps>(({ amtResult, current
                 <div className="flex flex-col gap-2 mt-2">
                     {(() => {
                         let passedCount = 0;
-                        const ts = 0.05;
-                        const distThreshold = 5 * ts;
+                        const distThreshold = 0.25;
                         if (amtResult?.marketState !== 'DEAD') passedCount++;
                         if (currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold) passedCount++;
                         if (agentDecision?.timing === 'ENTER_NOW') passedCount++;

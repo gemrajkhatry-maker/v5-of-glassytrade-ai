@@ -3,6 +3,7 @@ import React, { useState, useCallback, useMemo } from 'react';
 import GlassPanel from './GlassPanel';
 import { InstrumentState } from '../types';
 import { Search, BarChart3, Radio, Filter } from 'lucide-react';
+import { shortSymbol } from '../utils/symbol';
 
 interface MarketSidebarProps {
     instruments: Record<string, InstrumentState>;
@@ -16,21 +17,6 @@ function timingRank(timing: string | undefined): number {
     if (timing === 'MONITOR' || timing === 'WAIT') return 2;
     if (timing === 'SKIP') return 1;
     return 0;
-}
-
-/** Extract a short display name from Dhan symbol like "NIFTY 27 FEB 25500 CALL" -> "NIFTY 25500 CE" */
-function shortSymbol(sym: string): { name: string; tag: string } {
-    const parts = sym.split(' ');
-    // Options: "NIFTY 27 FEB 25500 CALL" or "CRUDEOIL 17 MAR 5900 PUT"
-    if (parts.length >= 4) {
-        const underlying = parts[0];
-        const strike = parts[parts.length - 2];
-        const optType = parts[parts.length - 1];
-        const tag = optType === 'CALL' ? 'CE' : optType === 'PUT' ? 'PE' : optType;
-        return { name: `${underlying} ${strike}`, tag };
-    }
-    // Fallback
-    return { name: sym.replace('USDT', ''), tag: '' };
 }
 
 /** Memoized symbol card to avoid re-rendering all cards when only one changes. */

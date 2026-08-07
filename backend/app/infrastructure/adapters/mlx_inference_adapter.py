@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -53,6 +54,9 @@ class MLXInferenceAdapter(ILLMInference):
         self._model_path = model_path
         self._temperature = temperature
         self._max_new_tokens = max_new_tokens
+        self._executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="mlx-engine"
+        )
         self._start_background_loading()
         self._initialized = True
 
@@ -96,13 +100,28 @@ class MLXInferenceAdapter(ILLMInference):
             self._is_loading = True
             logger.info("Loading MLX model synchronously (main thread)...")
             try:
-                self._load_model()
+                self._load_model_on_engine_thread()
             except Exception as e:
                 logger.error("Failed to load MLX model: %s", e)
                 self._load_error = str(e)
                 self._is_loading = False
                 # If cloud fallback configured, we'll use that instead
                 return
+
+    def _load_model_on_engine_thread(self):
+        """Load the model on the dedicated engine thread.
+
+        MLX binds arrays to the stream of the thread that created them. Loading
+        and generating on the same single engine thread avoids
+        "There is no Stream(cpu, 0) in current thread" errors when inference
+        runs on handler executor threads.
+        """
+        self._is_loading = True
+        try:
+            future = self._executor.submit(self._load_model)
+            future.result()
+        finally:
+            self._is_loading = False
 
     def _load_model(self):
         """Load the MLX model and tokenizer from the configured path."""
@@ -564,7 +583,7 @@ class MLXInferenceAdapter(ILLMInference):
                 logger.info("MLX_DEFER_LOADING: Loading model on first inference request...")
                 self._is_loading = True
                 try:
-                    self._load_model()
+                    self._load_model_on_engine_thread()
                     logger.info("✅ MLX model loaded successfully on first request!")
                 except Exception as e:
                     logger.error("Failed to load MLX model on first request: %s", e)
@@ -596,71 +615,82 @@ class MLXInferenceAdapter(ILLMInference):
         else:
             from mlx_lm import generate
 
-        # ChatML format with response prefill to keep output aligned with the
-        # canonical runtime contract. Legacy structured parsing still exists as
-        # a fallback, but JSON is the active paper-trading format.
-        clean_input = input_text.strip()
-        # Detect if this is an Overseer prompt or an Entry prompt
-        is_overseer = "HOLD" in instruction and "FULL_EXIT" in instruction
+        # MLX binds arrays to the stream of the thread that created them. All
+        # model-touching work must run on the dedicated engine thread so the
+        # model loaded at startup and the generate() calls here share a thread.
+        def _generate_on_engine():
+            # ChatML format with response prefill to keep output aligned with the
+            # canonical runtime contract. Legacy structured parsing still exists as
+            # a fallback, but JSON is the active paper-trading format.
+            clean_input = input_text.strip()
+            # Detect if this is an Overseer prompt or an Entry prompt
+            is_overseer = "HOLD" in instruction and "FULL_EXIT" in instruction
 
-        sys_msg = instruction
-        if not is_overseer:
-            sys_msg = f"{instruction}\n{ENTRY_JSON_RUNTIME_REMINDER}"
+            sys_msg = instruction
+            if not is_overseer:
+                sys_msg = f"{instruction}\n{ENTRY_JSON_RUNTIME_REMINDER}"
 
-        if prefill is None:
-            prefill = "{"
+            pf = prefill or "{"
 
-        # Gemma and some other models do not support the 'system' role in their
-        # default chat templates. We use a try-except block to fall back to
-        # merging the system message into the user message if needed.
-        try:
-            messages = [
-                {"role": "system", "content": sys_msg},
-                {"role": "user", "content": clean_input},
-            ]
-            prompt = self.processor.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-        except Exception as e:
-            err_str = str(e).lower()
-            if "system" in err_str or "role" in err_str or "support" in err_str:
-                logger.info("MLX: System role not supported by template, merging into user message.")
+            # Gemma and some other models do not support the 'system' role in their
+            # default chat templates. We use a try-except block to fall back to
+            # merging the system message into the user message if needed.
+            try:
                 messages = [
-                    {"role": "user", "content": f"{sys_msg}\n\n{clean_input}"},
+                    {"role": "system", "content": sys_msg},
+                    {"role": "user", "content": clean_input},
                 ]
                 prompt = self.processor.apply_chat_template(
                     messages, tokenize=False, add_generation_prompt=True
                 )
-            else:
-                raise
+            except Exception as e:
+                err_str = str(e).lower()
+                if "system" in err_str or "role" in err_str or "support" in err_str:
+                    logger.info("MLX: System role not supported by template, merging into user message.")
+                    messages = [
+                        {"role": "user", "content": f"{sys_msg}\n\n{clean_input}"},
+                    ]
+                    prompt = self.processor.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True
+                    )
+                else:
+                    raise
 
-        # Inject prefill (e.g., forcing JSON start)
-        prompt += prefill
+            # Inject prefill (e.g., forcing JSON start)
+            prompt += pf
 
-        max_t = max_tokens if max_tokens is not None else self._max_new_tokens
+            max_t = max_tokens if max_tokens is not None else self._max_new_tokens
 
-        target = (
-            "OVERSEER"
-            if is_overseer
-            else ("REASONING" if prefill and "think" in prefill else "ENTRY")
-        )
-
-        # Metal GPU crashes on concurrent generate() calls — serialize with lock
-        import time as _time
-        from mlx_lm.sample_utils import make_sampler
-
-        t0 = _time.time()
-        with MLX_GPU_LOCK:
-            logger.info("[%s] Starting generation (max_tokens=%d, temp=%s)...", target, max_t, self._temperature)
-            # Pass sampling parameters for proper temperature control
-            # Trading decisions need low temperature (0.3) for deterministic output
-            # mlx_lm v0.31+ requires sampler object instead of direct temperature/top_p params
-            sampler = make_sampler(temp=self._temperature, top_p=0.95)
-            response = self._generate_early_stop(
-                prompt, max_t, sampler, target
+            target = (
+                "OVERSEER"
+                if is_overseer
+                else ("REASONING" if pf and "think" in pf else "ENTRY")
             )
-            duration = _time.time() - t0
-            logger.info("[%s] Generation complete in %.2fs.", target, duration)
+
+            # Metal GPU crashes on concurrent generate() calls — serialize with lock
+            import time as _time
+            from mlx_lm.sample_utils import make_sampler
+
+            t0 = _time.time()
+            with MLX_GPU_LOCK:
+                logger.info("[%s] Starting generation (max_tokens=%d, temp=%s)...", target, max_t, self._temperature)
+                # Pass sampling parameters for proper temperature control
+                # Trading decisions need low temperature (0.3) for deterministic output
+                # mlx_lm v0.31+ requires sampler object instead of direct temperature/top_p params
+                sampler = make_sampler(temp=self._temperature, top_p=0.95)
+                response = self._generate_early_stop(
+                    prompt, max_t, sampler, target
+                )
+                duration = _time.time() - t0
+                logger.info("[%s] Generation complete in %.2fs.", target, duration)
+
+            return pf, response, is_overseer
+
+        if threading.current_thread().name.startswith("mlx-engine"):
+            prefill, response, is_overseer = _generate_on_engine()
+        else:
+            future = self._executor.submit(_generate_on_engine)
+            prefill, response, is_overseer = future.result()
 
         rendered = prefill + (response or "").strip()
         if is_overseer:

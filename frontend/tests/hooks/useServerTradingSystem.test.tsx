@@ -27,19 +27,10 @@ class MockWebSocket {
 
 const DEFAULT_CONFIG: ChartConfig = {
   symbol: 'NSE:NIFTY',
-  interval: '5',
-  dataSource: 'SERVER',
   bullColor: '#22c55e',
   bearColor: '#ef4444',
-  glassOpacity: 0.3,
-  roughness: 0.5,
-  transmission: 0.5,
-  showGrid: true,
-  autoRotate: false,
-  showPredictions: false,
   showVolumeProfile: false,
   vpMode: 'session',
-  trend: 'sideways',
 };
 
 describe('useServerTradingSystem', () => {
@@ -178,9 +169,7 @@ describe('phantom field removal (backend never sends these)', () => {
 
     const inst = result.current.instruments['NIFTY'];
     expect(inst).toBeDefined();
-    expect(inst.runtimeSafety?.unsafeToTrade).toBe(false);
-    expect(inst.runtimeSafety?.feedStale).toBe(false);
-    expect(inst.stale).toBeFalsy();
+    expect(inst).not.toHaveProperty('stale');
   });
 
   it('does not store phantom depth20Active state', async () => {
@@ -193,7 +182,7 @@ describe('phantom field removal (backend never sends these)', () => {
     });
 
     const inst = result.current.instruments['NIFTY'];
-    expect(inst.depth20Active).toBeUndefined();
+    expect(inst).not.toHaveProperty('depth20Active');
   });
 
   it('ignores backend stale-notification messages', async () => {
@@ -202,7 +191,7 @@ describe('phantom field removal (backend never sends these)', () => {
     await pushMessage(ws, { _type: 'stale', _symbol: 'NIFTY' });
 
     const inst = result.current.instruments['NIFTY'];
-    expect(inst.stale).toBeFalsy();
+    expect(inst).not.toHaveProperty('stale');
   });
 });
 

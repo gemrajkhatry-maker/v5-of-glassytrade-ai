@@ -1,0 +1,12 @@
+=== FINAL REVIEW — base 74f1f6a (pre-Phase-3) .. HEAD ===
+43e6dd5 chore(backend): update scripts/config for brain migration
+ccf7903 refactor(backend): delete legacy brain + shims
+4e12bfa refactor(backend): relocate ops modules to app.domain.ops
+6765b10 refactor(backend): swap straggler imports to quant.*
+=== STAT ===
+ tests/quant/inference/test_valentini_rl.py         |  12 +-
+ tests/quant/probability/test_probability_parity.py |  77 +--
+ tests/system/test_quant_execution_e2e.py           |   6 +-
+ tests/system/test_quant_system_e2e.py              |   2 +-
+ tests/test_fabio_alignment.py                      |   2 +-
+ 344 files changed, 770 insertions(+), 3396 deletions(-)

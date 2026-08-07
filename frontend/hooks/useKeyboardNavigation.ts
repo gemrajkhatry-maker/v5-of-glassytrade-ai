@@ -41,10 +41,6 @@ export function useKeyboardNavigation(hotkeys: HotkeyConfig[]) {
             let baseKey = e.key;
             if (baseKey === ' ') baseKey = 'Space';
             if (baseKey === 'Escape') baseKey = 'Esc';
-            if (baseKey === 'ArrowUp') baseKey = 'ArrowUp';
-            if (baseKey === 'ArrowDown') baseKey = 'ArrowDown';
-            if (baseKey === 'ArrowLeft') baseKey = 'ArrowLeft';
-            if (baseKey === 'ArrowRight') baseKey = 'ArrowRight';
             
             // Ignore modifier-only presses
             if (['Control', 'Alt', 'Shift', 'Meta'].includes(baseKey)) return;
@@ -88,17 +84,6 @@ export function useKeyboardNavigation(hotkeys: HotkeyConfig[]) {
             window.removeEventListener('keydown', handleKeyDown);
         };
     }, []);
-}
-
-/**
- * Generate hotkey hints for UI display
- */
-export function getHotkeyHints(hotkeys: HotkeyConfig[]): Record<string, string> {
-    const hints: Record<string, string> = {};
-    hotkeys.forEach(h => {
-        hints[h.key] = h.description;
-    });
-    return hints;
 }
 
 /**

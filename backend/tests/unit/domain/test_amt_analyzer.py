@@ -736,3 +736,24 @@ class TestVWAPSigmaBounds:
             assert abs(result.vwap_deviation_sigmas) <= 4.0, (
                 f"VWAP sigma {result.vwap_deviation_sigmas} should be bounded with low vol data"
             )
+
+
+class TestVolumeProfileZeroRange:
+    """Flat/zero price-range candles must not divide by zero (buckets stays 0)."""
+
+    def test_flat_candles_auto_bucket_no_zero_division(self):
+        from quant.amt.profile.volume_profile import IncrementalVolumeProfile
+
+        profile = IncrementalVolumeProfile(buckets=0, tick_size=0.05)
+        candle = OHLC(
+            time="2026-01-01T09:00:00Z",
+            open=100.0,
+            high=100.0,
+            low=100.0,
+            close=100.0,
+            volume=1500,
+            delta=0,
+        )
+        profile.update(candle)
+        assert profile._buckets == 1
+        assert profile._volumes[0][0] == 1500.0

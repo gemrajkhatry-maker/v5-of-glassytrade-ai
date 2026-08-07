@@ -23,14 +23,6 @@ export interface CandleDataPoint {
   volume?: number;
 }
 
-export interface CandleSeriesConfig {
-  bullColor: string;
-  bearColor: string;
-  borderVisible?: boolean;
-  wickUpColor?: string;
-  wickDownColor?: string;
-}
-
 export interface CandleValidationResult {
   isValid: boolean;
   errors: string[];
@@ -75,34 +67,6 @@ export function transformToCandleData(data: OHLCData[]): CandleDataPoint[] {
     low: d.low,
     close: d.close,
     volume: d.volume,
-  }));
-}
-
-/**
- * Transform OHLCData to volume histogram data
- * 
- * @param data - Raw OHLCV data
- * @param bullColor - Color for bullish candles
- * @param bearColor - Color for bearish candles
- * @returns Array of volume data points with colors
- */
-export function transformToVolumeData(
-  data: OHLCData[],
-  bullColor: string = '#00c896',
-  bearColor: string = '#ff4757'
-): Array<{ time: number; value: number; color: string }> {
-  if (!data || data.length === 0) {
-    return [];
-  }
-
-  const sortedData = [...data].sort((a, b) => 
-    new Date(a.time).getTime() - new Date(b.time).getTime()
-  );
-
-  return sortedData.map(d => ({
-    time: toISTTimestamp(d.time as string),
-    value: d.volume,
-    color: d.close >= d.open ? bullColor : bearColor,
   }));
 }
 
@@ -209,115 +173,5 @@ export function validateCandleData(candles: CandleDataPoint[]): CandleValidation
     isValid: errors.length === 0,
     errors,
     warnings,
-  };
-}
-
-/**
- * Get candle statistics
- * 
- * @param candles - Array of candle data points
- * @returns Statistical summary
- */
-export function getCandleStats(candles: CandleDataPoint[]) {
-  if (!candles || candles.length === 0) {
-    return null;
-  }
-
-  const prices = candles.flatMap(c => [c.open, c.high, c.low, c.close]);
-  const volumes = candles.map(c => c.volume || 0);
-
-  return {
-    count: candles.length,
-    priceRange: {
-      min: Math.min(...prices),
-      max: Math.max(...prices),
-    },
-    volumeStats: {
-      total: volumes.reduce((a, b) => a + b, 0),
-      average: volumes.reduce((a, b) => a + b, 0) / volumes.length,
-      max: Math.max(...volumes),
-    },
-    bullishCount: candles.filter(c => c.close >= c.open).length,
-    bearishCount: candles.filter(c => c.close < c.open).length,
-  };
-}
-
-/**
- * Filter candles by time range
- * 
- * @param candles - Array of candle data points
- * @param startTime - Start timestamp
- * @param endTime - End timestamp
- * @returns Filtered candles within time range
- */
-export function filterCandlesByTimeRange(
-  candles: CandleDataPoint[],
-  startTime: number,
-  endTime: number
-): CandleDataPoint[] {
-  return candles.filter(c => c.time >= startTime && c.time <= endTime);
-}
-
-/**
- * Get last N candles
- * 
- * @param candles - Array of candle data points
- * @param count - Number of candles to retrieve
- * @returns Last N candles
- */
-export function getLastNCandles(candles: CandleDataPoint[], count: number): CandleDataPoint[] {
-  if (!candles || candles.length === 0) {
-    return [];
-  }
-  return candles.slice(-Math.min(count, candles.length));
-}
-
-/**
- * Calculate candle body size
- * 
- * @param candle - Candle data point
- * @returns Absolute body size (|close - open|)
- */
-export function getCandleBodySize(candle: CandleDataPoint): number {
-  return Math.abs(candle.close - candle.open);
-}
-
-/**
- * Calculate candle range (high - low)
- * 
- * @param candle - Candle data point
- * @returns Candle range
- */
-export function getCandleRange(candle: CandleDataPoint): number {
-  return candle.high - candle.low;
-}
-
-/**
- * Determine if candle is bullish
- * 
- * @param candle - Candle data point
- * @returns true if close >= open
- */
-export function isBullishCandle(candle: CandleDataPoint): boolean {
-  return candle.close >= candle.open;
-}
-
-/**
- * Get default candle series configuration
- * 
- * @param bullColor - Bull candle color
- * @param bearColor - Bear candle color
- * @returns Default configuration
- */
-export function getDefaultCandleConfig(
-  bullColor: string = '#00c896',
-  bearColor: string = '#ff4757'
-): CandleSeriesConfig {
-  return {
-    bullColor,
-    bearColor,
-    borderVisible: false,
-    wickUpColor: bullColor,
-    wickDownColor: bearColor,
   };
 }

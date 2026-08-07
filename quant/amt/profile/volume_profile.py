@@ -364,6 +364,8 @@ class IncrementalVolumeProfile:
             self._buckets = compute_optimal_buckets(price_range, tick_size)
 
         if price_range == 0:
+            if self._buckets <= 0:
+                self._buckets = 1
             total_vol = sum(float(d.volume) for d in self._candles)
             vol_per = total_vol / self._buckets
             self._volumes = [

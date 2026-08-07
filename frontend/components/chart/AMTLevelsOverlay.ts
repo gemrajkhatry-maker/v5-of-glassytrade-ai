@@ -32,17 +32,6 @@ export interface AMTLevelsOverlayOptions {
 }
 
 /**
- * Line style constants (TradingView Lightweight Charts API)
- */
-export const LineStyle = {
-  Solid: 0,
-  Dashed: 1,
-  Dotted: 2,
-  LargeDashed: 3,
-  SparseDotted: 4,
-} as const;
-
-/**
  * Calculate VWAP slope and determine color based on recent trend
  * 
  * @param data - Recent OHLCV data with VWAP values

@@ -68,9 +68,6 @@ describe('MarketSidebar to ChartScene Integration', () => {
       equity: 100000,
       leverage: 10,
     },
-    modelWeights: { trend: 0.2, momentum: 0.2, delta: 0.2, orderBook: 0.2, volatility: 0.2 },
-    generation: 0,
-    aiAnalysis: null,
     genAIAnalysis: null,
     amtAnalysis: null,
     auctionAnalysis: null,
@@ -78,11 +75,8 @@ describe('MarketSidebar to ChartScene Integration', () => {
     riskState: null,
     agentDecision: null,
     llmHistory: [],
-    predictions: [],
     overseerAction: '',
     overseerReason: '',
-    stats: null,
-    depth20Active: false,
     lastUpdate: Date.now(),
   });
 
@@ -98,19 +92,10 @@ describe('MarketSidebar to ChartScene Integration', () => {
 
   const defaultConfig: ChartConfig = {
     symbol: 'NIFTY',
-    interval: '5m',
-    dataSource: 'SERVER',
     bullColor: '#22c55e',
     bearColor: '#ef4444',
     showVolumeProfile: true,
     vpMode: 'combined',
-    glassOpacity: 0.5,
-    roughness: 0.5,
-    transmission: 0.5,
-    showGrid: true,
-    autoRotate: false,
-    showPredictions: true,
-    trend: 'sideways',
   };
 
   // Shared state between tests
