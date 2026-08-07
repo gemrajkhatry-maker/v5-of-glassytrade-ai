@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Request
 from app.core.metrics import metrics
 from app.core.logging import get_correlation_id
-from app.core.circuit_breaker import get_amt_circuit, get_session_circuit
+from shared.resilience import get_amt_circuit, get_session_circuit
 from app.core.startup_telemetry import RUNBOOK, crash_summary, startup_snapshot, unresolved_count
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
