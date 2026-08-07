@@ -61,6 +61,32 @@ class RiskUpdated(Event):
     risk: "RiskState"
 
 
+@dataclass(frozen=True)
+class DepthUpdated(Event):
+    depth: dict | None = None
+
+
+@dataclass(frozen=True)
+class AmtUpdated(Event):
+    amt: dict | None = None
+
+
+@dataclass(frozen=True)
+class LLMAnalysisProduced(Event):
+    analysis: dict | None = None
+
+
+@dataclass(frozen=True)
+class OverseerProduced(Event):
+    action: str = ""
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class AgentDecisionProduced(Event):
+    decision: dict | None = None
+
+
 Handler = Callable[[Event], None]
 E = TypeVar("E", bound=Event)
 

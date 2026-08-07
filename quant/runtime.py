@@ -10,6 +10,10 @@ Only imports ``quant.*`` and stdlib — zero backend/ imports.
 
 from __future__ import annotations
 
+import json
+import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 
 from quant.aggregator import BarAggregator
@@ -18,11 +22,15 @@ from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
 from quant.decision.signal_builder import clamp_quantity
 from quant.events import (
+    AgentDecisionProduced,
+    AmtUpdated,
     AuctionUpdated,
     BarClosed,
     DecisionProduced,
     Event,
     EventBus,
+    LLMAnalysisProduced,
+    OverseerProduced,
     PositionClosed,
     PositionOpened,
     RiskUpdated,
@@ -33,6 +41,8 @@ from quant.execution.oms import PaperOMS
 from quant.execution.risk import SessionRisk
 from quant.persistence import Journal
 from quant.state import StateProjector
+
+logger = logging.getLogger(__name__)
 
 
 class QuantEngine:
@@ -45,6 +55,8 @@ class QuantEngine:
         min_rr: float = 1.5,
         tick_size: float = 0.05,
         time_stop_bars: int = 60,
+        inference=None,
+        llm_history=None,
     ) -> None:
         self._gateway = gateway
         self.symbol = symbol
@@ -63,6 +75,12 @@ class QuantEngine:
         self._bar_index = 0
         self._entry_bar_index = 0
         self._subscribed = False
+        self._inference = inference
+        self._llm_history = llm_history
+        self._llm_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="llm-fold"
+        )
+        self._emit_lock = threading.Lock()
 
     def run(self, max_steps: int | None = None) -> list[Event]:
         """Consume ticks from the gateway, drive the full pipeline, and return
@@ -96,6 +114,11 @@ class QuantEngine:
         self._bar_index += 1
         self._emit(BarClosed(symbol=self.symbol, time=bar.time, bar=bar))
         self._emit(AuctionUpdated(symbol=self.symbol, time=bar.time, auction=state))
+        self._emit(AmtUpdated(symbol=self.symbol, time=bar.time,
+                              amt=self._amt_from_state(state)))
+
+        if self._inference is not None and self._inference.is_ready():
+            self._llm_executor.submit(self._schedule_llm, state, bar)
 
         if self._position is None:
             self._decide(state, bar)
@@ -141,9 +164,124 @@ class QuantEngine:
 
     def _emit(self, event: Event) -> None:
         """Publish to the bus, append to the trace, fold into the projector,
-        and persist a JSON-serializable record to the journal."""
-        self._bus.publish(event)
-        self._trace.append(event)
-        self._projector.on_event(event)
-        if self._journal is not None:
-            self._journal.append({"type": event.__class__.__name__, **asdict(event)})
+        and persist a JSON-serializable record to the journal.
+
+        Guarded by a lock so the LLM fold-back thread (``_schedule_llm``) can
+        post results without racing the engine thread's own emits.
+        """
+        with self._emit_lock:
+            self._bus.publish(event)
+            self._trace.append(event)
+            self._projector.on_event(event)
+            if self._journal is not None:
+                self._journal.append(
+                    {"type": event.__class__.__name__, **asdict(event)}
+                )
+
+    @staticmethod
+    def _amt_from_state(state) -> dict:
+        """Small ``amt`` DTO derived from the auction state so the field is
+        always populated even without an LLM."""
+        vp = state.volume_profile
+        of = state.order_flow
+        return {
+            "poc": vp.poc,
+            "vah": vp.vah,
+            "val": vp.val,
+            "delta": of.delta,
+        }
+
+    def _schedule_llm(self, state, bar) -> None:
+        """Run on the llm-fold thread: predict, parse JSON, fold events back.
+
+        The emitted LLM/Overseer/AgentDecision events are posted through the
+        lock-guarded ``_emit``, so the deterministic bar/decision trace on the
+        engine thread is untouched and async results only append afterwards.
+        """
+        try:
+            raw = self._inference.predict(
+                instruction=self._llm_instruction(state, bar),
+                input_text=self._llm_input(state, bar),
+                temperature=0.3,
+                max_tokens=256,
+                prefill="{",
+            )
+            analysis = json.loads(raw)
+            if not isinstance(analysis, dict):
+                analysis = {"raw_output": raw}
+        except Exception as exc:
+            logger.warning("LLM fold-back failed for %s: %s", self.symbol, exc)
+            return
+
+        self._emit(LLMAnalysisProduced(symbol=self.symbol, time=bar.time,
+                                       analysis=analysis))
+        self._emit(OverseerProduced(
+            symbol=self.symbol,
+            time=bar.time,
+            action=str(analysis.get("action", "")),
+            reason=str(analysis.get("reason", analysis.get("rationale", ""))),
+        ))
+        self._emit(AgentDecisionProduced(symbol=self.symbol, time=bar.time,
+                                         decision=self._agent_decision(analysis)))
+
+        if self._llm_history is not None:
+            self._llm_history.append(analysis)
+            if len(self._llm_history) >= 50:
+                del self._llm_history[0]
+
+    @staticmethod
+    def _agent_decision(analysis: dict) -> dict:
+        return {
+            "direction": str(analysis.get("direction", "FLAT")),
+            "probability": analysis.get(
+                "probability", analysis.get("confidence", "Medium")
+            ),
+            "regime": str(analysis.get("regime", analysis.get("market_state", ""))),
+            "timing": str(analysis.get("timing", "")),
+            "sizeFraction": analysis.get(
+                "sizeFraction", analysis.get("size_fraction")
+            ),
+            "latencyUs": analysis.get("latencyUs"),
+            "rationale": str(analysis.get("rationale", "")),
+        }
+
+    def _llm_instruction(self, state, bar) -> str:
+        """System instruction — the canonical entry prompt when the pure builder
+        is importable, else a minimal inline instruction."""
+        try:
+            from quant.inference.prompt_builder import build_entry_prompt
+
+            vp = state.volume_profile
+            vw = state.vwap
+            of = state.order_flow
+            return build_entry_prompt({
+                "symbol": self.symbol,
+                "time": state.time,
+                "ltp": state.close,
+                "poc": vp.poc,
+                "vah": vp.vah,
+                "val": vp.val,
+                "market_state": state.triple_a_signal or state.triple_a_phase,
+                "cvd": of.cvd,
+                "cvd_slope": of.cvd_slope,
+                "cvd_divergence": of.cvd_divergence,
+                "delta": of.delta,
+                "vwap": vw.value,
+                "vwap_upper_2": vw.upper_2,
+                "vwap_lower_2": vw.lower_2,
+            })
+        except Exception as exc:
+            logger.warning("prompt_builder unavailable, using inline prompt: %s", exc)
+            return (
+                "You are an orderflow analyst. Analyze the auction and return a "
+                "JSON object with keys direction, confidence, rationale."
+            )
+
+    @staticmethod
+    def _llm_input(state, bar) -> str:
+        vp = state.volume_profile
+        return (
+            f"Bar {bar.time}: O={bar.open} H={bar.high} L={bar.low} "
+            f"C={bar.close} V={bar.volume} delta={bar.delta}. "
+            f"Auction: POC={vp.poc} VAH={vp.vah} VAL={vp.val}."
+        )

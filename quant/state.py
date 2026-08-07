@@ -13,10 +13,15 @@ from dataclasses import dataclass
 from quant.auction_state import AuctionState
 from quant.decision.decision_service import QuantDecision
 from quant.events import (
+    AgentDecisionProduced,
+    AmtUpdated,
     AuctionUpdated,
     BarClosed,
     DecisionProduced,
+    DepthUpdated,
     Event,
+    LLMAnalysisProduced,
+    OverseerProduced,
     PositionClosed,
     PositionOpened,
     RiskUpdated,
@@ -200,6 +205,17 @@ class StateProjector:
             fill = event.fill
             self._remove_open(fill.position.open_time, s["portfolio"])
             s["portfolio"]["closedTrades"].append(_position_to_view(fill.position, fill))
+        elif isinstance(event, DepthUpdated):
+            s["depth"] = event.depth
+        elif isinstance(event, AmtUpdated):
+            s["amt"] = event.amt
+        elif isinstance(event, LLMAnalysisProduced):
+            s["gen_ai"] = event.analysis
+        elif isinstance(event, OverseerProduced):
+            s["overseer_action"] = event.action
+            s["overseer_reason"] = event.reason
+        elif isinstance(event, AgentDecisionProduced):
+            s["agent_decision"] = event.decision
 
     def snapshot(self, symbol: str) -> ViewState:
         s = self._symbol_state(symbol)
