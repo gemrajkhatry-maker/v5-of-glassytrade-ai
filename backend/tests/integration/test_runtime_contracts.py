@@ -7,7 +7,6 @@ from collections import deque
 import re
 from decimal import Decimal
 from types import MappingProxyType
-from types import SimpleNamespace
 from pathlib import Path
 from typing import Any, Callable
 from unittest.mock import Mock, call
@@ -192,13 +191,9 @@ def _build_runtime_app_fixture(
         _FakeScanner,
     )
     monkeypatch.setattr("app.application.engine.TradingEngine", _FakeEngine)
-    monkeypatch.setattr(
-        "config.consolidated.ConsolidatedConfig.from_unified",
-        lambda: SimpleNamespace(dhan_symbols=list(startup_symbols), cors_origins=["*"]),
-    )
     # Note: settings.* are read-only env/YAML-backed properties on
     # SettingsAdapter and cannot be monkeypatched here. The fake scanner and
-    # fake config below make the actual values irrelevant to these tests.
+    # fake container below make the actual config values irrelevant to these tests.
 
     return main.create_application(), container, fake_storage, fake_session
 

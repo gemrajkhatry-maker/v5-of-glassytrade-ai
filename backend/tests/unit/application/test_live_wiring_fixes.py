@@ -42,11 +42,12 @@ class TestAllowShort:
 
     def test_composed_trading_session_respects_allow_short(self):
         """The allow_short resolved in the composition root reaches the session."""
-        from config.consolidated import ConsolidatedConfig as Configuration
+        from app.config import settings
         from app.application.di.composition_root import compose_container
         from app.application.services.trading_session import TradingSessionService
 
-        config = Configuration.from_unified()
+        mode = settings.get_mode_config()
+        config = mode.system_config if mode is not None else None
         container = compose_container(config)
         session = container.resolve(TradingSessionService)
         assert session._allow_short is True
