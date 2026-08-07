@@ -21,7 +21,7 @@ echo "  QUANT_EXECUTION_MODE=${QUANT_EXECUTION_MODE}"
 echo "  TRADING_MODE=${TRADING_MODE}"
 echo "  GLASSYTRADE_ENV=${GLASSYTRADE_ENV}"
 echo ""
-echo "After the paper session, run the §5.4 acceptance gate:"
+echo "After the paper session, from the REPO ROOT run the §5.4 acceptance gate:"
 echo "  python backend/scripts/acceptance_gate.py backend/live_trading_logs/journal_*.jsonl"
 echo ""
 
