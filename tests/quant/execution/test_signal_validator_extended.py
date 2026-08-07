@@ -20,7 +20,8 @@ def _make_signal(price=100, timestamp=None):
         reason="test",
         stop_loss=90,
         take_profit=110,
-        timestamp=timestamp or "2026-01-01T10:00:00Z",
+        # 30s before the default tick time (10:05:00Z) — fresh under 60s default TTL
+        timestamp=timestamp or "2026-01-01T10:04:30Z",
         setup=SetupType.TREND_MODEL,
         source=Source.AMT,
     )
