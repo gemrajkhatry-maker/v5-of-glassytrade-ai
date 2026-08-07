@@ -621,6 +621,7 @@ def test_readiness_contract_rejects_zero_active_symbols(monkeypatch):
             default_exchange="MCX",
             scanner_underlyings=[],
             scanner_config={"top_n": 4, "option_type": ""},
+            system_config=_NS(),
         ),
     )
     app, _container, _fake_storage, _fake_session = _build_runtime_app_fixture(

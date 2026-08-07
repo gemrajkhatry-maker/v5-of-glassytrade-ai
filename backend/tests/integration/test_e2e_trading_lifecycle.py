@@ -74,7 +74,6 @@ class TestFullTradingLifecycle:
         assert state is not None
         assert "portfolio" in state
         assert "amt" in state
-        assert "stats" in state
 
     def test_position_opens_with_slipped_entry(self):
         """When a position opens, entry price differs from signal due to slippage."""

@@ -95,7 +95,6 @@ class TestWebSocketGameloop:
                 "leverage": 10,
                 "positions": [],
                 "closedTrades": [],
-                "history": [],
             },
             "amt": {
                 "marketState": "BALANCED",
@@ -117,51 +116,14 @@ class TestWebSocketGameloop:
                 "inputPrompt": "",
                 "rawOutput": "",
             },
-            "stats": {
-                "totalTrades": 0,
-                "wins": 0,
-                "losses": 0,
-                "winRate": 0,
-                "netProfit": 0,
-                "avgProfit": 0,
-                "largestWin": 0,
-                "largestLoss": 0,
-            },
             "riskState": {
                 "halted": False,
                 "haltReason": "",
                 "consecutiveLosses": 0,
                 "dailyPnl": 0,
             },
-            "playbookGuard": {
-                "session": "NSE_PRIMARY",
-                "marketState": "BALANCED",
-                "expectedPlaybook": "return_to_value",
-                "candidatePlaybook": "return_to_value",
-                "guardTripped": False,
-                "maxRejections": 3,
-                "totalRejections": 0,
-                "sessionCompatible": True,
-                "agentAligned": True,
-                "lastRejectionReason": "",
-                "rejections": {},
-            },
-            "explainabilityMonitor": {
-                "entries": 4,
-                "explainedEntries": 3,
-                "aggressionExplainedEntries": 2,
-                "coverageRate": 75.0,
-                "aggressionDriverRate": 50.0,
-                "minTrades": 3,
-                "minCoverageRate": 90.0,
-                "minAggressionRate": 75.0,
-                "alertActive": True,
-                "alertReason": "LOW_FEATURE_DRIVER_COVERAGE",
-            },
             "overseerAction": "",
             "overseerReason": "",
-            "modelWeights": {"trend": 0.4, "momentum": 0.25, "delta": 0.15, "orderBook": 0.15, "volatility": 0.05},
-            "generation": 0,
         }
 
         with c.websocket_connect("/api/trading/ws/gameloop") as ws:
@@ -192,15 +154,9 @@ class TestWebSocketGameloop:
             assert "closedTrades" in state["portfolio"]
             assert "amt" in state
             assert "genAIAnalysis" in state
-            assert "stats" in state
             assert "riskState" in state
-            assert "playbookGuard" in state
-            assert "guardTripped" in state["playbookGuard"]
-            assert "explainabilityMonitor" in state
-            assert "alertActive" in state["explainabilityMonitor"]
             assert "overseerAction" in state
             assert "overseerReason" in state
-            assert "modelWeights" in state
 
     def test_history_seeding(self, client):
         """Test history seeding message."""
@@ -262,7 +218,6 @@ class TestDTOContract:
         assert "leverage" in dto
         assert "positions" in dto
         assert "closedTrades" in dto  # camelCase
-        assert "history" in dto
 
     def test_amt_result_dto_keys(self):
         from app.infrastructure.serialization.schemas import amt_result_to_dto

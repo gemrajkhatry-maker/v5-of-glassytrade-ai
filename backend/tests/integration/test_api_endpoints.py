@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-from app.api.dependencies import get_storage
+from app.api.dependencies import get_storage, get_trade_journal
 
 
 client = TestClient(app)
@@ -32,10 +32,18 @@ class TestTradingEndpoints:
         assert body["balance"] > 0
 
     def test_compute_stats_empty(self):
-        r = client.post(
-            "/api/trading/stats",
-            json={"closedTrades": [], "source": "AMT"},
-        )
+        class _EmptyJournal:
+            def get_completed_trades(self, target_date=None, run_id=None):
+                return []
+
+        app.dependency_overrides[get_trade_journal] = lambda: _EmptyJournal()
+        try:
+            r = client.post(
+                "/api/trading/stats",
+                json={"closedTrades": [], "source": "AMT"},
+            )
+        finally:
+            app.dependency_overrides.pop(get_trade_journal, None)
         assert r.status_code == 200
         body = r.json()
         assert body["totalTrades"] == 0

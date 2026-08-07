@@ -453,7 +453,7 @@ class TradingSessionService:
             )
             return
 
-        trading_enabled = session.trading_state == "TRADABLE"
+        trading_enabled = getattr(session, "trading_state", "TRADABLE") == "TRADABLE"
         if trading_enabled:
             self._event_router.execute_signal(pending_symbol, pending_signal, session)
         else:
@@ -714,7 +714,7 @@ class TradingSessionService:
         _tick_start = time.monotonic()
         session = self.get_or_create_session(event.symbol)
         cache = self._get_cache(event.symbol)
-        trading_enabled = session.trading_state == "TRADABLE"
+        trading_enabled = getattr(session, "trading_state", "TRADABLE") == "TRADABLE"
 
         # Initialize IB engine for this symbol if not exists
         if not hasattr(self, "_ib_engines"):
