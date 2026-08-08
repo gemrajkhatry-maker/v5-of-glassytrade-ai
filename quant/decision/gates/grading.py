@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from quant.contracts.constants import CVD_SLOPE_HARD_BLOCK
 from quant.contracts.enums import SetupType
+from quant.contracts.numeric import to_float
 
 if TYPE_CHECKING:
     from quant.contracts.value_objects import OHLC, AMTResult
@@ -36,10 +37,10 @@ def check_vwap_bias(
 
     Returns {"warning": bool, "overextended": bool}.
     """
-    price_f = _to_float(price, default=0.0) or 0.0
-    vwap_f = _to_float(vwap, default=0.0) or 0.0
-    vwap_upper_2_f = _to_float(vwap_upper_2, default=0.0) or 0.0
-    vwap_lower_2_f = _to_float(vwap_lower_2, default=0.0) or 0.0
+    price_f = to_float(price, default=0.0) or 0.0
+    vwap_f = to_float(vwap, default=0.0) or 0.0
+    vwap_upper_2_f = to_float(vwap_upper_2, default=0.0) or 0.0
+    vwap_lower_2_f = to_float(vwap_lower_2, default=0.0) or 0.0
 
     if vwap_f <= 0:
         return {"warning": False, "overextended": False}
@@ -81,15 +82,6 @@ def check_imbalance_alignment(direction: str, imbalances: list) -> int:
     return 0
 
 
-def _to_float(value, default: float | None = 0.0) -> float | None:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def compute_grade_score(
     direction: str,
     tick: OHLC,
@@ -105,7 +97,7 @@ def compute_grade_score(
     score = 0
 
     # HARD GATE: Extreme CVD Opposition
-    cvd_slope = _to_float(amt_result.cvd_slope, default=None)
+    cvd_slope = to_float(amt_result.cvd_slope, default=None)
     if cvd_slope is None:
         cvd_slope = 0.0
     if direction == "LONG" and cvd_slope < -CVD_SLOPE_HARD_BLOCK:
@@ -154,13 +146,13 @@ def compute_grade_score(
         score -= 1
 
     # VWAP bias
-    tick_vwap = _to_float(getattr(tick, "vwap", 0), default=0.0)
-    session_vwap = _to_float(getattr(amt_result, "session_vwap", 0), default=0.0)
+    tick_vwap = to_float(getattr(tick, "vwap", 0), default=0.0)
+    session_vwap = to_float(getattr(amt_result, "session_vwap", 0), default=0.0)
     vwap = session_vwap if (session_vwap is not None and session_vwap > 0) else ((tick_vwap or 0.0) if (tick_vwap is not None and tick_vwap > 0) else 0.0)
-    vwap = _to_float(vwap, default=0.0) or 0.0
-    price = _to_float(tick.close, default=0.0) or 0.0
-    vwap_upper_2 = _to_float(getattr(amt_result, "vwap_upper_2", 0), default=0.0) or 0.0
-    vwap_lower_2 = _to_float(getattr(amt_result, "vwap_lower_2", 0), default=0.0) or 0.0
+    vwap = to_float(vwap, default=0.0) or 0.0
+    price = to_float(tick.close, default=0.0) or 0.0
+    vwap_upper_2 = to_float(getattr(amt_result, "vwap_upper_2", 0), default=0.0) or 0.0
+    vwap_lower_2 = to_float(getattr(amt_result, "vwap_lower_2", 0), default=0.0) or 0.0
     vwap_check = check_vwap_bias(
         direction,
         price,

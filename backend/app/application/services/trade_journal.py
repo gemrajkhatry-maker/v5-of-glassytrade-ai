@@ -9,6 +9,8 @@ from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal
 from threading import Lock
 from typing import Any
+
+from quant.contracts.numeric import to_float
 from quant.contracts.timezones import IST
 
 logger = logging.getLogger(__name__)
@@ -107,16 +109,6 @@ class TradeJournal:
     @staticmethod
     def _safe_div(numerator: float, denominator: float) -> float:
         return numerator / denominator if denominator else 0.0
-
-    @staticmethod
-    def _to_float(value: Any, default: float = 0.0) -> float:
-        """Coerce journal numerics (float/int/str/Decimal) to float."""
-        if value is None:
-            return default
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            return default
 
     @staticmethod
     def _json_default(obj: Any) -> Any:
@@ -444,9 +436,9 @@ class TradeJournal:
         entry_timestamp: str = "",
     ) -> None:
         """Log when a position is closed."""
-        entry_price_f = self._to_float(entry_price)
-        exit_price_f = self._to_float(exit_price)
-        pnl_f = self._to_float(pnl)
+        entry_price_f = to_float(entry_price)
+        exit_price_f = to_float(exit_price)
+        pnl_f = to_float(pnl)
         if side and str(side).upper() == "SHORT":
             pnl_pct = ((entry_price_f - exit_price_f) / entry_price_f * 100) if entry_price_f > 0 else 0.0
         else:
@@ -463,9 +455,9 @@ class TradeJournal:
             exit_reason=exit_reason,
             pnl=round(pnl_f, 4),
             pnl_pct=round(pnl_pct, 4),
-            time_in_trade_s=round(self._to_float(time_in_trade_s), 1),
-            mfe=round(self._to_float(mfe), 4),
-            mae=round(self._to_float(mae), 4),
+            time_in_trade_s=round(to_float(time_in_trade_s), 1),
+            mfe=round(to_float(mfe), 4),
+            mae=round(to_float(mae), 4),
             tick_count=tick_count,
             entry_timestamp=entry_timestamp,
             decision_source=decision_source,
@@ -493,8 +485,8 @@ class TradeJournal:
         attribution: str = "",
     ) -> None:
         """Log a partial position close (e.g. 50% at TP1)."""
-        entry_price_f = self._to_float(entry_price)
-        exit_price_f = self._to_float(exit_price)
+        entry_price_f = to_float(entry_price)
+        exit_price_f = to_float(exit_price)
         if side and str(side).upper() == "SHORT":
             pnl_pct = ((entry_price_f - exit_price_f) / entry_price_f * 100) if entry_price_f > 0 else 0.0
         else:
@@ -509,7 +501,7 @@ class TradeJournal:
             entry_price=round(entry_price_f, 4),
             exit_price=round(exit_price_f, 4),
             exit_reason=f"PARTIAL_{partial_pct:.0%}",
-            pnl=round(self._to_float(realized_pnl), 4),
+            pnl=round(to_float(realized_pnl), 4),
             pnl_pct=round(pnl_pct, 4),
             decision_source=decision_source,
             attribution=attribution,
@@ -869,27 +861,27 @@ class TradeJournal:
     def _build_completed_trade(self, exit_ev: dict, entry_ev: dict | None) -> dict:
         """Build a trade payload from an EXIT event, enriched by a matched ENTRY."""
         entry_ev = entry_ev or {}
-        entry_price = self._to_float(exit_ev.get("entry_price")) or self._to_float(entry_ev.get("entry_price")) or 0.0
-        exit_price = self._to_float(exit_ev.get("exit_price")) or self._to_float(entry_ev.get("exit_price")) or entry_price
+        entry_price = to_float(exit_ev.get("entry_price")) or to_float(entry_ev.get("entry_price")) or 0.0
+        exit_price = to_float(exit_ev.get("exit_price")) or to_float(entry_ev.get("exit_price")) or entry_price
         exit_time = exit_ev.get("timestamp", "")
         entry_time = exit_ev.get("entry_timestamp") or entry_ev.get("timestamp", "")
         side = exit_ev.get("side") or entry_ev.get("side", "")
         return {
             "symbol": exit_ev.get("symbol", ""),
             "side": side,
-            "size": self._to_float(entry_ev.get("size")) or self._to_float(exit_ev.get("size")) or None,
+            "size": to_float(entry_ev.get("size")) or to_float(exit_ev.get("size")) or None,
             "entry_time": entry_time,
             "exit_time": exit_time,
             "entry_price": entry_price,
             "exit_price": exit_price,
-            "stop_loss": self._to_float(entry_ev.get("stop_loss")) or self._to_float(exit_ev.get("stop_loss")),
-            "take_profit": self._to_float(entry_ev.get("take_profit")) or self._to_float(exit_ev.get("take_profit")),
-            "pnl": self._to_float(exit_ev.get("pnl")),
+            "stop_loss": to_float(entry_ev.get("stop_loss")) or to_float(exit_ev.get("stop_loss")),
+            "take_profit": to_float(entry_ev.get("take_profit")) or to_float(exit_ev.get("take_profit")),
+            "pnl": to_float(exit_ev.get("pnl")),
             "pnl_pct": self._trade_pnl_pct(entry_price, exit_price, side, exit_ev),
             "duration_s": self._trade_duration_s(entry_time, exit_time, exit_ev),
             "exit_reason": exit_ev.get("exit_reason", ""),
-            "mfe": self._to_float(exit_ev.get("mfe")),
-            "mae": self._to_float(exit_ev.get("mae")),
+            "mfe": to_float(exit_ev.get("mfe")),
+            "mae": to_float(exit_ev.get("mae")),
             "market_state": entry_ev.get("market_state") or exit_ev.get("market_state", ""),
             "session_name": entry_ev.get("session_name") or exit_ev.get("session_name", ""),
             "llm_rationale": entry_ev.get("llm_rationale", ""),
@@ -911,13 +903,13 @@ class TradeJournal:
             if side and str(side).upper() == "SHORT":
                 return round((entry_price - exit_price) / entry_price * 100, 4)
             return round((exit_price - entry_price) / entry_price * 100, 4)
-        return round(cls._to_float(exit_ev.get("pnl_pct")), 4)
+        return round(to_float(exit_ev.get("pnl_pct")), 4)
 
     @classmethod
     def _trade_duration_s(cls, entry_time: str, exit_time: str, exit_ev: dict) -> float:
         """Positive duration in seconds. Prefers timestamps; falls back to the
         stored duration and never leaks a negative value."""
-        duration = cls._to_float(exit_ev.get("time_in_trade_s"))
+        duration = to_float(exit_ev.get("time_in_trade_s"))
         if entry_time and exit_time:
             try:
                 entry_dt = datetime.fromisoformat(entry_time.replace("Z", "+00:00"))
@@ -936,9 +928,9 @@ class TradeJournal:
         signals = [e for e in entries if e.get("event_type") == "SIGNAL_GENERATED"]
         rejections = [e for e in entries if e.get("event_type") == "ENTRY_REJECTED"]
 
-        total_pnl = sum(self._to_float(e.get("pnl")) for e in exits)
-        wins = [e for e in exits if self._to_float(e.get("pnl")) > 0]
-        losses = [e for e in exits if self._to_float(e.get("pnl")) < 0]
+        total_pnl = sum(to_float(e.get("pnl")) for e in exits)
+        wins = [e for e in exits if to_float(e.get("pnl")) > 0]
+        losses = [e for e in exits if to_float(e.get("pnl")) < 0]
         win_rate = len(wins) / len(exits) * 100 if exits else 0.0
 
         first_ts = entries[0].get("timestamp", "") if entries else ""
@@ -955,13 +947,13 @@ class TradeJournal:
             "losses": len(losses),
             "win_rate": round(win_rate, 1),
             "avg_time_in_trade_s": round(
-                sum(self._to_float(e.get("time_in_trade_s")) for e in exits) / len(exits), 1
+                sum(to_float(e.get("time_in_trade_s")) for e in exits) / len(exits), 1
             ) if exits else 0.0,
-            "avg_mfe": round(sum(self._to_float(e.get("mfe")) for e in exits) / len(exits), 4) if exits else 0.0,
-            "avg_mae": round(sum(self._to_float(e.get("mae")) for e in exits) / len(exits), 4) if exits else 0.0,
+            "avg_mfe": round(sum(to_float(e.get("mfe")) for e in exits) / len(exits), 4) if exits else 0.0,
+            "avg_mae": round(sum(to_float(e.get("mae")) for e in exits) / len(exits), 4) if exits else 0.0,
             "avg_r": self._avg_r_multiple_from_exits(exits),
             "total_partial_exits": len(partials),
-            "total_partial_pnl": round(sum(self._to_float(e.get("pnl")) for e in partials), 4),
+            "total_partial_pnl": round(sum(to_float(e.get("pnl")) for e in partials), 4),
             "entries_with_thesis": len([
                 e for e in entries
                 if e.get("event_type") == "ENTRY_EXECUTED"
@@ -976,9 +968,9 @@ class TradeJournal:
         EXIT's own entry/exit price and the paired stop level."""
         rs: list[float] = []
         for e in exits:
-            entry_price = self._to_float(e.get("entry_price"))
-            exit_price = self._to_float(e.get("exit_price"))
-            stop_loss = self._to_float(e.get("stop_loss"))
+            entry_price = to_float(e.get("entry_price"))
+            exit_price = to_float(e.get("exit_price"))
+            stop_loss = to_float(e.get("stop_loss"))
             if entry_price <= 0 or stop_loss <= 0:
                 continue
             side = str(e.get("side", "LONG")).upper()

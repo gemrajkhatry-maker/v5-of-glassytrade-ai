@@ -22,6 +22,7 @@ for _ancestor in _this_file.parents:
         break
 
 from app.config import Configuration, settings
+from quant.contracts.numeric import to_float
 from quant.contracts.ports.broker import IBroker
 from quant.contracts.aggregates import (
     RISK_BY_CONFIDENCE,
@@ -63,15 +64,6 @@ def _to_decimal(value: Any, default: str = "0") -> Decimal:
         return Decimal(str(value))
     except Exception:
         return Decimal(default)
-
-
-def _to_float(value: Any, default: float = 0.0) -> float:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 class DhanBrokerAdapter(IBroker):
@@ -173,7 +165,7 @@ class DhanBrokerAdapter(IBroker):
                 quantity=qty,
                 order_type=self._map_order_type(signal),
                 price=float(entry_price),
-                trigger_price=_to_float(signal.stop_loss),
+                trigger_price=to_float(signal.stop_loss),
                 product_type=self._resolve_product_type(signal.metadata or {}),
             )
             # Preserve source trace in in-memory object; Dhan converter sends
@@ -203,17 +195,17 @@ class DhanBrokerAdapter(IBroker):
                     "Order %s terminal status=%s, filled=%s/%s",
                     placed_order_id,
                     getattr(final_order.status, "value", final_order.status),
-                    _to_float(final_order.filled_quantity),
-                    _to_float(final_order.quantity),
+                    to_float(final_order.filled_quantity),
+                    to_float(final_order.quantity),
                 )
                 return None
 
             fill_price = (
-                _to_float(getattr(final_order, "average_fill_price", None))
-                or _to_float(getattr(final_order, "price", None), _to_float(signal.price))
+                to_float(getattr(final_order, "average_fill_price", None))
+                or to_float(getattr(final_order, "price", None), to_float(signal.price))
                 or 0.0
             )
-            filled_quantity = _to_float(final_order.filled_quantity)
+            filled_quantity = to_float(final_order.filled_quantity)
             if filled_quantity <= 0:
                 # Defensive fallback from requested quantity if broker omits filled qty.
                 filled_quantity = float(placed_order.quantity)
@@ -400,7 +392,7 @@ class DhanBrokerAdapter(IBroker):
 
     def _resolve_quantity(self, signal: Signal, portfolio: Portfolio) -> int:
         meta = signal.metadata or {}
-        explicit_qty = _to_float(
+        explicit_qty = to_float(
             meta.get("order_quantity", meta.get("size", 0)),
             default=0.0,
         )
@@ -499,8 +491,8 @@ class DhanBrokerAdapter(IBroker):
         if status_value in {"FILLED", "COMPLETED"}:
             return True
 
-        quantity = _to_float(order.quantity)
-        filled_quantity = _to_float(order.filled_quantity)
+        quantity = to_float(order.quantity)
+        filled_quantity = to_float(order.filled_quantity)
         return quantity > 0 and filled_quantity >= quantity
 
     @staticmethod

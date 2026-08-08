@@ -15,14 +15,8 @@ from functools import lru_cache
 from typing import Any
 
 from quant.contracts.enums import SetupType
+from quant.contracts.numeric import to_float
 from quant.contracts.value_objects import AMTResult, OHLC
-
-
-def _to_float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def _take_level_list(value: Any) -> list[float]:
@@ -31,7 +25,7 @@ def _take_level_list(value: Any) -> list[float]:
         raw_values = list(value) if value is not None else []
     except TypeError:
         return []
-    return [_to_float(level, default=0.0) for level in raw_values]
+    return [to_float(level, default=0.0) for level in raw_values]
 
 
 @dataclass(frozen=True)
@@ -79,27 +73,27 @@ def infer_location(price: float, amt_result: AMTResult) -> tuple[str, float]:
     If no specific level found, use VA boundary as default.
     """
     px = float(price)
-    value_area_high = _to_float(amt_result.value_area_high, default=0.0)
-    value_area_low = _to_float(amt_result.value_area_low, default=0.0)
+    value_area_high = to_float(amt_result.value_area_high, default=0.0)
+    value_area_low = to_float(amt_result.value_area_low, default=0.0)
     va_range = abs(value_area_high - value_area_low)
     threshold = (
         min(max(va_range * 0.35, px * 0.0025), px * 0.015) if px > 0 else 0.0
     )
     levels: list[tuple[str, float]] = [
-        ("POC", _to_float(amt_result.poc, default=0.0)),
+        ("POC", to_float(amt_result.poc, default=0.0)),
         ("VAH", value_area_high),
         ("VAL", value_area_low),
-        ("PRIOR_POC", _to_float(amt_result.prior_poc, default=0.0)),
-        ("PRIOR_VAH", _to_float(amt_result.prior_vah, default=0.0)),
-        ("PRIOR_VAL", _to_float(amt_result.prior_val, default=0.0)),
-        ("IB_HIGH", _to_float(amt_result.ib_high, default=0.0)),
-        ("IB_LOW", _to_float(amt_result.ib_low, default=0.0)),
-        ("DEV_POC", _to_float(amt_result.dev_poc, default=0.0)),
-        ("DEV_VAH", _to_float(amt_result.dev_vah, default=0.0)),
-        ("DEV_VAL", _to_float(amt_result.dev_val, default=0.0)),
-        ("LEG_POC", _to_float(amt_result.leg_poc, default=0.0)),
-        ("LEG_VAH", _to_float(amt_result.leg_vah, default=0.0)),
-        ("LEG_VAL", _to_float(amt_result.leg_val, default=0.0)),
+        ("PRIOR_POC", to_float(amt_result.prior_poc, default=0.0)),
+        ("PRIOR_VAH", to_float(amt_result.prior_vah, default=0.0)),
+        ("PRIOR_VAL", to_float(amt_result.prior_val, default=0.0)),
+        ("IB_HIGH", to_float(amt_result.ib_high, default=0.0)),
+        ("IB_LOW", to_float(amt_result.ib_low, default=0.0)),
+        ("DEV_POC", to_float(amt_result.dev_poc, default=0.0)),
+        ("DEV_VAH", to_float(amt_result.dev_vah, default=0.0)),
+        ("DEV_VAL", to_float(amt_result.dev_val, default=0.0)),
+        ("LEG_POC", to_float(amt_result.leg_poc, default=0.0)),
+        ("LEG_VAH", to_float(amt_result.leg_vah, default=0.0)),
+        ("LEG_VAL", to_float(amt_result.leg_val, default=0.0)),
     ]
     levels.extend([("LVN", level) for level in _take_level_list(amt_result.lvns)[:5]])
     levels.extend([("HVN", level) for level in _take_level_list(amt_result.hvns)[:5]])
@@ -124,8 +118,8 @@ def infer_aggression_trigger(tick: OHLC, amt_result: AMTResult) -> str:
     FABIO: "Aggression is the trigger" — we need SOME form of aggression signal.
     Never return empty string (would cause thesis validation to fail).
     """
-    tick_volume = _to_float(getattr(tick, "volume", 0), default=0.0)
-    tick_delta = _to_float(getattr(tick, "delta", 0), default=0.0)
+    tick_volume = to_float(getattr(tick, "volume", 0), default=0.0)
+    tick_delta = to_float(getattr(tick, "delta", 0), default=0.0)
     delta_ratio = abs(tick_delta) / tick_volume if tick_volume > 0 else 0.0
     
     # High-confidence triggers (specific setups)
@@ -153,8 +147,8 @@ def infer_aggression_trigger(tick: OHLC, amt_result: AMTResult) -> str:
         return "DELTA_ACTIVITY"
     
     # Final fallback — market is moving, that's aggression
-    tick_high = _to_float(getattr(tick, "high", 0), default=0.0)
-    tick_low = _to_float(getattr(tick, "low", 0), default=0.0)
+    tick_high = to_float(getattr(tick, "high", 0), default=0.0)
+    tick_low = to_float(getattr(tick, "low", 0), default=0.0)
     if tick_high != tick_low:
         return "PRICE_MOVEMENT"
     

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from quant.contracts.candle_metrics import body as calc_body
 from quant.contracts.constants import CVD_SLOPE_EXTREME, D2_CVD_SLOPE_MAX
+from quant.contracts.numeric import to_float
 from quant.decision.gates.confirmation_bundle import check_confirmation_bundle
 
 if TYPE_CHECKING:
@@ -110,15 +111,6 @@ def extract_bubble_levels_from_footprint(fp_domain: dict | None, min_stacked_cou
     except TypeError:
         pass  # Bubble level extraction error — no bubbles returned
     return bubble_levels
-
-
-def _to_float(value, default: float | None = None) -> float | None:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 from quant.amt.profile.three_align_input import ThreeAlignInput
@@ -274,9 +266,9 @@ def three_align_check(
         recent_touches = 0
         past_touches = 0
         for i, d in enumerate(reversed(history[-30:])):
-            d_high = _to_float(getattr(d, "high", None), default=None)
-            d_low = _to_float(getattr(d, "low", None), default=None)
-            d_close = _to_float(getattr(d, "close", None), default=None)
+            d_high = to_float(getattr(d, "high", None), default=None)
+            d_low = to_float(getattr(d, "low", None), default=None)
+            d_close = to_float(getattr(d, "close", None), default=None)
             if d_high is None or d_low is None or d_close is None:
                 continue
             dist = min(

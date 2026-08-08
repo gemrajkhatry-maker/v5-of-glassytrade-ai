@@ -16,20 +16,12 @@ from datetime import datetime, time as _time
 from typing import TYPE_CHECKING
 
 from quant.contracts.candle_metrics import body as calc_body
+from quant.contracts.numeric import to_float
 
 if TYPE_CHECKING:
     from quant.contracts.value_objects import OHLC
 
 logger = logging.getLogger(__name__)
-
-
-def _to_float(value, default: float | None = 0.0) -> float | None:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def check_confirmation_bundle(data: list, tick: OHLC, order_book=None) -> bool:
@@ -44,7 +36,7 @@ def check_confirmation_bundle(data: list, tick: OHLC, order_book=None) -> bool:
     alpha = 2.0 / 21  # EMA(20)
     history = data[-20:]
     vol_values: list[float] = [
-        _to_float(getattr(d, "volume", None), default=None) for d in history
+        to_float(getattr(d, "volume", None), default=None) for d in history
     ]
     vol_values = [v for v in vol_values if v is not None]
     if len(vol_values) < 2:
@@ -68,8 +60,8 @@ def check_confirmation_bundle(data: list, tick: OHLC, order_book=None) -> bool:
     except (ValueError, TypeError):
         pass  # MCX lull detection failure — default multiplier used
 
-    tick_volume = _to_float(getattr(tick, "volume", 0), default=0.0)
-    tick_delta = _to_float(getattr(tick, "delta", 0), default=0.0)
+    tick_volume = to_float(getattr(tick, "volume", 0), default=0.0)
+    tick_delta = to_float(getattr(tick, "delta", 0), default=0.0)
     if tick_volume <= 0:
         return False
 
@@ -114,13 +106,13 @@ def check_momentum_fade(data: list, tick: OHLC, direction: str) -> bool:
     Fabio Rule: Do not short a 2.5 sigma bullish impulse on the first touch
     if it has no meaningful rejection wick. (Same for long on bearish impulse).
     """
-    if not data or len(data) < 20 or _to_float(getattr(tick, "volume", 0), default=0.0) <= 0:
+    if not data or len(data) < 20 or to_float(getattr(tick, "volume", 0), default=0.0) <= 0:
         return False
 
     alpha = 2.0 / 21  # EMA(20)
     history = data[-20:]
     vol_values = [
-        _to_float(getattr(d, "volume", None), default=None) for d in history
+        to_float(getattr(d, "volume", None), default=None) for d in history
     ]
     vol_values = [v for v in vol_values if v is not None]
     if len(vol_values) < 2:
@@ -130,14 +122,14 @@ def check_momentum_fade(data: list, tick: OHLC, direction: str) -> bool:
         ema_vol = alpha * v + (1.0 - alpha) * ema_vol
 
     # Is it a massive volume spike?
-    tick_volume = _to_float(getattr(tick, "volume", 0), default=0.0)
+    tick_volume = to_float(getattr(tick, "volume", 0), default=0.0)
     if tick_volume < (ema_vol * 2.5):
         return False
 
-    open_price = _to_float(getattr(tick, "open", 0.0), default=0.0)
-    high = _to_float(getattr(tick, "high", 0.0), default=0.0)
-    low = _to_float(getattr(tick, "low", 0.0), default=0.0)
-    close = _to_float(getattr(tick, "close", 0.0), default=0.0)
+    open_price = to_float(getattr(tick, "open", 0.0), default=0.0)
+    high = to_float(getattr(tick, "high", 0.0), default=0.0)
+    low = to_float(getattr(tick, "low", 0.0), default=0.0)
+    close = to_float(getattr(tick, "close", 0.0), default=0.0)
 
     body_size = calc_body(open_price, high, low, close)
     candle_range = high - low
