@@ -397,7 +397,7 @@ class TestAbstractionLayerConsistency:
             assert reg.exchange_for(f"{underlying} 27 FEB 25500 CALL") == "NSE"
 
     def test_di_container_wiring(self):
-        """DIContainer should wire all exchange abstractions."""
+        """DIContainer should NOT register the dead exchange-strategy port."""
         from app.application.di.composition_root import compose_container
         from app.config import settings
 
@@ -407,8 +407,7 @@ class TestAbstractionLayerConsistency:
 
         from quant.contracts.ports import IExchangeStrategy
 
-        strat = container.resolve(IExchangeStrategy)
-        assert strat is not None
+        assert not container.has(IExchangeStrategy)
 
         # Verify the container was created successfully
         assert container is not None
