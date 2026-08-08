@@ -194,7 +194,6 @@ def create_application() -> FastAPI:
                 selected_symbols = [r.symbol for r in final[:settings.SCANNER_TOP_N]]
 
                 if selected_symbols:
-                    container.register_singleton(list, lambda c: selected_symbols)
                     app.state.active_symbols = selected_symbols
                     logger.info(
                         "Option scanner selected %d contracts: %s",
