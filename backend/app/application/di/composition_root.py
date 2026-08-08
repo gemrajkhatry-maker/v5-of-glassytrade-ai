@@ -62,35 +62,8 @@ def compose_container(config: "Configuration") -> DIContainer:
     )
 
     container.register_singleton(
-        _probability_inference_port(),
-        lambda c: _create_probability_adapter(c, config),
-    )
-
-    container.register_singleton(
         _quant_coordinator(),
         lambda c: _create_quant_coordinator(c, config),
-    )
-
-    # --- Additional Infrastructure Adapters ---
-    container.register_singleton(
-        _delta_profile_port(),
-        lambda c: _create_delta_profile_adapter(c),
-    )
-
-    container.register_singleton(
-        _exchange_strategy_port(),
-        lambda c: _create_exchange_strategy(c, config),
-    )
-
-    # --- Domain Services ---
-    container.register_singleton(
-        _gate_pipeline(),
-        lambda c: _create_gate_pipeline(c, config),
-    )
-
-    container.register_singleton(
-        _generative_ai_service(),
-        lambda c: _create_generative_ai_service(c),
     )
 
     return container
@@ -118,11 +91,6 @@ def _storage_port():
 def _llm_inference_port():
     from quant.contracts.ports.llm_inference import ILLMInference
     return ILLMInference
-
-
-def _probability_inference_port():
-    from quant.contracts.ports.probability_inference import IProbabilityInference
-    return IProbabilityInference
 
 
 def _quant_coordinator():
@@ -186,24 +154,6 @@ def _resolve_llm_temperature(llm_config) -> float:
     return (entry + overseer) / 2.0
 
 
-def _create_probability_adapter(container: DIContainer, config: "Configuration"):
-    model_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "models"
-    )
-    model_dir = os.path.normpath(model_dir)
-
-    try:
-        from app.infrastructure.adapters.lgbm_probability_adapter import LGBMProbabilityAdapter
-        return LGBMProbabilityAdapter(model_dir)
-    except Exception as exc:
-        if is_live_mode():
-            raise RuntimeError(
-                "Probability model failed in live mode"
-            ) from exc
-        from quant.contracts.ports.probability_inference import NoOpProbabilityAdapter
-        return NoOpProbabilityAdapter()
-
-
 def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     """Build the greenfield QuantCoordinator — the source of truth for the
     WS viewer + REST shell. Reuses the same market-data / LLM / broker
@@ -265,79 +215,5 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         config=coord_config,
         llm_sink=llm_sink,
     )
-
-
-# ---------------------------------------------------------------------------
-# Additional port type getters
-# ---------------------------------------------------------------------------
-
-def _delta_profile_port():
-    from quant.contracts.ports.delta_profile import IDeltaProfile
-    return IDeltaProfile
-
-
-def _exchange_strategy_port():
-    from quant.contracts.ports.exchange_strategy import IExchangeStrategy
-    return IExchangeStrategy
-
-
-def _gate_pipeline():
-    from quant.decision.gates.legacy_gate_pipeline import GatePipeline
-    return GatePipeline
-
-
-def _generative_ai_service():
-    from quant.inference.generative_ai import GenerativeAIService
-    return GenerativeAIService
-
-
-# ---------------------------------------------------------------------------
-# Additional factory functions
-# ---------------------------------------------------------------------------
-
-def _create_delta_profile_adapter(container: DIContainer):
-    from app.infrastructure.adapters.delta_profile_adapter import DeltaProfileAdapter
-    return DeltaProfileAdapter()
-
-
-def _create_exchange_strategy(container: DIContainer, config: "Configuration"):
-    from quant.contracts.exchange_config import ExchangeConfig
-    from app.domain.models.exchange import Exchange
-
-    exchange_name = (getattr(config, "default_exchange", None) or _settings.DEFAULT_EXCHANGE or "MCX").upper()
-    exchange = Exchange.normalize(exchange_name)
-    exc_config = ExchangeConfig.for_exchange(exchange.value)
-
-    # NFO (NSE F&O) uses same strategy as NSE
-    if exchange_name in ("NSE", "NFO"):
-        from app.infrastructure.strategies.nse_strategy import NSEExchangeStrategy
-        return NSEExchangeStrategy(exc_config)
-    else:
-        from app.infrastructure.strategies.mcx_strategy import MCXExchangeStrategy
-        return MCXExchangeStrategy(exc_config)
-
-
-def _create_gate_pipeline(container: DIContainer, config: "Configuration"):
-    from quant.decision.gates.legacy_gate_pipeline import GatePipeline
-    from quant.contracts.ports.market_data import IMarketData
-    from quant.contracts.ports.storage import IStorage
-    from quant.contracts.ports.llm_inference import ILLMInference
-    from quant.contracts.ports.probability_inference import IProbabilityInference
-
-    return GatePipeline(
-        config=config,
-        market_data=container.resolve(IMarketData),
-        storage=container.resolve(IStorage),
-        llm=container.resolve(ILLMInference),
-        probability=container.resolve(IProbabilityInference),
-    )
-
-
-def _create_generative_ai_service(container: DIContainer):
-    from quant.inference.generative_ai import GenerativeAIService
-    from quant.contracts.ports.llm_inference import ILLMInference
-
-    llm_adapter = container.resolve(ILLMInference)
-    return GenerativeAIService(llm_adapter=llm_adapter)
 
 
