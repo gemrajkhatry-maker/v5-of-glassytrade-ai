@@ -93,3 +93,23 @@ def test_llm_history_appends_and_caps_at_50():
     time.sleep(0.2)
     assert len(history) >= 1
     assert history[-1]["direction"] == "LONG"
+    # Enriched bar timestamps must be attached so the UI shows real times.
+    for entry in history:
+        assert "timestamp" in entry and isinstance(entry["timestamp"], int)
+        assert entry.get("created_at"), "created_at must be stamped per entry"
+        assert entry.get("input_prompt") is not None
+        assert entry.get("raw_output") is not None
+
+
+def test_bar_time_stamp_helpers():
+    """ISO (history path) and epoch-seconds (live path) bars both resolve to a
+    real epoch-ms timestamp and an IST created_at string."""
+    from quant.runtime import QuantEngine
+    iso_ms = QuantEngine._bar_epoch_ms("2026-08-07T22:46:12+05:30")
+    assert iso_ms == 1786122972000
+    assert QuantEngine._ist_created_at("2026-08-07T22:46:12+05:30", iso_ms) == \
+        "2026-08-07 22:46:12"
+    epoch_ms = QuantEngine._bar_epoch_ms("1786122972")
+    assert epoch_ms == 1786122972000
+    assert QuantEngine._bar_epoch_ms("not-a-time") == 0
+    assert QuantEngine._ist_created_at("not-a-time", 0) == "not-a-time"

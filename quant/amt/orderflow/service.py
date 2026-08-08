@@ -20,6 +20,7 @@ from quant.amt.orderflow.detectors import (
     BubbleDetector,
     OFICalculator,
     AbsorptionDetector,
+    AbsorptionResult,
 )
 from quant.amt.orderflow.aggression import PersistentAggressionScorer
 from quant.amt.orderflow.aggressive_prints import AggressivePrintRegistry
@@ -234,6 +235,8 @@ class OrderFlowService:
     
     def _check_cvd_confirmation(self, market_state, cvd_state) -> bool:
         """Check if CVD confirms market state."""
+        if cvd_state is None:
+            return False
         # Simplified check - expand based on original logic
         if market_state.name in ("IMBALANCED") and cvd_state.slope != 0:
             return True
@@ -241,16 +244,10 @@ class OrderFlowService:
             return True
         return False
     
-    def _compute_absorption(self, recent_data, current, avg_vol) -> object:
+    def _compute_absorption(self, recent_data, current, avg_vol) -> AbsorptionResult:
         """Compute absorption detection."""
         if not recent_data or len(recent_data) < 2:
-            # Return a mock absorption result for empty data
-            class MockAbsorption:
-                detected = False
-                side = ""
-                range_ratio = 0.0
-                vol_ratio = 0.0
-            return MockAbsorption()
+            return AbsorptionResult(False, "", 0.0, 0.0)
         atr = (
             max(d.high for d in recent_data[-14:])
             - min(d.low for d in recent_data[-14:])

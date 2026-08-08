@@ -17,9 +17,14 @@ class TradingQueryService:
         partial_exits = [event for event in events if event.get("event_type") == "PARTIAL_EXIT"]
         stale_reconciliations = sum(1 for event in events if event.get("event_type") == "RECONCILED_STALE")
 
+        # Position-scoped identity: the OPENED/RECOVERED event is the
+        # authoritative source for position_id/symbol/side/entry; fall back to
+        # the first event and then to empty strings so an empty event list
+        # never raises IndexError.
+        identity = opened or (events[0] if events else {})
         return {
-            "positionId": events[0].get("position_id", ""),
-            "symbol": events[0].get("symbol", ""),
+            "positionId": identity.get("position_id", ""),
+            "symbol": identity.get("symbol", ""),
             "eventCount": len(events),
             "status": "CLOSED" if closed else "OPEN",
             "openedAt": (opened or {}).get("event_time", ""),
@@ -79,7 +84,9 @@ class TradingQueryService:
                 side=t.get("side", "LONG"),
                 source=source,
                 entryPrice=t.get("entry_price", 0),
-                size=1.0,
+                # Journal rows may not carry a size (legacy rows predate it) —
+                # fall back to 1.0 so per-trade PnL still drives the stats.
+                size=t.get("size") or 1.0,
                 stopLoss=t.get("stop_loss", 0),
                 takeProfit=t.get("take_profit", 0),
                 pnl=t.get("pnl", 0),

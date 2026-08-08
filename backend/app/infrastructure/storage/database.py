@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS ticks (
     open REAL, high REAL, low REAL, close REAL,
     volume REAL, delta REAL,
     extra TEXT,
-    created_at TEXT DEFAULT (datetime('now', '+5:30 hours'))
+    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE TABLE IF NOT EXISTS trades (
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS trades (
     closed_at TEXT,
     extra TEXT,
     llm_analysis TEXT,
-    created_at TEXT DEFAULT (datetime('now', '+5:30 hours'))
+    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE TABLE IF NOT EXISTS llm_decisions (
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS llm_decisions (
     volume REAL,
     profile_shape TEXT,
     extra TEXT,
-    created_at TEXT DEFAULT (datetime('now', '+5:30 hours'))
+    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE TABLE IF NOT EXISTS performance_snapshots (
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS performance_snapshots (
     total_trades INTEGER,
     win_rate REAL,
     extra TEXT,
-    created_at TEXT DEFAULT (datetime('now', '+5:30 hours'))
+    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE TABLE IF NOT EXISTS session_profiles (
@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS session_profiles (
     profile_shape TEXT,
     total_volume REAL,
     extra TEXT,
-    created_at TEXT DEFAULT (datetime('now', '+5:30 hours'))
+    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE TABLE IF NOT EXISTS open_positions (
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS position_events (
     event_type TEXT NOT NULL,
     event_time TEXT,
     extra TEXT,
-    created_at TEXT DEFAULT (datetime('now', '+5:30 hours'))
+    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_ticks_symbol_time ON ticks(symbol, time);
@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS npoc_records (
     poc_price REAL NOT NULL,
     is_filled INTEGER DEFAULT 0,
     filled_at TEXT,
-    created_at TEXT DEFAULT (datetime('now', '+5:30 hours'))
+    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
 CREATE INDEX IF NOT EXISTS idx_npoc_underlying_date ON npoc_records(underlying, session_date);
 
@@ -163,7 +163,7 @@ CREATE TABLE IF NOT EXISTS fine_tuning_features (
     setup_type TEXT,
     result TEXT,
     pnl_r REAL,
-    created_at TEXT DEFAULT (datetime('now', '+5:30 hours'))
+    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
 CREATE INDEX IF NOT EXISTS idx_finetune_symbol ON fine_tuning_features(symbol, created_at);
 CREATE INDEX IF NOT EXISTS idx_finetune_result ON fine_tuning_features(result);
@@ -171,7 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_finetune_result ON fine_tuning_features(result);
 CREATE TABLE IF NOT EXISTS kv_store (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
-    updated_at TEXT DEFAULT (datetime('now', '+5:30 hours'))
+    updated_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
 """
 
@@ -380,12 +380,14 @@ class SQLiteStorageAdapter(IStorage):
                     if k not in _KNOWN_KEYS
                 }
             ),
+            decision_data.get("created_at") or None,
         )
         self._execute_write(
             "INSERT INTO llm_decisions (symbol, direction, confidence, rationale, "
             "input_prompt, raw_output, market_state, aggression, "
-            "price, vah, val, poc, delta, volume, profile_shape, extra) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "price, vah, val, poc, delta, volume, profile_shape, extra, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "COALESCE(?, datetime('now', '+330 minutes')))",
             params,
             auto_commit=auto_commit,
         )
@@ -854,7 +856,7 @@ class SQLiteStorageAdapter(IStorage):
         with self._lock:
             try:
                 self._conn.execute(
-                    "INSERT INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime('now', '+5:30 hours')) "
+                    "INSERT INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime('now', '+330 minutes')) "
                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
                     (key, value),
                 )

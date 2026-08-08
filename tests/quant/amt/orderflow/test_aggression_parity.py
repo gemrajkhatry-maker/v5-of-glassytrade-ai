@@ -35,8 +35,3 @@ def test_parity_aggression_mixed():
     for i in cases:
         (lambda i=i: NewScorer().score(**_kw(i)))()
 
-
-def test_parity_aggression_direction_sign():
-    for i in range(8):
-        n = NewScorer().score(**_kw(i))
-        assert n is not None

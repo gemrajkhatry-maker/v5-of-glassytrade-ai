@@ -24,6 +24,8 @@ export interface GenAIAnalysis {
   rawOutput?: string;
   marketState?: string;
   aggression?: string;
+  timestamp?: number;
+  createdAt?: string;
 }
 
 export interface AgentDecision {

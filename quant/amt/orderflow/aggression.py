@@ -46,16 +46,6 @@ class AggressionResult:
     confidence: str  # "HIGH" | "MEDIUM" | "LOW"
     breakdown: dict  # Individual signal contributions
 
-    @property
-    def direction_sign(self) -> int:
-        """Return +1 for bullish, -1 for bearish based on dominant signals."""
-        bullish = sum(
-            1
-            for v in self.breakdown.values()
-            if v > 0 and "bearish" not in str(v).lower()
-        )
-        return 1 if bullish > len(self.breakdown) / 2 else -1
-
 
 class AggressionScorer:
     """Multi-signal additive scoring per Fabio spec (FR-06).

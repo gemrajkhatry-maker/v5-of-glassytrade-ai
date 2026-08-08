@@ -1,3 +1,4 @@
+import json
 import queue
 import time
 
@@ -160,6 +161,25 @@ class _FakeFeed:
         pass
 
 
+class _FakeInference:
+    """ILLMInference-compatible stub returning a canned JSON decision."""
+
+    def __init__(self):
+        self.calls = []
+
+    def is_ready(self) -> bool:
+        return True
+
+    def predict(self, instruction, input_text, temperature=None, max_tokens=None,
+                prefill=None):
+        self.calls.append({"instruction": instruction, "input_text": input_text})
+        return json.dumps({
+            "direction": "LONG",
+            "confidence": "High",
+            "rationale": "test rationale",
+        })
+
+
 _SYM_A = "NIFTY 11 AUG 24600 CALL"
 _SYM_B = "BANKNIFTY 11 AUG 50000 PUT"
 
@@ -240,3 +260,38 @@ def test_decisions_queue(coordinator):
     # ... and it remains a plain, usable queue
     q.put("dummy")
     assert q.get_nowait() == "dummy"
+
+
+def test_llm_sink_persists_analyses(monkeypatch):
+    """LLMAnalysisProduced fold-backs must reach the injected llm_sink with
+    symbol, direction, confidence, and the enriched bar timestamp."""
+    monkeypatch.setattr("quant.coordinator.LiveGateway", _FakeGateway)
+    monkeypatch.setattr("quant.coordinator.MultiplexedMarketFeed", _FakeFeed)
+    persisted = []
+    c = QuantCoordinator(
+        market_data=object(),
+        inference=_FakeInference(),
+        config={"interval_seconds": 1},
+        llm_sink=persisted.append,
+    )
+    monkeypatch.setattr(c, "_scan", lambda: [_SYM_A])
+    c.start()
+    try:
+        deadline = time.monotonic() + 3.0
+        while not persisted and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert persisted, "expected LLM analysis to be persisted via sink"
+        row = persisted[0]
+        assert row["symbol"] == _SYM_A
+        assert row["direction"] == "LONG"
+        assert row["confidence"] == "High"
+        assert row["rationale"] == "test rationale"
+        # Enriched timestamps must be present (synthetic bars use unparseable
+        # "t0" times, so the exact epoch is not asserted here — the runtime
+        # helper unit test covers real ISO/epoch parsing).
+        assert isinstance(row.get("timestamp"), int)
+        assert row.get("created_at"), "created_at should be stamped by the engine"
+        assert row.get("input_prompt") is not None
+        assert row.get("raw_output") is not None
+    finally:
+        c.stop()

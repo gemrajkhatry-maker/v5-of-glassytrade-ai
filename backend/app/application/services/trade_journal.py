@@ -877,6 +877,7 @@ class TradeJournal:
         return {
             "symbol": exit_ev.get("symbol", ""),
             "side": side,
+            "size": self._to_float(entry_ev.get("size")) or self._to_float(exit_ev.get("size")) or None,
             "entry_time": entry_time,
             "exit_time": exit_time,
             "entry_price": entry_price,

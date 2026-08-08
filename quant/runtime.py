@@ -407,9 +407,11 @@ class QuantEngine:
         engine thread is untouched and async results only append afterwards.
         """
         try:
+            instruction = self._llm_instruction(state, bar)
+            input_text = self._llm_input(state, bar)
             raw = self._inference.predict(
-                instruction=self._llm_instruction(state, bar),
-                input_text=self._llm_input(state, bar),
+                instruction=instruction,
+                input_text=input_text,
                 temperature=0.3,
                 max_tokens=256,
                 prefill="{",
@@ -420,6 +422,15 @@ class QuantEngine:
         except Exception as exc:
             logger.warning("LLM fold-back failed for %s: %s", self.symbol, exc)
             return
+
+        # Stamp the analysis with its own bar time so the UI decision history
+        # shows real per-entry timestamps instead of a shared client-side
+        # Date.now() value, and so persisted rows keep the actual decision time.
+        ts_ms = self._bar_epoch_ms(bar.time)
+        analysis.setdefault("timestamp", ts_ms)
+        analysis.setdefault("created_at", self._ist_created_at(bar.time, ts_ms))
+        analysis.setdefault("input_prompt", input_text)
+        analysis.setdefault("raw_output", raw)
 
         self._emit(LLMAnalysisProduced(symbol=self.symbol, time=bar.time,
                                        analysis=analysis))
@@ -436,6 +447,39 @@ class QuantEngine:
             self._llm_history.append(analysis)
             if len(self._llm_history) >= 50:
                 del self._llm_history[0]
+
+    @staticmethod
+    def _bar_epoch_ms(bar_time: str) -> int:
+        """Parse bar.time into epoch milliseconds.
+
+        History bars carry IST ISO strings (``2026-08-07T22:46:12+05:30``);
+        live gateway bars carry epoch seconds as strings. Returns 0 when the
+        value cannot be parsed.
+        """
+        if not bar_time:
+            return 0
+        try:
+            from datetime import datetime as _dt
+            return int(
+                _dt.fromisoformat(bar_time.replace("Z", "+00:00")).timestamp() * 1000
+            )
+        except (TypeError, ValueError):
+            pass
+        try:
+            return int(float(bar_time) * 1000)
+        except (TypeError, ValueError):
+            return 0
+
+    @staticmethod
+    def _ist_created_at(bar_time: str, ts_ms: int) -> str:
+        """Format a bar time as the DB's ``YYYY-MM-DD HH:MM:SS`` IST string."""
+        from datetime import datetime as _dt
+        from quant.contracts.timezones import IST
+        if ts_ms:
+            return _dt.fromtimestamp(ts_ms / 1000, tz=IST).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+        return bar_time
 
     @staticmethod
     def _agent_decision(analysis: dict) -> dict:

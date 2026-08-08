@@ -213,6 +213,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     from quant.contracts.ports.market_data import IMarketData
     from quant.contracts.ports.broker import IBroker
     from quant.contracts.ports.llm_inference import ILLMInference
+    from quant.contracts.ports.storage import IStorage
 
     market_data = container.resolve(IMarketData)
     broker = container.resolve(IBroker)
@@ -224,6 +225,19 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
             exc_info=True,
         )
         llm_adapter = None
+
+    # Persist every live LLM fold-back to the decisions table so the UI history
+    # survives restarts. storage.save_llm_decision(symbol, direction, ...) matches
+    # the coordinator's llm_sink signature (single dict argument).
+    try:
+        storage = container.resolve(IStorage)
+        llm_sink = storage.save_llm_decision
+    except Exception:
+        logger.warning(
+            "QuantCoordinator: storage unavailable — LLM decisions not persisted",
+            exc_info=True,
+        )
+        llm_sink = None
 
     candle_minutes = int(getattr(config, "candle_timeframe_minutes", 5) or 5)
     coord_config = {
@@ -249,6 +263,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         inference=llm_adapter,
         broker=broker,
         config=coord_config,
+        llm_sink=llm_sink,
     )
 
 

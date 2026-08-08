@@ -421,7 +421,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     const entries: LLMHistoryEntry[] = state.history
                         .filter((d: any) => !!d && typeof d === 'object')
                         .map((d: any) => ({
-                            timestamp: typeof d.timestamp === 'number'
+                            timestamp: typeof d.timestamp === 'number' && d.timestamp > 0
                                 ? d.timestamp
                                 : new Date(d.created_at || d.time || Date.now()).getTime() || Date.now(),
                             direction: d.direction || 'FLAT',
@@ -616,7 +616,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                             const lastEntry = inst.llmHistory[inst.llmHistory.length - 1];
                             if (lastEntry && lastEntry.inputPrompt === newAi.inputPrompt) return inst.llmHistory;
                             const entry: LLMHistoryEntry = {
-                                timestamp: Date.now(),
+                                timestamp: newAi.timestamp || Date.now(),
                                 direction: newAi.direction,
                                 confidence: newAi.confidence,
                                 rationale: newAi.rationale,

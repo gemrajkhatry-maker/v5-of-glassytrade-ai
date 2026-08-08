@@ -79,7 +79,7 @@ class AuctionCoordinator:
 from quant.amt.session.scanner import OptionScannerService
 from quant.brokers.live_gateway import LiveGateway
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
-from quant.events import DecisionProduced, SignalApproved
+from quant.events import DecisionProduced, LLMAnalysisProduced, SignalApproved
 from quant.runtime import QuantEngine
 from quant.ws_adapter import view_state_to_ws
 
@@ -105,11 +105,16 @@ class QuantCoordinator:
     connection for every symbol (Dhan allows up to 1000 instruments per
     connection). Plus a shared decision queue."""
 
-    def __init__(self, market_data, inference=None, broker=None, config=None) -> None:
+    def __init__(self, market_data, inference=None, broker=None, config=None,
+                 llm_sink=None) -> None:
         self.market_data = market_data
         self.inference = inference
         self.broker = broker
         self.config = {**_DEFAULT_CONFIG, **(config or {})}
+        # Optional persistence sink — the backend injects storage.save_llm_decision
+        # so live LLM fold-backs get durable rows. Kept as a plain callable so the
+        # quant layer stays free of backend imports.
+        self._llm_sink = llm_sink
         self._feed = MultiplexedMarketFeed(market_data)
         self._engines: dict[str, QuantEngine] = {}
         self._gateways: dict[str, LiveGateway] = {}
@@ -186,6 +191,8 @@ class QuantCoordinator:
         )
         engine._bus.subscribe(DecisionProduced, self._on_decision)
         engine._bus.subscribe(SignalApproved, self._on_decision)
+        if self._llm_sink is not None:
+            engine._bus.subscribe(LLMAnalysisProduced, self._on_llm_analysis)
         thread = threading.Thread(
             target=engine.run, daemon=True, name=f"quant-{symbol}"
         )
@@ -196,6 +203,26 @@ class QuantCoordinator:
 
     def _on_decision(self, event) -> None:
         self._decisions.put(event)
+
+    def _on_llm_analysis(self, event) -> None:
+        """Persist a live LLM fold-back via the injected sink.
+
+        Runs on the engine's LLM-fold thread; the sink is a single small DB
+        write, so no extra queuing is needed. Enriched analyses carry
+        ``timestamp``/``created_at``/``input_prompt``/``raw_output`` set by
+        QuantEngine._schedule_llm.
+        """
+        if self._llm_sink is None:
+            return
+        try:
+            data = dict(event.analysis or {})
+            data.setdefault("symbol", event.symbol)
+            data.setdefault("created_at", event.time)
+            self._llm_sink(data)
+        except Exception:
+            logger.warning(
+                "LLM decision sink failed for %s", event.symbol, exc_info=True
+            )
 
     def _stop_engine(self, symbol: str) -> None:
         gateway = self._gateways.pop(symbol, None)

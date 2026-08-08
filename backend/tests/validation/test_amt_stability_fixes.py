@@ -403,34 +403,6 @@ class TestFootprintDeltaAlignment:
 
 
 # ===================================================================
-# TEST: Aggression Scorer direction_sign
-# ===================================================================
-
-
-class TestAggressionDirectionSign:
-    """Verify direction_sign correctly identifies bullish vs bearish."""
-
-    def test_bullish_signals_give_positive_direction(self):
-        scorer = AggressionScorer()
-        # Set majority of the 7 signals to positive
-        result = scorer.score(
-            footprint_confirmed=True,
-            cvd_confirmed=True,
-            big_trade_confirmed=True,
-            absorption_detected=True,
-        )
-        # 4 out of 7 signals are active (> 7/2 = 3.5) → bullish
-        assert result.direction_sign == 1
-
-    def test_empty_signals_give_negative_direction(self):
-        scorer = AggressionScorer()
-        result = scorer.score()
-        # With no signals, there are 0 bullish out of 7 total
-        # 0 > 7/2 is False → direction_sign = -1
-        assert result.direction_sign == -1
-
-
-# ===================================================================
 # TEST: PROBING Playbook Signal Generation
 # ===================================================================
 
