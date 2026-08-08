@@ -11,8 +11,8 @@ from quant.contracts.aggregates import Portfolio
 from quant.contracts.entities import Position
 from quant.contracts.enums import Side, Source
 from quant.contracts.value_objects import AMTResult
+from quant.amt.dto import amt_result_to_dto
 from app.infrastructure.serialization.schemas import (
-    amt_result_to_dto,
     portfolio_to_dto,
     position_to_dto,
 )
@@ -26,7 +26,7 @@ def test_amt_dto_drops_dead_fields():
         value_area_low=95,
         aggression=0.6,
     )
-    dto = amt_result_to_dto(result, llm_thinking="", llm_json="{}")
+    dto = amt_result_to_dto(result, llm_thinking="")
     for dead in (
         "devPoc",
         "devVah",
@@ -65,7 +65,7 @@ def test_amt_dto_drops_telemetry_only_fields():
         value_area_low=95,
         aggression=0.6,
     )
-    dto = amt_result_to_dto(result, llm_thinking="", llm_json="{}")
+    dto = amt_result_to_dto(result, llm_thinking="")
     telemetry = (
         "dayType",
         "liquiditySweep",
@@ -105,7 +105,7 @@ def test_amt_dto_keeps_frontend_rendered_fields():
         daily_poc=100,
         hourly_poc=101,
     )
-    dto = amt_result_to_dto(result, llm_thinking="", llm_json="{}")
+    dto = amt_result_to_dto(result, llm_thinking="")
     for keep in (
         "marketState",
         "poc",

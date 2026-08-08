@@ -14,10 +14,11 @@ from quant.inference.models import (
 )
 from quant.contracts.entities import Signal, Position
 from quant.contracts.aggregates import Portfolio
+from quant.amt.dto import amt_result_to_dto
 from app.infrastructure.serialization.schemas import (
     ohlc_to_dto, dto_to_ohlc, OHLCDataDTO,
     portfolio_to_dto, position_to_dto, signal_to_dto,
-    amt_result_to_dto, stats_to_dto, footprint_to_dto,
+    stats_to_dto, footprint_to_dto,
     dto_to_order_book, OrderBookDTO, OrderBookLevelDTO,
     dto_to_weights, ModelWeightsDTO,
     position_event_to_dto,

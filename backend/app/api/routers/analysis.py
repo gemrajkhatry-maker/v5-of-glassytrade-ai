@@ -7,9 +7,9 @@ from app.infrastructure.serialization.schemas import (
     AMTRequestDTO,
     PredictionRequestDTO,
     FootprintRequestDTO,
-    amt_result_to_dto,
     footprint_to_dto,
 )
+from quant.amt.dto import amt_result_to_dto
 
 router = APIRouter(prefix="/analysis", tags=["analysis"])
 

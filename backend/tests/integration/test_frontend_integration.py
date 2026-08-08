@@ -134,7 +134,7 @@ class TestDTOContract:
         assert "closedTrades" in dto  # camelCase
 
     def test_amt_result_dto_keys(self):
-        from app.infrastructure.serialization.schemas import amt_result_to_dto
+        from quant.amt.dto import amt_result_to_dto
 
         amt = MagicMock()
         amt.market_state = "BALANCED"
