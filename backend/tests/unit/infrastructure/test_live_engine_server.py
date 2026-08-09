@@ -6,8 +6,6 @@ from quant.brokers.gateway import Tick
 from quant.runtime import QuantEngine
 from quant.ws_adapter import view_state_to_ws
 
-from app.infrastructure.adapters.live_engine_server import run_live_engine  # noqa: F401
-
 
 class FakeGateway:
     def __init__(self, ticks):
