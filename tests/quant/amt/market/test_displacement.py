@@ -6,7 +6,7 @@ from quant.amt.market.displacement import (
     detect_acceptance,
     detect_displacement_leg,
 )
-from app.infrastructure.adapters.data_generator import generate_market_data
+from backend.tests.helpers.market_data import generate_market_data
 
 
 class TestDetectDisplacement:
