@@ -6,7 +6,7 @@ The only boundary faked is the broker, and only via PaperBrokerAdapter (the
 real in-process adapter used by paper mode) — no network.
 
 Coverage per component:
-  1a. Market data ingestion   -> data_generator.generate_market_data + OHLC invariants
+  1a. Market data ingestion   -> tests.helpers.market_data.generate_market_data + OHLC invariants
   1b. Indicator calculation   -> compute_atr (confirmation bundle), update_excursions
   1c. Signal generation       -> build_entry_signal (real SL/TP/grade pipeline)
   1d. Risk sizing             -> Portfolio.open_position (tiered risk sizing math)
