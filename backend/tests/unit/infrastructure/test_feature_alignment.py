@@ -58,7 +58,7 @@ def test_probability_feature_contract_metadata():
 
 
 def test_parse_symbol_metadata_call():
-    from app.application.utils import parse_symbol_metadata
+    from quant.amt.session.symbol_registry import parse_symbol_metadata
     meta = parse_symbol_metadata("NIFTY 27 MAR 23500 CALL", spot=23600.0)
     assert meta["option_type_flag"] == 1.0
     assert meta["strike"] == 23500.0
@@ -67,7 +67,7 @@ def test_parse_symbol_metadata_call():
 
 
 def test_parse_symbol_metadata_put():
-    from app.application.utils import parse_symbol_metadata
+    from quant.amt.session.symbol_registry import parse_symbol_metadata
     meta = parse_symbol_metadata("BANKNIFTY 27 MAR 50000 PUT", spot=49000.0)
     assert meta["option_type_flag"] == -1.0
     assert meta["strike"] == 50000.0
@@ -75,33 +75,33 @@ def test_parse_symbol_metadata_put():
 
 
 def test_parse_symbol_metadata_unknown():
-    from app.application.utils import parse_symbol_metadata
+    from quant.amt.session.symbol_registry import parse_symbol_metadata
     meta = parse_symbol_metadata("CRUDEOIL 17 MAR 6000 CALL", spot=5950.0)
     assert meta["option_type_flag"] == 1.0
     assert meta["strike"] == 6000.0
 
 
 def test_is_market_open_during_hours():
-    from app.application.utils import is_market_open
+    from quant.amt.session.symbol_registry import is_market_open
     # Wednesday 10:00 IST (04:30 UTC) — inside NSE window 09:15-15:15
     assert is_market_open("2026-02-25T04:30:00Z", exchange="NSE") is True
 
 
 def test_is_market_open_weekend():
-    from app.application.utils import is_market_open
+    from quant.amt.session.symbol_registry import is_market_open
     # Saturday — closed for both exchanges
     assert is_market_open("2026-02-28T04:30:00Z", exchange="NSE") is False
     assert is_market_open("2026-02-28T04:30:00Z", exchange="MCX") is False
 
 
 def test_is_market_open_after_close():
-    from app.application.utils import is_market_open
+    from quant.amt.session.symbol_registry import is_market_open
     # Wednesday 16:00 IST (10:30 UTC) — after NSE close at 15:15
     assert is_market_open("2026-02-25T10:30:00Z", exchange="NSE") is False
 
 
 def test_nse_close_at_1515():
-    from app.application.utils import is_market_open
+    from quant.amt.session.symbol_registry import is_market_open
     # NSE closes at 15:15 IST (09:45 UTC)
     # 15:14 IST = 09:44 UTC → open
     assert is_market_open("2026-02-25T09:44:00Z", exchange="NSE") is True
@@ -110,7 +110,7 @@ def test_nse_close_at_1515():
 
 
 def test_mcx_hours():
-    from app.application.utils import is_market_open
+    from quant.amt.session.symbol_registry import is_market_open
     # MCX opens 09:00 IST (03:30 UTC), closes 23:15 IST (17:45 UTC)
     # 09:01 IST = 03:31 UTC → open
     assert is_market_open("2026-02-25T03:31:00Z", exchange="MCX") is True
@@ -123,6 +123,6 @@ def test_mcx_hours():
 
 
 def test_is_market_open_parse_error_fails_closed():
-    from app.application.utils import is_market_open
+    from quant.amt.session.symbol_registry import is_market_open
     # Bad timestamp → fail-closed (returns False, not True)
     assert is_market_open("not-a-timestamp") is False
