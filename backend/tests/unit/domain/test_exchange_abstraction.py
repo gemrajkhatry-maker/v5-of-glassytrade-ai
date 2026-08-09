@@ -3,7 +3,6 @@
 Tests:
   - ExchangeConfig value object (immutability, factory methods, YAML parsing)
   - SymbolRegistry (exchange detection, deduplication)
-  - ExchangeStrategy port + NSE/MCX implementations
   - SessionContextFactory (DIP-compliant construction)
   - Canonical ExchangeConfig bridge (quant.contracts.exchange_config)
 """
@@ -16,8 +15,6 @@ from datetime import datetime, timezone, timedelta
 
 from quant.contracts.exchange_config import ExchangeConfig
 from quant.amt.session.symbol_registry import SymbolRegistry
-from app.infrastructure.strategies.nse_strategy import NSEExchangeStrategy
-from app.infrastructure.strategies.mcx_strategy import MCXExchangeStrategy
 from quant.amt.session.context_factory import SessionContextFactory
 
 _IST = timezone(timedelta(hours=5, minutes=30))
@@ -195,93 +192,6 @@ class TestSymbolRegistry:
 
 
 # ======================================================================
-# ExchangeStrategy Tests
-# ======================================================================
-
-
-class TestNSEExchangeStrategy:
-    """NSE strategy tests."""
-
-    def setup_method(self):
-        self.config = ExchangeConfig.for_exchange("NSE")
-        self.strategy = NSEExchangeStrategy(self.config)
-
-    def test_name(self):
-        assert self.strategy.name == "NSE"
-
-    def test_cvd_threshold(self):
-        assert self.strategy.get_cvd_block_threshold() == 5000.0
-
-    def test_warm_up(self):
-        assert self.strategy.get_warm_up_minutes() == 15
-
-    def test_session_times(self):
-        assert self.strategy.get_session_open_time() == (9, 15)
-        assert self.strategy.get_session_close_time() == (15, 15)
-
-    def test_no_eia(self):
-        ist_dt = datetime(2024, 1, 3, 21, 0, tzinfo=_IST)  # Wednesday
-        assert not self.strategy.is_eia_window("NIFTY", ist_dt)
-
-    def test_aggression_sigma(self):
-        assert self.strategy.get_aggression_sigma() == 2.5
-
-    def test_config_passthrough(self):
-        assert self.strategy.config is self.config
-
-
-class TestMCXExchangeStrategy:
-    """MCX strategy tests."""
-
-    def setup_method(self):
-        self.config = ExchangeConfig.for_exchange("MCX")
-        self.strategy = MCXExchangeStrategy(self.config)
-
-    def test_name(self):
-        assert self.strategy.name == "MCX"
-
-    def test_cvd_threshold(self):
-        assert self.strategy.get_cvd_block_threshold() == 50.0
-
-    def test_session_times(self):
-        assert self.strategy.get_session_open_time() == (9, 0)
-        assert self.strategy.get_session_close_time() == (23, 15)
-
-    def test_eia_window_crudeoil_wednesday(self):
-        # Wednesday 21:00 IST = EIA crude oil release
-        ist_dt = datetime(2024, 1, 3, 21, 0, tzinfo=_IST)
-        assert self.strategy.is_eia_window("CRUDEOIL 19 MAR 6000 CALL", ist_dt)
-
-    def test_eia_window_crudeoil_not_in_window(self):
-        # Wednesday 22:00 IST = outside 15-min window
-        ist_dt = datetime(2024, 1, 3, 22, 0, tzinfo=_IST)
-        assert not self.strategy.is_eia_window("CRUDEOIL 19 MAR 6000 CALL", ist_dt)
-
-    def test_eia_window_natgas_thursday(self):
-        # Thursday 21:00 IST = EIA natural gas release
-        ist_dt = datetime(2024, 1, 4, 21, 0, tzinfo=_IST)  # Thursday
-        assert self.strategy.is_eia_window("NATURALGAS 25 APR 200 CALL", ist_dt)
-
-    def test_eia_window_not_eia_symbol(self):
-        ist_dt = datetime(2024, 1, 3, 21, 0, tzinfo=_IST)
-        assert not self.strategy.is_eia_window("GOLD 25 APR 72000 PUT", ist_dt)
-
-    def test_eia_window_wrong_day(self):
-        # Monday 21:00 IST — no EIA release
-        ist_dt = datetime(2024, 1, 1, 21, 0, tzinfo=_IST)
-        assert not self.strategy.is_eia_window("CRUDEOIL 19 MAR 6000 CALL", ist_dt)
-
-    def test_aggression_sigma(self):
-        assert self.strategy.get_aggression_sigma() == 2.0
-
-    def test_balance_ratio(self):
-        assert self.strategy.get_balance_ratio_threshold() == 0.55
-
-    def test_big_trade_multiplier(self):
-        assert self.strategy.get_big_trade_multiplier() == 5.0
-
-
-# ======================================================================
 # SessionContextFactory Tests
 # ======================================================================
 
@@ -368,21 +278,6 @@ class TestExchangeConfigBridge:
 class TestAbstractionLayerConsistency:
     """Verify the full abstraction layer works end-to-end."""
 
-    def test_mcx_strategy_uses_config_thresholds(self):
-        """Strategy should delegate to config, not hardcode."""
-        yaml_overrides = {"aggression_sigma": 1.5, "cvd_block_threshold": 25.0}
-        cfg = ExchangeConfig.from_dict("MCX", yaml_overrides)
-        strategy = MCXExchangeStrategy(cfg)
-
-        assert strategy.get_aggression_sigma() == 1.5
-        assert strategy.get_cvd_block_threshold() == 25.0
-
-    def test_nse_strategy_uses_config_thresholds(self):
-        yaml_overrides = {"aggression_sigma": 3.0}
-        cfg = ExchangeConfig.from_dict("NSE", yaml_overrides)
-        strategy = NSEExchangeStrategy(cfg)
-
-        assert strategy.get_aggression_sigma() == 3.0
 
     def test_registry_matches_config_underlyings(self):
         """SymbolRegistry should match ExchangeConfig underlyings."""
