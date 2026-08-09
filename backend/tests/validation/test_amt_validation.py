@@ -201,32 +201,6 @@ class TestAggressionDetection:
 class TestGateLogic:
     """Verify entry gate correctly accepts/rejects scenarios."""
 
-    def test_no_trade_choppy_scenario(self):
-        """Choppy market should be rejected by gate."""
-        scenario = get_scenario_no_trade_choppy()
-        
-        try:
-            from quant.decision.gates.three_align import three_align_check
-            from quant.amt.analyzer import AMTAnalyzer
-            
-            analyzer = AMTAnalyzer()
-            ohlc = candles_to_ohlc(scenario.candles)
-            result = analyzer.analyze(ohlc)
-            
-            tick = ohlc[-1]
-            gate_passed, strong, second_drive = three_align_check(
-                data=ohlc,
-                amt_result=result,
-                tick=tick,
-                return_is_second_drive=True,
-            )
-            
-            print(f"✅ Choppy market gate: passed={gate_passed}, strong={strong}")
-            # In choppy market, gate should NOT pass (no clear setup)
-            # But this depends on current market conditions
-        except ImportError:
-            pytest.skip("Required modules not available")
-
     def test_trend_scenario_has_correct_state(self):
         """Trend scenario should have IMBALANCED state."""
         scenario = get_scenario_trend_long_at_lvn()

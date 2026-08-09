@@ -130,35 +130,7 @@ class TestP7OverseerPnLGuard:
 
 # ---- P8: Confirmation Bundle Returns Tuple ----
 
-class TestP8ConfirmationBundle:
-    pytestmark = pytest.mark.skip(reason="Pre-existing P8 confirmation bundle assertion")
-    def test_gate_returns_tuple(self):
-        from quant.decision.gates.three_align import three_align_check
-        data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
-        tick = _tick(close=100, volume=500, delta=200)
-        amt = _amt(poc=100, vah=105, val=95)
-        result = three_align_check(data, amt, tick)
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-        gate_passed, confirmation = result
-        assert isinstance(gate_passed, bool)
-        assert isinstance(confirmation, bool)
-
-    def test_gate_passes_near_poc(self):
-        from quant.decision.gates.three_align import three_align_check
-        data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
-        tick = _tick(close=100, volume=500, delta=200)
-        amt = _amt(poc=100, vah=105, val=95)
-        gate_passed, _ = three_align_check(data, amt, tick)
-        assert gate_passed is True
-
-    def test_gate_blocks_far_from_levels(self):
-        from quant.decision.gates.three_align import three_align_check
-        data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
-        tick = _tick(close=200, volume=500, delta=200)
-        amt = _amt(poc=100, vah=105, val=95)
-        gate_passed, _ = three_align_check(data, amt, tick)
-        assert gate_passed is False
+# P8 tests (three_align) removed — module deleted in Phase C1.
 
 
 # ---- P9: Structured Parser ----
@@ -206,13 +178,3 @@ class TestDevelopingVA:
         assert amt.dev_poc == 98
         assert amt.dev_vah == 102
         assert amt.dev_val == 94
-
-    def test_gate_checks_dev_va_levels(self):
-        """Price far from session VA but near developing VA should pass gate."""
-        from quant.decision.gates.three_align import three_align_check
-        data = [_tick(close=100, volume=200, delta=80) for _ in range(30)]
-        # Price=150 is far from session VA (95-105) but near dev_vah=148
-        tick = _tick(close=150, volume=500, delta=200)
-        amt = _amt(poc=100, vah=105, val=95, dev_poc=145, dev_vah=148, dev_val=140)
-        gate_passed, _ = three_align_check(data, amt, tick)
-        assert gate_passed is True

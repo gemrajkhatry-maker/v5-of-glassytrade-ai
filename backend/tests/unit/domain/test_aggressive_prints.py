@@ -10,7 +10,6 @@ from quant.amt.analyzer import (
     find_aggressive_prints,
     AMTConfig,
 )
-from quant.decision.gates.signal_builder import sl_from_aggressive_print
 from quant.contracts.value_objects import OHLC, AggressivePrint, AMTResult
 
 
@@ -316,56 +315,3 @@ class TestEMAVarianceWarmUp:
         data[20] = _candle(volume=135, delta=50, time=data[20].time)
         prints = find_aggressive_prints(data)
         assert len(prints) == 0
-
-
-# ─── sl_from_aggressive_print() ──────────────────────────────────
-
-
-class TestSlFromAggressivePrint:
-    def test_picks_nearest_sell_print_for_long(self):
-        """For LONG: pick the highest (nearest) SELL print below price."""
-        prints = [
-            AggressivePrint(price=99.60, time="t1", side="SELL", volume=100, delta=-50),
-            AggressivePrint(price=99.70, time="t2", side="SELL", volume=100, delta=-50),
-            AggressivePrint(price=99.80, time="t3", side="SELL", volume=100, delta=-50),
-        ]
-        amt = _amt_result_with_prints(prints)
-        tick = _candle(price=100.0)
-        sl = sl_from_aggressive_print(amt, tick, is_buy=True, buffer=0.1)
-        assert sl is not None
-        # Should pick 99.80 (nearest), not 99.60 (furthest)
-        assert sl == pytest.approx(99.80 - 0.1)
-
-    def test_picks_nearest_buy_print_for_short(self):
-        """For SHORT: pick the lowest (nearest) BUY print above price."""
-        prints = [
-            AggressivePrint(price=100.10, time="t1", side="BUY", volume=100, delta=50),
-            AggressivePrint(price=100.20, time="t2", side="BUY", volume=100, delta=50),
-            AggressivePrint(price=100.40, time="t3", side="BUY", volume=100, delta=50),
-        ]
-        amt = _amt_result_with_prints(prints)
-        tick = _candle(price=100.0)
-        sl = sl_from_aggressive_print(amt, tick, is_buy=False, buffer=0.1)
-        assert sl is not None
-        # Should pick 100.10 (nearest), not 100.40 (furthest)
-        assert sl == pytest.approx(100.10 + 0.1)
-
-    def test_returns_none_when_no_opposing_prints(self):
-        prints = [
-            AggressivePrint(price=101.0, time="t1", side="BUY", volume=100, delta=50),
-        ]
-        amt = _amt_result_with_prints(prints)
-        tick = _candle(price=100.0)
-        # Looking for SELL prints below for LONG — none exist
-        sl = sl_from_aggressive_print(amt, tick, is_buy=True, buffer=0.1)
-        assert sl is None
-
-    def test_respects_proximity_filter(self):
-        """Prints > 0.5% away from price should be ignored."""
-        prints = [
-            AggressivePrint(price=95.0, time="t1", side="SELL", volume=100, delta=-50),
-        ]
-        amt = _amt_result_with_prints(prints)
-        tick = _candle(price=100.0)  # 95.0 is 5% away, > 0.5% proximity
-        sl = sl_from_aggressive_print(amt, tick, is_buy=True, buffer=0.1)
-        assert sl is None

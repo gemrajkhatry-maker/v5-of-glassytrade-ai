@@ -31,11 +31,6 @@ from quant.amt.market.structure import (
     MarketStructureClassifier,
     MarketStructure,
 )
-from quant.decision.gates.legacy_gate_pipeline import (
-    GatePipeline,
-    GateContext,
-    GateReason,
-)
 from quant.contracts.enums import MarketState
 from quant.contracts.value_objects import OHLC, VolumeProfileLevel
 
@@ -230,35 +225,6 @@ class TestProbingRangeContradiction:
         market_state = MarketState.BALANCED
         assert market_state == MarketState.BALANCED
         assert balance_structure.state == "BALANCE"
-
-
-# ===================================================================
-# TEST 4: PROBING Playbook
-# ===================================================================
-
-
-class TestProbingPlaybook:
-    """Verify PROBING state can generate signals with high aggression."""
-
-    def test_gate4_allows_with_high_aggression(self):
-        """IMBALANCED with high aggression passes the 5-gate pipeline."""
-        pipeline = GatePipeline()
-        ctx = GateContext(
-            market_state=MarketState.IMBALANCED,
-            aggression_score=3.5,  # above 2.0 threshold
-            candle_count=100,
-            nearest_level=100.0,
-            distance_to_level_ticks=1.0,
-            drive_number=2,
-            drive_entry_valid=True,
-            cushion_ticks=5.0,
-            r_r_ratio=2.0,
-            position_size_ok=True,
-        )
-        result = pipeline.evaluate(ctx)
-        # All 5 gates pass (aggression proxy is folded into gate 2/4)
-        assert result.passed is True
-        assert result.gate_count == 5
 
 
 # ===================================================================
