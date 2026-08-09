@@ -1,40 +1,42 @@
-"""PHASE 1 — LEAF COMPONENT TESTS (independent of pre-existing tests).
+"""PHASE 1 — LEAF COMPONENT TESTS (rewritten against the LIVE pipeline, 2026-08-09).
 
-Every test below calls the REAL production class/function with deterministic
-inputs and asserts deterministic outputs.  No internal logic is mocked.
-The only boundary faked is the broker, and only via PaperBrokerAdapter (the
-real in-process adapter used by paper mode) — no network.
+Originally tested legacy dead modules (confirmation_bundle.compute_atr,
+gates.signal_builder.build_entry_signal, execution.exit_engine). Those were
+deleted in Phase C (C1/C2). This rewrite exercises the canonical runtime path:
+live `quant.decision.signal_builder.SignalBuilder`, live
+`quant.execution.exits.ExitEngine`, live `Portfolio`, and the real paper broker
+adapter. Leaves with no live equivalent (standalone ATR) are dropped.
 
 Coverage per component:
   1a. Market data ingestion   -> tests.helpers.market_data.generate_market_data + OHLC invariants
-  1b. Indicator calculation   -> compute_atr (confirmation bundle), update_excursions
-  1c. Signal generation       -> build_entry_signal (real SL/TP/grade pipeline)
+  1b. Indicator/excursions    -> update_excursions (live exit_rules MAE/MFE tracking)
+  1c. Signal generation       -> SignalBuilder.build (real SL/TP/grade pipeline)
   1d. Risk sizing             -> Portfolio.open_position (tiered risk sizing math)
   1e. OMS                     -> Portfolio order lifecycle + ExitEngine stop-loss rule
   1f. Broker adapter          -> PaperBrokerAdapter.execute_order / cancel_order
 """
 from __future__ import annotations
 
-import math
+import pytest
 from decimal import Decimal
 
-import pytest
-
-pytest.skip(
-    "C4-deferred: rewrite against live pipeline (confirmation_bundle + gates.signal_builder "
-    "deleted in C1; full rewrite planned in C4)",
-    allow_module_level=True,
-)
-
 from tests.helpers.market_data import generate_market_data
-from quant.contracts.value_objects import OHLC, AMTResult
+from quant.auction_state import AuctionState
+from quant.contracts.value_objects import OHLC
 from quant.contracts.entities import Position, Signal
 from quant.contracts.aggregates import Portfolio, INITIAL_CAPITAL
 from quant.contracts.enums import SignalType, SetupType, Source, Side, PositionStatus
-from quant.decision.gates.confirmation_bundle import compute_atr
+from quant.decision.context import DecisionContext
+from quant.decision.result import GateResult
+from quant.decision.signal_builder import SignalBuilder
 from quant.execution.exit_rules import update_excursions
-from quant.decision.gates.signal_builder import build_entry_signal
-from quant.execution.exit_engine import ExitEngine, ExitReason
+from quant.execution.exits import ExitEngine as LiveExitEngine
+from quant.execution.order import Order as LiveOrder
+from quant.execution.order import Position as LivePosition
+from quant.location import LocationState
+from quant.order_flow import OrderFlowState
+from quant.volume_profile import VolumeProfile
+from quant.vwap import VWAPState
 from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 
 
@@ -50,6 +52,34 @@ def _signal(price=100.0, sl=95.0, tp=110.0, is_buy=True, source=Source.AMT, **me
         source=source,
         metadata=meta or None,
     )
+
+
+def _state(close, val, step, nearest) -> AuctionState:
+    return AuctionState(
+        time="2026-08-05T09:20:00Z", close=close,
+        volume_profile=VolumeProfile(
+            levels=(), poc=close, vah=val + 2 * step, val=val, step=step,
+            total_volume=100),
+        vwap=VWAPState(value=close, upper_1=close + 1, lower_1=close - 1,
+                       upper_2=close + 2, lower_2=close - 2, std=1,
+                       deviation_sigmas=0),
+        order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=0,
+                                  cvd_divergence="NONE", aggressive_prints=()),
+        absorption=None,
+        location=LocationState(ib_high=close + 5, ib_low=close - 5,
+                               ib_complete=True, zone="INSIDE_VA",
+                               nearest_level=nearest, distance_to_level=0),
+        triple_a_phase="AGGRESSION", triple_a_signal="LONG",
+    )
+
+
+def _ctx(state, direction="LONG") -> DecisionContext:
+    return DecisionContext(state=state, bar=None, symbol="NIFTY",
+                           agent_direction=direction, agent_probability=0.7)
+
+
+def _pass_results():
+    return [GateResult(i, True) for i in range(1, 6)]
 
 
 # ---------------------------------------------------------------------------
@@ -82,17 +112,11 @@ class TestMarketDataIngestion:
 
 
 # ---------------------------------------------------------------------------
-# 1b. Indicator calculation
+# 1b. Excursion tracking (live exit_rules.update_excursions)
 # ---------------------------------------------------------------------------
 
 
 class TestIndicators:
-    def test_atr_positive_finite(self):
-        data = generate_market_data(days=50, start_price=100.0, regime="volatile")
-        atr = compute_atr(data, 14)
-        assert atr > 0
-        assert math.isfinite(atr)
-
     def test_excursions_track_mae_mfe(self):
         pos = Position(
             side=Side.LONG, entry_price=Decimal("100"), size=Decimal("1"),
@@ -103,63 +127,64 @@ class TestIndicators:
         assert float(pos.mae) == pytest.approx(5.0)
         assert float(pos.mfe) == pytest.approx(8.0)
 
+    def test_short_position_excursion_sign(self):
+        pos = Position(
+            side=Side.SHORT, entry_price=Decimal("100"), size=Decimal("1"),
+            stop_loss=Decimal("105"), take_profit=Decimal("90"),
+        )
+        update_excursions(pos, 103.0)  # adverse move of 3
+        update_excursions(pos, 96.0)   # favorable move of 4
+        assert float(pos.mae) == pytest.approx(3.0)
+        assert float(pos.mfe) == pytest.approx(4.0)
+
 
 # ---------------------------------------------------------------------------
-# 1c. Signal generation (real SL/TP builder)
+# 1c. Signal generation (live SignalBuilder)
 # ---------------------------------------------------------------------------
 
 
 class TestSignalGeneration:
-    def _amt(self) -> AMTResult:
-        return AMTResult(
-            market_state="BALANCED",
-            poc=102.0,
-            value_area_high=105.0,
-            value_area_low=99.0,
-            prior_poc=101.0,
-            session_vwap=101.5,
-            npoc_above=0.0,
-            npoc_below=0.0,
-            aggressive_prints=(),
-            profile_shape="D",
-            setup="MEAN_REVERSION",
-            ib_high=106.0,
-            ib_low=98.0,
-            ib_complete=True,
-        )
-
     def test_long_signal_builds_valid_rr(self):
-        tick = OHLC.create("2026-08-05T09:20:00Z", 100.0, 101.0, 99.5, 100.5, 1200, vwap=100.8)
-        sig = build_entry_signal(
-            direction="LONG",
-            tick=tick,
-            amt_result=self._amt(),
-            ai_result={"rationale": "phase1", "market_state": "BALANCED"},
-            setup_type=SetupType.MEAN_REVERSION,
-            data=[tick],
-            confidence="High",
-            tick_size=0.05,
-        )
-        assert sig.type == SignalType.BUY
-        assert float(sig.price) == pytest.approx(100.5)
-        assert float(sig.stop_loss) < float(sig.price) < float(sig.take_profit)
-        assert sig.metadata.get("scale_in") is True
-        assert ExitEngine.is_valid_rr(float(sig.price), float(sig.stop_loss), float(sig.take_profit)) is True
+        sb = SignalBuilder()
+        # close 100, VAL 98, step 1 -> SL 97, TP 106 (2R), RR 2.0
+        state = _state(close=100.0, val=98.0, step=1.0, nearest=98.0)
+        sig = sb.build(_ctx(state, "LONG"), _pass_results())
+        assert sig is not None
+        assert sig.type == "LONG"
+        assert sig.entry == pytest.approx(100.0)
+        assert sig.sl < sig.entry < sig.tp
+        assert sig.sl == pytest.approx(97.0)
+        assert sig.tp == pytest.approx(106.0)
+        assert sig.rr == pytest.approx(2.0)
 
     def test_short_signal_is_sell(self):
-        tick = OHLC.create("2026-08-05T09:20:00Z", 100.0, 101.0, 99.5, 99.5, 1200, vwap=100.8)
-        sig = build_entry_signal(
-            direction="SHORT",
-            tick=tick,
-            amt_result=self._amt(),
-            ai_result={"rationale": "phase1", "market_state": "BALANCED"},
-            setup_type=SetupType.MEAN_REVERSION,
-            data=[tick],
-            confidence="Medium",
-            tick_size=0.05,
-        )
-        assert sig.type == SignalType.SELL
-        assert float(sig.stop_loss) > float(sig.price) > float(sig.take_profit)
+        sb = SignalBuilder()
+        # close 100, VAH 102, step 1 -> SL 103, TP 94 (2R)
+        state = _state(close=100.0, val=98.0, step=1.0, nearest=102.0)
+        sig = sb.build(_ctx(state, "SHORT"), _pass_results())
+        assert sig is not None
+        assert sig.type == "SHORT"
+        assert sig.sl > sig.entry > sig.tp
+        assert sig.sl == pytest.approx(103.0)
+        assert sig.tp == pytest.approx(94.0)
+
+    def test_thin_stop_rejected(self):
+        sb = SignalBuilder()
+        # entry 104.92, SL at VAL-step = 104.90 (~0.02% away) -> rejected.
+        state = _state(close=104.92, val=104.91, step=0.01, nearest=104.9)
+        assert sb.build(_ctx(state, "LONG"), _pass_results()) is None
+
+    def test_failing_gate_returns_none(self):
+        sb = SignalBuilder()
+        state = _state(close=100.0, val=98.0, step=1.0, nearest=98.0)
+        results = [GateResult(i, i != 3) for i in range(1, 6)]  # gate 3 fails
+        assert sb.build(_ctx(state, "LONG"), results) is None
+
+    def test_size_clamped_to_max(self):
+        sb = SignalBuilder()
+        qty = sb.size(equity=100_000.0, entry=100.0, sl=99.9,
+                      risk_per_trade_pct=0.01)
+        assert qty == 1000  # MAX_POSITION_QUANTITY
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +223,7 @@ class TestRiskSizing:
 
 
 # ---------------------------------------------------------------------------
-# 1e. OMS — order lifecycle
+# 1e. OMS — order lifecycle (Portfolio + live ExitEngine)
 # ---------------------------------------------------------------------------
 
 
@@ -216,17 +241,34 @@ class TestOMS:
         assert len(p.positions) == 0
         assert len(p.closed_trades) == 1
 
-    def test_exit_engine_stop_loss_signal(self):
-        engine = ExitEngine()
+    def test_live_exit_engine_sl_signal(self):
         sig = _signal(price=100, sl=95, tp=120)
-        pos = Position.from_signal(sig, "NIFTY", Decimal("10"))
-        pos.entry_time = "2026-08-05T09:00:00Z"
-        engine.register_position("P1", "NIFTY", "LONG", 100, 95, 120)
-        exit_sig = engine.check_position(
-            pos, current_price=94.0, current_time=9999999999.0
-        )
-        assert exit_sig is not None
-        assert exit_sig.reason == ExitReason.STOP_LOSS
+        live_sig = type("LiveSig", (), {
+            "entry": 100.0, "sl": 95.0, "tp": 120.0, "rr": 2.0,
+            "confidence": 0.8, "symbol": "NIFTY", "timestamp": "t0",
+            "type": "LONG",
+        })()
+        pos = LivePosition(order=LiveOrder(live_sig, 10),
+                           open_price=100.0, open_time="t0", size=10)
+        engine = LiveExitEngine()
+        state = _state(close=94.0, val=98.0, step=1.0, nearest=98.0)
+        dec = engine.evaluate(pos, state, bar_index=5)
+        assert dec.should_exit
+        assert dec.reason == "SL"
+
+    def test_live_exit_engine_holds_in_range(self):
+        sig = _signal(price=100, sl=95, tp=120)
+        live_sig = type("LiveSig", (), {
+            "entry": 100.0, "sl": 95.0, "tp": 120.0, "rr": 2.0,
+            "confidence": 0.8, "symbol": "NIFTY", "timestamp": "t0",
+            "type": "LONG",
+        })()
+        pos = LivePosition(order=LiveOrder(live_sig, 10),
+                           open_price=100.0, open_time="t0", size=10)
+        engine = LiveExitEngine(time_stop_bars=30)
+        state = _state(close=101.0, val=98.0, step=1.0, nearest=98.0)
+        dec = engine.evaluate(pos, state, bar_index=5)
+        assert not dec.should_exit
 
     def test_closed_trade_accounts_commission(self):
         p = Portfolio.create_default()

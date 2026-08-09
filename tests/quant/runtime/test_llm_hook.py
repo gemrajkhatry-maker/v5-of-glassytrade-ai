@@ -6,7 +6,7 @@ bar/decision trace."""
 import json
 import time
 
-from quant.brokers.synthetic import SyntheticGateway
+from tests.helpers.synthetic import SyntheticGateway
 from quant.events import (
     AgentDecisionProduced,
     LLMAnalysisProduced,

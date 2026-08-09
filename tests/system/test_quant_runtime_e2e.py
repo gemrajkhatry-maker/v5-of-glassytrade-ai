@@ -8,7 +8,7 @@ phase IS the phase the LONG fired in — the projected state is the WS state the
 frontend would receive at the moment of the signal.
 """
 
-from quant.brokers.synthetic import SyntheticGateway
+from tests.helpers.synthetic import SyntheticGateway
 from quant.runtime import QuantEngine
 from quant.ws_adapter import view_state_to_ws
 from tests.quant.runtime.test_runtime import _ticks

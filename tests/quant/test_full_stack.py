@@ -4,7 +4,7 @@ signal -> OMS open -> exit engine -> OMS close -> risk record."""
 
 from quant.bars import Bar
 from quant.brokers.gateway import Tick
-from quant.brokers.synthetic import SyntheticGateway
+from tests.helpers.synthetic import SyntheticGateway
 from quant.coordinator import AuctionCoordinator
 from quant.decision.context import DecisionContext
 from quant.decision.pipeline import GatePipeline

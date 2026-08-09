@@ -5,7 +5,7 @@ OMS -> exit -> risk -> journal, all driven deterministically by the engine."""
 import pytest
 
 from quant.brokers.gateway import Tick
-from quant.brokers.synthetic import SyntheticGateway
+from tests.helpers.synthetic import SyntheticGateway
 from quant.decision.decision_service import QuantDecision
 from quant.decision.signal_builder import MAX_POSITION_QUANTITY, Signal
 from quant.events import PositionOpened, SignalApproved

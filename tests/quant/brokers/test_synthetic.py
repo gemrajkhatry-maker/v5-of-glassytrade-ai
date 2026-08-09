@@ -1,7 +1,7 @@
 # tests/quant/brokers/test_synthetic.py
 from quant.bars import Bar
 from quant.brokers.gateway import Tick
-from quant.brokers.synthetic import SyntheticGateway
+from tests.helpers.synthetic import SyntheticGateway
 
 
 def test_replays_ticks_in_order():

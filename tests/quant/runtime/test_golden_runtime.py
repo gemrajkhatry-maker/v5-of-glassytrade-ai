@@ -7,7 +7,7 @@ Reuses the exact ``_ticks()`` fixture from the runtime test so this suite
 exercises the same AGGRESSION-LONG pipeline as ``test_runtime.py``.
 """
 
-from quant.brokers.synthetic import SyntheticGateway
+from tests.helpers.synthetic import SyntheticGateway
 from quant.persistence import Journal
 from quant.runtime import QuantEngine
 from quant.ws_adapter import view_state_to_ws

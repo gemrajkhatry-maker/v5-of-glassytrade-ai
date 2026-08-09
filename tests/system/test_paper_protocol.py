@@ -25,7 +25,7 @@ from collections import Counter
 
 from quant.bars import Bar as _Bar
 from quant.brokers.gateway import Tick
-from quant.brokers.synthetic import SyntheticGateway
+from tests.helpers.synthetic import SyntheticGateway
 from quant.events import (
     AuctionUpdated,
     BarClosed,
