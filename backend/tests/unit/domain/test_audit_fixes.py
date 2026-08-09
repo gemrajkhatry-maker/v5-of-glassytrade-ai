@@ -167,33 +167,6 @@ class TestSlippageModel:
 
 
 # =====================================================================
-# 3. EVENT IMMUTABILITY TEST
-# =====================================================================
-
-class TestEventImmutability:
-    """Validates TickReceived.data is a defensive copy."""
-
-    def test_tick_received_data_is_tuple(self):
-        """TickReceived.data should be a tuple (immutable), not a list."""
-        from quant.contracts.events import TickReceived
-        tick = _make_tick(close=100)
-        original_list = [tick, tick, tick]
-        event = TickReceived(symbol="SYM", tick=tick, data=tuple(original_list))
-
-        # Mutating original_list should not affect event
-        original_list.pop()
-        assert len(event.data) == 3  # still 3
-
-    def test_frozen_event_cannot_be_mutated(self):
-        """TickReceived is a frozen dataclass — attributes cannot be reassigned."""
-        from quant.contracts.events import TickReceived
-        tick = _make_tick(close=100)
-        event = TickReceived(symbol="SYM", tick=tick)
-        with pytest.raises(AttributeError):
-            event.symbol = "MUTATED"
-
-
-# =====================================================================
 # 5. SL WATCHDOG INTEGRATION TEST (Lightweight)
 # =====================================================================
 

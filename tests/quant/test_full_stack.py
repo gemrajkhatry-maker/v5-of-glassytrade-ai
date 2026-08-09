@@ -2,8 +2,6 @@
 """Full-stack lifecycle: ticks -> bars -> AuctionState -> journal -> gates ->
 signal -> OMS open -> exit engine -> OMS close -> risk record."""
 
-from quant.advisory.entry_journal import EntryJournal
-from quant.advisory.chat import ChatClient
 from quant.bars import Bar
 from quant.brokers.gateway import Tick
 from quant.brokers.synthetic import SyntheticGateway
@@ -16,9 +14,14 @@ from quant.execution.oms import PaperOMS
 from quant.execution.risk import SessionRisk
 
 
-class FakeChat:
-    def complete(self, messages, max_tokens=200):
-        return '{"direction":"LONG","confidence":0.7,"rationale":"journaled"}'
+class _StubJournal:
+    """In-test stub replacing the dead advisory.entry_journal module."""
+
+    def __init__(self):
+        self.entries = []
+
+    def analyze(self, state, symbol):
+        self.entries.append(type("Entry", (), {"decision": "LONG"})())
 
 
 def _ticks():
@@ -55,7 +58,7 @@ def test_full_stack_lifecycle():
     oms = PaperOMS()
     exits = ExitEngine(time_stop_bars=4)
     risk = SessionRisk()
-    journal = EntryJournal(FakeChat())
+    journal = _StubJournal()
 
     position = None
     entry_step = 0

@@ -292,7 +292,7 @@ class TestAbstractionLayerConsistency:
             assert reg.exchange_for(f"{underlying} 27 FEB 25500 CALL") == "NSE"
 
     def test_di_container_wiring(self):
-        """DIContainer should NOT register the dead exchange-strategy port."""
+        """DIContainer should compose successfully without the dead exchange-strategy port."""
         from app.application.di.composition_root import compose_container
         from app.config import settings
 
@@ -300,11 +300,8 @@ class TestAbstractionLayerConsistency:
         config = mode.system_config if mode is not None else None
         container = compose_container(config)
 
-        from quant.contracts.ports import IExchangeStrategy
-
-        assert not container.has(IExchangeStrategy)
-
-        # Verify the container was created successfully
+        # The dead exchange-strategy port was deleted in Phase C3 — container
+        # composition is the assertion now.
         assert container is not None
 
     def test_no_domain_imports_config(self):
