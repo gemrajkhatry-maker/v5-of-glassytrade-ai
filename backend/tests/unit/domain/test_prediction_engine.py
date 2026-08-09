@@ -5,7 +5,7 @@ from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
 pytestmark = pytest.mark.skip(reason="Requires additional stubbed infrastructure — planned")
 from quant.inference.models import ModelWeights
 from quant.inference.prediction import PredictionEngine
-from app.infrastructure.adapters.data_generator import generate_market_data
+from tests.helpers.market_data import generate_market_data
 
 
 class TestPredictionEngine:

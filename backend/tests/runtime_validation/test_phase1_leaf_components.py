@@ -20,7 +20,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.infrastructure.adapters.data_generator import generate_market_data
+from tests.helpers.market_data import generate_market_data
 from quant.contracts.value_objects import OHLC, AMTResult
 from quant.contracts.entities import Position, Signal
 from quant.contracts.aggregates import Portfolio, INITIAL_CAPITAL

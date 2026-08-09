@@ -16,7 +16,7 @@ from quant.amt.analyzer import (
 )
 from quant.amt import compute as mc
 from quant.contracts.value_objects import VolumeProfileLevel
-from app.infrastructure.adapters.data_generator import generate_market_data
+from tests.helpers.market_data import generate_market_data
 
 
 def _make_candle(

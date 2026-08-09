@@ -6,7 +6,7 @@ import pytest
 from quant.contracts.value_objects import OHLC
 from quant.amt.orderflow.cvd import CVDTracker
 from quant.amt.analyzer import AMTAnalyzer
-from app.infrastructure.adapters.data_generator import generate_market_data
+from tests.helpers.market_data import generate_market_data
 
 
 def _candle(close: float, time: str, delta: float = 10.0,
