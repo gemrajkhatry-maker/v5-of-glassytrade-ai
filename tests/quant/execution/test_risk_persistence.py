@@ -1,0 +1,64 @@
+import json
+from quant.execution.risk import SessionRisk
+
+
+class MemKV:
+    """Test double mimicking the real Database.kv_set/kv_get contract:
+    kv_set JSON-encodes dict/list values (see database.py:850-852) and
+    kv_get returns the stored string."""
+    def __init__(self): self.m = {}
+    def kv_set(self, k, v):
+        if isinstance(v, (dict, list, tuple)):
+            v = json.dumps(v)
+        self.m[k] = v
+    def kv_get(self, k): return self.m.get(k)
+
+
+def test_risk_persists_across_restarts():
+    kv = MemKV()
+    r1 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10")
+    r1.record_trade(-1000.0)
+    r1.record_trade(-2000.0)  # -3000 total, default max_daily_loss is 3% of 1M = 30000, so not halted yet
+
+    r2 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10")
+    assert r2.state().daily_pnl == -3000.0
+    assert r2.state().consecutive_losses == 2
+    assert r2.state().halted is False
+
+
+def test_halted_state_persists_and_refuses_new_trades():
+    kv = MemKV()
+    r1 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10",
+                     max_daily_loss_pct=0.005, starting_equity=1_000_000.0)
+    r1.record_trade(-6000.0)   # exceeds 0.5% of 1M = 5000 -> halted
+    assert r1.state().halted is True
+
+    r2 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10",
+                     max_daily_loss_pct=0.005, starting_equity=1_000_000.0)
+    assert r2.state().halted is True
+    # After restart, a further loss is NOT counted (trading must be halted).
+    r2.record_trade(-50000.0)
+    assert r2.state().daily_pnl == -6000.0
+
+
+def test_new_session_date_resets_state():
+    kv = MemKV()
+    r1 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10")
+    r1.record_trade(-1000.0)
+    r2 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-11")  # new day
+    assert r2.state().daily_pnl == 0.0
+    assert r2.state().halted is False
+
+
+def test_no_storage_is_noop():
+    r = SessionRisk()
+    r.record_trade(-1000.0)  # must not raise
+    assert r.state().daily_pnl == -1000.0
+
+
+def test_corrupt_storage_falls_back_to_fresh_state():
+    kv = MemKV()
+    kv.m["daily_risk:NIFTY:2026-08-10"] = "{not-json"
+    r = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10")
+    assert r.state().daily_pnl == 0.0
+    assert r.state().halted is False
