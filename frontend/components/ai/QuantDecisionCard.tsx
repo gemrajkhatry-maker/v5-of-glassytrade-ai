@@ -50,10 +50,10 @@ const QuantDecisionCard = React.memo<QuantDecisionCardProps>(({ quantDecision })
                         {quantDecision.gateResults.map(g => (
                             <div
                                 key={g.gate}
-                                title={`Gate ${g.gate}: ${g.reason || (g.passed ? 'passed' : 'blocked')}`}
+                                title={`Gate ${g.gate}${g.name ? ` (${g.name})` : ''}: ${g.reason || (g.passed ? 'passed' : 'blocked')}`}
                                 className={`rounded-sm border px-1 py-1 text-center ${g.passed ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-rose-500/40 bg-rose-500/10 text-rose-400'}`}
                             >
-                                <div className="text-[7px] font-bold leading-none">G{g.gate}</div>
+                                <div className="text-[7px] font-bold leading-none">{g.name ?? `G${g.gate}`}</div>
                                 <div className="text-[9px] font-bold leading-tight mt-0.5">{g.passed ? 'PASS' : 'BLOCK'}</div>
                             </div>
                         ))}
