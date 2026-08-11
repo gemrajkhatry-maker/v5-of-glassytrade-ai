@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
+import quant.decision.signal_builder as sb_mod
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import SignalBuilder
@@ -25,10 +26,7 @@ def _ctx(**kw):
         triple_a_phase="AGGRESSION", triple_a_signal=kw.get("triple_a_signal", "LONG"),
     )
     return DecisionContext(state=state, bar=None, symbol="SYM",
-                           agent_direction=kw.get("direction", "LONG"), agent_probability=0.7,
-                           prior_poc=kw.get("prior_poc", 0.0),
-                           npoc_above=kw.get("npoc_above", 0.0),
-                           npoc_below=kw.get("npoc_below", 0.0))
+                           agent_direction=kw.get("direction", "LONG"), agent_probability=0.7)
 
 
 def _pass_results():
@@ -50,7 +48,6 @@ def test_long_sl_falls_back_to_step_when_tick_math_fails():
         levels=(), poc=100, vah=102, val=98, step=1, total_volume=100))
     # Force the degenerate tick math path (sl >= anchor) to exercise
     # the step-based safety net.
-    import quant.decision.signal_builder as sb_mod
     with patch.object(sb_mod, "TICK_SIZE_NSE_OPTIONS", 0.0):
         s = sb.build(ctx, _pass_results())
     assert s is not None

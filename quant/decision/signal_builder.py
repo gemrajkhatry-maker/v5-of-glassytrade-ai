@@ -63,12 +63,10 @@ class SignalBuilder:
         tp_multiplier: float = 2.0,
         min_stop_distance_pct: float = MIN_STOP_DISTANCE_PCT,
         max_position_quantity: float = MAX_POSITION_QUANTITY,
-        min_rr: float = 1.5,
     ) -> None:
         self.tp_multiplier = tp_multiplier
         self.min_stop_distance_pct = min_stop_distance_pct
         self.max_position_quantity = max_position_quantity
-        self.min_rr = min_rr
 
     def build(self, ctx: DecisionContext, pipeline_results: list[GateResult]) -> Signal | None:
         if any(not r.passed for r in pipeline_results):
@@ -85,16 +83,6 @@ class SignalBuilder:
         entry = float(state.close)
         nearest_level = float(state.location.nearest_level)
 
-        # CONTINUATION-TP: Fabio's target for an initiative trade is the
-        # previous balance area / prior POC ("the market seeks a new balance").
-        # The structural target is the nearest level ahead of the entry from
-        # {naked-POC above, prior-session POC, session VAH} (LONG) or
-        # {naked-POC below, prior-session POC, session VAL} (SHORT), capped at
-        # the fixed R-multiple when it is nearer, and applied only when the
-        # capped R:R still meets ``min_rr``. With no structure ahead (zeros),
-        # the build-guide fixed R-multiple remains the explicit placeholder.
-        # The reversion (VA-fade) path targets the POC — see
-        # quant/decision/va_fade.py.
         if direction == "LONG":
             val = float(state.volume_profile.val)
             step = float(state.volume_profile.step)
@@ -105,16 +93,6 @@ class SignalBuilder:
             if sl >= anchor:  # degenerate profile safety net
                 sl = anchor - step if step > 0 else anchor
             tp = entry + (entry - sl) * self.tp_multiplier
-            structural = self._cap_at_nearest_acceptable(
-                entry, sl,
-                float(getattr(ctx, "npoc_above", 0.0) or 0.0),
-                float(getattr(ctx, "prior_poc", 0.0) or 0.0),
-                float(state.volume_profile.vah or 0.0),
-                direction="LONG",
-                min_rr=self.min_rr,
-            )
-            if structural is not None:
-                tp = min(tp, structural)
         else:
             vah = float(state.volume_profile.vah)
             step = float(state.volume_profile.step)
@@ -125,16 +103,6 @@ class SignalBuilder:
             if sl <= anchor:  # degenerate profile safety net
                 sl = anchor + step if step > 0 else anchor
             tp = entry - (sl - entry) * self.tp_multiplier
-            structural = self._cap_at_nearest_acceptable(
-                entry, sl,
-                float(getattr(ctx, "npoc_below", 0.0) or 0.0),
-                float(getattr(ctx, "prior_poc", 0.0) or 0.0),
-                float(state.volume_profile.val or 0.0),
-                direction="SHORT",
-                min_rr=self.min_rr,
-            )
-            if structural is not None:
-                tp = max(tp, structural)
 
         if direction == "LONG":
             monotonic = sl < entry < tp
@@ -168,36 +136,6 @@ class SignalBuilder:
             symbol=ctx.symbol,
             timestamp=state.time,
         )
-
-    def _cap_at_nearest_acceptable(
-        self,
-        entry: float,
-        sl: float,
-        *candidates: float,
-        direction: str,
-        min_rr: float = 1.5,
-    ) -> float | None:
-        """Nearest structural level ahead of ``entry`` whose capped R:R >= min_rr.
-
-        Candidates are scanned nearest-first; the first one that still pays
-        ``min_rr`` against the actual stop is the cap. Levels too close to pay
-        (e.g. session VAH 2 ticks away on a 3-tick stop) are skipped — the
-        caller keeps the fixed R-multiple target when nothing qualifies.
-        """
-        risk = abs(entry - sl)
-        if risk <= 0:
-            return None
-        if direction == "LONG":
-            above = sorted(c for c in candidates if c and c > entry)
-            for cand in above:
-                if (cand - entry) / risk >= min_rr:
-                    return cand
-        else:
-            below = sorted((c for c in candidates if c and 0 < c < entry), reverse=True)
-            for cand in below:
-                if (entry - cand) / risk >= min_rr:
-                    return cand
-        return None
 
     def size(
         self,
