@@ -16,6 +16,7 @@ import os
 import random
 import threading
 import time
+from collections import deque
 from datetime import date, datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -200,7 +201,10 @@ class QuantEngine:
         self._bus = EventBus()
         self._projector = StateProjector()
         self._journal = Journal(path=journal_path) if journal_path else None
-        self._trace: list[Event] = []
+        # ponytail: bounded ring for the whole-session trace. 10k bars @ ~10 events
+        # per bar covers a 6.5-hour NSE session; older events fall out of memory.
+        # Full history still lands in the tick journal (quant/persistence.Journal).
+        self._trace: deque[Event] = deque(maxlen=10_000)
         self._position = None
         self._bar_index = 0
         # History bars seeded into the decision coordinator (see
