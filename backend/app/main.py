@@ -155,6 +155,7 @@ def create_application() -> FastAPI:
     """Create and configure the FastAPI application."""
     mark_startup_started()
     begin_phase("application_init")
+    import os  # local: startup-only env read, keeps module import surface unchanged
     
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator:
@@ -335,12 +336,28 @@ def create_application() -> FastAPI:
                 "ok",
                 f"db={reconciliation_result.db_positions} broker={reconciliation_result.broker_positions}",
             )
+            if (
+                os.getenv("GLASSYTRADE_ENV", "paper").lower() == "live"
+                and reconciliation_result.db_positions != reconciliation_result.broker_positions
+            ):
+                # ponytail: refuse to boot on broker/DB position mismatch in live.
+                raise RuntimeError(
+                    "Startup reconciliation mismatch in live mode: "
+                    f"db={reconciliation_result.db_positions} "
+                    f"broker={reconciliation_result.broker_positions}"
+                )
         except Exception as e:
             reconciliation_executed = False
             logger.warning("Startup reconciliation failed: %s", e)
             record_startup_reconciliation(None)
             end_phase("startup_reconciliation", "failed", str(e))
             mark_startup_failed("startup_reconciliation", str(e))
+            if os.getenv("GLASSYTRADE_ENV", "paper").lower() == "live":
+                # ponytail: refuse to boot on unknown broker state in live mode.
+                # Raising kills startup; the operator must fix reconciliation first.
+                raise RuntimeError(
+                    f"Startup reconciliation failed in live mode: {e}"
+                ) from e
 
         # Get active symbols from service or config
         active_symbols = list(getattr(app.state, "active_symbols", []))
