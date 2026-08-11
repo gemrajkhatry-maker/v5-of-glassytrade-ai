@@ -63,7 +63,10 @@ logger = logging.getLogger(__name__)
 # (AMT_ARCHITECTURE_PROPOSAL.md), so _decide must not depend on the async
 # fold-back.
 _DETERMINISTIC_CONVICTION = 0.7
-
+# One-shot startup warning when an option contract runs with no underlying
+# feed — Fabio's auction structure belongs on the most liquid futures; running
+# AMT on option premium is a deliberate fallback (Task 8).
+_UNDERLYING_WARNED = False
 # Minimum closed bars (live + seeded history) before the engine may decide.
 # The analysis kernel needs enough bars for a meaningful POC/VA/VWAP profile;
 # the AMT/decision design pins this at > 15 bars (75 minutes of 5m candles),
@@ -145,8 +148,10 @@ class QuantEngine:
         market: str = "NSE",
         llm_consensus_gate: bool | None = None,
         session_levels: SessionLevelStore | None = None,
+        underlying_gateway=None,
     ) -> None:
         self._gateway = gateway
+        self._underlying_gateway = underlying_gateway
         self.symbol = symbol
         self._tick_size = tick_size
         # Session market for the Fabio phase gates: NSE closes 15:30, MCX
@@ -241,9 +246,23 @@ class QuantEngine:
     def run(self, max_steps: int | None = None) -> list[Event]:
         """Consume ticks from the gateway, drive the full pipeline, and return
         the event trace. Deterministic: same ticks -> same trace."""
+        global _UNDERLYING_WARNED
         if not self._subscribed:
             self._gateway.subscribe(self.symbol)
             self._subscribed = True
+        if self._underlying_gateway is not None:
+            # Fabio Task 8: auction structure belongs on the underlying futures.
+            # Subscribe the second feed; its ticks feed AMT via the aggregator.
+            self._underlying_gateway.subscribe(self._underlying())
+        elif not _UNDERLYING_WARNED and self._contract_expiry is not None:
+            # Option contract with no underlying feed — running AMT on the
+            # option's own premium is a fallback, not the faithful setup.
+            _UNDERLYING_WARNED = True
+            logger.warning(
+                "No underlying feed for %s — running AMT on the option premium. "
+                "Pass underlying_gateway to compute auction structure on the futures.",
+                self.symbol,
+            )
         self._start_amt_seed()
         steps = 0
         while True:
@@ -258,9 +277,19 @@ class QuantEngine:
             self._projector.on_quote(self.symbol, tick)
             if tick.depth is not None:
                 self._last_depth = self._depth_to_book(tick.depth)
-            bar = self._aggregator.add_tick(tick)
-            if bar is not None:
-                self._on_bar_closed(bar)
+            # When an underlying feed is present, the option tick only drives
+            # quotes/depth/fills — auction bars come from the futures stream.
+            if self._underlying_gateway is not None:
+                utick = self._underlying_gateway.next_tick()
+                while utick is not None:
+                    bar = self._aggregator.add_tick(utick)
+                    if bar is not None:
+                        self._on_bar_closed(bar)
+                    utick = self._underlying_gateway.next_tick()
+            else:
+                bar = self._aggregator.add_tick(tick)
+                if bar is not None:
+                    self._on_bar_closed(bar)
         return list(self._trace)
 
     @property

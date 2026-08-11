@@ -52,13 +52,13 @@ class DecisionService:
         # the POC and requires price OUTSIDE the value area, so it never fires
         # in balanced rotation; a dead market refuses even the reversion.
         if str(ctx.market_state or "").upper() == "DEAD":
-            return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results))
+            return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results), blocked)
         fade = detect_va_fade(ctx.state, ctx)
         if fade and ctx.agent_direction == fade.direction and fade.rr >= self.min_rr:
             if not is_min_stop_met(fade.entry, fade.sl):
-                return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results))
+                return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results), blocked)
             sig = Signal(type=fade.direction, reason="Value-Area fade", entry=fade.entry,
                          sl=fade.sl, tp=fade.tp, rr=fade.rr, confidence=0.5,
                          symbol=ctx.symbol, timestamp=ctx.state.time)
             return QuantDecision(True, sig, "VA_FADE", ctx.state.triple_a_phase, tuple(results))
-        return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results))
+        return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results), blocked)
