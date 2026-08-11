@@ -56,7 +56,7 @@ from quant.state import StateProjector, _epoch_to_iso
 
 logger = logging.getLogger(__name__)
 
-# Deterministic conviction used for gate 3's probability check when the engine
+# Deterministic conviction used for gate 4's probability check when the engine
 # decides from the auction state alone (above the 0.55 min_probability
 # threshold). The decision-critical path is 100% deterministic by design — the
 # LLM is an advisory overlay (narrative + exit tuning) and never gates a trade
@@ -301,8 +301,8 @@ class QuantEngine:
     def _decide(self, state, bar) -> None:
         # Direction input to the gates is the deterministic Triple-A auction-
         # state signal, NOT the async LLM advisory. It was hard-coded to
-        # "LONG", which made a SHORT edge structurally unreachable: gate 4
-        # requires ``state.triple_a_signal == agent_direction`` and gate 3 runs
+        # "LONG", which made a SHORT edge structurally unreachable: gate 5
+        # requires ``state.triple_a_signal == agent_direction`` and gate 4 runs
         # the LONG CVD-conflict check, so the kernel's SELL-absorption edge
         # (close < vwap.lower_1 -> AGGRESSION/SHORT) could never execute.
         signal = state.triple_a_signal if state is not None else None
@@ -313,7 +313,7 @@ class QuantEngine:
         # and the >15-bar warmup — see quant/amt/session/context.py.
         llm_direction, llm_confidence, llm_fresh = self._llm_consensus_state()
         # Market state + balance ratio from the AMT analyzer (this bar's DTO,
-        # snapshotted in _on_bar_closed before _decide). Gate 4 refuses any
+        # snapshotted in _on_bar_closed before _decide). Gate 5 refuses any
         # initiative entry unless the market is IMBALANCED (Fabio: the edge
         # exists only out of balance); the VA-fade tier refuses dead markets.
         amt_dto = self._last_amt_dto or {}
@@ -335,6 +335,11 @@ class QuantEngine:
             agent_probability=_DETERMINISTIC_CONVICTION,
             market_state=amt_market_state,
             balance_ratio=float(amt_dto.get("balanceRatio") or 0.0),
+            # Drive tracker flows only the "second drive" boolean today; the
+            # raw drive count is not exported on the WS DTO, so gate 3's
+            # rejection reason falls back to drive=0. Thread driveNumber
+            # through amt_result_to_dto when the banner needs it.
+            drive_entry_valid=bool(amt_dto.get("isSecondDrive") or False),
             prior_poc=float(amt_dto.get("priorPoc") or 0.0),
             npoc_above=float(amt_dto.get("npocAbove") or 0.0),
             npoc_below=float(amt_dto.get("npocBelow") or 0.0),
@@ -936,7 +941,7 @@ class QuantEngine:
         """Map the LLM advisory's confidence/probability to a float in [0, 1].
 
         The LLM contract emits ``confidence: "High" | "Medium" | "Low"``, but
-        the frontend contract (types.ts ``probability: number``) and gate 3's
+        the frontend contract (types.ts ``probability: number``) and gate 4's
         ``ctx.agent_probability < min_probability`` comparison both require a
         number. Accepts floats, numeric strings, and percentage form (75 -> 0.75).
         """

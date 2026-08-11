@@ -2,7 +2,7 @@
 CME two-row value area. The value-area percentage is configurable via
 ``globals.value_area_pct`` (backend/config/base.yaml) and shared with the AMT
 analyzer's profile path so the trade engine's SL/TP anchors (SignalBuilder,
-Gate 5, VA-fade) always match what the UI renders."""
+Gate 6, VA-fade) always match what the UI renders."""
 
 from __future__ import annotations
 

@@ -142,7 +142,7 @@ def test_no_trade_without_approved_decision():
         # the open reason/trace must map to the approved decision's signal
         signal = evt.position.order.signal
         assert signal.type == decision.signal.type
-        assert signal.reason in ("All 5 gates passed", "Value-Area fade")
+        assert signal.reason in ("All 7 gates passed", "Value-Area fade")
         assert abs(signal.entry - decision.signal.entry) <= 1e-9
         assert signal.timestamp == t
 

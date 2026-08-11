@@ -190,16 +190,16 @@ def test_decision_fold_gate_results():
         symbol="S", time="t1",
         decision=QuantDecision(
             False, None, "GATE_REJECTED", "ABSORBING",
-            (GateResult(1, True, "session phase ok"),
-             GateResult(2, True),
-             GateResult(3, False, "probability below threshold", "0.42")),
+             (GateResult(1, True, "session phase ok"),
+              GateResult(2, True),
+              GateResult(4, False, "probability below threshold", "0.42")),
         ),
     ))
     qd = p.snapshot("S").quant_decision
     assert qd["gateResults"] == [
         {"gate": 1, "name": "SESSION_PHASE", "passed": True, "reason": "session phase ok"},
         {"gate": 2, "name": "POSITION_COOLDOWN", "passed": True, "reason": ""},
-        {"gate": 3, "name": "DIRECTION_PROBABILITY", "passed": False, "reason": "probability below threshold"},
+        {"gate": 4, "name": "DIRECTION_PROBABILITY", "passed": False, "reason": "probability below threshold"},
     ]
 
 

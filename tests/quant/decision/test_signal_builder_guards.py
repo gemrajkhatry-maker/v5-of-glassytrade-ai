@@ -41,7 +41,7 @@ def _ctx(close, val, step, nearest):
 
 
 def _pass_results():
-    return [GateResult(i, True) for i in range(1, 6)]
+    return [GateResult(i, True) for i in range(1, 8)]
 
 
 def test_defaults_are_exported_constants():

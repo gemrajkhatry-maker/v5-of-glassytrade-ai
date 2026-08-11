@@ -127,7 +127,7 @@ class SignalBuilder:
 
         return Signal(
             type=direction,
-            reason="All 5 gates passed",
+            reason="All 7 gates passed",
             entry=entry,
             sl=sl,
             tp=tp,

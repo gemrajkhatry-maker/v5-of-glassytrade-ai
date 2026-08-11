@@ -1,4 +1,4 @@
-"""Gate 5 — risk-reward check on the Triple-A edge."""
+"""Gate 6 — risk-reward check on the Triple-A edge."""
 
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
@@ -13,11 +13,11 @@ def gate_risk_reward(
     max_distance_ticks: float = 20.0,
 ) -> GateResult:
     if ctx is None or ctx.state is None:
-        return GateResult(5, False, "no state")
+        return GateResult(6, False, "no state")
     state = ctx.state
     signal = state.triple_a_signal
     if signal not in ("LONG", "SHORT"):
-        return GateResult(5, False, "No Triple-A signal for R:R")
+        return GateResult(6, False, "No Triple-A signal for R:R")
     entry = float(state.close)
     vp = state.volume_profile
     loc = state.location
@@ -34,7 +34,7 @@ def gate_risk_reward(
         sl = anchor + step if step > 0 else anchor
         tp = entry - (sl - entry) * DEFAULT_TP_MULTIPLIER
     if sl is None:
-        return GateResult(5, False, "No stop anchor")
+        return GateResult(6, False, "No stop anchor")
     sl = float(sl)
     tp = float(tp)
     risk = abs(entry - sl)
@@ -45,7 +45,7 @@ def gate_risk_reward(
     distance_ok = risk / tick <= max_distance_ticks
     detail = f"RR={rr:.2f} SL={sl:.2f} TP={tp:.2f}"
     if rr_ok and distance_ok:
-        return GateResult(5, True, "", detail)
+        return GateResult(6, True, "", detail)
     reason = f"RR {rr:.2f} below {min_rr}" if not rr_ok else \
         f"stop {risk:.2f} exceeds {max_distance_ticks:.0f} ticks"
-    return GateResult(5, False, reason, detail)
+    return GateResult(6, False, reason, detail)

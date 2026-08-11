@@ -7,6 +7,19 @@ from quant.order_flow import OrderFlowState
 from quant.location import LocationState
 from quant.absorption import Absorption
 
+def _ctx_imbalanced(**kw):
+    """A gate-4 context with a real IMBALANCED market state (Fabio's
+    out-of-balance requirement for the initiative edge)."""
+    market_state = kw.pop("market_state", "IMBALANCED")
+    agent_direction = kw.pop("agent_direction", "LONG")
+    return DecisionContext(
+        state=_state(**kw), bar=None,
+        agent_direction=agent_direction,
+        agent_probability=0.7,
+        market_state=market_state,
+    )
+
+
 def _state(triple_a_phase="", triple_a_signal=None, close=100.0,
            cvd_slope=0.0, absorption=None, upper_1=101.0, lower_1=99.0):
     return AuctionState(
@@ -22,54 +35,81 @@ def _state(triple_a_phase="", triple_a_signal=None, close=100.0,
         triple_a_phase=triple_a_phase, triple_a_signal=triple_a_signal,
     )
 
-def test_gate3_passes_with_direction_and_prob():
+def test_gate4_passes_with_direction_and_prob():
     r = gate_direction_probability(DecisionContext(state=_state(), bar=None,
         agent_direction="LONG", agent_probability=0.7))
-    assert r.passed and r.gate == 3
+    assert r.passed and r.gate == 4
 
-def test_gate3_fails_flat():
+def test_gate4_fails_flat():
     assert not gate_direction_probability(DecisionContext(state=_state(), bar=None,
         agent_direction="FLAT", agent_probability=0.7)).passed
 
-def test_gate3_fails_low_probability():
+def test_gate4_fails_low_probability():
     assert not gate_direction_probability(DecisionContext(state=_state(), bar=None,
         agent_direction="LONG", agent_probability=0.4)).passed
 
-def test_gate3_cvd_conflict_blocks_long():
+def test_gate4_cvd_conflict_blocks_long():
     r = gate_direction_probability(DecisionContext(state=_state(cvd_slope=-5),
         bar=None, agent_direction="LONG", agent_probability=0.7))
     assert not r.passed and "CVD" in r.reason
 
-def test_gate4_passes_on_aggression_signal():
-    r = gate_triple_a_edge(DecisionContext(state=_state(triple_a_phase="AGGRESSION",
-        triple_a_signal="LONG"), bar=None, agent_direction="LONG"))
-    assert r.passed and r.gate == 4
+def test_gate5_passes_on_aggression_signal():
+    r = gate_triple_a_edge(_ctx_imbalanced(triple_a_phase="AGGRESSION",
+        triple_a_signal="LONG"))
+    assert r.passed and r.gate == 5
 
-def test_gate4_passes_on_fresh_absorption_breakout():
-    r = gate_triple_a_edge(DecisionContext(state=_state(
-        absorption=Absorption(0, 100, 500, "BUY", 0.5, 0), upper_1=99.0, close=100.5),
-        bar=None, agent_direction="LONG"))
+def test_gate5_passes_on_fresh_absorption_breakout():
+    r = gate_triple_a_edge(_ctx_imbalanced(
+        absorption=Absorption(0, 100, 500, "BUY", 0.5, 0), upper_1=99.0, close=100.5))
     assert r.passed
 
-def test_gate4_rejects_triple_a_direction_divergence():
+def test_gate5_rejects_triple_a_direction_divergence():
+    r = gate_triple_a_edge(_ctx_imbalanced(triple_a_phase="AGGRESSION",
+        triple_a_signal="SHORT"))
+    assert not r.passed
+    assert "direction" in r.reason.lower()
+
+def test_gate5_rejects_absorption_direction_conflict():
+    r = gate_triple_a_edge(_ctx_imbalanced(
+        absorption=Absorption(0, 100, 500, "BUY", 0.5, 0), upper_1=99.0, close=100.5,
+        agent_direction="SHORT"))
+    assert not r.passed
+    assert "direction" in r.reason.lower()
+
+def test_gate5_fails_no_edge():
+    r = gate_triple_a_edge(_ctx_imbalanced())
+    assert not r.passed and r.gate == 5
+
+def test_gate5_stale_absorption_no_edge():
+    r = gate_triple_a_edge(_ctx_imbalanced(
+        absorption=Absorption(0, 100, 500, "BUY", 0.5, 10), upper_1=99.0, close=100.5))
+    assert not r.passed
+
+def test_gate5_rejects_balanced_market_even_with_edge():
+    """Fabio: no initiative edge in balanced rotation. A valid AGGRESSION
+    signal in a BALANCED market must be rejected by gate 5."""
+    r = gate_triple_a_edge(_ctx_imbalanced(triple_a_phase="AGGRESSION",
+        triple_a_signal="LONG", market_state="BALANCED"))
+    assert not r.passed
+    assert "balanced" in r.reason.lower()
+
+def test_gate5_rejects_balanced_fresh_absorption_breakout():
+    r = gate_triple_a_edge(_ctx_imbalanced(
+        absorption=Absorption(0, 100, 500, "BUY", 0.5, 0), upper_1=99.0, close=100.5,
+        market_state="BALANCED"))
+    assert not r.passed
+    assert "balanced" in r.reason.lower()
+
+def test_gate5_rejects_dead_market():
+    r = gate_triple_a_edge(_ctx_imbalanced(triple_a_phase="AGGRESSION",
+        triple_a_signal="LONG", market_state="DEAD"))
+    assert not r.passed
+    assert "dead" in r.reason.lower()
+
+def test_gate5_unknown_market_state_defaults_conservative():
+    """Default DecisionContext.market_state is BALANCED — unknown state must
+    never unlock an initiative entry."""
     r = gate_triple_a_edge(DecisionContext(state=_state(triple_a_phase="AGGRESSION",
-        triple_a_signal="SHORT"), bar=None, agent_direction="LONG"))
+        triple_a_signal="LONG"), bar=None, agent_direction="LONG"))
     assert not r.passed
-    assert "direction" in r.reason.lower()
-
-def test_gate4_rejects_absorption_direction_conflict():
-    r = gate_triple_a_edge(DecisionContext(state=_state(
-        absorption=Absorption(0, 100, 500, "BUY", 0.5, 0), upper_1=99.0, close=100.5),
-        bar=None, agent_direction="SHORT"))
-    assert not r.passed
-    assert "direction" in r.reason.lower()
-
-def test_gate4_fails_no_edge():
-    r = gate_triple_a_edge(DecisionContext(state=_state(), bar=None, agent_direction="LONG"))
-    assert not r.passed and r.gate == 4
-
-def test_gate4_stale_absorption_no_edge():
-    r = gate_triple_a_edge(DecisionContext(state=_state(
-        absorption=Absorption(0, 100, 500, "BUY", 0.5, 10), upper_1=99.0, close=100.5),
-        bar=None, agent_direction="LONG"))
-    assert not r.passed
+    assert "balanced" in r.reason.lower()

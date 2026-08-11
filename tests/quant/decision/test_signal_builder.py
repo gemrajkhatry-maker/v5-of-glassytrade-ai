@@ -25,12 +25,12 @@ def _ctx(**kw):
                            agent_direction=kw.get("direction", "LONG"), agent_probability=0.7)
 
 def _pass_results():
-    return [GateResult(i, True) for i in range(1, 6)]
+    return [GateResult(i, True) for i in range(1, 8)]
 
 def test_build_returns_none_when_a_gate_fails():
     sb = SignalBuilder()
     results = _pass_results()
-    results[2] = GateResult(3, False, "No direction")
+    results[3] = GateResult(4, False, "No direction")
     assert sb.build(_ctx(), results) is None
 
 def test_build_returns_long_signal():

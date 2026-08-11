@@ -1,6 +1,6 @@
 """DecisionService — the quant decision engine of record.
 
-Runs GatePipeline (gates 1-5) then SignalBuilder; when the gates pass but no
+Runs GatePipeline (gates 1-7) then SignalBuilder; when the gates pass but no
 Triple-A signal materializes, falls back to a Value-Area fade (tier-2); returns
 NO_EDGE when nothing qualifies. The returned QuantDecision is consumed by the
 backend wiring (quant signal -> domain Signal -> execution).
@@ -40,7 +40,11 @@ class DecisionService:
             if sig is not None:
                 return QuantDecision(True, sig, "Triple-A", ctx.state.triple_a_phase, tuple(results))
             return QuantDecision(False, None, "GATE_REJECTED", ctx.state.triple_a_phase, tuple(results))
-        # VA-fade fallback
+        # VA-fade fallback — the balance-returning reversion trade. It targets
+        # the POC and requires price OUTSIDE the value area, so it never fires
+        # in balanced rotation; a dead market refuses even the reversion.
+        if str(ctx.market_state or "").upper() == "DEAD":
+            return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results))
         fade = detect_va_fade(ctx.state, ctx)
         if fade and ctx.agent_direction == fade.direction and fade.rr >= self.min_rr:
             if not is_min_stop_met(fade.entry, fade.sl):

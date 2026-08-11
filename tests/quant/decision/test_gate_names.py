@@ -1,8 +1,8 @@
 from quant.decision.result import GateResult, GATE_NAMES
 
 def test_every_pipeline_gate_has_a_name():
-    # gates 1..6 from the current pipeline
-    for n in range(1, 7):
+    # gates 1..7 from the current pipeline
+    for n in range(1, 8):
         r = GateResult(gate=n, passed=True)
         assert r.name == GATE_NAMES[n]
 
