@@ -158,7 +158,7 @@ def _decision_to_view(decision: QuantDecision) -> dict:
         "reason": decision.reason,
         "phase": decision.phase,
         "gateResults": [
-            {"gate": g.gate, "passed": bool(g.passed), "reason": g.reason}
+            {"gate": g.gate, "name": g.name, "passed": bool(g.passed), "reason": g.reason}
             for g in decision.gate_results
         ],
         "signal": (
