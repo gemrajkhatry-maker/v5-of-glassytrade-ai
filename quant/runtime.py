@@ -354,6 +354,7 @@ class QuantEngine:
             position = self._oms.submit(signal, quantity)
             self._entry_bar_index = self._bar_index
             self._position = position
+            self._entry_time_epoch = self._bar_epoch_ms(bar.time) / 1000.0
             self._emit(PositionOpened(symbol=self.symbol, time=bar.time, position=position))
 
     @staticmethod
@@ -506,10 +507,46 @@ class QuantEngine:
             # position so nothing rides overnight.
             exit_dec = ExitDecision(True, "SESSION_CLOSE", float(state.close))
         else:
-            exit_dec = self._exits.evaluate(self._position, state, bar_index=held_bars)
+            book = self._last_depth
+            best_bid = float(book.bids[0].price) if book and book.bids else None
+            best_ask = float(book.asks[0].price) if book and book.asks else None
+            # Session context for the session-aware time stop. SessionInfo has
+            # no is_expiry/time_to_close fields, so derive both here: the
+            # session name is the phase label; expiry + seconds-to-close come
+            # from the session helpers.
+            from quant.amt.session.context import is_expiry_day, seconds_to_close
+            ist_dt = QuantEngine._ist_dt(bar.time)
+            amt_dto = self._last_amt_dto or {}
+            market_state = str(amt_dto.get("marketState") or "").upper()
+            if market_state not in ("BALANCED", "IMBALANCED"):
+                market_state = ""
+            if ist_dt is not None:
+                info = get_session_info(bar.time, market=self._market)
+                session_phase = str(info.session)
+                is_expiry = (
+                    self._market == "NSE" and is_expiry_day(ist_dt.date())
+                ) or (
+                    self._contract_expiry is not None
+                    and ist_dt.date() == self._contract_expiry
+                )
+                time_to_close = seconds_to_close(bar.time, exchange=self._market)
+                now_epoch = ist_dt.timestamp()
+            else:
+                session_phase, is_expiry, time_to_close, now_epoch = "", False, 0.0, 0.0
+            exit_dec = self._exits.evaluate(
+                self._position, state, bar_index=held_bars,
+                bar_high=bar.high, bar_low=bar.low,
+                best_bid=best_bid, best_ask=best_ask,
+                market_state=market_state, session_phase=session_phase,
+                is_expiry=is_expiry, time_to_close=time_to_close,
+                entry_time_epoch=getattr(self, "_entry_time_epoch", 0.0),
+                now_epoch=now_epoch,
+            )
         if exit_dec.should_exit:
-            fill = self._oms.close(self._position, exit_dec.close_price, bar.time,
+            closing = self._position
+            fill = self._oms.close(closing, exit_dec.close_price, bar.time,
                                    exit_dec.reason)
+            self._exits.pop_trail(closing)
             self._position = None
             self._emit(PositionClosed(symbol=self.symbol, time=bar.time, fill=fill))
             risk = self._risk.record_trade(fill.pnl)
