@@ -218,6 +218,11 @@ class QuantEngine:
             max_workers=1, thread_name_prefix="llm-fold"
         )
         self._emit_lock = threading.Lock()
+        # LLM entry temperature — ponytail: env var over DI plumbing for a single
+        # scalar; promote when we need per-session tuning.
+        self._llm_entry_temperature = float(
+            os.getenv("LLM_TEMPERATURE_ENTRY", "0.3")
+        )
         # LLM-consensus gate (Track D): when enabled, an entry needs the LLM
         # advisory to agree with the deterministic Triple-A direction at High
         # confidence. Opt-in via LLM_CONSENSUS_GATE=1 (or the constructor
@@ -775,7 +780,7 @@ class QuantEngine:
             raw = self._inference.predict(
                 instruction=instruction,
                 input_text=input_text,
-                temperature=0.3,
+                temperature=self._llm_entry_temperature,
                 max_tokens=256,
                 prefill="{",
             )

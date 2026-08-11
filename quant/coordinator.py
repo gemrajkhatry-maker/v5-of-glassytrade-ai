@@ -82,12 +82,86 @@ from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 from quant.events import DecisionProduced, LLMAnalysisProduced, SignalApproved
 from quant.runtime import QuantEngine
 from quant.ws_adapter import view_state_to_ws
+from quant.contracts.timezones import IST
 
+import json
 import logging
 import queue
 import threading
+from datetime import datetime
+from pathlib import Path
+
+from quant.session_levels import SessionLevelStore
 
 logger = logging.getLogger(__name__)
+
+
+# Persist the coordinator's active contracts (JSON, stdlib-only) so a backend
+# restart on the same trading day reuses the same strikes instead of re-running
+# the option scanner and switching contracts (which also resets per-symbol
+# decision history in the UI). Defaults to <repo-root>/backend/.active_contracts.json
+# regardless of cwd; override via coord_config["contracts_file"].
+_DEFAULT_CONTRACTS_FILE = str(
+    Path(__file__).resolve().parents[1] / "backend" / ".active_contracts.json"
+)
+
+# Prior-session levels + naked-POC records (Phase 1) live next to the
+# contracts file: <repo-root>/backend/.session_levels.json, override via
+# coord_config["session_levels_file"]. Survives restarts so the AMT analyzer
+# can target the previous balance area from session one.
+_DEFAULT_SESSION_LEVELS_FILE = str(
+    Path(__file__).resolve().parents[1] / "backend" / ".session_levels.json"
+)
+
+
+def _ist_date_str() -> str:
+    """Current trading day as an IST date string (YYYY-MM-DD)."""
+    return datetime.now(tz=IST).date().isoformat()
+
+
+def load_persisted_contracts(
+    path: str | None = None, exchange: str | None = None
+) -> list[str] | None:
+    """Return persisted active contracts if they belong to today's IST trading
+    day and (when ``exchange`` is given) were selected for that exchange, else
+    None (stale/absent/mismatched selections must trigger a fresh scan).
+
+    Exchange scoping matters for mid-day strategy switches: an NSE selection
+    persisted in the morning must never be reused after the app restarts in
+    MCX mode (the contracts resolve to different underlyings entirely).
+    """
+    path = path or _DEFAULT_CONTRACTS_FILE
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if data.get("date") != _ist_date_str():
+        return None
+    if exchange is not None and str(data.get("exchange") or "").upper() != str(exchange).upper():
+        return None
+    symbols = data.get("symbols") or []
+    if not isinstance(symbols, list) or not all(
+        isinstance(s, str) and s.strip() for s in symbols
+    ):
+        return None
+    return [s.strip() for s in symbols]
+
+
+def save_persisted_contracts(
+    symbols: list[str], path: str | None = None, exchange: str | None = None
+) -> None:
+    """Persist the active contracts for today's IST trading day, tagged with
+    the exchange they were selected for so a strategy switch can't reuse them."""
+    path = path or _DEFAULT_CONTRACTS_FILE
+    payload: dict = {"date": _ist_date_str(), "symbols": list(symbols)}
+    if exchange is not None:
+        payload["exchange"] = str(exchange).upper()
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+    except OSError:
+        logger.warning("Failed to persist active contracts to %s", path)
 
 _DEFAULT_CONFIG = {
     "underlyings": ["NIFTY", "BANKNIFTY", "FINNIFTY"],
@@ -96,6 +170,8 @@ _DEFAULT_CONFIG = {
     "expiry_index": 0,
     "strikes_around_atm": 2,
     "interval_seconds": 60,
+    # First-listed roots get first claim on scanner slots (primary series).
+    "underlying_priority": None,
 }
 
 
@@ -106,7 +182,7 @@ class QuantCoordinator:
     connection). Plus a shared decision queue."""
 
     def __init__(self, market_data, inference=None, broker=None, config=None,
-                 llm_sink=None) -> None:
+                 llm_sink=None, history_loader=None) -> None:
         self.market_data = market_data
         self.inference = inference
         self.broker = broker
@@ -115,6 +191,15 @@ class QuantCoordinator:
         # so live LLM fold-backs get durable rows. Kept as a plain callable so the
         # quant layer stays free of backend imports.
         self._llm_sink = llm_sink
+        # Optional loader(symbol) -> list[dict] used to rehydrate per-symbol LLM
+        # decision history from durable storage after a restart.
+        self._history_loader = history_loader
+        self._contracts_file = self.config.get("contracts_file") or _DEFAULT_CONTRACTS_FILE
+        # Shared across all engines (one file, one lock) so prior levels are
+        # consistent and NPOC records dedupe per session.
+        self._session_levels = SessionLevelStore(
+            path=self.config.get("session_levels_file") or _DEFAULT_SESSION_LEVELS_FILE
+        )
         self._feed = MultiplexedMarketFeed(market_data)
         self._engines: dict[str, QuantEngine] = {}
         self._gateways: dict[str, LiveGateway] = {}
@@ -128,14 +213,16 @@ class QuantCoordinator:
         symbols = self._scan()
         self._feed.set_symbols(symbols)
         for symbol in symbols:
+            self._hydrate_history(symbol)
             self._spawn_engine(symbol)
         self.started = True
 
     def rescan(self) -> list[str]:
         self._stop_engines()
-        symbols = self._scan()
+        symbols = self._scan(force=True)
         self._feed.set_symbols(symbols)
         for symbol in symbols:
+            self._hydrate_history(symbol)
             self._spawn_engine(symbol)
         return symbols
 
@@ -144,12 +231,21 @@ class QuantCoordinator:
             return False
         self._stop_engine(old)
         self._feed.subscribe(new)
+        self._hydrate_history(new)
         self._spawn_engine(new)
         return True
 
     def stop(self) -> None:
         self._stop.set()
         self._stop_engines()
+        # ponytail: per-engine ThreadPoolExecutor threads outlive the coordinator
+        # without this; shutdown(wait=False) is fine because daemon=True on
+        # ThreadPoolExecutor's worker threads since Python 3.9.
+        for eng in list(self._engines.values()):
+            try:
+                eng._llm_executor.shutdown(wait=False)
+            except Exception:
+                pass
         self._feed.close()
         self.started = False
 
@@ -163,12 +259,43 @@ class QuantCoordinator:
         return list(self._engines.keys())
 
     def llm_history(self, symbol: str) -> list[dict]:
-        return list(self._history.get(symbol, []))
+        entries = self._history.get(symbol, [])
+        if not entries and self._history_loader is not None:
+            self._hydrate_history(symbol)
+            entries = self._history.get(symbol, [])
+        return list(entries)
+
+    def _hydrate_history(self, symbol: str) -> None:
+        """Load durable LLM decisions into the in-memory per-symbol history so
+        the UI keeps its decision history across restarts."""
+        if self._history.get(symbol) or self._history_loader is None:
+            return
+        try:
+            rows = self._history_loader(symbol) or []
+        except Exception:
+            logger.warning(
+                "LLM history hydration failed for %s", symbol, exc_info=True
+            )
+            return
+        if rows:
+            self._history[symbol] = list(rows)
 
     def decisions(self) -> queue.Queue:
         return self._decisions
 
-    def _scan(self) -> list[str]:
+    def _scan(self, *, force: bool = False) -> list[str]:
+        """Select active contracts: reuse today's persisted selection unless a
+        fresh scan is forced (e.g. an explicit rescan request), otherwise run
+        the option scanner and persist the result."""
+        if not force:
+            persisted = load_persisted_contracts(
+                self._contracts_file, exchange=self.config.get("exchange")
+            )
+            if persisted:
+                logger.info(
+                    "QuantCoordinator: reusing persisted contracts: %s", persisted
+                )
+                return persisted
         scanner = OptionScannerService(self.market_data)
         results = scanner.scan_top_n(
             n=self.config["n"],
@@ -176,8 +303,38 @@ class QuantCoordinator:
             exchange=self.config["exchange"],
             expiry_index=self.config["expiry_index"],
             strikes_around_atm=self.config["strikes_around_atm"],
+            underlying_priority=self.config.get("underlying_priority"),
         )
-        return [r.symbol for r in results if (r.ltp or 0) > 0]
+        symbols = [r.symbol for r in results if (r.ltp or 0) > 0]
+        if symbols:
+            save_persisted_contracts(
+                symbols, self._contracts_file, exchange=self.config.get("exchange")
+            )
+            logger.info("QuantCoordinator: persisted active contracts: %s", symbols)
+        return symbols
+
+    def _resolve_lot_size(self, symbol: str) -> float:
+        """Exchange lot size for *symbol* (units per lot) for paper OMS parity.
+
+        Routes through the market-data adapter's option-aware ``get_lot_size``
+        (resolves an actual NFO option contract of the underlying, e.g.
+        NIFTY=65/BANKNIFTY=30/FINNIFTY=60). Falls back to 1.0 (equity
+        semantics) on any failure so engine startup never blocks on a broker
+        hiccup; the warning surfaces the fallback.
+        """
+        try:
+            raw = self.market_data.get_lot_size(symbol)
+        except Exception:
+            logger.warning(
+                "lot size lookup failed for %s — paper sizing falls back to 1.0",
+                symbol, exc_info=True,
+            )
+            return 1.0
+        try:
+            lot_size = float(raw or 0)
+        except (TypeError, ValueError):
+            return 1.0
+        return lot_size if lot_size > 0 else 1.0
 
     def _spawn_engine(self, symbol: str) -> None:
         gateway = LiveGateway(self._feed, symbol)
@@ -188,6 +345,9 @@ class QuantCoordinator:
             inference=self.inference,
             llm_history=self._history.setdefault(symbol, []),
             history_source=self.market_data,
+            lot_size=self._resolve_lot_size(symbol),
+            market=self.config.get("exchange") or "NSE",
+            session_levels=self._session_levels,
         )
         engine._bus.subscribe(DecisionProduced, self._on_decision)
         engine._bus.subscribe(SignalApproved, self._on_decision)
