@@ -25,12 +25,12 @@ def gate_llm_consensus(ctx: DecisionContext) -> GateResult:
         return GateResult(7, False, f"LLM advisory has no direction ({ctx.llm_direction})")
     if ctx.llm_direction != ctx.agent_direction:
         return GateResult(
-            6,
+            7,
             False,
             f"LLM {ctx.llm_direction} disagrees with deterministic {ctx.agent_direction}",
         )
     if str(ctx.llm_confidence or "").lower() != "high":
         return GateResult(
-            6, False, f"LLM confidence {ctx.llm_confidence or 'n/a'} < High"
+            7, False, f"LLM confidence {ctx.llm_confidence or 'n/a'} < High"
         )
     return GateResult(7, True, "LLM confirms deterministic direction (High)")

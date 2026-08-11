@@ -108,10 +108,15 @@ class ExitEngine:
         # 4. Trailing stop — only once the trade has reached 1R profit.
         entry = float(position.order.signal.entry)
         risk = abs(entry - sl)
+        tr = self._trail.get(id(position))
         if risk > 0:
             profit = (close - entry) if long else (entry - close)
+            # Ratchet ONLY at/above 1R; once armed, enforce on every bar so a
+            # giveback below 1R can't silently ride back to the original SL.
             if profit >= risk:
-                tr = self._trail.setdefault(id(position), _Trail())
+                if tr is None:
+                    tr = _Trail()
+                    self._trail[id(position)] = tr
                 tr.active = True
                 candidate = (
                     close - self.trail_giveback_pct * profit
@@ -125,6 +130,7 @@ class ExitEngine:
                 else:
                     # Monotonicity: long trails only rise, short only fall.
                     tr.stop = max(tr.stop, candidate) if long else min(tr.stop, candidate)
+            if tr is not None and tr.stop is not None:
                 if (long and low <= tr.stop) or (not long and high >= tr.stop):
                     return ExitDecision(True, "TRAIL", close, trail_stop=tr.stop)
 

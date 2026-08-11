@@ -201,8 +201,10 @@ class QuantEngine:
         # fills exactly — see PaperOMS docstring.
         self._oms = PaperOMS(lot_size=lot_size)
         self._exits = ExitEngine(time_stop_bars=time_stop_bars)
-        risk_storage = getattr(self._session_levels, "_storage", None)  # ponytail: session_levels already owns the storage port
-        self._risk = SessionRisk(storage=risk_storage, symbol=self.symbol, date=self._session_date)
+        # SessionLevelStore now exposes kv_get/kv_set (its JSON file), so the
+        # daily-loss budget survives restart through the same port that already
+        # persists prior-session POC/VAH/VAL.
+        self._risk = SessionRisk(storage=self._session_levels, symbol=self.symbol, date=self._session_date)
         self._bus = EventBus()
         self._projector = StateProjector()
         self._journal = Journal(path=journal_path) if journal_path else None
@@ -359,7 +361,7 @@ class QuantEngine:
             warmup_complete=(self._bar_index + self._warm_bars) >= _WARMUP_BARS,
             position_open=False,
             cooldown_remaining_sec=0,
-            risk_halted=False,
+            risk_halted=self._risk.state().halted,
             agent_direction=agent_direction,
             agent_probability=_DETERMINISTIC_CONVICTION,
             market_state=amt_market_state,
