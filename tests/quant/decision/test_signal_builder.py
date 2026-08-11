@@ -22,7 +22,10 @@ def _ctx(**kw):
         triple_a_phase="AGGRESSION", triple_a_signal=kw.get("triple_a_signal", "LONG"),
     )
     return DecisionContext(state=state, bar=None, symbol="SYM",
-                           agent_direction=kw.get("direction", "LONG"), agent_probability=0.7)
+                           agent_direction=kw.get("direction", "LONG"), agent_probability=0.7,
+                           prior_poc=kw.get("prior_poc", 0.0),
+                           npoc_above=kw.get("npoc_above", 0.0),
+                           npoc_below=kw.get("npoc_below", 0.0))
 
 def _pass_results():
     return [GateResult(i, True) for i in range(1, 6)]
@@ -37,8 +40,8 @@ def test_build_returns_long_signal():
     sb = SignalBuilder()
     s = sb.build(_ctx(), _pass_results())
     assert s is not None and s.type == "LONG"
-    # SL anchored one step below VAL: val=98, step=1 -> 97 (amt_docs §2.6).
-    assert s.sl == pytest.approx(98.0 - 1.0)
+    # SL anchored two ticks (0.10) below VAL: val=98 -> 97.9 (Task 4 placement).
+    assert s.sl == pytest.approx(98.0 - 0.10)
     assert s.sl < s.entry < s.tp
     assert s.rr >= 1.0
 
@@ -64,7 +67,7 @@ def test_build_returns_none_when_sl_on_wrong_side_of_entry():
 
 def test_build_emits_short_with_sl_above_entry():
     sb = SignalBuilder()
-    # SHORT: entry 100 < vah 102 -> SL = vah + step = 103 (above entry),
+    # SHORT: entry 100 < vah 102 -> SL = vah + 2 ticks = 102.1 (above entry),
     # TP below entry. The correct invariant is sl > entry > tp.
     ctx = _ctx(direction="SHORT", close=100.0, volume_profile=VolumeProfile(
         levels=(), poc=98, vah=102, val=99, step=1, total_volume=100),
@@ -73,4 +76,64 @@ def test_build_emits_short_with_sl_above_entry():
     s = sb.build(ctx, results)
     assert s is not None and s.type == "SHORT"
     assert s.sl > s.entry > s.tp
-    assert s.sl == pytest.approx(102.0 + 1.0)
+    assert s.sl == pytest.approx(102.0 + 0.10)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — structural TP (Fabio: target the previous balance area / POC)
+# Default geometry: entry 100, SL = val-2ticks = 97.9, risk 2.1, 2R TP = 104.2.
+# ---------------------------------------------------------------------------
+
+def test_build_long_tp_capped_at_nearest_npoc_above():
+    sb = SignalBuilder()
+    # npoc_above 104: capped rr = (104-100)/2.1 = 1.90 >= 1.5 -> cap applies.
+    s = sb.build(_ctx(npoc_above=104.0), _pass_results())
+    assert s is not None and s.tp == pytest.approx(104.0)
+    assert s.rr == pytest.approx(4.0 / 2.1)
+
+def test_build_long_tp_uses_nearest_of_npoc_and_prior_poc():
+    sb = SignalBuilder()
+    # prior_poc 103.9 is nearer than npoc_above 104.0 -> capped at 103.9.
+    s = sb.build(_ctx(npoc_above=104.0, prior_poc=103.9), _pass_results())
+    assert s.tp == pytest.approx(103.9)
+
+def test_build_long_tp_uses_prior_poc_when_no_npoc():
+    sb = SignalBuilder()
+    s = sb.build(_ctx(prior_poc=104.0), _pass_results())
+    assert s.tp == pytest.approx(104.0)
+
+def test_build_long_tp_keeps_2r_when_capped_rr_below_min():
+    sb = SignalBuilder()
+    # npoc_above 103: capped rr = 1.0 < 1.5 -> cap rejected, 2R kept.
+    s = sb.build(_ctx(npoc_above=103.0), _pass_results())
+    assert s.tp == pytest.approx(s.entry + (s.entry - s.sl) * 2.0)
+
+def test_build_long_tp_capped_when_min_rr_lowered():
+    sb = SignalBuilder(min_rr=1.0)
+    s = sb.build(_ctx(npoc_above=103.0), _pass_results())
+    assert s.tp == pytest.approx(103.0)
+
+def test_build_long_tp_keeps_2r_without_structure():
+    sb = SignalBuilder()
+    s = sb.build(_ctx(), _pass_results())
+    assert s.tp == pytest.approx(s.entry + (s.entry - s.sl) * 2.0)
+
+def test_build_short_tp_capped_at_nearest_npoc_below():
+    sb = SignalBuilder()
+    # SHORT: entry 100, SL = vah+2ticks = 102.1, risk 2.1, 2R TP = 95.8.
+    # npoc_below 96: capped rr = (100-96)/2.1 = 1.90 >= 1.5 -> cap applies.
+    ctx = _ctx(direction="SHORT", close=100.0, volume_profile=VolumeProfile(
+        levels=(), poc=98, vah=102, val=99, step=1, total_volume=100), nearest=101,
+        npoc_below=96.0)
+    s = sb.build(ctx, _pass_results())
+    assert s is not None and s.type == "SHORT"
+    assert s.tp == pytest.approx(96.0)
+
+def test_build_short_tp_keeps_2r_when_npoc_below_above_2r_target():
+    sb = SignalBuilder()
+    # npoc_below 98.5: capped rr = 0.71 < 1.5 -> rejected, 2R kept (95.8).
+    ctx = _ctx(direction="SHORT", close=100.0, volume_profile=VolumeProfile(
+        levels=(), poc=98, vah=102, val=99, step=1, total_volume=100), nearest=101,
+        npoc_below=98.5)
+    s = sb.build(ctx, _pass_results())
+    assert s is not None and s.tp == pytest.approx(95.8)

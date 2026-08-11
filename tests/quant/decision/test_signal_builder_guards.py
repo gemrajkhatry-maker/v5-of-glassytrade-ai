@@ -53,9 +53,9 @@ def test_defaults_are_exported_constants():
 
 
 def test_thin_stop_setup_is_rejected():
-    # entry 104.92, SL at VAL - step = 104.90 (~0.02% away) -> rejected.
+    # entry 104.92, SL at VAL - 2 ticks = 104.819 (~0.096% away) -> rejected.
     sb = SignalBuilder()
-    ctx = _ctx(close=104.92, val=104.91, step=0.01, nearest=104.9)
+    ctx = _ctx(close=104.92, val=104.919, step=0.01, nearest=104.9)
     assert sb.build(ctx, _pass_results()) is None
 
 
@@ -66,18 +66,18 @@ def test_thin_stop_pure_function():
 
 
 def test_healthy_setup_still_builds():
-    # SL 3% away (100 -> 97) -> builds normally.
+    # SL 2.1% away (100 -> 97.9) -> builds normally.
     sb = SignalBuilder()
     ctx = _ctx(close=100.0, val=98.0, step=1.0, nearest=98.0)
     s = sb.build(ctx, _pass_results())
     assert s is not None and s.type == "LONG"
-    assert s.sl == pytest.approx(97.0)
+    assert s.sl == pytest.approx(97.9)
 
 
 def test_override_min_stop_allows_thin_stop():
     # Explicit override (min_stop_distance_pct=0) permits the thin stop.
     sb = SignalBuilder(min_stop_distance_pct=0.0)
-    ctx = _ctx(close=104.92, val=104.91, step=0.01, nearest=104.9)
+    ctx = _ctx(close=104.92, val=104.919, step=0.01, nearest=104.9)
     assert sb.build(ctx, _pass_results()) is not None
 
 
