@@ -25,6 +25,13 @@ class QuantDecision:
     reason: str          # "Triple-A" | "VA_FADE" | "NO_EDGE" | "GATE_REJECTED"
     phase: str           # AuctionState.triple_a_phase
     gate_results: tuple[GateResult, ...]
+    # Every failed gate as "NAME: reason" (GateResult.name) so UI/logs can
+    # show the full rejection detail, not just one gate's reason.
+    block_reasons: tuple[str, ...] = ()
+
+
+def _block_reasons(results) -> tuple[str, ...]:
+    return tuple(f"{r.name}: {r.reason}" for r in results if not r.passed)
 
 
 class DecisionService:
@@ -34,12 +41,13 @@ class DecisionService:
     def evaluate(self, ctx: DecisionContext) -> QuantDecision:
         if ctx.state is None:
             return QuantDecision(False, None, "NO_EDGE", "", ())
-        results = GatePipeline().evaluate(ctx)
+        results = tuple(GatePipeline().evaluate(ctx))
+        blocked = _block_reasons(results)
         if all(r.passed for r in results):
             sig = SignalBuilder().build(ctx, results)
             if sig is not None:
-                return QuantDecision(True, sig, "Triple-A", ctx.state.triple_a_phase, tuple(results))
-            return QuantDecision(False, None, "GATE_REJECTED", ctx.state.triple_a_phase, tuple(results))
+                return QuantDecision(True, sig, "Triple-A", ctx.state.triple_a_phase, results)
+            return QuantDecision(False, None, "GATE_REJECTED", ctx.state.triple_a_phase, results, blocked)
         # VA-fade fallback — the balance-returning reversion trade. It targets
         # the POC and requires price OUTSIDE the value area, so it never fires
         # in balanced rotation; a dead market refuses even the reversion.
