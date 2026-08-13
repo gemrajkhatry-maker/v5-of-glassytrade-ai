@@ -80,6 +80,10 @@ backend/rl_logs/
 node_modules/
 dist/
 
+# Backend runtime state (written by the engine at session rollover)
+backend/.session_levels.json
+backend/.contracts.json
+
 # Test coverage
 .coverage*
 coverage.json

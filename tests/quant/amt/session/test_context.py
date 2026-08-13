@@ -20,8 +20,12 @@ _IST = timezone(timedelta(hours=5, minutes=30))
 
 # ---- is_expiry_day ----
 
-def test_thursday_is_expiry_day():
-    assert is_expiry_day(date(2026, 2, 26)) is True
+def test_tuesday_is_expiry_day():
+    """Any Tuesday is an expiry day: NIFTY weekly (every Tuesday)."""
+    # 2026-02-24 is a Tuesday (last Tuesday of Feb 2026)
+    assert is_expiry_day(date(2026, 2, 24)) is True
+    # 2026-02-10 is a plain mid-month Tuesday — still NIFTY weekly expiry
+    assert is_expiry_day(date(2026, 2, 10)) is True
 
 
 def test_friday_is_not_expiry_day():
@@ -32,8 +36,14 @@ def test_monday_is_not_expiry_day():
     assert is_expiry_day(date(2026, 2, 23)) is False
 
 
-def test_last_thursday_of_month_is_expiry():
-    assert is_expiry_day(date(2026, 2, 26)) is True
+def test_wednesday_is_not_expiry_day():
+    assert is_expiry_day(date(2026, 2, 25)) is False
+
+
+def test_last_tuesday_of_month_is_expiry():
+    """Last Tuesday of month (monthly expiry) is also a Tuesday."""
+    # 2026-02-24 is last Tuesday of Feb 2026
+    assert is_expiry_day(date(2026, 2, 24)) is True
 
 
 # ---- seconds_to_close ----
@@ -57,9 +67,10 @@ def test_nse_seconds_to_close_after_close():
 
 
 def test_mcx_seconds_to_close():
+    # MCX closes 23:30 IST: 22:00 -> 90 minutes.
     dt = datetime(2026, 2, 25, 22, 0, 0, tzinfo=_IST)
     result = seconds_to_close(dt, "MCX")
-    assert result == 4500.0
+    assert result == 5400.0
 
 
 def test_unknown_exchange_returns_zero():
@@ -82,6 +93,32 @@ def test_mcx_afternoon_still_allows_entry_same_clock():
     info = get_session_info(timestamp=ts, market="MCX")
     assert info.session == "MCX_AFTERNOON"
     assert info.allow_entry is True
+
+
+def test_mcx_evening_is_high_liquidity_trend_window():
+    """18:00-23:00 is the US/COMEX/NYMEX overlap — the engine must treat it
+    as the high-liquidity trend-continuation window, not the old
+    "reduced liquidity / NEUTRAL" classification."""
+    ts = "2026-04-17T20:00:00+05:30"
+    info = get_session_info(timestamp=ts, market="MCX")
+    assert info.session == "MCX_EVENING"
+    assert info.allow_entry is True
+    assert info.favor_strategy == "TREND_CONTINUATION"
+
+
+def test_mcx_close_window_blocks_at_real_close():
+    """MCX close protection runs 23:00-23:30 (real close 23:30 IST): the
+    23:20 window blocks new entries and forces the square-off."""
+    ts = "2026-04-17T23:20:00+05:30"
+    info = get_session_info(timestamp=ts, market="MCX")
+    assert info.session == "MCX_CLOSE"
+    assert info.allow_entry is False
+    assert info.force_exit is True
+    # Still inside the close window — entries were allowed at 22:55.
+    ts_before = "2026-04-17T22:55:00+05:30"
+    info_before = get_session_info(timestamp=ts_before, market="MCX")
+    assert info_before.session == "MCX_EVENING"
+    assert info_before.allow_entry is True
 
 
 # ======================================================================

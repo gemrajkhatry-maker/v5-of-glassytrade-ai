@@ -40,14 +40,17 @@ def test_dhan_broker_get_lot_size_exists():
     assert hasattr(broker, "get_lot_size")
 
 def test_dhan_adapter_get_lot_size():
-    """DhanMarketDataAdapter.get_lot_size should delegate to broker."""
+    """DhanMarketDataAdapter.get_lot_size should delegate to the broker's
+    option-aware exchange config (bare index instruments carry lot_size=1)."""
     adapter = DhanMarketDataAdapter(
         symbols=["NIFTY"],
         client_id="test",
         access_token="token"
     )
     mock_broker = MagicMock()
-    mock_broker.get_lot_size.return_value = 50
+    mock_exchange_config = MagicMock()
+    mock_exchange_config.get_lot_size.return_value = 65
+    mock_broker.get_exchange_config.return_value = mock_exchange_config
     adapter._broker = mock_broker
     
     # Mock ensure_initialized_sync
@@ -55,10 +58,8 @@ def test_dhan_adapter_get_lot_size():
     
     lot_size = adapter.get_lot_size("BANKNIFTY")
     
-    assert lot_size == 50
-    mock_broker.get_lot_size.assert_called_once()
-    args, _ = mock_broker.get_lot_size.call_args
-    assert args[0] == "BANKNIFTY"
+    assert lot_size == 65
+    mock_exchange_config.get_lot_size.assert_called_once_with("BANKNIFTY")
 
 def test_dhan_broker_get_lot_size_logic():
     """Test the internal logic of DhanBroker.get_lot_size with mocks."""

@@ -144,6 +144,21 @@ class SettingsAdapter:
         return [s.strip() for s in underlyings.split(",")]
     
     @property
+    def SCANNER_UNDERLYING_PRIORITY(self) -> list[str] | None:
+        """Explicit scanner root priority (first = primary, fills slots first).
+        Falls back to None so the scanner keeps its score-ordered default when
+        no priority is configured."""
+        if self._mode_config:
+            prio = self._mode_config.scanner_config.get("underlying_priority")
+            if prio:
+                return [str(s).strip() for s in prio]
+            return None
+        raw = os.getenv("SCANNER_UNDERLYING_PRIORITY", "")
+        if raw:
+            return [s.strip() for s in raw.split(",") if s.strip()]
+        return None
+
+    @property
     def SCANNER_TOP_N(self) -> int:
         """Get scanner top N from YAML config."""
         if self._mode_config:
@@ -256,7 +271,10 @@ class SettingsAdapter:
     @property
     def CORS_ORIGINS(self) -> List[str]:
         """Get allowed CORS origins from env (comma-separated)."""
-        raw = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+        raw = os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5190,http://127.0.0.1:5190",
+        )
         return [o.strip() for o in raw.split(",") if o.strip()]
 
     @property

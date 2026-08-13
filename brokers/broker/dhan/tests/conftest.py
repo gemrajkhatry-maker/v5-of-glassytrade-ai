@@ -408,6 +408,12 @@ def clean_env():
         "DHAN_TIMEOUT",
         "DHAN_MAX_RETRIES",
         "DHAN_RATE_LIMIT",
+        # TOTP auto-generation flow substitutes for ACCESS_TOKEN — missing-token
+        # tests must not see these in the environment.
+        "TOTP_SECRET",
+        "PIN",
+        "DHAN_TOTP_SECRET",
+        "DHAN_PIN",
     ]
     
     for var in env_vars:

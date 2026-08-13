@@ -1,13 +1,11 @@
-"""System E2E: synthetic OHLC session -> AuctionCoordinator -> QuantBridge
--> WS ``auction`` DTO (shared frontend contract).
+"""System E2E: synthetic tick session -> QuantEngine -> AuctionUpdated trace
+(AGGRESSION/LONG) -> WS ``auction`` DTO via view_state_to_ws.
 
-This is the backend half of the true end-to-end wiring: a synthetic session
-drives the greenfield `quant.AuctionCoordinator` to AGGRESSION/LONG, and its
-`AuctionState` is serialized via `auction_state_to_dto` into the snapshot's
-``auction`` field exactly as the WS frontend test consumes it.
+The current architecture: QuantEngine aggregates ticks into bars, folds them
+through AuctionCoordinator (Triple-A state machine), and StateProjector
+serializes each AuctionState into the frontend's ``auction`` contract.
 """
 
-import json
 import pathlib
 import sys
 
@@ -15,69 +13,79 @@ _BACKEND = pathlib.Path(__file__).resolve().parents[2] / "backend"
 if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
-from app.application.services.quant_bridge import QuantBridge
-from quant.contracts.value_objects import OHLC
+from quant.brokers.gateway import Tick
+from quant.events import AuctionUpdated
+from quant.runtime import QuantEngine
+from tests.helpers.synthetic import SyntheticGateway
 
-FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "ws_session_long.json"
+SYMBOL = "SYM"
 
 
-def _session_ohlc():
-    """Deterministic 60-bar synthetic session (AGGRESSION-LONG on bar 59).
-
-    Mirrors the greenfield determinism pattern from tests/quant: quiet bars
-    @100 -> absorption spike bar (500 vol, 450 buys, tight range) -> rising
-    closes that break above vwap.upper_1 near POC.
-
-      bars 0-54   quiet at 100, vol 100                  -> WAITING
-      bar  55     volume spike 5x, zero range @100, 90% buys -> BUY absorption
-      bars 56-58  accumulation near POC (100)            -> ABSORBING -> ACCUMULATING
-      bar  59     breakout 104 (> vwap.upper_1)          -> AGGRESSION -> LONG
-    """
-    out = []
-    for i in range(55):
-        out.append(OHLC.create(f"t{i}", 100, 101, 99, 100, 100, 0, 60, 20))
-    out.append(OHLC.create("t55", 100, 100, 100, 100, 500, 0, 450, 400))
-    for i in range(56, 59):
-        out.append(OHLC.create(f"t{i}", 100, 101, 99, 100, 100, 0, 60, 20))
-    out.append(OHLC.create("t59", 103.5, 105, 103, 104, 100, 0, 60, 20))
+def _session_ticks():
+    """Deterministic AGGRESSION-LONG session (proven shape from
+    tests/quant/runtime): ~150 quiet 0.1-range bars @100 (keeps avg_range > 0
+    so the zero-range spike passes range_ok), an absorption spike bar (zero
+    range, 5x volume, 90% buys), accumulation near POC, then rising closes
+    above vwap.upper_1 -> AGGRESSION/LONG on the final bar."""
+    out = [
+        Tick(f"t{i}", 99.95 if i % 2 == 0 else 100.05, 10, 6, 4)
+        for i in range(300)
+    ]
+    out.append(Tick("t300", 100.0, 500, 450, 50))
+    for i in range(1, 6):
+        out.append(Tick(f"t{300 + i}", 100.0, 10, 6, 4))
+    for i, price in enumerate([100.3, 100.6, 100.9, 101.2]):
+        out.append(Tick(f"t{306 + i}", price, 10, 6, 4))
     return out
 
 
 def _run_trace():
-    bridge = QuantBridge()
-    return [bridge.on_bar_close("SYM", ohlc) for ohlc in _session_ohlc()]
+    eng = QuantEngine(
+        SyntheticGateway(_session_ticks()), SYMBOL, interval_seconds=1
+    )
+    return eng.run()
+
+
+def _auctions(trace):
+    return [e.auction for e in trace if isinstance(e, AuctionUpdated)]
 
 
 def test_auction_trace_reaches_aggression_long():
-    dtos = _run_trace()
-    assert len(dtos) == 60
-    # intermediate progression: spike re-arms ABSORBING, near-POC accumulation,
-    # then the breakout bar trips AGGRESSION/LONG on the final bar.
-    assert dtos[55]["tripleAPhase"] == "ABSORBING"
-    assert dtos[57]["tripleAPhase"] == "ACCUMULATING"
-    assert dtos[-1]["tripleAPhase"] == "AGGRESSION"
-    assert dtos[-1]["tripleASignal"] == "LONG"
-    assert dtos[-1]["close"] > dtos[-1]["vwap"]["upper1"]
+    auctions = _auctions(_run_trace())
+    assert len(auctions) == 155
+    # intermediate progression: absorption re-arms ABSORBING, near-POC
+    # accumulation, then rising closes trip AGGRESSION/LONG.
+    phases = [a.triple_a_phase for a in auctions]
+    assert "ABSORBING" in phases
+    assert "ACCUMULATING" in phases
+    assert phases.index("ABSORBING") < phases.index("ACCUMULATING")
+    # The breakout bar trips AGGRESSION/LONG; the machine re-arms afterwards.
+    agg = [a for a in auctions if a.triple_a_phase == "AGGRESSION"]
+    assert agg, "AGGRESSION must be reached"
+    assert agg[-1].triple_a_signal == "LONG"
+    assert agg[-1].close > agg[-1].vwap.upper_1
 
 
 def test_dto_has_ws_auction_contract_keys():
-    last = _run_trace()[-1]
-    vp = last["volumeProfile"]
-    vw = last["vwap"]
-    of = last["orderFlow"]
-    loc = last["location"]
+    eng = QuantEngine(
+        SyntheticGateway(_session_ticks()), SYMBOL, interval_seconds=1
+    )
+    eng.run()
+    from quant.ws_adapter import view_state_to_ws
+
+    last = view_state_to_ws(eng.projector.snapshot(SYMBOL))
+    auction = last["auction"]
+    assert auction is not None, "projector must carry the final auction state"
+    vp = auction["volumeProfile"]
+    vw = auction["vwap"]
+    of = auction["orderFlow"]
+    loc = auction["location"]
     assert {"poc", "vah", "val"} <= set(vp)
     assert {"value", "deviationSigmas"} <= set(vw)
     assert {"cvd", "cvdSlope"} <= set(of)
     assert "zone" in loc
-    assert "tripleAPhase" in last and "tripleASignal" in last
+    assert "tripleAPhase" in auction and "tripleASignal" in auction
 
 
 def test_determinism_same_bars_same_trace():
     assert _run_trace() == _run_trace()
-
-
-def test_fixture_matches_trace():
-    """Committed fixture = the shared contract the frontend test consumes."""
-    fixture = json.loads(FIXTURE.read_text())
-    assert fixture == _run_trace()

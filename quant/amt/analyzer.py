@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -300,15 +301,18 @@ class AMTAnalyzer:
     @staticmethod
     def _detect_option_type(symbol: str) -> str:
         """Detect whether symbol is CALL, PUT, or UNKNOWN.
-        
-        Fix 1: Used for direction labeling in frontend.
+
+        Anchored detection — a trailing CALL/PUT word or a digit-suffixed
+        CE/PE token — so an underlying name containing "CE"/"PE"/"CALL"/
+        "PUT" as a substring (e.g. PRINCE, SPICE, CALLAWAY) can never flip
+        the label. Used for direction labeling in frontend.
         """
         if not symbol:
             return "UNKNOWN"
-        symbol_upper = symbol.upper()
-        if "CALL" in symbol_upper or "CE" in symbol_upper:
+        sym = symbol.upper().rstrip()
+        if sym.endswith("CALL") or re.search(r"\d+\s*CE$", sym):
             return "CALL"
-        if "PUT" in symbol_upper or "PE" in symbol_upper:
+        if sym.endswith("PUT") or re.search(r"\d+\s*PE$", sym):
             return "PUT"
         return "UNKNOWN"
 

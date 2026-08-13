@@ -112,7 +112,11 @@ class TestMCXScannerFiltering:
         nse = ExchangeConfig.for_exchange("NSE")
 
         assert mcx.get_lot_size("CRUDEOIL") == 100
-        assert nse.get_lot_size("NIFTY") == 25  # NIFTY options lot size
+        # Exchange-authoritative lot sizes (Aug 2026, from Dhan's instrument
+        # master) — the previous 25/15/25 were off by 2-2.6x.
+        assert nse.get_lot_size("NIFTY") == 65
+        assert nse.get_lot_size("BANKNIFTY") == 30
+        assert nse.get_lot_size("FINNIFTY") == 60
         assert mcx.get_lot_size("GOLD") == 100
 
 

@@ -1,58 +1,50 @@
+"""Gate 3 — the Triple-A edge (Fabio: absorption -> accumulation -> aggression)."""
+
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 
-
-def gate_direction_probability(ctx: DecisionContext, min_probability: float = 0.55) -> GateResult:
-    """Gate 4: direction + probability threshold, CVD-conflict aware."""
-    state = ctx.state
-    if state is None:
-        return GateResult(4, False, "No state")
-    if ctx.agent_direction not in ("LONG", "SHORT"):
-        return GateResult(4, False, "No direction")
-    if ctx.agent_probability < min_probability:
-        return GateResult(4, False, "Probability below threshold")
-    cvd_slope = state.order_flow.cvd_slope
-    if ctx.agent_direction == "LONG" and cvd_slope < 0:
-        return GateResult(4, False, "CVD conflict")
-    if ctx.agent_direction == "SHORT" and cvd_slope > 0:
-        return GateResult(4, False, "CVD conflict")
-    return GateResult(4, True)
+# Fresh absorption window (bars): the absorption must be recent enough to back
+# the breakout — older footprints are re-tested, not traded through.
+_ABSORPTION_MAX_AGE_BARS = 3
 
 
 def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
-    """Gate 5: AGGRESSION signal or fresh absorption backing a VWAP breakout.
+    """Gate 3: AGGRESSION signal or fresh absorption backing a VWAP breakout.
 
-    Requires the machine's edge (Triple-A signal or absorption side) to agree
-    with the agent's intended direction, so an edge and an agent that disagree
-    can never produce an inverted signal.
+    The machine's edge (Triple-A signal or absorption side) must agree with the
+    intended direction, so an edge and a direction that disagree can never
+    produce an inverted signal.
 
-    Market-state requirement (Fabio's model): the initiative edge exists only
-    OUT of balance — price is IMBALANCED and searching for a new balance, with
-    an absorption→aggression transition. In BALANCED rotation there is no
-    initiative edge (the balance-returning reversion trade is the separate
-    VA-fade tier, not this gate). A DEAD market (volume collapse) rejects too.
+    Fabio's playbook (Valentini Triple-A, see amt_docs/):
+      - Absorption:  high volume, little movement at a level (BUY/SELL side).
+      - Accumulation: consolidation near POC (implicit between absorption and
+        the breakout — the machine's phase machine tracks it).
+      - Aggression:   breakout beyond VWAP with volume — the entry trigger.
+    LONG requires BUY absorption + close above the VWAP band; SHORT requires
+    SELL absorption + close below the VWAP band. A DEAD market (volume
+    collapse) rejects — there is nothing to trade. Entries are allowed in both
+    BALANCED and IMBALANCED auctions: in balance the same absorption/breakout
+    rule applies, and the VA-fade tier covers balance-returning reversion.
     """
     state = ctx.state
     if state is None:
-        return GateResult(5, False, "No state")
+        return GateResult(3, False, "No state")
     if ctx.agent_direction not in ("LONG", "SHORT"):
-        return GateResult(5, False, "No direction")
+        return GateResult(3, False, "No direction")
     market_state = str(ctx.market_state or "").upper()
     if market_state in ("DEAD", "DEAD_MARKET"):
-        return GateResult(5, False, "Dead market — no edge")
-    if market_state != "IMBALANCED":
-        return GateResult(5, False, "Market balanced — initiative edge requires imbalance")
+        return GateResult(3, False, "Dead market — no edge")
     if state.triple_a_phase == "AGGRESSION" and state.triple_a_signal is not None:
         if state.triple_a_signal != ctx.agent_direction:
-            return GateResult(5, False, "Triple-A direction conflicts with agent direction")
-        return GateResult(5, True)
-    if state.absorption is not None and state.absorption.bar_age <= 3:
+            return GateResult(3, False, "Triple-A direction conflicts with agent direction")
+        return GateResult(3, True)
+    if state.absorption is not None and state.absorption.bar_age <= _ABSORPTION_MAX_AGE_BARS:
         if state.absorption.side == "BUY" and state.close > state.vwap.upper_1:
             if ctx.agent_direction != "LONG":
-                return GateResult(5, False, "Absorption direction conflicts with agent direction")
-            return GateResult(5, True)
+                return GateResult(3, False, "Absorption direction conflicts with agent direction")
+            return GateResult(3, True)
         if state.absorption.side == "SELL" and state.close < state.vwap.lower_1:
             if ctx.agent_direction != "SHORT":
-                return GateResult(5, False, "Absorption direction conflicts with agent direction")
-            return GateResult(5, True)
-    return GateResult(5, False, "No Triple-A edge")
+                return GateResult(3, False, "Absorption direction conflicts with agent direction")
+            return GateResult(3, True)
+    return GateResult(3, False, "No Triple-A edge")

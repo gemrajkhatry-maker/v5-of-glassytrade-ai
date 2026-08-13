@@ -25,7 +25,7 @@ def _ctx(**kw):
                            agent_direction=kw.get("direction", "LONG"), agent_probability=0.7)
 
 def _pass_results():
-    return [GateResult(i, True) for i in range(1, 8)]
+    return [GateResult(i, True) for i in range(1, 5)]
 
 def test_build_returns_none_when_a_gate_fails():
     sb = SignalBuilder()

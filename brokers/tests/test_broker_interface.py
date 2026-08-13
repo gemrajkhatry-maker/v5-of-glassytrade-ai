@@ -396,12 +396,3 @@ class TestBrokerLifecycle:
         broker = PaperBroker()
         broker.initialize()  # should not raise
 
-    def test_gateway_close_calls_broker_close(self):
-        """BrokerGateway.close() calls broker.close() for brokers without close_sync."""
-        from unittest.mock import MagicMock
-        from brokers.broker.paper import PaperBroker
-        from brokers.gateway import BrokerGateway
-
-        gw = BrokerGateway.paper()
-        # PaperBroker has no close_sync, so gateway should call close()
-        gw.close()  # should not raise

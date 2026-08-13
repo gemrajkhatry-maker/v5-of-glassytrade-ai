@@ -155,10 +155,11 @@ def _get_mcx_phase(
     if t < 1080:  # 14:00–18:00 afternoon
         return ("MCX_AFTERNOON", 2, True, True, True, False, "TREND_CONTINUATION")
 
-    if t < 1380:  # 18:00–23:00 evening (reduced liquidity)
-        return ("MCX_EVENING", 3, True, True, True, False, "NEUTRAL")
+    if t < 1380:  # 18:00–23:00 evening — US/COMEX/NYMEX overlap, HIGH liquidity
+        return ("MCX_EVENING", 3, True, True, True, False, "TREND_CONTINUATION")
 
-    if t < 1410:  # 23:00–23:30 close
+    if t < 1410:  # 23:00–23:30 close protection (real MCX close 23:30 IST;
+        #            23:55 during US daylight saving — keep the conservative 23:30)
         return ("MCX_CLOSE", 4, False, False, False, True, "NEUTRAL")
 
     return ("MCX_POST_MARKET", 0, False, False, False, False, "NEUTRAL")
@@ -428,20 +429,23 @@ def load_prior_profile(storage, symbol: str) -> dict[str, float]:
 
 
 def is_expiry_day(trade_date: date) -> bool:
-    """Check if the given date is an options expiry day.
+    """Check if the given date is an NSE options expiry day.
 
-    Weekly expiry: every Thursday.
-    Monthly expiry: last Thursday of the month.
-    Both are Thursdays, so any Thursday is an expiry day.
+    Current NSE schedule (weeklies for all indices except NIFTY were
+    discontinued in Nov 2024):
+      - NIFTY weekly: every Tuesday.
+      - BANKNIFTY/FINNIFTY/MIDCPNIFTY monthly: last Tuesday of the month.
+    Every Tuesday is therefore an expiry day (weekly or monthly), so any
+    Tuesday is an expiry day.
     """
-    return trade_date.weekday() == 3  # Thursday = 3
+    return trade_date.weekday() == 1  # Tuesday = 1
 
 
 def seconds_to_close(current_time: datetime, exchange: str = "NSE") -> float:
     """Return seconds remaining until market close.
 
     NSE close: 15:15 IST
-    MCX close: 23:15 IST
+    MCX close: 23:30 IST
     Returns 0.0 if market is already closed or exchange is unknown.
     """
     ist_dt = _to_ist(current_time)
@@ -449,7 +453,7 @@ def seconds_to_close(current_time: datetime, exchange: str = "NSE") -> float:
     if exchange.upper() == "NSE":
         close_hour, close_minute = 15, 15
     elif exchange.upper() == "MCX":
-        close_hour, close_minute = 23, 15
+        close_hour, close_minute = 23, 30
     else:
         return 0.0
 

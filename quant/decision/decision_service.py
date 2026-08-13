@@ -1,9 +1,10 @@
 """DecisionService — the quant decision engine of record.
 
-Runs GatePipeline (gates 1-7) then SignalBuilder; when the gates pass but no
-Triple-A signal materializes, falls back to a Value-Area fade (tier-2); returns
-NO_EDGE when nothing qualifies. The returned QuantDecision is consumed by the
-backend wiring (quant signal -> domain Signal -> execution).
+Runs GatePipeline (gates 1-4, the Fabio AMT playbook) then SignalBuilder;
+when the gates pass but no Triple-A signal materializes, falls back to a
+Value-Area fade (tier-2); returns NO_EDGE when nothing qualifies. The returned
+QuantDecision is consumed by the backend wiring (quant signal -> domain Signal
+-> execution).
 """
 
 from __future__ import annotations

@@ -59,13 +59,22 @@ class MultiplexedMarketFeed:
         # it raw cumulative values would explode bar volume. ``(vol, buy, sell)``
         # per symbol.
         #
-        # Lock discipline: the producer thread is the SOLE writer of this dict
-        # (``_route``/``_convert`` run single-threaded on the producer).
+        # Per-symbol last-trade-price baselines for buy/sell attribution: Dhan
+        # does NOT provide a traded buy/sell split on the WS feed (its
+        # total_buy_qty/total_sell_qty are order-book bid/ask totals that
+        # oscillate with every book change). Attributing each tick's traded
+        # volume by price direction — up-tick = buyer-initiated, down-tick =
+        # seller-initiated, flat = split — yields a bar delta that tracks the
+        # exchange's real traded delta instead of order-book noise.
+        #
+        # Lock discipline: the producer thread is the SOLE writer of both
+        # dicts (``_route``/``_convert`` run single-threaded on the producer).
         # ``unsubscribe``/``close`` pop/clear entries under ``self._lock``;
         # dict reads and writes are GIL-atomic, so a pop racing a write can
         # only drop a baseline (benign — the next packet re-baselines). Do not
         # "fix" one side to take the lock without taking it on the other.
         self._prev_cum: dict[str, tuple[float, float, float]] = {}
+        self._prev_price: dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # Cumulative -> per-tick delta conversion (legacy candle-builder logic)
@@ -78,17 +87,37 @@ class MultiplexedMarketFeed:
     ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
         """Return ``(new_baseline, (dvol, dbuy, dsell))`` for a packet.
 
-        First packet for a symbol establishes the baseline (delta 0). A
-        value that went *backwards* means a session reset — re-baseline,
-        drop the spike. A delta larger than 5% of the baseline (or 10k) is
-        treated as a stale/session-reset artifact and capped — mirrors the
-        legacy ``candle_aggregator`` caps (``vol_cap`` and combined
-        ``bs_cap`` for buy/sell).
+        Only ``vol`` is a true cumulative (Dhan's ``Vol`` — cumulative traded
+        quantity since session open). Dhan's ``total_buy_qty``/``total_sell_qty``
+        are the CURRENT order-book bid/ask totals: they oscillate with every
+        book change and are NOT cumulative traded splits (their sum is far
+        below ``Vol``). Guarding the session-reset on buy/sell therefore trips
+        on nearly every packet, re-baselining ``vol`` and capping the next real
+        delta at 10k — the bar lost ~85% of its traded volume.
+
+        Rules:
+        * A packet with NO volume fields at all (a Dhan TICKER LTP-only packet
+          routed through ``stream_full``) must not touch the baseline — pass
+          through with zero delta.
+        * First packet for a symbol establishes the baseline (delta 0).
+        * Only ``vol`` going *backwards* means a session reset — re-baseline,
+          drop the spike.
+        * A delta larger than 5% of the baseline (or 10k) is treated as a
+          stale/session-reset artifact and capped — mirrors the legacy
+          ``candle_aggregator`` ``vol_cap``.
+
+        The returned ``dbuy``/``dsell`` are the raw order-book-total diffs
+        (legacy callers only); ``MultiplexedMarketFeed._convert`` IGNORES them
+        and attributes buy/sell by tick direction via ``_attr_delta`` — the
+        book-total diffs oscillate and would fabricate a per-bar delta.
         """
+        if vol == 0 and buy == 0 and sell == 0:
+            # TICKER packet — LTP only, no volume data. Do NOT re-baseline.
+            return prev, (0.0, 0.0, 0.0)
         if prev is None:
             return (vol, buy, sell), (0.0, 0.0, 0.0)
         pvol, pbuy, psell = prev
-        if vol < pvol or buy < pbuy or sell < psell:
+        if vol < pvol:
             return (vol, buy, sell), (0.0, 0.0, 0.0)
         dvol = max(0.0, vol - pvol)
         dbuy = max(0.0, buy - pbuy)
@@ -96,13 +125,30 @@ class MultiplexedMarketFeed:
         cap = max(10000.0, pvol * 0.05) if pvol > 0 else 10000.0
         if dvol > cap:
             dvol = cap
-        bs_tot = pbuy + psell
-        bs_cap = max(10000.0, bs_tot * 0.05) if bs_tot > 0 else 10000.0
-        if dbuy > bs_cap:
-            dbuy = bs_cap
-        if dsell > bs_cap:
-            dsell = bs_cap
         return (vol, buy, sell), (dvol, dbuy, dsell)
+
+    @staticmethod
+    def _attr_delta(prev_price: float | None, price: float, dvol: float) -> tuple[float, float]:
+        """Split a tick's traded volume into buy/sell by price direction.
+
+        Dhan WS carries no aggressor flag and its total_buy_qty/total_sell_qty
+        are order-book totals, not traded splits — using their diffs produces a
+        bar delta that oscillates with the book (e.g. +82 vs the exchange's
+        real +10). Direction is the standard proxy: an up-tick is
+        buyer-initiated, a down-tick seller-initiated, a flat tick (and the
+        very first tick, which has no direction) splits evenly.
+
+        ``buy + sell == dvol`` always, so bar volume stays consistent with the
+        buy/sell split the footprint/aggression pipeline expects.
+        """
+        if dvol <= 0:
+            return 0.0, 0.0
+        if prev_price is None or price == prev_price:
+            half = dvol / 2.0
+            return half, half
+        if price > prev_price:
+            return dvol, 0.0
+        return 0.0, dvol
 
     # ------------------------------------------------------------------
     # Subscription API (symbol-level)
@@ -133,6 +179,7 @@ class MultiplexedMarketFeed:
         with self._lock:
             q = self._queues.pop(symbol, None)
             self._prev_cum.pop(symbol, None)
+            self._prev_price.pop(symbol, None)
         if q is not None:
             q.put(None)
         self._resync.set()
@@ -153,6 +200,7 @@ class MultiplexedMarketFeed:
             self._thread.join(timeout=5.0)
         with self._lock:
             self._prev_cum.clear()
+            self._prev_price.clear()
             for q in self._queues.values():
                 q.put(None)
 
@@ -285,10 +333,15 @@ class MultiplexedMarketFeed:
             vol = float(pkt.get("volume") or 0)
             buy = float(pkt.get("total_buy_qty") or 0)
             sell = float(pkt.get("total_sell_qty") or 0)
-            baseline, (dvol, dbuy, dsell) = self._cum_to_delta(
+            baseline, (dvol, _dbuy, _dsell) = self._cum_to_delta(
                 self._prev_cum.get(symbol), vol, buy, sell
             )
             self._prev_cum[symbol] = baseline
+            # Buy/sell by tick direction (see ``_attr_delta``) — the book-total
+            # diffs are noise and would fabricate the bar delta.
+            prev_price = self._prev_price.get(symbol)
+            self._prev_price[symbol] = ltp
+            dbuy, dsell = self._attr_delta(prev_price, ltp, dvol)
             depth = None
             db = pkt.get("depth_bids") or []
             da = pkt.get("depth_asks") or []

@@ -5,17 +5,10 @@ Provides:
 - IBrokerPort: Abstract interface for broker implementations
 - PaperBroker: Simulated broker for testing
 - DhanBroker: Production Dhan broker (self-contained, no dhanhq_custom dependency)
-- BrokerGateway: Unified API with factory pattern and circuit breaker
 
-Usage:
-    # Paper trading (testing)
-    from brokers import BrokerGateway
-    gateway = BrokerGateway.paper()
-    quote = gateway.get_quote("RELIANCE")
-
-    # Dhan broker (production) — credentials auto-loaded from .env
-    gateway = BrokerGateway.dhan()
-    quote = gateway.get_quote("RELIANCE")
+The legacy ``BrokerGateway`` facade (brokers/gateway.py) was removed; the
+active paths are the Dhan hexagon (``brokers.broker.dhan``, used by the
+backend adapters) and the quant ``LiveGateway`` (``quant/brokers``).
 """
 
 # Auto-load .env from project root so credentials are available without
@@ -59,18 +52,6 @@ def __getattr__(name):
         return DhanBroker
     raise AttributeError(f"module 'brokers' has no attribute {name!r}")
 
-# Application Layer
-from brokers.gateway import (
-    BrokerType,
-    BrokerFactory,
-    CircuitBreaker,
-    CircuitState,
-    CircuitBreakerError,
-    BrokerGateway,
-    create_paper_gateway,
-    create_dhan_gateway,
-)
-
 __all__ = [
     # Types
     'Exchange',
@@ -93,14 +74,4 @@ __all__ = [
     # Brokers
     'PaperBroker',
     'DhanBroker',
-    
-    # Gateway
-    'BrokerType',
-    'BrokerFactory',
-    'CircuitBreaker',
-    'CircuitState',
-    'CircuitBreakerError',
-    'BrokerGateway',
-    'create_paper_gateway',
-    'create_dhan_gateway',
 ]

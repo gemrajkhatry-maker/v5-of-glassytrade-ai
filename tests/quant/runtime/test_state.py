@@ -193,17 +193,17 @@ def test_decision_fold_gate_results():
             False, None, "GATE_REJECTED", "ABSORBING",
              (GateResult(1, True, "session phase ok"),
               GateResult(2, True),
-              GateResult(4, False, "probability below threshold", "0.42")),
-             block_reasons=("DIRECTION_PROBABILITY: probability below threshold",),
+              GateResult(3, False, "No Triple-A edge")),
+             block_reasons=("TRIPLE_A_EDGE: No Triple-A edge",),
         ),
     ))
     qd = p.snapshot("S").quant_decision
     assert qd["gateResults"] == [
         {"gate": 1, "name": "SESSION_PHASE", "passed": True, "reason": "session phase ok"},
         {"gate": 2, "name": "POSITION_COOLDOWN", "passed": True, "reason": ""},
-        {"gate": 4, "name": "DIRECTION_PROBABILITY", "passed": False, "reason": "probability below threshold"},
+        {"gate": 3, "name": "TRIPLE_A_EDGE", "passed": False, "reason": "No Triple-A edge"},
     ]
-    assert qd["blockReasons"] == ["DIRECTION_PROBABILITY: probability below threshold"]
+    assert qd["blockReasons"] == ["TRIPLE_A_EDGE: No Triple-A edge"]
 
 
 def test_risk_fold():

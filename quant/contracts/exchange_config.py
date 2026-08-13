@@ -76,12 +76,24 @@ class ExchangeConfig:
         return self.tick_sizes.get(underlying, 0.05)
 
     def get_lot_size(self, symbol_or_underlying: str) -> int:
-        """Get lot size for a symbol or underlying. Defaults to 25."""
+        """Get lot size for a symbol or underlying.
+
+        Raises KeyError when the underlying is unknown — the old silent ``25``
+        default sized NIFTY positions 2.6x too small. Lot size is exchange
+        metadata; an unknown underlying must be surfaced, not guessed.
+        """
         clean = (
             symbol_or_underlying.upper().replace("NSE:", "").replace("MCX:", "").strip()
         )
         underlying = clean.split("-")[0].split(" ")[0]
-        return self.lot_sizes.get(underlying, 25)
+        try:
+            return self.lot_sizes[underlying]
+        except KeyError:
+            raise KeyError(
+                f"No lot size configured for underlying {underlying!r} "
+                f"(known: {sorted(self.lot_sizes)}). Lot size is exchange "
+                "metadata — configure it or query the broker instrument master."
+            ) from None
 
     def get_point_value(self, symbol_or_underlying: str) -> float:
         """Get point value (INR per tick) for a symbol or underlying. Defaults to 1.0."""
@@ -204,9 +216,11 @@ class ExchangeConfig:
                 "FINNIFTY": 0.05,
             },
             lot_sizes={
-                "NIFTY": 25,
-                "BANKNIFTY": 15,
-                "FINNIFTY": 25,
+                # Current NSE series (exchange-authoritative, Aug 2026):
+                # NIFTY=65, BANKNIFTY=30, FINNIFTY=60. Were 25/15/25 (wrong).
+                "NIFTY": 65,
+                "BANKNIFTY": 30,
+                "FINNIFTY": 60,
             },
             point_values={
                 "NIFTY": 1.0,

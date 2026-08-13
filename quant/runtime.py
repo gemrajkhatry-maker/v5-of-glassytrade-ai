@@ -330,14 +330,22 @@ class QuantEngine:
             self._manage_exit(state, bar)
 
     def _decide(self, state, bar) -> None:
-        # Direction input to the gates is the deterministic Triple-A auction-
-        # state signal, NOT the async LLM advisory. It was hard-coded to
-        # "LONG", which made a SHORT edge structurally unreachable: gate 5
-        # requires ``state.triple_a_signal == agent_direction`` and gate 4 runs
-        # the LONG CVD-conflict check, so the kernel's SELL-absorption edge
-        # (close < vwap.lower_1 -> AGGRESSION/SHORT) could never execute.
+        # Direction input to the gates is the deterministic auction-state edge,
+        # NOT the async LLM advisory: the AGGRESSION Triple-A signal when the
+        # machine has one, else the fresh absorption side (BUY -> LONG,
+        # SELL -> SHORT). The absorption fallback is what lets the Fabio entry
+        # (absorption + VWAP breakout, gate 3) execute during the
+        # ABSORPTION/ACCUMULATION phases — before an AGGRESSION signal exists.
         signal = state.triple_a_signal if state is not None else None
         agent_direction = signal if signal in ("LONG", "SHORT") else None
+        if (
+            agent_direction is None
+            and state is not None
+            and state.absorption is not None
+        ):
+            agent_direction = {"BUY": "LONG", "SELL": "SHORT"}.get(
+                state.absorption.side
+            )
         # Gate 1 (session-phase) and warmup were hard-coded to pass; the engine
         # now enforces the Fabio NSE session phases (no entries in the
         # 09:15-09:30 opening-noise window, none after 15:15 close protection)

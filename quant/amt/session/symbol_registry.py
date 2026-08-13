@@ -140,7 +140,9 @@ def parse_symbol_metadata(symbol: str, spot: float = 0.0) -> dict:
     strike = float(strike_str)
     opt_flag = 1.0 if opt_type.upper() == "CALL" else -1.0
 
-    # Build expiry date (NSE weekly: last Thursday of the month — approximate with day+month)
+    # Build expiry date from the date embedded in the symbol (DAY MON). NSE
+    # weeklies expire Tuesday; monthlies on the last Tuesday — no weekday
+    # table needed since the symbol carries the authoritative date.
     try:
         now_ist = datetime.now(IST_ZONE)
         month_num = _MONTH_MAP.get(month_str, now_ist.month)
@@ -175,9 +177,9 @@ def parse_symbol_metadata(symbol: str, spot: float = 0.0) -> dict:
 _NSE_OPENIST  = dtime(9, 15)
 _NSE_CLOSEIST = dtime(15, 15)
 
-# MCX commodity derivatives: Mon-Fri 09:00-23:15 IST
+# MCX commodity derivatives: Mon-Fri 09:00-23:30 IST (23:55 in US DST)
 _MCX_OPENIST  = dtime(9, 0)
-_MCX_CLOSEIST = dtime(23, 15)
+_MCX_CLOSEIST = dtime(23, 30)
 
 # Exchanges whose hours span midnight (none currently, but structure supports it)
 _EXCHANGE_HOURS: dict[str, tuple[dtime, dtime]] = {
@@ -194,7 +196,7 @@ def is_market_open(ts: str | None = None, exchange: str | None = None) -> bool:
 
     Exchange-specific hours:
       NSE / NSE_EQ / BSE / NFO : 09:15 – 15:15 IST
-      MCX                       : 09:00 – 23:15 IST
+      MCX                       : 09:00 – 23:30 IST
 
     Falls back to NSE hours when exchange is unknown.
     On timestamp parse error returns False (fail-closed — safer than allowing

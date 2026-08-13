@@ -12,9 +12,9 @@ class MockMarketData:
     def get_lot_size(self, symbol: str) -> int:
         sym = symbol.upper()
         if "BANKNIFTY" in sym:
-            return 15
+            return 30
         if "NIFTY" in sym:
-            return 25
+            return 65
         if "CRUDEOIL" in sym:
             return 100
         return 1
@@ -31,14 +31,14 @@ def test_get_lot_size_nifty(mock_market_data):
     assert response.status_code == 200
     data = response.json()
     assert data["symbol"] == "NIFTY24JAN25000CE"
-    assert data["lotSize"] == 25
+    assert data["lotSize"] == 65
 
 def test_get_lot_size_banknifty(mock_market_data):
     response = client.get("/api/market/lot-size/BANKNIFTY24JAN48000PE")
     assert response.status_code == 200
     data = response.json()
     assert data["symbol"] == "BANKNIFTY24JAN48000PE"
-    assert data["lotSize"] == 15
+    assert data["lotSize"] == 30
 
 def test_get_lot_size_default(mock_market_data):
     response = client.get("/api/market/lot-size/RELIANCE")

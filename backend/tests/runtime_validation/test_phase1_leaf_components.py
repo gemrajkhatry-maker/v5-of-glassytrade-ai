@@ -79,7 +79,7 @@ def _ctx(state, direction="LONG") -> DecisionContext:
 
 
 def _pass_results():
-    return [GateResult(i, True) for i in range(1, 6)]
+    return [GateResult(i, True) for i in range(1, 5)]
 
 
 # ---------------------------------------------------------------------------
@@ -146,33 +146,47 @@ class TestIndicators:
 class TestSignalGeneration:
     def test_long_signal_builds_valid_rr(self):
         sb = SignalBuilder()
-        # close 100, VAL 98, step 1 -> SL 97, TP 106 (2R), RR 2.0
+        # close 100, VAL 98, step 1; SL sits 2 NSE-option ticks INSIDE the
+        # value-area edge (98 - 2*0.05 = 97.9), not a full bucket outside.
         state = _state(close=100.0, val=98.0, step=1.0, nearest=98.0)
         sig = sb.build(_ctx(state, "LONG"), _pass_results())
         assert sig is not None
         assert sig.type == "LONG"
         assert sig.entry == pytest.approx(100.0)
         assert sig.sl < sig.entry < sig.tp
-        assert sig.sl == pytest.approx(97.0)
-        assert sig.tp == pytest.approx(106.0)
+        assert sig.sl == pytest.approx(97.9)
+        assert sig.tp == pytest.approx(104.2)
         assert sig.rr == pytest.approx(2.0)
 
     def test_short_signal_is_sell(self):
         sb = SignalBuilder()
-        # close 100, VAH 102, step 1 -> SL 103, TP 94 (2R)
+        # close 100, anchor level 102 (nearest, above entry); SL sits 2 ticks
+        # INSIDE it (102 + 2*0.05 = 102.1), TP 2R below entry.
         state = _state(close=100.0, val=98.0, step=1.0, nearest=102.0)
         sig = sb.build(_ctx(state, "SHORT"), _pass_results())
         assert sig is not None
         assert sig.type == "SHORT"
         assert sig.sl > sig.entry > sig.tp
-        assert sig.sl == pytest.approx(103.0)
-        assert sig.tp == pytest.approx(94.0)
+        assert sig.sl == pytest.approx(102.1)
+        assert sig.tp == pytest.approx(95.8)
 
     def test_thin_stop_rejected(self):
+        from quant.decision.signal_builder import (
+            is_min_stop_met,
+            is_stop_too_thin,
+        )
+
+        # A razor-thin stop (VA-fade SL at VAL-step: 0.02 on a 104.92 entry,
+        # ~0.02%) is noise and must not clear the 0.1% structural-stop floor.
+        assert is_stop_too_thin(entry=104.92, sl=104.90)
+        assert not is_min_stop_met(entry=104.92, sl=104.90)
+        # The Triple-A builder's 2-tick-inside SL (104.81, ~0.105% away)
+        # clears the floor and emits a signal.
         sb = SignalBuilder()
-        # entry 104.92, SL at VAL-step = 104.90 (~0.02% away) -> rejected.
         state = _state(close=104.92, val=104.91, step=0.01, nearest=104.9)
-        assert sb.build(_ctx(state, "LONG"), _pass_results()) is None
+        sig = sb.build(_ctx(state, "LONG"), _pass_results())
+        assert sig is not None
+        assert sig.sl == pytest.approx(104.81)
 
     def test_failing_gate_returns_none(self):
         sb = SignalBuilder()

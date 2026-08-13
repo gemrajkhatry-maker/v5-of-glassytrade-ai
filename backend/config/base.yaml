@@ -120,7 +120,10 @@ exchanges:
         exchange: "NSE"
         segment: "NFO"
         instrument_type: "OPT"
-        lot_size: 25
+        # Exchange-authoritative (NSE current series): 65. Config value is a
+        # fallback only — the runtime prefers broker/exchange metadata via
+        # market_data.get_lot_size(). Was 25 (wrong, 2.6x understated).
+        lot_size: 65
         tick_size: 0.05
         vp_bucket_size: 10.0
         vp_num_buckets: 200
@@ -168,7 +171,8 @@ exchanges:
         exchange: "NSE"
         segment: "NFO"
         instrument_type: "OPT"
-        lot_size: 15
+        # Exchange-authoritative (NSE current series): 30. Was 15 (wrong).
+        lot_size: 30
         tick_size: 0.05
         vp_bucket_size: 25.0
         vp_num_buckets: 200
@@ -216,7 +220,8 @@ exchanges:
         exchange: "NSE"
         segment: "NFO"
         instrument_type: "OPT"
-        lot_size: 25
+        # Exchange-authoritative (NSE current series): 60. Was 25 (wrong).
+        lot_size: 60
         tick_size: 0.05
         vp_bucket_size: 10.0
         vp_num_buckets: 200
@@ -263,7 +268,7 @@ exchanges:
     enabled: true
     segment: "MCX_COMM"
     session_open: "09:00"
-    session_close: "23:15"
+    session_close: "23:30"
     warmup_minutes: 15
     timezone: "Asia/Kolkata"
     eia_suppression_minutes: 15

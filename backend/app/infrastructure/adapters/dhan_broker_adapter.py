@@ -102,6 +102,14 @@ class DhanBrokerAdapter(IBroker):
         self._order_poll_timeout = float(
             os.environ.get("DHAN_ORDER_POLL_TIMEOUT_SEC", "30")
         )
+        # Duplicate-order protection: signal_ids currently being executed (or
+        # already executed). A duplicate submission of the same signal (e.g. a
+        # replay, a double-click, or a concurrent consumer) must never reach
+        # place_order twice — each signal_id maps to exactly one broker order.
+        # Broker-side dedup is the backstop (correlationId in the payload);
+        # this guard stops the second call before it leaves the process.
+        self._executing_signal_ids: set[str] = set()
+        self._executing_lock = threading.Lock()
 
         client_id = str(
             getattr(self._config, "dhan_client_id", None)
@@ -156,6 +164,21 @@ class DhanBrokerAdapter(IBroker):
                 qty,
             )
             return None
+
+        # Duplicate-order protection: refuse a second execution of a signal
+        # that is already placed/in-flight (or was already executed). Each
+        # signal_id must map to exactly one broker order — duplicates would
+        # double the position.
+        signal_id = str(getattr(signal, "signal_id", "") or "").strip()
+        if signal_id:
+            with self._executing_lock:
+                if signal_id in self._executing_signal_ids:
+                    logger.warning(
+                        "Duplicate order request for signal %s (%s) — skipping",
+                        signal_id, symbol,
+                    )
+                    return None
+                self._executing_signal_ids.add(signal_id)
 
         try:
             instrument = self._make_instrument(signal, symbol)

@@ -20,20 +20,17 @@ class DecisionContext:
     # intended direction from a higher-level agent (may be None -> gates decide)
     agent_direction: Optional[str] = None   # "LONG" | "SHORT" | "FLAT" | None
     agent_probability: float = 0.0
-    # AMT market state (Fabio 2-state model) from the AMT analyzer — the
-    # initiative (Triple-A) edge only exists OUT of balance: Fabio trades the
-    # absorption→aggression transition when the market is IMBALANCED and is
-    # searching for a new balance; in BALANCED rotation there is no edge.
-    # Gate 5 rejects any initiative entry unless market_state == "IMBALANCED"
-    # ("DEAD" volume also rejects). The VA-fade fallback is the balance-
-    # returning reversion trade and does NOT require imbalance, but refuses a
-    # dead market. Defaults keep gate 5 conservative when the state is unknown.
+    # AMT market state (Fabio 2-state model) from the AMT analyzer. The
+    # Triple-A edge (absorption → accumulation → VWAP breakout) fires in both
+    # BALANCED and IMBALANCED auctions; a DEAD market (volume collapse)
+    # rejects — there is nothing to trade. The VA-fade fallback is the
+    # balance-returning reversion trade and also refuses a dead market.
     market_state: str = "BALANCED"          # "BALANCED" | "IMBALANCED" | "DEAD"
     balance_ratio: float = 0.0              # fraction of recent closes inside VA
     # Failed-auction drive tracker (Fabio): a BALANCE entry must be a return
     # visit after an outside probe was rejected ("second drive"). Populated
-    # from AMTResult.drive_number / drive_entry_valid; gate 3 blocks D1-touch
-    # entries in BALANCE. Defaults keep gate 3 conservative when unknown.
+    # from AMTResult.drive_number / drive_entry_valid; carried for journal /
+    # ML features only — the simplified gate pipeline no longer gates on it.
     drive_entry_valid: bool = False
     drive_number: int = 0                   # 0 = no level tested, 1 = D1, 2 = D2, 3+ exhausted
     # Structural targets for the Triple-A take-profit (Fabio: target the

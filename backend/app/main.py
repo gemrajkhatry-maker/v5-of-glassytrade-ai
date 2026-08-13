@@ -167,45 +167,64 @@ def create_application() -> FastAPI:
         # Get service container from app state
         container = app.state.container
 
-        # Run option scanner to select MCX/NSE contracts
+        # Run option scanner to select MCX/NSE contracts — unless a valid
+        # persisted selection for today exists. Reusing the same contracts on a
+        # restart keeps the strikes stable and preserves per-symbol decision
+        # history in the UI; the scanner only re-runs on a new trading day or
+        # via an explicit /api/scanner/rescan.
         logger.info("Running option scanner to select contracts...")
         begin_phase("option_scanner")
         try:
-            from quant.amt.session.scanner import OptionScannerService
-            from app.config import settings
-            import concurrent.futures
+            from quant.coordinator import load_persisted_contracts
 
-            scanner = OptionScannerService(container.resolve(IMarketData))
+            # Reuse today's persisted selection only when it was selected for
+            # the same exchange as the active strategy (e.g. NSE picks must not
+            # leak into an MCX session after a mid-day strategy switch).
+            persisted = load_persisted_contracts(
+                exchange=_settings.DEFAULT_EXCHANGE
+            )
+            selected_symbols = list(persisted or [])
 
-            # Run scanner in thread pool (it's synchronous)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                results = pool.submit(
-                    scanner.scan_top_n,
-                    n=settings.SCANNER_TOP_N,
-                    underlyings=settings.SCANNER_UNDERLYINGS,
-                    preferred_option_type=settings.SCANNER_OPTION_TYPE or None,
-                    exchange=settings.DEFAULT_EXCHANGE,
-                    expiry_index=settings.SCANNER_EXPIRY_INDEX,
-                    strikes_around_atm=settings.STRIKES_AROUND_ATM,
-                ).result(timeout=120)
+            if persisted:
+                logger.info(
+                    "Reusing persisted contracts (same trading day): %s", persisted
+                )
+            else:
+                from quant.amt.session.scanner import OptionScannerService
+                from app.config import settings
+                import concurrent.futures
 
-            if results:
-                # Filter to valid contracts with LTP > 0
-                final = [r for r in results if r.ltp > 0] or results
-                selected_symbols = [r.symbol for r in final[:settings.SCANNER_TOP_N]]
+                scanner = OptionScannerService(container.resolve(IMarketData))
 
-                if selected_symbols:
-                    app.state.active_symbols = selected_symbols
-                    logger.info(
-                        "Option scanner selected %d contracts: %s",
-                        len(selected_symbols),
-                        selected_symbols
-                    )
-                else:
-                    logger.warning("Option scanner found contracts but none with LTP > 0")
+                # Run scanner in thread pool (it's synchronous)
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    results = pool.submit(
+                        scanner.scan_top_n,
+                        n=settings.SCANNER_TOP_N,
+                        underlyings=settings.SCANNER_UNDERLYINGS,
+                        preferred_option_type=settings.SCANNER_OPTION_TYPE or None,
+                        exchange=settings.DEFAULT_EXCHANGE,
+                        expiry_index=settings.SCANNER_EXPIRY_INDEX,
+                        strikes_around_atm=settings.STRIKES_AROUND_ATM,
+                    ).result(timeout=120)
+
+                if results:
+                    # Filter to valid contracts with LTP > 0
+                    final = [r for r in results if r.ltp > 0] or results
+                    selected_symbols = [
+                        r.symbol for r in final[:settings.SCANNER_TOP_N]
+                    ]
+
+            if selected_symbols:
+                app.state.active_symbols = selected_symbols
+                logger.info(
+                    "Option scanner selected %d contracts: %s",
+                    len(selected_symbols),
+                    selected_symbols
+                )
             else:
                 logger.warning(
-                    "Option scanner found no contracts — using default underlyings: %s",
+                    "No contracts selected — using default underlyings: %s",
                     app.state.active_symbols
                 )
             end_phase("option_scanner", "ok")

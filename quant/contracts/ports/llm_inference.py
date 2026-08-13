@@ -26,6 +26,15 @@ class ILLMInference(ABC):
     def is_ready(self) -> bool:
         """Check if model is loaded and ready for inference."""
 
+    def is_loading(self) -> bool:
+        """True while the model is mid-load and will be ready shortly.
+
+        Backends that lazily load their model on the first ``predict()``
+        (e.g. the shared MLX singleton) must report loading so callers can
+        schedule work that waits for the load instead of dropping it.
+        """
+        return False
+
     def wait_until_ready(self, timeout: float = 120.0) -> bool:
         """Block until model is ready or timeout. Default: poll is_ready()."""
         import time

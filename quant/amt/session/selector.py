@@ -34,7 +34,7 @@ class OptionSelection:
     iv: float                # implied volatility
     bid_ask_spread: float    # spread in rupees
     oi: int                  # open interest
-    lot_size: int            # NIFTY=25, BANKNIFTY=15
+    lot_size: int            # NIFTY=65, BANKNIFTY=30 (current NSE series)
     num_lots: int            # calculated from risk sizing
 
 
@@ -60,8 +60,10 @@ class OptionSelectorConfig:
     min_oi_next_week: int = 500_000     # Stricter for next-week expiry
     min_volume: int = 50_000
     max_theta_ratio: float = 0.20       # theta cost < 20% of expected profit
-    nifty_lot_size: int = 25
-    banknifty_lot_size: int = 15
+    # Exchange-authoritative current NSE series (Aug 2026). These defaults are
+    # fallbacks only — callers should pass the broker/config lot size.
+    nifty_lot_size: int = 65
+    banknifty_lot_size: int = 30
     nifty_strike_interval: int = 50
     banknifty_strike_interval: int = 100
 
@@ -72,7 +74,7 @@ MCX_LOT_SIZES: dict[str, int] = {
     "CRUDEOILM": 10,     # Mini crude
     "NATURALGAS": 1250,
     "GOLD": 100,          # grams
-    "GOLDM": 10,          # Mini gold
+    "GOLDM": 100,         # Mini gold — was 10 (10x under-sized risk sizing)
     "GOLDPETAL": 1,
     "SILVER": 30,         # kg
     "SILVERM": 5,         # Mini silver

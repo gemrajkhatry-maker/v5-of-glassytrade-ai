@@ -476,6 +476,14 @@ class DhanConverter:
             if trigger:
                 payload["triggerPrice"] = trigger
 
+        # Dhan idempotency: when the caller sets ``user_order_id`` (e.g. the
+        # strategy signal_id), send it as ``correlationId`` so a retried
+        # place_order POST (network blip where the first response was lost)
+        # is deduplicated broker-side instead of opening a duplicate position.
+        correlation_id = str(getattr(order, "user_order_id", "") or "").strip()
+        if correlation_id:
+            payload["correlationId"] = correlation_id[:36]
+
         return payload
 
     @staticmethod

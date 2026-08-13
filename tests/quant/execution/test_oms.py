@@ -36,3 +36,48 @@ def test_close_short_profit():
     p = oms.submit(_sig("SHORT"), quantity=5)
     f = oms.close(p, price=99.0, time="t1", reason="TP")
     assert f.pnl == pytest.approx((100 - 99) * 5)
+
+
+# ---------------------------------------------------------------------------
+# Lot-aware sizing — paper P&L must match live rupee P&L exactly
+# ---------------------------------------------------------------------------
+
+
+def test_submit_snaps_size_to_lot_multiples():
+    """100 raw units / 65 lot -> round(1.54) = 2 lots = 130 units, exactly the
+    rounding the live adapter (DhanBrokerAdapter._resolve_quantity) and
+    Portfolio.open_position apply."""
+    oms = PaperOMS(lot_size=65)
+    p = oms.submit(_sig(), quantity=100)
+    assert p.size == 130
+    assert p.order.quantity == 130
+
+
+def test_submit_enforces_minimum_one_lot():
+    oms = PaperOMS(lot_size=65)
+    p = oms.submit(_sig(), quantity=10)
+    assert p.size == 65
+
+
+def test_submit_short_snaps_to_negative_lot_multiple():
+    oms = PaperOMS(lot_size=65)
+    p = oms.submit(_sig("SHORT"), quantity=100)
+    assert p.size == -130
+
+
+def test_close_pnl_is_lot_scaled():
+    """pnl = price_diff * (lot-snapped units) — the same unit count a live
+    fill would report, so paper and live rupee P&L agree."""
+    oms = PaperOMS(lot_size=65)
+    p = oms.submit(_sig(), quantity=100)  # snapped to 130 units
+    f = oms.close(p, price=102.0, time="t1", reason="TP")
+    assert f.pnl == pytest.approx((102 - 100) * 130)
+    assert f.pnl == pytest.approx((102 - 100) * 100 * 1.3)  # 130 = 2 lots
+
+
+def test_lot_size_one_preserves_legacy_behavior():
+    oms = PaperOMS(lot_size=1)
+    p = oms.submit(_sig(), quantity=10)
+    f = oms.close(p, price=102.0, time="t1", reason="TP")
+    assert p.size == 10
+    assert f.pnl == pytest.approx((102 - 100) * 10)

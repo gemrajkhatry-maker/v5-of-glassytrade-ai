@@ -1,0 +1,28 @@
+# Reproducible LoRA retrain config for the LFM2.5-2.6B AMT entry model.
+# Trains on the COMBINED live-format dataset (amt_dataset/amt_data_livefmt:
+# NSE nifty_amt_data_livefmt + MCX mcx_amt_data_livefmt), which is rendered
+# byte-for-byte in the live prompt shape (QuantEngine._llm_instruction system
+# + render_entry_prompt user narrative).
+model: models/lfm2.5-2.6b-mlx-8bit
+adapter_path: models/lfm2.5-amt-lora-v2
+data: amt_dataset/amt_data_livefmt
+iters: 500
+train: true
+test: false
+learning_rate: 2.0e-05
+num_layers: 8
+batch_size: 1
+grad_accumulation_steps: 1
+grad_checkpoint: true
+mask_prompt: true
+max_seq_length: 2048
+save_every: 100
+steps_per_eval: 100
+steps_per_report: 10
+val_batches: 25
+optimizer: adam
+seed: 0
+lora_parameters:
+  rank: 8
+  dropout: 0.0
+  scale: 20.0

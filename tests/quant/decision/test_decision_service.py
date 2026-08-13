@@ -74,31 +74,58 @@ def _quiet_state():
 
 def test_aggression_long_approved():
     ctx = DecisionContext(state=_state(triple_a_phase="AGGRESSION", triple_a_signal="LONG"),
+                          bar=None, agent_direction="LONG", agent_probability=0.7,
+                          market_state="IMBALANCED")
+    d = DecisionService().evaluate(ctx)
+    assert d.approved and d.signal is not None and d.signal.type == "LONG"
+    assert d.reason == "Triple-A"
+
+
+def test_aggression_approved_in_balanced_market():
+    """Fabio playbook (simplified): a valid Triple-A edge executes in balanced
+    rotation too — the playbook trades the same absorption/breakout setup
+    everywhere (default market_state is BALANCED)."""
+    ctx = DecisionContext(state=_state(triple_a_phase="AGGRESSION", triple_a_signal="LONG"),
                           bar=None, agent_direction="LONG", agent_probability=0.7)
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None and d.signal.type == "LONG"
     assert d.reason == "Triple-A"
 
 
-def test_va_fade_fallback():
-    ctx = DecisionContext(state=_va_fade_state(), bar=None, agent_direction="LONG", agent_probability=0.7)
-    d = DecisionService().evaluate(ctx)
-    assert d.approved and d.signal is not None and d.reason == "VA_FADE"
-
-
-def test_va_fade_thin_stop_rejected():
-    # entry 99.6, SL at VAL - step = 99.61 -> ~0.01% stop -> rejected as NO_EDGE.
-    ctx = DecisionContext(state=_thin_va_fade_state(), bar=None, agent_direction="LONG", agent_probability=0.7)
+def test_aggression_blocked_in_dead_market():
+    ctx = DecisionContext(state=_state(triple_a_phase="AGGRESSION", triple_a_signal="LONG"),
+                          bar=None, agent_direction="LONG", agent_probability=0.7,
+                          market_state="DEAD")
     d = DecisionService().evaluate(ctx)
     assert not d.approved and d.signal is None and d.reason == "NO_EDGE"
 
 
-def test_va_fade_healthy_stop_passes():
-    # entry 99.6, SL at VAL - step = 99.5 -> ~0.1% stop -> guard met, fade passes.
-    ctx = DecisionContext(state=_va_fade_state(), bar=None, agent_direction="LONG", agent_probability=0.7)
+def test_va_fade_fallback():
+    ctx = DecisionContext(state=_va_fade_state(), bar=None, agent_direction="LONG", agent_probability=0.7,
+                          market_state="IMBALANCED")
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None and d.reason == "VA_FADE"
 
+def test_va_fade_thin_stop_rejected():
+    # entry 99.6, SL at VAL - step = 99.61 -> ~0.01% stop -> rejected as NO_EDGE.
+    ctx = DecisionContext(state=_thin_va_fade_state(), bar=None, agent_direction="LONG", agent_probability=0.7,
+                          market_state="IMBALANCED")
+    d = DecisionService().evaluate(ctx)
+    assert not d.approved and d.signal is None and d.reason == "NO_EDGE"
+
+def test_va_fade_healthy_stop_passes():
+    # entry 99.6, SL at VAL - step = 99.5 -> ~0.1% stop -> guard met, fade passes.
+    ctx = DecisionContext(state=_va_fade_state(), bar=None, agent_direction="LONG", agent_probability=0.7,
+                          market_state="IMBALANCED")
+    d = DecisionService().evaluate(ctx)
+    assert d.approved and d.signal is not None and d.reason == "VA_FADE"
+
+def test_va_fade_blocked_in_dead_market():
+    """Even the reversion trade refuses a dead market."""
+    ctx = DecisionContext(state=_va_fade_state(), bar=None, agent_direction="LONG", agent_probability=0.7,
+                          market_state="DEAD")
+    d = DecisionService().evaluate(ctx)
+    assert not d.approved and d.signal is None and d.reason == "NO_EDGE"
 
 def test_no_edge():
     ctx = DecisionContext(state=_quiet_state(), bar=None, agent_direction=None, agent_probability=0.0)

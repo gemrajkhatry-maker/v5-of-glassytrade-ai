@@ -5,6 +5,7 @@ set -e
 PROJECT_DIR="/Users/apple/Documents/v5-of-glassytrade-ai"
 BACKEND_DIR="$PROJECT_DIR/backend"
 FRONTEND_DIR="$PROJECT_DIR/frontend"
+VENV_PYTHON="$PROJECT_DIR/.venv/bin/python"
 
 # Kill existing
 lsof -ti:9090 -ti:5190 2>/dev/null | xargs kill -9 2>/dev/null || true
@@ -14,14 +15,16 @@ sleep 1
 unset DEBUG
 
 # Start backend
-echo "Starting backend on :9090..."
+# NSE mode: paper env + nse_options strategy (nse_index_options is a legacy
+# name that falls back to mcx_options — use nse_options explicitly).
+echo "Starting backend on :9090 (NSE mode)..."
 cd "$BACKEND_DIR"
 KMP_DUPLICATE_LIB_OK=TRUE \
 GLASSYTRADE_ENV="${GLASSYTRADE_ENV:-paper}" \
-GLASSYTRADE_STRATEGY="${GLASSYTRADE_STRATEGY:-nse_index_options}" \
+GLASSYTRADE_STRATEGY="${GLASSYTRADE_STRATEGY:-nse_options}" \
 PYTHONPATH="$PROJECT_DIR:$BACKEND_DIR" \
 DEBUG=false \
-nohup python3 -u -m uvicorn app.main:app \
+nohup "$VENV_PYTHON" -u -m uvicorn app.main:app \
   --host 0.0.0.0 --port 9090 \
   > "$BACKEND_DIR/backend.log" 2>&1 &
 BACKEND_PID=$!

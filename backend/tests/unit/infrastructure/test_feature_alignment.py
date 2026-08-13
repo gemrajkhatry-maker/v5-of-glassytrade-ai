@@ -111,15 +111,17 @@ def test_nse_close_at_1515():
 
 def test_mcx_hours():
     from quant.amt.session.symbol_registry import is_market_open
-    # MCX opens 09:00 IST (03:30 UTC), closes 23:15 IST (17:45 UTC)
+    # MCX opens 09:00 IST (03:30 UTC), closes 23:30 IST (18:00 UTC)
     # 09:01 IST = 03:31 UTC → open
     assert is_market_open("2026-02-25T03:31:00Z", exchange="MCX") is True
     # 08:59 IST = 03:29 UTC → closed (before open)
     assert is_market_open("2026-02-25T03:29:00Z", exchange="MCX") is False
     # 22:00 IST = 16:30 UTC → open
     assert is_market_open("2026-02-25T16:30:00Z", exchange="MCX") is True
-    # 23:16 IST = 17:46 UTC → closed
-    assert is_market_open("2026-02-25T17:46:00Z", exchange="MCX") is False
+    # 23:20 IST = 17:50 UTC → still open (evening session)
+    assert is_market_open("2026-02-25T17:50:00Z", exchange="MCX") is True
+    # 23:31 IST = 18:01 UTC → closed (after 23:30 close)
+    assert is_market_open("2026-02-25T18:01:00Z", exchange="MCX") is False
 
 
 def test_is_market_open_parse_error_fails_closed():

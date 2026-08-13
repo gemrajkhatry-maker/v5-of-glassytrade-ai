@@ -86,6 +86,7 @@ def test_full_stack_lifecycle():
 
         ctx = DecisionContext(state=state, bar=bar, symbol="SYM",
                               agent_direction="LONG", agent_probability=0.7,
+                              market_state="IMBALANCED",
                               session_open=True, warmup_complete=True,
                               position_open=False, cooldown_remaining_sec=0,
                               risk_halted=False)

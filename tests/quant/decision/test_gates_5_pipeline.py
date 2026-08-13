@@ -32,56 +32,45 @@ def _ctx(**kw):
                            tick_size=kw.get("tick_size", 0.05))
 
 
-def test_gate6_passes_good_rr():
-    # LONG: entry 100, structural SL = val - step (support). val=99.5, step=0.05
-    # -> SL 99.45 -> 0.55 risk, tp 101.1 -> rr 2.0, stop 11 ticks at 0.05.
+def test_gate4_passes_good_rr():
+    # LONG: entry 100, SL = VAL - 2 ticks = 99.40 -> risk 0.60, TP 101.20 -> RR 2.0.
     r = gate_risk_reward(_ctx(val=99.5))
-    assert r.passed and r.gate == 6
+    assert r.passed and r.gate == 4
 
 
-def test_gate6_fails_poor_rr():
-    # SL = val - step = 99.85 -> 0.15 away -> rr 2.0; force failure with high min_rr
+def test_gate4_fails_poor_rr():
+    # SL = val - 2 ticks = 99.80 -> 0.20 risk, RR 2.0; force failure with high min_rr
     r = gate_risk_reward(_ctx(val=99.9), min_rr=5.0)
-    assert not r.passed and r.gate == 6
+    assert not r.passed and r.gate == 4
 
 
-def test_gate6_fails_stop_too_far():
-    # SL = val - step = 94.95 -> 5.05 away = 101 ticks at 0.05 -> exceeds max
+def test_gate4_fails_stop_too_far():
+    # SL = val - 2 ticks = 94.90 -> 5.10 away = 102 ticks at 0.05 -> exceeds max
     r = gate_risk_reward(_ctx(val=95.0))
-    assert not r.passed and r.gate == 6
+    assert not r.passed and r.gate == 4
 
 
 def test_sl_offset_below_val():
-    # LONG: SL anchored one step below VAL per amt_docs §2.6 (val - step).
-    # val=99.5, step=0.5 -> SL 99.0, risk 1.0 = 20 ticks -> passes.
+    # LONG: SL anchored 2 ticks INSIDE the value-area edge (val - 2*tick),
+    # matching SignalBuilder exactly so gate and builder never diverge.
     r = gate_risk_reward(_ctx(val=99.5, step=0.5))
-    assert r.passed and r.gate == 6
-    assert "SL=99.00" in r.extra
+    assert r.passed and r.gate == 4
+    assert "SL=99.40" in r.extra
 
 
 def test_sl_offset_above_vah():
-    # SHORT: SL anchored one step above VAH per amt_docs §2.6 (vah + step).
-    # vah=100.5, step=0.5 -> SL 101.0, risk 1.0 = 20 ticks -> passes.
+    # SHORT: SL anchored 2 ticks above VAH (vah + 2*tick).
     r = gate_risk_reward(_ctx(close=100.0, vah=100.5, step=0.5,
-                               agent_direction="SHORT", triple_a_signal="SHORT"))
-    assert r.passed and r.gate == 6
-    assert "SL=101.00" in r.extra
+                              agent_direction="SHORT", triple_a_signal="SHORT"))
+    assert r.passed and r.gate == 4
+    assert "SL=100.60" in r.extra
 
 
 def test_pipeline_runs_all_gates():
     pipe = GatePipeline()
     results = pipe.evaluate(_ctx(val=99.5))
-    assert [r.gate for r in results] == [1, 2, 3, 4, 5, 6, 7]
+    assert [r.gate for r in results] == [1, 2, 3, 4]
     assert all(r.passed for r in results)
-
-
-def test_pipeline_gate7_disabled_passes_trivially():
-    # Default ctx: llm_execution_enabled=False -> gate 7 passes (advisory-only).
-    ctx = _ctx(val=99.5)
-    results = GatePipeline().evaluate(ctx)
-    g7 = results[6]
-    assert g7.gate == 7 and g7.passed
-    assert "advisory-only" in g7.reason
 
 
 def test_pipeline_position_open_fails_gate2_but_runs_rest():
@@ -90,3 +79,4 @@ def test_pipeline_position_open_fails_gate2_but_runs_rest():
     assert results[0].passed        # gate1 session open
     assert not results[1].passed    # gate2 position open
     assert results[2].passed        # gate3 still runs
+    assert results[3].passed        # gate4 still runs

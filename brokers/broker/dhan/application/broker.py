@@ -446,23 +446,32 @@ class DhanBroker(IBrokerPort):
             )
 
             if security_id:
-                from brokers.broker.dhan.domain import InstrumentTypeEnum
+                # Prefer the FULL instrument from the exchange master — it
+                # carries lot_size, tick_size, strike, expiry and option_type
+                # (SEM_LOT_UNITS etc.). The old minimal reconstruction dropped
+                # all of these, so get_lot_size() silently returned 1 for every
+                # option contract — wrong position sizing for NIFTY (65), etc.
+                instrument = await self._symbol_mapper.get_instrument(security_id)
+                if instrument is None:
+                    from brokers.broker.dhan.domain import InstrumentTypeEnum
 
-                type_map = {
-                    "index": InstrumentTypeEnum.INDEX,
-                    "equity": InstrumentTypeEnum.EQUITY,
-                    "index_option": InstrumentTypeEnum.INDEX_OPTION,
-                    "stock_option": InstrumentTypeEnum.STOCK_OPTION,
-                    "future": InstrumentTypeEnum.INDEX_FUTURE,
-                    "commodity": InstrumentTypeEnum.COMMODITY_FUTURE,
-                }
-                instrument = DhanInstrument(
-                    security_id=security_id,
-                    trading_symbol=symbol,
-                    symbol=symbol,
-                    exchange_segment=resolved.segment,
-                    instrument_type=type_map.get(resolved.symbol_type, InstrumentTypeEnum.EQUITY),
-                )
+                    type_map = {
+                        "index": InstrumentTypeEnum.INDEX,
+                        "equity": InstrumentTypeEnum.EQUITY,
+                        "index_option": InstrumentTypeEnum.INDEX_OPTION,
+                        "stock_option": InstrumentTypeEnum.STOCK_OPTION,
+                        "future": InstrumentTypeEnum.INDEX_FUTURE,
+                        "commodity": InstrumentTypeEnum.COMMODITY_FUTURE,
+                    }
+                    instrument = DhanInstrument(
+                        security_id=security_id,
+                        trading_symbol=symbol,
+                        symbol=symbol,
+                        exchange_segment=resolved.segment,
+                        instrument_type=type_map.get(
+                            resolved.symbol_type, InstrumentTypeEnum.EQUITY
+                        ),
+                    )
                 self._instrument_cache[cache_key] = instrument
                 return instrument
 
@@ -492,13 +501,15 @@ class DhanBroker(IBrokerPort):
         return self.get_quote(instrument).ltp
 
     def get_lot_size(self, symbol: str, exchange: Optional[Exchange] = None) -> int:
-        """Get lot size for a symbol (sync)."""
-        try:
-            instrument = self._run_async(self.resolve_symbol(symbol, exchange))
-            return instrument.lot_size
-        except Exception as e:
-            logger.warning(f"Failed to get lot size for {symbol}: {e}")
-            return 1
+        """Get lot size for a symbol (sync).
+
+        Raises DhanSymbolNotFoundError when the symbol cannot be resolved — the
+        old silent ``return 1`` fallback produced lot size 1 for every option
+        contract, which would size positions 65x too small for NIFTY. Lot size
+        is exchange metadata; a failure to obtain it must be explicit.
+        """
+        instrument = self._run_async(self.resolve_symbol(symbol, exchange))
+        return instrument.lot_size
 
     def get_exchange_config(self) -> "DhanExchangeConfig":
         """Get ExchangeConfig for RiskSizingEngine integration.
@@ -867,11 +878,15 @@ class DhanExchangeConfig:
     
     def __init__(self, broker: "DhanBroker"):
         self._broker = broker
-    
+
     def get_lot_size(self, symbol_or_underlying: str) -> int:
         """Get lot size from broker's instrument cache.
-        
-        Accepts symbol_or_underlying and normalizes it (matches ExchangeConfig protocol).
+
+        Accepts a full option symbol ("NIFTY 27 FEB 25500 CALL") or an
+        underlying root ("NIFTY") and returns the OPTION lot size from the
+        exchange master. Resolving the bare index ("NIFTY" → IDX_I) is NOT
+        enough: index instruments carry lot_size=1, so an actual NFO option
+        contract of the underlying must be used.
         """
         # Normalize symbol: "NIFTY 27 FEB 25500 CALL" -> "NIFTY"
         clean = (
@@ -881,4 +896,46 @@ class DhanExchangeConfig:
             .strip()
         )
         underlying = clean.split("-")[0].split(" ")[0]
-        return self._broker.get_lot_size(underlying)
+
+        try:
+            # 1) If given a full option symbol, resolve it directly.
+            instrument = self._broker._run_async(
+                self._broker.resolve_symbol(clean)
+            )
+            if instrument.lot_size > 1 or "OPTION" in str(instrument.instrument_type):
+                return instrument.lot_size
+        except Exception:
+            pass
+
+        # 2) Underlying root: find any current NFO option contract of it.
+        mapper = self._broker._symbol_mapper
+        if mapper is not None:
+            from brokers.broker.dhan.infrastructure.symbol_mapper import (
+                ExchangeSegment,
+            )
+
+            from datetime import datetime as _dt
+
+            options = [
+                i
+                for i in mapper.instruments.values()
+                if i.exchange_segment == ExchangeSegment.NSE_FNO
+                and str(i.trading_symbol).startswith(underlying + " ")
+                and i.option_type is not None
+                and "NXT" not in str(i.trading_symbol)
+            ]
+            # Prefer the nearest expiry, then the largest lot size group.
+            if options:
+                options.sort(
+                    key=lambda i: (
+                        abs((i.expiry_date - _dt.now().date()).days)
+                        if i.expiry_date
+                        else 10**6,
+                    )
+                )
+                return options[0].lot_size
+
+        raise DhanSymbolNotFoundError(
+            message=f"Cannot determine option lot size for {underlying}",
+            details={"symbol": symbol_or_underlying},
+        )

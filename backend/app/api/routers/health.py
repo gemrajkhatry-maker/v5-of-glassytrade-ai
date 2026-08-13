@@ -3,6 +3,7 @@
 import asyncio
 import gc
 import logging
+import os
 import resource
 import sys
 import tracemalloc
@@ -342,6 +343,8 @@ async def system_config(request: Request):
         "interval": settings.STREAM_INTERVAL,
         "tradingMode": settings.TRADING_MODE,
         "llmExecutionEnabled": settings.LLM_EXECUTION_ENABLED,
+        "llmConsensusGate": os.getenv("LLM_CONSENSUS_GATE", "0").lower()
+        in ("1", "true", "yes"),
         "playbookGuardMaxRejections": settings.PLAYBOOK_GUARD_MAX_REJECTIONS,
         "explainabilityAlertMinTrades": settings.EXPLAINABILITY_ALERT_MIN_TRADES,
         "explainabilityMinCoverageRate": settings.EXPLAINABILITY_MIN_DRIVER_COVERAGE_PCT,

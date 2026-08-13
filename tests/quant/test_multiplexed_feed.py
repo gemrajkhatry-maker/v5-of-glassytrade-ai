@@ -116,7 +116,9 @@ def test_cumulative_volume_converted_to_per_tick_delta():
 
     The aggregator sums tick volumes, so feeding it raw cumulative values
     would explode bar volume (the flat/misleading volume regression). The
-    feed must emit ``vol - prev_cum`` with a session-reset guard.
+    feed must emit ``vol - prev_cum`` with a session-reset guard. Buy/sell
+    are attributed by tick direction (up-tick = buy), NOT by the order-book
+    total diffs, which oscillate and would fabricate the bar delta.
     """
     md = _FakeMarketData({
         "A": [
@@ -135,13 +137,122 @@ def test_cumulative_volume_converted_to_per_tick_delta():
         t1 = feed.next_tick("A")
         t2 = feed.next_tick("A")
         t3 = feed.next_tick("A")
-        # First packet establishes the baseline (delta 0); subsequent packets
-        # carry the cumulative difference.
+        # First packet establishes the volume baseline (delta 0) and has no
+        # direction yet — buy/sell split evenly on zero volume.
         assert t1.volume == 0.0 and t1.buy_volume == 0.0 and t1.sell_volume == 0.0
-        assert t2.volume == 50.0 and t2.buy_volume == 30.0 and t2.sell_volume == 20.0
-        assert t3.volume == 5.0 and t3.buy_volume == 2.0 and t3.sell_volume == 3.0
+        # Subsequent packets carry the cumulative difference, attributed by
+        # tick direction: 100 → 101 → 102 is a string of up-ticks (buy).
+        assert t2.volume == 50.0 and t2.buy_volume == 50.0 and t2.sell_volume == 0.0
+        assert t3.volume == 5.0 and t3.buy_volume == 5.0 and t3.sell_volume == 0.0
         # Prices always flow regardless of volume baseline.
         assert t1.price == 100.0 and t2.price == 101.0 and t3.price == 102.0
+    finally:
+        feed.close()
+
+
+def test_delta_attributed_by_tick_direction():
+    """Buy/sell must come from price direction, not order-book totals.
+
+    Dhan's total_buy_qty/total_sell_qty are CURRENT order-book bid/ask
+    totals — their diffs oscillate with every book change and would produce a
+    fabricated bar delta (the live GOLDM bar showed delta=+82 vs the
+    exchange's real +10). Attribution: up-tick → buy, down-tick → sell,
+    flat tick → split, and buy+sell always equals the tick's volume.
+    """
+    md = _FakeMarketData({
+        "A": [
+            {**_pkt("A", 1, 100.0), "volume": 100},
+            {**_pkt("A", 2, 101.0), "volume": 108},   # up-tick → buy 8
+            {**_pkt("A", 3, 100.5), "volume": 113},   # down-tick → sell 5
+            {**_pkt("A", 4, 100.5), "volume": 117},   # flat → split 4/4
+        ],
+    })
+    feed = _make_feed(md)
+    feed.set_symbols(["A"])
+    try:
+        _wait_until(lambda: feed._queues["A"].qsize() >= 4)
+        t1 = feed.next_tick("A")
+        t2 = feed.next_tick("A")
+        t3 = feed.next_tick("A")
+        t4 = feed.next_tick("A")
+        # First tick: no direction yet — split evenly (4 of the 8).
+        assert t1.volume == 0.0
+        assert t2.volume == 8.0 and t2.buy_volume == 8.0 and t2.sell_volume == 0.0
+        assert t3.volume == 5.0 and t3.buy_volume == 0.0 and t3.sell_volume == 5.0
+        assert t4.volume == 4.0 and t4.buy_volume == 2.0 and t4.sell_volume == 2.0
+        # buy + sell == volume on every tick (consistency invariant).
+        for t in (t2, t3, t4):
+            assert abs(t.buy_volume + t.sell_volume - t.volume) < 1e-9
+    finally:
+        feed.close()
+
+
+def test_oscillating_buy_sell_does_not_reset_baseline():
+    """Dhan total_buy_qty/total_sell_qty are book totals that oscillate.
+
+    Only cumulative `volume` is monotonic — the session-reset guard must not
+    look at buy/sell, or it trips on nearly every packet and the bar loses
+    ~85% of its traded volume (the V=410020-vs-10M distortion). Buy/sell on
+    the tick come from price direction, so the oscillating book totals must
+    never influence volume OR the delta.
+    """
+    md = _FakeMarketData({
+        "A": [
+            {**_pkt("A", 1, 100.0), "volume": 100, "total_buy_qty": 60,
+             "total_sell_qty": 40},
+            # buy/sell go DOWN — but volume keeps rising: NOT a reset
+            {**_pkt("A", 2, 101.0), "volume": 150, "total_buy_qty": 55,
+             "total_sell_qty": 42},
+            {**_pkt("A", 3, 102.0), "volume": 165, "total_buy_qty": 62,
+             "total_sell_qty": 35},
+        ],
+    })
+    feed = _make_feed(md)
+    feed.set_symbols(["A"])
+    try:
+        _wait_until(lambda: feed._queues["A"].qsize() >= 3)
+        t1 = feed.next_tick("A")
+        t2 = feed.next_tick("A")
+        t3 = feed.next_tick("A")
+        # Volume accumulates fully across oscillating buy/sell: 0, +50, +15.
+        assert t1.volume == 0.0
+        assert t2.volume == 50.0
+        assert t3.volume == 15.0
+        # Rising prices → all buys, regardless of the oscillating book totals.
+        assert t2.buy_volume == 50.0 and t2.sell_volume == 0.0
+        assert t3.buy_volume == 15.0 and t3.sell_volume == 0.0
+    finally:
+        feed.close()
+
+
+def test_no_volume_ticker_packet_does_not_reset_baseline():
+    """A TICKER packet (LTP only, no volume fields) must not re-baseline.
+
+    If vol=0 were treated as a reset, the next real packet's delta (full
+    cumulative vs 0) would be capped at 10k, losing almost all bar volume.
+    """
+    md = _FakeMarketData({
+        "A": [
+            {**_pkt("A", 1, 100.0), "volume": 100, "total_buy_qty": 60,
+             "total_sell_qty": 40},
+            {**_pkt("A", 2, 101.0), "volume": 0, "total_buy_qty": 0,
+             "total_sell_qty": 0},  # ticker — no volume data
+            {**_pkt("A", 3, 102.0), "volume": 190, "total_buy_qty": 61,
+             "total_sell_qty": 41},
+        ],
+    })
+    feed = _make_feed(md)
+    feed.set_symbols(["A"])
+    try:
+        _wait_until(lambda: feed._queues["A"].qsize() >= 3)
+        t1 = feed.next_tick("A")
+        t2 = feed.next_tick("A")
+        t3 = feed.next_tick("A")
+        assert t1.volume == 0.0
+        assert t2.volume == 0.0   # ticker contributes nothing
+        # The next real packet gets the TRUE delta (90), not a 10k-capped
+        # full-cumulative spike (which would be ~100 minus baseline 0).
+        assert t3.volume == 90.0
     finally:
         feed.close()
 

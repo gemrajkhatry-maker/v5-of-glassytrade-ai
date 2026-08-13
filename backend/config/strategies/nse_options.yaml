@@ -1,12 +1,19 @@
 # NSE Index Options Trading Strategy
 # Activate: GLASSYTRADE_STRATEGY=nse_options
-# 
-# This strategy configures the system for NSE index options trading
-# with NIFTY, BANKNIFTY, and FINNIFTY as the primary underlyings.
+#
+# PRIMARY:   NIFTY weekly options (Tuesday expiry — the only remaining weekly
+#            series since Nov 2024; NIFTY weekly runs every Tuesday).
+# SECONDARY: BANKNIFTY/FINNIFTY monthly options (last Tuesday expiry; their
+#            weeklies were discontinued).
+#
+# expiry_index: 0 = nearest expiry per underlying. For NIFTY that is the
+# weekly Tuesday series; for BANKNIFTY/FINNIFTY it is the monthly. The
+# underlying_priority list makes NIFTY fill its scanner slots (including the
+# extra slot from top_n=4) before the monthlies.
 
 strategy:
   name: "nse_options"
-  description: "NSE index options trading with AMT methodology"
+  description: "NSE index options trading with AMT methodology — NIFTY weekly primary, BANKNIFTY/FINNIFTY monthly secondary"
 
 exchanges:
   NSE:
@@ -18,10 +25,13 @@ exchanges:
 scanner:
   mode: "nse_options"
   underlyings: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
-  top_n: 3
-  top_per_underlying: 1
+  # First = primary series. NIFTY weekly gets first claim on slots, including
+  # the 4th slot from top_n=4 (2 contracts vs 1 each for the monthlies).
+  underlying_priority: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+  top_n: 4
+  top_per_underlying: 2
   strikes_around_atm: 2
-  expiry_index: 0
+  expiry_index: 0  # nearest expiry: NIFTY weekly (Tue), monthlies last Tue
   option_type: ""  # Auto-select based on momentum
 
 # Exchange Configuration
@@ -50,7 +60,10 @@ feature_flags:
 
 # LLM Configuration
 llm:
-  timeout_seconds: 30
+  # Local MLX (unquantized fp16 + LoRA) decodes at ~4-6 tok/s; allow a full
+  # 60s budget for entry analysis so the first call (model load + Metal
+  # shader compile) and steady-state JSON generation both complete in time.
+  timeout_seconds: 60
   entry_temperature: 0.4
   overseer_temperature: 0.3
   max_tokens: 120
@@ -79,4 +92,4 @@ risk:
   risk_per_trade_pct: 0.005
   max_daily_loss_pct: 0.02
   max_consecutive_losses: 3
-  max_concurrent_positions: 3
+  max_concurrent_positions: 3  # 4 engines, but at most 3 concurrent positions

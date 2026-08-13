@@ -1,4 +1,13 @@
-"""Valentini Triple-A state machine: absorption -> accumulation -> aggression."""
+"""Valentini Triple-A state machine: absorption -> accumulation -> aggression.
+
+AGGRESSION PROXY (data ceiling): Fabio's aggression trigger is real order-flow
+prints — "big orders/bubbles" at a level — which the Dhan feed cannot provide
+(no true aggressor split; see quant/absorption.py). This machine therefore
+uses the build-guide proxy: price breaking beyond VWAP ±1σ on the absorption
+side. The richer order-flow aggression score (footprint/CVD/big-trade/OFI) is
+computed by the AMT analyzer and carried in the AMT DTO for the advisory/UI,
+but is NOT a hard entry gate — it is a documented proxy, not the real feature.
+"""
 
 from __future__ import annotations
 

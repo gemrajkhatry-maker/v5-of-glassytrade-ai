@@ -56,6 +56,8 @@ def amt_result_to_dto(r, *, llm_thinking: str = "") -> dict:
         "vwapLower2": r.vwap_lower_2,
         "vwapDeviationSigmas": r.vwap_deviation_sigmas,
         "balanceRatio": r.balance_ratio,
+        "npocAbove": float(r.npoc_above or 0.0),
+        "npocBelow": float(r.npoc_below or 0.0),
         "legProfile": [
             {
                 "price": p.price,

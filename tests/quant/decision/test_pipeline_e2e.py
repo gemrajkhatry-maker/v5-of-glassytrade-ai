@@ -36,6 +36,7 @@ def test_kernel_to_signal_flow():
         if last_state.triple_a_signal == "LONG":
             ctx = DecisionContext(state=last_state, bar=b, symbol="SYM",
                                   agent_direction="LONG", agent_probability=0.7,
+                                  market_state="IMBALANCED",
                                   session_open=True, warmup_complete=True,
                                   position_open=False, cooldown_remaining_sec=0,
                                   risk_halted=False)

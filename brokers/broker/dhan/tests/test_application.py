@@ -109,9 +109,14 @@ class TestDhanConfig:
         assert "CLIENT_ID" in str(exc_info.value)
 
     def test_from_env_missing_access_token(self, clean_env, monkeypatch):
-        """Test from_env raises error when ACCESS_TOKEN is missing."""
+        """Test from_env raises error when ACCESS_TOKEN is missing (and the
+        TOTP auto-generation fallback is unavailable)."""
         monkeypatch.setattr(DhanConfig, "_load_dotenv", classmethod(lambda cls: None))
         os.environ["DHAN_CLIENT_ID"] = "CLIENT123"
+        # from_env substitutes TOTP_SECRET+PIN for a missing ACCESS_TOKEN —
+        # clear them so this test exercises the true missing-credential path.
+        os.environ.pop("TOTP_SECRET", None)
+        os.environ.pop("PIN", None)
 
         with pytest.raises(ValueError) as exc_info:
             DhanConfig.from_env()
@@ -513,6 +518,44 @@ class TestDhanConverterFromOrderRequestNewFields:
         payload = DhanConverter.from_order_request(order, client_id="CLIENT123")
         assert payload["triggerPrice"] == 145.0
 
+    def test_correlation_id_included_from_user_order_id(self, base_instrument):
+        """When the caller sets user_order_id (strategy signal_id), it must be
+        sent as correlationId — Dhan's idempotency key that deduplicates a
+        retried place_order POST instead of opening a duplicate position."""
+        order = Order(
+            instrument=base_instrument,
+            side=OrderSide.BUY,
+            quantity=50,
+            order_type=OrderType.MARKET,
+        )
+        setattr(order, "user_order_id", "sig-123-abc")
+        payload = DhanConverter.from_order_request(order, client_id="CLIENT123")
+        assert payload["correlationId"] == "sig-123-abc"
+
+    def test_correlation_id_omitted_when_no_user_order_id(self, base_instrument):
+        """Orders without user_order_id must not carry a correlationId (Dhan
+        treats an absent key as non-idempotent — safe default)."""
+        order = Order(
+            instrument=base_instrument,
+            side=OrderSide.BUY,
+            quantity=50,
+            order_type=OrderType.MARKET,
+        )
+        payload = DhanConverter.from_order_request(order, client_id="CLIENT123")
+        assert "correlationId" not in payload
+
+    def test_correlation_id_truncated_to_36_chars(self, base_instrument):
+        """Dhan limits correlationId to 36 chars; longer ids are truncated."""
+        order = Order(
+            instrument=base_instrument,
+            side=OrderSide.BUY,
+            quantity=50,
+            order_type=OrderType.MARKET,
+        )
+        setattr(order, "user_order_id", "x" * 60)
+        payload = DhanConverter.from_order_request(order, client_id="CLIENT123")
+        assert len(payload["correlationId"]) == 36
+
 
 class TestDhanConverterFromInstrument:
     """Tests for DhanConverter.from_instrument method."""
@@ -814,6 +857,11 @@ def _make_streaming_service(instrument_map: dict):
     svc._config.access_token = "tok"
     svc._config.client_id = "cid"
     svc._ensure_initialized = AsyncMock()
+    # __new__ bypasses __init__, which normally creates these fields.
+    svc._ws_lock = asyncio.Lock()
+    svc._depth_ws_lock = asyncio.Lock()
+    svc._persistent_ws = None
+    svc._persistent_depth_ws = None
     return svc
 
 
@@ -948,11 +996,12 @@ class TestStreamFull:
 
         assert len(results) == 1
         pkt = results[0]
-        assert pkt["ltp"] == 55.5
-        assert pkt["depth_bids"] == [{"price": 55.0, "qty": 10}]
-        assert pkt["depth_asks"] == [{"price": 56.0, "qty": 8}]
-        assert pkt["symbol"] == "CRUDEOIL CE"
-        assert pkt["timestamp"] == full_msg.timestamp
+        # stream_full yields FullPacket domain objects, not raw dicts.
+        assert pkt.ltp == 55.5
+        assert pkt.depth_bids == ({"price": 55.0, "qty": 10},)
+        assert pkt.depth_asks == ({"price": 56.0, "qty": 8},)
+        assert pkt.symbol == "CRUDEOIL CE"
+        assert pkt.timestamp == full_msg.timestamp
 
     @pytest.mark.asyncio
     async def test_stream_full_uses_mcx_segment(self):

@@ -26,17 +26,18 @@ except (ImportError, ModuleNotFoundError):
 # =============================================================================
 
 LOT_SIZES: Dict[str, int] = {
-    # NSE F&O Indices
-    "NIFTY": 25,
-    "NIFTY 50": 25,
-    "BANKNIFTY": 15,
-    "NIFTY BANK": 15,
-    "FINNIFTY": 25,
-    "NIFTY FIN SERVICE": 25,
-    "MIDCPNIFTY": 50,
-    "NIFTY MID SELECT": 50,
-    "SENSEX": 10,
-    "BANKEX": 15,
+    # NSE F&O Indices — exchange-authoritative Aug 2026 revision
+    # (NIFTY=65, BANKNIFTY=30, FINNIFTY=60; were 25/15/25).
+    "NIFTY": 65,
+    "NIFTY 50": 65,
+    "BANKNIFTY": 30,
+    "NIFTY BANK": 30,
+    "FINNIFTY": 60,
+    "NIFTY FIN SERVICE": 60,
+    "MIDCPNIFTY": 120,
+    "NIFTY MID SELECT": 120,
+    "SENSEX": 20,     # BSE — raised 10->20 in 2025
+    "BANKEX": 30,
     # NSE F&O Stocks
     "RELIANCE": 250,
     "TCS": 150,
@@ -58,15 +59,15 @@ LOT_SIZES: Dict[str, int] = {
     "NTPC": 2300,
     "POWERGRID": 2600,
     "ULTRACEMCO": 150,
-    # MCX Commodities
+    # MCX Commodities (authoritative per exchange_config)
     "GOLD": 100,
-    "GOLDM": 10,
+    "GOLDM": 100,   # was 10 — 10x under-sized risk sizing for the traded mini gold
     "GOLDPETAL": 1,
     "SILVER": 30,
     "SILVERM": 5,
     "SILVERMIC": 1,
     "CRUDEOIL": 100,
-    "CRUDEOILM": 5,
+    "CRUDEOILM": 10,
     "NATURALGAS": 1250,
     "COPPER": 2500,
     "ALUMINIUM": 5000,
@@ -119,12 +120,16 @@ STEP_SIZES: Dict[str, float] = {**INDEX_STEP_SIZES, **COMMODITY_STEP_SIZES}
 # EXPIRY CONSTANTS
 # =============================================================================
 
+# Current NSE schedule: NIFTY is the only index with weekly options (every
+# Tuesday, since Sept 2025). BANKNIFTY/FINNIFTY/MIDCPNIFTY weeklies were
+# discontinued (Nov 2024) — those are monthly-only on the last Tuesday of the
+# month. SENSEX is a BSE product (weekly on Friday) and is unchanged.
 EXPIRY_WEEKDAY: Dict[str, int] = {
-    "NIFTY": 3,        # Thursday
-    "BANKNIFTY": 2,    # Wednesday
-    "FINNIFTY": 1,     # Tuesday
-    "MIDCPNIFTY": 0,   # Monday
-    "SENSEX": 4,       # Friday
+    "NIFTY": 1,        # Tuesday — weekly (only remaining NSE weekly)
+    "BANKNIFTY": 1,    # Tuesday — monthly only (last Tuesday)
+    "FINNIFTY": 1,     # Tuesday — monthly only (last Tuesday)
+    "MIDCPNIFTY": 1,   # Tuesday — monthly only (last Tuesday)
+    "SENSEX": 4,       # Friday — BSE weekly (unchanged)
 }
 
 # Asset name normalization
@@ -199,9 +204,10 @@ def get_expiry_weekday(symbol: str) -> int:
         symbol: Index symbol
 
     Returns:
-        Weekday (0=Monday, 3=Thursday, etc.). Returns 3 (Thursday) as default.
+        Weekday (0=Monday, 1=Tuesday, etc.). Returns 1 (Tuesday) as default —
+        the current NSE expiry day (NIFTY weekly / monthly last Tuesday).
     """
-    return EXPIRY_WEEKDAY.get(normalize_symbol(symbol), 3)
+    return EXPIRY_WEEKDAY.get(normalize_symbol(symbol), 1)
 
 
 def is_expiry_day(symbol: str = "NIFTY") -> bool:

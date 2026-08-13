@@ -1,32 +1,32 @@
-.PHONY: test test-unit test-integration test-e2e test-coverage test-ci test-critical lint format clean
+.PHONY: test test-backend test-quant test-brokers test-frontend test-ci lint clean
 
-test:
-	cd backendv2 && PYTHONPATH=. python -m pytest tests/ -v
+# Python interpreter: override with `make PYTHON=/path/to/python`
+PYTHON ?= .venv/bin/python
 
-test-unit:
-	cd backendv2 && PYTHONPATH=. python -m pytest tests/unit/ -v --tb=short
+test: test-backend test-quant test-brokers test-frontend
 
-test-integration:
-	cd backendv2 && PYTHONPATH=. python -m pytest tests/integration/ -v --tb=short --timeout=300
+test-backend:
+	cd backend && PYTHONPATH=..:. $(PYTHON) -m pytest tests/ -q --no-header
 
-test-e2e:
-	cd backendv2 && PYTHONPATH=. python -m pytest tests/e2e/ -v --tb=short
+test-quant:
+	PYTHONPATH=backend:. $(PYTHON) -m pytest tests/ -q --no-header
 
-test-coverage:
-	cd backendv2 && PYTHONPATH=. python -m pytest tests/ --cov=app --cov-report=html --cov-report=term-missing
+test-brokers:
+	cd brokers && PYTHONPATH=..:. $(PYTHON) -m pytest -q --no-header
 
+test-frontend:
+	cd frontend && npm test
+
+# Fast CI pass: backend + quant unit/offline tests, brokers, frontend.
 test-ci:
-	cd backendv2 && PYTHONPATH=. python -m pytest tests/unit/ -v --tb=line
-	cd backendv2 && PYTHONPATH=. python -m pytest tests/integration/ -v --tb=line --timeout=300
-
-test-critical:
-	cd backendv2 && PYTHONPATH=. python -m pytest tests/ -v -m "not live and not slow"
+	cd backend && PYTHONPATH=..:. $(PYTHON) -m pytest tests/ -q --no-header -m "not slow and not live"
+	PYTHONPATH=backend:. $(PYTHON) -m pytest tests/ -q --no-header -m "not slow and not live"
+	cd brokers && PYTHONPATH=..:. $(PYTHON) -m pytest -q --no-header -m "not slow and not live"
+	cd frontend && npm test
 
 lint:
-	cd backendv2 && ruff check app/ tests/
-
-format:
-	cd backendv2 && ruff format app/ tests/
+	$(PYTHON) -m ruff check quant backend/app brokers shared tests backend/tests
+	cd frontend && npx tsc --noEmit
 
 clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +

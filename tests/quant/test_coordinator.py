@@ -213,7 +213,7 @@ def test_snapshot_contract_keys(coordinator):
 
 def test_rescan_returns_new_symbols(coordinator, monkeypatch):
     new = ["FINNIFTY 11 AUG 20000 CALL"]
-    monkeypatch.setattr(coordinator, "_scan", lambda: new)
+    monkeypatch.setattr(coordinator, "_scan", lambda force=False: new)
     assert coordinator.rescan() == new
     assert coordinator.symbols() == new
     time.sleep(0.1)  # let respawned engine thread spin up
@@ -262,6 +262,83 @@ def test_decisions_queue(coordinator):
     assert q.get_nowait() == "dummy"
 
 
+def test_spawn_engine_uses_exchange_lot_size(monkeypatch):
+    """The coordinator must inject each symbol's exchange lot size into its
+    engine so the paper OMS P&L matches live rupee P&L (lot-multiple sizing)."""
+    monkeypatch.setattr("quant.coordinator.LiveGateway", _FakeGateway)
+    monkeypatch.setattr("quant.coordinator.MultiplexedMarketFeed", _FakeFeed)
+
+    class _LotAwareMarketData:
+        def get_lot_size(self, symbol):
+            return 65.0 if symbol == _SYM_A else 30.0
+
+    c = QuantCoordinator(
+        market_data=_LotAwareMarketData(), config={"interval_seconds": 1}
+    )
+    monkeypatch.setattr(c, "_scan", lambda: [_SYM_A, _SYM_B])
+    c.start()
+    try:
+        assert c._engines[_SYM_A]._oms._lot_size == 65.0
+        assert c._engines[_SYM_B]._oms._lot_size == 30.0
+    finally:
+        c.stop()
+
+
+def test_spawn_engine_uses_config_market(monkeypatch):
+    """Each engine inherits the coordinator's exchange so the Fabio session
+    gates use the right market (MCX trades until 23:15, NSE closes 15:30)."""
+    monkeypatch.setattr("quant.coordinator.LiveGateway", _FakeGateway)
+    monkeypatch.setattr("quant.coordinator.MultiplexedMarketFeed", _FakeFeed)
+
+    c = QuantCoordinator(
+        market_data=object(),
+        config={"interval_seconds": 1, "exchange": "MCX"},
+    )
+    monkeypatch.setattr(c, "_scan", lambda: [_SYM_A])
+    c.start()
+    try:
+        assert c._engines[_SYM_A]._market == "MCX"
+    finally:
+        c.stop()
+
+
+def test_spawn_engine_defaults_market_to_nse(monkeypatch):
+    """No exchange in config keeps the legacy NSE session gates."""
+    monkeypatch.setattr("quant.coordinator.LiveGateway", _FakeGateway)
+    monkeypatch.setattr("quant.coordinator.MultiplexedMarketFeed", _FakeFeed)
+
+    c = QuantCoordinator(
+        market_data=object(), config={"interval_seconds": 1}
+    )
+    monkeypatch.setattr(c, "_scan", lambda: [_SYM_A])
+    c.start()
+    try:
+        assert c._engines[_SYM_A]._market == "NSE"
+    finally:
+        c.stop()
+
+
+def test_spawn_engine_lot_lookup_failure_falls_back(monkeypatch):
+    """A broker lot-size failure must not block engine startup — fall back to
+    1.0 (equity semantics) with a warning."""
+    monkeypatch.setattr("quant.coordinator.LiveGateway", _FakeGateway)
+    monkeypatch.setattr("quant.coordinator.MultiplexedMarketFeed", _FakeFeed)
+
+    class _BrokenMarketData:
+        def get_lot_size(self, symbol):
+            raise RuntimeError("broker down")
+
+    c = QuantCoordinator(
+        market_data=_BrokenMarketData(), config={"interval_seconds": 1}
+    )
+    monkeypatch.setattr(c, "_scan", lambda: [_SYM_A])
+    c.start()
+    try:
+        assert c._engines[_SYM_A]._oms._lot_size == 1.0
+    finally:
+        c.stop()
+
+
 def test_llm_sink_persists_analyses(monkeypatch):
     """LLMAnalysisProduced fold-backs must reach the injected llm_sink with
     symbol, direction, confidence, and the enriched bar timestamp."""
@@ -283,7 +360,10 @@ def test_llm_sink_persists_analyses(monkeypatch):
         assert persisted, "expected LLM analysis to be persisted via sink"
         row = persisted[0]
         assert row["symbol"] == _SYM_A
-        assert row["direction"] == "LONG"
+        # Contradiction guard overrides direction when no deterministic edge.
+        assert row["direction"] == "FLAT"
+        assert row["guard_overridden"] is True
+        assert row["_original_direction"] == "LONG"
         assert row["confidence"] == "High"
         assert row["rationale"] == "test rationale"
         # Enriched timestamps must be present (synthetic bars use unparseable

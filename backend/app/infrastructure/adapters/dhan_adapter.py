@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import pathlib
+import re
 import sys
 import threading
 import time
@@ -186,13 +187,21 @@ class DhanMarketDataAdapter(IMarketData):
         from brokers.broker.entities import Instrument, OptionType
 
         sym_upper = symbol.upper()
-        is_option = ("CALL" in sym_upper or "PUT" in sym_upper
-                     or sym_upper.endswith("CE") or sym_upper.endswith("PE"))
+        # Anchored detection (trailing CALL/PUT word, or digit-suffixed CE/PE)
+        # so an underlying name containing CALL/PUT/CE/PE as a substring can
+        # never mislabel the contract or misroute the exchange segment.
+        is_call = sym_upper.endswith("CALL") or bool(
+            re.search(r"\d+\s*CE$", sym_upper)
+        )
+        is_put = sym_upper.endswith("PUT") or bool(
+            re.search(r"\d+\s*PE$", sym_upper)
+        )
+        is_option = is_call or is_put
         if is_option:
             # Detect exchange from the underlying name embedded in the symbol
             is_mcx = any(sym_upper.startswith(u) for u in self._MCX_UNDERLYINGS)
             exchange = _exchange_enum("MCX" if is_mcx else "NFO")
-            option_type = OptionType.CALL if ("CALL" in sym_upper or sym_upper.endswith("CE")) else OptionType.PUT
+            option_type = OptionType.CALL if is_call else OptionType.PUT
             return Instrument(symbol=symbol, exchange=exchange, option_type=option_type)
         elif sym_upper.endswith(" FUT"):
             # Futures roots (e.g. "NIFTY AUG FUT", "CRUDEOIL AUG FUT") — route to
@@ -408,15 +417,17 @@ class DhanMarketDataAdapter(IMarketData):
             return 0.0
     
     def get_lot_size(self, symbol: str) -> int:
-        """Get lot size for a symbol."""
-        try:
-            self.ensure_initialized_sync()
-            broker = self.get_broker()
-            instrument = self._make_instrument(symbol)
-            return broker.get_lot_size(instrument.symbol, instrument.exchange)
-        except Exception:
-            logger.warning("Lot size fetch failed for %s", symbol, exc_info=True)
-            return 1
+        """Get the OPTION lot size for a symbol (exchange-authoritative).
+
+        Routes through the broker's exchange config, which resolves an actual
+        NFO option contract of the underlying. Resolving the bare index (e.g.
+        "NIFTY" -> IDX_I) is NOT enough: index instruments carry lot_size=1
+        and would under-size NIFTY positions ~65x. Errors propagate — no
+        silent ``return 1``.
+        """
+        self.ensure_initialized_sync()
+        broker = self.get_broker()
+        return broker.get_exchange_config().get_lot_size(symbol)
 
     async def stream_full(self, symbols: list[str]) -> AsyncIterator[dict]:
         """Stream live FULL packets via DhanBroker.stream_full().

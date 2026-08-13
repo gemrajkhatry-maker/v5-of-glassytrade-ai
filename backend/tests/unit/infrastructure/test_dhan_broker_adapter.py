@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -32,6 +33,7 @@ from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter
 from quant.contracts.entities import Signal
 from quant.contracts.enums import SignalType, SetupType, Source
 from quant.contracts.aggregates import Portfolio
+from brokers.broker.dhan.domain.errors import DhanError
 from brokers.broker.types import OrderStatus
 
 
@@ -48,6 +50,8 @@ def _make_adapter(mock_broker: MagicMock) -> DhanBrokerAdapter:
     adapter._order_poll_interval = 0.01
     adapter._order_poll_timeout = 2.0
     adapter._config = None
+    adapter._executing_signal_ids = set()
+    adapter._executing_lock = threading.Lock()
     return adapter
 
 
@@ -79,6 +83,26 @@ def _mock_broker_filled(quantity=4, fill_price=100.0) -> MagicMock:
         timestamp=datetime.now().isoformat(),
     )
     return broker
+
+
+def _status(**overrides) -> SimpleNamespace:
+    """A broker get_order_status payload with sensible defaults."""
+    base = dict(
+        status=OrderStatus.OPEN,
+        quantity=4,
+        filled_quantity=2,
+        average_fill_price=100.0,
+        instrument=SimpleNamespace(symbol="CRUDEOIL 17 AUG 7200 CALL"),
+        timestamp=datetime.now().isoformat(),
+    )
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def _make_signal_once(metadata=None):
+    """Create a signal and capture its signal_id (used for duplicate tests)."""
+    signal = _make_signal(metadata=metadata)
+    return signal, signal.signal_id
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +151,129 @@ def test_execute_order_sets_initial_stop_for_short():
 
     assert pos is not None
     assert float(pos.initial_stop) == pytest.approx(105.0)
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-order protection + broker-callback idempotency
+# ---------------------------------------------------------------------------
+
+
+def test_duplicate_signal_skipped_second_execution():
+    """Calling execute_order twice with the SAME signal must place exactly one
+    broker order — the second call is refused by the adapter's dedup guard."""
+    broker = _mock_broker_filled()
+    adapter = _make_adapter(broker)
+    signal, signal_id = _make_signal_once(metadata={"order_quantity": 4})
+    portfolio = Portfolio.create_default()
+    symbol = "CRUDEOIL 17 AUG 7200 CALL"
+
+    pos1 = adapter.execute_order(signal, portfolio, symbol)
+    pos2 = adapter.execute_order(signal, portfolio, symbol)
+
+    assert pos1 is not None
+    assert pos2 is None, "duplicate signal must not open a second position"
+    assert broker.place_order.call_count == 1
+    assert signal_id
+
+
+def test_order_carries_signal_id_for_broker_dedup():
+    """The order handed to place_order must carry user_order_id == signal_id,
+    which DhanConverter sends as correlationId for broker-side idempotency."""
+    broker = _mock_broker_filled()
+    adapter = _make_adapter(broker)
+    signal, signal_id = _make_signal_once(metadata={"order_quantity": 4})
+
+    adapter.execute_order(signal, Portfolio.create_default(),
+                         "CRUDEOIL 17 AUG 7200 CALL")
+
+    order = broker.place_order.call_args[0][0]
+    assert getattr(order, "user_order_id", None) == signal_id
+
+
+def test_partial_fill_completes_within_poll_returns_position():
+    """A partially filled order that reaches FILLED within the poll window is
+    accepted with the filled quantity."""
+    broker = _mock_broker_filled(quantity=4)
+    broker.get_order_status.side_effect = [
+        _status(status=OrderStatus.OPEN, filled_quantity=2),   # partial
+        _status(status=OrderStatus.FILLED, filled_quantity=4),
+    ]
+    adapter = _make_adapter(broker)
+    signal, _ = _make_signal_once(metadata={"order_quantity": 4})
+
+    pos = adapter.execute_order(signal, Portfolio.create_default(),
+                                "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert pos is not None
+    assert float(pos.size) == 4.0
+    assert broker.cancel_order.call_count == 0
+
+
+def test_partial_fill_times_out_and_cancels_remainder():
+    """A partial fill that never completes within the poll timeout is
+    cancelled and yields no position — never a phantom open position."""
+    broker = _mock_broker_filled(quantity=4)
+    broker.get_order_status.return_value = _status(
+        status=OrderStatus.OPEN, filled_quantity=2
+    )
+    adapter = _make_adapter(broker)
+    adapter._order_poll_timeout = 0.05  # fast timeout for the test
+    signal, _ = _make_signal_once(metadata={"order_quantity": 4})
+
+    pos = adapter.execute_order(signal, Portfolio.create_default(),
+                                "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert pos is None
+    broker.cancel_order.assert_called_once_with("ORD-1")
+
+
+def test_rejected_order_returns_none():
+    """A broker rejection must not open a position and must not be cancelled."""
+    broker = _mock_broker_filled(quantity=4)
+    broker.get_order_status.return_value = _status(
+        status=OrderStatus.REJECTED, filled_quantity=0
+    )
+    adapter = _make_adapter(broker)
+    signal, _ = _make_signal_once(metadata={"order_quantity": 4})
+
+    pos = adapter.execute_order(signal, Portfolio.create_default(),
+                                "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert pos is None
+    assert broker.cancel_order.call_count == 0
+
+
+def test_cancelled_order_returns_none():
+    """A broker-cancelled order yields no position and no extra cancel."""
+    broker = _mock_broker_filled(quantity=4)
+    broker.get_order_status.return_value = _status(
+        status=OrderStatus.CANCELLED, filled_quantity=0
+    )
+    adapter = _make_adapter(broker)
+    signal, _ = _make_signal_once(metadata={"order_quantity": 4})
+
+    pos = adapter.execute_order(signal, Portfolio.create_default(),
+                                "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert pos is None
+    assert broker.cancel_order.call_count == 0
+
+
+def test_place_order_network_error_returns_none():
+    """A network failure during place_order must yield None (the HTTP layer
+    retries internally; the adapter never fabricates a position)."""
+    broker = _mock_broker_filled(quantity=4)
+    broker.place_order.side_effect = DhanError(
+        message="connection reset", code="NETWORK", details={}
+    )
+    adapter = _make_adapter(broker)
+    signal, _ = _make_signal_once(metadata={"order_quantity": 4})
+
+    pos = adapter.execute_order(signal, Portfolio.create_default(),
+                                "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert pos is None
+    assert broker.get_order_status.call_count == 0
 
 
 # ---------------------------------------------------------------------------

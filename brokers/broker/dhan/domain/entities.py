@@ -62,7 +62,7 @@ class DhanInstrument:
         ...     expiry_date=date(2023, 2, 23),
         ...     strike=18000.0,
         ...     option_type=OptionType.CALL,
-        ...     lot_size=25
+        ...     lot_size=65
         ... )
     """
     security_id: str

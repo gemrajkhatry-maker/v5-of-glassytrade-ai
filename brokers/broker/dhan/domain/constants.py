@@ -106,7 +106,10 @@ VALIDITY_GOOD_TILL_CANCELLED: str = "GTC"
 # Feed type codes for WebSocket subscriptions (regular feed)
 FEED_TYPE_TICKER: int = 15  # LTP only
 FEED_TYPE_QUOTE: int = 17  # LTP + OHLC + Volume
-FEED_TYPE_FULL: int = 17  # Quote + 5-level depth (same as QUOTE — Dhan sends depth in rc=8 packets on this feed regardless of 15/17)
+# Full feed = Quote + 5-level depth per Dhan's spec. Was 17 (silently a QUOTE
+# subscription — depth packets never subscribed), contradicting the documented
+# code 21 and streaming_service's own comment.
+FEED_TYPE_FULL: int = 21
 FEED_TYPE_FULL_DEPTH: int = 20  # 20-level depth (depth-only endpoint)
 
 # Full Market Depth WebSocket — subscription and response codes
@@ -126,13 +129,14 @@ DEPTH_RC_DISCONNECT: int = 50  # Server-initiated disconnect
 
 # Default lot sizes for major indices and stocks
 LOT_SIZES: dict[str, int] = {
-    # NSE F&O Indices
-    "NIFTY": 25,
-    "BANKNIFTY": 15,
-    "FINNIFTY": 25,
-    "MIDCPNIFTY": 50,
-    "SENSEX": 10,
-    "BANKEX": 15,
+    # NSE F&O Indices — exchange-authoritative Aug 2026 revision
+    # (NIFTY=65, BANKNIFTY=30, FINNIFTY=60; were 25/15/25).
+    "NIFTY": 65,
+    "BANKNIFTY": 30,
+    "FINNIFTY": 60,
+    "MIDCPNIFTY": 120,
+    "SENSEX": 20,     # BSE — raised 10->20 in 2025
+    "BANKEX": 30,
     # NSE F&O Stocks (sample - actual lot sizes vary)
     "RELIANCE": 250,
     "TCS": 150,

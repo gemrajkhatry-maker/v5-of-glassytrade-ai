@@ -10,8 +10,10 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from typing import Any
 
 from app.config_models import SystemConfig as Configuration
 from app.config import settings as _settings
@@ -21,6 +23,32 @@ from app.shared.mode import is_live_mode
 logger = logging.getLogger(__name__)
 
 from app.application.di.container import DIContainer
+
+
+def _load_llm_history(storage, symbol: str) -> list[dict[str, Any]]:
+    """Load durable LLM decisions for a symbol for UI rehydration.
+
+    Normalizes DB rows to match the in-memory live-analysis shape:
+    - Drops legacy rows without a usable ``created_at`` (they have no real
+      timestamp and would otherwise render as "now" in the UI).
+    - Restores the numeric ``timestamp`` (epoch ms) from the ``extra`` JSON so
+      hydrated entries sort/dedupe identically to freshly produced ones.
+    """
+    rows = storage.query_llm_decisions(symbols=[symbol], limit=100)
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not (row or {}).get("created_at"):
+            continue
+        row = dict(row)
+        try:
+            extra = json.loads(row.get("extra") or "{}")
+        except (TypeError, ValueError):
+            extra = {}
+        ts = extra.get("timestamp")
+        if isinstance(ts, (int, float)) and ts > 0:
+            row["timestamp"] = int(ts)
+        out.append(row)
+    return out
 
 
 def compose_container(config: "Configuration") -> DIContainer:
@@ -123,7 +151,29 @@ def _create_storage_adapter(container: DIContainer, config: "Configuration"):
     return SQLiteStorageAdapter(db_path)
 
 
+class NullLLMInference:
+    """No-op inference used when LLM_DISABLED=1 — never loads a model and
+    reports not-ready, so the engine treats it as "no LLM" everywhere
+    (advisory, overseer, health) without touching the MLX/Metal stack."""
+
+    def predict(self, instruction="", input_text="", temperature=None,
+                max_tokens=None, prefill=None) -> str:
+        return '{"direction": "FLAT", "rationale": "LLM disabled", "confidence": "Low"}'
+
+    def is_ready(self) -> bool:
+        return False
+
+    def is_loading(self) -> bool:
+        return False
+
+    def validate(self) -> bool:
+        return False
+
+
 def _create_llm_adapter(container: DIContainer, config: "Configuration"):
+    if os.environ.get("LLM_DISABLED", "0") == "1":
+        logger.info("LLM_DISABLED=1 — running without LLM inference")
+        return NullLLMInference()
     llm_config = getattr(config, "llm", None)
     if llm_config is None:
         from quant.contracts.ports.llm_inference import LLMNotReadyError
@@ -178,16 +228,22 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
 
     # Persist every live LLM fold-back to the decisions table so the UI history
     # survives restarts. storage.save_llm_decision(symbol, direction, ...) matches
-    # the coordinator's llm_sink signature (single dict argument).
+    # the coordinator's llm_sink signature (single dict argument). Also inject a
+    # history loader so the coordinator can rehydrate per-symbol history from the
+    # DB on restart (durable rows outlive the in-memory engine history).
     try:
         storage = container.resolve(IStorage)
         llm_sink = storage.save_llm_decision
+        history_loader = (
+            lambda symbol, _storage=storage: _load_llm_history(_storage, symbol)
+        )
     except Exception:
         logger.warning(
             "QuantCoordinator: storage unavailable — LLM decisions not persisted",
             exc_info=True,
         )
         llm_sink = None
+        history_loader = None
 
     candle_minutes = int(getattr(config, "candle_timeframe_minutes", 5) or 5)
     coord_config = {
@@ -197,16 +253,18 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         "expiry_index": int(_settings.SCANNER_EXPIRY_INDEX or 0),
         "strikes_around_atm": int(_settings.STRIKES_AROUND_ATM or 2),
         "interval_seconds": candle_minutes * 60,
+        "underlying_priority": _settings.SCANNER_UNDERLYING_PRIORITY,
     }
     logger.info(
         "QuantCoordinator config: underlyings=%s n=%d exchange=%s expiry_index=%d "
-        "strikes_around_atm=%d interval_seconds=%d",
+        "strikes_around_atm=%d interval_seconds=%d priority=%s",
         coord_config["underlyings"],
         coord_config["n"],
         coord_config["exchange"],
         coord_config["expiry_index"],
         coord_config["strikes_around_atm"],
         coord_config["interval_seconds"],
+        coord_config["underlying_priority"],
     )
     return QuantCoordinator(
         market_data=market_data,
@@ -214,6 +272,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         broker=broker,
         config=coord_config,
         llm_sink=llm_sink,
+        history_loader=history_loader,
     )
 
 

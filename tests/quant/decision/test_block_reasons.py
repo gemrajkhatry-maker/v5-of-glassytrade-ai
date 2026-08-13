@@ -46,7 +46,7 @@ def test_block_reasons_use_symbolic_gate_names():
     )
     assert any(s.startswith("SESSION_PHASE:") for s in blocked.decision.block_reasons)
     assert any(
-        s.startswith("FAILED_AUCTION_SEQUENCE:")
+        s.startswith("TRIPLE_A_EDGE:")
         for s in blocked.decision.block_reasons
     )
 
@@ -60,7 +60,7 @@ def test_block_reasons_reach_projector_view():
     br = view["blockReasons"]
     assert isinstance(br, list) and br
     assert any(s.startswith("SESSION_PHASE:") for s in br)
-    assert any(s.startswith("FAILED_AUCTION_SEQUENCE:") for s in br)
+    assert any(s.startswith("TRIPLE_A_EDGE:") for s in br)
     failed = [g for g in view["gateResults"] if not g["passed"]]
     assert br == [f"{g['name']}: {g['reason']}" for g in failed]
     assert tuple(br) == tuple(f"{g['name']}: {g['reason']}" for g in failed)

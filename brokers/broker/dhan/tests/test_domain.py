@@ -1073,9 +1073,10 @@ class TestConstants:
         assert FEED_TYPE_FULL == 21
     
     def test_lot_sizes(self):
-        """Test lot sizes dictionary."""
-        assert LOT_SIZES["NIFTY"] == 25
-        assert LOT_SIZES["BANKNIFTY"] == 15
+        """Test lot sizes dictionary (exchange-authoritative Aug 2026)."""
+        assert LOT_SIZES["NIFTY"] == 65
+        assert LOT_SIZES["BANKNIFTY"] == 30
+        assert LOT_SIZES["FINNIFTY"] == 60
         assert "RELIANCE" in LOT_SIZES
     
     def test_strike_steps(self):

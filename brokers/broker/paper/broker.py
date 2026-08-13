@@ -236,12 +236,16 @@ class PaperBroker(IBrokerPort, IOptionsProvider):
         atm = round(spot / step_size) * step_size
         strikes = [atm + i * step_size for i in range(-5, 6)]  # ATM ± 5 strikes
 
-        # Nearest future weekly Thursday (expiry_index weeks out)
+        # Nearest future weekly expiry (expiry_index weeks out), on the symbol's
+        # real expiry weekday from market_info (NIFTY=Tuesday etc.) so the
+        # synthetic chain matches the actual series the scanner expects.
+        from brokers.broker.market_info import get_expiry_weekday as _get_weekday
         today = datetime.now()
-        days_until_thursday = (3 - today.weekday()) % 7
-        if days_until_thursday == 0:
-            days_until_thursday = 7
-        base_expiry = today + timedelta(days=days_until_thursday + expiry_index * 7)
+        weekday = _get_weekday(underlying)
+        days_until = (weekday - today.weekday()) % 7
+        if days_until == 0:
+            days_until = 7
+        base_expiry = today + timedelta(days=days_until + expiry_index * 7)
         expiry = base_expiry.replace(hour=15, minute=30, second=0, microsecond=0)
 
         calls: dict = {}
@@ -293,13 +297,16 @@ class PaperBroker(IBrokerPort, IOptionsProvider):
         )
 
     def get_expiry_list(self, underlying: str, exchange: Exchange) -> List[datetime]:
-        """Get simulated expiry dates (4 weekly Thursdays from today)."""
+        """Get simulated expiry dates (4 weekly expiries from today, on the
+        symbol's real expiry weekday from market_info — NIFTY Tuesday etc.)."""
+        from brokers.broker.market_info import get_expiry_weekday as _get_weekday
         today = datetime.now()
-        days_until_thursday = (3 - today.weekday()) % 7
-        if days_until_thursday == 0:
-            days_until_thursday = 7
+        weekday = _get_weekday(underlying)
+        days_until = (weekday - today.weekday()) % 7
+        if days_until == 0:
+            days_until = 7
         return [
-            (today + timedelta(days=days_until_thursday + i * 7)).replace(
+            (today + timedelta(days=days_until + i * 7)).replace(
                 hour=15, minute=30, second=0, microsecond=0
             )
             for i in range(4)

@@ -72,6 +72,16 @@ def _parse_ml_thresholds(data: dict) -> MLThresholds:
 
 def _parse_symbol(name: str, data: dict) -> SymbolConfig:
     """Parse SymbolConfig from YAML data."""
+    # Lot size is exchange metadata — a missing value must not silently
+    # default to 25 (that sized NIFTY positions 2.6x too small). Fail fast.
+    lot_size = data.get("lot_size")
+    if lot_size is None:
+        raise ValueError(
+            f"Symbol {name!r} is missing required 'lot_size' in config. "
+            "Lot size is exchange metadata (NIFTY=65, BANKNIFTY=30, FINNIFTY=60 "
+            "in the current NSE series); a silent default would mis-size "
+            "positions."
+        )
     cp = data.get("cost_profile", {})
     return SymbolConfig(
         name=name,
@@ -79,7 +89,7 @@ def _parse_symbol(name: str, data: dict) -> SymbolConfig:
         exchange=data.get("exchange", "NSE"),
         segment=data.get("segment", "NFO"),
         instrument_type=data.get("instrument_type", "OPT"),
-        lot_size=data.get("lot_size", 25),
+        lot_size=lot_size,
         tick_size=data.get("tick_size", 0.05),
         vp_bucket_size=data.get("vp_bucket_size", 10.0),
         vp_num_buckets=data.get("vp_num_buckets", 200),

@@ -84,6 +84,19 @@ class OptionScannerService:
     def __init__(self, broker, default_underlyings: list[str] | None = None) -> None:
         self._broker = broker
         self._default_underlyings = default_underlyings
+        # Big-move mode: only trade when premium is cheap (IV low), enough
+        # time to expiry, and in the scalping premium band. Env-driven so no
+        # caller plumbing is needed. ponytail: straddle-% is the IV proxy we
+        # can compute from the chain; no IV history exists to build a real IVR.
+        self.big_move_mode = os.environ.get("SCANNER_BIG_MOVE", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        self.big_move_max_straddle_pct = float(
+            os.environ.get("SCANNER_BIG_MOVE_MAX_STRADDLE_PCT", "0.02")
+        )
+        self.big_move_min_dte = int(os.environ.get("SCANNER_BIG_MOVE_MIN_DTE", "2"))
 
     @staticmethod
     def _score_contract(strike, atm, interval, oi, vol, opt, ltp, bid, ask, underlying_upper, bias=None, opt_type=None, median_vol=1000) -> tuple:
@@ -129,8 +142,26 @@ class OptionScannerService:
 
         return score, atm_dist, delta_val
 
+    @staticmethod
+    def _straddle_pct(chain, atm):
+        """ATM straddle premium as a fraction of spot — cheap-IV proxy.
+
+        Skip the whole chain when the market already prices in a large move
+        (expensive premium); big-move scalps only pay off from a low base.
+        """
+        ce = chain.calls.get(float(atm))
+        pe = chain.puts.get(float(atm))
+        if not ce or not pe:
+            return None
+        premium = float(ce.ltp or 0) + float(pe.ltp or 0)
+        spot = float(getattr(chain, "spot_price", 0) or chain.atm_strike or 0)
+        if premium <= 0 or spot <= 0:
+            return None
+        return premium / spot
+
     def _process_contract(self, u, opt_type, strike, atm, interval, option_map,
-                          bullish_only, bias, bias_reason, chain, is_mcx, median_vol=1000):
+                          bullish_only, bias, bias_reason, chain, is_mcx, median_vol=1000,
+                          big_move_mode=False):
         """Process a single option contract — applies filters, scores, returns ScanResult or None."""
         # Bullish-only filter: skip OTM
         if bullish_only:
@@ -146,6 +177,8 @@ class OptionScannerService:
         ltp = float(opt.ltp or 0)
         # Scalping filter: premium in valid range
         mcx_min, mcx_max, nse_min, nse_max = 20, 50000, 20, 800
+        if big_move_mode and not is_mcx:
+            nse_min, nse_max = 25, 400
         ltp_min, ltp_max = (mcx_min, mcx_max) if is_mcx else (nse_min, nse_max)
         if not (ltp_min <= ltp <= ltp_max):
             return None
@@ -198,6 +231,7 @@ class OptionScannerService:
         strikes_around_atm: int,
         bullish_only: bool,
         preferred_option_type: str | None = None,
+        big_move_mode: bool = False,
     ) -> list[ScanResult]:
         """Fetch chain for one underlying and return scored contracts (CE+PE near ATM)."""
         out: list[ScanResult] = []
@@ -247,6 +281,26 @@ class OptionScannerService:
 
         atm = chain.atm_strike
         interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
+
+        if big_move_mode:
+            dte = (expiry_date - date.today()).days
+            if dte < self.big_move_min_dte:
+                logger.info(
+                    "%s: big-move skipped — DTE %d < %d",
+                    u,
+                    dte,
+                    self.big_move_min_dte,
+                )
+                return out
+            straddle_pct = self._straddle_pct(chain, atm)
+            if straddle_pct is None or straddle_pct > self.big_move_max_straddle_pct:
+                logger.info(
+                    "%s: big-move skipped — ATM straddle %.2f%% of spot > %.2f%%",
+                    u,
+                    (straddle_pct or 0) * 100,
+                    self.big_move_max_straddle_pct * 100,
+                )
+                return out
 
         all_strikes = sorted(chain.calls.keys())
         near_atm = [s for s in all_strikes if abs(s - atm) <= interval * 3]
@@ -315,6 +369,7 @@ class OptionScannerService:
                     chain,
                     is_mcx=is_mcx,
                     median_vol=median_vol,
+                    big_move_mode=big_move_mode,
                 )
                 if result:
                     out.append(result)
@@ -330,6 +385,8 @@ class OptionScannerService:
         expiry_index: int = 0,
         strikes_around_atm: int = 2,
         bullish_only: bool = False,  # Allow both CE and PE by default
+        big_move_mode: bool | None = None,
+        underlying_priority: list[str] | None = None,
     ) -> list[ScanResult]:
         """Select top N contracts based on momentum and liquidity.
 
@@ -337,9 +394,15 @@ class OptionScannerService:
             bullish_only: When True, only selects contracts aligned with a bullish thesis:
                 - CE: ATM or ITM (strike <= ATM) — direct bullish bet
                 - PE: ATM or ITM (strike >= ATM) — high-delta put, bullish if underlying rallies
+            big_move_mode: When True (or SCANNER_BIG_MOVE env), only trade when
+                premium is cheap: skip chains whose ATM straddle is a large % of
+                spot (IV rich), require >= big_move_min_dte DTE, and cap NSE
+                premium at 25-400 for scalping ROI.
         """
 
         results: list[ScanResult] = []
+        if big_move_mode is None:
+            big_move_mode = self.big_move_mode
 
         # Use injected default underlyings if not specified
         if underlyings is None:
@@ -376,6 +439,7 @@ class OptionScannerService:
                         strikes_around_atm,
                         bullish_only,
                         preferred_option_type,
+                        big_move_mode,
                     ): u
                     for u in underlyings
                 }
@@ -399,6 +463,7 @@ class OptionScannerService:
                             strikes_around_atm,
                             bullish_only,
                             preferred_option_type,
+                            big_move_mode,
                         )
                     )
                 except Exception as e:
@@ -418,15 +483,28 @@ class OptionScannerService:
             cap = max(1, int(top_per_underlying))
             per_u[u_name] = ranked[:cap]
 
-        # Round-robin across roots ordered by *best* score on that root.
-        # Pure global sort by score used to drop entire underlyings (e.g. GOLDM) when
-        # CRUDEOIL/NATURALGAS dominated the top-N — mini metals never got a slot even
-        # with a healthy chain.
-        u_ranked = sorted(
-            per_u.keys(),
-            key=lambda u: per_u[u][0].score if per_u[u] else -1.0,
-            reverse=True,
-        )
+        # Round-robin across roots. Default order: *best* score on that root
+        # (a strong root can't monopolize the top-N and a weak root still gets a
+        # slot — mini metals never got picked when CRUDEOIL/NATURALGAS
+        # dominated the global sort). When an explicit underlying_priority is
+        # configured (e.g. NIFTY weekly primary, BANKNIFTY/FINNIFTY monthly
+        # secondary), that order wins: earlier-listed underlyings fill their
+        # slots first, including the extra passes beyond the first slot each.
+        if underlying_priority:
+            prio_idx = {str(u).upper(): i for i, u in enumerate(underlying_priority)}
+            u_ranked = sorted(
+                per_u.keys(),
+                key=lambda u: (
+                    prio_idx.get(str(u).upper(), len(prio_idx)),
+                    -(per_u[u][0].score if per_u[u] else 0.0),
+                ),
+            )
+        else:
+            u_ranked = sorted(
+                per_u.keys(),
+                key=lambda u: per_u[u][0].score if per_u[u] else -1.0,
+                reverse=True,
+            )
         final: list[ScanResult] = []
         round_idx = 0
         while len(final) < n and per_u:
@@ -448,8 +526,10 @@ class OptionScannerService:
             [r.underlying for r in final],
         )
 
-        # If no contracts found (no momentum), return ATM contracts for monitoring
-        if not final:
+        # If no contracts found (no momentum), return ATM contracts for monitoring.
+        # Big-move mode is a strict filter: expensive premium means "no setup",
+        # not "show me ATM monitors anyway" — those would get traded.
+        if not final and not big_move_mode:
             logger.info("No momentum setups — selecting ATM contracts for monitoring")
             
             # Determine exchange for fallback

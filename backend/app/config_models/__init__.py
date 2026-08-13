@@ -44,7 +44,11 @@ class SymbolConfig:
     exchange: str = "NSE"
     segment: str = "NFO"
     instrument_type: str = "OPT"
-    lot_size: int = 25
+    # The loader (config_models/loader.py) REQUIRES lot_size from YAML and
+    # always overrides this default; it only serves direct (test) construction.
+    # Kept at the exchange-authoritative NIFTY value (65, Aug 2026) so a
+    # constructed config is never silently wrong (was 25, off by ~2.6x).
+    lot_size: int = 65
     tick_size: float = 0.05
     vp_bucket_size: float = 10.0
     vp_num_buckets: int = 200

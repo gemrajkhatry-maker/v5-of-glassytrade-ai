@@ -60,10 +60,27 @@ class AbsorptionDetector:
 
     @staticmethod
     def _side(bar: Bar) -> str:
-        if bar.buy_volume >= 0.55 * bar.volume:
-            return "BUY"
-        if bar.sell_volume >= 0.55 * bar.volume:
-            return "SELL"
+        """Absorption side from the available volume mix.
+
+        DATA CEILING: Dhan's WS feed carries no true aggressor/trade-flag
+        split — ``buy_volume``/``sell_volume`` are tick-direction-attributed in
+        the multiplexed feed (up-tick = buyer, down-tick = seller). The 55%%
+        rule and the majority rule below therefore read the *direction-*
+        attributed* mix, a documented proxy for Fabio's "big orders at a
+        level" absorption (real order-flow prints are unavailable on Dhan).
+        A bare candle-direction guess (close vs bar mid) is used only as the
+        last resort on a tie, never as the primary signal.
+        """
+        vol = float(bar.volume or 0.0)
+        buy = float(bar.buy_volume or 0.0)
+        sell = float(bar.sell_volume or 0.0)
+        if vol > 0:
+            if buy >= 0.55 * vol:
+                return "BUY"
+            if sell >= 0.55 * vol:
+                return "SELL"
+            if buy != sell:
+                return "BUY" if buy > sell else "SELL"
         mid = (bar.high + bar.low) / 2.0
         return "BUY" if bar.close > mid else "SELL"
 
