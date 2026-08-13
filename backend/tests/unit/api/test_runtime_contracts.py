@@ -33,30 +33,20 @@ class _ReadyAdapter:
 
 @pytest.mark.asyncio
 async def test_system_config_reports_runtime_port_and_symbols(monkeypatch):
-    graph = SimpleNamespace(
-        llm_inference=_ReadyAdapter(),
-        probability_engine=_ReadyAdapter(),
-        active_symbols=["NIFTY25000CE", "NIFTY25000PE"],
-    )
-    fake_app = SimpleNamespace(state=SimpleNamespace(service_graph=graph))
+    active = ["NIFTY25000CE", "NIFTY25000PE"]
+    fake_app = SimpleNamespace(state=SimpleNamespace(service_graph=None))
     fake_request = SimpleNamespace(app=fake_app)
     
-    # Mock get_active_symbols to return the graph's active symbols
     def _mock_get_active_symbols():
-        return graph.active_symbols
-    
-    # Mock get_gen_ai_service to return a ready adapter
-    def _mock_get_gen_ai():
-        return _ReadyAdapter()
+        return active
     
     monkeypatch.setattr(health, "get_active_symbols", _mock_get_active_symbols)
-    monkeypatch.setattr(health, "get_gen_ai_service", _mock_get_gen_ai)
 
     payload = await health.system_config(fake_request)
 
     assert payload["backendPort"] == settings.PORT
-    assert payload["activeSymbols"] == graph.active_symbols
-    assert payload["defaultSymbol"] == graph.active_symbols[0]
+    assert payload["activeSymbols"] == active
+    assert payload["defaultSymbol"] == active[0]
 
 
 def test_bootstrap_active_symbols_never_empty(monkeypatch):

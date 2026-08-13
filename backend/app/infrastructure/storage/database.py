@@ -1,4 +1,4 @@
-"""SQLite storage adapter — persists ticks, trades, and LLM decisions.
+"""SQLite storage adapter — persists ticks, trades, and positions.
 
 Auto-creates tables on first use.  Thread-safe via a single persistent
 connection protected by a threading lock.  Ticks are batched (flush every
@@ -45,28 +45,6 @@ CREATE TABLE IF NOT EXISTS trades (
     reason TEXT,
     opened_at TEXT,
     closed_at TEXT,
-    extra TEXT,
-    llm_analysis TEXT,
-    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
-);
-
-CREATE TABLE IF NOT EXISTS llm_decisions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    symbol TEXT,
-    direction TEXT,
-    confidence TEXT,
-    rationale TEXT,
-    input_prompt TEXT,
-    raw_output TEXT,
-    market_state TEXT,
-    aggression TEXT,
-    price REAL,
-    vah REAL,
-    val REAL,
-    poc REAL,
-    delta REAL,
-    volume REAL,
-    profile_shape TEXT,
     extra TEXT,
     created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
 );
@@ -121,7 +99,6 @@ CREATE TABLE IF NOT EXISTS position_events (
 
 CREATE INDEX IF NOT EXISTS idx_ticks_symbol_time ON ticks(symbol, time);
 CREATE INDEX IF NOT EXISTS idx_trades_closed_at ON trades(closed_at);
-CREATE INDEX IF NOT EXISTS idx_llm_created ON llm_decisions(created_at);
 CREATE INDEX IF NOT EXISTS idx_perf_created ON performance_snapshots(created_at);
 CREATE INDEX IF NOT EXISTS idx_session_profiles ON session_profiles(symbol, market, session_date);
 CREATE INDEX IF NOT EXISTS idx_position_events_pos_time ON position_events(position_id, created_at);
@@ -222,7 +199,7 @@ class SQLiteStorageAdapter(IStorage):
         """Execute a write query with lock, commit, and rollback on error.
 
         This eliminates the duplicated try/except/rollback pattern across
-        save_trade, save_llm_decision, save_open_position, etc.
+        save_trade, save_open_position, etc.
         """
         with self._lock:
             try:
@@ -333,61 +310,6 @@ class SQLiteStorageAdapter(IStorage):
             "INSERT INTO trades (position_id, symbol, side, entry_price, exit_price, "
             "size, pnl, source, reason, opened_at, closed_at, extra) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            params,
-            auto_commit=auto_commit,
-        )
-
-    def save_llm_decision(
-        self, decision_data: dict[str, Any], *, auto_commit: bool = True
-    ) -> None:
-        _KNOWN_KEYS = {
-            "symbol",
-            "direction",
-            "confidence",
-            "rationale",
-            "input_prompt",
-            "raw_output",
-            "market_state",
-            "aggression",
-            "price",
-            "vah",
-            "val",
-            "poc",
-            "delta",
-            "volume",
-            "profile_shape",
-        }
-        params = (
-            decision_data.get("symbol", ""),
-            decision_data.get("direction", ""),
-            decision_data.get("confidence", ""),
-            decision_data.get("rationale", ""),
-            decision_data.get("input_prompt", ""),
-            decision_data.get("raw_output", ""),
-            decision_data.get("market_state", ""),
-            decision_data.get("aggression", ""),
-            decision_data.get("price", 0),
-            decision_data.get("vah", 0),
-            decision_data.get("val", 0),
-            decision_data.get("poc", 0),
-            decision_data.get("delta", 0),
-            decision_data.get("volume", 0),
-            decision_data.get("profile_shape", ""),
-            json.dumps(
-                {
-                    k: v
-                    for k, v in decision_data.items()
-                    if k not in _KNOWN_KEYS
-                }
-            ),
-            decision_data.get("created_at") or None,
-        )
-        self._execute_write(
-            "INSERT INTO llm_decisions (symbol, direction, confidence, rationale, "
-            "input_prompt, raw_output, market_state, aggression, "
-            "price, vah, val, poc, delta, volume, profile_shape, extra, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-            "COALESCE(?, datetime('now', '+330 minutes')))",
             params,
             auto_commit=auto_commit,
         )
@@ -528,31 +450,6 @@ class SQLiteStorageAdapter(IStorage):
                 query += " AND closed_at <= ?"
                 params.append(end)
             query += " ORDER BY closed_at ASC"
-            rows = self._conn.execute(query, params).fetchall()
-            return [dict(r) for r in rows]
-
-    def query_llm_decisions(
-        self,
-        start: str | None = None,
-        end: str | None = None,
-        symbols: list[str] | None = None,
-        limit: int = 200,
-    ) -> list[dict[str, Any]]:
-        with self._lock:
-            query = "SELECT * FROM llm_decisions WHERE 1=1"
-            params: list[Any] = []
-            if start:
-                query += " AND created_at >= ?"
-                params.append(start)
-            if end:
-                query += " AND created_at <= ?"
-                params.append(end)
-            if symbols:
-                placeholders = ",".join(["?"] * len(symbols))
-                query += f" AND symbol IN ({placeholders})"
-                params.extend(symbols)
-            query += f" ORDER BY created_at DESC LIMIT ?"
-            params.append(limit)
             rows = self._conn.execute(query, params).fetchall()
             return [dict(r) for r in rows]
 

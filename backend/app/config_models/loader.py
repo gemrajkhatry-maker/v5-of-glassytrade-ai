@@ -26,7 +26,6 @@ from app.config_models import (
     CostProfile,
     ExchangeConfig,
     FeatureFlags,
-    LLMConfig,
     MLThresholds,
     RiskConfig,
     SymbolConfig,
@@ -208,9 +207,6 @@ def load_config(
         short_signals_enabled=flags_raw.get("short_signals_enabled", False),
         risk_tier_engine=flags_raw.get("risk_tier_engine", False),
         walk_forward_validation=flags_raw.get("walk_forward_validation", False),
-        llm_pre_candle_advisory=flags_raw.get("llm_pre_candle_advisory", True),
-        llm_overseer=flags_raw.get("llm_overseer", True),
-        llm_post_trade=flags_raw.get("llm_post_trade", True),
         scalp_engine_enabled=flags_raw.get("scalp_engine_enabled", False),
         ib_breakout_scalp=flags_raw.get("ib_breakout_scalp", False),
         print_level_trigger=flags_raw.get("print_level_trigger", False),
@@ -219,7 +215,6 @@ def load_config(
     # STEP 5: Parse into typed objects
     sys_data = merged.get("system", {})
     risk_data = merged.get("risk", {})
-    llm_data = merged.get("llm", {})
 
     exchanges = {}
     for ex_name, ex_data in merged.get("exchanges", {}).items():
@@ -249,15 +244,6 @@ def load_config(
             kelly_win_prob=risk_data.get("kelly_win_prob", 0.55),
             kelly_win_loss_ratio=risk_data.get("kelly_win_loss_ratio", 2.0),
             bootstrap_trade_count=risk_data.get("bootstrap_trade_count", 30),
-        ),
-        llm=LLMConfig(
-            model_id=llm_data.get("model_id", "glassytrade-qwen-mlx-fused"),
-            reasoning_model_id=llm_data.get("reasoning_model_id", ""),
-            temperature_entry=llm_data.get("temperature_entry", 0.4),
-            temperature_overseer=llm_data.get("temperature_overseer", 0.3),
-            max_tokens=llm_data.get("max_tokens", 120),
-            timeout_seconds=llm_data.get("timeout_seconds", 15),
-            instruction=llm_data.get("instruction", ""),
         ),
         flags=flags,
     )
@@ -299,9 +285,6 @@ def _log_startup_summary(config: SystemConfig) -> None:
         "short_signals_enabled",
         "risk_tier_engine",
         "walk_forward_validation",
-        "llm_pre_candle_advisory",
-        "llm_overseer",
-        "llm_post_trade",
         "scalp_engine_enabled",
     ):
         val = getattr(config.flags, fname, None)

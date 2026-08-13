@@ -91,21 +91,8 @@ class SettingsAdapter:
         self.DHAN_ACCESS_TOKEN = os.getenv("DHAN_ACCESS_TOKEN", "")
         self.DHAN_API_KEY = os.getenv("DHAN_API_KEY", "")
         self.DHAN_API_SECRET = os.getenv("DHAN_API_SECRET", "")
-        self.OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
         self.TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
         self.TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-        
-        # LLM paths
-        self.MLX_MODEL_PATH = os.getenv("MLX_MODEL_PATH", "")
-        self.MLX_ADAPTER_PATH = os.getenv("MLX_ADAPTER_PATH", "")
-        self.LFM25_MODEL_PATH = os.getenv("LFM25_MODEL_PATH", "")
-        self.LFM25_ADAPTER_PATH = os.getenv("LFM25_ADAPTER_PATH", "")
-        
-        # LLM instruction (from env or default)
-        self.LLM_INSTRUCTION = os.getenv(
-            "LLM_INSTRUCTION",
-            "You are an expert market analyst using Fabio Valentini's AMT methodology..."
-        )
     
     # =========================================================================
     # Property accessors that read from YAML config

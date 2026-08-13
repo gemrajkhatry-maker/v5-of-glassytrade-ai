@@ -28,8 +28,6 @@ class JournalEntry:
     config_fingerprint: str = ""
     decision_source: str = ""
     attribution: str = ""
-    llm_model_family: str = ""
-    llm_entry_contract_version: str = ""
     probability_feature_schema_version: str = ""
 
     # Execution-grade trade thesis
@@ -56,9 +54,6 @@ class JournalEntry:
     session_name: str = ""
 
     # Model reasoning
-    llm_direction: str = ""
-    llm_confidence: str = ""
-    llm_rationale: str = ""
     probability_long: float = 0.0
     probability_short: float = 0.0
     agent_direction: str = ""
@@ -101,8 +96,6 @@ class TradeJournal:
         return {
             "run_id": self._experiment.run_id,
             "config_fingerprint": self._experiment.config_fingerprint,
-            "llm_model_family": self._experiment.llm_model_family,
-            "llm_entry_contract_version": self._experiment.llm_entry_contract_version,
             "probability_feature_schema_version": self._experiment.probability_feature_schema_version,
         }
 
@@ -298,9 +291,6 @@ class TradeJournal:
         symbol: str,
         tick_trace_id: str = "",
         amt: dict | None = None,
-        llm_direction: str = "",
-        llm_confidence: str = "",
-        llm_rationale: str = "",
         agent_direction: str = "",
         agent_regime: str = "",
         probability_long: float = 0.0,
@@ -310,15 +300,12 @@ class TradeJournal:
         attribution: str = "",
         trade_thesis: dict[str, Any] | None = None,
     ) -> None:
-        """Log when LLM produces a trade signal."""
+        """Log when the engine produces a trade signal."""
         entry = JournalEntry(
             timestamp=self._now_ist(),
             event_type="SIGNAL_GENERATED",
             symbol=symbol,
             tick_trace_id=tick_trace_id,
-            llm_direction=llm_direction,
-            llm_confidence=llm_confidence,
-            llm_rationale=llm_rationale,
             agent_direction=agent_direction,
             agent_regime=agent_regime,
             agent_feature_drivers=list(agent_feature_drivers or ()),
@@ -348,8 +335,6 @@ class TradeJournal:
         probability_long: float = 0.0,
         probability_short: float = 0.0,
         agent_feature_drivers: list[str] | tuple[str, ...] | None = None,
-        llm_direction: str = "",
-        llm_rationale: str = "",
         decision_source: str = "",
         attribution: str = "",
         trade_thesis: dict[str, Any] | None = None,
@@ -370,8 +355,6 @@ class TradeJournal:
             agent_feature_drivers=list(agent_feature_drivers or ()),
             probability_long=probability_long,
             probability_short=probability_short,
-            llm_direction=llm_direction,
-            llm_rationale=llm_rationale,
             decision_source=decision_source,
             attribution=attribution,
             **self._market_fields(amt),
@@ -387,7 +370,6 @@ class TradeJournal:
         reason: str,
         tick_trace_id: str = "",
         amt: dict | None = None,
-        llm_direction: str = "",
         agent_direction: str = "",
         agent_regime: str = "",
         agent_feature_drivers: list[str] | tuple[str, ...] | None = None,
@@ -401,7 +383,6 @@ class TradeJournal:
             event_type="ENTRY_REJECTED",
             symbol=symbol,
             tick_trace_id=tick_trace_id,
-            llm_direction=llm_direction,
             agent_direction=agent_direction,
             agent_regime=agent_regime,
             agent_feature_drivers=list(agent_feature_drivers or ()),
@@ -519,18 +500,16 @@ class TradeJournal:
         symbol: str,
         position_id: str,
         action: str,
-        reason: str,
         amt: dict | None = None,
         decision_source: str = "",
         attribution: str = "",
     ) -> None:
-        """Log overseer actions (HOLD/TIGHTEN/PARTIAL/FULL_EXIT/ADD)."""
+        """Log position-management actions (HOLD/TIGHTEN/PARTIAL/FULL_EXIT/ADD)."""
         entry = JournalEntry(
             timestamp=self._now_ist(),
             event_type="OVERSEER_ACTION",
             symbol=symbol,
             position_id=position_id,
-            llm_rationale=reason,
             exit_reason=action,
             decision_source=decision_source,
             attribution=attribution,
@@ -551,7 +530,6 @@ class TradeJournal:
         pnl: float = 0.0,
         time_in_trade_s: float = 0.0,
         amt: dict | None = None,
-        reason: str = "",
     ) -> None:
         """Log a breakeven move lifecycle event.
 
@@ -564,7 +542,6 @@ class TradeJournal:
             pnl: Unrealized or latest realized PnL at move time
             time_in_trade_s: Time in trade when move happened
             amt: AMT snapshot (optional)
-            reason: Human-readable rationale
         """
         entry = JournalEntry(
             timestamp=self._now_ist(),
@@ -580,7 +557,6 @@ class TradeJournal:
             take_profit=0.0,
             pnl=round(pnl, 4),
             time_in_trade_s=time_in_trade_s,
-            llm_rationale=reason,
             **self._market_fields(amt),
             **self._base_fields(),
         )
@@ -884,7 +860,6 @@ class TradeJournal:
             "mae": to_float(exit_ev.get("mae")),
             "market_state": entry_ev.get("market_state") or exit_ev.get("market_state", ""),
             "session_name": entry_ev.get("session_name") or exit_ev.get("session_name", ""),
-            "llm_rationale": entry_ev.get("llm_rationale", ""),
             "run_id": exit_ev.get("run_id", ""),
             "attribution": entry_ev.get("attribution") or exit_ev.get("attribution", ""),
             "thesis_location_type": entry_ev.get("thesis_location_type", ""),

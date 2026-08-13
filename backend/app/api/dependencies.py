@@ -12,7 +12,6 @@ from typing import Annotated
 # Module-level singletons (created by init_singletons() in main.py)
 _broker = None
 _storage = None
-_gen_ai_service = None
 _market_data = None
 _configuration = None
 _active_symbols = []
@@ -21,18 +20,16 @@ _active_symbols = []
 def init_singletons(
     broker,
     storage,
-    gen_ai_service,
     market_data,
     configuration,
     active_symbols,
 ) -> None:
     """Initialize module-level singletons at startup (called from main.py)."""
-    global _broker, _storage, _gen_ai_service
+    global _broker, _storage
     global _market_data, _configuration, _active_symbols
 
     _broker = broker
     _storage = storage
-    _gen_ai_service = gen_ai_service
     _market_data = market_data
     _configuration = configuration
     _active_symbols = active_symbols
@@ -47,11 +44,6 @@ def get_broker() -> "IBroker":
 def get_storage() -> "IStorage":
     """Dependency: Storage adapter."""
     return _storage
-
-
-def get_gen_ai_service() -> "GenerativeAIService":
-    """Dependency: Generative AI service."""
-    return _gen_ai_service
 
 
 def get_market_data() -> "IMarketData":
@@ -72,7 +64,6 @@ def get_active_symbols() -> list:
 # Annotated types for FastAPI
 BrokerDep = Annotated["IBroker", Depends(get_broker)]
 StorageDep = Annotated["IStorage", Depends(get_storage)]
-GenAIDep = Annotated["GenerativeAIService", Depends(get_gen_ai_service)]
 MarketDataDep = Annotated["IMarketData", Depends(get_market_data)]
 ConfigDep = Annotated["Configuration", Depends(get_configuration)]
 ActiveSymbolsDep = Annotated[list, Depends(get_active_symbols)]

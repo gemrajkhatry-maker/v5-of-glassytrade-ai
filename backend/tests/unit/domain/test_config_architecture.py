@@ -16,7 +16,6 @@ from app.config_models import (
     CostProfile,
     ExchangeConfig,
     FeatureFlags,
-    LLMConfig,
     MLThresholds,
     RiskConfig,
     SymbolConfig,
@@ -219,13 +218,12 @@ class TestFeatureFlags:
     def test_defaults(self):
         flags = FeatureFlags()
         assert flags.true_delta_lee_ready is False
-        assert flags.llm_overseer is True
         assert flags.realistic_cost_model is False
 
     def test_immutable(self):
         flags = FeatureFlags()
         with pytest.raises(AttributeError):
-            flags.llm_overseer = False
+            flags.realistic_cost_model = False
 
 
 class TestMLThresholds:

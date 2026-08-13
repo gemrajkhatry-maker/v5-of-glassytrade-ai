@@ -18,8 +18,6 @@ class _ExperimentContext:
     """Minimal experiment-context double (legacy experiment_context removed)."""
     run_id: str = "test-run"
     config_fingerprint: str = "test-fp"
-    llm_model_family: str = "test-model"
-    llm_entry_contract_version: str = "1"
     probability_feature_schema_version: str = "1"
 
 
@@ -45,9 +43,6 @@ def test_trade_journal_writes_and_filters_by_run_id(tmp_path):
 
     journal.log_signal(
         symbol="NIFTY",
-        llm_direction="LONG",
-        llm_confidence="High",
-        llm_rationale="test",
         agent_feature_drivers=["auction: balanced rotation"],
         decision_source="llm",
         attribution="llm_only",
@@ -96,9 +91,6 @@ def test_trade_journal_summary_respects_run_id_filter(tmp_path):
     )
     journal2.log_signal(
         symbol="BANKNIFTY",
-        llm_direction="FLAT",
-        llm_confidence="Low",
-        llm_rationale="other run",
         decision_source="llm",
         attribution="llm_only",
     )

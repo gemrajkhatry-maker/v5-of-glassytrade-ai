@@ -159,46 +159,6 @@ class AMTAnalysisDTO(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# AI / Prediction DTOs
-# ---------------------------------------------------------------------------
-
-
-class ModelWeightsDTO(BaseModel):
-    trend: float = 0.40
-    momentum: float = 0.25
-    delta: float = 0.15
-    order_book: float = Field(alias="orderBook", default=0.15)
-    volatility: float = 0.05
-
-    model_config = {"populate_by_name": True}
-
-
-class FactorBreakdownDTO(BaseModel):
-    trend: float = 0
-    momentum: float = 0
-    delta: float = 0
-    order_book: float = Field(alias="orderBook", default=0)
-    volatility: float = 0
-
-    model_config = {"populate_by_name": True}
-
-
-class AIAnalysisDTO(BaseModel):
-    sentiment: str = "NEUTRAL"
-    confidence: float = 0
-    long_term_trend: str = Field(alias="longTermTrend", default="SIDEWAYS")
-    volatility_score: float = Field(alias="volatilityScore", default=0)
-    quant_score: float = Field(alias="quantScore", default=0)
-    projected_price: float = Field(alias="projectedPrice", default=0)
-    reasoning: list[str] = []
-    factor_breakdown: FactorBreakdownDTO = Field(
-        alias="factorBreakdown", default_factory=FactorBreakdownDTO
-    )
-
-    model_config = {"populate_by_name": True}
-
-
-# ---------------------------------------------------------------------------
 # Trading DTOs
 # ---------------------------------------------------------------------------
 
@@ -322,15 +282,6 @@ class AMTRequestDTO(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class PredictionRequestDTO(BaseModel):
-    data: list[OHLCDataDTO]
-    weights: ModelWeightsDTO = Field(default_factory=ModelWeightsDTO)
-    count: int = 10
-    order_book: Optional[OrderBookDTO] = Field(alias="orderBook", default=None)
-
-    model_config = {"populate_by_name": True}
-
-
 class FootprintRequestDTO(BaseModel):
     data: list[OHLCDataDTO]
 
@@ -394,18 +345,6 @@ def dto_to_order_book(d: Optional[OrderBookDTO]):
     return OrderBook(
         bids=tuple(OrderBookLevel(price=b.price, quantity=b.quantity) for b in d.bids),
         asks=tuple(OrderBookLevel(price=a.price, quantity=a.quantity) for a in d.asks),
-    )
-
-
-def dto_to_weights(d: ModelWeightsDTO):
-    from quant.inference.models import ModelWeights
-
-    return ModelWeights(
-        trend=d.trend,
-        momentum=d.momentum,
-        delta=d.delta,
-        order_book=d.order_book,
-        volatility=d.volatility,
     )
 
 

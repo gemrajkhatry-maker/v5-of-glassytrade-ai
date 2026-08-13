@@ -24,10 +24,6 @@ features:
   # ── Phase 3 flags ──
   walk_forward_validation: false       # requires WF-validated models before entry
 
-  # ── LLM role flags (individual per role) ──
-  llm_pre_candle_advisory: true       # non-blocking, fires T-60s before bar close
-  llm_overseer: true                  # position monitoring (keep as-is)
-  llm_post_trade: true                # post-trade analysis (keep as-is)
 
   # ── Phase 4 flags ──
   scalp_engine_enabled: true           # enables 1-min/15-sec MTF stack

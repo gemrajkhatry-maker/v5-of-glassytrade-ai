@@ -3,7 +3,6 @@
 import asyncio
 import gc
 import logging
-import os
 import resource
 import sys
 import tracemalloc
@@ -14,10 +13,6 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, HTTPException, Query, Request
 from app.infrastructure.metrics import MetricsCollector
 from app.config import settings
-from quant.inference.llm_contract import (
-    CANONICAL_RUNTIME_MODEL_FAMILY,
-    ENTRY_CONTRACT_VERSION,
-)
 from quant.probability.features import (
     FEATURE_NAMES,
     PROBABILITY_FEATURE_SCHEMA_VERSION,
@@ -31,7 +26,6 @@ from app.api.dependencies import (
     get_storage,
     get_configuration,
     get_active_symbols,
-    get_gen_ai_service,
     get_market_data,
 )
 
@@ -86,37 +80,8 @@ async def health_check(
         logger.warning("Health check: database failed: %s", e)
         checks["database"] = f"error: {e}"
 
-    # LLM check (critical for trading) - use the DI gen_ai_service directly
-    try:
-        runtime_state: dict[str, object] | None = None
-        gen_ai = get_gen_ai_service()
-        if gen_ai is not None:
-            llm_ready = gen_ai.is_ready() if hasattr(gen_ai, "is_ready") else False
-            load_error = getattr(gen_ai, '_load_error', None)
-            runtime_state = getattr(gen_ai, "runtime_state", lambda: None)()
-            if isinstance(runtime_state, dict):
-                checks["llm_state"] = str(runtime_state.get("state") or "UNKNOWN")
-                reason = runtime_state.get("reason")
-                if reason:
-                    checks["llm_state_reason"] = str(reason)
-        else:
-            llm_ready = False
-            load_error = "gen_ai_service not found"
-        if llm_ready:
-            checks["llm"] = "ok"
-        elif isinstance(runtime_state, dict) and str(runtime_state.get("state", "")).startswith("DEGRADED"):
-            checks["llm"] = "degraded"
-        elif load_error:
-            checks["llm"] = f"error: {load_error}"
-        else:
-            checks["llm"] = "not_ready"
-    except Exception as e:
-        logger.warning("Health check: llm check failed: %s", e)
-        checks["llm"] = f"error: {e}"
-
     # Probability engine check (non-critical)
     try:
-        # Since graph was removed, we just check if it's generally okay or assume ok
         checks["probability"] = "ok"
     except Exception as e:
         checks["probability"] = f"error: {e}"
@@ -150,7 +115,7 @@ async def health_check(
     elif all(
         v in ["ok", "not_ready", "degraded"]
         for k, v in checks.items()
-        if k not in {"llm_state", "llm_state_reason", "coordinator"}
+        if k not in {"coordinator"}
     ):
         overall = "ok"
     else:
@@ -165,7 +130,6 @@ async def readiness_check(request: Request):
 
     Unlike /health (which checks current health), this verifies:
     - Database connection is operational
-    - LLM model is loaded and ready
     - Trading engine is running
     - Active symbols are configured
     """
@@ -190,30 +154,6 @@ async def readiness_check(request: Request):
         checks["database"] = "ok"
     except Exception as e:
         checks["database"] = f"error: {e}"
-
-    # LLM
-    try:
-        gen_ai_service = get_gen_ai_service()
-        llm_state = None
-        llm_ready = gen_ai_service.is_ready() if gen_ai_service else False
-        llm_state = (
-            gen_ai_service.runtime_state()
-            if gen_ai_service and hasattr(gen_ai_service, "runtime_state")
-            else None
-        )
-        if llm_ready:
-            checks["llm"] = "ok"
-        elif isinstance(llm_state, dict) and llm_state.get("state", "").startswith("DEGRADED"):
-            checks["llm"] = "degraded"
-        else:
-            checks["llm"] = "not_loaded"
-    except Exception as e:
-        checks["llm"] = f"error: {e}"
-    if isinstance(llm_state, dict):
-        checks["llm_state"] = str(llm_state.get("state") or "UNKNOWN")
-        reason = llm_state.get("reason")
-        if reason:
-            checks["llm_state_reason"] = str(reason)
 
     # QuantCoordinator (the decision brain — replaces the legacy engine)
     try:
@@ -282,8 +222,6 @@ async def readiness_check(request: Request):
         for k, v in checks.items()
         if k
         not in {
-            "llm_state",
-            "llm_state_reason",
             "startup_contract_id",
             "startup_reconciliation_summary",
             "startup_reconciliation_discrepancies",
@@ -309,15 +247,7 @@ async def metrics():
 @router.get("/system/config")
 async def system_config(request: Request):
     """Return backend configuration for frontend auto-detection."""
-    gen_ai_service = get_gen_ai_service()
-    llm_ready = gen_ai_service.is_ready() if hasattr(gen_ai_service, 'is_ready') else False
     prob_ready = True
-    llm_device = getattr(gen_ai_service, "_runtime_device", None)
-    _inf = gen_ai_service
-    llm_model_loaded = (
-        getattr(_inf, "model", None) is not None
-        or getattr(_inf, "llm", None) is not None
-    )
 
     class _MockGraph:
         active_symbols = get_active_symbols()
@@ -342,23 +272,13 @@ async def system_config(request: Request):
         "symbols": settings.DHAN_SYMBOLS,
         "interval": settings.STREAM_INTERVAL,
         "tradingMode": settings.TRADING_MODE,
-        "llmExecutionEnabled": settings.LLM_EXECUTION_ENABLED,
-        "llmConsensusGate": os.getenv("LLM_CONSENSUS_GATE", "0").lower()
-        in ("1", "true", "yes"),
         "playbookGuardMaxRejections": settings.PLAYBOOK_GUARD_MAX_REJECTIONS,
         "explainabilityAlertMinTrades": settings.EXPLAINABILITY_ALERT_MIN_TRADES,
         "explainabilityMinCoverageRate": settings.EXPLAINABILITY_MIN_DRIVER_COVERAGE_PCT,
         "explainabilityMinAggressionRate": settings.EXPLAINABILITY_MIN_AGGRESSION_DRIVER_PCT,
-        "llmReady": llm_ready,
-        "llmModelLoaded": llm_model_loaded,
         "probabilityReady": prob_ready,
         "probabilityFeatureSchemaVersion": PROBABILITY_FEATURE_SCHEMA_VERSION,
         "probabilityFeatureCount": len(FEATURE_NAMES),
-        "llmModelFamily": CANONICAL_RUNTIME_MODEL_FAMILY,
-        "llmEntryContractVersion": ENTRY_CONTRACT_VERSION,
-        "llmEntryOutputFormat": "json",
-        "llmModelPath": settings.MLX_MODEL_PATH,
-        "llmDevice": llm_device,
         "runId": "",
         "configFingerprint": "",
         "serverDriven": bool(settings.DHAN_CLIENT_ID),

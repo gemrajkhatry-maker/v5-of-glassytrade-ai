@@ -32,7 +32,3 @@ scanner:
   strikes_around_atm: 2
   expiry_index: 0
 
-# LLM settings
-llm:
-  timeout_seconds: 60
-  temperature_entry: 0.4

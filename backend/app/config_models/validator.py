@@ -134,12 +134,6 @@ def validate_config(config: SystemConfig) -> None:
                     f"WARN-4: {sym.name} min_rr_ratio={sym.min_rr_ratio} < 1.5 (below Fabio's floor)."
                 )
 
-    # WARN-5: llm_pre_candle_advisory enabled but no model
-    if config.flags.llm_pre_candle_advisory and not config.llm.model_id:
-        warnings.append(
-            "WARN-5: llm_pre_candle_advisory enabled but LLM model_id is empty."
-        )
-
     # WARN-6: MCX enabled with futures-only symbols
     for ex in config.exchanges.values():
         if ex.name == "MCX" and ex.enabled:

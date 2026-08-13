@@ -9,9 +9,6 @@ from quant.contracts.value_objects import (
     StrategyStats, FootprintLevel, FootprintCandle,
     AMTResult, VolumeProfileLevel, AggressivePrint,
 )
-from quant.inference.models import (
-    ModelWeights, FactorBreakdown, AIAnalysisResult,
-)
 from quant.contracts.entities import Signal, Position
 from quant.contracts.aggregates import Portfolio
 from quant.amt.dto import amt_result_to_dto
@@ -20,7 +17,6 @@ from app.infrastructure.serialization.schemas import (
     portfolio_to_dto, position_to_dto, signal_to_dto,
     stats_to_dto, footprint_to_dto,
     dto_to_order_book, OrderBookDTO, OrderBookLevelDTO,
-    dto_to_weights, ModelWeightsDTO,
     position_event_to_dto,
 )
 
@@ -67,18 +63,6 @@ class TestOrderBookRoundTrip:
         assert len(domain_ob.bids) == 1
         assert domain_ob.bids[0].price == 99
         assert domain_ob.asks[0].quantity == 500
-
-
-class TestWeightsRoundTrip:
-    def test_round_trip(self):
-        dto = ModelWeightsDTO(
-            trend=0.3, momentum=0.2, delta=0.2,
-            orderBook=0.2, volatility=0.1,
-        )
-        domain_w = dto_to_weights(dto)
-        assert domain_w.trend == 0.3
-        assert abs(sum([domain_w.trend, domain_w.momentum, domain_w.delta,
-                        domain_w.order_book, domain_w.volatility]) - 1.0) < 0.001
 
 
 class TestPositionSerialization:

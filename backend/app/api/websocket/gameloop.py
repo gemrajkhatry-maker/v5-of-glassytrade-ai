@@ -206,12 +206,7 @@ async def _coordinator_viewer_loop(
     Control protocol mirrors the legacy engine loop so the frontend sees the
     same ``server_mode`` messages:
       1. server_mode (exchange/interval/activeSymbols)
-      2. llm_history_loaded (LLM decision history per symbol) — deliberately
-         NOT ``history_loaded``: the frontend treats that status as chart
-         candle data (the legacy protocol sent OHLC there). LLM decisions are
-         raw analysis JSON with no OHLC shape, so they get their own status
-         and are routed to the decision-history panel, never into the chart.
-      3. full snapshot, then 0.5s delta-compressed snapshots
+      2. full snapshot, then 0.5s delta-compressed snapshots
       4. client ping -> {"type": "pong"}; subscribe -> symbol_switched + re-enter
 
     The requested symbol is resolved against the coordinator's live contracts
@@ -274,24 +269,7 @@ async def _coordinator_viewer_loop(
             ):
                 return
 
-            # 2. Send LLM decision history under its own status — this is NOT
-            # candle history (the coordinator keeps no OHLC history in the
-            # greenfield shell), so it must never ride the ``history_loaded``
-            # status the frontend maps to chart data.
-            history = coordinator.llm_history(symbol)
-            if not await _safe_send(
-                ws,
-                {
-                    "status": "llm_history_loaded",
-                    "symbol": symbol,
-                    "_symbol": symbol,
-                    "history": list(history),
-                    "count": len(history),
-                },
-            ):
-                return
-
-            # 3. Send current full snapshot
+            # 2. Send current full snapshot
             previous_state: dict = dict(coordinator.snapshot(symbol))
             if not await _safe_send(ws, {**previous_state, "_type": "full"}):
                 return

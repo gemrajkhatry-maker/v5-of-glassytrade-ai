@@ -1,103 +1,52 @@
-"""AI analysis router — market analysis via fine-tuned LLM."""
+"""Journal router — deterministic paper-trading journal endpoints.
+
+Moved out of the former /ai router when the LLM layer was removed; the
+trade journal is deterministic and unrelated to inference.
+"""
 
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Query
 
-from app.api.dependencies import get_active_symbols, get_gen_ai_service, get_storage, get_trade_journal
-from app.application.services.ai_command_service import AiCommandService
-from quant.inference.generative_ai import GenerativeAIService
-from app.infrastructure.storage.database import SQLiteStorageAdapter
+from app.api.dependencies import get_trade_journal
 
 logger = logging.getLogger(__name__)
-_command_service = AiCommandService()
 
-router = APIRouter(prefix="/ai", tags=["ai"])
-
-
-class MarketAnalysisRequest(BaseModel):
-    ltp: float
-    delta: Optional[float] = 0.0
-    volume: Optional[float] = 0.0
-    context: Optional[str] = "Neutral"
-    key_level: Optional[str] = None
-    aggression: Optional[str] = None
+router = APIRouter(prefix="/journal", tags=["journal"])
 
 
-@router.post("/analyze")
-async def analyze_market(
-    req: MarketAnalysisRequest,
-    service: GenerativeAIService = Depends(get_gen_ai_service),
-):
-    """Analyzes market data using the fine-tuned model."""
-    market_data = req.model_dump()
-    return _command_service.analyze_market(service, market_data)
-
-
-@router.get("/history")
-async def get_decision_history(
-    request: Request,
-    symbol: str = Query(""),
-    start: Optional[str] = Query(None),
-    end: Optional[str] = Query(None),
-    limit: int = Query(1000),
-    storage: SQLiteStorageAdapter = Depends(get_storage),
-    active_symbols: list[str] = Depends(get_active_symbols),
-):
-    """Returns decision history — greenfield LLM history when a coordinator is running."""
-    coordinator = getattr(request.app.state, "coordinator", None)
-    if coordinator is not None:
-        syms = coordinator.symbols()
-        target = symbol or (syms[0] if syms else "")
-        return {"history": coordinator.llm_history(target)}
-    try:
-        return _command_service.get_decision_history(
-            storage=storage,
-            active_symbols=active_symbols,
-            start=start,
-            end=end,
-            limit=limit,
-        )
-    except Exception as e:
-        logger.error(f"Error in /ai/history: {e}", exc_info=True)
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(status_code=500, content={"error": str(e), "type": str(type(e))})
-
-
-@router.get("/journal")
+@router.get("")
 async def get_journal(
     date: Optional[str] = Query(None),
     run_id: Optional[str] = Query(None, alias="runId"),
     journal = Depends(get_trade_journal),
 ):
     """Returns journal entries for a given date (YYYY-MM-DD)."""
-    return _command_service.get_journal_endpoint(journal, date, run_id, action="entries")
+    return {"entries": journal.read_entries(date, run_id=run_id)}
 
 
-@router.get("/journal/trades")
+@router.get("/trades")
 async def get_journal_trades(
     date: Optional[str] = Query(None),
     run_id: Optional[str] = Query(None, alias="runId"),
     journal = Depends(get_trade_journal),
 ):
     """Returns completed trades (entry+exit pairs) for a given date."""
-    return _command_service.get_journal_endpoint(journal, date, run_id, action="trades")
+    return {"trades": journal.get_completed_trades(date, run_id=run_id)}
 
 
-@router.get("/journal/summary")
+@router.get("/summary")
 async def get_journal_summary(
     date: Optional[str] = Query(None),
     run_id: Optional[str] = Query(None, alias="runId"),
     journal = Depends(get_trade_journal),
 ):
     """Returns trade summary for a given date."""
-    return _command_service.get_journal_endpoint(journal, date, run_id, action="summary")
+    return journal.summary(date, run_id=run_id)
 
 
-@router.get("/journal/report")
+@router.get("/report")
 async def get_journal_report(
     date: Optional[str] = Query(None),
     run_id: Optional[str] = Query(None, alias="runId"),
@@ -107,7 +56,7 @@ async def get_journal_report(
     return journal.report(date, run_id=run_id)
 
 
-@router.get("/journal/compare")
+@router.get("/compare")
 async def get_journal_compare(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
@@ -119,7 +68,7 @@ async def get_journal_compare(
     return journal.compare_runs(start_date=start, end_date=end, run_ids=parsed_run_ids)
 
 
-@router.get("/journal/promotion")
+@router.get("/promotion")
 async def get_journal_promotion(
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
@@ -146,8 +95,7 @@ async def get_journal_promotion(
 ):
     """Assess whether one or more paper-trading runs are ready for promotion."""
     parsed_run_ids = [item.strip() for item in run_ids.split(",")] if run_ids else None
-    return _command_service.get_promotion(
-        journal=journal,
+    return journal.assess_promotion(
         start_date=start,
         end_date=end,
         run_ids=parsed_run_ids,

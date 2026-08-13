@@ -39,7 +39,3 @@ scanner:
   strikes_around_atm: 2
   expiry_index: 0
 
-# LLM settings for development (faster timeout)
-llm:
-  timeout_seconds: 30
-  temperature_entry: 0.5  # More creative for testing

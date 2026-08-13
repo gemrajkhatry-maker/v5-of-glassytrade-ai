@@ -26,10 +26,6 @@ RUNBOOK = {
         "message": "Mode/configuration could not be resolved",
         "action": "Verify GLASSYTRADE_ENV, GLASSYTRADE_STRATEGY, and strategy YAML files.",
     },
-    "mlx": {
-        "message": "MLX/LLM bootstrap unavailable at startup",
-        "action": "Keep deferred loading enabled; verify MLX_MODEL_PATH, adapter path, and OpenRouter fallback.",
-    },
     "symbol_resolution": {
         "message": "Symbol mapping missing for option->underlying",
         "action": "Verify instruments.json and broker symbol format for listed symbols.",

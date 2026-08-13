@@ -6,10 +6,6 @@ from quant.contracts.value_objects import (
     StrategyStats,
     FootprintLevel, FootprintCandle, AICommandResponse, AggressivePrint,
 )
-from quant.inference.models import (
-    ModelWeights, FactorBreakdown, AIAnalysisResult,
-)
-
 
 class TestOHLC:
     def test_create_basic(self):
@@ -50,37 +46,6 @@ class TestOrderBook:
         ob = OrderBook()
         with pytest.raises(AttributeError):
             ob.bids = ()  # type: ignore
-
-
-class TestModelWeights:
-    def test_defaults_sum_to_one(self):
-        w = ModelWeights()
-        total = w.trend + w.momentum + w.delta + w.order_book + w.volatility
-        assert abs(total - 1.0) < 0.01
-
-    def test_custom(self):
-        w = ModelWeights(trend=0.5, momentum=0.2, delta=0.1, order_book=0.1, volatility=0.1)
-        assert w.trend == 0.5
-
-
-class TestFactorBreakdown:
-    def test_defaults_zero(self):
-        fb = FactorBreakdown()
-        assert fb.trend == 0.0
-        assert fb.momentum == 0.0
-
-
-class TestAIAnalysisResult:
-    def test_create(self):
-        fb = FactorBreakdown(trend=50, momentum=20, delta=10, order_book=5)
-        a = AIAnalysisResult(
-            sentiment="BULLISH", confidence=75,
-            long_term_trend="UP", volatility_score=0.02,
-            quant_score=60, projected_price=51000,
-            reasoning=("Strong trend",), factor_breakdown=fb,
-        )
-        assert a.sentiment == "BULLISH"
-        assert a.factor_breakdown.trend == 50
 
 
 class TestStrategyStats:

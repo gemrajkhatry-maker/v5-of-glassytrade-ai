@@ -58,9 +58,7 @@ class TestHealthEndpoints:
         assert isinstance(data["activeSymbols"], list)
         assert len(data["activeSymbols"]) >= 1
         assert data["defaultSymbol"] == data["activeSymbols"][0]
-        assert "llmReady" in data
         assert "probabilityReady" in data
-        assert "llmExecutionEnabled" in data
         assert "playbookGuardMaxRejections" in data
         assert "explainabilityAlertMinTrades" in data
         assert "explainabilityMinCoverageRate" in data
@@ -68,13 +66,13 @@ class TestHealthEndpoints:
 
 
 class TestAIHistory:
-    def test_history_endpoint_exists(self, client):
+    def test_history_endpoint_removed_with_llm_layer(self, client):
+        """The /api/ai/history endpoint was removed with the LLM layer;
+        decision history is now streamed over WS as deterministic quantDecision
+        events only."""
         c, mock = client
         res = c.get("/api/ai/history")
-        # Should return 200 (even if storage returns empty/mock data)
-        assert res.status_code == 200
-        data = res.json()
-        assert "decisions" in data
+        assert res.status_code == 404
 
 
 # =====================================================================
@@ -201,40 +199,13 @@ class TestDTOContract:
         assert "largestWin" in dto
         assert "largestLoss" in dto
 
-    def test_genai_analysis_camelcase(self):
-        """Frontend GenAIAnalysis keys are produced by the greenfield projector.
-
-        The legacy ``_camel_case_ai`` DTO converter (state_snapshot_builder) was
-        removed with the legacy pipeline; the QuantCoordinator folds the LLM
-        analysis dict into the snapshot ``gen_ai`` key with the same camelCase
-        contract (inputPrompt / rawOutput / marketState).
-        """
+    def test_genai_analysis_removed_with_llm_layer(self):
+        """The projector no longer exposes a gen_ai (LLM) view — decision data
+        is carried by the deterministic quantDecision/agentDecision keys only."""
         from quant.state import StateProjector
-        from quant.events import LLMAnalysisProduced
 
         projector = StateProjector()
-        projector.on_event(
-            LLMAnalysisProduced(
-                symbol="SYM",
-                time="2026-08-07T10:00:00Z",
-                analysis={
-                    "direction": "LONG",
-                    "rationale": "test",
-                    "confidence": "High",
-                    "inputPrompt": "prompt...",
-                    "rawOutput": "output...",
-                    "marketState": "BALANCED",
-                    "aggression": "0.50",
-                },
-            )
-        )
-        result = projector.snapshot("SYM").gen_ai
-
-        # Frontend GenAIAnalysis interface
-        assert result["direction"] == "LONG"
-        assert result["rationale"] == "test"
-        assert result["confidence"] == "High"
-        assert result["inputPrompt"] == "prompt..."  # camelCase
-        assert result["rawOutput"] == "output..."
-        assert result["marketState"] == "BALANCED"
-        assert result["aggression"] == "0.50"
+        snapshot = projector.snapshot("SYM")
+        assert not hasattr(snapshot, "gen_ai")
+        assert not hasattr(snapshot, "overseer")
+        assert hasattr(snapshot, "quant_decision")

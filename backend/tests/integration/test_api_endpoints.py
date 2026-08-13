@@ -167,16 +167,6 @@ class TestAnalysisEndpoints:
         assert "poc" in body
         assert "valueAreaHigh" in body
 
-    def test_prediction(self):
-        r = client.post(
-            "/api/analysis/predict",
-            json={"data": self._make_candles(), "count": 5},
-        )
-        assert r.status_code == 200
-        body = r.json()
-        assert "predictions" in body
-        assert "analysis" in body
-
     def test_footprint(self):
         r = client.post(
             "/api/analysis/footprint",
@@ -227,7 +217,7 @@ class TestAIJournalEndpoints:
         monkeypatch.setattr(TradeJournal, "assess_promotion", _stub_assess)
 
         r = client.get(
-            "/api/ai/journal/promotion",
+            "/api/journal/promotion",
             params={
                 "start": "2026-01-01",
                 "end": "2026-01-05",

@@ -135,40 +135,6 @@ class TestP7OverseerPnLGuard:
 
 # ---- P9: Structured Parser ----
 
-class TestP9StructuredParser:
-    def test_parse_market_state_trigger_format(self):
-        from quant.inference.prompt_builder import parse_entry_response
-        text = "Market State: Balance\nLogic: Price at POC, mean reversion setup\nTrigger: Enter Long on pullback"
-        result = parse_entry_response(text)
-        assert result["direction"] == "LONG"
-
-    def test_parse_short_trigger(self):
-        from quant.inference.prompt_builder import parse_entry_response
-        text = "Market State: Imbalance\nLogic: Sellers in control\nTrigger: Enter Short"
-        result = parse_entry_response(text)
-        assert result["direction"] == "SHORT"
-
-    def test_parse_stay_flat(self):
-        from quant.inference.prompt_builder import parse_entry_response
-        text = "Market State: Balance\nLogic: No clear setup\nTrigger: Stay Flat"
-        result = parse_entry_response(text)
-        assert result["direction"] == "FLAT"
-
-    def test_freeform_with_trigger_keyword(self):
-        """MLX model often outputs freeform with 'Trigger:' embedded."""
-        from quant.inference.prompt_builder import parse_entry_response
-        text = "Market State:Balance (mean reversion). Price at VAL. Logic: buyers stepping in at support. Trigger: Enter Long with size"
-        result = parse_entry_response(text)
-        assert result["direction"] == "LONG"
-
-    def test_json_still_works(self):
-        from quant.inference.prompt_builder import parse_entry_response
-        text = '{"direction": "SHORT", "rationale": "test", "confidence": "High"}'
-        result = parse_entry_response(text)
-        assert result["direction"] == "SHORT"
-        assert result["confidence"] == "High"
-
-
 # ---- Developing VA (previous fix) ----
 
 class TestDevelopingVA:

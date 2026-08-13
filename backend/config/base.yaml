@@ -482,16 +482,3 @@ risk:
   kelly_win_loss_ratio: 2.0
   bootstrap_trade_count: 30
 
-# ── LLM Configuration ──
-
-llm:
-  model_id: "glassytrade-qwen-mlx-fused"
-  reasoning_model_id: "Jackrong/Qwen3.5-4B-Claude-4.6-Opus-Reasoning-Distilled"
-  temperature_entry: 0.4
-  temperature_overseer: 0.3
-  max_tokens: 120
-  timeout_seconds: 15
-  instruction: >
-    You are READING the auction using Fabio Valentini's AMT methodology.
-    You are NOT predicting — you are interpreting market structure, order flow,
-    and institutional behavior.

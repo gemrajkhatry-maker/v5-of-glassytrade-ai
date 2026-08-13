@@ -27,9 +27,6 @@ class _RawView:
         self.portfolio = d.get("portfolio")
         self.depth = d.get("depth")
         self.amt = d.get("amt")
-        self.gen_ai = d.get("genAIAnalysis")
-        self.overseer_action = d.get("overseerAction", "")
-        self.overseer_reason = d.get("overseerReason", "")
         self.agent_decision = d.get("agentDecision")
 
 
@@ -75,9 +72,6 @@ class _FakeCoordinator:
             return raw
         return view_state_to_ws(_RawView(raw))
 
-    def llm_history(self, symbol: str) -> list[dict]:
-        return list(self._history.get(symbol, []))
-
     def rescan(self) -> list[str]:
         self.rescanned = True
         return list(self._symbols)
@@ -115,26 +109,6 @@ def test_scanner_rescan_uses_coordinator(client):
     assert fake.rescanned is True
 
 
-def test_ai_history_returns_coordinator_llm_history(client):
-    c, app, fake = client
-    fake._history["SYM"] = [
-        {"type": "decision", "direction": "BUY", "confidence": "High"}
-    ]
-    resp = c.get("/api/ai/history?symbol=SYM")
-    assert resp.status_code == 200
-    assert resp.json() == {
-        "history": [{"type": "decision", "direction": "BUY", "confidence": "High"}]
-    }
-
-
-def test_ai_history_defaults_to_first_coordinator_symbol(client):
-    c, app, fake = client
-    fake._history["SYM"] = [{"type": "decision", "direction": "SELL"}]
-    resp = c.get("/api/ai/history")
-    assert resp.status_code == 200
-    assert resp.json() == {"history": [{"type": "decision", "direction": "SELL"}]}
-
-
 def test_health_includes_coordinator_check(client):
     c, app, fake = client
     resp = c.get("/api/health")
@@ -156,12 +130,6 @@ def test_ws_gameloop_streams_coordinator_snapshot(client):
         assert first["status"] == "server_mode"
         assert first["activeSymbols"] == ["SYM"]
 
-        second = ws.receive_json()
-        # LLM decision history rides its own status — never ``history_loaded``
-        # (that status means candle data to the frontend chart).
-        assert second["status"] == "llm_history_loaded"
-        assert second["symbol"] == "SYM"
-
         full = ws.receive_json()
         assert full["_type"] == "full"
         assert full["_symbol"] == "SYM"
@@ -181,7 +149,6 @@ def test_ws_portfolio_always_full_contract_shape(client):
     with c.websocket_connect("/api/trading/ws/gameloop") as ws:
         ws.send_json({"subscribe": "SYM"})
         ws.receive_json()  # server_mode
-        ws.receive_json()  # llm_history_loaded
         full = ws.receive_json()
         p = full["portfolio"]
         assert "balance" in p and "equity" in p and "leverage" in p
@@ -189,14 +156,13 @@ def test_ws_portfolio_always_full_contract_shape(client):
         assert isinstance(p["closedTrades"], list)
 
 
-def test_ws_llm_history_never_rides_history_loaded(client):
-    """LLM decision history is delivered under llm_history_loaded only."""
+def test_ws_never_sends_llm_history_status(client):
+    """The WS viewer is deterministic-only: no llm_history_loaded status is
+    ever emitted after the LLM layer removal."""
     c, app, fake = client
-    fake._history["SYM"] = [{"direction": "LONG", "confidence": "High"}]
     with c.websocket_connect("/api/trading/ws/gameloop") as ws:
         ws.send_json({"subscribe": "SYM"})
         ws.receive_json()  # server_mode
-        second = ws.receive_json()
-        assert second["status"] == "llm_history_loaded"
-        assert second["count"] == 1
-        assert second["history"][0]["direction"] == "LONG"
+        full = ws.receive_json()
+        assert full["_type"] == "full"
+        assert full.get("status") != "llm_history_loaded"

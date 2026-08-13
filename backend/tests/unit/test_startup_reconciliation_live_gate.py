@@ -46,6 +46,10 @@ def test_paper_mode_continues_past_reconciliation_failure(monkeypatch):
     monkeypatch.setenv("GLASSYTRADE_ENV", "paper")
     app = _build_app_with_failing_reconciliation(monkeypatch)
 
-    with TestClient(app) as client:
-        res = client.get("/api/health")
-        assert res.status_code == 200
+    # NB: intentionally NOT used as a context manager — the lifespan shutdown
+    # closes the app's shared storage singleton, poisoning later tests in the
+    # same process ("Cannot operate on a closed database"). The endpoint under
+    # test only needs the module-level app state, not the lifespan.
+    client = TestClient(app)
+    res = client.get("/api/health")
+    assert res.status_code == 200

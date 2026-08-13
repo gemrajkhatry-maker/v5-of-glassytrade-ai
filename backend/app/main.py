@@ -29,8 +29,7 @@ from app.api.routers import (
     health_router,
     market_router,
     trading_router,
-    ai_router,
-    rl_router,
+    journal_router,
     metrics_router,
 )
 from app.api.routers.observability import router as observability_router
@@ -53,8 +52,6 @@ from app.config import settings as _settings
 from quant.contracts.ports.broker import IBroker
 from quant.contracts.ports.storage import IStorage
 from quant.contracts.ports.market_data import IMarketData
-from quant.contracts.ports.llm_inference import ILLMInference
-from quant.inference.generative_ai import GenerativeAIService
 from app.domain.ops.startup_reconciliation import StartupReconciliation
 
 
@@ -404,9 +401,6 @@ def create_application() -> FastAPI:
         init_singletons(
             broker=broker,
             storage=storage,
-            gen_ai_service=GenerativeAIService(
-                llm_adapter=container.resolve(ILLMInference)
-            ),
             market_data=market_data,
             configuration=config,
             active_symbols=active_symbols,
@@ -419,8 +413,7 @@ def create_application() -> FastAPI:
         app.include_router(analysis_router, prefix="/api", tags=["analysis"])
         app.include_router(trading_router, prefix="/api", tags=["trading"])
         app.include_router(gameloop_router, prefix="/api", tags=["websocket"])
-        app.include_router(ai_router, prefix="/api", tags=["ai"])
-        app.include_router(rl_router, prefix="/rl", tags=["rl"])
+        app.include_router(journal_router, prefix="/api", tags=["journal"])
         app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
         app.include_router(observability_router, prefix="/api", tags=["observability"])
         app.include_router(alerts_router, prefix="/api", tags=["alerts"])

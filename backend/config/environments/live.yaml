@@ -33,11 +33,6 @@ scanner:
   strikes_around_atm: 1  # Only closest to ATM
   expiry_index: 0
 
-# LLM settings (production)
-llm:
-  timeout_seconds: 45
-  temperature_entry: 0.3  # More deterministic
-  overseer_temperature: 0.2
 
 # Production feature flags
 feature_flags:

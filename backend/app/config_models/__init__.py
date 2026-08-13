@@ -116,19 +116,6 @@ class RiskConfig:
 
 
 @dataclass(frozen=True)
-class LLMConfig:
-    """LLM configuration."""
-
-    model_id: str = "glassytrade-qwen-mlx-fused"
-    reasoning_model_id: str = ""
-    temperature_entry: float = 0.4
-    temperature_overseer: float = 0.3
-    max_tokens: int = 120
-    timeout_seconds: float = 15.0
-    instruction: str = ""
-
-
-@dataclass(frozen=True)
 class FeatureFlags:
     """All feature flags with defaults. Matches spec Phase -1, Component 3."""
 
@@ -145,11 +132,6 @@ class FeatureFlags:
 
     # Phase 3 flags
     walk_forward_validation: bool = False
-
-    # LLM role flags
-    llm_pre_candle_advisory: bool = True
-    llm_overseer: bool = True
-    llm_post_trade: bool = True
 
     # Phase 4 flags
     scalp_engine_enabled: bool = False
@@ -186,7 +168,6 @@ class SystemConfig:
     broker_mode: str = "paper"
     exchanges: dict[str, ExchangeConfig] = field(default_factory=dict)
     risk: RiskConfig = field(default_factory=RiskConfig)
-    llm: LLMConfig = field(default_factory=LLMConfig)
     flags: FeatureFlags = field(default_factory=FeatureFlags)
     gap_fill: GapFillConfig = field(default_factory=GapFillConfig)
 
