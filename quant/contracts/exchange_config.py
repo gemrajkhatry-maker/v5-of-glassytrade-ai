@@ -53,9 +53,6 @@ class ExchangeConfig:
         3.0  # Max ticks from nearest key level for entry
     )
 
-    # LLM instruction — exchange-specific prompt
-    llm_instruction: str = ""
-
     # EIA calendar (MCX-specific)
     eia_symbols: FrozenSet[str] = frozenset()
     eia_suppression_minutes: int = 15
@@ -173,7 +170,6 @@ class ExchangeConfig:
                     "max_distance_to_level_ticks", base.max_distance_to_level_ticks
                 )
             ),
-            llm_instruction=data.get("llm_instruction", base.llm_instruction),
             eia_symbols=eia_symbols,
             eia_suppression_minutes=int(
                 data.get("eia_suppression_minutes", base.eia_suppression_minutes)
@@ -201,13 +197,6 @@ class ExchangeConfig:
             warm_up_minutes=15,
             cvd_block_threshold=5000.0,
             max_distance_to_level_ticks=500.0,
-            llm_instruction=(
-                "You are READING the auction using Fabio Valentini's AMT methodology "
-                "for the NSE Index market. You are NOT predicting — you are interpreting "
-                "market structure, order flow, and institutional behavior. "
-                "CRITICAL FOR NSE: Pay deep attention to Open Interest (OI) walls and PCR "
-                "as proxies for institutional flow."
-            ),
             eia_symbols=frozenset(),
             eia_suppression_minutes=0,
             tick_sizes={
@@ -265,13 +254,6 @@ class ExchangeConfig:
             warm_up_minutes=15,
             cvd_block_threshold=50.0,
             max_distance_to_level_ticks=5.0,
-            llm_instruction=(
-                "You are READING the auction using Fabio Valentini's AMT methodology "
-                "for the MCX Commodity market. You are NOT predicting — you are "
-                "interpreting market structure, direct exchange volume, and "
-                "institutional behavior. CRITICAL FOR MCX: Commodities have thinner "
-                "order books; respect direct volume spikes and key round numbers."
-            ),
             eia_symbols=frozenset({"NATURALGAS", "CRUDEOIL"}),
             eia_suppression_minutes=15,
             tick_sizes={

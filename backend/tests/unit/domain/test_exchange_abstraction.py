@@ -105,13 +105,6 @@ class TestExchangeConfig:
         assert nse.is_underlying("BANKNIFTY-WED-FUT")
         assert not nse.is_underlying("CRUDEOIL 19 MAR 6000 CALL")
 
-    def test_llm_instruction_is_exchange_specific(self):
-        nse = ExchangeConfig.for_exchange("NSE")
-        mcx = ExchangeConfig.for_exchange("MCX")
-        assert "NSE" in nse.llm_instruction
-        assert "MCX" in mcx.llm_instruction
-        assert nse.llm_instruction != mcx.llm_instruction
-
 
 # ======================================================================
 # SymbolRegistry Tests
