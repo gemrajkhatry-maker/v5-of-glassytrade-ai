@@ -30,6 +30,7 @@ __pycache__/
 *.bak
 venv/
 .env
+.env.bak*
 
 # ML models - exclude all model files
 poc*/models/
