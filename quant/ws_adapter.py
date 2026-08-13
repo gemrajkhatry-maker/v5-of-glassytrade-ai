@@ -2,11 +2,35 @@
 
 Pure mapper: StateProjector.ViewState -> the existing WS snapshot dict the
 frontend already consumes (``_symbol, portfolio, amt, auction, quantDecision,
-genAIAnalysis, overseerAction, overseerReason, agentDecision, riskState, tick,
-ltp, oi, depth``). No I/O, no backend imports.
+agentDecision, riskState, tick, ltp, oi, depth``). No I/O, no backend imports.
+
+The LLM layer is gone, so the LLM-derived keys (``genAIAnalysis``,
+``overseerAction``, ``overseerReason``) are not emitted; ``agentDecision`` is
+projected from the deterministic ``quantDecision`` so the frontend's
+sidebar sorting/filtering keeps working on engine output alone.
 """
 
 from __future__ import annotations
+
+
+def _agent_decision_from_quant(qd: dict | None) -> dict | None:
+    """Project the deterministic decision into the frontend ``AgentDecision``
+    contract (direction/probability/regime/timing/rationale)."""
+    if not qd:
+        return None
+    sig = qd.get("signal") or {}
+    direction = str(sig.get("type") or "FLAT").upper()
+    if direction not in ("LONG", "SHORT", "FLAT"):
+        direction = "FLAT"
+    return {
+        "direction": direction,
+        "probability": float(sig.get("confidence") or 0.0),
+        "regime": str(qd.get("phase") or ""),
+        "timing": "",
+        "sizeFraction": 0.0,
+        "latencyUs": 0,
+        "rationale": str(qd.get("reason") or ""),
+    }
 
 
 def view_state_to_ws(vs) -> dict:
@@ -33,10 +57,7 @@ def view_state_to_ws(vs) -> dict:
         "amt": vs.amt,
         "auction": vs.auction,
         "quantDecision": vs.quant_decision,
-        "genAIAnalysis": vs.gen_ai,
-        "overseerAction": vs.overseer_action,
-        "overseerReason": vs.overseer_reason,
-        "agentDecision": vs.agent_decision,
+        "agentDecision": _agent_decision_from_quant(vs.quant_decision),
         "riskState": vs.risk_state,
         "tick": vs.tick,
         "ltp": vs.ltp,

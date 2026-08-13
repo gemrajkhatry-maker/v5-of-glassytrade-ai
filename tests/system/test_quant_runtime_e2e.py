@@ -15,18 +15,15 @@ from tests.quant.runtime.test_runtime import _ticks
 
 WS_CONTRACT_KEYS = (
     "_symbol", "portfolio", "amt", "auction", "quantDecision",
-    "genAIAnalysis", "overseerAction", "overseerReason", "agentDecision",
-    "riskState", "tick", "ltp", "oi", "depth",
+    "agentDecision", "riskState", "tick", "ltp", "oi", "depth",
 )
 
-# The 10 keys emitted by the legacy backend snapshot builder
-# (backend/app/application/services/state_snapshot_builder.py
-# build_state_snapshot: lines 39-56). The engine's WS contract must be a
-# superset so the frontend keeps reading identical fields.
+# The keys emitted by the WS adapter (quant/ws_adapter.py). The LLM-derived
+# keys (genAIAnalysis, overseerAction, overseerReason) were removed with the
+# LLM layer; agentDecision is projected from the deterministic quantDecision.
 BACKEND_SNAPSHOT_KEYS = {
     "_symbol", "portfolio", "amt", "auction", "quantDecision",
-    "genAIAnalysis", "overseerAction", "overseerReason", "agentDecision",
-    "riskState",
+    "agentDecision", "riskState",
 }
 ENGINE_ADDED_KEYS = {"tick", "ltp", "oi", "depth"}
 

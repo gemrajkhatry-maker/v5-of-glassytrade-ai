@@ -18,9 +18,8 @@ from quant.vwap import VWAPState
 from quant.ws_adapter import view_state_to_ws
 
 WS_KEYS = {
-    "_symbol", "portfolio", "amt", "auction", "quantDecision", "genAIAnalysis",
-    "overseerAction", "overseerReason", "agentDecision", "riskState", "tick",
-    "ltp", "oi", "depth",
+    "_symbol", "portfolio", "amt", "auction", "quantDecision",
+    "agentDecision", "riskState", "tick", "ltp", "oi", "depth",
 }
 
 
@@ -67,7 +66,17 @@ def _projector():
 def test_ws_snapshot_has_all_frontend_keys():
     ws = view_state_to_ws(_projector().snapshot("S"))
     assert set(ws) == WS_KEYS
-    assert len(ws) == 14
+    assert len(ws) == 11
+
+
+def test_agent_decision_projected_from_quant_decision():
+    """agentDecision is now derived from the deterministic quantDecision —
+    direction/probability/rationale mirror the signal, no LLM involved."""
+    ws = view_state_to_ws(_projector().snapshot("S"))
+    ad = ws["agentDecision"]
+    assert ad["direction"] == "LONG"
+    assert ad["probability"] == 0.8
+    assert ad["rationale"] == "Triple-A"
 
 
 def test_ws_snapshot_fields():

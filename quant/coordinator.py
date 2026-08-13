@@ -79,7 +79,7 @@ class AuctionCoordinator:
 from quant.amt.session.scanner import OptionScannerService
 from quant.brokers.live_gateway import LiveGateway
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
-from quant.events import DecisionProduced, LLMAnalysisProduced, SignalApproved
+from quant.events import DecisionProduced, SignalApproved
 from quant.runtime import QuantEngine
 from quant.ws_adapter import view_state_to_ws
 from quant.contracts.timezones import IST
@@ -181,19 +181,10 @@ class QuantCoordinator:
     connection for every symbol (Dhan allows up to 1000 instruments per
     connection). Plus a shared decision queue."""
 
-    def __init__(self, market_data, inference=None, broker=None, config=None,
-                 llm_sink=None, history_loader=None) -> None:
+    def __init__(self, market_data, broker=None, config=None) -> None:
         self.market_data = market_data
-        self.inference = inference
         self.broker = broker
         self.config = {**_DEFAULT_CONFIG, **(config or {})}
-        # Optional persistence sink — the backend injects storage.save_llm_decision
-        # so live LLM fold-backs get durable rows. Kept as a plain callable so the
-        # quant layer stays free of backend imports.
-        self._llm_sink = llm_sink
-        # Optional loader(symbol) -> list[dict] used to rehydrate per-symbol LLM
-        # decision history from durable storage after a restart.
-        self._history_loader = history_loader
         self._contracts_file = self.config.get("contracts_file") or _DEFAULT_CONTRACTS_FILE
         # Shared across all engines (one file, one lock) so prior levels are
         # consistent and NPOC records dedupe per session.
@@ -204,7 +195,6 @@ class QuantCoordinator:
         self._engines: dict[str, QuantEngine] = {}
         self._gateways: dict[str, LiveGateway] = {}
         self._threads: dict[str, threading.Thread] = {}
-        self._history: dict[str, list[dict]] = {}
         self._decisions: queue.Queue = queue.Queue()
         self._stop = threading.Event()
         self.started = False
@@ -213,7 +203,6 @@ class QuantCoordinator:
         symbols = self._scan()
         self._feed.set_symbols(symbols)
         for symbol in symbols:
-            self._hydrate_history(symbol)
             self._spawn_engine(symbol)
         self.started = True
 
@@ -222,7 +211,6 @@ class QuantCoordinator:
         symbols = self._scan(force=True)
         self._feed.set_symbols(symbols)
         for symbol in symbols:
-            self._hydrate_history(symbol)
             self._spawn_engine(symbol)
         return symbols
 
@@ -231,21 +219,12 @@ class QuantCoordinator:
             return False
         self._stop_engine(old)
         self._feed.subscribe(new)
-        self._hydrate_history(new)
         self._spawn_engine(new)
         return True
 
     def stop(self) -> None:
         self._stop.set()
         self._stop_engines()
-        # ponytail: per-engine ThreadPoolExecutor threads outlive the coordinator
-        # without this; shutdown(wait=False) is fine because daemon=True on
-        # ThreadPoolExecutor's worker threads since Python 3.9.
-        for eng in list(self._engines.values()):
-            try:
-                eng._llm_executor.shutdown(wait=False)
-            except Exception:
-                pass
         self._feed.close()
         self.started = False
 
@@ -257,28 +236,6 @@ class QuantCoordinator:
 
     def symbols(self) -> list[str]:
         return list(self._engines.keys())
-
-    def llm_history(self, symbol: str) -> list[dict]:
-        entries = self._history.get(symbol, [])
-        if not entries and self._history_loader is not None:
-            self._hydrate_history(symbol)
-            entries = self._history.get(symbol, [])
-        return list(entries)
-
-    def _hydrate_history(self, symbol: str) -> None:
-        """Load durable LLM decisions into the in-memory per-symbol history so
-        the UI keeps its decision history across restarts."""
-        if self._history.get(symbol) or self._history_loader is None:
-            return
-        try:
-            rows = self._history_loader(symbol) or []
-        except Exception:
-            logger.warning(
-                "LLM history hydration failed for %s", symbol, exc_info=True
-            )
-            return
-        if rows:
-            self._history[symbol] = list(rows)
 
     def decisions(self) -> queue.Queue:
         return self._decisions
@@ -342,8 +299,6 @@ class QuantCoordinator:
             gateway,
             symbol,
             interval_seconds=self.config["interval_seconds"],
-            inference=self.inference,
-            llm_history=self._history.setdefault(symbol, []),
             history_source=self.market_data,
             lot_size=self._resolve_lot_size(symbol),
             market=self.config.get("exchange") or "NSE",
@@ -351,8 +306,6 @@ class QuantCoordinator:
         )
         engine._bus.subscribe(DecisionProduced, self._on_decision)
         engine._bus.subscribe(SignalApproved, self._on_decision)
-        if self._llm_sink is not None:
-            engine._bus.subscribe(LLMAnalysisProduced, self._on_llm_analysis)
         thread = threading.Thread(
             target=engine.run, daemon=True, name=f"quant-{symbol}"
         )
@@ -363,26 +316,6 @@ class QuantCoordinator:
 
     def _on_decision(self, event) -> None:
         self._decisions.put(event)
-
-    def _on_llm_analysis(self, event) -> None:
-        """Persist a live LLM fold-back via the injected sink.
-
-        Runs on the engine's LLM-fold thread; the sink is a single small DB
-        write, so no extra queuing is needed. Enriched analyses carry
-        ``timestamp``/``created_at``/``input_prompt``/``raw_output`` set by
-        QuantEngine._schedule_llm.
-        """
-        if self._llm_sink is None:
-            return
-        try:
-            data = dict(event.analysis or {})
-            data.setdefault("symbol", event.symbol)
-            data.setdefault("created_at", event.time)
-            self._llm_sink(data)
-        except Exception:
-            logger.warning(
-                "LLM decision sink failed for %s", event.symbol, exc_info=True
-            )
 
     def _stop_engine(self, symbol: str) -> None:
         gateway = self._gateways.pop(symbol, None)

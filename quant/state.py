@@ -15,15 +15,12 @@ from quant.auction_state import AuctionState
 from quant.contracts.timezones import IST
 from quant.decision.decision_service import QuantDecision
 from quant.events import (
-    AgentDecisionProduced,
     AmtUpdated,
     AuctionUpdated,
     BarClosed,
     DecisionProduced,
     DepthUpdated,
     Event,
-    LLMAnalysisProduced,
-    OverseerProduced,
     PositionClosed,
     PositionOpened,
     RiskUpdated,
@@ -44,10 +41,6 @@ class ViewState:
     portfolio: dict | None = None
     depth: dict | None = None
     amt: dict | None = None
-    gen_ai: dict | None = None
-    overseer_action: str = ""
-    overseer_reason: str = ""
-    agent_decision: dict | None = None
 
 
 def _auction_to_view(state: AuctionState) -> dict:
@@ -257,13 +250,6 @@ class StateProjector:
             s["depth"] = event.depth
         elif isinstance(event, AmtUpdated):
             s["amt"] = event.amt
-        elif isinstance(event, LLMAnalysisProduced):
-            s["gen_ai"] = event.analysis
-        elif isinstance(event, OverseerProduced):
-            s["overseer_action"] = event.action
-            s["overseer_reason"] = event.reason
-        elif isinstance(event, AgentDecisionProduced):
-            s["agent_decision"] = event.decision
 
     def snapshot(self, symbol: str) -> ViewState:
         s = self._symbol_state(symbol)
@@ -278,10 +264,6 @@ class StateProjector:
             portfolio=self._portfolio(s["portfolio"]),
             depth=s["depth"],
             amt=s["amt"],
-            gen_ai=s["gen_ai"],
-            overseer_action=s["overseer_action"],
-            overseer_reason=s["overseer_reason"],
-            agent_decision=s["agent_decision"],
         )
 
     def _symbol_state(self, symbol: str) -> dict:
@@ -296,10 +278,6 @@ class StateProjector:
                 "portfolio": None,
                 "depth": None,
                 "amt": None,
-                "gen_ai": None,
-                "overseer_action": "",
-                "overseer_reason": "",
-                "agent_decision": None,
             }
         return self._state[symbol]
 

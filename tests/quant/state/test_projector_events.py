@@ -1,13 +1,10 @@
 from dataclasses import dataclass
 
 from quant.events import (
-    AgentDecisionProduced,
     AmtUpdated,
     AuctionUpdated,
     BarClosed,
     DepthUpdated,
-    LLMAnalysisProduced,
-    OverseerProduced,
 )
 from quant.state import StateProjector
 
@@ -88,28 +85,6 @@ def test_amt_updated_folds():
     p = StateProjector()
     p.on_event(AmtUpdated(symbol="SYM", time="t1", amt={"poc": 1.0}))
     assert p.snapshot("SYM").amt["poc"] == 1.0
-
-
-def test_llm_analysis_folds():
-    p = StateProjector()
-    p.on_event(LLMAnalysisProduced(symbol="SYM", time="t1",
-                                   analysis={"direction": "LONG", "confidence": "High"}))
-    assert p.snapshot("SYM").gen_ai["direction"] == "LONG"
-
-
-def test_overseer_folds():
-    p = StateProjector()
-    p.on_event(OverseerProduced(symbol="SYM", time="t1", action="HOLD", reason="x"))
-    v = p.snapshot("SYM")
-    assert v.overseer_action == "HOLD"
-    assert v.overseer_reason == "x"
-
-
-def test_agent_decision_folds():
-    p = StateProjector()
-    p.on_event(AgentDecisionProduced(symbol="SYM", time="t1",
-                                     decision={"direction": "SHORT", "probability": 0.7}))
-    assert p.snapshot("SYM").agent_decision["direction"] == "SHORT"
 
 
 def test_bar_close_folds_oi():

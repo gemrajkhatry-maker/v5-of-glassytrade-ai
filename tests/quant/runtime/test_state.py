@@ -83,10 +83,6 @@ def test_snapshot_defaults_empty_state():
         "closedTrades": [],
     }
     assert v.amt is None
-    assert v.gen_ai is None
-    assert v.overseer_action == ""
-    assert v.overseer_reason == ""
-    assert v.agent_decision is None
 
 
 def test_bar_fold_sets_ohlc_tick():

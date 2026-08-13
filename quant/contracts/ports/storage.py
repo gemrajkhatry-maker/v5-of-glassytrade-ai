@@ -67,13 +67,6 @@ class ITradeStorage(ABC):
     def query_trades(self, start: str | None = None, end: str | None = None) -> list[dict[str, Any]]: ...
 
 
-class IDecisionStorage(ABC):
-    @abstractmethod
-    def save_llm_decision(self, decision_data: dict[str, Any]) -> None: ...
-    @abstractmethod
-    def query_llm_decisions(self, start: str | None = None, end: str | None = None) -> list[dict[str, Any]]: ...
-
-
 class IOpenPositionStorage(ABC):
     @abstractmethod
     def save_open_position(self, position: dict[str, Any]) -> None: ...
@@ -105,11 +98,10 @@ class IPositionEventStorage(ABC):
 class IStorage(
     ITickStorage,
     ITradeStorage,
-    IDecisionStorage,
     IOpenPositionStorage,
     IPositionEventStorage,
 ):
-    """Abstraction for persisting ticks, trades, and LLM decisions."""
+    """Abstraction for persisting ticks, trades, and positions."""
 
     @abstractmethod
     def save_tick(self, symbol: str, tick_data: dict[str, Any]) -> None:
@@ -118,10 +110,6 @@ class IStorage(
     @abstractmethod
     def save_trade(self, trade_data: dict[str, Any]) -> None:
         """Persist a closed trade."""
-
-    @abstractmethod
-    def save_llm_decision(self, decision_data: dict[str, Any]) -> None:
-        """Persist an LLM analysis decision."""
 
     @abstractmethod
     def save_performance_snapshot(self, snapshot: dict[str, Any]) -> None:
@@ -139,12 +127,6 @@ class IStorage(
         self, start: str | None = None, end: str | None = None,
     ) -> list[dict[str, Any]]:
         """Query historical trades."""
-
-    @abstractmethod
-    def query_llm_decisions(
-        self, start: str | None = None, end: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Query historical LLM decisions."""
 
     @abstractmethod
     def save_session_profile(self, profile_data: dict[str, Any]) -> None:

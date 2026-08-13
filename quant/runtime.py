@@ -10,7 +10,6 @@ Only imports ``quant.*`` and stdlib — zero backend/ imports.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import random
@@ -34,15 +33,12 @@ from quant.decision.decision_service import DecisionService
 from quant.decision.signal_builder import clamp_quantity
 from quant.session_levels import SessionLevelStore
 from quant.events import (
-    AgentDecisionProduced,
     AmtUpdated,
     AuctionUpdated,
     BarClosed,
     DecisionProduced,
     Event,
     EventBus,
-    LLMAnalysisProduced,
-    OverseerProduced,
     PositionClosed,
     PositionOpened,
     RiskUpdated,
@@ -58,10 +54,8 @@ logger = logging.getLogger(__name__)
 
 # Deterministic conviction used for gate 4's probability check when the engine
 # decides from the auction state alone (above the 0.55 min_probability
-# threshold). The decision-critical path is 100% deterministic by design — the
-# LLM is an advisory overlay (narrative + exit tuning) and never gates a trade
-# (AMT_ARCHITECTURE_PROPOSAL.md), so _decide must not depend on the async
-# fold-back.
+# threshold). The decision-critical path is 100% deterministic by design — no
+# model inference is involved, so _decide never waits on external calls.
 _DETERMINISTIC_CONVICTION = 0.7
 # One-shot startup warning when an option contract runs with no underlying
 # feed — Fabio's auction structure belongs on the most liquid futures; running
@@ -141,12 +135,9 @@ class QuantEngine:
         min_rr: float = 1.5,
         tick_size: float = 0.05,
         time_stop_bars: int = 60,
-        inference=None,
-        llm_history=None,
         history_source=None,
         lot_size: float = 1.0,
         market: str = "NSE",
-        llm_consensus_gate: bool | None = None,
         session_levels: SessionLevelStore | None = None,
         underlying_gateway=None,
     ) -> None:
@@ -219,31 +210,7 @@ class QuantEngine:
         self._warm_bars = 0
         self._entry_bar_index = 0
         self._subscribed = False
-        self._inference = inference
-        self._llm_history = llm_history
-        self._llm_executor = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="llm-fold"
-        )
         self._emit_lock = threading.Lock()
-        # LLM entry temperature — ponytail: env var over DI plumbing for a single
-        # scalar; promote when we need per-session tuning.
-        self._llm_entry_temperature = float(
-            os.getenv("LLM_TEMPERATURE_ENTRY", "0.3")
-        )
-        # LLM-consensus gate (Track D): when enabled, an entry needs the LLM
-        # advisory to agree with the deterministic Triple-A direction at High
-        # confidence. Opt-in via LLM_CONSENSUS_GATE=1 (or the constructor
-        # param) — default OFF so the advisory stays advisory-only until the
-        # model is validated (paper-first rollout).
-        if llm_consensus_gate is not None:
-            self._llm_execution_enabled = bool(llm_consensus_gate)
-        else:
-            self._llm_execution_enabled = (
-                os.getenv("LLM_CONSENSUS_GATE", "0").lower()
-                in ("1", "true", "yes")
-            )
-        self._llm_state_lock = threading.Lock()  # guards _llm_history + _last_llm_bar_index
-        self._last_llm_bar_index = -1
 
     def run(self, max_steps: int | None = None) -> list[Event]:
         """Consume ticks from the gateway, drive the full pipeline, and return
@@ -308,21 +275,10 @@ class QuantEngine:
         self._bar_index += 1
         self._emit(BarClosed(symbol=self.symbol, time=bar.time, bar=bar))
         self._emit(AuctionUpdated(symbol=self.symbol, time=bar.time, auction=state))
-        # Snapshot the AMT DTO for this bar and hand it to the fold-back so
-        # the LLM advisory is grounded in the SAME evidence the banner shows
-        # (IB break, absorption side, aggression) instead of a stale/last DTO.
+        # Snapshot the AMT DTO for this bar so the banner/UI sees the same
+        # auction evidence the decision path used.
         amt_dto = self._amt_analyze(bar)
         self._emit(AmtUpdated(symbol=self.symbol, time=bar.time, amt=amt_dto))
-
-        if self._inference is not None and (
-            self._inference.is_ready() or self._inference_loading()
-        ):
-            # Pass the bar index at submit time so the fold-back thread stamps
-            # WHICH bar its advisory analyzed — the async task reads
-            # self._bar_index later and could see a newer index.
-            self._llm_executor.submit(
-                self._schedule_llm, state, bar, amt_dto, self._bar_index
-            )
 
         if self._position is None:
             self._decide(state, bar)
@@ -330,12 +286,12 @@ class QuantEngine:
             self._manage_exit(state, bar)
 
     def _decide(self, state, bar) -> None:
-        # Direction input to the gates is the deterministic auction-state edge,
-        # NOT the async LLM advisory: the AGGRESSION Triple-A signal when the
-        # machine has one, else the fresh absorption side (BUY -> LONG,
-        # SELL -> SHORT). The absorption fallback is what lets the Fabio entry
-        # (absorption + VWAP breakout, gate 3) execute during the
-        # ABSORPTION/ACCUMULATION phases — before an AGGRESSION signal exists.
+        # Direction input to the gates is the deterministic auction-state edge:
+        # the AGGRESSION Triple-A signal when the machine has one, else the
+        # fresh absorption side (BUY -> LONG, SELL -> SHORT). The absorption
+        # fallback is what lets the Fabio entry (absorption + VWAP breakout,
+        # gate 3) execute during the ABSORPTION/ACCUMULATION phases — before an
+        # AGGRESSION signal exists.
         signal = state.triple_a_signal if state is not None else None
         agent_direction = signal if signal in ("LONG", "SHORT") else None
         if (
@@ -350,11 +306,9 @@ class QuantEngine:
         # now enforces the Fabio NSE session phases (no entries in the
         # 09:15-09:30 opening-noise window, none after 15:15 close protection)
         # and the >15-bar warmup — see quant/amt/session/context.py.
-        llm_direction, llm_confidence, llm_fresh = self._llm_consensus_state()
         # Market state + balance ratio from the AMT analyzer (this bar's DTO,
-        # snapshotted in _on_bar_closed before _decide). Gate 5 refuses any
-        # initiative entry unless the market is IMBALANCED (Fabio: the edge
-        # exists only out of balance); the VA-fade tier refuses dead markets.
+        # snapshotted in _on_bar_closed before _decide). The DEAD market state
+        # refuses any initiative entry; the VA-fade tier refuses dead markets.
         amt_dto = self._last_amt_dto or {}
         amt_market_state = str(amt_dto.get("marketState") or "BALANCED").upper()
         if amt_market_state not in ("BALANCED", "IMBALANCED", "DEAD"):
@@ -383,10 +337,6 @@ class QuantEngine:
             npoc_above=float(amt_dto.get("npocAbove") or 0.0),
             npoc_below=float(amt_dto.get("npocBelow") or 0.0),
             tick_size=self._tick_size,
-            llm_direction=llm_direction,
-            llm_confidence=llm_confidence,
-            llm_fresh=llm_fresh,
-            llm_execution_enabled=self._llm_execution_enabled,
         )
         decision = self._decision_service.evaluate(ctx)
         self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
@@ -600,8 +550,8 @@ class QuantEngine:
         """Publish to the bus, append to the trace, fold into the projector,
         and persist a JSON-serializable record to the journal.
 
-        Guarded by a lock so the LLM fold-back thread (``_schedule_llm``) can
-        post results without racing the engine thread's own emits.
+        Guarded by a lock so concurrent emitters (depth updates) never race
+        the engine thread's own emits.
         """
         with self._emit_lock:
             self._bus.publish(event)
@@ -782,8 +732,7 @@ class QuantEngine:
                 )
                 self._amt_fail_logged = True
             return self._last_amt_dto if self._last_amt_dto is not None else empty_amt_dto()
-        # NB: llmThinking stays empty — the amt DTO must be deterministic and
-        # independent of the async LLM fold-back (see test_llm_hook).
+        # The amt DTO is fully deterministic — no model inference involved.
         dto = amt_result_to_dto(result)
         self._last_amt_dto = dto
         return dto
@@ -832,115 +781,6 @@ class QuantEngine:
             ),
         )
 
-    def _inference_loading(self) -> bool:
-        """True when the inference backend is mid-load and will be ready soon.
-
-        The MLX adapter lazily loads its shared singleton model on the first
-        ``predict()`` after a restart. If a bar close lands in that window,
-        ``is_ready()`` is False but the fold-back must still be scheduled —
-        ``predict()`` waits for the in-flight load rather than raising. Other
-        backends (GGUF sync-load, cloud) are never mid-load at call time.
-        """
-        loader = getattr(self._inference, "is_loading", None)
-        return bool(loader and loader())
-
-    def _schedule_llm(self, state, bar, amt_dto=None, bar_index=None) -> None:
-        """Run on the llm-fold thread: predict, parse JSON, fold events back.
-
-        The emitted LLM/Overseer/AgentDecision events are posted through the
-        lock-guarded ``_emit``, so the deterministic bar/decision trace on the
-        engine thread is untouched and async results only append afterwards.
-
-        ``bar_index`` is the engine bar index this analysis belongs to; it is
-        stamped so the LLM-consensus gate can judge freshness (an advisory for
-        the current or immediately-previous bar only).
-        """
-        try:
-            instruction = self._llm_instruction(state, bar, amt_dto)
-            input_text = self._llm_input(state, bar, amt_dto, self.symbol)
-            raw = self._inference.predict(
-                instruction=instruction,
-                input_text=input_text,
-                temperature=self._llm_entry_temperature,
-                max_tokens=256,
-                prefill="{",
-            )
-            analysis = json.loads(raw)
-            if not isinstance(analysis, dict):
-                analysis = {"raw_output": raw}
-        except Exception as exc:
-            logger.warning("LLM fold-back failed for %s: %s", self.symbol, exc)
-            return
-
-        # Stamp the analysis with its own bar time so the UI decision history
-        # shows real per-entry timestamps instead of a shared client-side
-        # Date.now() value, and so persisted rows keep the actual decision time.
-        ts_ms = self._bar_epoch_ms(bar.time)
-        analysis.setdefault("timestamp", ts_ms)
-        analysis.setdefault("created_at", self._ist_created_at(bar.time, ts_ms))
-        analysis.setdefault("input_prompt", input_text)
-        analysis.setdefault("raw_output", raw)
-        # Audit trail: persist the full system instruction too (the DB sink
-        # stores unknown keys in the ``extra`` JSON), so every decision can be
-        # verified against exactly what the model was asked.
-        analysis.setdefault("instruction", instruction)
-
-        # Contradiction guard: the LLM advisory must never independently
-        # claim LONG/SHORT when the deterministic engine found no edge.
-        # When the kernel's Triple-A signal is absent, coerce to FLAT.
-        engine_edge = str(state.triple_a_signal or "").upper() if state else ""
-        llm_dir = str(analysis.get("direction") or "").upper()
-        if llm_dir in ("LONG", "SHORT") and engine_edge not in ("LONG", "SHORT"):
-            analysis["_original_direction"] = llm_dir
-            analysis["direction"] = "FLAT"
-            analysis["guard_overridden"] = True
-            analysis["guard_reason"] = (
-                f"No deterministic edge (triple_a_signal={engine_edge or 'NONE'})"
-                " -- advisory overridden to FLAT"
-            )
-
-        self._emit(LLMAnalysisProduced(symbol=self.symbol, time=bar.time,
-                                       analysis=analysis))
-        self._emit(OverseerProduced(
-            symbol=self.symbol,
-            time=bar.time,
-            action=str(analysis.get("action", "")),
-            reason=str(analysis.get("reason", analysis.get("rationale", ""))),
-        ))
-        self._emit(AgentDecisionProduced(symbol=self.symbol, time=bar.time,
-                                         decision=self._agent_decision(analysis)))
-
-        if self._llm_history is not None:
-            with self._llm_state_lock:
-                self._llm_history.append(analysis)
-                if len(self._llm_history) >= 50:
-                    del self._llm_history[0]
-                # Freshness stamp: this analysis is for ``bar_index`` (the bar
-                # index captured at submit time). A failed fold-back returns
-                # before here, so a failed bar never refreshes the stamp and
-                # the consensus gate sees the advisory as stale.
-                self._last_llm_bar_index = bar_index
-
-    def _llm_consensus_state(self) -> tuple:
-        """Latest LLM advisory (direction, confidence) + freshness flag.
-
-        Fresh = the advisory analyzed the current or immediately-previous bar
-        (the fold-back for bar N lands ~seconds after its close, well before
-        bar N+1's decision 5m later). Guarded by ``_llm_state_lock`` so the
-        engine thread never races the fold-back thread's append.
-        """
-        if self._llm_history is None:
-            return None, None, False
-        with self._llm_state_lock:
-            entry = self._llm_history[-1] if self._llm_history else None
-            fresh = self._last_llm_bar_index >= self._bar_index - 1
-            if entry is None:
-                return None, None, fresh
-            return (
-                str(entry.get("direction", "") or "").upper(),
-                str(entry.get("confidence", "") or "").capitalize(),
-                fresh,
-            )
 
     @staticmethod
     def _bar_epoch_ms(bar_time: str) -> int:
@@ -964,189 +804,3 @@ class QuantEngine:
         except (TypeError, ValueError):
             return 0
 
-    @staticmethod
-    def _ist_created_at(bar_time: str, ts_ms: int) -> str:
-        """Format a bar time as the DB's ``YYYY-MM-DD HH:MM:SS`` IST string."""
-        from datetime import datetime as _dt
-        from quant.contracts.timezones import IST
-        if ts_ms:
-            return _dt.fromtimestamp(ts_ms / 1000, tz=IST).strftime(
-                "%Y-%m-%d %H:%M:%S"
-            )
-        return bar_time
-
-    @staticmethod
-    def _normalize_probability(value) -> float:
-        """Map the LLM advisory's confidence/probability to a float in [0, 1].
-
-        The LLM contract emits ``confidence: "High" | "Medium" | "Low"``, but
-        the frontend contract (types.ts ``probability: number``) and gate 4's
-        ``ctx.agent_probability < min_probability`` comparison both require a
-        number. Accepts floats, numeric strings, and percentage form (75 -> 0.75).
-        """
-        if value is None:
-            return 0.0
-        if isinstance(value, bool):
-            return 1.0 if value else 0.0
-        if not isinstance(value, (int, float)):
-            text = str(value).strip().lower()
-            words = {"high": 0.8, "medium": 0.6, "low": 0.4}
-            if text in words:
-                return words[text]
-            try:
-                value = float(text)
-            except (TypeError, ValueError):
-                return 0.0
-        p = float(value)
-        if p > 1.0:
-            p = p / 100.0  # tolerate "75" as 75%
-        return max(0.0, min(1.0, p))
-
-    @staticmethod
-    def _agent_decision(analysis: dict) -> dict:
-        return {
-            "direction": str(analysis.get("direction", "FLAT")),
-            "probability": QuantEngine._normalize_probability(
-                analysis.get("probability", analysis.get("confidence", "Medium"))
-            ),
-            "regime": str(analysis.get("regime", analysis.get("market_state", ""))),
-            "timing": str(analysis.get("timing", "")),
-            "sizeFraction": analysis.get(
-                "sizeFraction", analysis.get("size_fraction")
-            ),
-            "latencyUs": analysis.get("latencyUs"),
-            "rationale": str(analysis.get("rationale", "")),
-        }
-
-    def _llm_instruction(self, state, bar, amt_dto=None) -> str:
-        """System instruction — the short canonical contract, matching the
-        training shape produced by scripts/dataset_render.py (``_DEFAULT_INSTRUCTION``
-        + the entry JSON schema). The AMT narrative lives in the USER message
-        (``_llm_input``), exactly as the datasets render it — previously the
-        narrative was in the system role while training put it in the user
-        role, so adapters saw a different role split at runtime than at
-        training time.
-
-        The schema allows SHORT: the engine is SHORT-capable, and a LONG/FLAT-only
-        schema made the advisory structurally unable to agree with a bearish
-        setup (IB BREAK DOWN / SELL ABSORPTION banner vs always-LONG advisory).
-        """
-        try:
-            from quant.inference.generative_ai import _DEFAULT_INSTRUCTION
-            from quant.inference.llm_contract import (
-                entry_response_schema_instruction,
-            )
-
-            return (
-                _DEFAULT_INSTRUCTION
-                + "\n"
-                + entry_response_schema_instruction(allow_short=True)
-            )
-        except Exception as exc:
-            logger.warning("prompt_builder unavailable, using inline prompt: %s", exc)
-            return (
-                "You are an orderflow analyst. Analyze the auction and return a "
-                "JSON object with keys direction (LONG, SHORT or FLAT), "
-                "confidence, rationale."
-            )
-
-    @staticmethod
-    def _entry_prompt_data(state, bar, amt_dto=None, symbol: str = "") -> dict:
-        """Build the field dict for the live AMT narrative.
-
-        Single source of truth: the AMT DTO's POC/VA/CVD are what the dashboard
-        banner shows — the model must see the same numbers the user sees, not
-        the decision-path profile (which drifts by a fraction of a point from
-        a different bucketing).
-        """
-        vp = state.volume_profile
-        vw = state.vwap
-        of = state.order_flow
-        amt = amt_dto or {}
-        absr = state.absorption
-        return {
-            "symbol": symbol,
-            "time": state.time,
-            "ltp": state.close,
-            "poc": amt.get("poc") or vp.poc,
-            "vah": amt.get("valueAreaHigh") or vp.vah,
-            "val": amt.get("valueAreaLow") or vp.val,
-            "market_state": (
-                amt.get("marketState") or state.triple_a_signal
-                or state.triple_a_phase
-            ),
-            "aggression": amt.get("aggression", 0.0),
-            "cvd": of.cvd,
-            "cvd_slope": (
-                amt.get("cvdSlope")
-                if amt.get("cvdSlope") is not None
-                else of.cvd_slope
-            ),
-            "cvd_divergence": of.cvd_divergence,
-            "delta": of.delta,
-            "vwap": vw.value,
-            "session_vwap": amt.get("sessionVwap") or vw.value,
-            "vwap_upper_2": amt.get("vwapUpper2") or vw.upper_2,
-            "vwap_lower_2": amt.get("vwapLower2") or vw.lower_2,
-            "ib_high": amt.get("ibHigh", 0.0),
-            "ib_low": amt.get("ibLow", 0.0),
-            "ib_complete": bool(amt.get("ibComplete")),
-            "break_direction": amt.get("breakDirection", ""),
-            "break_type": amt.get("breakType", ""),
-            "break_level": amt.get("breakLevel", 0.0),
-            "absorption_side": absr.side if absr is not None else None,
-            "market_structure": amt.get("marketStructure", ""),
-            "profile_shape": amt.get("profileShape", ""),
-            "acceptance_above": bool(amt.get("acceptanceAbove")),
-            "acceptance_below": bool(amt.get("acceptanceBelow")),
-            "rejection_at_high": bool(amt.get("rejectionAtHigh")),
-            "rejection_at_low": bool(amt.get("rejectionAtLow")),
-            "is_second_drive": bool(amt.get("isSecondDrive")),
-            "lvn_play": amt.get("lvnPlay"),
-            "lvns": amt.get("lvns", []),
-            "prior_poc": amt.get("priorPoc", 0.0),
-            "prior_vah": amt.get("priorVah", 0.0),
-            "prior_val": amt.get("priorVal", 0.0),
-            "gap_type": amt.get("gapType", ""),
-            "opening_bias": amt.get("openingBias", ""),
-            "option_type": AMTAnalyzer._detect_option_type(symbol),
-        }
-
-    @staticmethod
-    def _llm_input(state, bar, amt_dto=None, symbol: str = "") -> str:
-        """USER message for the LLM — the live AMT narrative, exactly the
-        training shape (scripts/dataset_render.py renders the same narrative
-        via render_entry_prompt), plus a compact bar footer with the closed
-        bar's OHLC/volume/delta.
-
-        Every numeric goes through quant.inference.formatting: prices at 2dp
-        (option tick size is 0.05), volume/delta as integers. Raw floats (e.g.
-        a weighted POC of 72.1598272138229) leak into the model output verbatim
-        and confuse the rationale — the helper also coerces NaN/None safely.
-
-        The delta is the closed bar's body-ratio delta — the SAME
-        ``estimate_tick_delta`` the REST history API serves — so the model sees
-        the number the chart shows. Dhan's WS carries no traded buy/sell split:
-        the live per-tick attribution (used by the AMT/CVD pipeline) would give
-        the model a different, noisier figure than the chart the user is
-        looking at (measured: live −17 vs the API's +68.7 on the same bar).
-        """
-        from quant.contracts.market_data_utils import estimate_tick_delta
-        from quant.inference.formatting import fmt_int, fmt_price
-        from quant.inference.prompt_builder import build_entry_prompt
-
-        data = QuantEngine._entry_prompt_data(state, bar, amt_dto, symbol)
-        delta = estimate_tick_delta(
-            bar.open, bar.high, bar.low, bar.close, bar.volume
-        )
-        narrative = build_entry_prompt(
-            data, allow_short=True, include_schema=False
-        )
-        footer = (
-            f"\nBar {bar.time}: O={fmt_price(bar.open)} H={fmt_price(bar.high)} "
-            f"L={fmt_price(bar.low)} C={fmt_price(bar.close)} V={fmt_int(bar.volume)} "
-            f"delta={fmt_int(delta)}. "
-            f"Auction: POC={fmt_price(data['poc'])} VAH={fmt_price(data['vah'])} "
-            f"VAL={fmt_price(data['val'])}."
-        )
-        return narrative + footer

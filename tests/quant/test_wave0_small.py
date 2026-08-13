@@ -36,14 +36,14 @@ def test_llm_temperature_default_unchanged(monkeypatch):
     assert engine._llm_entry_temperature == 0.3
 
 
-def test_coordinator_stop_shuts_down_engine_executors():
-    """After coordinator.stop(), each engine's _llm_executor must not accept
-    new submissions."""
+def test_coordinator_stop_shuts_down_engines_and_feed():
+    """After coordinator.stop(), engines are stopped and the feed is closed.
+    The LLM executor no longer exists on engines — the LLM layer was removed."""
     from quant.coordinator import QuantCoordinator
 
-    engines = [MagicMock(), MagicMock()]
+    engines = [MagicMock(spec=[]), MagicMock(spec=[])]
     for eng in engines:
-        eng._llm_executor = ThreadPoolExecutor(max_workers=1)
+        assert not hasattr(eng, "_llm_executor")
 
     coord = QuantCoordinator.__new__(QuantCoordinator)
     coord._engines = {f"s{i}": e for i, e in enumerate(engines)}
@@ -55,8 +55,6 @@ def test_coordinator_stop_shuts_down_engine_executors():
 
     coord.stop()
 
-    for eng in engines:
-        with pytest.raises(RuntimeError):
-            eng._llm_executor.submit(lambda: None)
+    coord._stop_engines.assert_called_once()
     assert coord.started is False
     coord._feed.close.assert_called_once()

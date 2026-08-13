@@ -39,15 +39,6 @@ class DecisionContext:
     prior_poc: float = 0.0                  # previous session's POC
     npoc_above: float = 0.0                 # nearest unfilled prior-session POC above
     npoc_below: float = 0.0                 # nearest unfilled prior-session POC below
-    # LLM advisory (bar-stamped by the engine) for the LLM-consensus gate:
-    # when ``llm_execution_enabled`` is True, gate 7 requires the advisory to
-    # agree with the deterministic direction at High confidence, fresh within
-    # one bar. Disabled by default — the LLM stays advisory-only until the
-    # model is validated (paper-first rollout).
-    llm_direction: Optional[str] = None     # "LONG" | "SHORT" | "FLAT" | None
-    llm_confidence: Optional[str] = None    # "High" | "Medium" | "Low" | None
-    llm_fresh: bool = False                 # advisory is for current/prev bar
-    llm_execution_enabled: bool = False
     # capital for sizing
     equity: float = 1_000_000.0
     risk_per_trade_pct: float = 0.01
