@@ -111,3 +111,8 @@ skills-lock.json
 # Agent/test caches (not project code)
 .hypothesis/
 .superpowers/
+
+# Stale tooling caches and runtime spool artifacts
+graphify-out/
+MagicMock/
+*.fallback.jsonl.lock
