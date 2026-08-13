@@ -11,7 +11,7 @@ describe('AMTAnalysis type pruning', () => {
     'direction', 'pLong', 'pShort', 'agentRegime', 'agentTiming',
     'agentKelly', 'agentRationale', 'tickSize', 'sessionId', 'computedAt',
     'amtTimeWindow', 'amtStructureLabel', 'kellyBreakdown', 'cvdDivPlaybook',
-    'optionType', 'underlyingPrice',
+    'optionType', 'underlyingPrice', 'llmThinking',
   ];
 
   it('does not declare backend-never-sent members', () => {
@@ -19,9 +19,5 @@ describe('AMTAnalysis type pruning', () => {
       const re = new RegExp(`^  ${k}\\??:`, 'm');
       expect(re.test(amtBlock)).toBe(false);
     }
-  });
-
-  it('keeps llmThinking which the backend sends', () => {
-    expect(/llmThinking\??:/.test(amtBlock)).toBe(true);
   });
 });

@@ -4,8 +4,40 @@ import {
     InstrumentState,
     ChartConfig,
     OHLCData,
-    LLMHistoryEntry,
+    DecisionHistoryEntry,
 } from '../types';
+
+/**
+ * Append a deterministic quantDecision to the per-symbol decision history.
+ * Dedupes consecutive identical decisions (same rationale+phase within 10s)
+ * so the 0.5s delta stream doesn't spam the panel.
+ */
+const mergeDecisionHistory = (
+    existing: DecisionHistoryEntry[],
+    qd: any,
+): DecisionHistoryEntry[] => {
+    if (!qd) return existing;
+    const signal = qd.signal || {};
+    const entry: DecisionHistoryEntry = {
+        timestamp: Date.now(),
+        direction: String(signal.type || 'FLAT').toUpperCase() as DecisionHistoryEntry['direction'],
+        confidence: Number(signal.confidence ?? 0),
+        rationale: qd.reason || '',
+        phase: qd.phase || '',
+        approved: !!qd.approved,
+        blockReasons: Array.isArray(qd.blockReasons) ? qd.blockReasons : undefined,
+    };
+    const last = existing[existing.length - 1];
+    if (
+        last &&
+        last.rationale === entry.rationale &&
+        last.phase === entry.phase &&
+        Date.now() - last.timestamp < 10_000
+    ) {
+        return existing;
+    }
+    return [...existing, entry].slice(-20);
+};
 
 /**
  * Creates a fresh instrument state.
@@ -26,15 +58,12 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
         positions: [],
         closedTrades: [],
     },
-    genAIAnalysis: null,
     amtAnalysis: null,
     auctionAnalysis: null,
     quantDecisionAnalysis: null,
     riskState: null,
     agentDecision: null,
-    llmHistory: [],
-    overseerAction: '',
-    overseerReason: '',
+    decisionHistory: [],
     lastUpdate: Date.now(),
 });
 
@@ -233,53 +262,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     }, []);
 
     // ----------------------------------------------------------------
-    // 1.  Load persisted LLM decision history on mount
-    // ----------------------------------------------------------------
-    useEffect(() => {
-        fetch(backendUrl('/api/ai/history'))
-            .then(res => res.json())
-            .then(data => {
-                if (!data.decisions || data.decisions.length === 0) return;
-
-                // Group entries by symbol
-                const entriesBySymbol: Record<string, LLMHistoryEntry[]> = {};
-                for (const d of data.decisions) {
-                    const sym = d.symbol || 'UNKNOWN';
-                    if (!entriesBySymbol[sym]) entriesBySymbol[sym] = [];
-
-                    entriesBySymbol[sym].push({
-                        timestamp: (() => {
-                            // Try parsing as-is first; only append 'Z' if it yields
-                            // NaN (handles strings that already contain timezone info).
-                            let ts = new Date(d.created_at).getTime();
-                            if (isNaN(ts)) {
-                                ts = new Date(d.created_at + 'Z').getTime();
-                            }
-                            return ts;
-                        })(),
-                        direction: d.direction || 'FLAT',
-                        confidence: d.confidence || 'Medium',
-                        rationale: d.rationale || '',
-                        inputPrompt: d.input_prompt || '',
-                        rawOutput: d.raw_output || '',
-                    });
-                }
-
-                setInstruments(prev => {
-                    const next = { ...prev };
-                    for (const sym of Object.keys(entriesBySymbol)) {
-                        if (!next[sym]) next[sym] = createInstrumentState(sym);
-                        // Sort by timestamp and keep last 20
-                        const sorted = entriesBySymbol[sym].sort((a, b) => a.timestamp - b.timestamp);
-                        next[sym] = { ...next[sym], llmHistory: sorted.slice(-20) };
-                    }
-                    return next;
-                });
-            })
-            .catch(() => { }); // Silently fail if backend not ready
-    }, []);
-
-    // ----------------------------------------------------------------
     // 2a. Warm chart history from REST /api/market/history/{symbol}
     // ----------------------------------------------------------------
     // The greenfield backend streams live bars over the WS but keeps no OHLC
@@ -410,49 +392,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 return;
             }
 
-            // LLM decision history (backend sends raw analysis JSON under this
-            // dedicated status — it is NOT candle data and must never reach the
-            // chart. The DecisionHistoryPanel reads it from llmHistory.)
-            if (state.status === 'llm_history_loaded') {
-                if (state.history && state.symbol) {
-                    const sym = state.symbol;
-                    // Guard against non-object entries: a throw inside this
-                    // try/catch increments parseErrorCount and force-reconnects.
-                    const entries: LLMHistoryEntry[] = state.history
-                        .filter((d: any) => !!d && typeof d === 'object')
-                        .map((d: any) => ({
-                            timestamp: typeof d.timestamp === 'number' && d.timestamp > 0
-                                ? d.timestamp
-                                : new Date(d.created_at || d.time || Date.now()).getTime() || Date.now(),
-                            direction: d.direction || 'FLAT',
-                            confidence: d.confidence || 'Medium',
-                            rationale: d.rationale || '',
-                            inputPrompt: d.input_prompt || d.inputPrompt || '',
-                            rawOutput: d.raw_output || d.rawOutput || '',
-                        }))
-                        .sort((a: LLMHistoryEntry, b: LLMHistoryEntry) => a.timestamp - b.timestamp);
-                    if (entries.length > 0) {
-                        setInstruments(prev => {
-                            const inst = prev[sym] || createInstrumentState(sym);
-                            // Dedup: the backend re-sends its ring buffer on every
-                            // subscribe/reconnect — key on content so repeated
-                            // subscribes don't stack duplicates in the panel.
-                            const seen = new Set(inst.llmHistory.map(e =>
-                                `${e.direction}|${e.confidence}|${e.rationale}|${e.timestamp}`
-                            ));
-                            const fresh = entries.filter(e => !seen.has(
-                                `${e.direction}|${e.confidence}|${e.rationale}|${e.timestamp}`
-                            ));
-                            const merged = [...inst.llmHistory, ...fresh]
-                                .sort((a, b) => a.timestamp - b.timestamp)
-                                .slice(-20);
-                            return { ...prev, [sym]: { ...inst, llmHistory: merged } };
-                        });
-                    }
-                }
-                return;
-            }
-
             // Handle pong (heartbeat response)
             if (state.pong) {
                 lastPongRef.current = Date.now();
@@ -478,11 +417,8 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     state.amt !== undefined ||
                     state.auction !== undefined ||
                     state.quantDecision !== undefined ||
-                    state.genAIAnalysis !== undefined ||
                     state.riskState !== undefined ||
                     state.agentDecision !== undefined ||
-                    state.overseerAction !== undefined ||
-                    state.overseerReason !== undefined ||
                     state.depth !== undefined ||
                     state.ltp !== undefined ||
                     state.oi !== undefined;
@@ -516,42 +452,15 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         merged.amtAnalysis = state.amt === null ? null : { ...existing.amtAnalysis, ...state.amt };
                     }
                     if (state.auction !== undefined) merged.auctionAnalysis = { ...existing.auctionAnalysis, ...state.auction };
-                    if (state.quantDecision !== undefined) merged.quantDecisionAnalysis = { ...existing.quantDecisionAnalysis, ...state.quantDecision };
-                    if (state.genAIAnalysis !== undefined) merged.genAIAnalysis = { ...existing.genAIAnalysis, ...state.genAIAnalysis };
+                    if (state.quantDecision !== undefined) {
+                        merged.quantDecisionAnalysis = { ...existing.quantDecisionAnalysis, ...state.quantDecision };
+                        merged.decisionHistory = mergeDecisionHistory(existing.decisionHistory, state.quantDecision);
+                    }
                     if (state.riskState !== undefined) merged.riskState = { ...existing.riskState, ...state.riskState };
                     if (state.agentDecision !== undefined) merged.agentDecision = state.agentDecision;
-                    if (state.overseerAction !== undefined) merged.overseerAction = state.overseerAction;
-                    if (state.overseerReason !== undefined) merged.overseerReason = state.overseerReason;
                     if (state.depth !== undefined) merged.orderBook = state.depth;
                     if (state.ltp !== undefined) merged.ltp = state.ltp;
                     if (state.oi !== undefined) merged.oi = state.oi;
-
-                    // History tracking: Listen for generative AI analysis
-                    const newAi = state.genAIAnalysis;
-
-                    if (newAi?.inputPrompt) {
-                        const lastEntry = existing.llmHistory[existing.llmHistory.length - 1];
-                        const newPrompt = newAi.inputPrompt;
-                        const newDirection = newAi.direction;
-                        const newRationale = newAi.rationale;
-
-                        // FIX P1-B: Enhanced deduplication - check direction + rationale, not just prompt
-                        const isDuplicate = lastEntry &&
-                            lastEntry.direction === newDirection &&
-                            lastEntry.rationale === newRationale &&
-                            (Date.now() - lastEntry.timestamp) < 10000; // within 10 seconds
-
-                        if (!isDuplicate) {
-                            merged.llmHistory = [...existing.llmHistory, {
-                                timestamp: Date.now(), // FIX P1-A: Captured at creation time, not render
-                                direction: newDirection,
-                                confidence: newAi.confidence,
-                                rationale: newRationale,
-                                inputPrompt: newPrompt,
-                                rawOutput: newAi.rawOutput,
-                            }].slice(-20);
-                        }
-                    }
 
                     return { ...prev, [symbol]: merged };
                 });
@@ -594,11 +503,8 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 const newQuantDecisionAnalysis = 'quantDecision' in state
                     ? (state.quantDecision ?? null)
                     : inst.quantDecisionAnalysis;
-                const newGenAIAnalysis = state.genAIAnalysis ?? inst.genAIAnalysis;
                 const newRiskState = state.riskState ?? inst.riskState;
                 const newAgentDecision = state.agentDecision ?? inst.agentDecision;
-                const newOverseerAction = state.overseerAction ?? inst.overseerAction;
-                const newOverseerReason = state.overseerReason ?? inst.overseerReason;
 
                 return {
                     ...prev,
@@ -609,26 +515,9 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         amtAnalysis: newAmtAnalysis,
                         auctionAnalysis: newAuctionAnalysis,
                         quantDecisionAnalysis: newQuantDecisionAnalysis,
-                        genAIAnalysis: newGenAIAnalysis,
-                        llmHistory: (() => {
-                            const newAi = state.genAIAnalysis;
-                            if (!newAi || !newAi.inputPrompt) return inst.llmHistory;
-                            const lastEntry = inst.llmHistory[inst.llmHistory.length - 1];
-                            if (lastEntry && lastEntry.inputPrompt === newAi.inputPrompt) return inst.llmHistory;
-                            const entry: LLMHistoryEntry = {
-                                timestamp: newAi.timestamp || Date.now(),
-                                direction: newAi.direction,
-                                confidence: newAi.confidence,
-                                rationale: newAi.rationale,
-                                inputPrompt: newAi.inputPrompt,
-                                rawOutput: newAi.rawOutput,
-                            };
-                            return [...inst.llmHistory, entry].slice(-20);
-                        })(),
+                        decisionHistory: mergeDecisionHistory(inst.decisionHistory, state.quantDecision),
                         riskState: newRiskState,
                         agentDecision: newAgentDecision,
-                        overseerAction: newOverseerAction,
-                        overseerReason: newOverseerReason,
                         orderBook: state.depth ?? inst.orderBook,
                         lastUpdate: Date.now(),
                     },

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook, QuantDecisionAnalysis } from '../types';
+import { AMTAnalysis, Portfolio, RiskState, DecisionHistoryEntry, AgentDecision, OrderBook, QuantDecisionAnalysis } from '../types';
 import { Zap, Clock } from 'lucide-react';
 import {
     EquityPanel,
@@ -15,23 +15,18 @@ import {
     AbsorptionCard,
     VwapContextCard,
     AgentProbabilityCard,
-    OverseerCard,
     TradePlanCard,
     RecentExitsCard,
     DiagnosticsPanel,
-    ModelIoFooter,
 } from './ai';
 
 interface AIAnalysisPanelProps {
-    analysis: GenAIAnalysis | null;
     amtResult: AMTAnalysis | null;
     portfolio: Portfolio;
     riskState?: RiskState | null;
     agentDecision?: AgentDecision | null;
-    llmHistory?: LLMHistoryEntry[];
+    decisionHistory?: DecisionHistoryEntry[];
     orderBook?: OrderBook | null;
-    overseerAction?: string;
-    overseerReason?: string;
     quantDecision?: QuantDecisionAnalysis | null;
     symbol?: string;
     data?: any[];
@@ -60,7 +55,7 @@ const LegacyAmtWrapper: React.FC<{
     );
 };
 
-const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtResult, portfolio, riskState, agentDecision, llmHistory = [], orderBook, overseerAction, overseerReason, quantDecision, symbol, data = [] }) => {
+const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ amtResult, portfolio, riskState, agentDecision, decisionHistory = [], orderBook, quantDecision, symbol, data = [] }) => {
     // Determine current best price proxy (LTP) with 3-tier fallback chain.
     // Tier 1: Order book mid-price (most accurate, requires depth data)
     // Tier 2: Last close price from history
@@ -79,52 +74,23 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
         return 0;
     }, [orderBook, amtResult?.sessionVwap, data]);
 
-    // 2. Monitoring Mode: AMT ready, but no GenAI signal yet
-    // We construct a "dummy" analysis object from AMT data to render the panel in "Monitoring" mode
-    // MODIFIED: Use new reasoning model data if available!
-    const effectiveAnalysis = useMemo<GenAIAnalysis>(() => {
-        if (analysis) return analysis;
-
-        return {
-            direction: 'FLAT',
-            rationale: amtResult?.llmThinking || "Monitoring market state and order flow. Waiting for Fabio Playbook setup.",
-            confidence: 'Low',
-            marketState: amtResult?.marketState || 'BALANCED',
-            aggression: `Score:${amtResult?.aggression?.toFixed(2) || "0.00"}`,
-            rawOutput: amtResult?.llmThinking || "",
-            inputPrompt: "Reasoning Model Analysis" // Placeholder for now
-        };
-    }, [analysis, amtResult?.marketState, amtResult?.aggression, amtResult?.llmThinking]);
-
-    // Always prefer AMT data for market state and aggression (real market data > LLM defaults)
-    const displayAnalysis = useMemo(() => ({
-        ...effectiveAnalysis,
-        marketState: amtResult?.marketState || effectiveAnalysis.marketState || 'BALANCED',
-        aggression: effectiveAnalysis.aggression && effectiveAnalysis.aggression !== ''
-            ? effectiveAnalysis.aggression
-            : `Score:${amtResult?.aggression?.toFixed(2) || "0.00"}`,
-    }), [effectiveAnalysis, amtResult?.marketState, amtResult?.aggression]);
-
     // Memoize open PnL calculation (used 3 times in render)
     const openPnl = useMemo(() =>
         portfolio.positions.reduce((acc, p) => acc + p.pnl, 0),
         [portfolio.positions]
     );
 
-    // Parse aggression — prefer live AMT aggression over LLM's stale value
-    const aggScore = useMemo(() => {
-        const liveAggression = amtResult?.aggression ?? 0;
-        return typeof liveAggression === 'number' ? liveAggression : parseFloat(displayAnalysis.aggression?.split(':')[1] || "0.00");
-    }, [amtResult?.aggression, displayAnalysis.aggression]);
+    // Aggression from live AMT data (deterministic)
+    const aggScore = amtResult?.aggression ?? 0;
 
     // Per-symbol delta score from backend
     const deltaScore = amtResult?.deltaNormalizedOption ?? 0;
 
-    // Market state from AMT (real-time) not LLM (stale)
-    const liveMarketState = amtResult?.marketState || displayAnalysis.marketState || 'BALANCED';
+    // Market state from AMT (real-time)
+    const liveMarketState = amtResult?.marketState || 'BALANCED';
     const isImbalanced = liveMarketState === 'IMBALANCED';
 
-    // Determine Status Color based on market state (not LLM direction)
+    // Determine Status Color based on market state
     const statusColor = isImbalanced ? "text-orange-400" : "text-blue-300";
     const statusBg = isImbalanced ? "bg-orange-500/20" : "bg-blue-500/20";
 
@@ -132,7 +98,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
     const poc = useMemo(() => amtResult?.poc?.toFixed(2) || "---", [amtResult?.poc]);
 
     // 1. Fallback: If both are missing -> Initializing
-    if (!analysis && !amtResult) {
+    if (!amtResult && !quantDecision) {
         return (
             <div className="bg-glassy-bg-tertiary border border-glassy-border-default rounded-md p-4 flex flex-col gap-4 font-sans text-glassy-text-secondary shadow-xl opacity-70">
                 <div className="flex justify-between items-start">
@@ -176,16 +142,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
 
                 {/* Risk State Warning */}
                 <RiskStateDisplay riskState={riskState} />
-
-                {/* LLM Timeout / Quant Only Banner */}
-                {!analysis && amtResult && (
-                    <div className="mt-2 px-3 py-1.5 bg-glassy-warning/10 border border-glassy-warning/20 rounded-sm flex items-center gap-2 animate-pulse">
-                        <Clock className="w-3.5 h-3.5 text-glassy-warning" />
-                        <span className="text-[9px] font-bold text-glassy-warning uppercase tracking-wider">
-                            LLM Timeout — Running on Quant Logic Only
-                        </span>
-                    </div>
-                )}
             </div>
 
             {/* 00. QUANT DECISION — PRIMARY */}
@@ -229,9 +185,6 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
             {/* 04. PROBABILITY ENGINE */}
             <AgentProbabilityCard agentDecision={agentDecision} isSecondDrive={amtResult?.isSecondDrive} />
 
-            {/* 04b. OVERSEER */}
-            <OverseerCard overseerAction={overseerAction} overseerReason={overseerReason} hasPositions={portfolio.positions.length > 0} />
-
             {/* 04c. TRADE PLAN — Open Positions with SL/TP/Trail */}
             <TradePlanCard positions={portfolio.positions} />
 
@@ -243,11 +196,8 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ analysis, amtRes
 
             </LegacyAmtWrapper>
 
-            {/* MODEL I/O Footer */}
-            <ModelIoFooter analysis={displayAnalysis} />
-
-            {/* 06. LLM DECISION HISTORY */}
-            <DecisionHistoryPanel llmHistory={llmHistory} />
+            {/* 06. DECISION HISTORY */}
+            <DecisionHistoryPanel decisionHistory={decisionHistory} />
 
         </div>
     );

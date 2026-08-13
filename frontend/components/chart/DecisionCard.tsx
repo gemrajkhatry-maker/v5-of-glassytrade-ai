@@ -9,11 +9,9 @@ interface DecisionCardProps {
 }
 
 /**
- * DecisionCard displays the current AI trading decision with expandable rationale.
- * Extracted from ChartScene for better maintainability.
+ * DecisionCard displays the current deterministic trading decision with
+ * expandable rationale. Extracted from ChartScene for better maintainability.
  * Props mirror the backend's real `agentDecision` contract.
- * Direction/probability/timing are canonical in the ModelStateBanner — this
- * chart overlay keeps only rationale + direction.
  */
 const DecisionCard: React.FC<DecisionCardProps> = ({ 
   direction, 

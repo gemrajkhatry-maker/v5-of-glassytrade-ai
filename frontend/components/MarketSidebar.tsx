@@ -44,7 +44,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const totalPnl = openPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
     const totalSize = openPositions.reduce((sum, p) => sum + (p.size || 0), 0);
 
-    const isDead = inst.genAIAnalysis?.rationale?.includes('DEAD') || inst.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
+    const isDead = inst.amtAnalysis?.marketState === 'DEAD';
     const mode = inst.amtAnalysis?.marketState || 'BALANCED';
     const modeAbbr = (mode || 'BAL').substring(0, 3).toUpperCase();
 
@@ -138,7 +138,7 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
         if (filter) f = f.filter(s => s.toLowerCase().includes(filter.toLowerCase()));
         
         // Apply Mode filter
-        if (modeFilter !== 'ALL') f = f.filter(s => instruments[s].amtAnalysis?.marketState?.includes(modeFilter) || (modeFilter === 'DEAD' && instruments[s].genAIAnalysis?.rationale?.includes('DEAD')));
+        if (modeFilter !== 'ALL') f = f.filter(s => instruments[s].amtAnalysis?.marketState?.includes(modeFilter));
         
         // Apply Action filter
         if (actionFilter !== 'ALL') f = f.filter(s => instruments[s].agentDecision?.timing === actionFilter);
@@ -148,8 +148,8 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
             const instA = instruments[a];
             const instB = instruments[b];
             
-            const isDeadA = instA.genAIAnalysis?.rationale?.includes('DEAD') || instA.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
-            const isDeadB = instB.genAIAnalysis?.rationale?.includes('DEAD') || instB.genAIAnalysis?.rawOutput?.includes('QUANT_DEAD_MARKET');
+            const isDeadA = instA.amtAnalysis?.marketState === 'DEAD';
+            const isDeadB = instB.amtAnalysis?.marketState === 'DEAD';
 
             // 0. Dead markets always at the bottom
             if (isDeadA !== isDeadB) return isDeadA ? 1 : -1;

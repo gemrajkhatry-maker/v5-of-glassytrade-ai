@@ -34,7 +34,7 @@ const portfolio: Portfolio = {
 describe('AIAnalysisPanel', () => {
   it('does not render a simulated CVD sparkline', () => {
     const { container } = render(
-      <AIAnalysisPanel analysis={null} amtResult={amtResult} portfolio={portfolio} />
+      <AIAnalysisPanel amtResult={amtResult} portfolio={portfolio} />
     );
     expect(screen.queryByText('CVD Trend')).toBeNull();
     const sparkline = container.querySelector('svg[class="flex-shrink-0"]');
@@ -43,14 +43,14 @@ describe('AIAnalysisPanel', () => {
 
   it('does not render the fabricated ENGINE ARMED badge', () => {
     const { container } = render(
-      <AIAnalysisPanel analysis={null} amtResult={amtResult} portfolio={portfolio} />
+      <AIAnalysisPanel amtResult={amtResult} portfolio={portfolio} />
     );
     expect(container.textContent).not.toContain('[ENGINE ARMED]');
   });
 
   it('wraps diagnostic tiers in a collapsed details element', () => {
     const { container } = render(
-      <AIAnalysisPanel analysis={null} amtResult={amtResult} portfolio={portfolio} />
+      <AIAnalysisPanel amtResult={amtResult} portfolio={portfolio} />
     );
     const details = [...container.querySelectorAll('details')].find(
       (el) => el.textContent?.includes('Diagnostics')
@@ -61,7 +61,7 @@ describe('AIAnalysisPanel', () => {
 
   it('renders market structure only inside the Diagnostics tier', () => {
     const { container } = render(
-      <AIAnalysisPanel analysis={null} amtResult={amtResult} portfolio={portfolio} />
+      <AIAnalysisPanel amtResult={amtResult} portfolio={portfolio} />
     );
     const diagnostics = [...container.querySelectorAll('details')].find(
       (el) => el.textContent?.includes('Diagnostics')
@@ -97,7 +97,6 @@ describe('AIAnalysisPanel quant decision precedence (F-07)', () => {
   it('renders the quant decision as the primary card when present', () => {
     render(
       <AIAnalysisPanel
-        analysis={null}
         amtResult={amtResult}
         portfolio={portfolio}
         quantDecision={quantApproved}
@@ -112,7 +111,6 @@ describe('AIAnalysisPanel quant decision precedence (F-07)', () => {
   it('does not fabricate a signal when quantDecision has none', () => {
     render(
       <AIAnalysisPanel
-        analysis={null}
         amtResult={amtResult}
         portfolio={portfolio}
         quantDecision={quantRejected}
@@ -129,7 +127,6 @@ describe('AIAnalysisPanel quant decision precedence (F-07)', () => {
   it('collapses the legacy AMT body behind a grayed details when a quant decision exists', () => {
     const { container } = render(
       <AIAnalysisPanel
-        analysis={null}
         amtResult={amtResult}
         portfolio={portfolio}
         quantDecision={quantApproved}
@@ -148,7 +145,7 @@ describe('AIAnalysisPanel quant decision precedence (F-07)', () => {
 
   it('renders the AMT body unwrapped when no quant decision exists', () => {
     const { container } = render(
-      <AIAnalysisPanel analysis={null} amtResult={amtResult} portfolio={portfolio} />
+      <AIAnalysisPanel amtResult={amtResult} portfolio={portfolio} />
     );
     expect(
       [...container.querySelectorAll('details')].some(

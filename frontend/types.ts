@@ -16,18 +16,6 @@ export interface OrderBook {
   asks: { price: number; quantity: number }[];
 }
 
-export interface GenAIAnalysis {
-  direction: 'LONG' | 'SHORT' | 'FLAT';
-  rationale: string;
-  confidence: 'High' | 'Medium' | 'Low';
-  inputPrompt?: string;
-  rawOutput?: string;
-  marketState?: string;
-  aggression?: string;
-  timestamp?: number;
-  createdAt?: string;
-}
-
 export interface AgentDecision {
   direction: 'LONG' | 'SHORT' | 'FLAT';
   probability: number;
@@ -47,13 +35,14 @@ export interface RiskState {
   driftMessage?: string;
 }
 
-export interface LLMHistoryEntry {
+export interface DecisionHistoryEntry {
   timestamp: number;
   direction: 'LONG' | 'SHORT' | 'FLAT';
-  confidence: string;
+  confidence: number;
   rationale: string;
-  inputPrompt?: string;
-  rawOutput?: string;
+  phase: string;
+  approved: boolean;
+  blockReasons?: string[];
 }
 
 export interface TradePosition {
@@ -91,15 +80,12 @@ export interface InstrumentState {
   data: OHLCData[];
   orderBook: OrderBook | null;
   portfolio: Portfolio;
-  genAIAnalysis: GenAIAnalysis | null;
   amtAnalysis: AMTAnalysis | null;
   auctionAnalysis: AuctionAnalysis | null;
   quantDecisionAnalysis: QuantDecisionAnalysis | null;
   riskState: RiskState | null;
   agentDecision: AgentDecision | null;
-  llmHistory: LLMHistoryEntry[];
-  overseerAction: string;
-  overseerReason: string;
+  decisionHistory: DecisionHistoryEntry[];
   ltp?: number;
   oi?: number;
   lastUpdate: number;
@@ -255,7 +241,6 @@ export interface AMTAnalysis {
     has_rejection: boolean;
     has_delta_flip: boolean;
   } | null;
-  llmThinking?: string;
   // Fabio playbook: Second drive detection (reclaim leg confirmation)
   isSecondDrive?: boolean;
   // Multi-timeframe levels (used by location bar)

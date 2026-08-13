@@ -14,7 +14,7 @@ is safe.
 from __future__ import annotations
 
 
-def amt_result_to_dto(r, *, llm_thinking: str = "") -> dict:
+def amt_result_to_dto(r) -> dict:
     """Convert a domain AMTResult to the camelCase WS DTO dict."""
     return {
         "marketState": r.market_state,
@@ -101,8 +101,6 @@ def amt_result_to_dto(r, *, llm_thinking: str = "") -> dict:
         "pocVsPrice": r.poc_vs_price,
         "lvnPlay": r.lvn_play,
         "isSecondDrive": r.drive_entry_valid,
-        # Reasoning model output (folded in from the LLM hook)
-        "llmThinking": llm_thinking,
         # Higher Timeframe Levels
         "dailyVah": r.daily_vah,
         "dailyVal": r.daily_val,
@@ -119,7 +117,7 @@ def amt_result_to_dto(r, *, llm_thinking: str = "") -> dict:
     }
 
 
-def empty_amt_dto(llm_thinking: str = "") -> dict:
+def empty_amt_dto() -> dict:
     """Full-shape DTO for an empty analysis (insufficient candles / error).
 
     Keeps every key present so the frontend renders the contract instead of
@@ -129,6 +127,5 @@ def empty_amt_dto(llm_thinking: str = "") -> dict:
 
     return amt_result_to_dto(
         AMTResult(market_state="BALANCED", poc=0.0, value_area_high=0.0,
-                  value_area_low=0.0),
-        llm_thinking=llm_thinking,
+                  value_area_low=0.0)
     )

@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
 import React from 'react';
 import { useServerTradingSystem } from '../../hooks/useServerTradingSystem';
-import ModelStateBanner from '../../components/ModelStateBanner';
+import { AIAnalysisPanel } from '../../components/AIAnalysisPanel';
 import type { AuctionAnalysis, ChartConfig } from '../../types';
 
 // Mock WebSocket class (reused from tests/hooks/useServerTradingSystem.test.tsx)
@@ -67,23 +67,31 @@ const auctionFixture = (overrides: Partial<AuctionAnalysis> = {}): AuctionAnalys
     ...overrides,
 });
 
-// Mirrors App.tsx:213 wiring: hook → ModelStateBanner.
+// Mirrors App.tsx wiring: hook → AIAnalysisPanel + a probe exposing the
+// auction triple-A state (the ModelStateBanner that rendered it was removed
+// with the LLM layer; the auction data itself still flows through the hook).
 const Harness = () => {
     const { activeInstrument } = useServerTradingSystem(CONFIG);
     if (!activeInstrument) return <div>connecting…</div>;
     return (
-        <ModelStateBanner
-            genAI={activeInstrument.genAIAnalysis}
-            amtResult={activeInstrument.amtAnalysis}
-            agentDecision={activeInstrument.agentDecision}
-            auction={activeInstrument.auctionAnalysis}
-            quantDecision={activeInstrument.quantDecisionAnalysis}
-            symbol={activeInstrument.symbol}
-        />
+        <div>
+            <AIAnalysisPanel
+                amtResult={activeInstrument.amtAnalysis}
+                portfolio={activeInstrument.portfolio}
+                riskState={activeInstrument.riskState}
+                agentDecision={activeInstrument.agentDecision}
+                orderBook={activeInstrument.orderBook}
+                quantDecision={activeInstrument.quantDecisionAnalysis}
+                symbol={activeInstrument.symbol}
+                data={activeInstrument.data}
+            />
+            <span data-testid="tripleA-phase">{activeInstrument.auctionAnalysis?.tripleAPhase || ''}</span>
+            <span data-testid="tripleA-signal">{activeInstrument.auctionAnalysis?.tripleASignal || ''}</span>
+        </div>
     );
 };
 
-describe('auction WS → Triple-A render', () => {
+describe('auction WS → analysis pipeline', () => {
     const connect = async () => {
         const instances: MockWebSocket[] = [];
         class TrackingWS extends MockWebSocket {
@@ -120,7 +128,7 @@ describe('auction WS → Triple-A render', () => {
         });
     };
 
-    it('renders 3A phase, model type, and balance chips even without a signal', async () => {
+    it('merges the auction through a full message and renders market state', async () => {
         const { ws } = await connect();
         expect(ws).toBeDefined();
 
@@ -151,12 +159,14 @@ describe('auction WS → Triple-A render', () => {
             },
         });
 
-        expect(screen.getByText(/3A ABSORBING/i)).toBeInTheDocument();
-        expect(screen.getByText(/MODEL MEAN-REV/i)).toBeInTheDocument();
-        expect(screen.getByText(/IMBALANCED/i)).toBeInTheDocument();
+        // Auction data flows through the hook.
+        expect(screen.getByTestId('tripleA-phase').textContent).toBe('ABSORBING');
+        // Market state renders through AIAnalysisPanel's MarketStateCard (may
+        // appear in more than one card, e.g. the order-flow summary too).
+        expect(screen.getAllByText(/IMBALANCED/i).length).toBeGreaterThan(0);
     });
 
-    it('renders the TRIPLE-A LONG decision from a full WS message carrying auction', async () => {
+    it('keeps the TRIPLE-A LONG signal from a full WS message carrying auction', async () => {
         const { ws } = await connect();
         expect(ws).toBeDefined();
 
@@ -166,11 +176,10 @@ describe('auction WS → Triple-A render', () => {
             auction: auctionFixture(),
         });
 
-        expect(screen.getByText(/3A LONG · AGGRESSION/i)).toBeInTheDocument();
-        expect(screen.getByText(/BUY ABSORPTION/i)).toBeInTheDocument();
+        expect(screen.getByTestId('tripleA-signal').textContent).toBe('LONG');
     });
 
-    it('merges auction through the delta path and updates the badge', async () => {
+    it('merges auction through the delta path and updates the signal', async () => {
         const { ws } = await connect();
         expect(ws).toBeDefined();
 
@@ -179,7 +188,7 @@ describe('auction WS → Triple-A render', () => {
             _symbol: 'SYM',
             auction: auctionFixture(),
         });
-        expect(screen.getByText(/3A LONG · AGGRESSION/i)).toBeInTheDocument();
+        expect(screen.getByTestId('tripleA-signal').textContent).toBe('LONG');
 
         // Delta: only auction changed → auctionAnalysis merged (LONG→SHORT, absorption cleared).
         await pushMessage(ws, {
@@ -192,9 +201,8 @@ describe('auction WS → Triple-A render', () => {
             }),
         });
 
-        expect(screen.getByText(/3A SHORT · ACCUMULATING/i)).toBeInTheDocument();
-        expect(screen.queryByText(/3A LONG/i)).not.toBeInTheDocument();
-        expect(screen.queryByText(/BUY ABSORPTION/i)).not.toBeInTheDocument();
+        expect(screen.getByTestId('tripleA-signal').textContent).toBe('SHORT');
+        expect(screen.getByTestId('tripleA-phase').textContent).toBe('ACCUMULATING');
     });
 
     it('renders an approved quant decision from a full WS message carrying quantDecision', async () => {
@@ -213,10 +221,11 @@ describe('auction WS → Triple-A render', () => {
             },
         });
 
-        expect(screen.getByText(/DECISION LONG @104\.00 \(RR 2\.0\)/i)).toBeInTheDocument();
+        expect(screen.getByText(/LONG @ 104\.00/i)).toBeInTheDocument();
+        expect(screen.getByText(/RR 2\.0/i)).toBeInTheDocument();
     });
 
-    it('clears the decision badge when quantDecision is not approved', async () => {
+    it('clears the decision card when quantDecision is not approved', async () => {
         const { ws } = await connect();
         expect(ws).toBeDefined();
 
@@ -227,13 +236,13 @@ describe('auction WS → Triple-A render', () => {
             quantDecision: { approved: true, reason: 'Triple-A', phase: 'AGGRESSION',
                 signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, confidence: 1.0 } },
         });
-        expect(screen.getByText(/DECISION LONG/i)).toBeInTheDocument();
+        expect(screen.getByText(/LONG @ 104\.00/i)).toBeInTheDocument();
 
         await pushMessage(ws, {
             _type: 'delta',
             _symbol: 'SYM',
             quantDecision: { approved: false, reason: 'NO_EDGE', phase: 'WAITING', signal: null },
         });
-        expect(screen.queryByText(/DECISION LONG/i)).not.toBeInTheDocument();
+        expect(screen.queryByText(/LONG @ 104\.00/i)).not.toBeInTheDocument();
     });
 });

@@ -26,7 +26,7 @@ def test_amt_dto_drops_dead_fields():
         value_area_low=95,
         aggression=0.6,
     )
-    dto = amt_result_to_dto(result, llm_thinking="")
+    dto = amt_result_to_dto(result)
     for dead in (
         "devPoc",
         "devVah",
@@ -65,7 +65,7 @@ def test_amt_dto_drops_telemetry_only_fields():
         value_area_low=95,
         aggression=0.6,
     )
-    dto = amt_result_to_dto(result, llm_thinking="")
+    dto = amt_result_to_dto(result)
     telemetry = (
         "dayType",
         "liquiditySweep",
@@ -105,7 +105,7 @@ def test_amt_dto_keeps_frontend_rendered_fields():
         daily_poc=100,
         hourly_poc=101,
     )
-    dto = amt_result_to_dto(result, llm_thinking="")
+    dto = amt_result_to_dto(result)
     for keep in (
         "marketState",
         "poc",
@@ -168,7 +168,6 @@ def test_amt_dto_keeps_frontend_rendered_fields():
         "signal",
     ):
         assert keep in dto
-    assert "llmThinking" in dto
 
 
 def test_position_dto_drops_lot_size():

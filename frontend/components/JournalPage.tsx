@@ -147,9 +147,9 @@ export default function JournalPage({ onBack }: { onBack: () => void }) {
     useEffect(() => {
         setLoading(true);
         Promise.all([
-            fetch(`/api/ai/journal/trades?date=${date}`).then(r => r.ok ? r.json() : { trades: [] }),
-            fetch(`/api/ai/journal?date=${date}`).then(r => r.ok ? r.json() : { entries: [] }),
-            fetch(`/api/ai/journal/summary?date=${date}`).then(r => r.ok ? r.json() : null),
+            fetch(`/api/journal/trades?date=${date}`).then(r => r.ok ? r.json() : { trades: [] }),
+            fetch(`/api/journal?date=${date}`).then(r => r.ok ? r.json() : { entries: [] }),
+            fetch(`/api/journal/summary?date=${date}`).then(r => r.ok ? r.json() : null),
         ]).then(([t, j, s]) => {
             setTrades(t.trades || []);
             setEntries(j.entries || []);

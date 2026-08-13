@@ -148,8 +148,6 @@ class AMTAnalysisDTO(BaseModel):
     poc_vs_price: str = Field(alias="pocVsPrice", default="")
     lvn_play: Optional[dict[str, Any]] = Field(alias="lvnPlay", default=None)
     is_second_drive: bool = Field(alias="isSecondDrive", default=False)  # Task 3.3: Fabio Playbook drive cycle
-    llm_thinking: str = Field(alias="llmThinking", default="")
-    llm_json: str = Field(alias="llmJson", default="{}")
     daily_vah: float = Field(alias="dailyVah", default=0.0)
     daily_val: float = Field(alias="dailyVal", default=0.0)
     daily_poc: float = Field(alias="dailyPoc", default=0.0)

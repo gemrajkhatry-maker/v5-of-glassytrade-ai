@@ -309,7 +309,7 @@ describe('no gap-filling fabrication (F-03/F-05)', () => {
   });
 });
 
-describe('llm_history_loaded routing (greenfield protocol)', () => {
+describe('deterministic decision history routing (greenfield protocol)', () => {
   const connectHook = async () => {
     const instances: MockWebSocket[] = [];
     class TrackingWS extends MockWebSocket {
@@ -344,30 +344,44 @@ describe('llm_history_loaded routing (greenfield protocol)', () => {
     });
   };
 
-  it('routes LLM decision history to llmHistory, never into chart data', async () => {
+  it('appends deterministic quant decisions to decisionHistory, never into chart data', async () => {
     const { result, ws } = await connectHook();
     expect(ws).toBeDefined();
 
-    // The greenfield backend streams coordinator.llm_history (raw analysis JSON
-    // with no OHLC `time`) under the dedicated llm_history_loaded status.
+    // The backend streams quantDecision under the snapshot/delta protocol —
+    // the deterministic engine decision. Chart data is untouched by it.
     await pushMessage(ws, {
-      status: 'llm_history_loaded',
-      symbol: 'NIFTY',
-      count: 2,
-      history: [
-        { direction: 'LONG', confidence: 'High', rationale: 'strong push', raw_output: 'a' },
-        { direction: 'FLAT', confidence: 'Low', rationale: 'range', raw_output: 'b' },
-      ],
+      _type: 'full',
+      _symbol: 'NIFTY',
+      quantDecision: {
+        approved: true,
+        reason: 'TRIPLE_A_BREAKOUT',
+        phase: 'AGGRESSION',
+        signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, confidence: 0.9 },
+      },
     });
 
     const inst = result.current.instruments['NIFTY'];
     expect(inst).toBeDefined();
-    // Chart data stays empty — LLM decisions are NOT candles.
+    // Chart data stays empty — decisions are NOT candles.
     expect(inst.data).toHaveLength(0);
-    // They land in the decision-history panel feed instead.
-    expect(inst.llmHistory.length).toBeGreaterThanOrEqual(2);
-    expect(inst.llmHistory.map(e => e.direction)).toContain('LONG');
-    expect(inst.llmHistory.map(e => e.rawOutput)).toEqual(expect.arrayContaining(['a', 'b']));
+    // They land in the deterministic decision-history feed instead.
+    expect(inst.decisionHistory.length).toBeGreaterThanOrEqual(1);
+    expect(inst.decisionHistory.map(e => e.direction)).toContain('LONG');
+    expect(inst.decisionHistory[inst.decisionHistory.length - 1].rationale).toBe('TRIPLE_A_BREAKOUT');
+
+    // A delta re-sending the same decision is deduped (same rationale within 10s).
+    await pushMessage(ws, {
+      _type: 'delta',
+      _symbol: 'NIFTY',
+      quantDecision: {
+        approved: true,
+        reason: 'TRIPLE_A_BREAKOUT',
+        phase: 'AGGRESSION',
+        signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, confidence: 0.9 },
+      },
+    });
+    expect(result.current.instruments['NIFTY'].decisionHistory.length).toBe(1);
   });
 });
 

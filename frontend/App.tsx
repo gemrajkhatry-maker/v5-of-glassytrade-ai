@@ -9,7 +9,6 @@ import { ChartConfig } from './types';
 import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, BookOpen } from 'lucide-react';
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
 import JournalPage from './components/JournalPage';
-import ModelStateBanner from './components/ModelStateBanner';
 import { useKeyboardNavigation, getDefaultTradingHotkeys } from './hooks/useKeyboardNavigation';
 import { useUIStore, selectChartMode, selectSidebarOpen, selectRightSidebarOpen } from './stores/ui';
 
@@ -171,18 +170,6 @@ function App() {
                 {/* Overlay UI Layer */}
                 <div className="absolute inset-0 z-10 flex flex-col pointer-events-none">
 
-                    {/* Primary model state — compact, fits content */}
-                    <div className="shrink-0 px-3 pt-3 pointer-events-auto">
-                        <ModelStateBanner
-                            genAI={activeInstrument.genAIAnalysis}
-                            amtResult={activeInstrument.amtAnalysis}
-                            agentDecision={activeInstrument.agentDecision}
-                            auction={activeInstrument.auctionAnalysis}
-                            quantDecision={activeInstrument.quantDecisionAnalysis}
-                            symbol={activeInstrument.symbol}
-                        />
-                    </div>
-
                     <div className="flex-1 flex flex-col justify-between p-3 pointer-events-none min-h-0">
 
                     {/* Top Bar Area */}
@@ -288,15 +275,12 @@ function App() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                     <ErrorBoundary name="Analysis">
                         <AIAnalysisPanel
-                            analysis={activeInstrument.genAIAnalysis}
                             amtResult={activeInstrument.amtAnalysis}
                             portfolio={activeInstrument.portfolio}
                             riskState={activeInstrument.riskState}
                             agentDecision={activeInstrument.agentDecision}
-                            llmHistory={activeInstrument.llmHistory}
+                            decisionHistory={activeInstrument.decisionHistory}
                             orderBook={activeInstrument.orderBook}
-                            overseerAction={activeInstrument.overseerAction}
-                            overseerReason={activeInstrument.overseerReason}
                             quantDecision={activeInstrument.quantDecisionAnalysis}
                             symbol={activeSymbol}
                             data={activeInstrument.data}
