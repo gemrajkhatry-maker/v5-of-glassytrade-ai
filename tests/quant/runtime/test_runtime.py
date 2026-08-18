@@ -424,13 +424,13 @@ def _run_with_signal(signal: Signal):
 def _thin_stop_signal() -> Signal:
     # 0.02% stop -> SessionRisk would size 500_000 units; clamp caps at 1000.
     return Signal(type="LONG", reason="test", entry=100.0, sl=99.98, tp=100.06,
-                  rr=3.0, confidence=0.7, symbol="SYM", timestamp="t")
+                  rr=3.0, model_label="Triple-A", symbol="SYM", timestamp="t")
 
 
 def _healthy_stop_signal() -> Signal:
     # 20% stop -> 1M (SessionRisk default) * 1% / 20.0 = 500 units, under the ceiling.
     return Signal(type="LONG", reason="test", entry=100.0, sl=80.0, tp=140.0,
-                  rr=2.0, confidence=0.7, symbol="SYM", timestamp="t")
+                  rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t")
 
 
 def test_runtime_clamps_thin_stop_quantity_to_max():
@@ -440,7 +440,9 @@ def test_runtime_clamps_thin_stop_quantity_to_max():
 
 def test_runtime_leaves_healthy_stop_quantity_unclamped():
     opened = _run_with_signal(_healthy_stop_signal())
-    assert opened.position.order.quantity == pytest.approx(1_000_000.0 * 0.01 / 20.0)
+    # 1M (SessionRisk default) * 0.25% (CONSERVATIVE tier) / 20.0 = 125 units, under the ceiling.
+    # Fabio cushion system starts trades in CONSERVATIVE tier at 0.25%.
+    assert opened.position.order.quantity == pytest.approx(1_000_000.0 * 0.0025 / 20.0)
 
 
 def test_engine_rolls_prior_session_levels_on_date_change():

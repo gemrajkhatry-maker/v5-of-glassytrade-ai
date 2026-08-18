@@ -1,12 +1,18 @@
 """Valentini Triple-A state machine: absorption -> accumulation -> aggression.
 
-AGGRESSION PROXY (data ceiling): Fabio's aggression trigger is real order-flow
-prints — "big orders/bubbles" at a level — which the Dhan feed cannot provide
-(no true aggressor split; see quant/absorption.py). This machine therefore
-uses the build-guide proxy: price breaking beyond VWAP ±1σ on the absorption
-side. The richer order-flow aggression score (footprint/CVD/big-trade/OFI) is
-computed by the AMT analyzer and carried in the AMT DTO for the advisory/UI,
-but is NOT a hard entry gate — it is a documented proxy, not the real feature.
+AGGRESSION TRIGGER (spec §8): A full 1-min candle CLOSES strictly beyond the
+high of the absorption cluster (LONG) or below the low of the cluster (SHORT).
+This is the canonical Fabio entry trigger — the "sniper entry" that waits for
+the market to prove it wants to go.
+
+DATA CEILING FALLBACK: When cluster_high/cluster_low are not available from
+the Absorption object (legacy path or zero values), this machine falls back to
+the VWAP ±1σ proxy used historically. The absorption.cluster_high/low fields
+are now populated by AbsorptionDetector (quant/absorption.py) so the fallback
+should only trigger in edge cases.
+
+The richer 7-factor aggression score (footprint/CVD/big-trade/OFI) computed
+by the AMT analyzer is advisory only — it feeds the UI DTO, not the gate.
 """
 
 from __future__ import annotations
@@ -24,6 +30,8 @@ class TripleAStateMachine:
         self._last_signal: str | None = None
         self._absorption_side: str | None = None
         self._absorption_price: float = 0.0
+        self._absorption_cluster_high: float = 0.0  # From Absorption.cluster_high
+        self._absorption_cluster_low: float = 0.0   # From Absorption.cluster_low
         self._absorb_bars: int = 0
 
     @property
@@ -67,25 +75,55 @@ class TripleAStateMachine:
                 return "ABSORBING"
             self._phase = "ACCUMULATING"
 
-        return self._resolve_aggression(bar, vwap)
+        return self._resolve_aggression(bar, vwap, absorption)
 
     def _rearm(self, absorption: Absorption) -> None:
         if self._phase != "WAITING" and absorption.side == self._absorption_side:
             self._absorption_price = absorption.price
+            self._absorption_cluster_high = float(absorption.cluster_high or 0.0)
+            self._absorption_cluster_low = float(absorption.cluster_low or 0.0)
             self._absorb_bars = 0
             return
         self._phase = "ABSORBING"
         self._absorption_side = absorption.side
         self._absorption_price = absorption.price
+        self._absorption_cluster_high = float(absorption.cluster_high or 0.0)
+        self._absorption_cluster_low = float(absorption.cluster_low or 0.0)
         self._absorb_bars = 0
 
-    def _resolve_aggression(self, bar: Bar, vwap: VWAPState) -> str:
+    def _resolve_aggression(self, bar: Bar, vwap: VWAPState, absorption: Absorption | None = None) -> str:
+        """Check if price breaks out beyond VWAP band AND closes beyond the absorption cluster.
+
+        Spec §8:
+          LONG:  bar.close > vwap.upper_1 AND bar.close > cluster_high
+          SHORT: bar.close < vwap.lower_1 AND bar.close < cluster_low
+
+        If accumulation exceeds 15 bars without breakout, the setup is stale
+        and resets to WAITING per Fabio anti-stale accumulation rule.
+        """
+        if absorption is not None and absorption.bar_age > 15:
+            self._phase = "WAITING"
+            self._last_signal = None
+            return "WAITING"
+
+        cluster_high = self._absorption_cluster_high
+        cluster_low = self._absorption_cluster_low
+
         if self._absorption_side == "BUY" and bar.close > vwap.upper_1:
-            self._phase = "AGGRESSION"
-            self._last_signal = "LONG"
+            if cluster_high <= 0 or bar.close > cluster_high:
+                self._phase = "AGGRESSION"
+                self._last_signal = "LONG"
+            else:
+                self._phase = "ACCUMULATING"
+
         elif self._absorption_side == "SELL" and bar.close < vwap.lower_1:
-            self._phase = "AGGRESSION"
-            self._last_signal = "SHORT"
+            if cluster_low <= 0 or bar.close < cluster_low:
+                self._phase = "AGGRESSION"
+                self._last_signal = "SHORT"
+            else:
+                self._phase = "ACCUMULATING"
+
         else:
             self._phase = "ACCUMULATING"
+
         return self._phase

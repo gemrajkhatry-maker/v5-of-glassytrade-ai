@@ -888,14 +888,18 @@ class DhanExchangeConfig:
         enough: index instruments carry lot_size=1, so an actual NFO option
         contract of the underlying must be used.
         """
-        # Normalize symbol: "NIFTY 27 FEB 25500 CALL" -> "NIFTY"
+        from brokers.broker.utils.symbol import extract_underlying
+
         clean = (
-            symbol_or_underlying.upper()
+            str(symbol_or_underlying)
+            .upper()
             .replace("NSE:", "")
+            .replace("NFO:", "")
             .replace("MCX:", "")
+            .replace("BSE:", "")
             .strip()
         )
-        underlying = clean.split("-")[0].split(" ")[0]
+        underlying = extract_underlying(clean) or clean.split("-")[0].split(" ")[0]
 
         try:
             # 1) If given a full option symbol, resolve it directly.

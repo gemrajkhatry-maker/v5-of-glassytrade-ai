@@ -40,11 +40,11 @@ def _va_fade_state():
 
 
 def _thin_va_fade_state():
-    # Same setup but step shrinks SL to 99.61 (0.01% stop, sub-0.1% -> rejected).
+    # Same setup but step shrinks SL to 99.55 (0.05% stop, sub-0.1% -> rejected).
     return AuctionState(
         time="t", close=99.6,
         volume_profile=VolumeProfile(levels=(), poc=101.0, vah=102.0, val=100.0,
-                                     step=0.39, total_volume=100),
+                                     step=0.05, total_volume=100),
         vwap=VWAPState(value=99.0, upper_1=100.0, lower_1=98.0,
                        upper_2=101.0, lower_2=97.0, std=1, deviation_sigmas=0),
         order_flow=OrderFlowState(delta=0, cvd=50.0, cvd_slope=0.0,
@@ -137,3 +137,57 @@ def test_no_state_guard():
     d = DecisionService().evaluate(DecisionContext(state=None, bar=None))
     assert not d.approved and d.signal is None and d.reason == "NO_EDGE"
     assert d.phase == "" and d.gate_results == ()
+
+
+# ── Defect regression tests ──────────────────────────────────────────────────
+
+def test_halted_emits_explicit_halted_decision():
+    """Defect 2 regression: a halted system must emit approved=False reason=HALTED,
+    never silently return without a decision. The StateProjector must not carry
+    stale ENTER state after a halt is triggered."""
+    ctx = DecisionContext(
+        state=_state(triple_a_phase="AGGRESSION", triple_a_signal="LONG"),
+        bar=None,
+        agent_direction="LONG",
+        agent_probability=0.9,
+        risk_halted=True,
+    )
+    d = DecisionService().evaluate(ctx)
+    assert not d.approved, "Halted system must not approve any signal"
+    assert d.signal is None, "Halted system must emit no signal"
+    assert d.reason == "HALTED", f"Expected reason=HALTED, got {d.reason!r}"
+    assert len(d.block_reasons) > 0, "HALTED decision must include a block_reason"
+    assert "halted" in d.block_reasons[0].lower(), f"Block reason should mention halt: {d.block_reasons[0]!r}"
+
+
+def test_approved_requires_aggression_phase():
+    """Defect 1 regression: approved=True must only occur when triple_a_phase==AGGRESSION
+    (or VA_FADE). Phases WAITING / ABSORBING / ACCUMULATING must all yield approved=False."""
+    for non_entry_phase in ("WAITING", "ABSORBING", "ACCUMULATING", ""):
+        ctx = DecisionContext(
+            state=_state(triple_a_phase=non_entry_phase, triple_a_signal=None),
+            bar=None,
+            agent_direction="LONG",
+            agent_probability=0.9,
+        )
+        d = DecisionService().evaluate(ctx)
+        assert not d.approved, (
+            f"approved=True must not fire in phase {non_entry_phase!r}, got reason={d.reason!r}"
+        )
+        assert d.signal is None, f"No signal expected in phase {non_entry_phase!r}"
+
+
+def test_approved_signal_carries_model_label():
+    """A Triple-A approved signal must carry a non-empty model_label string."""
+    ctx = DecisionContext(
+        state=_state(triple_a_phase="AGGRESSION", triple_a_signal="LONG"),
+        bar=None,
+        agent_direction="LONG",
+        agent_probability=0.9,
+        market_state="IMBALANCED",
+    )
+    d = DecisionService().evaluate(ctx)
+    assert d.approved and d.signal is not None
+    assert d.signal.model_label, "Approved signal must have a non-empty model_label"
+    assert d.model_label, "QuantDecision must carry model_label when approved"
+    assert d.signal.model_label == d.model_label, "Signal and decision model_label must match"

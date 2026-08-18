@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import DecisionCard from '../../../components/chart/DecisionCard';
 
 describe('DecisionCard', () => {
@@ -35,16 +35,16 @@ describe('DecisionCard', () => {
     expect(screen.getByText(/Reversion/)).toBeInTheDocument();
   });
 
-  it('renders rationale when expanded', async () => {
+  it('renders rationale when expanded', () => {
     const { container } = render(<DecisionCard {...defaultProps} />);
     
-    // Find and click the expand button
     const expandButton = container.querySelector('button');
     if (expandButton) {
-      expandButton.click();
+      act(() => {
+        expandButton.click();
+      });
     }
     
-    // Rationale should be visible after expansion
     expect(screen.getByText(/Strong bullish momentum/)).toBeInTheDocument();
   });
 

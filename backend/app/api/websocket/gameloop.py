@@ -161,17 +161,38 @@ async def _coordinator_listener(ws: WebSocket, commands: asyncio.Queue) -> None:
 def _resolve_symbol(requested: str, available: list[str]) -> str | None:
     """Map a client-requested symbol to a live coordinator contract.
 
-    Exact match wins; otherwise a base underlying (e.g. ``NIFTY``) resolves to
-    the first scanned contract for that underlying (e.g. ``NIFTY 11 AUG 24550
-    CALL``). Returns ``None`` when nothing matches.
+    Exact match wins; otherwise a base underlying (e.g. ``NIFTY``) or an older
+    strike for that underlying resolves to the first scanned contract for that
+    underlying. Falls back to available[0] if available is non-empty.
     """
+    if not available:
+        return None
     if requested in available:
         return requested
-    prefix = f"{requested.upper()} "
+    req_upper = requested.upper().strip()
+    # Check if requested string matches or starts with a known underlying root
+    for root in (
+        "BANKNIFTY",
+        "FINNIFTY",
+        "MIDCPNIFTY",
+        "NIFTY",
+        "CRUDEOILM",
+        "CRUDEOIL",
+        "NATURALGAS",
+        "GOLDM",
+        "SILVERM",
+        "GOLD",
+        "SILVER",
+    ):
+        if req_upper == root or req_upper.startswith(f"{root} "):
+            for sym in available:
+                if sym.upper().startswith(f"{root} "):
+                    return sym
+    prefix = f"{req_upper} "
     for sym in available:
-        if sym.upper().startswith(prefix):
+        if sym.upper().startswith(prefix) or sym.upper().startswith(req_upper):
             return sym
-    return None
+    return available[0]
 
 
 async def _wait_for_subscribe(
@@ -269,12 +290,17 @@ async def _coordinator_viewer_loop(
             ):
                 return
 
-            # 2. Send current full snapshot
-            previous_state: dict = dict(coordinator.snapshot(symbol))
-            if not await _safe_send(ws, {**previous_state, "_type": "full"}):
-                return
+            # 2. Send current full snapshot for subscribed symbol first, then remaining symbols
+            previous_states: dict[str, dict] = {}
+            symbols_list = coordinator.symbols()
+            ordered_symbols = [symbol] + [s for s in symbols_list if s != symbol]
+            for s in ordered_symbols:
+                snap = coordinator.snapshot(s)
+                previous_states[s] = dict(snap)
+                if not await _safe_send(ws, {**previous_states[s], "_type": "full"}):
+                    return
 
-            # 4. Stream delta-compressed updates every 0.5s
+            # 3. Stream delta-compressed updates for all active symbols every 0.5s
             while True:
                 if listener.done():
                     return
@@ -290,20 +316,27 @@ async def _coordinator_viewer_loop(
                         switched = payload
                     elif kind == "unsubscribe":
                         return
-                if switched is not None:
+
+                if switched is not None and switched != symbol:
+                    resolved_switch = _resolve_symbol(switched, coordinator.symbols())
+                    if resolved_switch is None:
+                        symbol = switched
+                        break
+                    symbol = resolved_switch
                     if not await _safe_send(
-                        ws, {"status": "symbol_switched", "symbol": switched}
+                        ws, {"status": "symbol_switched", "symbol": symbol}
                     ):
                         return
-                    symbol = switched
-                    break
 
-                snap = coordinator.snapshot(symbol)
-                delta = _compute_delta(previous_state, snap)
-                if delta:
-                    if not await _safe_send(ws, delta):
-                        return
-                    previous_state = dict(snap)
+                # Broadcast deltas for all active symbols continuously
+                for s in coordinator.symbols():
+                    snap = coordinator.snapshot(s)
+                    prev_s = previous_states.get(s)
+                    delta = _compute_delta(prev_s, snap)
+                    if delta:
+                        if not await _safe_send(ws, delta):
+                            return
+                        previous_states[s] = dict(snap)
     finally:
         listener.cancel()
         try:

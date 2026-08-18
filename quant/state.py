@@ -162,11 +162,12 @@ def _decision_to_view(decision: QuantDecision) -> dict:
                 "sl": round(float(sig.sl), 4),
                 "tp": round(float(sig.tp), 4),
                 "rr": round(float(sig.rr), 4),
-                "confidence": round(float(sig.confidence), 4),
+                "modelLabel": sig.model_label,
             }
             if sig is not None
             else None
         ),
+        "modelLabel": decision.model_label,
     }
 
 
@@ -176,6 +177,8 @@ def _risk_to_view(risk: RiskState) -> dict:
         "haltReason": risk.halt_reason,
         "consecutiveLosses": risk.consecutive_losses,
         "dailyPnl": risk.daily_pnl,
+        "tradesToday": getattr(risk, "trades_today", 0),
+        "equity": getattr(risk, "equity", 1_000_000.0),
         # Contract parity with the legacy risk DTO — SessionRisk does not yet
         # track drift, so these default off until a drift source exists.
         "driftAlert": False,
@@ -207,11 +210,15 @@ def _position_to_view(position: Position, fill: Fill | None = None) -> dict:
     return dto
 
 
+import threading
+
+
 class StateProjector:
     """Fold events per symbol into the latest frontend view-state."""
 
     def __init__(self) -> None:
         self._state: dict[str, dict] = {}
+        self._lock = threading.RLock()
 
     def on_quote(self, symbol: str, tick) -> None:
         """Per-tick LTP/OI/depth refresh (not an Event — bypasses bus/journal).
@@ -220,51 +227,54 @@ class StateProjector:
         live ``ltp``/``oi``/``depth`` between bar closes (the gameloop polls
         snapshots every 0.5s, so the sidebar and order-flow cards stay live).
         """
-        s = self._symbol_state(symbol)
-        s["ltp"] = float(tick.price)
-        s["oi"] = float(tick.oi)
-        if tick.depth is not None:
-            s["depth"] = tick.depth
+        with self._lock:
+            s = self._symbol_state(symbol)
+            s["ltp"] = float(tick.price)
+            s["oi"] = float(tick.oi)
+            if tick.depth is not None:
+                s["depth"] = tick.depth
 
     def on_event(self, event: Event) -> None:
-        s = self._symbol_state(event.symbol)
-        if isinstance(event, BarClosed):
-            s["ltp"] = float(event.bar.close)
-            s["oi"] = float(getattr(event.bar, "oi", 0.0) or 0.0)
-            s["tick"] = _bar_to_tick(event.bar)
-        elif isinstance(event, AuctionUpdated):
-            s["auction"] = _auction_to_view(event.auction)
-        elif isinstance(event, DecisionProduced):
-            s["quant_decision"] = _decision_to_view(event.decision)
-        elif isinstance(event, RiskUpdated):
-            s["risk_state"] = _risk_to_view(event.risk)
-        elif isinstance(event, PositionOpened):
-            s["portfolio"] = self._portfolio(s["portfolio"])
-            s["portfolio"]["positions"].append(_position_to_view(event.position))
-        elif isinstance(event, PositionClosed):
-            s["portfolio"] = self._portfolio(s["portfolio"])
-            fill = event.fill
-            self._remove_open(fill.position.open_time, s["portfolio"])
-            s["portfolio"]["closedTrades"].append(_position_to_view(fill.position, fill))
-        elif isinstance(event, DepthUpdated):
-            s["depth"] = event.depth
-        elif isinstance(event, AmtUpdated):
-            s["amt"] = event.amt
+        with self._lock:
+            s = self._symbol_state(event.symbol)
+            if isinstance(event, BarClosed):
+                s["ltp"] = float(event.bar.close)
+                s["oi"] = float(getattr(event.bar, "oi", 0.0) or 0.0)
+                s["tick"] = _bar_to_tick(event.bar)
+            elif isinstance(event, AuctionUpdated):
+                s["auction"] = _auction_to_view(event.auction)
+            elif isinstance(event, DecisionProduced):
+                s["quant_decision"] = _decision_to_view(event.decision)
+            elif isinstance(event, RiskUpdated):
+                s["risk_state"] = _risk_to_view(event.risk)
+            elif isinstance(event, PositionOpened):
+                s["portfolio"] = self._portfolio(s["portfolio"])
+                s["portfolio"]["positions"].append(_position_to_view(event.position))
+            elif isinstance(event, PositionClosed):
+                s["portfolio"] = self._portfolio(s["portfolio"])
+                fill = event.fill
+                self._remove_open(fill.position.open_time, s["portfolio"])
+                s["portfolio"]["closedTrades"].append(_position_to_view(fill.position, fill))
+            elif isinstance(event, DepthUpdated):
+                s["depth"] = event.depth
+            elif isinstance(event, AmtUpdated):
+                s["amt"] = event.amt
 
     def snapshot(self, symbol: str) -> ViewState:
-        s = self._symbol_state(symbol)
-        return ViewState(
-            symbol=symbol,
-            tick=s["tick"],
-            ltp=s["ltp"],
-            oi=s["oi"],
-            auction=s["auction"],
-            quant_decision=s["quant_decision"],
-            risk_state=s["risk_state"],
-            portfolio=self._portfolio(s["portfolio"]),
-            depth=s["depth"],
-            amt=s["amt"],
-        )
+        with self._lock:
+            s = self._symbol_state(symbol)
+            return ViewState(
+                symbol=symbol,
+                tick=s["tick"],
+                ltp=s["ltp"],
+                oi=s["oi"],
+                auction=s["auction"],
+                quant_decision=s["quant_decision"],
+                risk_state=s["risk_state"],
+                portfolio=self._portfolio(s["portfolio"], ltp=s["ltp"]),
+                depth=s["depth"],
+                amt=s["amt"],
+            )
 
     def _symbol_state(self, symbol: str) -> dict:
         if symbol not in self._state:
@@ -282,7 +292,7 @@ class StateProjector:
         return self._state[symbol]
 
     @staticmethod
-    def _portfolio(current: dict | None) -> dict:
+    def _portfolio(current: dict | None, ltp: float | None = None) -> dict:
         """Portfolio DTO — ALWAYS the full frontend contract shape.
 
         The WS snapshot protocol the frontend was built against guarantees
@@ -303,11 +313,33 @@ class StateProjector:
         }
         if current is None:
             return base
+
+        raw_positions = current.get("positions", base["positions"])
+        positions = [dict(p) for p in raw_positions]
+        closed_trades = current.get("closedTrades", base["closedTrades"])
+
+        # Compute live floating unrealized P&L for open positions using latest LTP
+        if ltp is not None and ltp > 0:
+            for p in positions:
+                if p.get("status") == "OPEN":
+                    entry = float(p.get("entryPrice", 0.0))
+                    size = float(p.get("size", 0.0))
+                    # size is positive for LONG, negative for SHORT
+                    p["pnl"] = round((ltp - entry) * size, 2)
+                    p["currentPrice"] = float(ltp)
+
+        closed_pnl = sum(float(t.get("pnl", 0.0)) for t in closed_trades)
+        open_pnl = sum(float(p.get("pnl", 0.0)) for p in positions)
+        starting_capital = float(current.get("balance", base["balance"]))
+        equity = round(starting_capital + closed_pnl + open_pnl, 2)
+
         return {
             **base,
             **current,
-            "positions": current.get("positions", base["positions"]),
-            "closedTrades": current.get("closedTrades", base["closedTrades"]),
+            "balance": starting_capital,
+            "equity": equity,
+            "positions": positions,
+            "closedTrades": closed_trades,
         }
 
     @staticmethod

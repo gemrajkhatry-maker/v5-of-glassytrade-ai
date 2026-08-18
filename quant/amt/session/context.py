@@ -59,10 +59,15 @@ from quant.contracts.timezones import IST
 # ---------------------------------------------------------------------------
 
 
-def _to_ist(timestamp: str | datetime | None) -> datetime:
+def _to_ist(timestamp: str | datetime | int | float | None) -> datetime:
     """Convert timestamp to IST datetime."""
     if timestamp is None:
         dt = datetime.now(IST)
+    elif isinstance(timestamp, (int, float)):
+        try:
+            dt = datetime.fromtimestamp(float(timestamp), tz=timezone.utc)
+        except (ValueError, OSError):
+            dt = datetime.now(IST)
     elif isinstance(timestamp, str):
         try:
             # Handle epoch timestamps (e.g. "1771832400.0" from Dhan adapter)
@@ -244,6 +249,10 @@ def get_session_info(
         market: "NSE" | "MCX" | "GLOBAL" (default: "NSE")
     """
     market = market.upper()
+    if market in ("NSE", "NFO", "NSE_FNO", "NSE_INDEX", "NSE_OPTIONS"):
+        market = "NSE"
+    elif market in ("MCX", "MCX_COMM", "MCX_COMMODITY", "MCX_OPTIONS"):
+        market = "MCX"
 
     if prior_vah > 0 and prior_val > 0 and open_price > 0:
         op_rel = opening_relation(open_price, prior_vah, prior_val)
@@ -450,9 +459,10 @@ def seconds_to_close(current_time: datetime, exchange: str = "NSE") -> float:
     """
     ist_dt = _to_ist(current_time)
 
-    if exchange.upper() == "NSE":
+    ex = exchange.upper()
+    if ex in ("NSE", "NFO", "NSE_FNO", "NSE_INDEX", "NSE_OPTIONS"):
         close_hour, close_minute = 15, 15
-    elif exchange.upper() == "MCX":
+    elif ex in ("MCX", "MCX_COMM", "MCX_COMMODITY", "MCX_OPTIONS"):
         close_hour, close_minute = 23, 30
     else:
         return 0.0
@@ -556,7 +566,7 @@ def get_vwap_anchors(exchange: str, current_time: datetime | None = None,
         if commodity_upper in ["CRUDEOIL", "NATURALGAS", "CRUDEOILM"]:
             hour = current_time.hour
             if hour >= 19 or (hour == 19 and current_time.minute >= 30):
-                anchors.append(MCX_US_OPENIST)
+                anchors.append(MCX_US_OPEN_IST)
     
     return anchors
 

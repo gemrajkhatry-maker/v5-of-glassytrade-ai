@@ -65,47 +65,42 @@ def detect_market_state(
     1. BALANCED — price inside VA with acceptance
     2. IMBALANCED — price outside VA OR displacement+acceptance
     """
-    _has_active_leg = has_displacement and leg_poc > 0
-    effective_poc = leg_poc if _has_active_leg else poc
-    effective_vah = leg_vah if (_has_active_leg and leg_vah > 0) else vah
-    effective_val = leg_val if (_has_active_leg and leg_val > 0) else val
-
-    va_range = max(effective_vah - effective_val, tick_size)
+    inside_session_va = val <= price <= vah
     is_extreme = vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) >= 3.0
 
-    # Inside effective value area (leg VA when active, session VA otherwise)
-    inside_va = effective_val <= price <= effective_vah
+    # If there is active displacement OR price is outside session Value Area OR low balance -> IMBALANCED
+    if has_displacement or not inside_session_va or balance_ratio < 0.5:
+        trigger_parts = []
+        if has_displacement:
+            trigger_parts.append("active displacement leg")
+        if not inside_session_va:
+            trigger_parts.append(f"outside session VA [{val:.2f}, {vah:.2f}]")
+        if balance_ratio < 0.5:
+            trigger_parts.append(f"low balance ratio ({balance_ratio:.2f})")
 
-    if inside_va and balance_ratio >= 0.5:
-        zone = classify_zone(price, effective_poc, effective_vah, effective_val)
-        va_label = "leg" if _has_active_leg else "session"
+        zone = "OUTSIDE_VA" if not inside_session_va else "DISPLACEMENT"
         return MarketStateResult(
-            state=MarketState.BALANCED,
+            state=MarketState.IMBALANCED,
             zone=zone,
-            confidence=0.80,
-            trigger=f"Price {price:.2f} inside {va_label} VA [{effective_val:.2f}, {effective_vah:.2f}]",
+            confidence=0.85,
+            trigger=f"Price {price:.2f} " + ", ".join(trigger_parts),
             has_displacement=has_displacement,
             has_acceptance=has_acceptance,
             balance_ratio=balance_ratio,
-            is_extreme_deviation=is_extreme
+            is_extreme_deviation=is_extreme,
         )
-    
-    # Outside VA OR displacement+acceptance = IMBALANCED
-    trigger_parts = []
-    if not inside_va:
-        trigger_parts.append(f"outside VA [{effective_val:.2f}, {effective_vah:.2f}]")
-    if has_displacement and has_acceptance:
-        trigger_parts.append("displacement + acceptance")
-    
+
+    # Price inside session VA, no displacement, high balance ratio -> BALANCED
+    zone = classify_zone(price, poc, vah, val)
     return MarketStateResult(
-        state=MarketState.IMBALANCED,
-        zone="OUTSIDE_VA",
-        confidence=0.85,
-        trigger=f"Price {price:.2f} " + ", ".join(trigger_parts),
+        state=MarketState.BALANCED,
+        zone=zone,
+        confidence=0.80,
+        trigger=f"Price {price:.2f} inside session VA [{val:.2f}, {vah:.2f}]",
         has_displacement=has_displacement,
         has_acceptance=has_acceptance,
         balance_ratio=balance_ratio,
-        is_extreme_deviation=is_extreme
+        is_extreme_deviation=is_extreme,
     )
 
 

@@ -1,5 +1,6 @@
 import React from 'react';
 import { AMTAnalysis, OrderBook } from '../../types';
+import { ORDER_FLOW_CONFIG } from '../../config';
 
 interface OrderFlowCardProps {
     amtResult: AMTAnalysis | null;
@@ -10,8 +11,8 @@ interface OrderFlowCardProps {
 /** 03B. MARKET METRICS — OFI / CVD slope / divergence / balance / shape / spread. */
 const formatCVD = (cvd: number): string => {
     const abs = Math.abs(cvd);
-    if (abs >= 1_000_000) return `${(cvd / 1_000_000).toFixed(2)}M lots`;
-    if (abs >= 1_000) return `${(cvd / 1_000).toFixed(1)}K lots`;
+    if (abs >= ORDER_FLOW_CONFIG.format.millionsThreshold) return `${(cvd / ORDER_FLOW_CONFIG.format.millionsThreshold).toFixed(2)}M lots`;
+    if (abs >= ORDER_FLOW_CONFIG.format.thousandsThreshold) return `${(cvd / ORDER_FLOW_CONFIG.format.thousandsThreshold).toFixed(1)}K lots`;
     return `${cvd.toFixed(1)} lots`;
 };
 
@@ -173,13 +174,50 @@ const OrderFlowCard = React.memo<OrderFlowCardProps>(({ amtResult, symbol, order
                             const mid = (bestBid + bestAsk) / 2;
                             const spreadBps = mid > 0 ? ((bestAsk - bestBid) / mid * 10000) : 0;
                             return bestBid > 0 ? (
-                                <span className={`text-[10px] font-mono ${spreadBps <= 5 ? 'text-green-400' : spreadBps <= 15 ? 'text-yellow-400' : 'text-red-400'}`}>
+                                <span className={`text-[10px] font-mono ${spreadBps <= ORDER_FLOW_CONFIG.spread.greenMax ? 'text-green-400' : spreadBps <= ORDER_FLOW_CONFIG.spread.yellowMax ? 'text-yellow-400' : 'text-red-400'}`}>
                                     {spreadBps.toFixed(1)} bps
                                 </span>
                             ) : <span className="text-[10px] text-white/20">—</span>;
                         })()}
                     </div>
                 </div>
+
+                {/* L2 Order Book Table */}
+                {Boolean(orderBook && ((orderBook.bids?.length ?? 0) > 0 || (orderBook.asks?.length ?? 0) > 0)) && (
+                    <div className="pt-2 border-t border-white/5">
+                        <div className="flex justify-between items-center mb-1">
+                            <span className="text-[10px] text-white/40">
+                                L2 Depth ({Math.max(orderBook?.bids?.length ?? 0, orderBook?.asks?.length ?? 0)})
+                            </span>
+                        </div>
+                        <div className="max-h-40 overflow-y-auto overscroll-contain pr-1 custom-scrollbar">
+                            <div className="grid grid-cols-2 gap-2 text-[9px] font-mono">
+                                <div>
+                                    <div className="text-glassy-bull-primary mb-0.5 border-b border-glassy-bull-primary/20 pb-0.5 flex justify-between sticky top-0 bg-[#0c0d0f] z-10">
+                                        <span>BID</span><span>VOL</span>
+                                    </div>
+                                    {(orderBook?.bids || []).slice(0, 20).map((bid, i) => (
+                                        <div key={`bid-${i}`} className="flex justify-between text-glassy-text-secondary py-0.5">
+                                            <span>{bid.price.toFixed(2)}</span>
+                                            <span>{bid.quantity}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div>
+                                    <div className="text-glassy-bear-primary mb-0.5 border-b border-glassy-bear-primary/20 pb-0.5 flex justify-between sticky top-0 bg-[#0c0d0f] z-10">
+                                        <span>ASK</span><span>VOL</span>
+                                    </div>
+                                    {(orderBook?.asks || []).slice(0, 20).map((ask, i) => (
+                                        <div key={`ask-${i}`} className="flex justify-between text-glassy-text-secondary py-0.5">
+                                            <span>{ask.price.toFixed(2)}</span>
+                                            <span>{ask.quantity}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );

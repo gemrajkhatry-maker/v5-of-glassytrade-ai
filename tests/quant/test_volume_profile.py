@@ -28,12 +28,13 @@ def test_poc_is_max_volume_bucket():
 def test_value_area_captures_config_percent():
     # VALUE_AREA_PCT is config-driven (globals.value_area_pct) and shared with
     # the AMT analyzer — decision-side SL/TP anchors must match the UI profile.
-    assert VALUE_AREA_PCT == pytest.approx(0.70)
+    assert VALUE_AREA_PCT == pytest.approx(0.40)  # Value area: 40% of volume
     vb = VolumeProfileBuilder()
     for b in _bars():
         vb.update(b)
     vp = vb.snapshot()
     va_vol = sum(l.volume for l in vp.levels
                  if vp.val <= l.price <= vp.vah)
-    assert va_vol >= 0.70 * vp.total_volume
+    assert va_vol >= VALUE_AREA_PCT * vp.total_volume
     assert vp.vah > vp.val
+

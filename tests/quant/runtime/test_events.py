@@ -11,7 +11,7 @@ def _bar(time="t1"):
 
 def _fill():
     sig = Signal(type="LONG", reason="test", entry=100.0, sl=99.0,
-                 tp=102.0, rr=2.0, confidence=0.7, symbol="S", timestamp="t1")
+                 tp=102.0, rr=2.0, model_label="Triple-A", symbol="S", timestamp="t1")
     pos = Position(order=Order(signal=sig, quantity=10), open_price=100.0,
                    open_time="t1", size=10.0)
     return Fill(position=pos, close_price=101.0, close_time="t2",

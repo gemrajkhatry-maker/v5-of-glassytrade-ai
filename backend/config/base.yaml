@@ -5,7 +5,7 @@
 system:
   name: GlassyTrade AI
   version: "2.0.0"
-  candle_timeframe_minutes: 5
+  candle_timeframe_minutes: 1
   tick_history_depth: 500
   db_path: "glassytrade.db"
   log_level: "INFO"
@@ -16,7 +16,7 @@ globals:
   # Volume Profile
   lvn_threshold: 0.15
   hvn_threshold: 2.00
-  value_area_pct: 0.70
+  value_area_pct: 0.40
   lvn_smoothing: 3
   lvn_min_persistence_bars: 3
   lvn_removal_threshold: 0.30
@@ -127,7 +127,7 @@ exchanges:
         tick_size: 0.05
         vp_bucket_size: 10.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.40
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -147,7 +147,7 @@ exchanges:
         strike_interval: 50
         strikes_around_atm: 2
         slippage_bps: 15
-        max_notional_pct: 0.20
+        max_notional_pct: 0.15
         min_rr_ratio: 1.5
         ml_thresholds:
           imbalance_continuation:
@@ -176,7 +176,7 @@ exchanges:
         tick_size: 0.05
         vp_bucket_size: 25.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.40
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -196,7 +196,7 @@ exchanges:
         strike_interval: 100
         strikes_around_atm: 2
         slippage_bps: 20
-        max_notional_pct: 0.20
+        max_notional_pct: 0.15
         min_rr_ratio: 1.5
         ml_thresholds:
           imbalance_continuation:
@@ -225,7 +225,7 @@ exchanges:
         tick_size: 0.05
         vp_bucket_size: 10.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.40
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -245,7 +245,55 @@ exchanges:
         strike_interval: 50
         strikes_around_atm: 2
         slippage_bps: 30
-        max_notional_pct: 0.20
+        max_notional_pct: 0.15
+        min_rr_ratio: 1.5
+        ml_thresholds:
+          imbalance_continuation:
+            long: 0.55
+            short: 0.58
+          return_to_value:
+            long: 0.51
+            short: 0.51
+          probing_breakout:
+            long: 0.58
+            short: 0.58
+        cost_profile:
+          slippage_bps: 30
+          stt_pct: 0.000625
+          exchange_fee_pct: 0.000495
+          brokerage_per_order: 20.0
+          gst_on_brokerage_pct: 0.18
+          sebi_charges_pct: 0.000001
+      MIDCPNIFTY:
+        enabled: true
+        exchange: "NSE"
+        segment: "NFO"
+        instrument_type: "OPT"
+        lot_size: 120
+        tick_size: 0.05
+        vp_bucket_size: 10.0
+        vp_num_buckets: 200
+        value_area_pct: 0.40
+        lvn_threshold: 0.15
+        hvn_threshold: 2.00
+        lvn_persistence_bars: 3
+        lvn_removal_threshold: 0.30
+        imbalance_threshold: 50.0
+        displacement_multiplier: 1.5
+        displacement_min_bars: 3
+        balance_ratio_threshold: 0.70
+        no_trade_ticks_from_poc: 2
+        aggression_sigma: 2.5
+        cvd_slope_warning: 30.0
+        cvd_slope_hard_block: 50.0
+        cvd_slope_extreme: 100.0
+        cvd_strong_slope: 2.0
+        cvd_rolling_bars: 20
+        min_oi: 20000
+        strike_interval: 25
+        strikes_around_atm: 3
+        slippage_bps: 30
+        max_notional_pct: 0.15
         min_rr_ratio: 1.5
         ml_thresholds:
           imbalance_continuation:
@@ -282,7 +330,7 @@ exchanges:
         tick_size: 1.0
         vp_bucket_size: 10.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.40
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -302,7 +350,7 @@ exchanges:
         strike_interval: 50
         strikes_around_atm: 2
         slippage_bps: 10
-        max_notional_pct: 0.20
+        max_notional_pct: 0.15
         min_rr_ratio: 1.5
         ml_thresholds:
           imbalance_continuation:
@@ -330,7 +378,7 @@ exchanges:
         tick_size: 0.1
         vp_bucket_size: 1.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.40
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -350,7 +398,7 @@ exchanges:
         strike_interval: 5
         strikes_around_atm: 2
         slippage_bps: 12
-        max_notional_pct: 0.20
+        max_notional_pct: 0.15
         min_rr_ratio: 1.5
         ml_thresholds:
           imbalance_continuation:
@@ -378,7 +426,7 @@ exchanges:
         tick_size: 1.0
         vp_bucket_size: 10.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.40
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -398,7 +446,7 @@ exchanges:
         strike_interval: 100
         strikes_around_atm: 2
         slippage_bps: 8
-        max_notional_pct: 0.20
+        max_notional_pct: 0.15
         min_rr_ratio: 1.5
         ml_thresholds:
           imbalance_continuation:
@@ -426,7 +474,7 @@ exchanges:
         tick_size: 1.0
         vp_bucket_size: 25.0
         vp_num_buckets: 200
-        value_area_pct: 0.70
+        value_area_pct: 0.40
         lvn_threshold: 0.15
         hvn_threshold: 2.00
         lvn_persistence_bars: 3
@@ -446,7 +494,7 @@ exchanges:
         strike_interval: 500
         strikes_around_atm: 2
         slippage_bps: 10
-        max_notional_pct: 0.20
+        max_notional_pct: 0.15
         min_rr_ratio: 1.5
         ml_thresholds:
           imbalance_continuation:

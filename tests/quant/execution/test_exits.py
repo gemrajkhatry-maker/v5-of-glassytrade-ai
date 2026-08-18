@@ -9,12 +9,12 @@ from quant.location import LocationState
 
 def _position(size=10, sl=99.0, tp=102.0, entry=100.0):
     sig = Signal(type="LONG", reason="r", entry=entry, sl=sl, tp=tp, rr=2.0,
-                 confidence=0.8, symbol="SYM", timestamp="t0")
+                 model_label="Triple-A", symbol="SYM", timestamp="t0")
     return Position(order=Order(sig, abs(size)), open_price=entry, open_time="t0", size=size)
 
 def _short_position(size=-10, sl=101.0, tp=98.0, entry=100.0):
     sig = Signal(type="SHORT", reason="r", entry=entry, sl=sl, tp=tp, rr=2.0,
-                 confidence=0.8, symbol="SYM", timestamp="t0")
+                 model_label="Triple-A", symbol="SYM", timestamp="t0")
     return Position(order=Order(sig, abs(size)), open_price=entry, open_time="t0", size=size)
 
 def _state(close, cvd_slope=0.0):

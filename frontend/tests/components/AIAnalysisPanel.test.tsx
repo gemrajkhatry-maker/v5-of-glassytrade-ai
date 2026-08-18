@@ -124,34 +124,34 @@ describe('AIAnalysisPanel quant decision precedence (F-07)', () => {
     expect(screen.queryByText(/SHORT @/i)).toBeNull();
   });
 
-  it('collapses the legacy AMT body behind a grayed details when a quant decision exists', () => {
-    const { container } = render(
+  it('renders QuantDecisionCard in the cockpit tab when quant decision exists', () => {
+    render(
       <AIAnalysisPanel
         amtResult={amtResult}
         portfolio={portfolio}
         quantDecision={quantApproved}
       />
     );
-    const legacy = [...container.querySelectorAll('details')].find(
-      (el) => el.textContent?.includes('Legacy AMT Analysis')
-    );
-    expect(legacy).not.toBeNull();
-    // Collapsed by default.
-    expect(legacy!.getAttribute('open')).toBeNull();
-    // Legacy body is grayed out (opacity applied).
-    const body = legacy!.querySelector('div.opacity-60');
-    expect(body).not.toBeNull();
+    // Cockpit tab is active by default — QuantDecisionCard should render
+    expect(screen.queryByText(/Quant Decision/i)).not.toBeNull();
+    // No LegacyAmtWrapper <details> element (that component is removed)
+    expect(
+      document.querySelectorAll('details').length === 0 ||
+      [...document.querySelectorAll('details')].every(
+        (el) => !el.textContent?.includes('Legacy AMT Analysis')
+      )
+    ).toBe(true);
   });
 
-  it('renders the AMT body unwrapped when no quant decision exists', () => {
-    const { container } = render(
+  it('does not render LegacyAmtWrapper when no quant decision exists', () => {
+    render(
       <AIAnalysisPanel amtResult={amtResult} portfolio={portfolio} />
     );
     expect(
-      [...container.querySelectorAll('details')].some(
+      [...document.querySelectorAll('details')].some(
         (el) => el.textContent?.includes('Legacy AMT Analysis')
       )
     ).toBe(false);
-    expect(screen.queryByText(/Quant Decision/i)).toBeNull();
   });
 });
+

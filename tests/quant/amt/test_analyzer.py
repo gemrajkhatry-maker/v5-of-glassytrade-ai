@@ -26,12 +26,13 @@ def _make_candle(
     high: float | None = None,
     low: float | None = None,
     open_: float | None = None,
+    time: str = "2026-01-01T00:00:00Z",
 ) -> OHLC:
     o = open_ or close
     h = high or max(close, o) * 1.001
     l = low or min(close, o) * 0.999
     return OHLC(
-        time="2026-01-01T00:00:00Z",
+        time=time,
         open=o,
         high=h,
         low=l,
@@ -41,6 +42,31 @@ def _make_candle(
         taker_buy_volume=(volume + delta) / 2,
         delta=delta,
     )
+
+
+def _candle_time(minute_of_session: int) -> str:
+    """IST-style timestamp for minute-of-session (09:15 open)."""
+    total = 15 + minute_of_session
+    return f"2026-01-01T{total // 60:02d}:{total % 60:02d}:00Z"
+
+
+def _candle_stream(start_min: int, end_min: int, high_boost: float = 0.0) -> list[OHLC]:
+    """Candles every 5 minutes from 09:15, minutes [start_min, end_min] inclusive."""
+    candles = []
+    for m in range(start_min, end_min + 1, 5):
+        hour, minute = divmod(15 + m, 60)
+        t = f"2026-01-01T{hour:02d}:{minute:02d}:00Z"
+        base = 100 + m * 0.1
+        candles.append(
+            _make_candle(
+                close=base,
+                high=base + 2 + high_boost,
+                low=base - 2,
+                volume=1000,
+                time=t,
+            )
+        )
+    return candles
 
 
 class TestSmoothArray:
@@ -144,7 +170,117 @@ class TestAMTAnalyzer:
         result = analyzer.analyze(data, ob)
         assert result.poc > 0
 
+    def test_obi_from_order_book_reaches_result(self):
+        """Depth reaches the decision path: the order book imbalance computed
+        from the live depth snapshot must land on AMTResult.obi so gate 3's
+        order-flow aggression leg can consume it."""
+        analyzer = AMTAnalyzer()
+        data = generate_market_data(100, 100, "sideways")
+        # Bid-heavy book (1000 vs 100): OBI = (1000-100)/1100 ≈ 0.82
+        ob = OrderBook(
+            bids=(OrderBookLevel(price=100, quantity=1000),),
+            asks=(OrderBookLevel(price=101, quantity=100),),
+        )
+        result = analyzer.analyze(data, ob)
+        assert result.obi > 0.5
+
     # ----- Formula gap tests -----
+
+    def test_collapsed_regime_clamps_vah_to_recent_range(self):
+        """When the option premium collapses intraday (morning ~195, afternoon
+        ~102), the whole-session value area must not extend to the stale
+        morning regime. VAH must clamp to the recent traded range.
+
+        Reproduces the live CRUDEOIL 7950 CALL case: the premium halved, so
+        the session profile's 70% area spans ~158 even though price sits at
+        ~102. Unlike a volume desert, the collapse traded through every
+        level — volume exists in every bucket — so only a recent-range clamp
+        fixes it."""
+        analyzer = AMTAnalyzer()
+        data = []
+        # Stale collapse regime: continuous tile 90 -> 199 (volume in EVERY
+        # bucket — no zero-volume gap for the desert guard to catch)
+        c = 90.0
+        while c < 199.0:
+            data.append(
+                _make_candle(close=c, volume=300, high=c + 0.9, low=c - 0.9)
+            )
+            c += 0.9
+        # Current auction cluster (newest candles): 100-106, denser per bucket
+        for i in range(60):
+            c = 100.0 + (i % 7)
+            data.append(
+                _make_candle(close=c, volume=300, high=c + 0.4, low=c - 0.4)
+            )
+
+        result = analyzer.analyze(data)
+        # POC in the current auction cluster (densest bucket there)
+        assert result.poc > 95.0
+        assert result.poc < 110.0
+        # 70% of the wide total volume must NOT drag VAH into the stale
+        # morning regime — clamp to the recent traded range instead.
+        assert result.value_area_high < 125.0
+        # But must still capture the current auction's top
+        assert result.value_area_high > 104.0
+        assert result.value_area_low < 100.0
+
+    def test_ib_freezes_at_60_min_but_session_va_keeps_developing(self):
+        """Fabio's framework: the Initial Balance (high/low of the first hour)
+        freezes after 60 minutes, while the session Value Area keeps
+        recalculating for the rest of the session. Freezing both would break
+        AMT — an in-window candle with a new high must still extend the IB,
+        but a candle past minute 60 must not move IB high/low, while the VA
+        keeps tracking new volume."""
+        analyzer = AMTAnalyzer()
+        # The runtime calls analyze() once per bar close with the newest bar as
+        # data[-1] — feed every candle individually from the session open to
+        # mirror it exactly (this also pins the IB window to 09:15, the
+        # session open, not the fifth analyzed bar).
+        data_evolving: list[OHLC] = []
+        r1 = None
+        for m in range(0, 60, 5):
+            candle = _make_candle(
+                close=100 + m * 0.1,
+                high=100 + m * 0.1 + 2,
+                low=100 + m * 0.1 - 2,
+                volume=1000,
+                time=_candle_time(m),
+            )
+            data_evolving.append(candle)
+            r1 = analyzer.analyze(data_evolving)
+        # Minute 55 (10:10) carries the fresh session high (112) — must extend
+        # the IB under a 60-minute build window (10:10 is minute 55 < 60).
+        data_evolving[-1] = _make_candle(close=105, high=112, low=99, volume=1200,
+                                         time=_candle_time(55))
+        r1 = analyzer.analyze(data_evolving)
+        assert r1.ib_complete is False  # minute 55 < 60 — still building
+        assert r1.ib_high >= 112.0      # in-window new high IS included
+
+        # Minute 60 (10:15) is the LAST candle of the first hour — the window
+        # closes AFTER including it, so its high legitimately extends the IB.
+        data_evolving.append(
+            _make_candle(close=160, high=148, low=96, volume=1000,
+                         time=_candle_time(60))
+        )
+        r_at_close = analyzer.analyze(data_evolving)
+        assert r_at_close.ib_complete is True   # window closes at minute 60
+        assert r_at_close.ib_high >= 148.0      # boundary candle is included
+
+        # Past-window candles (65..75) with even higher highs must NOT move
+        # IB high (frozen), but their volume must still feed the session VA.
+        r2 = None
+        for m in range(65, 76, 5):
+            data_evolving.append(
+                _make_candle(close=100 + m * 0.1, high=100 + m * 0.1 + 42,
+                             low=100 + m * 0.1 - 2, volume=1000,
+                             time=_candle_time(m))
+            )
+            r2 = analyzer.analyze(data_evolving)
+        assert r2.ib_complete is True   # minute 75 > 60 — window closed
+        assert r2.ib_high == r_at_close.ib_high  # new highs past hour 1 do NOT extend IB
+        # Session VA keeps developing: new volume after hour 1 moves the POC /
+        # value area instead of being locked to first-hour data.
+        assert r2.poc != r1.poc or r2.value_area_high != r1.value_area_high
 
     def test_vah_val_use_bin_edges(self):
         """VAH should be upper edge of top VA bin, VAL lower edge of bottom."""
@@ -516,7 +652,10 @@ class TestVWAPDoubleAccumulationRegression:
         # _make_candle_timed gives typical_price == close (h/l symmetric).
         assert analyzer._vwap_cum_vol == pytest.approx(200.0)
         assert analyzer._vwap_cum_quote_vol == pytest.approx(100 * 100 + 120 * 100)
-        assert result.session_vwap == pytest.approx((100 * 100 + 120 * 100) / 200.0)
+        # session_vwap is the same-window VWAP (all 6 candles are inside the
+        # 60-bar recent regime window) — the accumulator counters above are
+        # the B-20 single-accumulation regression check.
+        assert result.session_vwap == pytest.approx((100 * 100 * 5 + 120 * 100) / 600.0)
 
     def test_re_fed_candle_is_not_re_accumulated(self):
         """Re-feeding the SAME candle (e.g. a sub-candle tick where data[-1]
@@ -546,11 +685,12 @@ class TestVWAPDoubleAccumulationRegression:
         sq_after_refeed = analyzer._vwap_cum_sq_vol
 
         # New candle arrives — accumulated exactly once.
-        result = analyzer.analyze(base + [c5, c6])
+        result =        analyzer.analyze(base + [c5, c6])
         assert analyzer._vwap_cum_vol == pytest.approx(200.0)
         assert analyzer._vwap_cum_quote_vol == pytest.approx(100 * 100 + 120 * 100)
         assert analyzer._vwap_cum_sq_vol > sq_after_refeed  # c6 adds variance
-        assert result.session_vwap == pytest.approx((100 * 100 + 120 * 100) / 200.0)
+        # Same-window VWAP (all candles inside the 60-bar regime window).
+        assert result.session_vwap == pytest.approx((100 * 100 * 5 + 120 * 100) / 600.0)
 
     def test_session_reset_then_new_candle_accumulated(self):
         """After a session reset, the first candle of the new session must be
@@ -571,7 +711,8 @@ class TestVWAPDoubleAccumulationRegression:
         result = analyzer.analyze(base + [last_old, first_new])
         assert analyzer._vwap_cum_vol == pytest.approx(200.0)
         assert analyzer._vwap_cum_quote_vol == pytest.approx(110 * 200)
-        assert result.session_vwap == pytest.approx(110.0)
+        # Same-window VWAP over all 6 passed candles (5 @100 vol100 + 1 @110 vol200).
+        assert result.session_vwap == pytest.approx((100 * 100 * 5 + 110 * 200) / 700.0)
 
 
 class TestDayTypeClassification:
@@ -600,15 +741,19 @@ class TestDayTypeClassification:
     def test_trend_day_type(self):
         analyzer = AMTAnalyzer()
         data = []
-        for i in range(12):
+        # 13 candles span the full 60-min IB window (09:00 -> 10:00 inclusive;
+        # the boundary candle closes the window). Fabio: IB = first hour.
+        for i in range(13):
             data.append(
                 _make_candle_timed(
-                    105 + i % 2, f"2026-01-01T09:{i * 5:02d}:00Z", high=110, low=100
+                    105 + i % 2, _candle_time(i * 5), high=110, low=100
                 )
             )
             analyzer.analyze(data)
-        # Add massive extension up (IB range is 10, dist > 10 = 120+)
-        data.append(_make_candle_timed(125, "2026-01-01T10:00:00Z", high=125, low=115))
+        assert analyzer._ib_tracker.is_complete  # window closed at 10:00
+        # Add massive extension up AFTER the IB window (minute 65 = 10:05).
+        # IB range is 10, dist > 10 needs price above 120.
+        data.append(_make_candle_timed(125, _candle_time(65), high=125, low=115))
         result = analyzer.analyze(data)
 
         assert result.day_type == "TREND"
@@ -752,3 +897,47 @@ class TestVWAPSigmaBounds:
             assert abs(result.vwap_deviation_sigmas) <= 4.0, (
                 f"VWAP sigma {result.vwap_deviation_sigmas} should be bounded with low vol data"
             )
+
+    def test_vwap_and_balance_share_the_recent_regime_window(self):
+        """Regime collapse must not produce a VWAP/sigma/balance contradiction.
+
+        Live repro (CRUDEOIL-style): premium collapsed from ~195 to ~102, so
+        the whole-session VWAP accumulator sits far above the current auction.
+        The VA is clamped to the recent RECENT_VA_LOOKBACK candles, so the UI
+        said "LTP +2.4σ from VWAP — EXTREME DEVIATION" while "Balance: 100% in
+        VA".  The sigma, bands and session VWAP must be computed on the SAME
+        window as the VA clamp so the two readings cannot contradict.
+        """
+        analyzer = AMTAnalyzer()
+
+        # Feed per-bar like the runtime: early session trades at ~100, then a
+        # regime collapse to ~50 that persists for the whole recent window.
+        data = []
+        for i in range(30):
+            price = 100.0 + (i % 5 - 2) * 0.2
+            data.append(_make_candle(close=price, high=price + 0.5, low=price - 0.5,
+                                     time=_candle_time(i)))
+        for i in range(30, 90):
+            price = 50.0 + (i % 5 - 2) * 0.2
+            data.append(_make_candle(close=price, high=price + 0.5, low=price - 0.5,
+                                     time=_candle_time(i)))
+
+        result = None
+        for i in range(1, len(data) + 1):
+            result = analyzer.analyze(data[:i])
+
+        assert result is not None
+        # The last 60 candles are all inside the recent VA -> balance ratio 100%.
+        assert result.balance_ratio == 1.0, "recent regime must read 100% in VA"
+        # Session VWAP must reflect the CURRENT auction (~50), not the stale
+        # whole-session mix (~66.7) that produced the 2.4σ "EXTREME DEVIATION".
+        assert 49.0 < result.session_vwap < 51.0, (
+            f"session_vwap {result.session_vwap:.2f} must come from the recent "
+            f"regime window, not the whole-session accumulator"
+        )
+        # With price inside the recent VA, deviation cannot be extreme.
+        assert result.vwap_deviation_sigmas is not None
+        assert abs(result.vwap_deviation_sigmas) < 1.0, (
+            f"sigma {result.vwap_deviation_sigmas:.2f} must be small when price "
+            f"is inside the same-window VA"
+        )

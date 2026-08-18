@@ -142,16 +142,17 @@ def test_no_trade_without_approved_decision():
         # the open reason/trace must map to the approved decision's signal
         signal = evt.position.order.signal
         assert signal.type == decision.signal.type
-        assert signal.reason in ("All 7 gates passed", "Value-Area fade")
+        assert signal.reason in ("All 4 gates passed", "Value-Area fade")
         assert abs(signal.entry - decision.signal.entry) <= 1e-9
         assert signal.timestamp == t
 
-    # Only the Triple-A trade opens. The VA-fade candidate (t340) is present in
-    # the session but is correctly rejected by the MIN_STOP_DISTANCE_PCT guard:
-    # entry 104.92 / sl 104.90 is a razor-thin ~0.02% stop (exactly the profile
-    # WS-SMOKE flagged as unrealistic), so no VA-fade position may open.
-    assert len(opens) == 1
+    # The 2 Triple-A trades open (t166 aggression breakout and t184 absorbing breakout).
+    # t184 is the first bar after the 5-bar cooldown from the t174 close.
+    # The VA-fade candidate (t340) is present in the session but is correctly rejected
+    # by the MIN_STOP_DISTANCE_PCT guard, so no VA-fade position opens.
+    assert len(opens) == 2
     assert opens[0].time == AGGRESSION_BAR
+    assert opens[1].time == "t184"
     assert FADE_BAR not in {e.time for e in opens}
     assert all("Value-Area fade" not in (e.position.order.signal.reason or "")
                for e in opens)
@@ -257,12 +258,15 @@ def test_fills_within_one_tick_of_signal_bar_close():
             f"exit fill at {t} deviates {exit_dev} > tick {TICK_SIZE}"
         )
 
-    # spot-check the approved fill maps to its exact signal bar close; the
+    # spot-check the approved fills map to their exact signal bar close; the
     # VA-fade (t340) is rejected by the min-stop guard, so it never fills
-    assert len(opens) == 1
+    assert len(opens) == 2
     assert opens[0].position.open_price == bars[AGGRESSION_BAR].close == 100.6
+    assert opens[1].position.open_price == bars["t184"].close == 105.0
     assert closes[0].fill.close_price == bars[closes[0].time].close
     assert closes[0].fill.position.open_time == AGGRESSION_BAR
+    assert closes[1].fill.close_price == bars[closes[1].time].close
+    assert closes[1].fill.position.open_time == "t184"
 
 
 # ---------------------------------------------------------------------------
@@ -308,9 +312,9 @@ def test_ws_contract_carries_auction_and_quant_decision_on_approved_bars():
             assert ws["auction"]["tripleASignal"] == "LONG"
             assert ws["quantDecision"]["reason"] == "Triple-A"
             assert ws["quantDecision"]["signal"]["entry"] == 100.6
-    # only the Triple-A bar is approved; the VA-fade (t340) is rejected by the
+    # 2 Triple-A bars are approved; the VA-fade (t340) is rejected by the
     # min-stop guard and never surfaces as an approved WS decision
-    assert checks == 1
+    assert checks == 2
 
 
 def test_replay_is_deterministic():

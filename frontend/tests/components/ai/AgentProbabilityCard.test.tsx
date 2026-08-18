@@ -5,7 +5,7 @@ import { AgentDecision } from '../../../types';
 
 const decision: AgentDecision = {
   direction: 'LONG',
-  probability: 0.72,
+  modelLabel: 'Triple-A',
   regime: 'TRENDING',
   timing: 'ENTER_NOW',
   sizeFraction: 0.5,
@@ -19,10 +19,10 @@ describe('AgentProbabilityCard', () => {
     expect(screen.getByText(/Waiting for probability engine/i)).toBeInTheDocument();
   });
 
-  it('renders direction, probability, and timing/size from the decision', () => {
+  it('renders direction, model, and timing/size from the decision', () => {
     render(<AgentProbabilityCard agentDecision={decision} isSecondDrive={undefined} />);
     expect(screen.getByText(/BUY \(Initiative Trend\)/i)).toBeInTheDocument();
-    expect(screen.getByText('72.0%')).toBeInTheDocument();
+    expect(screen.getByText('Triple-A')).toBeInTheDocument();
     expect(screen.getByText(/ENTER_NOW/i)).toBeInTheDocument();
     expect(screen.getByText('50.0%')).toBeInTheDocument();
   });

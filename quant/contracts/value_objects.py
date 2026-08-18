@@ -63,6 +63,48 @@ class OHLC:
             delta=to_d(delta),
         )
 
+    def to_float(self) -> "FloatOHLC":
+        """Convert Decimal OHLC to FloatOHLC for float-based analysis kernels."""
+        return FloatOHLC(
+            time=self.time,
+            open=float(self.open),
+            high=float(self.high),
+            low=float(self.low),
+            close=float(self.close),
+            volume=float(self.volume),
+            vwap=float(self.vwap),
+            taker_buy_volume=float(self.taker_buy_volume),
+            delta=float(self.delta),
+        )
+
+
+@dataclass(frozen=True)
+class FloatOHLC:
+    """Float-based candlestick for fast numeric calculations and analysis kernels."""
+
+    time: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    vwap: float = 0.0
+    taker_buy_volume: float = 0.0
+    delta: float = 0.0
+
+    def to_decimal(self) -> OHLC:
+        """Convert FloatOHLC to Decimal OHLC."""
+        return OHLC.create(
+            time=self.time,
+            open=self.open,
+            high=self.high,
+            low=self.low,
+            close=self.close,
+            volume=self.volume,
+            vwap=self.vwap,
+            taker_buy_volume=self.taker_buy_volume,
+            delta=self.delta,
+        )
 
 @dataclass(frozen=True)
 class OrderBookLevel:
@@ -98,6 +140,24 @@ class AggressivePrint:
     side: str  # "BUY" | "SELL"
     volume: float
     delta: float
+
+
+@dataclass(frozen=True)
+class ValueMigration:
+    """Session VA development between successive 15-minute windows.
+
+    Samples (POC, VAH, VAL) once per 15-minute window of the session clock and
+    reports the drift of the latest completed window vs the previous one — so
+    the ongoing development of the session value area is explicit (Fabio: value
+    migrates as the auction progresses; freezing it breaks LOCATION reads).
+    """
+
+    direction: str = "INSUFFICIENT"  # MIGRATING_UP / MIGRATING_DOWN / EXPANDING / CONTRACTING / FLAT
+    poc_drift: float = 0.0  # POC change vs previous window
+    vah_drift: float = 0.0  # VAH change vs previous window
+    val_drift: float = 0.0  # VAL change vs previous window
+    window_label: str = ""  # e.g. "09:15→09:30"
+    has_migration: bool = False  # False until two windows have closed
 
 
 @dataclass(frozen=True)
@@ -146,6 +206,9 @@ class AMTResult:
     ib_high: float = 0.0
     ib_low: float = 0.0
     ib_complete: bool = False
+    ib_poc: float = 0.0
+    ib_vah: float = 0.0
+    ib_val: float = 0.0
     prior_poc: float = 0.0
     prior_vah: float = 0.0
     prior_val: float = 0.0
@@ -175,6 +238,9 @@ class AMTResult:
     poc_vs_price: str = ""  # "ALIGNED" / "DIVERGENT" / ""
     lvn_play: dict | None = None
     ofi: float = 0.0  # Order Flow Imbalance from order book (-1 to +1)
+    # Depth-derived order book imbalance ([-1, 1], +1 = bid-heavy) from the
+    # live 5-level depth snapshot — gate 3's order-flow aggression (A3) input.
+    obi: float = 0.0
     # Developing Value Area (short lookback — adapts fast to large moves)
     dev_poc: float = 0.0
     dev_vah: float = 0.0
@@ -210,6 +276,8 @@ class AMTResult:
     underlying_price: float = 0.0
     # Fix 1: Option type for direction labeling (CALL/PUT/UNKNOWN)
     option_type: str = "UNKNOWN"
+    # Session VA development over successive 15-min windows (ValueMigration)
+    value_migration: ValueMigration = ValueMigration()
 
 
 # ---------------------------------------------------------------------------

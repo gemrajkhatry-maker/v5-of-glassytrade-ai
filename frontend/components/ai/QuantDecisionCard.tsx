@@ -1,60 +1,229 @@
 import React from 'react';
-import { Zap } from 'lucide-react';
+import { Zap, ShieldCheck, Clock, CheckCircle2, XCircle } from 'lucide-react';
 import { QuantDecisionAnalysis } from '../../types';
 
 interface QuantDecisionCardProps {
     quantDecision: QuantDecisionAnalysis | null;
 }
 
-/** PRIMARY decision card — renders the quant decision when present. */
+const formatReason = (reason?: string | null): string => {
+    if (!reason) return 'Scanning for 3A setup';
+    switch (reason) {
+        case 'NO_EDGE':
+            return 'Scanning for 3A Edge (Absorption / Aggression)';
+        case 'POSITION_COOLDOWN':
+            return 'Position Cooldown Active';
+        case 'SESSION_WARMUP':
+            return 'Session Warmup in Progress';
+        case 'SESSION_CLOSED':
+            return 'Market Session Closed';
+        case 'RISK_LIMIT':
+            return 'Daily Risk Limit Reached';
+        case 'PORTFOLIO_EXPOSURE':
+            return 'Max Portfolio Exposure Reached';
+        case 'WAITING':
+            return 'Waiting for 3A Trigger';
+        default:
+            return reason.replace(/_/g, ' ');
+    }
+};
+
+/** PRIMARY decision card — renders the quant decision with clean metrics and gate grid. */
 const QuantDecisionCard = React.memo<QuantDecisionCardProps>(({ quantDecision }) => {
     if (!quantDecision) return null;
 
+    const isApproved = quantDecision.approved && !!quantDecision.signal;
+    const isHalted = quantDecision.reason === 'HALTED';
+    const humanReason = formatReason(quantDecision.reason);
+    const gates = quantDecision.gateResults || [];
+    const passedGatesCount = gates.filter(g => g.passed).length;
+    const totalGatesCount = gates.length || 7;
+    const overallProgressPct = gates.length > 0 ? Math.round((passedGatesCount / totalGatesCount) * 100) : 0;
+
+    // Primary blocker string — first block reason or halt reason
+    const blockReasons: string[] = (quantDecision as any).blockReasons || [];
+    const primaryBlocker = isHalted
+        ? `HALTED: ${blockReasons[0] || 'session risk limit reached'}`
+        : !isApproved && blockReasons.length > 0
+        ? blockReasons[0]
+        : null;
+
+    const modelLabel: string = (quantDecision as any).modelLabel
+        || (quantDecision.signal as any)?.modelLabel
+        || '';
+
     return (
-        <div className={`p-3 rounded-md border ${quantDecision.approved ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-glassy-border-default bg-glassy-bg-elevated/30'}`}>
+        <div className={`p-3.5 rounded-xl border transition-all duration-200 ${
+            isHalted
+                ? 'border-rose-500/50 bg-rose-950/20 shadow-[0_0_16px_rgba(239,68,68,0.12)]'
+                : isApproved 
+                ? 'border-emerald-500/50 bg-emerald-950/20 shadow-[0_0_16px_rgba(16,185,129,0.15)]' 
+                : 'border-white/8 bg-slate-900/60 backdrop-blur-md'
+        }`}>
+
+            {/* 0. Top blocker banner — overrides all visual "enter" language */}
+            {primaryBlocker && (
+                <div className={`mb-2.5 px-2.5 py-1.5 rounded-lg border flex items-start gap-2 ${
+                    isHalted
+                        ? 'border-rose-500/40 bg-rose-900/30 text-rose-300'
+                        : 'border-amber-500/30 bg-amber-900/20 text-amber-300'
+                }`}>
+                    <span className={`mt-0.5 w-1.5 h-1.5 rounded-full shrink-0 ${
+                        isHalted ? 'bg-rose-400 animate-pulse' : 'bg-amber-400'
+                    }`} />
+                    <span className="text-[9px] font-mono font-bold uppercase leading-tight tracking-wide">
+                        {primaryBlocker}
+                    </span>
+                </div>
+            )}
+            {/* 1. Header Bar */}
             <div className="flex items-center justify-between">
-                <span className="text-[9px] font-bold uppercase tracking-widest text-glassy-text-secondary flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-glassy-ai-primary" /> Quant Decision
+                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-300 flex items-center gap-1.5">
+                    <Zap className={`w-3.5 h-3.5 ${isApproved ? 'text-emerald-400 fill-emerald-400/20' : isHalted ? 'text-rose-400' : 'text-amber-400/80'}`} /> 
+                    Quant Decision
                 </span>
-                <span className={`px-1.5 py-0.5 rounded-sm text-[8px] font-bold tracking-widest uppercase ${quantDecision.approved ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/10 text-white/50'}`}>
-                    {quantDecision.approved ? 'Approved' : 'Standing By'}
+                <span className={`px-2 py-0.5 rounded text-[8px] font-bold tracking-wider uppercase border ${
+                    isHalted
+                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                        : isApproved 
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-[0_0_8px_rgba(52,211,153,0.3)]' 
+                        : 'bg-slate-800 text-slate-400 border-white/10'
+                }`}>
+                    {isHalted ? 'Halted' : isApproved ? 'Approved' : 'Standing By'}
                 </span>
             </div>
-            {quantDecision.signal ? (
-                <div className="mt-2">
-                    <div className={`text-sm font-bold ${quantDecision.signal.type === 'LONG' ? 'text-glassy-bull-primary' : quantDecision.signal.type === 'SHORT' ? 'text-glassy-bear-primary' : 'text-glassy-text-primary'}`}>
-                        {quantDecision.signal.type} @ {quantDecision.signal.entry.toFixed(2)}
-                        <span className="text-[10px] font-mono text-glassy-text-tertiary ml-2">RR {quantDecision.signal.rr.toFixed(1)}</span>
+
+            {/* 2. Main Signal or Standing-By Status */}
+            {isApproved && quantDecision.signal ? (
+                <div className="mt-2.5 pt-2 border-t border-emerald-500/20">
+                    <div className="flex items-center justify-between">
+                        <div className={`text-base font-extrabold tracking-wide ${
+                            quantDecision.signal.type === 'LONG' ? 'text-emerald-400' : 'text-rose-400'
+                        }`}>
+                            {quantDecision.signal.type} @ {quantDecision.signal.entry.toFixed(2)}
+                        </div>
+                        <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-mono text-slate-300 font-bold">
+                            RR {quantDecision.signal.rr.toFixed(1)}
+                        </span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 mt-2 text-[9px] font-mono">
-                        <div><div className="text-glassy-text-tertiary">SL</div><div className="font-bold text-glassy-bear-primary">{quantDecision.signal.sl.toFixed(2)}</div></div>
-                        <div><div className="text-glassy-text-tertiary">TP</div><div className="font-bold text-glassy-bull-primary">{quantDecision.signal.tp.toFixed(2)}</div></div>
-                        <div><div className="text-glassy-text-tertiary">Confidence</div><div className="font-bold text-glassy-text-primary">{(quantDecision.signal.confidence * 100).toFixed(0)}%</div></div>
+
+                    {/* Metric Grid — SL / TP / Model */}
+                    <div className="mt-2 bg-black/20 p-2.5 rounded-lg border border-white/5">
+                        <div className="grid grid-cols-3 gap-2 text-[10px] font-mono">
+                            <div>
+                                <div className="text-[8px] uppercase tracking-wider text-slate-400">SL</div>
+                                <div className="font-bold text-rose-400">{quantDecision.signal.sl.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div className="text-[8px] uppercase tracking-wider text-slate-400">TP</div>
+                                <div className="font-bold text-emerald-400">{quantDecision.signal.tp.toFixed(2)}</div>
+                            </div>
+                            <div>
+                                <div className="text-[8px] uppercase tracking-wider text-slate-400">Model</div>
+                                <div className="font-bold text-slate-200 text-[8px] truncate" title={modelLabel}>
+                                    {modelLabel || '—'}
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             ) : (
-                <div className="mt-2 text-[10px] font-mono text-glassy-text-tertiary">
-                    {quantDecision.reason || quantDecision.phase || 'No active signal'}
+                <div className="mt-2.5 pt-2 border-t border-white/5">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-300 min-w-0">
+                            <Clock className="w-3.5 h-3.5 text-amber-400/80 shrink-0" />
+                            <span className="truncate">{humanReason}</span>
+                        </div>
+                        {quantDecision.reason && (
+                            <span className="text-[8px] font-mono text-slate-500 uppercase px-1 py-0.5 rounded bg-white/5 shrink-0">
+                                {quantDecision.reason}
+                            </span>
+                        )}
+                    </div>
                 </div>
             )}
+
+            {/* 3. Phase Details */}
             {quantDecision.phase && (
-                <div className="mt-2 text-[9px] text-glassy-text-tertiary">
-                    <span className="uppercase tracking-widest">Phase: {quantDecision.phase}</span>
-                    {quantDecision.reason && !quantDecision.signal && <span className="ml-2">{quantDecision.reason}</span>}
+                <div className="mt-2 text-[9px] font-mono text-slate-400 flex items-center gap-1.5">
+                    <span className="text-slate-500 uppercase tracking-wider">Phase: {quantDecision.phase}</span>
+                    {quantDecision.reason && isApproved && (
+                        <span className="text-slate-400 font-sans">· {quantDecision.reason}</span>
+                    )}
                 </div>
             )}
-            {quantDecision.gateResults && quantDecision.gateResults.length > 0 && (
-                <div className="mt-2.5">
-                    <div className="text-[9px] uppercase tracking-widest text-glassy-text-tertiary mb-1.5">Triple-A Gates</div>
-                    <div className="grid grid-cols-5 gap-1">
-                        {quantDecision.gateResults.map(g => (
-                            <div
+
+            {/* 4. Triple-A Gates */}
+            {gates.length > 0 && (
+                <div className="mt-3 pt-2.5 border-t border-white/5 space-y-2">
+                    {/* Overall Progress Header */}
+                    <div className="space-y-1">
+                        <div className="flex items-center justify-between text-[9px]">
+                            <span className="font-bold uppercase tracking-widest text-slate-300 flex items-center gap-1">
+                                <ShieldCheck className="w-3.5 h-3.5 text-slate-400" /> Triple-A Gates
+                            </span>
+                            <span className="font-mono font-bold text-slate-300">
+                                {passedGatesCount}/{totalGatesCount} Passed ({overallProgressPct}%)
+                            </span>
+                        </div>
+                        {/* Overall Progress Bar */}
+                        <div className="w-full bg-slate-800/80 rounded-full h-2 overflow-hidden p-0.5 border border-white/5">
+                            <div 
+                                className={`h-full rounded-full transition-all duration-300 ${
+                                    isApproved 
+                                        ? 'bg-gradient-to-r from-emerald-500 to-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]' 
+                                        : 'bg-gradient-to-r from-amber-500/70 to-emerald-500/70'
+                                }`}
+                                style={{ width: `${overallProgressPct}%` }}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Vertical Gate Rows */}
+                    <div className="space-y-1.5 pt-1">
+                        {gates.map(g => (
+                            <div 
                                 key={g.gate}
                                 title={`Gate ${g.gate}${g.name ? ` (${g.name})` : ''}: ${g.reason || (g.passed ? 'passed' : 'blocked')}`}
-                                className={`rounded-sm border px-1 py-1 text-center ${g.passed ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-400' : 'border-rose-500/40 bg-rose-500/10 text-rose-400'}`}
+                                className={`p-1.5 rounded-lg border transition-colors ${
+                                    g.passed 
+                                        ? 'border-emerald-500/20 bg-emerald-950/15' 
+                                        : 'border-white/5 bg-slate-800/30'
+                                }`}
                             >
-                                <div className="text-[7px] font-bold leading-none">{g.name ?? `G${g.gate}`}</div>
-                                <div className="text-[9px] font-bold leading-tight mt-0.5">{g.passed ? 'PASS' : 'BLOCK'}</div>
+                                <div className="flex items-center justify-between text-[9px]">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                        {g.passed ? (
+                                            <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                                        ) : (
+                                            <XCircle className="w-3 h-3 text-slate-500 shrink-0" />
+                                        )}
+                                        <span className={`font-mono font-semibold truncate ${g.passed ? 'text-slate-200' : 'text-slate-400'}`}>
+                                            {g.name ?? `Gate ${g.gate}`}
+                                        </span>
+                                    </div>
+                                    <span className={`px-1.5 py-0.2 rounded text-[8px] font-black font-mono leading-tight tracking-wider uppercase border ${
+                                        g.passed 
+                                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' 
+                                            : 'bg-slate-800 text-slate-400 border-slate-700/50'
+                                    }`}>
+                                        {g.passed ? 'PASS' : 'BLOCK'}
+                                    </span>
+                                </div>
+
+                                {/* Gate Mini Progress Bar & Reason */}
+                                <div className="mt-1 flex items-center gap-2">
+                                    <div className="flex-1 bg-slate-800/60 rounded-full h-1 overflow-hidden">
+                                        <div 
+                                            className={`h-full rounded-full ${g.passed ? 'bg-emerald-400 w-full' : 'bg-slate-600 w-1/5'}`}
+                                        />
+                                    </div>
+                                    {g.reason && (
+                                        <span className="text-[7.5px] font-mono text-slate-500 truncate max-w-[120px]">
+                                            {g.reason}
+                                        </span>
+                                    )}
+                                </div>
                             </div>
                         ))}
                     </div>
@@ -65,5 +234,4 @@ const QuantDecisionCard = React.memo<QuantDecisionCardProps>(({ quantDecision })
 });
 
 QuantDecisionCard.displayName = 'QuantDecisionCard';
-
 export default QuantDecisionCard;

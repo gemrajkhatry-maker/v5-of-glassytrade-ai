@@ -965,6 +965,11 @@ class DhanAuthProvider(IAuthProvider):
     @classmethod
     def _save_token_to_env(cls, access_token: str) -> None:
         """Save access token to .env file for reuse across restarts."""
+        # Never overwrite .env during unit tests or with dummy tokens
+        if os.environ.get("PYTEST_CURRENT_TEST") or not access_token or not access_token.startswith("eyJ"):
+            logger.debug("Skipping .env token persistence (testing or non-JWT token)")
+            return
+
         try:
             from dotenv import set_key, load_dotenv
         except ImportError:

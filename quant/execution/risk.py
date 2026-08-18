@@ -1,12 +1,14 @@
 import json
 import threading
 from dataclasses import dataclass
-from datetime import date as _date_type
+from datetime import date as _date_type, datetime, timezone, timedelta
 from typing import Any
+
+_IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def _today() -> str:
-    return _date_type.today().isoformat()
+    return datetime.now(_IST).date().isoformat()
 
 
 @dataclass(frozen=True)
@@ -16,29 +18,38 @@ class RiskState:
     halted: bool
     halt_reason: str
     risk_per_trade_pct: float
+    trades_today: int = 0
+    equity: float = 1_000_000.0
+    cushion_tier: str = "CONSERVATIVE"
 
 
 class SessionRisk:
     def __init__(self, starting_equity: float = 1_000_000.0,
-                 base_risk_pct: float = 0.01,
-                 max_daily_loss_pct: float = 0.03,
+                 base_risk_pct: float = 0.005,          # 0.5% risk per trade (was 1%)
+                 max_daily_loss_pct: float = 0.02,       # 2% max daily loss (was 3%)
                  max_consecutive_losses: int = 3,
+                 max_trades_per_session: int = 6,        # hard cap: max 6 trades/day
                  *,
                  storage: Any | None = None,
                  symbol: str = "",
                  date: str | None = None) -> None:
+        self._starting_equity = starting_equity
         self._equity = starting_equity
         self._base_risk_pct = base_risk_pct
         self._max_daily_loss_pct = max_daily_loss_pct
         self._max_consecutive_losses = max_consecutive_losses
+        self._max_trades_per_session = max_trades_per_session
         self._daily_pnl = 0.0
         self._consecutive_losses = 0
+        self._consecutive_wins = 0
+        self._trades_today = 0
         self._halted = False
         self._halt_reason = ""
         self._lock = threading.RLock()  # RLock: record_trade calls state() under the lock
         self._storage = storage
         self._symbol = symbol
-        self._date = date if date is not None else _today()
+        # Always use today's date — never inherit a None date key
+        self._date = date if (date and date != "None") else _today()
         self._load()
 
     def _key(self) -> str:
@@ -52,8 +63,12 @@ class SessionRisk:
             data = json.loads(raw)
             self._daily_pnl = float(data["daily_pnl"])
             self._consecutive_losses = int(data["consecutive_losses"])
+            self._consecutive_wins = int(data.get("consecutive_wins", 0))
+            self._trades_today = int(data.get("trades_today", 0))
             self._halted = bool(data["halted"])
             self._halt_reason = str(data["halt_reason"])
+            # Restore equity: starting capital adjusted by daily P&L
+            self._equity = self._starting_equity + self._daily_pnl
         except Exception:
             pass  # corrupt/absent store must not inherit a phantom halt
 
@@ -63,8 +78,11 @@ class SessionRisk:
         self._storage.kv_set(self._key(), {
             "daily_pnl": self._daily_pnl,
             "consecutive_losses": self._consecutive_losses,
+            "consecutive_wins": self._consecutive_wins,
+            "trades_today": self._trades_today,
             "halted": self._halted,
             "halt_reason": self._halt_reason,
+            "equity": self._equity,
         })
 
     def record_trade(self, pnl: float) -> RiskState:
@@ -72,24 +90,46 @@ class SessionRisk:
             if self._halted:
                 return self.state()
             self._daily_pnl += pnl
+            self._trades_today += 1
+            # Update equity after each trade so next sizing uses real capital
+            self._equity = self._starting_equity + self._daily_pnl
+
             if pnl > 0.0:
                 self._consecutive_losses = 0
+                self._consecutive_wins += 1
             else:
                 self._consecutive_losses += 1
-            if self._daily_pnl <= -self._max_daily_loss_pct * self._equity:
+                self._consecutive_wins = 0
+
+            # Halt checks
+            if self._daily_pnl <= -self._max_daily_loss_pct * self._starting_equity:
                 self._halted = True
                 self._halt_reason = "daily loss limit reached"
             elif self._consecutive_losses >= self._max_consecutive_losses:
                 self._halted = True
                 self._halt_reason = "max consecutive losses reached"
+            elif self._trades_today >= self._max_trades_per_session:
+                self._halted = True
+                self._halt_reason = f"max trades/session reached ({self._max_trades_per_session})"
+
             self._save()
             return self.state()
+
+    def can_trade(self) -> tuple[bool, str]:
+        """Return (allowed, reason). False means do not enter a new position."""
+        with self._lock:
+            if self._halted:
+                return False, self._halt_reason
+            if self._trades_today >= self._max_trades_per_session:
+                return False, f"max trades/session reached ({self._max_trades_per_session})"
+            return True, ""
 
     def position_size(self, entry: float, sl: float) -> float:
         if entry == sl:
             return 0.0
-        risk_amount = self._equity * self._risk_per_trade_pct()
-        return risk_amount / abs(entry - sl)
+        with self._lock:
+            risk_amount = self._equity * self._risk_per_trade_pct()
+            return risk_amount / abs(entry - sl)
 
     def state(self) -> RiskState:
         with self._lock:
@@ -99,9 +139,43 @@ class SessionRisk:
                 halted=self._halted,
                 halt_reason=self._halt_reason,
                 risk_per_trade_pct=self._risk_per_trade_pct(),
+                trades_today=self._trades_today,
+                equity=self._equity,
+                cushion_tier=self._cushion_tier(),
             )
 
+    def _cushion_tier(self) -> str:
+        """Determine current risk tier based on session performance.
+        
+        Returns: 'CONSERVATIVE' | 'CUSHION' | 'MOMENTUM'
+        """
+        # 2+ consecutive losses → back to conservative
+        if self._consecutive_losses >= 2:
+            return "CONSERVATIVE"
+        # First 1-2 trades of the day → conservative
+        if self._trades_today < 2:
+            return "CONSERVATIVE"
+        # 2+ consecutive wins → momentum
+        if self._consecutive_wins >= 2:
+            return "MOMENTUM"
+        # Session profit positive → cushion
+        if self._daily_pnl > 0:
+            return "CUSHION"
+        return "CONSERVATIVE"
+
     def _risk_per_trade_pct(self) -> float:
-        floor = self._base_risk_pct * 0.25
-        shrunk = self._base_risk_pct * (0.5 ** self._consecutive_losses)
-        return max(shrunk, floor)
+        """Spec §12.2 Cushioning & House Money Protocol.
+
+        CONSERVATIVE: first 1-2 trades OR 2+ consecutive losses → 0.25% base risk
+        CUSHION: session_pnl > 0 after 2+ trades → 0.35% + 40% of session profit
+        MOMENTUM: 2+ consecutive wins → 0.40% + 40% of session profit
+        """
+        tier = self._cushion_tier()
+        if tier == "CONSERVATIVE" or self._daily_pnl <= 0:
+            return 0.0025
+
+        base = 0.004 if tier == "MOMENTUM" else 0.0035
+        # Spec §12.2: Deploy 40% of earned cushion while ring-fencing core capital
+        cushion_bonus = (0.40 * self._daily_pnl) / self._equity if self._equity > 0 else 0.0
+        return base + cushion_bonus
+

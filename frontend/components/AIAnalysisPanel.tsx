@@ -1,10 +1,9 @@
 import React, { useMemo } from 'react';
-import { AMTAnalysis, Portfolio, RiskState, DecisionHistoryEntry, AgentDecision, OrderBook, QuantDecisionAnalysis } from '../types';
-import { Zap, Clock } from 'lucide-react';
+import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook, QuantDecisionAnalysis, AuctionAnalysis } from '../types';
+import { Zap } from 'lucide-react';
 import {
     EquityPanel,
     RiskStateDisplay,
-    DecisionHistoryPanel,
     QuantDecisionCard,
     MarketStateCard,
     LocationCard,
@@ -15,194 +14,182 @@ import {
     AbsorptionCard,
     VwapContextCard,
     AgentProbabilityCard,
+    OverseerCard,
     TradePlanCard,
     RecentExitsCard,
     DiagnosticsPanel,
+    VaFreezeCard,
+    ThreeAIndicator,
 } from './ai';
 
 interface AIAnalysisPanelProps {
+    analysis?: GenAIAnalysis | null;
     amtResult: AMTAnalysis | null;
     portfolio: Portfolio;
     riskState?: RiskState | null;
     agentDecision?: AgentDecision | null;
-    decisionHistory?: DecisionHistoryEntry[];
+    llmHistory?: LLMHistoryEntry[];
     orderBook?: OrderBook | null;
+    overseerAction?: string;
+    overseerReason?: string;
     quantDecision?: QuantDecisionAnalysis | null;
+    auction?: AuctionAnalysis | null;
     symbol?: string;
     data?: any[];
 }
 
-/**
- * Wraps the legacy AMT-driven analysis body. When a quant decision is present
- * the legacy body is the SECONDARY view: collapsed into a grayed details block.
- * Without a quant decision the body renders unwrapped (current behaviour).
- */
-const LegacyAmtWrapper: React.FC<{
-    quantDecision: QuantDecisionAnalysis | null | undefined;
-    children: React.ReactNode;
-}> = ({ quantDecision, children }) => {
-    if (!quantDecision) return <>{children}</>;
-    return (
-        <details className="rounded-md border border-glassy-border-subtle bg-glassy-bg-elevated/30">
-            <summary className="list-none flex items-center justify-between px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-glassy-text-tertiary cursor-pointer select-none">
-                <span className="flex items-center gap-1.5">
-                    <Clock className="w-3 h-3" /> Legacy AMT Analysis
-                </span>
-                <span className="text-glassy-text-disabled">Expand</span>
-            </summary>
-            <div className="opacity-60 px-2 pb-2">{children}</div>
-        </details>
-    );
-};
-
-const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({ amtResult, portfolio, riskState, agentDecision, decisionHistory = [], orderBook, quantDecision, symbol, data = [] }) => {
-    // Determine current best price proxy (LTP) with 3-tier fallback chain.
-    // Tier 1: Order book mid-price (most accurate, requires depth data)
-    // Tier 2: Last close price from history
-    // Tier 3: Session VWAP from AMT analysis
-    // Tier 4: 0 (no data available — location section shows "Building...")
+const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
+    analysis, amtResult, portfolio, riskState, agentDecision,
+    orderBook, overseerAction, overseerReason, quantDecision, auction, symbol, data = []
+}) => {
     const currentLtp = React.useMemo(() => {
-        if (orderBook?.bids?.[0]?.price > 0 && orderBook?.asks?.[0]?.price > 0) {
-            return (orderBook.bids[0].price + orderBook.asks[0].price) / 2;
+        const bestBid = orderBook?.bids?.[0]?.price ?? 0;
+        const bestAsk = orderBook?.asks?.[0]?.price ?? 0;
+        if (bestBid > 0 && bestAsk > 0) {
+            return (bestBid + bestAsk) / 2;
         }
-        if (data.length > 0) {
-            return data[data.length - 1].close;
-        }
-        if (amtResult?.sessionVwap > 0) {
-            return amtResult.sessionVwap;
-        }
-        return 0;
+        if (data.length > 0) return data[data.length - 1].close;
+        return amtResult?.sessionVwap && amtResult.sessionVwap > 0 ? amtResult.sessionVwap : 0;
     }, [orderBook, amtResult?.sessionVwap, data]);
 
-    // Memoize open PnL calculation (used 3 times in render)
+    const effectiveAnalysis = useMemo<GenAIAnalysis>(() => {
+        if (analysis) return analysis;
+        return {
+            direction: 'FLAT',
+            rationale: 'Monitoring market state and order flow. Waiting for Fabio Playbook setup.',
+            confidence: 'Low',
+            marketState: amtResult?.marketState || 'BALANCED',
+            aggression: `Score:${amtResult?.aggression?.toFixed(2) || '0.00'}`,
+            rawOutput: '',
+            inputPrompt: 'Deterministic Quantitative Analysis',
+        };
+    }, [analysis, amtResult?.marketState, amtResult?.aggression]);
+
+    const displayAnalysis = useMemo(() => ({
+        ...effectiveAnalysis,
+        marketState: amtResult?.marketState || effectiveAnalysis.marketState || 'BALANCED',
+        aggression: effectiveAnalysis.aggression && effectiveAnalysis.aggression !== ''
+            ? effectiveAnalysis.aggression
+            : `Score:${amtResult?.aggression?.toFixed(2) || '0.00'}`,
+    }), [effectiveAnalysis, amtResult?.marketState, amtResult?.aggression]);
+
     const openPnl = useMemo(() =>
-        portfolio.positions.reduce((acc, p) => acc + p.pnl, 0),
-        [portfolio.positions]
+        portfolio.positions.reduce((acc, p) => {
+            if (p.pnl !== undefined && p.pnl !== 0) return acc + p.pnl;
+            const price = currentLtp > 0 ? currentLtp : p.entryPrice;
+            const size = p.size;
+            return acc + ((price - p.entryPrice) * size);
+        }, 0),
+        [portfolio.positions, currentLtp]
     );
 
-    // Aggression from live AMT data (deterministic)
-    const aggScore = amtResult?.aggression ?? 0;
+    const aggScore = useMemo(() => {
+        const liveAggression = amtResult?.aggression ?? 0;
+        return typeof liveAggression === 'number'
+            ? liveAggression
+            : parseFloat(displayAnalysis.aggression?.split(':')[1] || '0.00');
+    }, [amtResult?.aggression, displayAnalysis.aggression]);
 
-    // Per-symbol delta score from backend
-    const deltaScore = amtResult?.deltaNormalizedOption ?? 0;
+    const deltaScore = useMemo(() => amtResult?.deltaNormalizedOption ?? 0, [amtResult?.deltaNormalizedOption]);
 
-    // Market state from AMT (real-time)
-    const liveMarketState = amtResult?.marketState || 'BALANCED';
+    const liveMarketState = amtResult?.marketState || displayAnalysis.marketState || 'BALANCED';
     const isImbalanced = liveMarketState === 'IMBALANCED';
-
-    // Determine Status Color based on market state
-    const statusColor = isImbalanced ? "text-orange-400" : "text-blue-300";
-    const statusBg = isImbalanced ? "bg-orange-500/20" : "bg-blue-500/20";
-
-    // Location Data
-    const poc = useMemo(() => amtResult?.poc?.toFixed(2) || "---", [amtResult?.poc]);
-
-    // 1. Fallback: If both are missing -> Initializing
-    if (!amtResult && !quantDecision) {
-        return (
-            <div className="bg-glassy-bg-tertiary border border-glassy-border-default rounded-md p-4 flex flex-col gap-4 font-sans text-glassy-text-secondary shadow-xl opacity-70">
-                <div className="flex justify-between items-start">
-                    <div className="flex items-center gap-2">
-                        <Zap className="w-5 h-5 text-glassy-text-disabled" />
-                        <div>
-                            <h2 className="text-sm font-bold tracking-wider text-glassy-text-primary uppercase">Fabio Playbook</h2>
-                            <div className="text-[9px] text-glassy-text-disabled font-mono tracking-widest uppercase">Connecting to feed...</div>
-                        </div>
-                    </div>
-                </div>
-                <div className="h-32 flex items-center justify-center">
-                    <div className="text-xs text-glassy-text-disabled animate-pulse">Waiting for Market Data...</div>
-                </div>
-            </div>
-        );
-    }
+    const statusColor = isImbalanced ? 'text-orange-400' : 'text-blue-300';
+    const statusBg   = isImbalanced ? 'bg-orange-500/20' : 'bg-blue-500/20';
+    const poc = useMemo(() => amtResult?.poc?.toFixed(2) || '---', [amtResult?.poc]);
 
     return (
-        <div className="bg-glassy-bg-tertiary border border-glassy-border-default rounded-md p-4 flex flex-col gap-4 font-sans text-glassy-text-secondary shadow-xl">
+        <div className="flex flex-col h-full bg-[#0c0d0f] border border-white/8 rounded-xl overflow-hidden shadow-2xl font-sans text-slate-300">
 
-            {/* 0. Header (Sticky Top Bar) */}
-            <div className="sticky top-0 z-20 bg-glassy-bg-tertiary/95 backdrop-blur-xl pb-3 mb-2 border-b border-glassy-border-default">
-                <div className="flex justify-between items-start mb-3 pt-2">
-                    <div className="flex items-center gap-2">
-                        <Zap className="w-5 h-5 text-glassy-ai-primary fill-glassy-ai-primary/20" />
+            {/* ── Sticky Header ── */}
+            <div className="sticky top-0 z-20 bg-[#0c0d0f]/97 backdrop-blur-xl border-b border-white/8 px-4 pt-3 pb-2 space-y-2.5">
+
+                {/* Title row */}
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-lg bg-emerald-500/15 border border-emerald-500/25 flex items-center justify-center">
+                            <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                        </div>
                         <div>
-                            <h2 className="text-sm font-bold tracking-wider text-glassy-text-primary uppercase flex items-center gap-2">
+                            <div className="text-[11px] font-extrabold tracking-[0.12em] text-white uppercase leading-none">
                                 Fabio Playbook
-                                <span className="px-1.5 py-0.5 bg-glassy-neutral-cool/20 rounded-sm border border-glassy-neutral-cool/30 text-[8px] text-glassy-neutral-cool uppercase tracking-widest leading-none">
-                                    {portfolio.leverage}x
-                                </span>
-                            </h2>
-                            <div className="text-[9px] text-glassy-text-tertiary font-mono tracking-wider uppercase">Execution Engine</div>
+                            </div>
+                            <div className="text-[8.5px] text-slate-500 font-mono tracking-widest uppercase mt-0.5">
+                                AMT · Value Area 40%
+                            </div>
                         </div>
                     </div>
+                    <ThreeAIndicator amt={amtResult} />
                 </div>
 
-                {/* Equity Panel (Header) */}
+                {/* Source attribution — Structure source vs Execution source */}
+                {symbol && (
+                    <div className="flex items-center gap-1.5 text-[8px] font-mono text-slate-500 truncate">
+                        <span className="text-slate-600 uppercase tracking-widest">Struct:</span>
+                        <span className="text-slate-400">{symbol.split(' ')[0]} FUT</span>
+                        <span className="text-slate-700 mx-0.5">·</span>
+                        <span className="text-slate-600 uppercase tracking-widest">Exec:</span>
+                        <span className="text-slate-400 truncate">{symbol}</span>
+                    </div>
+                )}
+
+                {/* Equity */}
                 <EquityPanel portfolio={portfolio} openPnl={openPnl} />
 
-                {/* Risk State Warning */}
+                {/* Risk alert */}
                 <RiskStateDisplay riskState={riskState} />
             </div>
 
-            {/* 00. QUANT DECISION — PRIMARY */}
-            <QuantDecisionCard quantDecision={quantDecision} />
+            {/* ── Scrollable body ── */}
+            <div className="flex-1 overflow-y-auto overscroll-contain px-3 py-3 space-y-3">
+                <QuantDecisionCard quantDecision={quantDecision} />
+                
+                {/* Market State & Location */}
+                <MarketStateCard
+                    marketState={liveMarketState}
+                    isImbalanced={isImbalanced}
+                    statusColor={statusColor}
+                    statusBg={statusBg}
+                    hasDisplacement={amtResult?.hasDisplacement}
+                    legPoc={amtResult?.legPoc}
+                    legVah={amtResult?.legVah}
+                    legVal={amtResult?.legVal}
+                />
+                <AggressionCard deltaScore={deltaScore} aggScore={aggScore} />
+                <LocationCard currentLtp={currentLtp} amtResult={amtResult} poc={poc} />
+                
+                {/* Auction Context */}
+                <VaFreezeCard auction={auction} />
+                <AbsorptionCard amtResult={amtResult} />
+                <LvnPlayCard lvnPlay={amtResult?.lvnPlay} />
 
-            <LegacyAmtWrapper quantDecision={quantDecision}>
+                {/* Trade Management */}
+                <OverseerCard
+                    overseerAction={overseerAction}
+                    overseerReason={overseerReason}
+                    hasPositions={portfolio.positions.length > 0}
+                />
+                <TradePlanCard positions={portfolio.positions} />
+                <RecentExitsCard closedTrades={portfolio.closedTrades} />
 
-            {/* 01. STATE */}
-            <MarketStateCard
-                marketState={liveMarketState}
-                isImbalanced={isImbalanced}
-                statusColor={statusColor}
-                statusBg={statusBg}
-                hasDisplacement={amtResult?.hasDisplacement}
-                legPoc={amtResult?.legPoc}
-                legVah={amtResult?.legVah}
-                legVal={amtResult?.legVal}
-            />
-
-            {/* 02. LOCATION */}
-            <LocationCard currentLtp={currentLtp} amtResult={amtResult} poc={poc} />
-
-            {/* 03. AGGRESSION */}
-            <AggressionCard deltaScore={deltaScore} aggScore={aggScore} />
-
-            {/* 03b. MARKET METRICS — Verification Bars */}
-            <OrderFlowCard amtResult={amtResult} symbol={symbol} orderBook={orderBook} />
-
-            {/* 03d. INITIAL BALANCE + BREAKS */}
-            <InitialBalanceCard amtResult={amtResult} currentLtp={currentLtp} />
-
-            {/* 03e. LVN VELOCITY PLAY */}
-            <LvnPlayCard lvnPlay={amtResult?.lvnPlay} />
-
-            {/* Items 3.16-3.17: Absorption & Large Print Detection */}
-            <AbsorptionCard amtResult={amtResult} />
-
-            {/* 03f. VWAP + PRIOR DAY */}
-            <VwapContextCard amtResult={amtResult} currentLtp={currentLtp} />
-
-            {/* 04. PROBABILITY ENGINE */}
-            <AgentProbabilityCard agentDecision={agentDecision} isSecondDrive={amtResult?.isSecondDrive} />
-
-            {/* 04c. TRADE PLAN — Open Positions with SL/TP/Trail */}
-            <TradePlanCard positions={portfolio.positions} />
-
-            {/* Recent Closed Trades */}
-            <RecentExitsCard closedTrades={portfolio.closedTrades} />
-
-            {/* DIAGNOSTICS TIER — collapsed by default */}
-            <DiagnosticsPanel amtResult={amtResult} currentLtp={currentLtp} agentDecision={agentDecision} />
-
-            </LegacyAmtWrapper>
-
-            {/* 06. DECISION HISTORY */}
-            <DecisionHistoryPanel decisionHistory={decisionHistory} />
-
+                {/* Advanced Diagnostics (collapsed by default) */}
+                <details className="group">
+                    <summary className="cursor-pointer select-none list-none flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-white/5 bg-white/3 hover:bg-white/5 transition-colors">
+                        <span className="text-[9px] font-mono font-bold uppercase tracking-wider text-slate-500 group-open:text-slate-300">
+                            ▶ Advanced Diagnostics
+                        </span>
+                    </summary>
+                    <div className="mt-2 space-y-3">
+                        <OrderFlowCard amtResult={amtResult} symbol={symbol} orderBook={orderBook} />
+                        <InitialBalanceCard amtResult={amtResult} currentLtp={currentLtp} />
+                        <VwapContextCard amtResult={amtResult} currentLtp={currentLtp} />
+                        <AgentProbabilityCard agentDecision={agentDecision} isSecondDrive={amtResult?.isSecondDrive} />
+                        <DiagnosticsPanel amtResult={amtResult} currentLtp={currentLtp} agentDecision={agentDecision} />
+                    </div>
+                </details>
+            </div>
         </div>
     );
 };
 
-// Wrap in React.memo to avoid re-renders when parent state changes
-// but AIAnalysisPanel props have not changed.
 export const AIAnalysisPanel = React.memo(AIAnalysisPanelInner);

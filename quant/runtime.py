@@ -9,6 +9,7 @@ Only imports ``quant.*`` and stdlib — zero backend/ imports.
 """
 
 from __future__ import annotations
+from quant.contracts.enums import MarketState
 
 import logging
 import os
@@ -63,8 +64,8 @@ _DETERMINISTIC_CONVICTION = 0.7
 _UNDERLYING_WARNED = False
 # Minimum closed bars (live + seeded history) before the engine may decide.
 # The analysis kernel needs enough bars for a meaningful POC/VA/VWAP profile;
-# the AMT/decision design pins this at > 15 bars (75 minutes of 5m candles),
-# which also keeps entries out of the opening-noise window.
+# the AMT/decision design pins this at > 15 bars, which also keeps entries
+# out of the opening-noise window (15 minutes at the default 1m timeframe).
 _WARMUP_BARS = 15
 
 # ---------------------------------------------------------------------------
@@ -148,7 +149,13 @@ class QuantEngine:
         # Session market for the Fabio phase gates: NSE closes 15:30, MCX
         # trades until 23:30 — a hardcoded NSE table would block every MCX
         # entry after 15:15 ("Session closed").
-        self._market = str(market or "NSE").upper()
+        m = str(market or "NSE").upper()
+        if m in ("NSE", "NFO", "NSE_FNO", "NSE_INDEX", "NSE_OPTIONS"):
+            self._market = "NSE"
+        elif m in ("MCX", "MCX_COMM", "MCX_COMMODITY", "MCX_OPTIONS"):
+            self._market = "MCX"
+        else:
+            self._market = m
         # Per-contract option expiry (e.g. "CRUDEOIL 17 AUG 7450 CALL" -> 17 Aug):
         # on the contract's own expiry day, MCX gates entries after 21:00 IST
         # (option buying stops at 22:00) and forces a square-off from 21:30 so
@@ -195,7 +202,11 @@ class QuantEngine:
         # SessionLevelStore now exposes kv_get/kv_set (its JSON file), so the
         # daily-loss budget survives restart through the same port that already
         # persists prior-session POC/VAH/VAL.
-        self._risk = SessionRisk(storage=self._session_levels, symbol=self.symbol, date=self._session_date)
+        # SessionRisk must be initialized with today's date so the storage key
+        # is "daily_risk:SYMBOL:2026-08-17" — NOT "daily_risk:SYMBOL:None".
+        # _session_date is always None at __init__ time (set on first bar), so
+        # we pass None here and SessionRisk._today() fills it correctly.
+        self._risk = SessionRisk(storage=self._session_levels, symbol=self.symbol)
         self._bus = EventBus()
         self._projector = StateProjector()
         self._journal = Journal(path=journal_path) if journal_path else None
@@ -205,12 +216,23 @@ class QuantEngine:
         self._trace: deque[Event] = deque(maxlen=10_000)
         self._position = None
         self._bar_index = 0
+        # Pyramiding state (spec §13.2): tracks add-on positions for the base trade.
+        # _pyramid_count: number of pyramid add-ons opened (max 2: P1 + P2).
+        # _pyramid_positions: list of open pyramid Position objects.
+        self._pyramid_count: int = 0
+        self._pyramid_positions: list = []
+        self._bar_index = 0
         # History bars seeded into the decision coordinator (see
         # _start_amt_seed) count toward the warmup requirement.
         self._warm_bars = 0
         self._entry_bar_index = 0
         self._subscribed = False
         self._emit_lock = threading.Lock()
+        # Post-trade cooldown: after a fill, the engine waits this many bars
+        # before evaluating a new entry. Prevents chasing consecutive signals.
+        # Default 5 bars = 5 minutes on a 1m timeframe (configurable).
+        self._cooldown_bars: int = 5
+        self._last_close_bar_index: int = -1  # bar index of most recent fill
 
     def run(self, max_steps: int | None = None) -> list[Event]:
         """Consume ticks from the gateway, drive the full pipeline, and return
@@ -286,22 +308,97 @@ class QuantEngine:
             self._manage_exit(state, bar)
 
     def _decide(self, state, bar) -> None:
+        # --- Guard 0: trade-count / risk halt check BEFORE building any context ---
+        can_trade, no_trade_reason = self._risk.can_trade()
+        if not can_trade:
+            logger.info(
+                "🚫 [BLOCKED] %s: %s (trades_today=%d)",
+                self.symbol, no_trade_reason, self._risk.state().trades_today,
+            )
+            # Defect 2 fix: emit an explicit HALTED DecisionProduced so the
+            # StateProjector clears any stale approved/ENTER state that was
+            # carried over from before the halt was triggered.
+            from quant.decision.decision_service import QuantDecision
+            halted_decision = QuantDecision(
+                approved=False,
+                signal=None,
+                reason="HALTED",
+                phase=getattr(state, "triple_a_phase", "") if state else "",
+                gate_results=(),
+                block_reasons=(f"Risk: {no_trade_reason}",),
+                model_label="",
+            )
+            self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=halted_decision))
+            return
+
+        # --- Guard 1: post-trade cooldown (bars since last close) ---
+        bars_since_close = (
+            self._bar_index - self._last_close_bar_index
+            if self._last_close_bar_index >= 0
+            else self._cooldown_bars  # no trade yet → no cooldown
+        )
+        cooldown_bars_remaining = max(0, self._cooldown_bars - bars_since_close)
+        # Convert bars to seconds for the DecisionContext contract
+        cooldown_remaining_sec = cooldown_bars_remaining * int(
+            getattr(self._aggregator, "interval_seconds", 60) or 60
+        )
+        if cooldown_bars_remaining > 0:
+            logger.debug(
+                "⏳ [COOLDOWN] %s: %d bars remaining before next entry",
+                self.symbol, cooldown_bars_remaining,
+            )
+            return  # Skip decision entirely during cooldown
+
+        amt_dto = self._last_amt_dto or {}
+        obi = float(amt_dto.get("obi") or 0.0)
+
         # Direction input to the gates is the deterministic auction-state edge:
         # the AGGRESSION Triple-A signal when the machine has one, else the
-        # fresh absorption side (BUY -> LONG, SELL -> SHORT). The absorption
-        # fallback is what lets the Fabio entry (absorption + VWAP breakout,
-        # gate 3) execute during the ABSORPTION/ACCUMULATION phases — before an
-        # AGGRESSION signal exists.
+        # fresh absorption side (BUY -> LONG, SELL -> SHORT), depth OBI imbalance,
+        # or Value-Area location for reversion setups.
         signal = state.triple_a_signal if state is not None else None
         agent_direction = signal if signal in ("LONG", "SHORT") else None
         if (
             agent_direction is None
             and state is not None
             and state.absorption is not None
+            and state.absorption.bar_age <= 5
         ):
             agent_direction = {"BUY": "LONG", "SELL": "SHORT"}.get(
                 state.absorption.side
             )
+        if agent_direction is None and state is not None:
+            if obi >= 0.20 and state.close > state.vwap.upper_1:
+                agent_direction = "LONG"
+            elif obi <= -0.20 and state.close < state.vwap.lower_1:
+                agent_direction = "SHORT"
+            elif state.location and state.location.zone == "BELOW_VA":
+                agent_direction = "LONG"
+            elif state.location and state.location.zone == "ABOVE_VA":
+                agent_direction = "SHORT"
+
+        # Fabio Gap #9: VWAP directional bias filter.
+        # Price below session VWAP → don't go long (mean-reversion pull).
+        # Price above session VWAP → don't go short.
+        # Exception: IMBALANCED markets override (displacement can carry through VWAP).
+        if agent_direction is not None and state is not None:
+            session_vwap = float(amt_dto.get("vwap") or 0.0)
+            if session_vwap > 0:
+                raw_ms_check = str(amt_dto.get("marketState") or "BALANCED").upper()
+                if raw_ms_check != "IMBALANCED":
+                    if agent_direction == "LONG" and float(state.close) < session_vwap:
+                        logger.debug(
+                            "🔇 [VWAP BIAS] %s: LONG rejected — close %.2f below VWAP %.2f",
+                            self.symbol, float(state.close), session_vwap,
+                        )
+                        agent_direction = None
+                    elif agent_direction == "SHORT" and float(state.close) > session_vwap:
+                        logger.debug(
+                            "🔇 [VWAP BIAS] %s: SHORT rejected — close %.2f above VWAP %.2f",
+                            self.symbol, float(state.close), session_vwap,
+                        )
+                        agent_direction = None
+
         # Gate 1 (session-phase) and warmup were hard-coded to pass; the engine
         # now enforces the Fabio NSE session phases (no entries in the
         # 09:15-09:30 opening-noise window, none after 15:15 close protection)
@@ -309,10 +406,14 @@ class QuantEngine:
         # Market state + balance ratio from the AMT analyzer (this bar's DTO,
         # snapshotted in _on_bar_closed before _decide). The DEAD market state
         # refuses any initiative entry; the VA-fade tier refuses dead markets.
-        amt_dto = self._last_amt_dto or {}
-        amt_market_state = str(amt_dto.get("marketState") or "BALANCED").upper()
-        if amt_market_state not in ("BALANCED", "IMBALANCED", "DEAD"):
-            amt_market_state = "BALANCED"
+        raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
+        if raw_ms == "DEAD":
+            amt_market_state = "DEAD"
+        elif raw_ms == "IMBALANCED":
+            amt_market_state = MarketState.IMBALANCED
+        else:
+            amt_market_state = MarketState.BALANCED
+        risk_st = self._risk.state()
         ctx = DecisionContext(
             state=state,
             bar=bar,
@@ -322,8 +423,9 @@ class QuantEngine:
             ),
             warmup_complete=(self._bar_index + self._warm_bars) >= _WARMUP_BARS,
             position_open=False,
-            cooldown_remaining_sec=0,
-            risk_halted=self._risk.state().halted,
+            cooldown_remaining_sec=cooldown_remaining_sec,
+            risk_halted=risk_st.halted,
+            consecutive_losses=risk_st.consecutive_losses,
             agent_direction=agent_direction,
             agent_probability=_DETERMINISTIC_CONVICTION,
             market_state=amt_market_state,
@@ -333,16 +435,47 @@ class QuantEngine:
             # rejection reason falls back to drive=0. Thread driveNumber
             # through amt_result_to_dto when the banner needs it.
             drive_entry_valid=bool(amt_dto.get("isSecondDrive") or False),
+            # Depth reaches gate 3: the AMT DTO carries the live order-book
+            # imbalance (computed from the Dhan 5-level depth snapshot), and
+            # gate 3's order-flow aggression leg consumes it as the A3 trigger.
+            obi=obi,
+            # Canonical session VA (session-scoped, clamped) — gate 4 and
+            # SignalBuilder anchor stops on THIS profile so the LOCATION gate
+            # compares price against the same POC/VA the UI renders, not the
+            # coordinator's differently-bucketed bar-based snapshot.
+            poc=float(amt_dto.get("poc") or 0.0),
+            vah=float(amt_dto.get("valueAreaHigh") or 0.0),
+            val=float(amt_dto.get("valueAreaLow") or 0.0),
             prior_poc=float(amt_dto.get("priorPoc") or 0.0),
             npoc_above=float(amt_dto.get("npocAbove") or 0.0),
             npoc_below=float(amt_dto.get("npocBelow") or 0.0),
             tick_size=self._tick_size,
+            equity=risk_st.equity,
+            risk_per_trade_pct=risk_st.risk_per_trade_pct,
+            # Impulse Leg LVN (Layer 3 profile) — the primary void in the most
+            # recent directional impulse leg. Gate 3 Path C (Playbook C sniper)
+            # fires when price retests this level with fresh absorption.
+            # The key "legLvn" is populated by analyzer.detect_displacement_leg()
+            # → amt_result_to_dto(). Zero means no leg profile available yet.
+            leg_lvn=float(amt_dto.get("legLvn") or 0.0),
         )
         decision = self._decision_service.evaluate(ctx)
         self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
 
         if decision.approved and decision.signal is not None:
             signal = decision.signal
+            logger.info(
+                "⚡ [APPROVED SIGNAL] %s: %s @ %.2f (SL=%.2f, TP=%.2f, RR=%.2f) — %s | trades_today=%d equity=₹%.0f",
+                self.symbol,
+                signal.type,
+                signal.entry,
+                signal.sl,
+                signal.tp,
+                signal.rr,
+                decision.reason,
+                risk_st.trades_today,
+                risk_st.equity,
+            )
             self._emit(SignalApproved(symbol=self.symbol, time=bar.time, signal=signal))
             quantity = clamp_quantity(self._risk.position_size(signal.entry, signal.sl))
             position = self._oms.submit(signal, quantity)
@@ -350,6 +483,15 @@ class QuantEngine:
             self._position = position
             self._entry_time_epoch = self._bar_epoch_ms(bar.time) / 1000.0
             self._emit(PositionOpened(symbol=self.symbol, time=bar.time, position=position))
+        else:
+            logger.info(
+                "⚪ [DECISION EVAL] %s: approved=False reason=%s phase=%s blocked=%s",
+                self.symbol,
+                decision.reason,
+                decision.phase,
+                decision.block_reasons,
+            )
+
 
     @staticmethod
     def _parse_contract_expiry(symbol: str):
@@ -433,7 +575,7 @@ class QuantEngine:
         try:
             allowed = bool(get_session_info(bar_time, market=market).allow_entry)
         except Exception:
-            logger.warning("session phase lookup failed for %r", bar_time, exc_info=True)
+            logger.warning("session phase lookup failed for %r — defaulting to open", bar_time, exc_info=True)
             return True
         if not allowed:
             return False
@@ -480,6 +622,7 @@ class QuantEngine:
         try:
             info = get_session_info(bar_time, market=market)
         except Exception:
+            logger.warning("session force-exit lookup failed for %r — defaulting to hold", bar_time, exc_info=True)
             return False
         force = bool(info.force_exit or not info.allow_entry)
         if not force and str(market).upper() == "MCX" and contract_expiry is not None:
@@ -511,9 +654,11 @@ class QuantEngine:
             from quant.amt.session.context import is_expiry_day, seconds_to_close
             ist_dt = QuantEngine._ist_dt(bar.time)
             amt_dto = self._last_amt_dto or {}
-            market_state = str(amt_dto.get("marketState") or "").upper()
-            if market_state not in ("BALANCED", "IMBALANCED"):
-                market_state = ""
+            raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
+            if raw_ms == "IMBALANCED":
+                market_state = MarketState.IMBALANCED
+            else:
+                market_state = MarketState.BALANCED
             if ist_dt is not None:
                 info = get_session_info(bar.time, market=self._market)
                 session_phase = str(info.session)
@@ -542,9 +687,132 @@ class QuantEngine:
                                    exit_dec.reason)
             self._exits.pop_trail(closing)
             self._position = None
+            # Reset pyramid state: close all pyramid add-ons at the same price
+            for pyr_pos in self._pyramid_positions:
+                pyr_fill = self._oms.close(pyr_pos, exit_dec.close_price, bar.time,
+                                           exit_dec.reason + "_PYRAMID")
+                self._exits.pop_trail(pyr_pos)
+                self._risk.record_trade(pyr_fill.pnl)
+                logger.info(
+                    "🔒 [PYRAMID CLOSED] %s level=%d reason=%s pnl=₹%.2f",
+                    self.symbol, pyr_pos.pyramid_level, exit_dec.reason, pyr_fill.pnl,
+                )
+            self._pyramid_positions = []
+            self._pyramid_count = 0
+            # Track close time so cooldown gate correctly blocks re-entry
+            self._last_close_bar_index = self._bar_index
             self._emit(PositionClosed(symbol=self.symbol, time=bar.time, fill=fill))
             risk = self._risk.record_trade(fill.pnl)
+            logger.info(
+                "🔒 [POSITION CLOSED] %s reason=%s pnl=₹%.2f daily_pnl=₹%.2f "
+                "trades=%d/%d equity=₹%.0f halted=%s",
+                self.symbol, exit_dec.reason, fill.pnl,
+                risk.daily_pnl, risk.trades_today,
+                6,  # max_trades_per_session
+                risk.equity, risk.halted,
+            )
             self._emit(RiskUpdated(symbol=self.symbol, time=bar.time, risk=risk))
+        else:
+            # Position survived this bar. Check if we can add a pyramid.
+            # Pyramid is only authorized when the base trade is risk-free (0.8R hit).
+            if self._position is not None and self._exits.is_risk_free(self._position):
+                self._check_pyramid(state, bar)
+
+    def _check_pyramid(self, state, bar) -> None:
+        """Spec §13.2 pyramid engine: add-on positions at Impulse Leg LVN retest.
+
+        Authorization gates (all must pass):
+          1. Base trade is risk-free (SL at breakeven or better)
+          2. Maximum 2 pyramid add-ons not yet reached
+          3. Session allows entry (no force-exit window)
+          4. Risk engine not halted
+
+        Entry conditions (per bar):
+          - Price is within 2 ticks of the Impulse Leg LVN (Layer 3 profile)
+          - Fresh absorption (bar_age == 0) at the LVN in the trade direction
+          - 1m candle closes in the trade direction (close confirms level)
+
+        Sizing:
+          Pyramid 1: 50% of base position size (absolute units)
+          Pyramid 2: 25% of base position size (absolute units)
+
+        SL ratchet: combined SL moves to LVN - 2*tick (LONG) / LVN + 2*tick
+        (SHORT) so the entire bundle (base + pyramids) is always net positive.
+        """
+        if self._pyramid_count >= 2:
+            return  # Max 2 add-ons reached
+
+        # Guard: session must allow new entries
+        if not self._session_allow_entry(
+            bar.time, market=self._market, contract_expiry=self._contract_expiry
+        ):
+            return
+
+        # Guard: risk engine must be healthy
+        can_trade, _ = self._risk.can_trade()
+        if not can_trade:
+            return
+
+        # Need the Impulse Leg LVN from the AMT DTO
+        amt_dto = self._last_amt_dto or {}
+        leg_lvn = float(amt_dto.get("legLvn") or 0.0)
+        if leg_lvn <= 0:
+            return  # No Layer 3 LVN available yet
+
+        price = float(state.close)
+        tick = self._tick_size
+        if abs(price - leg_lvn) > 2.0 * tick:
+            return  # Price not at LVN zone
+
+        # Need fresh absorption at the LVN
+        absorption = state.absorption
+        if absorption is None or absorption.bar_age != 0:
+            return  # No fresh absorption this bar
+
+        pos = self._position
+        long = pos.size > 0
+
+        # Absorption direction must agree with the open position
+        if long and absorption.side != "BUY":
+            return
+        if not long and absorption.side != "SELL":
+            return
+
+        # Candle close must confirm the direction
+        if long and float(bar.close) < float(bar.open):
+            return  # Bearish candle at LVN for a long — skip
+        if not long and float(bar.close) > float(bar.open):
+            return  # Bullish candle at LVN for a short — skip
+
+        # Size: 50% of base for P1, 25% for P2
+        base_size = abs(pos.size)
+        fraction = 0.50 if self._pyramid_count == 0 else 0.25
+        pyramid_size = base_size * fraction
+
+        # New SL behind the LVN shelf
+        new_sl = (leg_lvn - 2.0 * tick) if long else (leg_lvn + 2.0 * tick)
+
+        try:
+            pyramid_pos = self._oms.add_pyramid(
+                base=pos,
+                entry_price=price,
+                new_sl=new_sl,
+                size=pyramid_size,
+                time=bar.time,
+                pyramid_level=self._pyramid_count + 1,
+            )
+        except ValueError as exc:
+            logger.debug("⏩ [PYRAMID SKIP] %s: %s", self.symbol, exc)
+            return
+
+        self._pyramid_count += 1
+        self._pyramid_positions.append(pyramid_pos)
+
+        logger.info(
+            "⚡ [PYRAMID ADD] %s P%d @ %.2f size=%.0f SL=%.2f LVN=%.2f",
+            self.symbol, self._pyramid_count, price, pyramid_size, new_sl, leg_lvn,
+        )
+        self._emit(PositionOpened(symbol=self.symbol, time=bar.time, position=pyramid_pos))
 
     def _emit(self, event: Event) -> None:
         """Publish to the bus, append to the trace, fold into the projector,
@@ -602,12 +870,18 @@ class QuantEngine:
             import asyncio
 
             candles: list = []
+            seed_interval = self._seed_interval_str()
             for attempt in range(1, _SEED_FETCH_RETRIES + 1):
                 try:
                     candles = asyncio.run(
-                        self._history_source.fetch_history(self.symbol, "5m", 500)
+                        self._history_source.fetch_history(
+                            self.symbol, seed_interval, 500
+                        )
                     )
-                except Exception:
+                except Exception as e:
+                    import asyncio
+                    if not isinstance(e, (TimeoutError, ConnectionError, OSError, asyncio.CancelledError)):
+                        logger.critical("Unexpected error", exc_info=True)
                     logger.warning(
                         "AMT history seed failed for %s (attempt %d/%d)",
                         self.symbol, attempt, _SEED_FETCH_RETRIES, exc_info=True,
@@ -654,6 +928,19 @@ class QuantEngine:
             target=run, daemon=True, name=f"amt-seed-{self.symbol}"
         ).start()
 
+    def _seed_interval_str(self) -> str:
+        """Dhan history interval string matching the engine's bar aggregation.
+
+        The aggregator floors live ticks to ``interval_seconds`` windows; the
+        REST history seed must use the same interval so seeded candles align
+        with live bars (1m -> "1m", 5m -> "5m", 60s/300s -> same)."""
+        seconds = int(getattr(self._aggregator, "interval_seconds", 60) or 60)
+        if seconds % 3600 == 0:
+            return f"{seconds // 3600}h"
+        if seconds % 60 == 0:
+            return f"{seconds // 60}m"
+        return f"{seconds}s"
+
     def _amt_analyze(self, bar) -> dict:
         """Append the closed bar to the AMT ring and run the full AMTAnalyzer.
 
@@ -696,8 +983,8 @@ class QuantEngine:
                 taker_buy_volume=float(bar.buy_volume), delta=float(bar.delta),
             )
         except Exception:
-            logger.warning("AMT bar->OHLC mapping failed: %r", bar, exc_info=True)
-            ohlc = None
+            logger.warning("AMT bar->OHLC mapping failed: %r — keeping last DTO", bar, exc_info=True)
+            return self._last_amt_dto or {}
         if ohlc is not None:
             with self._amt_lock:
                 self._amt_candles.append(ohlc)
@@ -731,10 +1018,12 @@ class QuantEngine:
                     self.symbol, exc_info=True,
                 )
                 self._amt_fail_logged = True
-            return self._last_amt_dto if self._last_amt_dto is not None else empty_amt_dto()
+            return self._last_amt_dto or {}
         # The amt DTO is fully deterministic — no model inference involved.
         dto = amt_result_to_dto(result)
-        self._last_amt_dto = dto
+        # Guard against concurrent read in _decide() during startup seed phase.
+        with self._amt_lock:
+            self._last_amt_dto = dto
         return dto
 
     @staticmethod
@@ -763,8 +1052,8 @@ class QuantEngine:
         )
 
     def _underlying(self) -> str:
-        head = (self.symbol or "").split()
-        return head[0] if head else "NIFTY"
+        from quant.contracts.exchange_config import ExchangeConfig
+        return ExchangeConfig.for_exchange(self._market).extract_underlying(self.symbol) or "NIFTY"
 
     @staticmethod
     def _depth_to_book(depth: dict) -> OrderBook | None:
@@ -793,10 +1082,12 @@ class QuantEngine:
         if not bar_time:
             return 0
         try:
-            from datetime import datetime as _dt
-            return int(
-                _dt.fromisoformat(bar_time.replace("Z", "+00:00")).timestamp() * 1000
-            )
+            from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+            _ist = _tz(_td(hours=5, minutes=30))
+            dt = _dt.fromisoformat(bar_time.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=_ist)
+            return int(dt.timestamp() * 1000)
         except (TypeError, ValueError):
             pass
         try:

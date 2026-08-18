@@ -7,6 +7,7 @@ rebuilt and the schema version is promoted.
 """
 
 from __future__ import annotations
+from quant.contracts.enums import MarketState
 
 from typing import TYPE_CHECKING
 
@@ -312,7 +313,7 @@ def extract_features_from_row(
     f["balance_ratio"] = float(row.get("balance_ratio", 0))
     va_width = vah - val
     f["va_width_pct"] = va_width / close if close > 0 else 0.0
-    f["market_state_encoded"] = MarketStateCodec.encode(row.get("market_state", ""))
+    f["market_state_encoded"] = MarketStateCodec.encode(row.get("market_state", MarketState.BALANCED))
     hvns_str = str(row.get("hvns", ""))
     f["hvn_count"] = float(len([x for x in hvns_str.split(",") if x.strip()])) if hvns_str else 0.0
     lvns_str = str(row.get("lvns", ""))

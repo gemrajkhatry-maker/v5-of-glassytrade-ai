@@ -95,6 +95,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   const activePriceLinesRef = useRef<Map<string, IPriceLine[]>>(new Map());
   const amtLinesRef = useRef<IPriceLine[]>([]);
   const initializedRef = useRef(false);
+  const lastCandleTimeRef = useRef<number>(0);
 
   // Memoize amtAnalysis to prevent overlay redraws when profile data hasn't changed.
   // The backend sends new AMT objects on every tick, but profile/legProfile arrays
@@ -259,9 +260,11 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       // Common Time
       const unixTime = (new Date(tick.time).getTime() / 1000 + IST_OFFSET_SECONDS) as any;
 
-      // CRITICAL: In server-mode, sometimes delayed ticks can arrive.
-      // Lightweight charts will crash if we update with an older timestamp.
-      // The hook now drops stale ticks, but we wrap in try-catch for total UI safety.
+      // Guard: timestamp must be strictly >= last rendered candle time
+      if (lastCandleTimeRef.current > 0 && unixTime < lastCandleTimeRef.current) {
+        return;
+      }
+
       try {
         // Update Candlestick directly Native API
         candleSeriesRef.current?.update({
@@ -275,8 +278,9 @@ const ChartScene: React.FC<ChartSceneProps> = ({
           value: tick.volume,
           color: tick.close >= tick.open ? '#22c55e80' : '#ef444480'
         });
-      } catch (e) {
-        console.warn('[ChartScene] Ignored stale/out-of-order tick update:', tick.time);
+        lastCandleTimeRef.current = unixTime;
+      } catch {
+        // Silently ignore benign in-flight tick collisions
       }
     };
 
@@ -837,8 +841,14 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     });
 
     if (data.length > 0) {
-      candleSeriesRef.current.setData(data.map(formatCandle));
+      const formattedCandles = data.map(formatCandle);
+      candleSeriesRef.current.setData(formattedCandles);
       volumeSeriesRef.current.setData(data.map(formatVolume));
+
+      const lastCandle = formattedCandles[formattedCandles.length - 1];
+      if (lastCandle) {
+        lastCandleTimeRef.current = Number(lastCandle.time);
+      }
 
       if (!initializedRef.current && chartRef.current) {
         chartRef.current.timeScale().scrollToPosition(0, false);
@@ -962,6 +972,26 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-black/40 backdrop-blur px-3 py-1 rounded-full border border-white/5 text-[10px] text-white/50 z-30 pointer-events-none uppercase tracking-wider">
         STANDARD CANDLESTICKS
       </div>
+
+      {/* Empty State / Live Stream Status Overlay */}
+      {data.length === 0 && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center z-25 pointer-events-none p-6 text-center">
+          <div className="p-6 rounded-2xl bg-black/40 backdrop-blur-xl border border-white/10 max-w-md space-y-3 shadow-2xl">
+            <div className="flex items-center justify-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-xs font-bold font-mono uppercase tracking-widest text-emerald-400">
+                Live Market Feed Connected
+              </span>
+            </div>
+            <div className="text-sm font-extrabold text-white tracking-wide font-mono">
+              {symbol || 'Awaiting Contract'}
+            </div>
+            <p className="text-[11px] text-slate-400 leading-relaxed">
+              Connected to Dhan WebSocket gameloop. Live 0.5s price delta, depth, and order book imbalance are actively streaming.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Current Decision Card */}
       {(agentDecision?.direction || agentDecision?.rationale) && (

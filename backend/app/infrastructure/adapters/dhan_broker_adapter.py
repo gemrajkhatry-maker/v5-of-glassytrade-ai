@@ -31,6 +31,7 @@ from quant.contracts.aggregates import (
 )
 from quant.contracts.entities import Position, Signal
 from quant.contracts.enums import Side, Source
+from quant.contracts.exchange_config import ExchangeConfig
 from brokers.broker import Exchange
 from brokers.broker import Instrument, Order
 from brokers.broker.types import OrderStatus, OrderType
@@ -74,23 +75,7 @@ class DhanBrokerAdapter(IBroker):
     internally.
     """
 
-    _MCX_UNDERLYINGS = frozenset(
-        {
-            "CRUDEOIL",
-            "GOLD",
-            "SILVER",
-            "NATURALGAS",
-            "GOLDM",
-            "SILVERM",
-            "CRUDEOILM",
-            "COPPER",
-            "ZINC",
-            "ALUMINIUM",
-            "LEAD",
-            "NICKEL",
-            "COTTONCANDY",
-        }
-    )
+    _MCX_UNDERLYINGS = ExchangeConfig.for_exchange("MCX").underlyings
 
     def __init__(self, config: Configuration):
         self._config = config
@@ -375,7 +360,7 @@ class DhanBrokerAdapter(IBroker):
             )
 
         if is_option:
-            is_mcx = any(sym_upper.startswith(u) for u in self._MCX_UNDERLYINGS)
+            is_mcx = ExchangeConfig.for_exchange("MCX").is_underlying(sym_upper)
             exchange = _exchange_enum("MCX" if is_mcx else "NFO")
             return Instrument(
                 symbol=clean_symbol,
@@ -461,6 +446,22 @@ class DhanBrokerAdapter(IBroker):
         qty_int = int(quantity)
         if qty_int <= 0:
             return 0
+
+        # Exchange order freeze limit guard (e.g. NIFTY 1800, BANKNIFTY 900)
+        sym = str(getattr(signal, "symbol", "") or "")
+        is_mcx = ExchangeConfig.for_exchange("MCX").is_underlying(sym)
+        ex_cfg = ExchangeConfig.for_exchange("MCX" if is_mcx else "NSE")
+        freeze_limit = ex_cfg.get_freeze_limit(sym)
+        if freeze_limit > 0 and qty_int > freeze_limit:
+            logger.warning(
+                "Order quantity %d for %s exceeds exchange freeze limit %d — capping to freeze limit",
+                qty_int, getattr(signal, "symbol", ""), freeze_limit
+            )
+            if lot_size > 0:
+                qty_int = max(int(lot_size), int((freeze_limit // int(lot_size)) * int(lot_size)))
+            else:
+                qty_int = freeze_limit
+
         return qty_int
 
     def _poll_for_terminal_status(

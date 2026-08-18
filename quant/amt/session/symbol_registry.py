@@ -32,24 +32,12 @@ class SymbolRegistry:
     Thread-safe, immutable, injectable via constructor.
     """
 
-    mcx_underlyings: FrozenSet[str] = frozenset(
-        {
-            "CRUDEOIL",
-            "GOLD",
-            "SILVER",
-            "NATURALGAS",
-            "COPPER",
-            "GOLDM",
-            "SILVERM",
-            "CRUDEOILM",
-            "ZINC",
-            "ALUMINIUM",
-            "LEAD",
-            "NICKEL",
-            "COTTONCANDY",
-        }
+    mcx_underlyings: FrozenSet[str] = field(
+        default_factory=lambda: ExchangeConfig.for_exchange("MCX").underlyings
     )
-    nse_underlyings: FrozenSet[str] = frozenset({"NIFTY", "BANKNIFTY", "FINNIFTY"})
+    nse_underlyings: FrozenSet[str] = field(
+        default_factory=lambda: ExchangeConfig.for_exchange("NSE").underlyings
+    )
 
     def exchange_for(self, symbol: str) -> str:
         """Determine exchange from a trading symbol.
@@ -80,10 +68,22 @@ class SymbolRegistry:
     def all_underlyings(self) -> FrozenSet[str]:
         return self.mcx_underlyings | self.nse_underlyings
 
-    @staticmethod
-    def _extract_underlying(symbol: str) -> str:
-        clean = symbol.replace("NSE:", "").replace("MCX:", "").strip()
-        return clean.split("-")[0].split(" ")[0].upper()
+    def _extract_underlying(self, symbol: str) -> str:
+        if not symbol:
+            return ""
+        clean = (
+            str(symbol)
+            .upper()
+            .replace("NSE:", "")
+            .replace("NFO:", "")
+            .replace("MCX:", "")
+            .replace("BSE:", "")
+            .strip()
+        )
+        for u in sorted(self.all_underlyings(), key=len, reverse=True):
+            if clean.startswith(u):
+                return u
+        return re.split(r"[-_\s]+", clean)[0]
 
     @classmethod
     def from_exchange_configs(

@@ -124,10 +124,9 @@ class TestComputeValueArea:
             VolumeProfileLevel(price=93, volume=450),
         ]
         vah, val = compute_value_area(profile, poc_index=1, value_area_pct=0.70)
-        # 70% of 2810 = 1967; POC(1000)+down(900)=1900 < 1967 -> one more up row.
-        # New logic: down first (avg 900 > avg 455), then up one row -> VAH=92.5.
-        # Old logic: up first (sum 910 >= 900), two up rows -> VAH=93.5.
-        assert vah < 93.0
+        # 70% of 2810 = 1967; POC(1000)+down(900)=1900 < 1967.
+        # Down first (avg 900 > avg 455), then up adds the remaining pair -> VAH=93.5.
+        assert vah >= 93.0
         assert val == 89.5
 
     def test_default_pct_from_config(self):
@@ -135,6 +134,37 @@ class TestComputeValueArea:
         profile = [VolumeProfileLevel(price=float(i), volume=100) for i in range(10)]
         vah, val = compute_value_area(profile, poc_index=5)
         assert vah > val
+
+    def test_sparse_far_tail_does_not_inflate_vah(self):
+        """A sparse far-out tail (stale morning regime) must not drag VAH away
+        from the dense cluster. Reproduces the live CRUDEOIL 7950 CALL case:
+        premium collapsed from ~195 to ~102, so the profile has a dense cluster
+        at 95-105 (POC) separated from a thin tail at 160+ by a zero-volume
+        gap (the old premium band was never traded back through). The CME
+        two-row method must stop at the gap, not ride across it to collect 70%."""
+        profile = []
+        # Dense current auction: buckets at integer prices 95..105
+        for p in range(95, 106):
+            vol = 100 if p in (101, 102, 103, 104, 105) else 30
+            profile.append(VolumeProfileLevel(price=float(p), volume=vol))
+        # Zero-volume gap 106..159 (nothing traded there — the collapse skipped it)
+        for p in range(106, 160):
+            profile.append(VolumeProfileLevel(price=float(p), volume=0))
+        # Stale tail 160..199 with real but thin volume
+        for p in range(160, 200):
+            profile.append(VolumeProfileLevel(price=float(p), volume=10))
+
+        # POC is 101..105 in the dense cluster
+        poc_price, poc_idx = compute_poc(profile)
+        assert 101 <= poc_price <= 105
+
+        vah, val = compute_value_area(profile, poc_index=poc_idx, value_area_pct=0.70)
+        # The VA must stay in the current auction cluster, NOT leap the gap to
+        # the stale tail. Total volume 30*6 + 100*5 + 40*10 = 1080; 70% = 756
+        # is fully satisfied by the 95-105 cluster alone.
+        assert vah < 106.0
+        assert vah > 105.0  # upper edge of the top cluster bin
+        assert val < 96.0
 
 
 class TestBuildSnapshot:

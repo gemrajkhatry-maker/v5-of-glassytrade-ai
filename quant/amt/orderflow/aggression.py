@@ -16,6 +16,7 @@ Confidence labels:
 """
 
 from __future__ import annotations
+from quant.contracts.enums import MarketState
 
 import logging
 from dataclasses import dataclass
@@ -190,7 +191,7 @@ class PersistentAggressionScorer:
         """
         if market_state in ("PROBING", "IMBALANCED"):
             self._persistence_bars = 2
-        elif market_state == "BALANCED":
+        elif market_state == MarketState.BALANCED:
             self._persistence_bars = 3
         else:
             self._persistence_bars = self._default_persistence

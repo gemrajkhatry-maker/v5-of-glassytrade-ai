@@ -38,7 +38,7 @@ def _state(triple_a_phase="", triple_a_signal=None, close=100.0,
 
 def _position(symbol="S", time="t1", size=10.0, entry=100.0):
     sig = Signal(type="LONG", reason="All 5 gates passed", entry=entry, sl=entry - 1,
-                 tp=entry + 2, rr=2.0, confidence=0.8, symbol=symbol, timestamp=time)
+                 tp=entry + 2, rr=2.0, model_label="Triple-A", symbol=symbol, timestamp=time)
     return Position(order=Order(signal=sig, quantity=size),
                     open_price=entry, open_time=time, size=size)
 
@@ -153,10 +153,11 @@ def test_auction_absorption_null_when_none():
 
 def test_decision_fold():
     sig = Signal(type="LONG", reason="All 5 gates passed", entry=100.0, sl=99.0,
-                 tp=102.0, rr=2.0, confidence=0.8, symbol="S", timestamp="t1")
+                 tp=102.0, rr=2.0, model_label="Triple-A", symbol="S", timestamp="t1")
     p = StateProjector()
     p.on_event(DecisionProduced(symbol="S", time="t1",
-                                decision=QuantDecision(True, sig, "Triple-A", "AGGRESSION", ())))
+                                decision=QuantDecision(True, sig, "Triple-A", "AGGRESSION", (),
+                                                       model_label="Triple-A")))
     qd = p.snapshot("S").quant_decision
     assert qd == {
         "approved": True,
@@ -164,8 +165,9 @@ def test_decision_fold():
         "phase": "AGGRESSION",
         "blockReasons": [],
         "gateResults": [],
+        "modelLabel": "Triple-A",
         "signal": {"type": "LONG", "entry": 100.0, "sl": 99.0, "tp": 102.0,
-                   "rr": 2.0, "confidence": 0.8},
+                   "rr": 2.0, "modelLabel": "Triple-A"},
     }
 
 
@@ -207,12 +209,15 @@ def test_risk_fold():
     p.on_event(RiskUpdated(symbol="S", time="t1",
                            risk=RiskState(daily_pnl=-50.0, consecutive_losses=2,
                                           halted=True, halt_reason="daily loss limit reached",
-                                          risk_per_trade_pct=0.01)))
+                                          risk_per_trade_pct=0.01,
+                                          trades_today=3, equity=950000.0)))
     assert p.snapshot("S").risk_state == {
         "halted": True,
         "haltReason": "daily loss limit reached",
         "consecutiveLosses": 2,
         "dailyPnl": -50.0,
+        "tradesToday": 3,
+        "equity": 950000.0,
         "driftAlert": False,
         "driftMessage": "",
     }

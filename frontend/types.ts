@@ -1,4 +1,3 @@
-
 export interface OHLCData {
   time: string;
   open: number;
@@ -16,9 +15,40 @@ export interface OrderBook {
   asks: { price: number; quantity: number }[];
 }
 
+export interface ModelWeights {
+  trend: number;
+  momentum: number;
+  delta: number;
+  orderBook: number;
+  volatility: number;
+}
+
+export interface FactorBreakdown extends ModelWeights { }
+
+export interface AIAnalysis {
+  sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  confidence: number;
+  longTermTrend: 'UP' | 'DOWN' | 'SIDEWAYS';
+  volatilityScore: number;
+  quantScore: number;
+  projectedPrice: number;
+  reasoning: string[];
+  factorBreakdown: FactorBreakdown;
+}
+
+export interface GenAIAnalysis {
+  direction: 'LONG' | 'SHORT' | 'FLAT';
+  rationale: string;
+  confidence: 'High' | 'Medium' | 'Low';
+  inputPrompt?: string;
+  rawOutput?: string;
+  marketState?: string;
+  aggression?: string;
+}
+
 export interface AgentDecision {
   direction: 'LONG' | 'SHORT' | 'FLAT';
-  probability: number;
+  modelLabel: string;  // replaces probability — "Triple-A" | "LVN_Sniper" | "VA_Fade" | ""
   regime: string;
   timing: string;
   sizeFraction: number;
@@ -35,14 +65,23 @@ export interface RiskState {
   driftMessage?: string;
 }
 
-export interface DecisionHistoryEntry {
+export interface RuntimeSafetyState {
+  brokerBound: boolean;
+  feedStale: boolean;
+  unsafeToTrade: boolean;
+  feed?: Record<string, unknown>;
+  execution?: Record<string, unknown>;
+  stateDigest?: string;
+  readiness?: Record<string, unknown>;
+}
+
+export interface LLMHistoryEntry {
   timestamp: number;
   direction: 'LONG' | 'SHORT' | 'FLAT';
-  confidence: number;
+  confidence: string;
   rationale: string;
-  phase: string;
-  approved: boolean;
-  blockReasons?: string[];
+  inputPrompt?: string;
+  rawOutput?: string;
 }
 
 export interface TradePosition {
@@ -72,6 +111,17 @@ export interface Portfolio {
   closedTrades: TradePosition[];
 }
 
+export interface InstrumentStats {
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  netProfit: number;
+  avgProfit: number;
+  largestWin: number;
+  largestLoss: number;
+}
+
 /**
  * Encapsulates the complete state of a single trading instrument.
  */
@@ -80,12 +130,23 @@ export interface InstrumentState {
   data: OHLCData[];
   orderBook: OrderBook | null;
   portfolio: Portfolio;
+  aiAnalysis: AIAnalysis | null;
+  genAIAnalysis: GenAIAnalysis | null;
   amtAnalysis: AMTAnalysis | null;
   auctionAnalysis: AuctionAnalysis | null;
   quantDecisionAnalysis: QuantDecisionAnalysis | null;
   riskState: RiskState | null;
   agentDecision: AgentDecision | null;
-  decisionHistory: DecisionHistoryEntry[];
+  llmHistory: LLMHistoryEntry[];
+  overseerAction: string;
+  overseerReason: string;
+  depth20Active?: boolean;
+  modelWeights?: ModelWeights;
+  generation?: number;
+  predictions?: OHLCData[];
+  stats?: InstrumentStats | null;
+  stale?: boolean;
+  runtimeSafety?: RuntimeSafetyState;
   ltp?: number;
   oi?: number;
   lastUpdate: number;
@@ -93,12 +154,29 @@ export interface InstrumentState {
 
 export type ChartMode = 'STANDARD';
 
+export interface AppState {
+  config: ChartConfig; // Global visual config
+  instruments: Record<string, InstrumentState>;
+  activeSymbol: string;
+  isScanning: boolean;
+  chartMode: ChartMode;
+}
+
 export interface ChartConfig {
   symbol: string; // Used for display/API context
+  interval?: string;
+  dataSource?: 'DHAN' | 'SERVER';
   bullColor: string;
   bearColor: string;
-  showVolumeProfile: boolean;
-  vpMode: 'session' | 'leg' | 'combined' | 'off';
+  glassOpacity?: number;
+  roughness?: number;
+  transmission?: number;
+  showGrid?: boolean;
+  autoRotate?: boolean;
+  showPredictions?: boolean;
+  showVolumeProfile?: boolean;
+  vpMode?: 'session' | 'leg' | 'combined' | 'off';
+  trend?: 'bullish' | 'bearish' | 'sideways' | 'volatile';
 }
 
 export interface AggressivePrint {
@@ -114,6 +192,7 @@ export interface QuantDecisionAnalysis {
   reason: string;
   phase: string;
   blockReasons?: string[];
+  modelLabel?: string;   // "Triple-A" | "LVN_Sniper" | "VA_Fade" | ""
   gateResults?: {
     gate: number;
     name?: string;
@@ -126,8 +205,16 @@ export interface QuantDecisionAnalysis {
     sl: number;
     tp: number;
     rr: number;
-    confidence: number;
+    modelLabel: string;  // replaces confidence
   } | null;
+}
+
+/** Frozen VA checkpoints: {time, vah, val, poc} — used to detect expansion. */
+export interface VaSnapshot {
+  time: string;
+  vah: number;
+  val: number;
+  poc: number;
 }
 
 export interface AuctionAnalysis {
@@ -172,6 +259,12 @@ export interface AuctionAnalysis {
   };
   tripleAPhase: string;
   tripleASignal: string | null;
+  /** Fabio freeze discipline: IB locked after the build window. */
+  ibFrozen?: boolean;
+  /** Developing VA trustworthy for gating (>= 30 min elapsed). */
+  vaReliable?: boolean;
+  /** Frozen VA checkpoints: {time, vah, val, poc} — used to detect expansion. */
+  vaSnapshots?: VaSnapshot[];
 }
 
 export interface AMTAnalysis {
@@ -200,13 +293,17 @@ export interface AMTAnalysis {
   cvdSlope?: number;
   cvdDivergence?: string;
   sessionVwap?: number;
+  // Normalized delta score (AggressionCard) — sent by backend amt_result_to_dto
+  deltaNormalizedOption?: number;
   // VWAP bands
   vwapUpper1?: number;
   vwapLower1?: number;
   vwapUpper2?: number;
   vwapLower2?: number;
   vwapDeviationSigmas?: number | null;
-  deltaNormalizedOption?: number;
+  isExtremeDeviation?: boolean;  // Engine's ≥3σ flag — single source of truth for FADE ZONES
+  // Session VA development between successive 15-minute windows
+  valueMigration?: ValueMigration;
   // Market structure (5-state classifier)
   marketStructure?: string;
   structureConfidence?: number;
@@ -214,6 +311,9 @@ export interface AMTAnalysis {
   ibHigh?: number;
   ibLow?: number;
   ibComplete?: boolean;
+  ibPoc?: number;
+  ibVah?: number;
+  ibVal?: number;
   // Prior day levels
   priorPoc?: number;
   priorVah?: number;
@@ -263,6 +363,20 @@ export interface VolumeProfileLevel {
   volume: number;
   buyVolume: number;
   sellVolume: number;
+}
+
+/**
+ * Session VA development between successive 15-minute windows (backend
+ * ValueMigration) — POC/VAH/VAL drift so the value area's ongoing migration
+ * is visible instead of reading as a frozen reference.
+ */
+export interface ValueMigration {
+  direction: 'MIGRATING_UP' | 'MIGRATING_DOWN' | 'EXPANDING' | 'CONTRACTING' | 'FLAT' | 'INSUFFICIENT';
+  pocDrift: number;
+  vahDrift: number;
+  valDrift: number;
+  windowLabel: string;  // e.g. "09:00→09:15"
+  hasMigration: boolean;
 }
 
 

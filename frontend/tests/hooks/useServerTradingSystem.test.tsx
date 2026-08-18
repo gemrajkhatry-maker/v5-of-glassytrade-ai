@@ -366,9 +366,9 @@ describe('deterministic decision history routing (greenfield protocol)', () => {
     // Chart data stays empty — decisions are NOT candles.
     expect(inst.data).toHaveLength(0);
     // They land in the deterministic decision-history feed instead.
-    expect(inst.decisionHistory.length).toBeGreaterThanOrEqual(1);
-    expect(inst.decisionHistory.map(e => e.direction)).toContain('LONG');
-    expect(inst.decisionHistory[inst.decisionHistory.length - 1].rationale).toBe('TRIPLE_A_BREAKOUT');
+    expect(inst.llmHistory.length).toBeGreaterThanOrEqual(1);
+    expect(inst.llmHistory.map(e => e.direction)).toContain('LONG');
+    expect(inst.llmHistory[inst.llmHistory.length - 1].rationale).toBe('TRIPLE_A_BREAKOUT');
 
     // A delta re-sending the same decision is deduped (same rationale within 10s).
     await pushMessage(ws, {
@@ -381,7 +381,7 @@ describe('deterministic decision history routing (greenfield protocol)', () => {
         signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, confidence: 0.9 },
       },
     });
-    expect(result.current.instruments['NIFTY'].decisionHistory.length).toBe(1);
+    expect(result.current.instruments['NIFTY'].llmHistory.length).toBe(1);
   });
 });
 
@@ -443,7 +443,7 @@ describe('warm chart history via /api/market/history (Phase 2)', () => {
         status: 'server_mode',
         symbol: 'NIFTY',
         activeSymbols: ['NIFTY'],
-        interval: '5m',
+        interval: '1m',
       });
 
       const inst = result.current.instruments['NIFTY'];
@@ -482,7 +482,7 @@ describe('warm chart history via /api/market/history (Phase 2)', () => {
         status: 'server_mode',
         symbol: 'NIFTY',
         activeSymbols: ['NIFTY'],
-        interval: '5m',
+        interval: '1m',
       });
 
       const inst = result.current.instruments['NIFTY'];

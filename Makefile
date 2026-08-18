@@ -1,7 +1,7 @@
 .PHONY: test test-backend test-quant test-brokers test-frontend test-ci lint clean
 
 # Python interpreter: override with `make PYTHON=/path/to/python`
-PYTHON ?= .venv/bin/python
+PYTHON ?= $(CURDIR)/.venv/bin/python
 
 test: test-backend test-quant test-brokers test-frontend
 
@@ -32,3 +32,10 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
 	rm -rf htmlcov/ .coverage .pytest_cache/
+
+test-arch:
+	PYTHONPATH=backend:. $(PYTHON) -m pytest tests/architecture/ -v --no-header
+
+test-fast:
+	PYTHONPATH=backend:. $(PYTHON) -m pytest tests/quant/ tests/architecture/ -q --no-header -x
+

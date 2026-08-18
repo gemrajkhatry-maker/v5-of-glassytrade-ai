@@ -41,7 +41,7 @@ class ScanResult:
 class OptionScannerService:
     """Simple momentum-based contract selection for MCX/NSE."""
 
-    _SCAN_NSE_UNDERLYINGS = frozenset({"NIFTY", "BANKNIFTY", "FINNIFTY"})
+    _SCAN_NSE_UNDERLYINGS = frozenset({"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"})
     _SCAN_MCX_UNDERLYINGS = frozenset(
         {
             "CRUDEOIL",
@@ -59,6 +59,7 @@ class OptionScannerService:
         "NIFTY": 50,
         "BANKNIFTY": 100,
         "FINNIFTY": 50,
+        "MIDCPNIFTY": 25,
         "CRUDEOIL": 50,
         "NATURALGAS": 5,
         "GOLD": 100,
@@ -72,6 +73,7 @@ class OptionScannerService:
         "NIFTY": 50_000,
         "BANKNIFTY": 150_000,
         "FINNIFTY": 30_000,
+        "MIDCPNIFTY": 20_000,
         "CRUDEOIL": 10,
         "NATURALGAS": 500,
         "GOLD": 0,

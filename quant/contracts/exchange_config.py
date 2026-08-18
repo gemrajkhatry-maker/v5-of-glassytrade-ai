@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import FrozenSet, Dict, Any, Optional
 
 
@@ -63,26 +64,64 @@ class ExchangeConfig:
     point_values: Dict[str, float] = field(
         default_factory=dict
     )  # underlying → point_value (INR per tick)
+    freeze_limits: Dict[str, int] = field(
+        default_factory=dict
+    )  # underlying → exchange max order quantity per slice
+
+    def extract_underlying(self, symbol_or_underlying: str) -> str:
+        """Extract canonical underlying root from any contract format or symbol prefix.
+
+        Handles:
+          - Prefixed exchange symbols: 'NSE:NIFTY24AUG25500CE', 'MCX:CRUDEOIL24AUGFUT'
+          - Space-delimited contracts: 'NIFTY 27 FEB 25500 CALL', 'CRUDEOILM 19 MAR 6000 CALL'
+          - Hyphen-delimited contracts: 'BANKNIFTY-25700-PE', 'CRUDEOIL-I'
+          - Compound roots: distinguishes 'CRUDEOILM' vs 'CRUDEOIL', 'GOLDM' vs 'GOLD',
+            'MIDCPNIFTY' / 'FINNIFTY' vs 'NIFTY'.
+        """
+        if not symbol_or_underlying:
+            return ""
+
+        clean = (
+            str(symbol_or_underlying)
+            .upper()
+            .replace("NSE:", "")
+            .replace("NFO:", "")
+            .replace("MCX:", "")
+            .replace("BSE:", "")
+            .strip()
+        )
+        if clean in self.underlyings:
+            return clean
+
+        # Match known underlyings sorted by descending length so compound roots match first
+        for u in sorted(self.underlyings, key=len, reverse=True):
+            if clean.startswith(u):
+                return u
+
+        # Fallback to delimiter tokenization
+        token = re.split(r"[-_\s]+", clean)[0]
+        for u in sorted(self.underlyings, key=len, reverse=True):
+            if token.startswith(u):
+                return u
+        return token
+
+    def get_freeze_limit(self, symbol_or_underlying: str) -> int:
+        """Get exchange order quantity freeze limit. Defaults to 1800 for NSE, 10000 for MCX."""
+        underlying = self.extract_underlying(symbol_or_underlying)
+        return self.freeze_limits.get(underlying, 1800 if self.is_nse() else 10000)
 
     def get_tick_size(self, symbol_or_underlying: str) -> float:
         """Get tick size for a symbol or underlying. Defaults to 0.05."""
-        clean = (
-            symbol_or_underlying.upper().replace("NSE:", "").replace("MCX:", "").strip()
-        )
-        underlying = clean.split("-")[0].split(" ")[0]
+        underlying = self.extract_underlying(symbol_or_underlying)
         return self.tick_sizes.get(underlying, 0.05)
 
     def get_lot_size(self, symbol_or_underlying: str) -> int:
         """Get lot size for a symbol or underlying.
 
-        Raises KeyError when the underlying is unknown — the old silent ``25``
-        default sized NIFTY positions 2.6x too small. Lot size is exchange
+        Raises KeyError when the underlying is unknown — lot size is exchange
         metadata; an unknown underlying must be surfaced, not guessed.
         """
-        clean = (
-            symbol_or_underlying.upper().replace("NSE:", "").replace("MCX:", "").strip()
-        )
-        underlying = clean.split("-")[0].split(" ")[0]
+        underlying = self.extract_underlying(symbol_or_underlying)
         try:
             return self.lot_sizes[underlying]
         except KeyError:
@@ -94,10 +133,7 @@ class ExchangeConfig:
 
     def get_point_value(self, symbol_or_underlying: str) -> float:
         """Get point value (INR per tick) for a symbol or underlying. Defaults to 1.0."""
-        clean = (
-            symbol_or_underlying.upper().replace("NSE:", "").replace("MCX:", "").strip()
-        )
-        underlying = clean.split("-")[0].split(" ")[0]
+        underlying = self.extract_underlying(symbol_or_underlying)
         return self.point_values.get(underlying, 1.0)
 
     @classmethod
@@ -177,6 +213,7 @@ class ExchangeConfig:
             tick_sizes=data.get("tick_sizes", base.tick_sizes),
             lot_sizes=data.get("lot_sizes", base.lot_sizes),
             point_values=data.get("point_values", base.point_values),
+            freeze_limits=data.get("freeze_limits", base.freeze_limits),
         )
 
     @classmethod
@@ -203,18 +240,27 @@ class ExchangeConfig:
                 "NIFTY": 0.05,
                 "BANKNIFTY": 0.05,
                 "FINNIFTY": 0.05,
+                "MIDCPNIFTY": 0.05,
             },
             lot_sizes={
                 # Current NSE series (exchange-authoritative, Aug 2026):
-                # NIFTY=65, BANKNIFTY=30, FINNIFTY=60. Were 25/15/25 (wrong).
+                # NIFTY=65, BANKNIFTY=30, FINNIFTY=60, MIDCPNIFTY=120.
                 "NIFTY": 65,
                 "BANKNIFTY": 30,
                 "FINNIFTY": 60,
+                "MIDCPNIFTY": 120,
             },
             point_values={
                 "NIFTY": 1.0,
                 "BANKNIFTY": 1.0,
                 "FINNIFTY": 1.0,
+                "MIDCPNIFTY": 1.0,
+            },
+            freeze_limits={
+                "NIFTY": 1800,
+                "BANKNIFTY": 900,
+                "FINNIFTY": 1800,
+                "MIDCPNIFTY": 4200,
             },
         )
 
@@ -295,6 +341,14 @@ class ExchangeConfig:
                 "LEAD": 5000.0,
                 "NICKEL": 1500.0,
             },
+            freeze_limits={
+                "CRUDEOIL": 10000,
+                "NATURALGAS": 100000,
+                "GOLD": 10000,
+                "SILVER": 10000,
+                "GOLDM": 10000,
+                "SILVERM": 10000,
+            },
         )
 
     def is_mcx(self) -> bool:
@@ -304,7 +358,6 @@ class ExchangeConfig:
         return self.exchange == "NSE"
 
     def is_underlying(self, symbol: str) -> bool:
-        """Check if a symbol starts with any of this exchange's underlyings."""
-        clean = symbol.replace("NSE:", "").replace("MCX:", "").strip()
-        root = clean.split("-")[0].split(" ")[0].upper()
+        """Check if a symbol corresponds to any of this exchange's underlyings."""
+        root = self.extract_underlying(symbol)
         return root in self.underlyings

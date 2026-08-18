@@ -32,6 +32,7 @@ for _ancestor in _here.parents:
 from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
 from quant.contracts.ports.market_data import IMarketData
 from quant.contracts.market_data_utils import compute_vwap_approx, estimate_tick_delta
+from quant.contracts.exchange_config import ExchangeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,10 @@ class DhanMarketDataAdapter(IMarketData):
         self._chain_cache: dict[tuple[str, str, int], tuple[object, float]] = {}
         self._chain_cache_lock = threading.Lock()
         self._chain_cache_ttl = float(os.environ.get("OPTION_CHAIN_CACHE_TTL_SEC", "8.0"))
+        # Short-TTL cache for historical candles (30s) to prevent API rate limits
+        self._history_cache: dict[tuple[str, str], tuple[list[OHLC], float]] = {}
+        self._history_cache_lock = threading.Lock()
+        self._history_cache_ttl = 30.0
         # Optional: serialize broker option-chain calls (set when broker is not thread-safe).
         self._serialize_option_chain_fetch = os.environ.get(
             "DHAN_SERIALIZE_OPTION_CHAIN", ""
@@ -126,13 +131,27 @@ class DhanMarketDataAdapter(IMarketData):
                     "Initializing DhanBroker (sync path, timeout=%ss)...", timeout
                 )
                 try:
-                    loop = asyncio.new_event_loop()
                     try:
-                        loop.run_until_complete(
-                            asyncio.wait_for(broker.initialize(), timeout=timeout)
-                        )
-                    finally:
-                        loop.close()
+                        active_loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        active_loop = None
+
+                    if active_loop is not None and active_loop.is_running():
+                        from concurrent.futures import ThreadPoolExecutor
+                        with ThreadPoolExecutor(max_workers=1) as pool:
+                            pool.submit(
+                                lambda: asyncio.run(
+                                    asyncio.wait_for(broker.initialize(), timeout=timeout)
+                                )
+                            ).result()
+                    else:
+                        loop = asyncio.new_event_loop()
+                        try:
+                            loop.run_until_complete(
+                                asyncio.wait_for(broker.initialize(), timeout=timeout)
+                            )
+                        finally:
+                            loop.close()
                 except Exception as e:
                     logger.error("DhanBroker initialization failed: %s", e)
                     raise  # Propagate so caller knows init failed
@@ -157,23 +176,8 @@ class DhanMarketDataAdapter(IMarketData):
             self._initialized = True
             logger.info("DhanBroker initialized (instrument cache ready)")
 
-    _MCX_UNDERLYINGS = frozenset(
-        {
-            "CRUDEOIL",
-            "GOLD",
-            "SILVER",
-            "NATURALGAS",
-            "GOLDM",
-            "SILVERM",
-            "CRUDEOILM",
-            "COPPER",
-            "ZINC",
-            "ALUMINIUM",
-            "LEAD",
-            "NICKEL",
-            "COTTONCANDY",
-        }
-    )
+    _MCX_UNDERLYINGS = ExchangeConfig.for_exchange("MCX").underlyings
+
 
     def _make_instrument(self, symbol: str):
         """Build Instrument for the given display symbol.
@@ -199,7 +203,7 @@ class DhanMarketDataAdapter(IMarketData):
         is_option = is_call or is_put
         if is_option:
             # Detect exchange from the underlying name embedded in the symbol
-            is_mcx = any(sym_upper.startswith(u) for u in self._MCX_UNDERLYINGS)
+            is_mcx = ExchangeConfig.for_exchange("MCX").is_underlying(sym_upper)
             exchange = _exchange_enum("MCX" if is_mcx else "NFO")
             option_type = OptionType.CALL if is_call else OptionType.PUT
             return Instrument(symbol=symbol, exchange=exchange, option_type=option_type)
@@ -207,7 +211,7 @@ class DhanMarketDataAdapter(IMarketData):
             # Futures roots (e.g. "NIFTY AUG FUT", "CRUDEOIL AUG FUT") — route to
             # the same derivative exchanges as options so Dhan resolves the security
             # ID in NSE_FNO / MCX_COMM instead of the equity segment.
-            is_mcx = any(sym_upper.startswith(u) for u in self._MCX_UNDERLYINGS)
+            is_mcx = ExchangeConfig.for_exchange("MCX").is_underlying(sym_upper)
             exchange = _exchange_enum("MCX" if is_mcx else "NFO")
             return Instrument(symbol=symbol, exchange=exchange)
         else:
@@ -269,6 +273,14 @@ class DhanMarketDataAdapter(IMarketData):
     async def fetch_history(
         self, symbol: str, interval: str = "5m", limit: int = 500
     ) -> list[OHLC]:
+        cache_key = (symbol, interval)
+        with self._history_cache_lock:
+            cached_entry = self._history_cache.get(cache_key)
+            if cached_entry:
+                cached_data, cached_ts = cached_entry
+                if (time.time() - cached_ts) < self._history_cache_ttl:
+                    return cached_data[-limit:]
+
         try:
             await self._ensure_initialized()
             broker = self.get_broker()
@@ -322,6 +334,9 @@ class DhanMarketDataAdapter(IMarketData):
 
             if df is None or df.empty:
                 logger.warning("No historical data for %s", symbol)
+                with self._history_cache_lock:
+                    if cache_key in self._history_cache:
+                        return self._history_cache[cache_key][0][-limit:]
                 return []
 
             result: list[OHLC] = []
@@ -367,9 +382,14 @@ class DhanMarketDataAdapter(IMarketData):
                 )
 
             logger.info("Fetched %d candles for %s (%s)", len(result), symbol, interval)
+            with self._history_cache_lock:
+                self._history_cache[cache_key] = (result, time.time())
             return result
         except Exception:
             logger.warning("Failed to fetch history for %s (interval=%s, limit=%d)", symbol, interval, limit, exc_info=True)
+            with self._history_cache_lock:
+                if cache_key in self._history_cache:
+                    return self._history_cache[cache_key][0][-limit:]
             return []
 
     async def fetch_order_book(self, symbol: str) -> OrderBook | None:
@@ -433,36 +453,41 @@ class DhanMarketDataAdapter(IMarketData):
         """Stream live FULL packets via DhanBroker.stream_full().
 
         Converts FullPacket → dict for backward compatibility with gameloop.
+        Falls back to REST quote polling if WebSocket is unavailable or rate-limited.
         """
         await self._ensure_initialized()
         broker = self.get_broker()
 
         instruments = [self._make_instrument(sym) for sym in symbols]
 
-        pkt_count = 0
-        async for pkt in broker.stream_full(instruments):
-            pkt_count += 1
-            if pkt_count <= 3 or pkt_count % 100 == 0:
-                logger.debug(
-                    "stream_full pkt #%d: ltp=%s", pkt_count, getattr(pkt, "ltp", "?")
-                )
-            yield asdict(pkt)
+        try:
+            pkt_count = 0
+            async for pkt in broker.stream_full(instruments):
+                pkt_count += 1
+                if pkt_count <= 3 or pkt_count % 100 == 0:
+                    logger.debug(
+                        "stream_full pkt #%d: ltp=%s", pkt_count, getattr(pkt, "ltp", "?")
+                    )
+                yield asdict(pkt)
+        except Exception as e:
+            logger.warning("stream_full WebSocket ended (%s) — falling back to REST quote polling", e)
+            async for pkt in self.stream_poll(symbols, poll_interval=1.0):
+                yield pkt
 
     async def stream_poll(
-        self, symbols: list[str], poll_interval: float = 3.0
+        self, symbols: list[str], poll_interval: float = 1.0
     ) -> AsyncIterator[dict]:
-        """REST LTP polling fallback when Dhan WS returns no data for MCX OPTFUT.
+        """REST quote/LTP polling fallback when Dhan WS is rate-limited or unavailable.
 
-        Polls broker.get_ltp() for each symbol every poll_interval seconds and
-        yields tick dicts in the same schema as stream_full(). Volume fields are
-        zero because REST LTP doesn't carry volume; the candle builder handles this.
+        Polls broker.get_quote() for each symbol every poll_interval seconds and
+        yields tick dicts carrying real LTP, volume, and 5-level depth.
         """
         await self._ensure_initialized()
         broker = self.get_broker()
         loop = asyncio.get_event_loop()
 
         logger.info(
-            "stream_poll: REST polling %d symbol(s) every %.1fs (MCX OPTFUT fallback)",
+            "stream_poll: REST quote polling %d symbol(s) every %.1fs (live tick fallback)",
             len(symbols),
             poll_interval,
         )
@@ -472,28 +497,42 @@ class DhanMarketDataAdapter(IMarketData):
             for sym in symbols:
                 try:
                     instrument = self._make_instrument(sym)
-                    ltp = await loop.run_in_executor(
-                        None, lambda i=instrument: float(broker.get_ltp(i))
+                    quote = await loop.run_in_executor(
+                        None, lambda i=instrument: broker.get_quote(i)
                     )
+                    ltp = float(getattr(quote, "ltp", 0.0) or 0.0)
+                    if ltp <= 0:
+                        ltp = await loop.run_in_executor(
+                            None, lambda i=instrument: float(broker.get_ltp(i))
+                        )
                     if ltp > 0:
+                        bids = [
+                            {"price": float(lvl.price), "qty": float(lvl.quantity)}
+                            for lvl in getattr(quote, "bid_depth", []) or []
+                            if getattr(lvl, "price", 0) > 0
+                        ]
+                        asks = [
+                            {"price": float(lvl.price), "qty": float(lvl.quantity)}
+                            for lvl in getattr(quote, "ask_depth", []) or []
+                            if getattr(lvl, "price", 0) > 0
+                        ]
                         yield {
                             "symbol": sym,
                             "ltp": ltp,
-                            "timestamp": datetime.now(IST).isoformat(),
-                            # WS-absent fields — candle builder treats vol=0 as "no new volume"
-                            "volume": 0,
-                            "ltq": 0,
-                            "oi": 0,
-                            "total_buy_qty": 0,
-                            "total_sell_qty": 0,
-                            "depth_bids": [],
-                            "depth_asks": [],
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "volume": float(getattr(quote, "volume", 0.0) or 0.0),
+                            "ltq": float(getattr(quote, "ltq", 0.0) or 0.0),
+                            "oi": float(getattr(quote, "oi", 0.0) or 0.0),
+                            "total_buy_qty": sum(b["qty"] for b in bids),
+                            "total_sell_qty": sum(a["qty"] for a in asks),
+                            "depth_bids": bids,
+                            "depth_asks": asks,
                         }
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     logger.debug(
-                        "stream_poll: LTP fetch failed for %s", sym, exc_info=True
+                        "stream_poll: Quote fetch failed for %s", sym, exc_info=True
                     )
 
             # Sleep the remainder of poll_interval (accounting for fetch time)
@@ -509,7 +548,13 @@ class DhanMarketDataAdapter(IMarketData):
         await self._ensure_initialized()
         broker = self.get_broker()
         instruments = [self._make_instrument(sym) for sym in symbols]
-        async for depth in broker.stream_depth(instruments, depth_level=20):
+        
+        # MCX does not support 20-level depth WebSocket (MCX depth is 5-level in stream_full)
+        from brokers.broker.entities import Exchange
+        non_mcx = [inst for inst in instruments if getattr(inst, "exchange", None) != Exchange.MCX]
+        if not non_mcx:
+            return
+        async for depth in broker.stream_depth(non_mcx, depth_level=20):
             yield depth
 
     def close_sync(self) -> None:

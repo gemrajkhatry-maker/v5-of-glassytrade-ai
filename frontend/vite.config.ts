@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   const repoRoot = path.resolve(__dirname, '..');
   // Merge repo + frontend env so PORT from backend/.env or root .env matches the proxy.
   const envAll = { ...loadEnv(mode, repoRoot, ''), ...loadEnv(mode, __dirname, '') };
-  const backendPort = envAll.VITE_BACKEND_PORT || envAll.PORT || '9090';
+  const backendPort = envAll.VITE_BACKEND_PORT || envAll.PORT || '8090';
   const proxyTarget =
     envAll.VITE_PROXY_TARGET?.replace(/\/$/, '') ||
     `http://127.0.0.1:${backendPort}`;
@@ -20,14 +20,14 @@ export default defineConfig(({ mode }) => {
 
   return {
     server: {
-      port: 5190,
+      port: 5191,
       host: '0.0.0.0',
       proxy: {
         '/api': apiProxy,
       },
     },
     preview: {
-      port: 5190,
+      port: 5191,
       host: '0.0.0.0',
       proxy: {
         '/api': apiProxy,

@@ -7,6 +7,8 @@ asyncio here).
 """
 
 from __future__ import annotations
+import uuid
+
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, TypeVar
@@ -20,10 +22,12 @@ if TYPE_CHECKING:
     from quant.execution.risk import RiskState
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Event:
     symbol: str
     time: str
+    event_id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False)
+    correlation_id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False)
 
 
 @dataclass(frozen=True)

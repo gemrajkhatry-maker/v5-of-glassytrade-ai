@@ -9,6 +9,7 @@ Also implements Fabio Rule 8 (contraction detection) and Rule 11
 """
 
 from __future__ import annotations
+from quant.contracts.enums import MarketState
 
 import time
 import logging
@@ -27,7 +28,7 @@ MIN_COOLDOWN = 5.0
 class _RegimeSnapshot:
     """Captures the market state at a point in time."""
 
-    market_state: str = ""
+    market_state: MarketState = MarketState.BALANCED
     price_zone: str = ""  # "ABOVE_VAH" | "BELOW_VAL" | "INSIDE_VA" | "AT_POC"
     poc: float = 0.0
     delta_sign: int = 0  # -1, 0, +1

@@ -68,12 +68,16 @@ describe('MarketSidebar to ChartScene Integration', () => {
       equity: 100000,
       leverage: 10,
     },
+    aiAnalysis: null,
+    genAIAnalysis: null,
     amtAnalysis: null,
     auctionAnalysis: null,
     quantDecisionAnalysis: null,
     riskState: null,
     agentDecision: null,
-    decisionHistory: [],
+    llmHistory: [],
+    overseerAction: '',
+    overseerReason: '',
     lastUpdate: Date.now(),
   });
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 def _agent_decision_from_quant(qd: dict | None) -> dict | None:
     """Project the deterministic decision into the frontend ``AgentDecision``
-    contract (direction/probability/regime/timing/rationale)."""
+    contract (direction/modelLabel/regime/timing/rationale)."""
     if not qd:
         return None
     sig = qd.get("signal") or {}
@@ -24,7 +24,7 @@ def _agent_decision_from_quant(qd: dict | None) -> dict | None:
         direction = "FLAT"
     return {
         "direction": direction,
-        "probability": float(sig.get("confidence") or 0.0),
+        "modelLabel": str(sig.get("modelLabel") or qd.get("modelLabel") or ""),
         "regime": str(qd.get("phase") or ""),
         "timing": "",
         "sizeFraction": 0.0,

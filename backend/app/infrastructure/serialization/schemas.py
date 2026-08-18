@@ -5,6 +5,8 @@ provide converters to/from domain objects.  The API layer (routers) uses
 these exclusively; the domain layer never imports Pydantic.
 """
 
+from quant.contracts.enums import MarketState
+
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -90,7 +92,7 @@ class TradeSignalDTO(BaseModel):
 
 
 class AMTAnalysisDTO(BaseModel):
-    market_state: str = Field(alias="marketState", default="BALANCED")
+    market_state: MarketState = Field(alias="marketState", default=MarketState.BALANCED)
     poc: float = 0
     value_area_high: float = Field(alias="valueAreaHigh", default=0)
     value_area_low: float = Field(alias="valueAreaLow", default=0)

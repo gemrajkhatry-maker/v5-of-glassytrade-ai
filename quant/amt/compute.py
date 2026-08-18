@@ -16,14 +16,24 @@ MLX wins at 5000+ elements (training pipelines, batch indicator computation).
 from __future__ import annotations
 import math
 
-# MLX disabled - Metal GPU initialization crashes on this system
-# All computations will use optimized pure Python instead
+# Try to enable MLX GPU acceleration
 _HAS_MLX = False
 mx = None
+_MLX_INIT_FAILED = False
 
 def _ensure_mlx():
-    """MLX is disabled on this system."""
-    return False
+    global _HAS_MLX, mx, _MLX_INIT_FAILED
+    if _HAS_MLX or _MLX_INIT_FAILED:
+        return _HAS_MLX
+    try:
+        import mlx.core
+        _ = mlx.core.array([0.0])  # probe Metal init
+        mx = mlx.core
+        _HAS_MLX = True
+        return True
+    except Exception:
+        _MLX_INIT_FAILED = True
+        return False
 
 # MLX crossover point: only use GPU above this array size
 _MLX_MIN_SIZE = 500

@@ -9,6 +9,7 @@ CVD tracking, profile shape classification, and session context.
 """
 
 from __future__ import annotations
+from quant.contracts.enums import MarketState
 
 import logging
 import math
@@ -167,6 +168,7 @@ class AMTConfig:
 # ---------------------------------------------------------------------------
 # Volume Profile + LVN/HVN Detection — imported from extracted services
 # ---------------------------------------------------------------------------
+from quant.amt.profile.migration import ValueMigrationTracker
 from quant.amt.profile.volume_profile import IncrementalVolumeProfile
 from quant.amt.profile.lvn import (
     find_lvns as _find_lvns_extracted,
@@ -255,6 +257,7 @@ class AMTAnalyzer:
         self.config = config or AMTConfig()
         self._cvd_tracker = CVDTracker()
         self._poc_tracker = POCMigrationTracker()
+        self._value_migration = ValueMigrationTracker()
         self._structure_classifier: "MarketStructureClassifier | None" = None
         self._vwap_history: list[float] = []
         # Incremental aggressive prints state
@@ -460,6 +463,7 @@ class AMTAnalyzer:
             self._ar_engine.reset()
             self._persistent_agg_scorer.reset()
             self._lvn_tracker.reset()
+            self._value_migration.reset()
         _is_new_candle = current.time != self._vwap_last_time
         self._vwap_last_time = current.time
         
@@ -693,31 +697,82 @@ class AMTAnalyzer:
             return "TREND"
         return "NORMAL_VARIATION"
 
-    def _build_vwap_bands(self, session_vwap: float, current) -> tuple[float, float, float, float, float, float | None]:
-        """Compute VWAP standard deviation bands (±1σ, ±2σ)."""
-        vwap_std = 0.0
-        if self._vwap_cum_vol > 0:
-            # Volume-weighted std from the shifted-variance accumulator:
-            # σ² = E[(TP - VWAP)²] = E[(TP - shift)²] - (VWAP - shift)²
-            variance = (
-                self._vwap_cum_sq_vol / self._vwap_cum_vol
-                - (session_vwap - self._vwap_shift) ** 2
-            )
-            vwap_std = math.sqrt(max(0.0, variance))
+    def _recent_vwap_stats(self, recent_data) -> tuple[float, float]:
+        """Volume-weighted VWAP + std over an explicit candle window.
 
-            # Proportional clamp bounds (0.1% floor, 3% cap of session VWAP)
-            MIN_VWAP_STD = max(1.0, session_vwap * 0.001)
-            if vwap_std < MIN_VWAP_STD:
-                vwap_std = MIN_VWAP_STD
+        Same shifted-variance math and proportional clamps as the whole-session
+        path, but over the given window. Used so the VWAP bands, the deviation
+        sigma and the displayed session VWAP are computed on the SAME window as
+        the VA clamp (RECENT_VA_LOOKBACK).  Otherwise a regime collapse (e.g.
+        option premium 195 -> 102) leaves the whole-session accumulator far
+        above the current auction — "LTP +2.4σ EXTREME DEVIATION" while the
+        recent-clamped VA reads "Balance: 100% in VA".
+        """
+        tot_vol = 0.0
+        tot_quote = 0.0
+        tot_sq = 0.0
+        shift = 0.0
+        for d in recent_data:
+            tp = (float(d.high) + float(d.low) + float(d.close)) / 3.0
+            v = float(d.volume)
+            if v <= 0:
+                continue
+            if shift == 0.0:
+                shift = tp
+            tot_vol += v
+            tot_quote += tp * v
+            s = tp - shift
+            tot_sq += s * s * v
+        if tot_vol <= 0:
+            return 0.0, 0.0
+        vwap = tot_quote / tot_vol
+        variance = max(0.0, tot_sq / tot_vol - (vwap - shift) ** 2)
+        vwap_std = math.sqrt(variance)
+        # Proportional clamp bounds (0.1% floor, 3% cap) — same as session path
+        min_std = max(1.0, vwap * 0.001)
+        if vwap_std < min_std:
+            vwap_std = min_std
+        max_std = vwap * 0.03
+        if vwap_std > max_std:
+            vwap_std = max_std
+        return vwap, vwap_std
 
-            # Enforce maximum std (4σ is extreme, anything higher is calculation error)
-            MAX_VWAP_STD = session_vwap * 0.03  # Max 3% of VWAP
-            if vwap_std > MAX_VWAP_STD:
-                logger.warning(
-                    "VWAP std clamped from %.2f to %.2f (max 3%% of VWAP=%.2f)",
-                    vwap_std, MAX_VWAP_STD, session_vwap
+    def _build_vwap_bands(self, session_vwap: float, current, recent_data=None) -> tuple[float, float, float, float, float, float | None]:
+        """Compute VWAP standard deviation bands (±1σ, ±2σ).
+
+        When `recent_data` is provided the VWAP and std are recomputed
+        volume-weighted over that window (the same basis as the VA clamp) —
+        this is what analyze() uses, so the deviation sigma and the displayed
+        VWAP describe the current auction instead of a stale whole-session mix.
+        Otherwise the whole-session accumulators are used (backward compatible
+        for direct callers).
+        """
+        if recent_data:
+            session_vwap, vwap_std = self._recent_vwap_stats(recent_data)
+        else:
+            vwap_std = 0.0
+            if self._vwap_cum_vol > 0:
+                # Volume-weighted std from the shifted-variance accumulator:
+                # σ² = E[(TP - VWAP)²] = E[(TP - shift)²] - (VWAP - shift)²
+                variance = (
+                    self._vwap_cum_sq_vol / self._vwap_cum_vol
+                    - (session_vwap - self._vwap_shift) ** 2
                 )
-                vwap_std = MAX_VWAP_STD
+                vwap_std = math.sqrt(max(0.0, variance))
+
+                # Proportional clamp bounds (0.1% floor, 3% cap of session VWAP)
+                MIN_VWAP_STD = max(1.0, session_vwap * 0.001)
+                if vwap_std < MIN_VWAP_STD:
+                    vwap_std = MIN_VWAP_STD
+
+                # Enforce maximum std (4σ is extreme, anything higher is calculation error)
+                MAX_VWAP_STD = session_vwap * 0.03  # Max 3% of VWAP
+                if vwap_std > MAX_VWAP_STD:
+                    logger.warning(
+                        "VWAP std clamped from %.2f to %.2f (max 3%% of VWAP=%.2f)",
+                        vwap_std, MAX_VWAP_STD, session_vwap
+                    )
+                    vwap_std = MAX_VWAP_STD
 
         vwap_upper_1 = session_vwap + vwap_std
         vwap_lower_1 = session_vwap - vwap_std
@@ -955,6 +1010,28 @@ class AMTAnalyzer:
         # Value Area — CME two-row pairs method (shared impl, average-weighted)
         vah, val = compute_value_area(profile, poc_index, VALUE_AREA_PCT)
 
+        # Clamp the value area to the recently-traded range. After an intraday
+        # regime collapse (e.g. the option premium halving 195 -> 102), the
+        # whole-session profile legitimately spans both regimes, so 70% of the
+        # session's volume can extend VAH far beyond the current auction (~158
+        # while price sits at ~102). The VA used for decisions must reflect the
+        # CURRENT auction — clamp VAH/VAL to the high/low of the last
+        # RECENT_VA_LOOKBACK candles so a stale tail can never dominate.
+        from quant.contracts.constants import RECENT_VA_LOOKBACK
+
+        recent_window = recent_data[-RECENT_VA_LOOKBACK:]
+        if recent_window:
+            recent_high = max(d.high for d in recent_window)
+            recent_low = min(d.low for d in recent_window)
+            if recent_high > 0:
+                vah = min(vah, recent_high)
+            if recent_low > 0:
+                val = max(val, recent_low)
+            # Keep the interval valid if the recent range sits entirely above
+            # (or below) the whole-session VA.
+            if vah < val:
+                vah, val = recent_high, recent_low
+
         # LVN detection with persistence filter
         raw_lvns = find_lvns(profile, self.config)
         lvns = self._lvn_tracker.update(raw_lvns, profile)
@@ -1099,9 +1176,13 @@ class AMTAnalyzer:
             market_state = MarketState.BALANCED
             effective_profile_shape = "D"
 
-        # VWAP bands (single accumulation per bar — B-20: no re-update here)
+        # VWAP bands — same recent window as the VA clamp, so the deviation
+        # sigma, the bands and the displayed session VWAP describe the CURRENT
+        # auction (fixes the "LTP +2.4σ EXTREME DEVIATION" vs "Balance: 100%
+        # in VA" contradiction after a regime collapse).
+        recent_vwap, _ = self._recent_vwap_stats(recent_window)
         vwap_upper_1, vwap_lower_1, vwap_upper_2, vwap_lower_2, vwap_std, vwap_deviation_sigmas = \
-            self._build_vwap_bands(session_vwap, current)
+            self._build_vwap_bands(recent_vwap, current, recent_data=recent_window)
 
         # CVD
         cvd_state = self._cvd_tracker.update(current)
@@ -1112,12 +1193,25 @@ class AMTAnalyzer:
         # Market structure classification
         structure = self._classify_market_structure(data, session_vwap, market_state)
 
-        # Initial Balance tracking
-        ib_state = self._ib_tracker.update(current)
+        # Initial Balance tracking — pinned to the session's first candle so
+        # the 60-minute build window measures from the actual session open
+        # (09:15 NSE / 09:00 MCX), not from the first analyzed bar (Fabio: IB
+        # is the high/low of the first hour of the session).
+        ib_state = self._ib_tracker.update(
+            current, session_open=data[0].time if data else None
+        )
         ib_high, ib_low, ib_complete = ib_state.ib_high, ib_state.ib_low, ib_state.is_complete
 
         # POC migration with price alignment
         poc_migration = self._poc_tracker.update(poc, current.close)
+
+        # Value migration — session VA development over successive 15-min
+        # windows (POC/VAH/VAL drift), so the value area's ongoing evolution is
+        # an explicit feature instead of a frozen reference.
+        value_migration = self._value_migration.update(
+            current, poc, vah, val,
+            session_open=data[0].time if data else None,
+        )
 
         # LVN velocity play detection
         lvn_play = detect_lvn_play(
@@ -1207,7 +1301,7 @@ class AMTAnalyzer:
             profile_type="Session",
             cvd_slope=cvd_state.slope,
             cvd_divergence=cvd_div,
-            session_vwap=session_vwap,
+            session_vwap=recent_vwap if recent_vwap > 0 else session_vwap,
             vwap_upper_1=vwap_upper_1,
             vwap_lower_1=vwap_lower_1,
             vwap_upper_2=vwap_upper_2,
@@ -1230,6 +1324,9 @@ class AMTAnalyzer:
             ib_high=ib_high,
             ib_low=ib_low if ib_low != float("inf") else 0.0,
             ib_complete=ib_complete,
+            ib_poc=ib_state.ib_poc,
+            ib_vah=ib_state.ib_vah,
+            ib_val=ib_state.ib_val,
             prior_poc=prior_poc,
             prior_vah=prior_vah,
             prior_val=prior_val,
@@ -1268,6 +1365,10 @@ class AMTAnalyzer:
             break_type=break_state["break_type"],
             break_level=break_state["break_level"],
             ofi=ofi_result.ofi,
+            # Depth reaches the decision path: the live order-book imbalance
+            # (bid-heavy +1 .. ask-heavy -1) from the depth snapshot. Gate 3
+            # consumes it as the order-flow aggression (A3) confirmation.
+            obi=obi,
             dev_poc=dev_poc,
             dev_vah=dev_vah,
             dev_val=dev_val,
@@ -1296,6 +1397,7 @@ class AMTAnalyzer:
             cvd_source=cvd_source,
             bimodal_active_pole=_bimodal_active_pole,
             is_extreme_deviation=state_result.is_extreme_deviation,
+            value_migration=value_migration,
             underlying_price=float(data[-1].close) if data else 0.0,
             # Fix 1: Option type for direction labeling
             option_type=self._detect_option_type(symbol),

@@ -18,11 +18,13 @@ from quant.absorption import Absorption
 def _ctx(**kw):
     agent_direction = kw.pop("agent_direction", "LONG")
     market_state = kw.pop("market_state", "IMBALANCED")
+    obi = kw.pop("obi", 0.0)
     return DecisionContext(
         state=_state(**kw), bar=None,
         agent_direction=agent_direction,
         agent_probability=0.7,
         market_state=market_state,
+        obi=obi,
     )
 
 
@@ -98,3 +100,34 @@ def test_rejects_dead_market():
                                 triple_a_signal="LONG", market_state="DEAD"))
     assert not r.passed
     assert "dead" in r.reason.lower()
+
+
+def test_passes_on_strong_bid_obi_breakout():
+    """Depth reaches gate 3: a strong bid-side order book imbalance (OBI > 0)
+    with price breaking beyond the upper VWAP band is the order-flow aggression
+    leg of the Triple-A edge — no bar absorption required."""
+    r = gate_triple_a_edge(_ctx(obi=0.65, upper_1=99.0, close=100.5))
+    assert r.passed
+    assert r.gate == 3
+
+
+def test_passes_on_strong_ask_obi_breakout_short():
+    """Ask-side imbalance (OBI < 0) below the lower VWAP band passes for SHORT."""
+    r = gate_triple_a_edge(_ctx(
+        agent_direction="SHORT", obi=-0.7, lower_1=101.0, close=99.5))
+    assert r.passed
+
+
+def test_rejects_obi_direction_conflict():
+    """OBI pointing one way while the price is beyond the opposite VWAP band is
+    not an aggression signal — the book and the move must agree."""
+    r = gate_triple_a_edge(_ctx(obi=0.65, lower_1=101.0, close=99.5))
+    assert not r.passed
+
+
+def test_rejects_weak_obi_with_breakout():
+    """A near-balanced book (|OBI| below the aggression threshold) is not enough
+    on its own — the depth signal must be one-sided."""
+    r = gate_triple_a_edge(_ctx(obi=0.15, upper_1=99.0, close=100.5))
+    assert not r.passed
+    assert "No Triple-A edge" in r.reason

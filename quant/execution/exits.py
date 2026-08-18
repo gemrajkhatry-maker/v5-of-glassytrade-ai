@@ -4,6 +4,7 @@ Pure and deterministic. No imports from backend/ or app/.
 """
 
 from __future__ import annotations
+from quant.contracts.enums import MarketState
 
 from dataclasses import dataclass
 
@@ -15,7 +16,7 @@ from quant.execution.order import Position
 @dataclass(frozen=True)
 class ExitDecision:
     should_exit: bool
-    reason: str          # "" | "SL" | "TP" | "TRAIL" | "TIME" | "CVD_KILL" | "SPREAD_BLOWOUT"
+    reason: str          # "" | "SL" | "TP" | "TRAIL" | "TIME" | "CVD_KILL" | "SPREAD_BLOWOUT" | "BREAKEVEN"
     close_price: float
     trail_stop: float | None = None
 
@@ -42,19 +43,33 @@ class ExitEngine:
         self,
         time_stop_bars: int = 30,
         cvd_kill_threshold: float = float("inf"),
-        trail_giveback_pct: float = 0.30,
+        trail_giveback_pct: float = 0.20,
         spread_max_pct: float = 0.03,
+        cvd_be_threshold: float = 2.0,
     ) -> None:
         self.time_stop_bars = time_stop_bars
         self.cvd_kill_threshold = cvd_kill_threshold
         self.trail_giveback_pct = trail_giveback_pct
         self.spread_max_pct = spread_max_pct
+        self.cvd_be_threshold = cvd_be_threshold
         # Trailing state is keyed by id(position) because Position is frozen.
         self._trail: dict[int, _Trail] = {}
+        self._breakeven: dict[int, float | None] = {}  # id(position) -> BE floor price
 
     def pop_trail(self, position: Position) -> None:
         """Drop trailing state for a closed position."""
         self._trail.pop(id(position), None)
+        self._breakeven.pop(id(position), None)
+
+    def is_risk_free(self, position: Position) -> bool:
+        """Return True when this position has reached the 0.8R breakeven floor.
+
+        Used by the pyramid engine to authorize add-ons: per spec §13.2 the
+        base trade must be risk-free (SL at entry or better) before any
+        pyramid entry is permitted.
+        """
+        be_floor = self._breakeven.get(id(position))
+        return be_floor is not None
 
     def evaluate(
         self,
@@ -66,7 +81,7 @@ class ExitEngine:
         *,
         best_bid: float | None = None,
         best_ask: float | None = None,
-        market_state: str = "",
+        market_state: MarketState = MarketState.BALANCED,
         session_phase: str = "",
         is_expiry: bool = False,
         time_to_close: float = 0.0,
@@ -105,12 +120,37 @@ class ExitEngine:
         if not long and slope > self.cvd_kill_threshold:
             return ExitDecision(True, "CVD_KILL", close)
 
-        # 4. Trailing stop — only once the trade has reached 1R profit.
+        # 3b. Breakeven logic — Fabio: move SL to entry at 1R or on CVD confirmation.
+        # The breakeven floor ensures the trail can never drop below entry once armed.
         entry = float(position.order.signal.entry)
         risk = abs(entry - sl)
-        tr = self._trail.get(id(position))
+        be_floor = self._breakeven.get(id(position))
+
         if risk > 0:
             profit = (close - entry) if long else (entry - close)
+            
+            # CVD-based early breakeven: if profit > 0 and CVD slope strongly
+            # confirms direction, lock in breakeven immediately (Fabio Gap #5).
+            cvd_slope = float(state.order_flow.cvd_slope)
+            if be_floor is None and profit > 0:
+                cvd_confirms = (
+                    (long and cvd_slope > self.cvd_be_threshold)
+                    or (not long and cvd_slope < -self.cvd_be_threshold)
+                )
+                if cvd_confirms:
+                    be_floor = entry
+                    self._breakeven[id(position)] = be_floor
+            
+            # Standard 0.8R breakeven: once profit reaches 0.8R, floor at entry.
+            # Spec §13.1: "Price breaks +0.8R advance → SL ← entry_price instantly."
+            # Triggers before full 1R to lock in risk-free status early and enable pyramiding.
+            if be_floor is None and profit >= risk * 0.8:
+                be_floor = entry
+                self._breakeven[id(position)] = be_floor
+
+        # 4. Trailing stop — only once the trade has reached 1R profit.
+        tr = self._trail.get(id(position))
+        if risk > 0:
             # Ratchet ONLY at/above 1R; once armed, enforce on every bar so a
             # giveback below 1R can't silently ride back to the original SL.
             if profit >= risk:
@@ -125,11 +165,22 @@ class ExitEngine:
                 )
                 # Never loosen below the original stop-loss.
                 candidate = max(candidate, sl) if long else min(candidate, sl)
+                
+                # Enforce breakeven floor from step 3b
+                if be_floor is not None:
+                    candidate = max(candidate, be_floor) if long else min(candidate, be_floor)
+
                 if tr.stop is None:
                     tr.stop = candidate
                 else:
                     # Monotonicity: long trails only rise, short only fall.
                     tr.stop = max(tr.stop, candidate) if long else min(tr.stop, candidate)
+            
+            # Check breakeven stop (armed by CVD before 1R)
+            if be_floor is not None and tr is None:
+                if (long and low <= be_floor) or (not long and high >= be_floor):
+                    return ExitDecision(True, "BREAKEVEN", close)
+
             if tr is not None and tr.stop is not None:
                 if (long and low <= tr.stop) or (not long and high >= tr.stop):
                     return ExitDecision(True, "TRAIL", close, trail_stop=tr.stop)

@@ -1,11 +1,11 @@
-
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
     InstrumentState,
     ChartConfig,
     OHLCData,
-    DecisionHistoryEntry,
+    LLMHistoryEntry,
 } from '../types';
+import { NETWORK_CONFIG } from '../config';
 
 /**
  * Append a deterministic quantDecision to the per-symbol decision history.
@@ -13,25 +13,24 @@ import {
  * so the 0.5s delta stream doesn't spam the panel.
  */
 const mergeDecisionHistory = (
-    existing: DecisionHistoryEntry[],
+    existing: LLMHistoryEntry[],
     qd: any,
-): DecisionHistoryEntry[] => {
+): LLMHistoryEntry[] => {
     if (!qd) return existing;
     const signal = qd.signal || {};
-    const entry: DecisionHistoryEntry = {
+    const entry: LLMHistoryEntry = {
         timestamp: Date.now(),
-        direction: String(signal.type || 'FLAT').toUpperCase() as DecisionHistoryEntry['direction'],
-        confidence: Number(signal.confidence ?? 0),
+        direction: String(signal.type || 'FLAT').toUpperCase() as LLMHistoryEntry['direction'],
+        confidence: signal.confidence?.toString() ?? 'Low',
         rationale: qd.reason || '',
-        phase: qd.phase || '',
-        approved: !!qd.approved,
-        blockReasons: Array.isArray(qd.blockReasons) ? qd.blockReasons : undefined,
+        inputPrompt: qd.inputPrompt,
+        rawOutput: qd.rawOutput,
     };
     const last = existing[existing.length - 1];
     if (
         last &&
         last.rationale === entry.rationale &&
-        last.phase === entry.phase &&
+        last.inputPrompt === entry.inputPrompt &&
         Date.now() - last.timestamp < 10_000
     ) {
         return existing;
@@ -58,12 +57,21 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
         positions: [],
         closedTrades: [],
     },
+    aiAnalysis: null,
+    genAIAnalysis: null,
     amtAnalysis: null,
     auctionAnalysis: null,
     quantDecisionAnalysis: null,
     riskState: null,
     agentDecision: null,
-    decisionHistory: [],
+    llmHistory: [],
+    overseerAction: '',
+    overseerReason: '',
+    runtimeSafety: {
+        brokerBound: false,
+        feedStale: false,
+        unsafeToTrade: false,
+    },
     lastUpdate: Date.now(),
 });
 
@@ -90,13 +98,12 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // Generation counter to prevent stale subscribe messages from racing with
     // rapid activeSymbol changes (e.g. user clicks multiple tabs quickly).
     const subscribeGenRef = useRef(0);
-
-    // --- RAF-batched state updates ---
+    // RAF-batched state updates
     // Queue multiple WS messages into a single React render per animation frame.
     // Without this, 9 symbols × ~7 generations/sec = ~60 separate setState calls/sec.
     const pendingUpdatesRef = useRef<Array<(prev: Record<string, InstrumentState>) => Record<string, InstrumentState>>>([]);
     const batchRafRef = useRef(0);
-    const MAX_RAF_QUEUE_SIZE = 10; // Backpressure: drop updates if queue grows too large
+    const MAX_RAF_QUEUE_SIZE = NETWORK_CONFIG.maxRafQueueSize; // Backpressure: drop updates if queue grows too large
 
     const batchedSetInstruments = useCallback(
         (updater: (prev: Record<string, InstrumentState>) => Record<string, InstrumentState>) => {
@@ -165,7 +172,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
         // Lifespan option scan can block HTTP for minutes — avoid aborting too early.
-        const configTimeoutMs = 180_000;
+        const configTimeoutMs = NETWORK_CONFIG.configTimeoutMs;
         const fetchOpts: RequestInit =
             typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal
                 ? { signal: AbortSignal.timeout(configTimeoutMs) }
@@ -206,6 +213,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 return next;
             });
             setActiveSymbol(symbols[0]);
+            warmHistoryForSymbols(symbols, String(cfg.interval || '1m'));
         };
 
         const fetchConfig = async (attempt: number) => {
@@ -272,7 +280,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     const warmHistoryForSymbols = useCallback((symbols: string[], interval: string) => {
         for (const sym of symbols) {
             const path = `/api/market/history/${encodeURIComponent(sym)}`;
-            const url = `${backendUrl(path)}?interval=${encodeURIComponent(interval || '5m')}&limit=500`;
+            const url = `${backendUrl(path)}?interval=${encodeURIComponent(interval || '1m')}&limit=500`;
             fetch(url)
                 .then(res => (res.ok ? res.json() : null))
                 .then(body => {
@@ -290,8 +298,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         delta: Number(c.delta ?? 0),
                     }));
                     setInstruments(prev => {
-                        const inst = prev[sym];
-                        if (!inst) return prev;
+                        const inst = prev[sym] || createInstrumentState(sym);
                         // Union warm history + any already-streamed live bars,
                         // sorted ascending and deduped by time.
                         const byTime = new Map<string, OHLCData>();
@@ -429,8 +436,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
 
                 // Analytics delta: batch into next animation frame
                 batchedSetInstruments(prev => {
-                    const existing = prev[symbol];
-                    if (!existing) return prev;
+                    const existing = prev[symbol] || createInstrumentState(symbol);
 
                     const merged: any = { ...existing, lastUpdate: Date.now() };
 
@@ -454,7 +460,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.auction !== undefined) merged.auctionAnalysis = { ...existing.auctionAnalysis, ...state.auction };
                     if (state.quantDecision !== undefined) {
                         merged.quantDecisionAnalysis = { ...existing.quantDecisionAnalysis, ...state.quantDecision };
-                        merged.decisionHistory = mergeDecisionHistory(existing.decisionHistory, state.quantDecision);
+                        merged.llmHistory = mergeDecisionHistory(existing.llmHistory, state.quantDecision);
                     }
                     if (state.riskState !== undefined) merged.riskState = { ...existing.riskState, ...state.riskState };
                     if (state.agentDecision !== undefined) merged.agentDecision = state.agentDecision;
@@ -515,7 +521,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         amtAnalysis: newAmtAnalysis,
                         auctionAnalysis: newAuctionAnalysis,
                         quantDecisionAnalysis: newQuantDecisionAnalysis,
-                        decisionHistory: mergeDecisionHistory(inst.decisionHistory, state.quantDecision),
+                        llmHistory: mergeDecisionHistory(inst.llmHistory, state.quantDecision),
                         riskState: newRiskState,
                         agentDecision: newAgentDecision,
                         orderBook: state.depth ?? inst.orderBook,

@@ -260,7 +260,7 @@ class SettingsAdapter:
         """Get allowed CORS origins from env (comma-separated)."""
         raw = os.getenv(
             "CORS_ORIGINS",
-            "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5190,http://127.0.0.1:5190",
+            "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5190,http://127.0.0.1:5190,http://localhost:5191,http://127.0.0.1:5191,http://localhost:5173,http://127.0.0.1:5173",
         )
         return [o.strip() for o in raw.split(",") if o.strip()]
 

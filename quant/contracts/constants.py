@@ -49,7 +49,7 @@ def _get(key: str, default) -> float | int | str:
 # ============================================================================
 LVN_THRESHOLD = _get("lvn_threshold", 0.15)
 HVN_THRESHOLD = _get("hvn_threshold", 2.00)
-VALUE_AREA_PCT = _get("value_area_pct", 0.70)
+VALUE_AREA_PCT = _get("value_area_pct", 0.40)
 LVN_SMOOTHING = _get("lvn_smoothing", 3)
 LVN_MIN_PERSISTENCE_BARS = _get("lvn_min_persistence_bars", 1)
 LVN_REMOVAL_THRESHOLD = _get("lvn_removal_threshold", 0.50)
@@ -89,7 +89,7 @@ DELTA_ZONE_SIGMA_MULT = _get("delta_zone_sigma_mult", 2.5)
 # ============================================================================
 # Market State (FR-04)
 # ============================================================================
-POC_NO_TRADE_TICKS = 2
+POC_NO_TRADE_TICKS = int(_get("poc_no_trade_ticks", 2))
 BALANCE_RATIO_THRESHOLD = _get("balance_ratio_threshold", 0.55)
 DRIVE_REJECTION_WICK_RATIO = _get("drive_rejection_wick_ratio", 0.5)
 DISPLACEMENT_MULTIPLIER = _get("displacement_multiplier", 1.5)
@@ -186,10 +186,18 @@ MIN_GRADE_SCORE_THRESHOLD = 1
 # ============================================================================
 # Analysis Parameters
 # ============================================================================
-IB_MINUTES: int = 30
+# Fabio's framework: the Initial Balance is the high/low of the FIRST HOUR.
+# It freezes after 60 minutes (structural day-type reference); the session
+# Value Area keeps developing all session. Matches get_ib_window() in
+# quant/amt/session/context.py (NSE 09:15-10:15, MCX 09:00-10:00).
+IB_MINUTES: int = 60
 DISPLACEMENT_LOOKBACK: int = 15
 RECENT_DATA_WINDOW: int = 100
 CANDLE_INTERVAL_MINUTES: int = 5
+# Value area lookback: the VA used for decisions is clamped to the traded
+# range of the last N candles so a stale intraday regime (e.g. an option
+# premium that collapsed 195 -> 102) cannot inflate VAH/VAL.
+RECENT_VA_LOOKBACK: int = 60
 
 SOFT_GATE_QUORUM: int = 3
 

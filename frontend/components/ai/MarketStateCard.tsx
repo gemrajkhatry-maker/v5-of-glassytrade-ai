@@ -24,7 +24,7 @@ const MarketStateCard = React.memo<MarketStateCardProps>(({ marketState, isImbal
 
                 <div className="flex items-center justify-between ml-2">
                     <span className="text-[9px] text-glassy-text-tertiary uppercase tracking-wider font-bold">Session & Leg</span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5 justify-end">
                         {marketState === 'DEAD' ? (
                             <div className="px-2 py-0.5 rounded-sm text-[8px] font-bold tracking-wide flex items-center gap-1.5 bg-glassy-regime-dead/20 text-glassy-bear-primary border border-glassy-bear-primary/30">
                                 <span className="text-glassy-text-tertiary font-normal">SESSION</span>
@@ -43,15 +43,21 @@ const MarketStateCard = React.memo<MarketStateCardProps>(({ marketState, isImbal
                                 <span className="text-glassy-text-tertiary font-normal">LEG</span>
                                 <div className={`w-1.5 h-1.5 rounded-full ${hasDisplacement ? 'bg-glassy-warning' : 'bg-glassy-neutral-warm'}`} />
                                 {hasDisplacement ? 'DISPLACEMENT' : 'BALANCED'}
-                                {(legPoc ?? 0) > 0 && (
-                                    <span className="text-[7px] font-mono text-glassy-text-tertiary font-normal">
-                                        POC {legPoc?.toFixed(1)}
-                                        {(legVah ?? 0) > 0 && ` | ${legVal?.toFixed(1)}–${legVah?.toFixed(1)}`}
-                                    </span>
-                                )}
-                            </div>
+                        </div>
                     </div>
                 </div>
+
+                {(legPoc ?? 0) > 0 && (
+                    <div className="flex items-center justify-between text-[8px] font-mono text-glassy-text-tertiary border-t border-glassy-border-default/40 pt-1.5 ml-2">
+                        <span className="text-glassy-text-secondary font-medium">Leg Profile</span>
+                        <div className="flex items-center gap-2">
+                            <span>POC <span className="text-glassy-text-primary font-semibold">{legPoc?.toFixed(1)}</span></span>
+                            {(legVah ?? 0) > 0 && (
+                                <span>VA <span className="text-glassy-text-primary font-semibold">{legVal?.toFixed(1)}–{legVah?.toFixed(1)}</span></span>
+                            )}
+                        </div>
+                    </div>
+                )}
 
             </div>
         </div>

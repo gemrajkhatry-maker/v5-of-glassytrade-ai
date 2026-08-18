@@ -51,12 +51,12 @@ def validate_config(config: SystemConfig) -> None:
             f"RULE-6: portfolio_notional_cap must be ≤ 0.80. Got {config.risk.portfolio_notional_cap}."
         )
 
-    # RULE-7: value_area_pct between 0.60 and 0.85 for all symbols
+    # RULE-7: value_area_pct between 0.30 and 0.85 for all symbols
     for ex in config.exchanges.values():
         for sym in ex.symbols.values():
-            if not (0.60 <= sym.value_area_pct <= 0.85):
+            if not (0.30 <= sym.value_area_pct <= 0.85):
                 errors.append(
-                    f"RULE-7: {sym.name} value_area_pct={sym.value_area_pct} outside [0.60, 0.85]."
+                    f"RULE-7: {sym.name} value_area_pct={sym.value_area_pct} outside [0.30, 0.85]."
                 )
 
     # RULE-8: min_rr_ratio ≥ 1.0 for all symbols

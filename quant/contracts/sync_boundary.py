@@ -20,6 +20,8 @@ def ensure_sync_adapter_result(
 
     result = callable_obj(*args, **kwargs)
     if inspect.isawaitable(result):
+        if inspect.iscoroutine(result):
+            result.close()
         raise RuntimeError(
             f"{adapter_name} returned awaitable in sync context; use async boundary or offload"
         )

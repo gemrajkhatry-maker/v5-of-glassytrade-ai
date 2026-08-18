@@ -86,7 +86,11 @@ const VwapContextCard = React.memo<VwapContextCardProps>(({ amtResult, currentLt
                                         (() => {
                                             const sigma = amtResult.vwapDeviationSigmas;
                                             if (sigma !== null && sigma !== undefined) {
-                                                const isExtreme = Math.abs(sigma) >= 1.8;
+                                                // Use the engine's ≥3σ flag (DTO isExtremeDeviation) as the
+                                                // single source of truth — a hardcoded 1.8σ threshold here
+                                                // once showed "EXTREME DEVIATION" while the engine still
+                                                // classified the market BALANCED.
+                                                const isExtreme = amtResult.isExtremeDeviation === true;
                                                 return (
                                                     <div className={`mt-2 text-center text-[9px] font-mono font-bold flex flex-col items-center gap-1 ${sigma > 1 ? 'text-red-400' : sigma < -1 ? 'text-emerald-400' : 'text-yellow-400'}`}>
                                                         <span>LTP is {sigma > 0 ? '+' : ''}{sigma.toFixed(2)}σ from VWAP</span>

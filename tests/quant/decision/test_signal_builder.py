@@ -48,10 +48,11 @@ def test_build_tp_is_r_multiple():
     expected_tp = s.entry + (s.entry - s.sl) * 2.0
     assert s.tp == pytest.approx(expected_tp)
 
-def test_confidence_from_absorption():
+def test_model_label_populated():
+    """Signal.model_label must be a non-empty string (replaces the removed confidence field)."""
     sb = SignalBuilder()
-    s = sb.build(_ctx(absorption=Absorption(0, 100, 500, "BUY", 0.8, 0)), _pass_results())
-    assert s.confidence == pytest.approx(0.8)
+    s = sb.build(_ctx(), _pass_results(), model_label="Triple-A")
+    assert s.model_label == "Triple-A"
 
 def test_build_returns_none_when_sl_on_wrong_side_of_entry():
     sb = SignalBuilder()

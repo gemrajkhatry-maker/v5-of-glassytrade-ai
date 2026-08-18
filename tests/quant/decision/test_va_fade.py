@@ -32,7 +32,7 @@ def test_long_fade_below_val():
     assert sig is not None
     assert sig.direction == "LONG"
     assert sig.tp == 101.0
-    assert sig.sl == 99.5
+    assert sig.sl == 99.1
     assert sig.entry == 99.6
     assert sig.rr > 0
 
@@ -44,8 +44,9 @@ def test_short_fade_above_vah():
     assert sig is not None
     assert sig.direction == "SHORT"
     assert sig.tp == 99.0
-    assert sig.sl == 100.5
+    assert sig.sl == 101.0
     assert sig.entry == 100.5
+    assert sig.rr == 3.0
 
 
 def test_no_fade_when_cvd_conflicts():

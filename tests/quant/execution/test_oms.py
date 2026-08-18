@@ -7,7 +7,7 @@ from quant.execution.oms import PaperOMS
 
 def _sig(direction="LONG"):
     return Signal(type=direction, reason="Triple-A", entry=100.0, sl=99.0,
-                  tp=102.0, rr=2.0, confidence=0.8, symbol="SYM", timestamp="t0")
+                  tp=102.0, rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
 
 
 def test_submit_long():

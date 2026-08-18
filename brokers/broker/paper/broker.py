@@ -1,3 +1,6 @@
+# DEPRECATED: Use backend.app.infrastructure.adapters.paper_broker.PaperBrokerAdapter instead.
+# This file is scheduled for removal. See architecture_review.md FIX BA-2.
+
 """
 Paper Broker - Simulated broker for testing and development.
 

@@ -31,7 +31,7 @@ class TestSystemConfig:
         config = SystemConfig()
         assert config.name == "GlassyTrade AI"
         assert config.version == "2.0.0"
-        assert config.candle_timeframe_minutes == 5
+        assert config.candle_timeframe_minutes == 1
         assert config.capital == 5000000.0
         assert config.environment == "development"
         assert config.broker_mode == "paper"
@@ -135,7 +135,7 @@ class TestConfigValidator:
             exchanges={
                 "NSE": ExchangeConfig(
                     name="NSE",
-                    symbols={"NIFTY": SymbolConfig(name="NIFTY", value_area_pct=0.50)},
+                    symbols={"NIFTY": SymbolConfig(name="NIFTY", value_area_pct=0.20)},
                 ),
             }
         )

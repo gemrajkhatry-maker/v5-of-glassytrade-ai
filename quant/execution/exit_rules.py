@@ -5,6 +5,7 @@ or None. They are pure functions suitable for unit testing.
 """
 
 from __future__ import annotations
+from quant.contracts.enums import MarketState
 
 import logging
 import time
@@ -133,11 +134,11 @@ def check_time_stop(
         entry_time_epoch = current_time
 
     # Derive market_state from position metadata
-    market_state = "BALANCED"
+    market_state = MarketState.BALANCED
     if position.metadata:
         ms = position.metadata.get("market_state_model", "")
         if ms and ("trend" in str(ms).lower() or "imbalance" in str(ms).lower()):
-            market_state = "IMBALANCED"
+            market_state = MarketState.IMBALANCED
 
     if position.session_phase or position.is_expiry:
         new_stop = get_session_time_stop(
@@ -224,11 +225,11 @@ def check_time_stop_with_price(
         entry_time_epoch = current_time
 
     # Derive market_state from position metadata
-    market_state = "BALANCED"
+    market_state = MarketState.BALANCED
     if position.metadata:
         ms = position.metadata.get("market_state_model", "")
         if ms and ("trend" in str(ms).lower() or "imbalance" in str(ms).lower()):
-            market_state = "IMBALANCED"
+            market_state = MarketState.IMBALANCED
 
     if position.session_phase or position.is_expiry:
         new_stop = get_session_time_stop(

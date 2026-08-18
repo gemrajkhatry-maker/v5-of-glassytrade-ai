@@ -43,17 +43,10 @@ const AgentProbabilityCard = React.memo<AgentProbabilityCardProps>(({ agentDecis
                             </span>
                         </div>
                         <div className="flex justify-between items-center pl-2">
-                            <span className="text-[10px] text-white/40">P(target)</span>
-                            <span className={`text-xs font-mono font-bold ${agentDecision.probability >= 0.6 ? 'text-emerald-400' : agentDecision.probability > 0.45 ? 'text-yellow-400' : agentDecision.probability > 0 ? 'text-red-400' : 'text-white/30'}`}>
-                                {(agentDecision.probability * 100).toFixed(1)}%
+                            <span className="text-[10px] text-white/40">Model</span>
+                            <span className="text-xs font-mono font-bold text-slate-200">
+                                {agentDecision.modelLabel || '—'}
                             </span>
-                        </div>
-                        {/* Probability bar */}
-                        <div className="h-1.5 bg-white/10 rounded-full overflow-hidden ml-2">
-                            <div className="h-full rounded-full transition-all duration-500" style={{
-                                width: `${Math.min(agentDecision.probability * 100, 100)}%`,
-                                backgroundColor: agentDecision.probability >= 0.6 ? '#4ade80' : agentDecision.probability > 0.45 ? '#facc15' : agentDecision.probability > 0 ? '#f87171' : '#334155',
-                            }} />
                         </div>
                         <div className="flex justify-between items-center pl-2 pt-1">
                             <span className="text-[10px] text-white/40">Timing / Size</span>

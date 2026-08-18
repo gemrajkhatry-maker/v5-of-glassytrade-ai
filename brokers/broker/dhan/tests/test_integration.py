@@ -705,6 +705,7 @@ class TestErrorHandlingIntegration:
 # Live Integration Tests (marked with pytest.mark.integration)
 # =============================================================================
 
+@pytest.mark.live
 @pytest.mark.integration
 class TestLiveIntegration:
     """

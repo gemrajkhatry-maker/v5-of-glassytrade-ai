@@ -15,7 +15,9 @@ class Position:
     open_price: float
     open_time: str
     size: float                 # signed: +long / -short
-    realized_pnl: float = 0.0   # for closed positions
+    realized_pnl: float = 0.0  # for closed positions
+    pyramid_level: int = 0     # 0 = base trade, 1 = Pyramid 1, 2 = Pyramid 2
+    is_pyramid: bool = False   # True for add-on positions (P1, P2)
 
 
 @dataclass(frozen=True)

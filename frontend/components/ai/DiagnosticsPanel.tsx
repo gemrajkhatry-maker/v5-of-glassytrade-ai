@@ -1,5 +1,6 @@
 import React from 'react';
 import { AMTAnalysis, AgentDecision } from '../../types';
+import { DIAGNOSTICS_CONFIG } from '../../config';
 
 interface DiagnosticsPanelProps {
     amtResult: AMTAnalysis | null;
@@ -24,7 +25,7 @@ const DiagnosticsPanel = React.memo<DiagnosticsPanelProps>(({ amtResult, current
                             {/* CSS Donut Chart */}
                             {(() => {
                                 const conf = amtResult?.structureConfidence ?? 0;
-                                const color = conf >= 70 ? '#4ade80' : conf >= 40 ? '#facc15' : '#f87171';
+                                const color = conf >= DIAGNOSTICS_CONFIG.structureConfidence.good ? '#4ade80' : conf >= DIAGNOSTICS_CONFIG.structureConfidence.poor ? '#facc15' : '#f87171';
                                 return (
                                     <div className="relative w-10 h-10 rounded-full flex items-center justify-center shrink-0"
                                          style={{ background: `conic-gradient(${color} ${conf}%, rgba(255,255,255,0.05) 0)` }}>
@@ -46,7 +47,7 @@ const DiagnosticsPanel = React.memo<DiagnosticsPanelProps>(({ amtResult, current
                                 <span className="text-[9px] text-white/40 uppercase">Structure</span>
                             </div>
                         </div>
-                        {((amtResult?.structureConfidence ?? 0) >= 70 && (amtResult?.structureConfidence ?? 0) <= 80) && (
+                        {((amtResult?.structureConfidence ?? 0) >= DIAGNOSTICS_CONFIG.structureConfidence.cautionStart && (amtResult?.structureConfidence ?? 0) <= DIAGNOSTICS_CONFIG.structureConfidence.cautionEnd) && (
                             <div className="absolute top-2 right-2 px-1.5 py-0.5 bg-yellow-500/10 border border-yellow-500/20 rounded text-[8px] text-yellow-400 font-bold animate-pulse">
                                 WAIT FOR REJECTION
                             </div>
@@ -117,8 +118,7 @@ const DiagnosticsPanel = React.memo<DiagnosticsPanelProps>(({ amtResult, current
 
                     // Detect VWAP cross direction
                     const distFromVwap = ((ltp - vwap) / vwap) * 100;
-                    const vwapCrossThreshold = 0.3; // 0.3% from VWAP
-                    const isNearVwap = Math.abs(distFromVwap) < vwapCrossThreshold;
+                    const isNearVwap = Math.abs(distFromVwap) < DIAGNOSTICS_CONFIG.vwapCrossThreshold;
 
                     // Check if price is at VWAP sigma bands
                     const upper1 = amtResult?.vwapUpper1 ?? 0;
@@ -211,11 +211,11 @@ const DiagnosticsPanel = React.memo<DiagnosticsPanelProps>(({ amtResult, current
                 <div className="flex flex-col gap-2 mt-2">
                     {(() => {
                         let passedCount = 0;
-                        const distThreshold = 0.25;
+                        const distThreshold = DIAGNOSTICS_CONFIG.distThreshold;
                         if (amtResult?.marketState !== 'DEAD') passedCount++;
                         if (currentLtp && amtResult?.valueAreaLow && Math.abs(currentLtp - (currentLtp > amtResult.sessionVwap! ? amtResult.valueAreaHigh! : amtResult.valueAreaLow!)) < distThreshold) passedCount++;
                         if (agentDecision?.timing === 'ENTER_NOW') passedCount++;
-                        const totalRules = 3;
+                        const totalRules = DIAGNOSTICS_CONFIG.ruleCount;
                         const sigmaV = amtResult?.vwapDeviationSigmas || 0;
                         const verdictText =
                             Math.abs(sigmaV) >= 3.0

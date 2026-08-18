@@ -1,5 +1,6 @@
 import React from 'react';
 import { AMTAnalysis } from '../../types';
+import { ABSORPTION_CONFIG } from '../../config';
 
 interface AbsorptionCardProps {
     amtResult: AMTAnalysis | null;
@@ -17,7 +18,7 @@ const AbsorptionCard = React.memo<AbsorptionCardProps>(({ amtResult }) => {
     const hasAbsorption = absorptionSide && absorptionRangeRatio > 0;
     const hasLargePrints = aggressivePrints.length > 0;
 
-    if (!hasAbsorption && !hasLargePrints && Math.abs(swingDelta) < 100) return null;
+    if (!hasAbsorption && !hasLargePrints && Math.abs(swingDelta) < ABSORPTION_CONFIG.swingDeltaThreshold) return null;
 
     return (
         <div className="flex flex-col gap-2">
@@ -62,7 +63,7 @@ const AbsorptionCard = React.memo<AbsorptionCardProps>(({ amtResult }) => {
                                             : 'bg-red-500/20 text-red-400 border border-red-500/30'
                                     }`}
                                 >
-                                    {print.side === 'BUY' ? 'B' : 'S'} {print.volume > 1000 ? `${(print.volume / 1000).toFixed(1)}K` : print.volume}
+                                    {print.side === 'BUY' ? 'B' : 'S'} {print.volume > ABSORPTION_CONFIG.largePrintKThreshold ? `${(print.volume / ABSORPTION_CONFIG.largePrintKThreshold).toFixed(1)}K` : print.volume}
                                 </span>
                             ))}
                         </div>
@@ -70,13 +71,13 @@ const AbsorptionCard = React.memo<AbsorptionCardProps>(({ amtResult }) => {
                 )}
 
                 {/* Swing Delta (Initiative vs Responsive) */}
-                {Math.abs(swingDelta) >= 100 && (
+                {Math.abs(swingDelta) >= ABSORPTION_CONFIG.swingDeltaThreshold && (
                     <div className="flex justify-between items-center px-1 py-0.5 bg-white/5 rounded border border-white/10">
                         <span className="text-[8px] text-white/40">Swing Delta</span>
                         <span className={`text-[8px] font-mono font-bold ${
                             swingDelta > 0 ? 'text-green-400' : 'text-red-400'
                         }`}>
-                            {swingDelta > 0 ? '+' : ''}{swingDelta > 1000 ? `${(swingDelta / 1000).toFixed(1)}K` : swingDelta.toFixed(0)}
+                            {swingDelta > 0 ? '+' : ''}{swingDelta > ABSORPTION_CONFIG.largePrintKThreshold ? `${(swingDelta / ABSORPTION_CONFIG.largePrintKThreshold).toFixed(1)}K` : swingDelta.toFixed(0)}
                             {swingDelta > 500 ? ' (INITIATIVE)' : swingDelta < -500 ? ' (RESPONSIVE)' : ''}
                         </span>
                     </div>

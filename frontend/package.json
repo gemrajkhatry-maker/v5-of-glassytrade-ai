@@ -11,6 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "immer": "^11.1.16",
     "lightweight-charts": "4.1.1",
     "lucide-react": "^0.555.0",
     "react": "^19.2.0",

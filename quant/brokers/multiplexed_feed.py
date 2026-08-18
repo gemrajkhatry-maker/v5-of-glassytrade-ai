@@ -1,3 +1,11 @@
+# BROKER CONTRACT:
+# The _normalize_dhan_packet() method is the ONLY place where Dhan-specific
+# WebSocket field names appear. _convert() and all downstream quant logic
+# reads canonical field names only. To add a new broker:
+#   1. Implement a _normalize_{broker}_packet() method
+#   2. Route packets to it based on feed source tag
+# Never add broker field names to _convert() or downstream.
+
 """MultiplexedMarketFeed — one WebSocket connection, many symbols.
 
 Dhan supports up to 1000 instruments on a single WebSocket subscription.
@@ -75,6 +83,8 @@ class MultiplexedMarketFeed:
         # "fix" one side to take the lock without taking it on the other.
         self._prev_cum: dict[str, tuple[float, float, float]] = {}
         self._prev_price: dict[str, float] = {}
+        self._prev_ts: dict[str, float] = {}
+        self._depth_cache: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
     # Cumulative -> per-tick delta conversion (legacy candle-builder logic)
@@ -180,6 +190,8 @@ class MultiplexedMarketFeed:
             q = self._queues.pop(symbol, None)
             self._prev_cum.pop(symbol, None)
             self._prev_price.pop(symbol, None)
+            self._prev_ts.pop(symbol, None)
+            self._depth_cache.pop(symbol, None)
         if q is not None:
             q.put(None)
         self._resync.set()
@@ -249,57 +261,87 @@ class MultiplexedMarketFeed:
             loop.close()
 
     async def _consume_loop(self) -> None:
+        consecutive_errors = 0
         while not self._stop.is_set():
             symbols = self._snapshot_symbols()
             if not symbols:
                 await asyncio.sleep(0.5)
                 continue
-            # Honor a pending resync BEFORE clearing it: if a symbol was added
-            # in the window where the cross-thread wake couldn't fire yet, the
-            # threading.Event still holds the signal — don't discard it.
+            
             pending = self._resync.is_set()
             self._resync_async = asyncio.Event()
             if pending:
                 self._resync_async.set()
             self._resync.clear()
-            stream = self._md.stream_full(symbols)
+            
+            stream_full = self._md.stream_full(symbols)
+            stream_depth = None
+            if hasattr(self._md, "stream_depth_20"):
+                stream_depth = self._md.stream_depth_20(symbols)
+                
             try:
+                anext_full = None
+                anext_depth = None
                 while True:
                     if self._stop.is_set() or self._resync.is_set():
                         break
-                    anext_task = asyncio.ensure_future(stream.__anext__())
-                    resync_task = asyncio.ensure_future(
-                        self._resync_async.wait()
-                    )
+                        
+                    tasks = set()
+                    resync_task = asyncio.ensure_future(self._resync_async.wait())
+                    tasks.add(resync_task)
+                    
+                    if anext_full is None:
+                        anext_full = asyncio.ensure_future(stream_full.__anext__())
+                    tasks.add(anext_full)
+                    
+                    if stream_depth and anext_depth is None:
+                        anext_depth = asyncio.ensure_future(stream_depth.__anext__())
+                    if stream_depth:
+                        tasks.add(anext_depth)
+                        
                     done, _ = await asyncio.wait(
-                        {anext_task, resync_task},
+                        tasks,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-                    if anext_task in done:
-                        resync_task.cancel()
+                    
+                    if resync_task in done:
+                        break
+                        
+                    if anext_full in done:
                         try:
-                            pkt = anext_task.result()
+                            pkt = anext_full.result()
+                            anext_full = None
+                            self._route(pkt)
+                            consecutive_errors = 0
                         except StopAsyncIteration:
                             break
-                        self._route(pkt)
-                        continue
-                    # resync fired — abandon this stream, resubscribe next loop
-                    anext_task.cancel()
-                    try:
-                        await anext_task
-                    except (asyncio.CancelledError, StopAsyncIteration):
-                        pass
-                    break
+                            
+                    if stream_depth and anext_depth in done:
+                        try:
+                            depth_obj = anext_depth.result()
+                            anext_depth = None
+                            self._route_depth(depth_obj)
+                            consecutive_errors = 0
+                        except (StopAsyncIteration, Exception) as depth_err:
+                            if not isinstance(depth_err, StopAsyncIteration):
+                                logger.debug("stream_depth ended (using stream_full 5-depth): %s", depth_err)
+                            stream_depth = None
+                            anext_depth = None
+                            
             except Exception as exc:
                 if not self._stop.is_set():
+                    consecutive_errors += 1
+                    backoff = min(10.0, 1.0 * (1.5 ** min(consecutive_errors, 6)))
                     logger.warning(
-                        "MultiplexedMarketFeed stream ended (%s): %s",
-                        ",".join(symbols), exc,
+                        "MultiplexedMarketFeed stream ended (%s): %s (retry in %.1fs)",
+                        ",".join(symbols), exc, backoff,
                     )
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(backoff)
             finally:
                 self._resync_async = None
-                await self._aclose_quietly(stream)
+                await self._aclose_quietly(stream_full)
+                if stream_depth:
+                    await self._aclose_quietly(stream_depth)
 
     @staticmethod
     async def _aclose_quietly(stream) -> None:
@@ -312,6 +354,28 @@ class MultiplexedMarketFeed:
     # Packet → per-symbol queue
     # ------------------------------------------------------------------
 
+    def _route_depth(self, depth_obj) -> None:
+        symbol = getattr(depth_obj, "symbol", None)
+        if not symbol:
+            return
+        side = getattr(depth_obj, "side", "").lower()
+        levels = getattr(depth_obj, "levels", [])
+        if not levels:
+            return
+            
+        if symbol not in self._depth_cache:
+            self._depth_cache[symbol] = {"bids": [], "asks": []}
+            
+        parsed_levels = [
+            {"price": float(getattr(lvl, "price", 0)), "quantity": float(getattr(lvl, "quantity", 0))}
+            for lvl in levels[:20]
+        ]
+        
+        if side == "bid":
+            self._depth_cache[symbol]["bids"] = parsed_levels
+        elif side == "ask":
+            self._depth_cache[symbol]["asks"] = parsed_levels
+
     def _route(self, pkt: dict) -> None:
         symbol = pkt.get("symbol") or pkt.get("_symbol")
         if not symbol:
@@ -323,48 +387,98 @@ class MultiplexedMarketFeed:
         if q is not None:
             q.put(tick)
 
+    def _normalize_dhan_packet(self, pkt: dict, symbol: str) -> dict:
+        """Translate Dhan-specific WebSocket packet fields to canonical names.
+        
+        This is the broker adapter layer within the multiplexer. All
+        Dhan-proprietary field names and data transformations (cumulative →
+        delta) are isolated here. _convert() reads only canonical fields.
+        """
+        raw_vol = float(pkt.get("volume") or 0)
+        raw_buy = float(pkt.get("total_buy_qty") or 0)
+        raw_sell = float(pkt.get("total_sell_qty") or 0)
+        baseline, (delta_vol, delta_buy, delta_sell) = self._cum_to_delta(
+            self._prev_cum.get(symbol), raw_vol, raw_buy, raw_sell
+        )
+        self._prev_cum[symbol] = baseline
+        return {
+            "ltp": float(pkt.get("last_trade_price") or pkt.get("ltp") or pkt.get("LTP") or 0),
+            "ltq": float(pkt.get("last_trade_quantity") or pkt.get("LTQ") or 0),
+            "delta_volume": delta_vol,
+            "bid_qty": delta_buy,
+            "ask_qty": delta_sell,
+            "timestamp": pkt.get("timestamp") or pkt.get("LTP_time") or pkt.get("last_trade_time") or 0,
+            "oi": float(pkt.get("oi") or 0),
+            "depth_bids": pkt.get("depth_bids") or [],
+            "depth_asks": pkt.get("depth_asks") or [],
+            "_raw_timestamp": pkt.get("timestamp"),
+        }
+
     def _convert(self, pkt: dict, symbol: str) -> Tick | None:
         """``symbol`` is resolved once by ``_route`` so the baseline key always
         matches the routing queue key."""
         try:
-            ltp = float(pkt.get("ltp") or 0)
+            norm_pkt = self._normalize_dhan_packet(pkt, symbol)
+            
+            ltp = norm_pkt["ltp"]
             if ltp <= 0:
                 return None
-            vol = float(pkt.get("volume") or 0)
-            buy = float(pkt.get("total_buy_qty") or 0)
-            sell = float(pkt.get("total_sell_qty") or 0)
-            baseline, (dvol, _dbuy, _dsell) = self._cum_to_delta(
-                self._prev_cum.get(symbol), vol, buy, sell
-            )
-            self._prev_cum[symbol] = baseline
+            
+            raw_ts = norm_pkt["_raw_timestamp"] or norm_pkt["timestamp"]
+            if hasattr(raw_ts, "timestamp"):
+                ts = float(raw_ts.timestamp())
+            else:
+                try:
+                    ts = float(raw_ts or 0)
+                except (ValueError, TypeError):
+                    ts = 0.0
+
+            # Monotonic timestamp guard — discard out-of-order/late ticks silently
+            prev_ts = self._prev_ts.get(symbol, 0.0)
+            if ts > 0 and ts < prev_ts:
+                logger.debug('Late tick discarded symbol=%s ts=%.3f prev=%.3f', symbol, ts, prev_ts)
+                return None
+            if ts > 0:
+                self._prev_ts[symbol] = ts
+
+            dvol = norm_pkt["delta_volume"]
+            
             # Buy/sell by tick direction (see ``_attr_delta``) — the book-total
             # diffs are noise and would fabricate the bar delta.
             prev_price = self._prev_price.get(symbol)
             self._prev_price[symbol] = ltp
             dbuy, dsell = self._attr_delta(prev_price, ltp, dvol)
-            depth = None
-            db = pkt.get("depth_bids") or []
-            da = pkt.get("depth_asks") or []
-            if db or da:
-                # Object shape matches the legacy ``order_book_to_dto``
-                # contract the frontend OrderBook type expects.
+            
+            cached_depth = self._depth_cache.get(symbol)
+            if cached_depth and (cached_depth["bids"] or cached_depth["asks"]):
                 depth = {
-                    "bids": [
-                        {"price": float(b["price"]), "quantity": float(b["qty"])}
-                        for b in db[:5]
-                    ],
-                    "asks": [
-                        {"price": float(a["price"]), "quantity": float(a["qty"])}
-                        for a in da[:5]
-                    ],
+                    "bids": cached_depth["bids"],
+                    "asks": cached_depth["asks"],
                 }
+            else:
+                depth = None
+                db = norm_pkt["depth_bids"]
+                da = norm_pkt["depth_asks"]
+                if db or da:
+                    depth = {
+                        "bids": [
+                            {"price": float(b["price"]), "quantity": float(b["qty"])}
+                            for b in db[:20]
+                        ],
+                        "asks": [
+                            {"price": float(a["price"]), "quantity": float(a["qty"])}
+                            for a in da[:20]
+                        ],
+                    }
+                    
+            time_str = str(int(ts)) if ts > 0 else (str(int(raw_ts.timestamp())) if hasattr(raw_ts, "timestamp") else "0")
             return Tick(
-                time=str(int(pkt["timestamp"].timestamp())),
+                time=time_str,
                 price=ltp,
                 volume=dvol,
                 buy_volume=dbuy,
                 sell_volume=dsell,
-                oi=float(pkt.get("oi") or 0),
+                oi=norm_pkt["oi"],
                 depth=depth,
             )
         except Exception:

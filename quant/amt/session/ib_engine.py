@@ -45,6 +45,9 @@ class IBState:
     is_complete: bool
     location: IBLocation
     ib_position_pct: float  # 0-100, where price is within IB
+    ib_poc: float = 0.0
+    ib_vah: float = 0.0
+    ib_val: float = 0.0
 
 
 class InitialBalanceEngine:
@@ -60,6 +63,10 @@ class InitialBalanceEngine:
         self._ib_low: float = float("inf")
         self._session_open_time: str = ""
         self._complete: bool = False
+        self._ib_candles: list[OHLC] = []
+        self._ib_poc: float = 0.0
+        self._ib_vah: float = 0.0
+        self._ib_val: float = 0.0
 
     @property
     def is_complete(self) -> bool:
@@ -81,22 +88,64 @@ class InitialBalanceEngine:
     def ib_width(self) -> float:
         return self.ib_high - self.ib_low
 
+    @property
+    def ib_poc(self) -> float:
+        return self._ib_poc
+
+    @property
+    def ib_vah(self) -> float:
+        return self._ib_vah
+
+    @property
+    def ib_val(self) -> float:
+        return self._ib_val
+
     def reset(self) -> None:
         """Reset at session start."""
         self._ib_high = 0.0
         self._ib_low = float("inf")
         self._session_open_time = ""
         self._complete = False
+        self._ib_candles = []
+        self._ib_poc = 0.0
+        self._ib_vah = 0.0
+        self._ib_val = 0.0
 
-    def update(self, candle: OHLC) -> IBState:
-        """Update IB with new candle. Returns current IB state."""
+    def _recompute_ib_profile(self) -> None:
+        if not self._ib_candles:
+            return
+        try:
+            from quant.amt.profile.volume_profile import create_profile, compute_value_area
+            from quant.contracts.constants import VALUE_AREA_PCT
+            prof = create_profile(self._ib_candles)
+            if prof:
+                poc_idx = max(range(len(prof)), key=lambda i: prof[i].volume)
+                self._ib_poc = prof[poc_idx].price
+                self._ib_vah, self._ib_val = compute_value_area(prof, poc_idx, VALUE_AREA_PCT)
+        except Exception:
+            pass
+
+    def update(self, candle: OHLC, session_open: str | None = None) -> IBState:
+        """Update IB with new candle. Returns current IB state.
+
+        ``session_open`` pins the build window to the actual session open
+        (the analyzer passes ``data[0].time``). Without it the engine would
+        anchor to the first candle it ever sees — which, after the analyzer's
+        ``len(data) < 5`` guard, is the fifth bar, so a 60-minute IB would
+        measure from ~09:35 instead of 09:15. The Fabio rule is explicit:
+        IB = high/low of the first hour of the SESSION.
+        """
+        if session_open is not None and not self._session_open_time:
+            self._session_open_time = session_open
         if not self._session_open_time:
             self._session_open_time = candle.time
 
-        # Update IB high/low (BEFORE marking complete, so the last candle of the window is included)
+        # Update IB high/low & collect 30-min profile candles
         if not self._complete:
             self._ib_high = max(self._ib_high, float(candle.high))
             self._ib_low = min(self._ib_low, float(candle.low))
+            self._ib_candles.append(candle)
+            self._recompute_ib_profile()
 
         # Check if IB window has elapsed
         if not self._complete:
@@ -106,11 +155,15 @@ class InitialBalanceEngine:
                 elapsed = (curr_dt - open_dt).total_seconds() / 60
                 if elapsed >= self._ib_minutes:
                     self._complete = True
+                    self._recompute_ib_profile()
                     logger.info(
-                        "IB complete: high=%.1f low=%.1f width=%.1f",
+                        "IB 30-min complete: high=%.1f low=%.1f width=%.1f poc=%.1f vah=%.1f val=%.1f",
                         self.ib_high,
                         self.ib_low,
                         self.ib_width,
+                        self.ib_poc,
+                        self.ib_vah,
+                        self.ib_val,
                     )
             except (ValueError, TypeError):
                 pass
@@ -141,6 +194,9 @@ class InitialBalanceEngine:
             is_complete=self._complete,
             location=location,
             ib_position_pct=round(position_pct, 1),
+            ib_poc=self.ib_poc,
+            ib_vah=self.ib_vah,
+            ib_val=self.ib_val,
         )
 
     def classify_breakout(self, candle: OHLC) -> str:
@@ -169,4 +225,7 @@ class InitialBalanceEngine:
             "ib_mid": self.ib_mid,
             "ib_width": self.ib_width,
             "is_complete": self._complete,
+            "ib_poc": self.ib_poc,
+            "ib_vah": self.ib_vah,
+            "ib_val": self.ib_val,
         }

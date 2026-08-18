@@ -16,6 +16,11 @@ class VWAPState:
 
 
 class VWAPBuilder:
+    """Volume-weighted average price (VWAP) accumulator using Typical Price (H+L+C)/3.
+    
+    Harmonized with the AMTAnalyzer decision kernel.
+    """
+
     def __init__(self) -> None:
         self._cum_pv = 0.0
         self._cum_vol = 0.0
@@ -26,12 +31,17 @@ class VWAPBuilder:
 
     def update(self, bar: Bar) -> None:
         self._n += 1
-        self._last_close = bar.close
-        self._cum_vol += bar.volume
-        self._cum_pv += bar.close * bar.volume
-        if self._cum_vol > 0:
+        self._last_close = float(bar.close)
+        vol = float(bar.volume)
+        # Typical price (H+L+C)/3 matches the canonical AMT typical-price definition
+        tp = (float(bar.high) + float(bar.low) + float(bar.close)) / 3.0 if (bar.high and bar.low) else self._last_close
+
+        if vol > 0:
+            self._cum_vol += vol
+            self._cum_pv += tp * vol
             new_vwap = self._cum_pv / self._cum_vol
-            self._cum_sq_vol += bar.volume * (bar.close - self._prev_vwap) * (bar.close - new_vwap)
+            # Shifted incremental variance: Welford-style accumulation
+            self._cum_sq_vol += vol * (tp - self._prev_vwap) * (tp - new_vwap)
             self._prev_vwap = new_vwap
 
     def snapshot(self) -> VWAPState:
@@ -45,7 +55,8 @@ class VWAPBuilder:
                              upper_2=value, lower_2=value, std=0.0,
                              deviation_sigmas=0.0)
         value = self._prev_vwap
-        std = sqrt(max(0.0, self._cum_sq_vol / self._cum_vol))
+        variance = max(0.0, self._cum_sq_vol / self._cum_vol)
+        std = sqrt(variance)
         deviation_sigmas = (self._last_close - value) / std if std > 0 else 0.0
         return VWAPState(value=value,
                          upper_1=value + std,
@@ -54,3 +65,4 @@ class VWAPBuilder:
                          lower_2=value - 2 * std,
                          std=std,
                          deviation_sigmas=deviation_sigmas)
+

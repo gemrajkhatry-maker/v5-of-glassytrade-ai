@@ -12,6 +12,7 @@ is safe.
 """
 
 from __future__ import annotations
+from quant.contracts.enums import MarketState
 
 
 def amt_result_to_dto(r) -> dict:
@@ -55,7 +56,16 @@ def amt_result_to_dto(r) -> dict:
         "vwapUpper2": r.vwap_upper_2,
         "vwapLower2": r.vwap_lower_2,
         "vwapDeviationSigmas": r.vwap_deviation_sigmas,
+        "isExtremeDeviation": r.is_extreme_deviation,
         "balanceRatio": r.balance_ratio,
+        "valueMigration": {
+            "direction": r.value_migration.direction,
+            "pocDrift": r.value_migration.poc_drift,
+            "vahDrift": r.value_migration.vah_drift,
+            "valDrift": r.value_migration.val_drift,
+            "windowLabel": r.value_migration.window_label,
+            "hasMigration": r.value_migration.has_migration,
+        },
         "npocAbove": float(r.npoc_above or 0.0),
         "npocBelow": float(r.npoc_below or 0.0),
         "legProfile": [
@@ -73,6 +83,7 @@ def amt_result_to_dto(r) -> dict:
         "legVal": r.leg_val,
         "hasDisplacement": r.has_displacement,
         "ofi": r.ofi,
+        "obi": r.obi,
         # Market structure
         "marketStructure": r.market_structure,
         "structureConfidence": r.structure_confidence,
@@ -80,6 +91,9 @@ def amt_result_to_dto(r) -> dict:
         "ibHigh": r.ib_high,
         "ibLow": r.ib_low,
         "ibComplete": r.ib_complete,
+        "ibPoc": r.ib_poc,
+        "ibVah": r.ib_vah,
+        "ibVal": r.ib_val,
         # Prior day levels
         "priorPoc": r.prior_poc,
         "priorVah": r.prior_vah,
@@ -126,6 +140,6 @@ def empty_amt_dto() -> dict:
     from quant.contracts.value_objects import AMTResult
 
     return amt_result_to_dto(
-        AMTResult(market_state="BALANCED", poc=0.0, value_area_high=0.0,
+        AMTResult(market_state=MarketState.BALANCED, poc=0.0, value_area_high=0.0,
                   value_area_low=0.0)
     )

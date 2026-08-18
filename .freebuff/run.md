@@ -5,6 +5,8 @@ Backend: FastAPI/uvicorn on **:9091**. Frontend: Vite dev server on **:5191** (p
 Mode is selected by `GLASSYTRADE_STRATEGY=mcx_options|nse_options` (the strategy YAMLs live in `backend/config/strategies/`). This thread currently runs **nse_options** (paper): NIFTY 18 AUG weekly CALL/PUT + BANKNIFTY/FINNIFTY monthly, per `backend/config/strategies/nse_options.yaml` (`underlying_priority`/`top_n: 4`). MCX mode (CRUDEOIL/NATURALGAS/GOLDM/SILVERM — live 09:00–23:30 IST) is the evening fallback when NSE is closed.
 
 > **The LLM layer was removed (stable_5).** There is no MLX/GGUF model, no `/api/ai/*` or `/api/rl/*` endpoints, no `llm:` config, and no LLM env vars (`MLX_*`, `LLM_*` are ignored). The decision brain is 100% deterministic (QuantCoordinator + Fabio gates 1–4). The trade journal moved from `/api/ai/journal/*` to `/api/journal/*`.
+>
+> **Timeframe is 1 minute.** `candle_timeframe_minutes: 1` in `backend/config/base.yaml` flows to the coordinator's bar interval (60s), the WS `interval: 1m`, and Dhan history (`1m` → Dhan `1`). The engine's AMT history seed derives its interval from the aggregator (`_seed_interval_str`), so seeded candles always match live bars.
 
 ## Reproduce artifacts
 

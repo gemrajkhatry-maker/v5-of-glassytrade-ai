@@ -256,6 +256,25 @@ def create_application() -> FastAPI:
 
         logger.info("Application started successfully")
 
+        import signal as _signal
+
+        def _emergency_flatten(signum, frame):
+            import logging
+            _log = logging.getLogger('emergency.shutdown')
+            _log.critical('SIGTERM received — initiating emergency risk halt', extra={'event': 'EMERGENCY_SHUTDOWN'})
+            try:
+                # Set risk_halted on all active engines
+                if hasattr(app.state, 'coordinator'):
+                    coord = app.state.coordinator
+                    if hasattr(coord, '_engines'):
+                        for eng in coord._engines.values():
+                            if hasattr(eng, '_risk_halted'):
+                                eng._risk_halted = True
+            except Exception as exc:
+                _log.error('Emergency flatten error: %s', exc)
+
+        _signal.signal(_signal.SIGTERM, _emergency_flatten)
+
         yield  # Server is running
 
         # Shutdown

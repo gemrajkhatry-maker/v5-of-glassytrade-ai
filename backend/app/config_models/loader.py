@@ -92,7 +92,7 @@ def _parse_symbol(name: str, data: dict) -> SymbolConfig:
         tick_size=data.get("tick_size", 0.05),
         vp_bucket_size=data.get("vp_bucket_size", 10.0),
         vp_num_buckets=data.get("vp_num_buckets", 200),
-        value_area_pct=data.get("value_area_pct", 0.70),
+        value_area_pct=data.get("value_area_pct", 0.40),
         lvn_threshold=data.get("lvn_threshold", 0.15),
         hvn_threshold=data.get("hvn_threshold", 2.00),
         lvn_persistence_bars=data.get("lvn_persistence_bars", 3),

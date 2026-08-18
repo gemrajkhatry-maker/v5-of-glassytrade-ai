@@ -42,7 +42,7 @@ def _auction():
 
 def _sig():
     return Signal(type="LONG", reason="All 5 gates passed", entry=100.0,
-                  sl=99.0, tp=102.0, rr=2.0, confidence=0.8, symbol="S",
+                  sl=99.0, tp=102.0, rr=2.0, model_label="Triple-A", symbol="S",
                   timestamp="t1")
 
 
@@ -71,11 +71,11 @@ def test_ws_snapshot_has_all_frontend_keys():
 
 def test_agent_decision_projected_from_quant_decision():
     """agentDecision is now derived from the deterministic quantDecision —
-    direction/probability/rationale mirror the signal, no LLM involved."""
+    direction/modelLabel/rationale mirror the signal, no LLM involved."""
     ws = view_state_to_ws(_projector().snapshot("S"))
     ad = ws["agentDecision"]
     assert ad["direction"] == "LONG"
-    assert ad["probability"] == 0.8
+    assert ad["modelLabel"] == "Triple-A"  # replaces the removed confidence/probability field
     assert ad["rationale"] == "Triple-A"
 
 

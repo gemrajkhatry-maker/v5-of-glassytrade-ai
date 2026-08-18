@@ -133,19 +133,37 @@ def compute_value_area(
         if not can_go_up and not can_go_down:
             break
 
+        # Gap guard: don't expand across a volume desert. A row pair that adds
+        # no meaningful volume (e.g. a zero-volume band left by an intraday
+        # regime collapse) must not let the VA leap to a far stale tail — the
+        # live CRUDEOIL case: premium collapsed 195 -> 102, gap 106-159, and
+        # the old loop crossed it to VAH ~167. Stop expanding on that side
+        # when the next pair is negligible (<1% of the POC bin).
+        poc_vol = profile[poc_index].volume
+        min_pair_vol = poc_vol * 0.01 if poc_vol > 0 else 0.0
+        if can_go_up and up_pair < min_pair_vol:
+            can_go_up = False
+        if can_go_down and down_pair < min_pair_vol:
+            can_go_down = False
+
+        if not can_go_up and not can_go_down:
+            # Both sides gated (volume desert on each) and target unmet —
+            # nothing left to expand into; stop rather than loop forever.
+            break
+
         up_avg = up_pair / up_count if up_count else 0.0
         down_avg = down_pair / down_count if down_count else 0.0
 
         if can_go_up and (not can_go_down or up_avg >= down_avg):
             # Expand upward by up to 2 rows
             for k in range(1, up_count + 1):
-                if up_idx + k < len(profile):
+                if up_idx + 1 < len(profile):
                     up_idx += 1
                     current_volume += profile[up_idx].volume
         elif can_go_down:
             # Expand downward by up to 2 rows
             for k in range(1, down_count + 1):
-                if down_idx - k >= 0:
+                if down_idx - 1 >= 0:
                     down_idx -= 1
                     current_volume += profile[down_idx].volume
 

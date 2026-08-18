@@ -253,15 +253,14 @@ class UnderlyingFuturesProvider:
         return None
 
     def _extract_underlying(self, symbol: str) -> str:
-        """Extract underlying name from option symbol.
-
-        "CRUDEOIL 16 APR 8900 CALL" → "CRUDEOIL"
-        "NIFTY 30 MAR 23300 PUT" → "NIFTY"
-        """
+        """Extract underlying name from option symbol."""
+        from quant.contracts.exchange_config import ExchangeConfig
+        for ex in ("NSE", "MCX"):
+            u = ExchangeConfig.for_exchange(ex).extract_underlying(symbol)
+            if u:
+                return u
         parts = symbol.split()
-        if parts:
-            return parts[0].upper()
-        return ""
+        return parts[0].upper() if parts else ""
 
     def _find_exchange(self, underlying: str) -> str | None:
         """Find which exchange an underlying belongs to."""

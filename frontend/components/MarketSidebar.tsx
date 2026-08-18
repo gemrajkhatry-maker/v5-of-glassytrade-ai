@@ -4,11 +4,14 @@ import GlassPanel from './GlassPanel';
 import { InstrumentState } from '../types';
 import { Search, BarChart3, Radio, Filter } from 'lucide-react';
 import { shortSymbol } from '../utils/symbol';
+import { ThreeAIndicator } from './ai/ThreeAIndicator';
 
 interface MarketSidebarProps {
     instruments: Record<string, InstrumentState>;
     activeSymbol: string;
     onSelect: (symbol: string) => void;
+    isHalted?: boolean;
+    haltReason?: string;
 }
 
 /** Sort key: higher = more urgent for entries */
@@ -41,12 +44,38 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     // --- Live PnL from open positions ---
     const openPositions = inst.portfolio?.positions?.filter(p => p.status === 'OPEN') || [];
     const hasOpenPosition = openPositions.length > 0;
-    const totalPnl = openPositions.reduce((sum, p) => sum + (p.pnl || 0), 0);
-    const totalSize = openPositions.reduce((sum, p) => sum + (p.size || 0), 0);
+    const firstPos = openPositions[0];
+    const posSide = firstPos?.side || (firstPos?.size && firstPos.size > 0 ? 'LONG' : 'SHORT') || 'LONG';
+    const totalSize = openPositions.reduce((sum, p) => sum + Math.abs(p.size || 0), 0);
+    const totalPnl = openPositions.reduce((sum, p) => {
+        if (p.pnl !== undefined && p.pnl !== 0) return sum + p.pnl;
+        const curPrice = price > 0 ? price : p.entryPrice;
+        return sum + ((curPrice - p.entryPrice) * p.size);
+    }, 0);
+    const isProfit = totalPnl > 0;
+    const isLoss = totalPnl < 0;
 
     const isDead = inst.amtAnalysis?.marketState === 'DEAD';
-    const mode = inst.amtAnalysis?.marketState || 'BALANCED';
-    const modeAbbr = (mode || 'BAL').substring(0, 3).toUpperCase();
+
+    const pnlBadgeColor = isProfit
+        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+        : isLoss
+        ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+        : 'bg-blue-500/15 text-blue-400 border-blue-500/30';
+
+    const pnlTextColor = isProfit
+        ? 'text-emerald-400 font-bold'
+        : isLoss
+        ? 'text-rose-400 font-bold'
+        : 'text-slate-300 font-normal';
+
+    const formatPnl = (val: number) => {
+        const sign = val > 0 ? '+' : val < 0 ? '-' : '';
+        const abs = Math.abs(val);
+        if (abs >= 100000) return `${sign}₹${(abs / 100000).toFixed(1)}L`;
+        if (abs >= 1000) return `${sign}₹${(abs / 1000).toFixed(1)}k`;
+        return `${sign}₹${abs.toFixed(0)}`;
+    };
 
     return (
         <button
@@ -54,9 +83,17 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
             className={`
                 w-full px-2 py-1.5 rounded-sm flex items-center gap-0 group transition-all duration-200 text-left border-l-2
                 ${hasOpenPosition
-                    ? isActive
-                        ? 'bg-glassy-bull-primary/10 border-l-glassy-bull-primary'
-                        : 'bg-glassy-bull-primary/5 border-l-glassy-bull-primary/50 hover:bg-glassy-bull-primary/10'
+                    ? isProfit
+                        ? isActive
+                            ? 'bg-emerald-500/15 border-l-emerald-400'
+                            : 'bg-emerald-500/5 border-l-emerald-500/60 hover:bg-emerald-500/10'
+                        : isLoss
+                        ? isActive
+                            ? 'bg-rose-500/15 border-l-rose-400'
+                            : 'bg-rose-500/5 border-l-rose-500/60 hover:bg-rose-500/10'
+                        : isActive
+                        ? 'bg-blue-500/15 border-l-blue-400'
+                        : 'bg-blue-500/5 border-l-blue-500/60 hover:bg-blue-500/10'
                     : isActive
                         ? 'bg-glassy-bg-active border-l-glassy-ai-primary'
                         : 'bg-transparent hover:bg-glassy-bg-hover border-l-transparent'}
@@ -64,11 +101,11 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 border-b border-glassy-border-subtle
             `}
         >
-            {/* Symbol & Tag (40%) */}
-            <div className="flex flex-col w-[40%] overflow-hidden pr-2">
+            {/* Symbol & Tag (38%) */}
+            <div className="flex flex-col w-[38%] overflow-hidden pr-2">
                 <div className="flex items-center gap-1.5 min-h-[14px]">
                     {hasOpenPosition ? (
-                        <span className="text-[9px] font-bold text-glassy-bull-primary animate-pulse">●</span>
+                        <span className={`text-[9px] font-bold animate-pulse ${isProfit ? 'text-emerald-400' : isLoss ? 'text-rose-400' : 'text-blue-400'}`}>●</span>
                     ) : hasData ? (
                         <Radio size={8} className="text-glassy-bull-primary" />
                     ) : (
@@ -85,11 +122,11 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                 <span className="text-[8px] text-glassy-text-tertiary font-mono ml-3">{hasData || hasOpenPosition ? tag : '\u00A0'}</span>
             </div>
 
-            {/* Mode (plain text) — marketState shown canonically in the ModelStateBanner */}
-            <div className="w-[30%] min-w-0 flex items-center">
+            {/* 3A traffic light (37%) */}
+            <div className="w-[37%] min-w-0 flex items-center justify-start">
                 {hasOpenPosition ? (
-                    <span className="text-[9px] font-bold text-glassy-bull-primary font-mono truncate">
-                        OPEN · {totalSize.toFixed(0)}L
+                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[7.5px] font-mono font-bold tracking-tight uppercase truncate ${pnlBadgeColor}`}>
+                        {posSide} · {totalSize.toFixed(0)}
                     </span>
                 ) : !hasData ? (
                     <span className="h-4 w-full max-w-[5.5rem] rounded bg-glassy-text-disabled/20 animate-pulse" />
@@ -98,17 +135,15 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                         DEAD
                     </span>
                 ) : (
-                    <span className="text-[8px] font-mono text-glassy-text-tertiary truncate">
-                        {modeAbbr}
-                    </span>
+                    <ThreeAIndicator amt={inst.amtAnalysis} />
                 )}
             </div>
 
-            {/* Change% or Live PnL indicator (30%) */}
-            <div className="w-[30%] text-right">
+            {/* Change% or Live PnL (25%) */}
+            <div className="w-[25%] text-right">
                 {hasOpenPosition ? (
-                    <span className={`text-[8px] font-mono ${totalPnl >= 0 ? 'text-glassy-bull-primary/80' : 'text-glassy-bear-primary/80'}`}>
-                        {totalPnl >= 0 ? '▲' : '▼'}
+                    <span className={`text-[9.5px] font-mono tabular-nums whitespace-nowrap ${pnlTextColor}`}>
+                        {formatPnl(totalPnl)}
                     </span>
                 ) : !hasData ? (
                     <span className="inline-block h-2 w-8 rounded bg-glassy-text-disabled/20 animate-pulse ml-auto" />
@@ -124,7 +159,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
 
 SymbolCard.displayName = 'SymbolCard';
 
-const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol, onSelect }) => {
+const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol, onSelect, isHalted, haltReason }) => {
     const [filter, setFilter] = useState('');
     const [modeFilter, setModeFilter] = useState('ALL');
     const [actionFilter, setActionFilter] = useState('ALL');
@@ -233,16 +268,24 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
                         {/* Column Header */}
                         <div className="flex w-full text-[9px] text-glassy-text-disabled font-mono mt-3 px-2 pb-1 border-b border-glassy-border-subtle uppercase tracking-tighter">
                             <div className="w-[40%]">Symbol</div>
-                            <div className="w-[30%] cursor-pointer hover:text-glassy-text-tertiary" onClick={() => setSortBy(sortBy === 'ACTION' ? 'PROB' : 'ACTION')} title="Sort by action priority">
-                                Status {sortBy === 'ACTION' ? '↓' : '↕'}
-                            </div>
+                            <div className="w-[30%]" title="3A score: Auction · Area · Action (Valentini rules)">3A</div>
                             <div className="w-[30%] text-right">Chg</div>
                         </div>
                     </div>
                 </div>
 
                 {/* Symbol List */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-1">
+                <div className="flex-1 overflow-y-auto p-2 space-y-1 relative">
+                    {/* HALTED overlay — covers all rows when risk limits are hit */}
+                    {isHalted && (
+                        <div className="sticky top-0 z-20 mb-2 px-2 py-1.5 rounded border border-rose-500/40 bg-rose-950/70 backdrop-blur-sm flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                            <div className="min-w-0">
+                                <div className="text-[9px] font-black text-rose-400 uppercase tracking-wider">TRADING HALTED</div>
+                                <div className="text-[8px] text-rose-300/70 truncate">{haltReason || 'Session risk limit reached'}</div>
+                            </div>
+                        </div>
+                    )}
                     {filtered.length === 0 && (
                         <div className="text-center text-[9px] text-glassy-text-disabled py-8">
                             {filter ? 'No matching symbols' : 'Waiting for scanner...'}

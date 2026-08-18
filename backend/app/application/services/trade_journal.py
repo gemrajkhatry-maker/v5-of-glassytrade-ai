@@ -1,5 +1,6 @@
 """Trade Journal — comprehensive JSONL logging of all trade decisions."""
 from __future__ import annotations
+from quant.contracts.enums import MarketState
 
 import json
 import logging
@@ -31,7 +32,7 @@ class JournalEntry:
     probability_feature_schema_version: str = ""
 
     # Execution-grade trade thesis
-    thesis_market_state: str = ""
+    thesis_market_state: MarketState = MarketState.BALANCED
     thesis_location_type: str = ""
     thesis_location_level: float = 0.0
     thesis_aggression_trigger: str = ""
@@ -40,7 +41,7 @@ class JournalEntry:
     thesis_setup_family: str = ""
 
     # Market conditions
-    market_state: str = ""
+    market_state: MarketState = MarketState.BALANCED
     market_structure: str = ""
     structure_confidence: int = 0
     ltp: float = 0.0
