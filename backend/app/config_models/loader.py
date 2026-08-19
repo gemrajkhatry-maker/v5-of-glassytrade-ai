@@ -235,6 +235,7 @@ def load_config(
             risk_per_trade_pct=risk_data.get("risk_per_trade_pct", 0.005),
             max_daily_loss_pct=risk_data.get("max_daily_loss_pct", 0.02),
             max_consecutive_losses=risk_data.get("max_consecutive_losses", 3),
+            max_trades_per_session=risk_data.get("max_trades_per_session", 50),
             max_drawdown_pct=risk_data.get("max_drawdown_pct", 0.03),
             absolute_ceiling_pct=risk_data.get("absolute_ceiling_pct", 0.01),
             max_concurrent_positions=risk_data.get("max_concurrent_positions", 5),

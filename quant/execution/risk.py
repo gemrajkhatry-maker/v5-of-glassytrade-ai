@@ -28,7 +28,9 @@ class SessionRisk:
                  base_risk_pct: float = 0.005,          # 0.5% risk per trade (was 1%)
                  max_daily_loss_pct: float = 0.02,       # 2% max daily loss (was 3%)
                  max_consecutive_losses: int = 3,
-                 max_trades_per_session: int = 6,        # hard cap: max 6 trades/day
+                 # TODO: Testing Mode — Raised to 50 for active paper testing & validation.
+                 # Change back to 6 in production per Fabio Valentini selective trading rule.
+                 max_trades_per_session: int = 50,
                  *,
                  storage: Any | None = None,
                  symbol: str = "",
@@ -67,6 +69,10 @@ class SessionRisk:
             self._trades_today = int(data.get("trades_today", 0))
             self._halted = bool(data["halted"])
             self._halt_reason = str(data["halt_reason"])
+            # If previous halt was purely due to lower max_trades limit and we are now under the new limit, unhalt
+            if self._halted and "max trades/session reached" in self._halt_reason and self._trades_today < self._max_trades_per_session:
+                self._halted = False
+                self._halt_reason = ""
             # Restore equity: starting capital adjusted by daily P&L
             self._equity = self._starting_equity + self._daily_pnl
         except Exception:

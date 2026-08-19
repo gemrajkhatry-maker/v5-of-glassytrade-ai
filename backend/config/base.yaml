@@ -520,6 +520,8 @@ risk:
   risk_per_trade_pct: 0.005
   max_daily_loss_pct: 0.02
   max_consecutive_losses: 3
+  # TODO: Testing Mode — Raised to 50 for testing & paper validation. Revert to 6 in production.
+  max_trades_per_session: 50
   max_drawdown_pct: 0.03
   absolute_ceiling_pct: 0.01
   max_concurrent_positions: 5

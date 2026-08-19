@@ -115,7 +115,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
                                 Fabio Playbook
                             </div>
                             <div className="text-[8.5px] text-slate-500 font-mono tracking-widest uppercase mt-0.5">
-                                AMT · Value Area 40%
+                                AMT · Value Area 70%
                             </div>
                         </div>
                     </div>
@@ -134,7 +134,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
                 )}
 
                 {/* Equity */}
-                <EquityPanel portfolio={portfolio} openPnl={openPnl} />
+                <EquityPanel portfolio={portfolio} openPnl={openPnl} riskState={riskState} />
 
                 {/* Risk alert */}
                 <RiskStateDisplay riskState={riskState} />

@@ -104,6 +104,8 @@ class RiskConfig:
     risk_per_trade_pct: float = 0.005
     max_daily_loss_pct: float = 0.02
     max_consecutive_losses: int = 3
+    # TODO: Testing Mode — Raised to 50 for testing & validation. Revert to 6 in production.
+    max_trades_per_session: int = 50
     max_drawdown_pct: float = 0.03
     absolute_ceiling_pct: float = 0.01
     max_concurrent_positions: int = 5

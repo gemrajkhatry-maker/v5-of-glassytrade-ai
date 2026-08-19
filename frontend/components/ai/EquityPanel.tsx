@@ -6,15 +6,25 @@ import { Wallet, TrendingUp, ShieldAlert, Target } from 'lucide-react';
 interface EquityPanelProps {
     portfolio: Portfolio;
     openPnl: number;
+    riskState?: { dailyPnl?: number; tradesToday?: number; halted?: boolean; equity?: number } | null;
 }
 
 const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 const fmtDecimal = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** Compact equity strip — capital, open P&L, session progress bar. */
-const EquityPanel = React.memo<EquityPanelProps>(({ portfolio, openPnl }) => {
+const EquityPanel = React.memo<EquityPanelProps>(({ portfolio, openPnl, riskState }) => {
     const totalPartialPnl = portfolio.positions.reduce((acc, p) => acc + (p.partialRealizedPnl || 0), 0);
-    const sessionPnl = portfolio.closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    const closedTradesSum = portfolio.closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    const sessionPnl = (riskState?.dailyPnl !== undefined && riskState?.dailyPnl !== 0)
+        ? riskState.dailyPnl
+        : closedTradesSum;
+    const closedCount = (riskState?.tradesToday !== undefined && riskState?.tradesToday > 0)
+        ? riskState.tradesToday
+        : portfolio.closedTrades.length;
+    const currentEquity = (riskState?.equity !== undefined && riskState?.equity > 0)
+        ? riskState.equity
+        : portfolio.equity;
 
     const target = EQUITY_PANEL.dailyTarget;
     const cb     = EQUITY_PANEL.circuitBreaker;
@@ -36,7 +46,7 @@ const EquityPanel = React.memo<EquityPanelProps>(({ portfolio, openPnl }) => {
                     <div className="min-w-0">
                         <div className="text-[7.5px] uppercase tracking-widest text-slate-500">Capital</div>
                         <div className="text-[11px] font-black font-mono text-slate-100 leading-none">
-                            ₹{fmtDecimal(portfolio.equity)}
+                            ₹{fmtDecimal(currentEquity)}
                         </div>
                     </div>
                 </div>
@@ -98,7 +108,7 @@ const EquityPanel = React.memo<EquityPanelProps>(({ portfolio, openPnl }) => {
 
                 <div className="flex items-center justify-between text-[7px] font-mono text-slate-600">
                     <span>−2% CB</span>
-                    <span>{portfolio.closedTrades.length} closed</span>
+                    <span>{closedCount} closed</span>
                     <span>+2% goal</span>
                 </div>
             </div>

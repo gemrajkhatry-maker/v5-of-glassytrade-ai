@@ -96,6 +96,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   const amtLinesRef = useRef<IPriceLine[]>([]);
   const initializedRef = useRef(false);
   const lastCandleTimeRef = useRef<number>(0);
+  const prevSymbolRef = useRef<string | undefined>(undefined);
 
   // Memoize amtAnalysis to prevent overlay redraws when profile data hasn't changed.
   // The backend sends new AMT objects on every tick, but profile/legProfile arrays
@@ -842,6 +843,26 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         : 'rgba(156,163,175,0.4)', // Grey for neutral delta
     });
 
+    const isSymbolChange = symbol !== undefined && symbol !== prevSymbolRef.current;
+    if (isSymbolChange) {
+      prevSymbolRef.current = symbol;
+      lastCandleTimeRef.current = 0;
+
+      // Clean up previous symbol's price lines immediately so they don't stretch the price scale
+      amtLinesRef.current.forEach(l => candleSeriesRef.current?.removePriceLine(l));
+      amtLinesRef.current = [];
+      activePriceLinesRef.current.forEach(lines => {
+        lines.forEach(l => candleSeriesRef.current?.removePriceLine(l));
+      });
+      activePriceLinesRef.current.clear();
+
+      // Clear canvas overlay immediately
+      if (overlayRef.current) {
+        const ctx = overlayRef.current.getContext('2d');
+        ctx?.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height);
+      }
+    }
+
     if (data.length > 0) {
       const formattedCandles = data.map(formatCandle);
       candleSeriesRef.current.setData(formattedCandles);
@@ -852,12 +873,21 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         lastCandleTimeRef.current = Number(lastCandle.time);
       }
 
-      if (!initializedRef.current && chartRef.current) {
-        chartRef.current.timeScale().scrollToPosition(0, false);
-        initializedRef.current = true;
+      if (chartRef.current) {
+        // Auto-scale price scale to the new instrument's price range
+        chartRef.current.priceScale('right').applyOptions({
+          autoScale: true,
+          scaleMargins: { top: 0.15, bottom: 0.15 },
+        });
+
+        if (isSymbolChange || !initializedRef.current) {
+          chartRef.current.timeScale().fitContent();
+          chartRef.current.timeScale().scrollToPosition(0, false);
+          initializedRef.current = true;
+        }
       }
     }
-  }, [data, config.bullColor, config.bearColor, mode]);
+  }, [data, symbol, config.bullColor, config.bearColor, mode]);
 
   // 5. Update Markers & Lines
   useEffect(() => {
@@ -963,7 +993,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
       activePriceLinesRef.current.set(pos.id, lines);
     });
 
-  }, [positions, closedTrades, stableAmtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
+  }, [symbol, positions, closedTrades, stableAmtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
 
   return (
     <div className="w-full h-full relative bg-[#0f172a] overflow-hidden">

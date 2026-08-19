@@ -150,6 +150,13 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                     <span className="inline-flex text-[8px] font-mono font-bold text-glassy-bear-primary/70 border border-glassy-bear-primary/20 px-1 rounded-sm animate-pulse">
                         DEAD
                     </span>
+                ) : inst.riskState?.halted ? (
+                    <span
+                        className="inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-black font-mono leading-none border uppercase tracking-wider text-rose-400 border-rose-500/40 bg-rose-500/10"
+                        title={`Halted: ${inst.riskState.haltReason || 'Risk limit reached'}`}
+                    >
+                        HALTED
+                    </span>
                 ) : (
                     <ThreeAIndicator amt={inst.amtAnalysis} />
                 )}
