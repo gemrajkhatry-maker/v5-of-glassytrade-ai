@@ -63,8 +63,8 @@ class TestTradingInvariants:
         sys.path.insert(0, str(ROOT / 'backend'))
         sys.path.insert(0, str(ROOT))
         from quant.contracts.constants import VALUE_AREA_PCT
-        assert VALUE_AREA_PCT == pytest.approx(0.40), (
-            f'VALUE_AREA_PCT={VALUE_AREA_PCT} — configured for 0.40 (40% value area).'
+        assert VALUE_AREA_PCT == pytest.approx(0.70), (
+            f'VALUE_AREA_PCT={VALUE_AREA_PCT} — configured for 0.70 (70% value area).'
         )
 
     def test_min_rr_is_fabio_minimum(self):

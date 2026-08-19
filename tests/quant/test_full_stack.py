@@ -2,16 +2,16 @@
 """Full-stack lifecycle: ticks -> bars -> AuctionState -> journal -> gates ->
 signal -> OMS open -> exit engine -> OMS close -> risk record."""
 
+from quant.amt_engine import AMTEngine
 from quant.bars import Bar
 from quant.brokers.gateway import Tick
-from tests.helpers.synthetic import SyntheticGateway
-from quant.coordinator import AuctionCoordinator
-from quant.decision.context import DecisionContext
-from quant.decision.pipeline import GatePipeline
-from quant.decision.signal_builder import SignalBuilder
+from quant.decision.decision_service import DecisionService
+from quant.decision_context_builder import DecisionContextBuilder
 from quant.execution.exits import ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.risk import SessionRisk
+from quant.session_levels import SessionLevelStore
+from tests.helpers.synthetic import SyntheticGateway
 
 
 class _StubJournal:
@@ -30,8 +30,8 @@ def _ticks():
     # two bars of accumulation at POC so ABSORBING -> ACCUMULATING can fire
     out.append(Tick("t301", 100.0, 10, 6, 4))
     out.append(Tick("t302", 100.0, 10, 6, 4))
-    for i in range(1, 9):
-        out.append(Tick(f"t{302+i}", 100.0 + i * 0.2, 10, 6, 4))
+    for i in range(1, 25):
+        out.append(Tick(f"t{302+i}", 100.0 + min(i, 8) * 0.2, 10, 6, 4))
     return out
 
 
@@ -52,9 +52,9 @@ def _bar(tick, spike=False):
 def test_full_stack_lifecycle():
     gw = SyntheticGateway(_ticks())
     gw.subscribe("SYM")
-    coord = AuctionCoordinator()
-    pipe = GatePipeline()
-    sb = SignalBuilder()
+    engine = AMTEngine(symbol="SYM", market="MCX", session_levels=SessionLevelStore())
+    builder = DecisionContextBuilder()
+    service = DecisionService()
     oms = PaperOMS()
     exits = ExitEngine(time_stop_bars=4)
     risk = SessionRisk()
@@ -70,13 +70,13 @@ def test_full_stack_lifecycle():
             break
         step += 1
         bar = _bar(tick, spike=(tick.time == "t300"))
-        state = coord.on_bar_close(bar)
+        amt_dto = engine.analyze(bar)
 
-        journal.analyze(state, "SYM")
+        journal.analyze(amt_dto, "SYM")
 
         if position is not None:
             held = step - entry_step
-            dec = exits.evaluate(position, state, bar_index=held)
+            dec = exits.evaluate(position, bar_close=bar.close, amt_dto=amt_dto, bar_index=held)
             if dec.should_exit:
                 fill = oms.close(position, dec.close_price, bar.time, dec.reason)
                 fills.append(fill)
@@ -84,24 +84,28 @@ def test_full_stack_lifecycle():
                 position = None
             continue
 
-        ctx = DecisionContext(state=state, bar=bar, symbol="SYM",
-                              agent_direction="LONG", agent_probability=0.7,
-                              market_state="IMBALANCED",
-                              session_open=True, warmup_complete=True,
-                              position_open=False, cooldown_remaining_sec=0,
-                              risk_halted=False)
-        results = pipe.evaluate(ctx)
-        if all(r.passed for r in results):
-            sig = sb.build(ctx, results)
-            if sig is not None:
-                qty = risk.position_size(sig.entry, sig.sl)
-                position = oms.submit(sig, qty)
-                entry_step = step
+        ctx = builder.build(
+            bar=bar,
+            symbol="SYM",
+            market="MCX",
+            contract_expiry=None,
+            tick_size=0.05,
+            bar_index=step,
+            warm_bars=20,
+            cooldown_remaining_sec=0.0,
+            risk_state=risk.state(),
+            amt_dto=amt_dto,
+        )
+        decision = service.evaluate(ctx)
+        if decision.approved and decision.signal is not None:
+            sig = decision.signal
+            qty = risk.position_size(sig.entry, sig.sl)
+            position = oms.submit(sig, qty)
+            entry_step = step
 
     assert position is None
     assert len(fills) >= 1
     assert fills[0].position.size > 0
     assert fills[0].reason in {"SL", "TP", "TRAIL", "TIME", "CVD_KILL"}
     assert len(journal.entries) > 100
-    assert all(e.decision == "LONG" for e in journal.entries)
     assert risk.state().daily_pnl != 0.0

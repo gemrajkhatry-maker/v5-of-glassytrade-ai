@@ -2,7 +2,6 @@ from dataclasses import dataclass
 
 from quant.events import (
     AmtUpdated,
-    AuctionUpdated,
     BarClosed,
     DepthUpdated,
 )
@@ -23,55 +22,7 @@ class FakeBar:
     oi: float = 0.0
 
 
-@dataclass(frozen=True)
-class FakeVP:
-    poc: float = 100.0
-    vah: float = 102.0
-    val: float = 98.0
-    step: float = 1.0
-    total_volume: float = 100.0
 
-
-@dataclass(frozen=True)
-class FakeVWAP:
-    value: float = 100.0
-    upper_1: float = 101.0
-    lower_1: float = 99.0
-    upper_2: float = 102.0
-    lower_2: float = 98.0
-    std: float = 1.0
-    deviation_sigmas: float = 0.0
-
-
-@dataclass(frozen=True)
-class FakeOrderFlow:
-    delta: float = 0.0
-    cvd: float = 0.0
-    cvd_slope: float = 0.0
-    cvd_divergence: str = "NONE"
-
-
-@dataclass(frozen=True)
-class FakeLocation:
-    ib_high: float = 105.0
-    ib_low: float = 95.0
-    ib_complete: bool = True
-    zone: str = "INSIDE_VA"
-    nearest_level: float = 100.0
-    distance_to_level: float = 0.0
-
-
-@dataclass(frozen=True)
-class FakeAuction:
-    time: str = "t"
-    close: float = 100.0
-    volume_profile: FakeVP = FakeVP()
-    vwap: FakeVWAP = FakeVWAP()
-    order_flow: FakeOrderFlow = FakeOrderFlow()
-    absorption: object = None
-    location: FakeLocation = FakeLocation()
-    triple_a_phase: str = ""
-    triple_a_signal: str | None = None
 
 
 def test_depth_updated_folds():
@@ -103,8 +54,4 @@ def test_oi_default_zero_when_no_bar_oi():
     assert p.snapshot("SYM").oi == 0.0
 
 
-def test_auction_updated_folds():
-    p = StateProjector()
-    p.on_event(AuctionUpdated(symbol="SYM", time="t1",
-                              auction=FakeAuction(time="t1")))
-    assert p.snapshot("SYM").auction is not None
+

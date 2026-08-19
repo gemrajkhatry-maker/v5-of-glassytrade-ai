@@ -52,7 +52,7 @@ class SymbolConfig:
     tick_size: float = 0.05
     vp_bucket_size: float = 10.0
     vp_num_buckets: int = 200
-    value_area_pct: float = 0.40
+    value_area_pct: float = 0.70
     lvn_threshold: float = 0.15
     hvn_threshold: float = 2.00
     lvn_persistence_bars: int = 3

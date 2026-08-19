@@ -12,7 +12,7 @@ succeeds. These tests pin the two mitigations in quant/runtime:
 import threading
 import time
 
-import quant.runtime as rt
+import quant.amt_engine as amt_eng
 from quant.contracts.value_objects import OHLC
 from quant.runtime import QuantEngine
 from tests.helpers.synthetic import SyntheticGateway
@@ -20,7 +20,7 @@ from tests.quant.runtime.test_runtime import _ticks
 
 
 def _reset_seed_gate():
-    rt._SEED_NEXT_START = 0.0
+    amt_eng._SEED_NEXT_START = 0.0
 
 
 def test_seed_starts_staggered_across_engines():
@@ -30,7 +30,7 @@ def test_seed_starts_staggered_across_engines():
     lock = threading.Lock()
 
     def worker():
-        rt._reserve_seed_slot()
+        amt_eng._reserve_seed_slot()
         with lock:
             starts.append(time.monotonic())
 
@@ -43,7 +43,7 @@ def test_seed_starts_staggered_across_engines():
     assert len(starts) == 3
     # Adjacent starts are >= stagger apart minus the previous slot's max
     # jitter (delay is target - now + jitter, so spacing >= stagger - jitter).
-    min_spacing = rt._SEED_STAGGER_SEC - rt._SEED_STAGGER_JITTER - 0.01
+    min_spacing = amt_eng._SEED_STAGGER_SEC - amt_eng._SEED_STAGGER_JITTER - 0.01
     assert starts[1] - starts[0] >= min_spacing
     assert starts[2] - starts[1] >= min_spacing
 
@@ -81,7 +81,7 @@ def _engine_with_history(history):
         history_source=history,
     )
     # Seed directly (without run()) so no live bars flow and abort the seed.
-    eng._start_amt_seed()
+    eng._amt_engine.seed()
     return eng
 
 
@@ -93,12 +93,12 @@ def test_seed_retries_rate_limited_fetch():
     eng = _engine_with_history(history)
 
     deadline = time.time() + 15
-    while time.time() < deadline and eng._warm_bars == 0:
+    while time.time() < deadline and eng._amt_engine.warm_bars == 0:
         time.sleep(0.2)
 
     assert history.calls == 3, f"expected 3 attempts, got {history.calls}"
-    assert eng._warm_bars == 1
-    assert len(eng._amt_candles) == 1
+    assert eng._amt_engine.warm_bars == 1
+    assert len(eng._amt_engine._amt_candles) == 1
 
 
 def test_seed_succeeds_on_first_attempt():
@@ -107,11 +107,11 @@ def test_seed_succeeds_on_first_attempt():
     eng = _engine_with_history(history)
 
     deadline = time.time() + 10
-    while time.time() < deadline and eng._warm_bars == 0:
+    while time.time() < deadline and eng._amt_engine.warm_bars == 0:
         time.sleep(0.2)
 
     assert history.calls == 1
-    assert eng._warm_bars == 1
+    assert eng._amt_engine.warm_bars == 1
 
 
 def test_seed_gives_up_after_max_retries():
@@ -121,8 +121,8 @@ def test_seed_gives_up_after_max_retries():
 
     # Max attempts = 1 + 2 backoff retries; give the retries time to finish.
     deadline = time.time() + 15
-    while time.time() < deadline and history.calls < rt._SEED_FETCH_RETRIES:
+    while time.time() < deadline and history.calls < amt_eng._SEED_FETCH_RETRIES:
         time.sleep(0.2)
 
-    assert history.calls == rt._SEED_FETCH_RETRIES
-    assert eng._warm_bars == 0
+    assert history.calls == amt_eng._SEED_FETCH_RETRIES
+    assert eng._amt_engine.warm_bars == 0

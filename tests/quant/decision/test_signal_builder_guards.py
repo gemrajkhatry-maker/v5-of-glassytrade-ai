@@ -2,7 +2,7 @@
 
 import pytest
 
-from quant.auction_state import AuctionState
+from quant.bars import Bar
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import (
@@ -13,31 +13,15 @@ from quant.decision.signal_builder import (
     is_min_stop_met,
     is_stop_too_thin,
 )
-from quant.location import LocationState
-from quant.order_flow import OrderFlowState
-from quant.volume_profile import VolumeProfile
-from quant.vwap import VWAPState
 
 
 def _ctx(close, val, step, nearest):
-    state = AuctionState(
-        time="t", close=close,
-        volume_profile=VolumeProfile(
-            levels=(), poc=close, vah=val + 2 * step, val=val, step=step,
-            total_volume=100),
-        vwap=VWAPState(value=close, upper_1=close + 1, lower_1=close - 1,
-                       upper_2=close + 2, lower_2=close - 2, std=1,
-                       deviation_sigmas=0),
-        order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=0,
-                                  cvd_divergence="NONE", aggressive_prints=()),
-        absorption=None,
-        location=LocationState(ib_high=close + 5, ib_low=close - 5,
-                               ib_complete=True, zone="INSIDE_VA",
-                               nearest_level=nearest, distance_to_level=0),
-        triple_a_phase="AGGRESSION", triple_a_signal="LONG",
+    bar = Bar(time="t", open=close, high=close, low=close, close=close, volume=100.0)
+    return DecisionContext(
+        state=None, bar=bar, symbol="SYM", time_str="t",
+        agent_direction="LONG", agent_probability=0.7,
+        poc=close, vah=val + 2 * step, val=val, tick_size=0.05,
     )
-    return DecisionContext(state=state, bar=None, symbol="SYM",
-                           agent_direction="LONG", agent_probability=0.7)
 
 
 def _pass_results():

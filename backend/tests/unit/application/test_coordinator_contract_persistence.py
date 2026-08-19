@@ -1,7 +1,7 @@
 """Tests for persisted active-contract selection across backend restarts.
 
 Verifies ``load_persisted_contracts`` / ``save_persisted_contracts`` in
-``quant.coordinator``: contracts saved today are reused on restart (when they
+``quant.multi_engine``: contracts saved today are reused on restart (when they
 belong to the same exchange), stale (yesterday's) or exchange-mismatched
 selections are invalidated so the scanner re-runs, and bad files degrade to
 ``None`` instead of raising.
@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from quant.coordinator import (
+from quant.multi_engine import (
     _ist_date_str,
     load_persisted_contracts,
     save_persisted_contracts,

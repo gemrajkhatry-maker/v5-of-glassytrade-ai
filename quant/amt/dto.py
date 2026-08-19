@@ -128,6 +128,26 @@ def amt_result_to_dto(r) -> dict:
         "swingDelta": r.swing_delta,
         # Per-symbol delta (isolated per option contract)
         "deltaNormalizedOption": r.delta_normalized_option,
+        "footprints": {
+            k: {
+                "time": v.time,
+                "levels": [
+                    {
+                        "price": lvl.price,
+                        "bid": lvl.bid,
+                        "ask": lvl.ask,
+                        "delta": lvl.delta,
+                        "imbalance": lvl.imbalance,
+                        "stacked": lvl.stacked,
+                    }
+                    for lvl in v.levels
+                ],
+                "pocPrice": v.poc_price,
+                "totalDelta": v.total_delta,
+                "stepPrice": v.step_price,
+            }
+            for k, v in r.footprints.items()
+        },
     }
 
 

@@ -1,6 +1,6 @@
 from quant.decision.context import DecisionContext
 from quant.bars import Bar
-from quant.auction_state import AuctionState
+
 
 def test_context_defaults():
     c = DecisionContext(state=None, bar=None)

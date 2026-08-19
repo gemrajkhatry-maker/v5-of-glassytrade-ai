@@ -278,6 +278,8 @@ class AMTResult:
     option_type: str = "UNKNOWN"
     # Session VA development over successive 15-min windows (ValueMigration)
     value_migration: ValueMigration = ValueMigration()
+    # Live tick-based footprints (candle time -> FootprintCandle)
+    footprints: dict[str, FootprintCandle] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

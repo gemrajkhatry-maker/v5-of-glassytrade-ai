@@ -31,6 +31,11 @@ class BarAggregator:
             self._fallback_counter += 1
             return self._fallback_counter
 
+    @property
+    def current_bar(self) -> Bar | None:
+        """The currently forming, unclosed candle updated on every tick."""
+        return self._bar
+
     def _window(self, epoch: int) -> int:
         return epoch // self.interval_seconds if self.interval_seconds else epoch
 
@@ -61,8 +66,7 @@ class BarAggregator:
         spread = max(self._bar.high, tick.price) - min(self._bar.low, tick.price)
         if spread >= self.range_size:
             closed = self._bar
-            self._bar = None
-            self._open_key = None
+            self._start(tick, None)
             return closed
         return None
 

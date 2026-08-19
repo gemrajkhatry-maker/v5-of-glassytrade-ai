@@ -943,6 +943,7 @@ class AMTAnalyzer:
         cvd_source: str = "",
         symbol: str = "",  # Fix 1: Full symbol name for option type detection
         prior_avg_volume: float = 0.0,  # Average volume from prior sessions
+        footprint_accumulator: "TickFootprintAccumulator | None" = None,
     ) -> AMTResult:
         """Run the full AMT analysis pipeline.
 
@@ -962,6 +963,7 @@ class AMTAnalyzer:
             hourly_data: Hourly timeframe data
             option_tick: Option contract tick (for per-symbol delta isolation)
             cvd_source: "underlying" if data comes from futures, "option" if from option premium
+            footprint_accumulator: Optional footprint accumulator for tick-level footprints
         """
         empty = AMTResult(
             market_state=MarketState.BALANCED.value,
@@ -1036,6 +1038,11 @@ class AMTAnalyzer:
         raw_lvns = find_lvns(profile, self.config)
         lvns = self._lvn_tracker.update(raw_lvns, profile)
         hvns = find_hvns(profile, self.config)
+
+        # Exclude HVNs that coincide with the POC to avoid duplicate overlapping lines
+        poc_price = float(poc)
+        tick_approx = (profile[1].price - profile[0].price) if len(profile) > 1 else 0.05
+        hvns = [h for h in hvns if abs(h - poc_price) > 3.0 * tick_approx]
 
         # Incremental aggressive prints
         agg_prints = find_aggressive_prints(
@@ -1285,6 +1292,11 @@ class AMTAnalyzer:
         elif market_state == MarketState.IMBALANCED:
             _setup = SetupType.TREND_MODEL
 
+        # Get footprints from accumulator if available
+        _footprints = {}
+        if footprint_accumulator is not None:
+            _footprints = footprint_accumulator.get_all()
+
         return AMTResult(
             market_state=_effective_market_state,
             poc=poc,
@@ -1398,9 +1410,9 @@ class AMTAnalyzer:
             bimodal_active_pole=_bimodal_active_pole,
             is_extreme_deviation=state_result.is_extreme_deviation,
             value_migration=value_migration,
-            underlying_price=float(data[-1].close) if data else 0.0,
-            # Fix 1: Option type for direction labeling
+            underlying_price=float(current.close) if data else 0.0,
             option_type=self._detect_option_type(symbol),
+            footprints=_footprints,
         )
 
     # -------------------------------------------------------------------

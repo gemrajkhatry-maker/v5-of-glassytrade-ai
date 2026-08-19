@@ -49,7 +49,7 @@ def _get(key: str, default) -> float | int | str:
 # ============================================================================
 LVN_THRESHOLD = _get("lvn_threshold", 0.15)
 HVN_THRESHOLD = _get("hvn_threshold", 2.00)
-VALUE_AREA_PCT = _get("value_area_pct", 0.40)
+VALUE_AREA_PCT = _get("value_area_pct", 0.70)
 LVN_SMOOTHING = _get("lvn_smoothing", 3)
 LVN_MIN_PERSISTENCE_BARS = _get("lvn_min_persistence_bars", 1)
 LVN_REMOVAL_THRESHOLD = _get("lvn_removal_threshold", 0.50)

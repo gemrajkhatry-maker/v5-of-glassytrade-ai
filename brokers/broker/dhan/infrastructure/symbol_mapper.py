@@ -415,37 +415,44 @@ class DhanSymbolMapper(ISymbolMapper):
 
         symbol = symbol.upper().strip()
 
-        # Validate exchange
-        if exchange != ExchangeSegment.MCX:
-            raise DhanInvalidExchangeError(
-                f"get_nearest_futures_contract() only supports MCX exchange, got: {exchange.code}"
-            )
-
         # Ensure cache is populated
         if self.is_cache_stale:
             await self.refresh_cache()
 
         try:
-            # Filter MCX FUTCOM contracts matching the symbol
             futures_instruments = []
+            is_mcx = exchange == ExchangeSegment.MCX
 
             for instrument in self._by_security_id.values():
-                # Check exchange
-                if instrument.exchange_segment != ExchangeSegment.MCX:
-                    continue
-
-                # Check instrument type is futures (FUTCOM)
-                if instrument.instrument_type != InstrumentTypeEnum.COMMODITY_FUTURE:
-                    continue
+                if is_mcx:
+                    if instrument.exchange_segment != ExchangeSegment.MCX:
+                        continue
+                    if instrument.instrument_type not in (
+                        InstrumentTypeEnum.COMMODITY_FUTURE,
+                        getattr(InstrumentTypeEnum, "FUTURES", None),
+                    ):
+                        continue
+                else:
+                    if instrument.exchange_segment not in (
+                        ExchangeSegment.NSE_FNO,
+                        ExchangeSegment.BSE_FNO,
+                    ):
+                        continue
+                    if instrument.instrument_type not in (
+                        InstrumentTypeEnum.INDEX_FUTURE,
+                        InstrumentTypeEnum.STOCK_FUTURE,
+                        getattr(InstrumentTypeEnum, "FUTURES", None),
+                    ):
+                        continue
 
                 # Check symbol match
-                if instrument.symbol.upper() != symbol:
-                    continue
-
-                futures_instruments.append(instrument)
+                inst_sym = (instrument.symbol or "").upper()
+                inst_ts = (instrument.trading_symbol or "").upper()
+                if inst_sym == symbol or inst_ts.startswith(f"{symbol}-") or inst_ts.startswith(f"{symbol} "):
+                    futures_instruments.append(instrument)
 
             if not futures_instruments:
-                logger.debug(f"No FUTCOM contracts found for {symbol} on MCX")
+                logger.debug(f"No futures contracts found for {symbol} on {exchange}")
                 return None
 
             # Sort by expiry date (ascending) to get nearest expiry
@@ -455,7 +462,7 @@ class DhanSymbolMapper(ISymbolMapper):
             today = date.today()
             active = [f for f in futures_instruments if f.expiry_date and f.expiry_date >= today]
             if not active:
-                logger.debug(f"All FUTCOM contracts for {symbol} are expired, using nearest")
+                logger.debug(f"All futures contracts for {symbol} are expired, using nearest")
                 active = futures_instruments
 
             # Return the first (nearest expiry) active futures contract

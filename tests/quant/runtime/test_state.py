@@ -1,10 +1,8 @@
-from quant.absorption import Absorption
-from quant.auction_state import AuctionState
 from quant.bars import Bar
 from quant.decision.decision_service import QuantDecision
 from quant.decision.signal_builder import Signal
 from quant.events import (
-    AuctionUpdated,
+    AmtUpdated,
     BarClosed,
     DecisionProduced,
     PositionClosed,
@@ -13,27 +11,7 @@ from quant.events import (
 )
 from quant.execution.order import Fill, Order, Position
 from quant.execution.risk import RiskState
-from quant.location import LocationState
-from quant.order_flow import OrderFlowState
 from quant.state import StateProjector
-from quant.volume_profile import VolumeProfile
-from quant.vwap import VWAPState
-
-
-def _state(triple_a_phase="", triple_a_signal=None, close=100.0,
-           cvd_slope=0.0, absorption=None, upper_1=101.0, lower_1=99.0):
-    return AuctionState(
-        time="t", close=close,
-        volume_profile=VolumeProfile(levels=(), poc=100, vah=102, val=98, step=1, total_volume=100),
-        vwap=VWAPState(value=100, upper_1=upper_1, lower_1=lower_1,
-                       upper_2=102, lower_2=98, std=1, deviation_sigmas=0),
-        order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=cvd_slope,
-                                  cvd_divergence="NONE", aggressive_prints=()),
-        absorption=absorption,
-        location=LocationState(ib_high=105, ib_low=95, ib_complete=True,
-                               zone="INSIDE_VA", nearest_level=100, distance_to_level=0),
-        triple_a_phase=triple_a_phase, triple_a_signal=triple_a_signal,
-    )
 
 
 def _position(symbol="S", time="t1", size=10.0, entry=100.0):
@@ -43,14 +21,14 @@ def _position(symbol="S", time="t1", size=10.0, entry=100.0):
                     open_price=entry, open_time=time, size=size)
 
 
-def test_projector_folds_bar_and_auction():
+def test_projector_folds_bar_and_amt():
     p = StateProjector()
     p.on_event(BarClosed(symbol="S", time="t1",
                          bar=Bar(time="t1", open=100, high=101, low=99, close=100, volume=100)))
-    p.on_event(AuctionUpdated(symbol="S", time="t1", auction=_state()))
+    p.on_event(AmtUpdated(symbol="S", time="t1", amt={"poc": 100.0, "marketState": "BALANCED"}))
     v = p.snapshot("S")
     assert v.ltp == 100.0
-    assert v.auction is not None and "tripleAPhase" in v.auction
+    assert v.amt is not None and v.amt.get("marketState") == "BALANCED"
 
 
 def test_projector_per_symbol_isolation():
@@ -124,31 +102,10 @@ def test_bar_tick_time_normalized_to_iso_for_epoch():
     assert int(datetime.fromisoformat(tick["time"]).timestamp()) == 1786095001
 
 
-def test_auction_keys_match_backend_serializer():
+def test_amt_fold():
     p = StateProjector()
-    p.on_event(AuctionUpdated(symbol="S", time="t1",
-                              auction=_state(triple_a_phase="AGGRESSION",
-                                             triple_a_signal="LONG",
-                                             absorption=Absorption(0, 100.5, 500, "BUY", 0.6, 0))))
-    a = p.snapshot("S").auction
-    assert set(a) == {"time", "close", "volumeProfile", "vwap", "orderFlow",
-                      "absorption", "location", "tripleAPhase", "tripleASignal"}
-    assert set(a["volumeProfile"]) == {"poc", "vah", "val", "step", "totalVolume"}
-    assert set(a["vwap"]) == {"value", "upper1", "lower1", "upper2", "lower2",
-                              "std", "deviationSigmas"}
-    assert set(a["orderFlow"]) == {"delta", "cvd", "cvdSlope", "cvdDivergence"}
-    assert set(a["location"]) == {"ibHigh", "ibLow", "ibComplete", "zone",
-                                  "nearestLevel", "distanceToLevel"}
-    assert a["absorption"] == {"side": "BUY", "price": 100.5, "volume": 500.0,
-                               "strength": 0.6, "barAge": 0}
-    assert a["tripleAPhase"] == "AGGRESSION"
-    assert a["tripleASignal"] == "LONG"
-
-
-def test_auction_absorption_null_when_none():
-    p = StateProjector()
-    p.on_event(AuctionUpdated(symbol="S", time="t1", auction=_state()))
-    assert p.snapshot("S").auction["absorption"] is None
+    p.on_event(AmtUpdated(symbol="S", time="t1", amt={"poc": 100.0, "marketState": "IMBALANCED"}))
+    assert p.snapshot("S").amt["marketState"] == "IMBALANCED"
 
 
 def test_decision_fold():

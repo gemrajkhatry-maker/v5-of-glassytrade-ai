@@ -2,13 +2,14 @@ from quant.contracts.enums import MarketState
 from dataclasses import dataclass
 from typing import Optional
 
-from quant.auction_state import AuctionState
+from quant.contracts.value_objects import AMTResult
 from quant.bars import Bar
 
 
 @dataclass(frozen=True)
 class DecisionContext:
-    state: Optional[AuctionState]  # the immutable snapshot
+    # state is deprecated, all context is directly populated
+    state: Optional[AMTResult]
     bar: Optional[Bar]             # the bar that closed to produce state
     symbol: str = ""
     # session / risk facts
@@ -59,8 +60,20 @@ class DecisionContext:
     equity: float = 1_000_000.0
     risk_per_trade_pct: float = 0.01
     tick_size: float = 0.05
+    vwap_std: float = 0.0
+    vwap_upper_2: float = 0.0
+    vwap_lower_2: float = 0.0
+    cvd_slope: float = 0.0
+    absorption_side: str = ""
     # Impulse Leg LVN (Layer 3 profile) — primary LVN from the most recent
     # directional impulse leg (swing low → high). Used by Gate 3 Path C
     # (Playbook C LVN Sniper) and the pyramid engine. Zero means unavailable.
     # Populated from amt_dto["legLvn"] in runtime._decide().
     leg_lvn: float = 0.0
+    # Initiative / Breakout state from AMT analyzer (Fabio Model 1)
+    break_direction: str = ""   # "UP" | "DOWN" | ""
+    break_type: str = ""        # "INITIATIVE" | "RESPONSIVE" | "ABSORPTION" | ""
+    # Live bid/ask quote prices for spread & slippage protection
+    bid: float = 0.0
+    ask: float = 0.0
+    time_str: str = ""

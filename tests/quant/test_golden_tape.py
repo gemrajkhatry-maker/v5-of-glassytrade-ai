@@ -11,7 +11,6 @@ from dataclasses import asdict
 from quant.contracts.exchange_config import ExchangeConfig
 from quant.events import (
     BarClosed,
-    AuctionUpdated,
     AmtUpdated,
     DecisionProduced,
     PositionOpened,
@@ -41,7 +40,6 @@ def test_golden_tape_event_sequence_determinism():
 
     # Verify key lifecycle events are emitted
     assert "BarClosed" in event_types1
-    assert "AuctionUpdated" in event_types1
     assert "AmtUpdated" in event_types1
     assert "DecisionProduced" in event_types1
 

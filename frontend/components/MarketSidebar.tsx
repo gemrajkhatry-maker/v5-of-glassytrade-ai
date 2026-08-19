@@ -119,7 +119,23 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                         </span>
                     )}
                 </div>
-                <span className="text-[8px] text-glassy-text-tertiary font-mono ml-3">{hasData || hasOpenPosition ? tag : '\u00A0'}</span>
+                <div className="flex items-center gap-1 ml-3 mt-0.5">
+                    {tag === 'FUT' ? (
+                        <span className="inline-flex items-center px-1 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[7.5px] font-mono font-bold leading-tight tracking-wider">
+                            FUT
+                        </span>
+                    ) : tag === 'CE' ? (
+                        <span className="inline-flex items-center px-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[7.5px] font-mono font-semibold leading-tight">
+                            CE
+                        </span>
+                    ) : tag === 'PE' ? (
+                        <span className="inline-flex items-center px-1 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 text-[7.5px] font-mono font-semibold leading-tight">
+                            PE
+                        </span>
+                    ) : (
+                        <span className="text-[8px] text-glassy-text-tertiary font-mono">{hasData || hasOpenPosition ? tag : '\u00A0'}</span>
+                    )}
+                </div>
             </div>
 
             {/* 3A traffic light (37%) */}

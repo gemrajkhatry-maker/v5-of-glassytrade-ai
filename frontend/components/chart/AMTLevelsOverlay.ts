@@ -122,9 +122,9 @@ export function generateAMTPriceLines(
       });
     }
 
-    // LVN lines (amber dotted)
+    // LVN lines (amber dotted — max 4 prominent nodes)
     if (amt.lvns && amt.lvns.length > 0) {
-      amt.lvns.forEach(lvn => {
+      amt.lvns.slice(0, 4).forEach(lvn => {
         lines.push({
           price: lvn,
           color: '#fb923c',
@@ -136,13 +136,13 @@ export function generateAMTPriceLines(
       });
     }
 
-    // HVN lines (emerald dashed)
+    // HVN lines (emerald dashed — max 4 prominent nodes)
     if (amt.hvns && amt.hvns.length > 0) {
-      amt.hvns.forEach(hvn => {
+      amt.hvns.slice(0, 4).forEach(hvn => {
         lines.push({
           price: hvn,
           color: '#34d399',
-          lineWidth: 2,
+          lineWidth: 1,
           lineStyle: 'Dashed',
           axisLabelVisible: true,
           title: 'HVN',

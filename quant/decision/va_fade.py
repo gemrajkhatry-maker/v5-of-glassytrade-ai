@@ -9,7 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from quant.auction_state import AuctionState
 from quant.decision.context import DecisionContext
 
 
@@ -23,24 +22,32 @@ class VAFadeSignal:
     reason: str
 
 
-def detect_va_fade(state: AuctionState, ctx: Optional[DecisionContext] = None) -> VAFadeSignal | None:
-    """LONG: zone==BELOW_VA, CVD > 0, close < poc, target POC.
-       SHORT: zone==ABOVE_VA, CVD < 0, close > poc, target POC."""
-    vp = state.volume_profile
-    poc = (ctx.poc if ctx and ctx.poc and ctx.poc > 0 else None) or vp.poc
-    val = (ctx.val if ctx and ctx.val and ctx.val > 0 else None) or vp.val
-    vah = (ctx.vah if ctx and ctx.vah and ctx.vah > 0 else None) or vp.vah
-    step = vp.step if (vp and vp.step and vp.step > 0) else 0.0
+def detect_va_fade(ctx: DecisionContext) -> VAFadeSignal | None:
+    """LONG: close < val, CVD > 0, close < poc, target POC.
+       SHORT: close > vah, CVD < 0, close > poc, target POC."""
+    if not ctx or not ctx.bar:
+        return None
+
+    poc = ctx.poc
+    val = ctx.val
+    vah = ctx.vah
+    step = ctx.tick_size
 
     if not poc or not val or not vah or not step:
         return None
 
-    close = float(state.close)
-    cvd = float(state.order_flow.cvd)
+    close = float(ctx.bar.close)
+    cvd = float(ctx.cvd_slope)
+
+    zone = "INSIDE_VA"
+    if close < val:
+        zone = "BELOW_VA"
+    elif close > vah:
+        zone = "ABOVE_VA"
 
     # LONG: price probed below VAL and buyers are in control (positive CVD)
     # Fabio: only fade back toward POC when order flow confirms the rejection
-    if state.location.zone == "BELOW_VA" and cvd > 0 and close < poc:
+    if zone == "BELOW_VA" and cvd > 0 and close < poc:
         entry = close
         sl = entry - step
         tp = poc
@@ -50,7 +57,7 @@ def detect_va_fade(state: AuctionState, ctx: Optional[DecisionContext] = None) -
                             "VAL bounce: below VA, buyer order flow")
 
     # SHORT: price probed above VAH and sellers are in control (negative CVD)
-    if state.location.zone == "ABOVE_VA" and cvd < 0 and close > poc:
+    if zone == "ABOVE_VA" and cvd < 0 and close > poc:
         entry = close
         sl = entry + step
         tp = poc

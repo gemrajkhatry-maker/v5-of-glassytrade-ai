@@ -902,44 +902,52 @@ class DhanExchangeConfig:
         underlying = extract_underlying(clean) or clean.split("-")[0].split(" ")[0]
 
         try:
-            # 1) If given a full option symbol, resolve it directly.
+            # 1) If given a full symbol (futures or options), resolve it directly.
             instrument = self._broker._run_async(
                 self._broker.resolve_symbol(clean)
             )
-            if instrument.lot_size > 1 or "OPTION" in str(instrument.instrument_type):
+            if instrument.lot_size > 0:
                 return instrument.lot_size
         except Exception:
             pass
 
-        # 2) Underlying root: find any current NFO option contract of it.
+        # 2) Underlying root: find any current NFO or MCX contract of it.
         mapper = self._broker._symbol_mapper
         if mapper is not None:
             from brokers.broker.dhan.infrastructure.symbol_mapper import (
                 ExchangeSegment,
             )
-
             from datetime import datetime as _dt
 
-            options = [
+            contracts = [
                 i
                 for i in mapper.instruments.values()
-                if i.exchange_segment == ExchangeSegment.NSE_FNO
-                and str(i.trading_symbol).startswith(underlying + " ")
-                and i.option_type is not None
+                if (i.exchange_segment in (ExchangeSegment.NSE_FNO, ExchangeSegment.MCX_COMM))
+                and str(i.trading_symbol).startswith(underlying)
+                and i.lot_size > 0
                 and "NXT" not in str(i.trading_symbol)
             ]
-            # Prefer the nearest expiry, then the largest lot size group.
-            if options:
-                options.sort(
+            # Prefer the nearest expiry
+            if contracts:
+                contracts.sort(
                     key=lambda i: (
                         abs((i.expiry_date - _dt.now().date()).days)
                         if i.expiry_date
                         else 10**6,
                     )
                 )
-                return options[0].lot_size
+                return contracts[0].lot_size
+
+        # 3) Fallback to authoritative ExchangeConfig metadata
+        from quant.contracts.exchange_config import ExchangeConfig
+        for ex in ("MCX", "NSE"):
+            try:
+                cfg = ExchangeConfig.for_exchange(ex)
+                return int(cfg.get_lot_size(underlying))
+            except Exception:
+                pass
 
         raise DhanSymbolNotFoundError(
-            message=f"Cannot determine option lot size for {underlying}",
+            message=f"Cannot determine lot size for {underlying}",
             details={"symbol": symbol_or_underlying},
         )

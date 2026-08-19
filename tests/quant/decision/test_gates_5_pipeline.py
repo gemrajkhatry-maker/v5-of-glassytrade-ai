@@ -1,37 +1,25 @@
+from quant.bars import Bar
 from quant.decision.context import DecisionContext
 from quant.decision.gates_rr import gate_risk_reward
 from quant.decision.pipeline import GatePipeline
-from quant.auction_state import AuctionState
-from quant.vwap import VWAPState
-from quant.volume_profile import VolumeProfile
-from quant.order_flow import OrderFlowState
-from quant.location import LocationState
 
 
 def _ctx(**kw):
-    state = AuctionState(
-        time="t", close=kw.get("close", 100.0),
-        volume_profile=VolumeProfile(levels=(), poc=100, vah=kw.get("vah", 101.0),
-                                     val=kw.get("val", 99.0),
-                                     step=kw.get("step", 0.05), total_volume=100),
-        vwap=VWAPState(value=100, upper_1=101, lower_1=99, upper_2=102, lower_2=98, std=1, deviation_sigmas=0),
-        order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=0, cvd_divergence="NONE", aggressive_prints=()),
-        absorption=None,
-        location=LocationState(ib_high=105, ib_low=95, ib_complete=True, zone="INSIDE_VA",
-                               nearest_level=kw.get("nearest", 100), distance_to_level=0),
-        triple_a_phase=kw.get("triple_a_phase", "AGGRESSION"),
-        triple_a_signal=kw.get("triple_a_signal", "LONG"),
+    close = kw.get("close", 100.0)
+    bar = Bar(time="t", open=close, high=close, low=close, close=close, volume=100.0)
+    return DecisionContext(
+        state=None, bar=bar, symbol="SYM", time_str="t",
+        agent_direction=kw.get("agent_direction", "LONG"),
+        agent_probability=0.7,
+        market_state=kw.get("market_state", "IMBALANCED"),
+        position_open=kw.get("position_open", False),
+        cooldown_remaining_sec=kw.get("cooldown_remaining_sec", 0),
+        risk_halted=kw.get("risk_halted", False),
+        tick_size=kw.get("tick_size", 0.05),
+        poc=kw.get("poc", 100.0),
+        vah=kw.get("ctx_vah", kw.get("vah", 101.0)),
+        val=kw.get("ctx_val", kw.get("val", 99.0)),
     )
-    return DecisionContext(state=state, bar=None,
-                           agent_direction=kw.get("agent_direction", "LONG"),
-                           agent_probability=0.7,
-                           market_state=kw.get("market_state", "IMBALANCED"),
-                           position_open=kw.get("position_open", False),
-                           cooldown_remaining_sec=kw.get("cooldown_remaining_sec", 0),
-                           risk_halted=kw.get("risk_halted", False),
-                           tick_size=kw.get("tick_size", 0.05),
-                           poc=kw.get("poc", 0.0), vah=kw.get("ctx_vah", 0.0),
-                           val=kw.get("ctx_val", 0.0))
 
 
 def test_gate4_passes_good_rr():

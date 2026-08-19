@@ -14,7 +14,7 @@ if str(_BACKEND) not in sys.path:
     sys.path.insert(0, str(_BACKEND))
 
 from quant.brokers.gateway import Tick
-from quant.events import AuctionUpdated
+from quant.events import AmtUpdated
 from quant.runtime import QuantEngine
 from tests.helpers.synthetic import SyntheticGateway
 
@@ -46,27 +46,18 @@ def _run_trace():
     return eng.run()
 
 
-def _auctions(trace):
-    return [e.auction for e in trace if isinstance(e, AuctionUpdated)]
+def _amts(trace):
+    return [e.amt for e in trace if isinstance(e, AmtUpdated)]
 
 
-def test_auction_trace_reaches_aggression_long():
-    auctions = _auctions(_run_trace())
-    assert len(auctions) == 155
-    # intermediate progression: absorption re-arms ABSORBING, near-POC
-    # accumulation, then rising closes trip AGGRESSION/LONG.
-    phases = [a.triple_a_phase for a in auctions]
-    assert "ABSORBING" in phases
-    assert "ACCUMULATING" in phases
-    assert phases.index("ABSORBING") < phases.index("ACCUMULATING")
-    # The breakout bar trips AGGRESSION/LONG; the machine re-arms afterwards.
-    agg = [a for a in auctions if a.triple_a_phase == "AGGRESSION"]
-    assert agg, "AGGRESSION must be reached"
-    assert agg[-1].triple_a_signal == "LONG"
-    assert agg[-1].close > agg[-1].vwap.upper_1
+def test_amt_trace_produces_unified_results():
+    amts = _amts(_run_trace())
+    assert len(amts) == 155
+    assert all(isinstance(a, dict) and "poc" in a and "marketState" in a for a in amts)
+    assert any(a["marketState"] in ("BALANCED", "IMBALANCED") for a in amts)
 
 
-def test_dto_has_ws_auction_contract_keys():
+def test_dto_has_ws_amt_contract_keys():
     eng = QuantEngine(
         SyntheticGateway(_session_ticks()), SYMBOL, interval_seconds=1
     )
@@ -74,17 +65,9 @@ def test_dto_has_ws_auction_contract_keys():
     from quant.ws_adapter import view_state_to_ws
 
     last = view_state_to_ws(eng.projector.snapshot(SYMBOL))
-    auction = last["auction"]
-    assert auction is not None, "projector must carry the final auction state"
-    vp = auction["volumeProfile"]
-    vw = auction["vwap"]
-    of = auction["orderFlow"]
-    loc = auction["location"]
-    assert {"poc", "vah", "val"} <= set(vp)
-    assert {"value", "deviationSigmas"} <= set(vw)
-    assert {"cvd", "cvdSlope"} <= set(of)
-    assert "zone" in loc
-    assert "tripleAPhase" in auction and "tripleASignal" in auction
+    amt = last["amt"]
+    assert amt is not None, "projector must carry the final amt state"
+    assert {"poc", "valueAreaHigh", "valueAreaLow", "marketState", "sessionVwap", "profile"} <= set(amt)
 
 
 def test_determinism_same_bars_same_trace():

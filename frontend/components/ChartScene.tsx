@@ -785,17 +785,19 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     // Session profile (blue-tinted direction bars with HVN/LVN/VA zones)
     if (mode === 'session' || mode === 'combined') {
-      const sessionOffset = (hasLeg && mode === 'combined') ? canvas.width * 0.12 : 0;
-      drawProfileBars(ctx, canvas, series, amt.profile, 0.15, sessionOffset, '#4488cc', '#cc4444', true,
+      const sessionWidth = mode === 'session' ? 0.40 : 0.28;
+      const sessionOffset = (hasLeg && mode === 'combined') ? canvas.width * 0.16 : 0;
+      drawProfileBars(ctx, canvas, series, amt.profile, sessionWidth, sessionOffset, '#4488cc', '#cc4444', true,
         amt.hvns, amt.lvns, amt.valueAreaHigh, amt.valueAreaLow, amt.poc);
-      drawVerticalLabel(ctx, canvas, 'SESSION PROFILE', rightEdge - sessionOffset - canvas.width * 0.08, '#6699cc');
+      drawVerticalLabel(ctx, canvas, 'SESSION PROFILE', rightEdge - sessionOffset - canvas.width * 0.14, '#6699cc');
     }
 
     // Leg profile (amber/orange bars with leg-specific levels)
     if (hasLeg && (mode === 'leg' || mode === 'combined')) {
-      drawProfileBars(ctx, canvas, series, amt.legProfile, 0.10, 0, '#FF9900', '#FF6600', false,
+      const legWidth = mode === 'leg' ? 0.40 : 0.16;
+      drawProfileBars(ctx, canvas, series, amt.legProfile, legWidth, 0, '#FF9900', '#FF6600', false,
         undefined, amt.legLvns, amt.legVah > 0 ? amt.legVah : undefined, amt.legVal > 0 ? amt.legVal : undefined, amt.legPoc > 0 ? amt.legPoc : undefined);
-      drawVerticalLabel(ctx, canvas, 'LEG PROFILE', rightEdge - canvas.width * 0.05, '#FF9900');
+      drawVerticalLabel(ctx, canvas, 'LEG PROFILE', rightEdge - canvas.width * 0.08, '#FF9900');
     }
 
     // Show "No displacement" indicator when in leg mode but no leg data

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 def test_coordinator_stop_shuts_down_engines_and_feed():
     """After coordinator.stop(), engines are stopped and the feed is closed.
     The LLM executor no longer exists on engines — the LLM layer was removed."""
-    from quant.coordinator import QuantCoordinator
+    from quant.multi_engine import QuantCoordinator
 
     engines = [MagicMock(spec=[]), MagicMock(spec=[])]
     for eng in engines:

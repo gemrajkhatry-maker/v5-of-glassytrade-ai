@@ -172,7 +172,7 @@ def create_application() -> FastAPI:
         logger.info("Running option scanner to select contracts...")
         begin_phase("option_scanner")
         try:
-            from quant.coordinator import load_persisted_contracts
+            from quant.multi_engine import load_persisted_contracts
 
             # Reuse today's persisted selection only when it was selected for
             # the same exchange as the active strategy (e.g. NSE picks must not
@@ -236,7 +236,7 @@ def create_application() -> FastAPI:
         startup_ok = True
         try:
             begin_phase("trading_engine")
-            from quant.coordinator import QuantCoordinator
+            from quant.multi_engine import QuantCoordinator
 
             coordinator = container.resolve(QuantCoordinator)
             app.state.coordinator = coordinator

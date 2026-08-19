@@ -81,39 +81,46 @@ class SignalBuilder:
         if direction not in ("LONG", "SHORT"):
             return None
 
-        state = ctx.state
-        if state is None:
+        if ctx.bar is None:
             return None
 
-        entry = float(state.close)
-        nearest_level = float(state.location.nearest_level)
+        entry = float(ctx.bar.close)
 
         # Canonical value area — the AMT analyzer's session-scoped, clamped VA
         # the UI renders, matching gate 4 exactly (DecisionContext.poc/vah/val).
-        # Falls back to the state's bar-based profile only when no AMT VA.
         amt_val = ctx.val if ctx.val and ctx.val > 0 else None
         amt_vah = ctx.vah if ctx.vah and ctx.vah > 0 else None
 
         if direction == "LONG":
-            val = amt_val if amt_val is not None else float(state.volume_profile.val)
-            step = float(state.volume_profile.step)
-            anchor = val if entry > val else nearest_level
-            # Fabio: SL sits 1-2 ticks INSIDE the value-area edge, not a full
+            val = amt_val
+            step = ctx.tick_size
+            if ctx.leg_lvn and ctx.leg_lvn > 0 and entry > ctx.leg_lvn:
+                anchor = ctx.leg_lvn
+            elif val is not None and entry > val:
+                anchor = val
+            else:
+                anchor = val or ctx.poc or (entry - 5 * TICK_SIZE_NSE_OPTIONS)
+            # Fabio: SL sits 1-2 ticks INSIDE the value-area/LVN edge, not a full
             # profile bucket outside it.
             sl = anchor - 2 * TICK_SIZE_NSE_OPTIONS
             if sl >= anchor:  # degenerate profile safety net
                 sl = anchor - step if step > 0 else anchor
             if sl >= entry:
                 sl = entry - 2 * TICK_SIZE_NSE_OPTIONS
-            # Fabio: target structural levels (prior POC / naked POC) when available.
+            # Fabio: target structural levels (prior POC / naked POC / opposite VA) when available.
             # Fall back to fixed R:R multiplier when no structure qualifies.
             fixed_tp = entry + (entry - sl) * self.tp_multiplier
             tp = self._structural_tp(ctx, entry, sl, "LONG", fixed_tp)
         else:
-            vah = amt_vah if amt_vah is not None else float(state.volume_profile.vah)
-            step = float(state.volume_profile.step)
-            anchor = vah if entry < vah else nearest_level
-            # Fabio: SL sits 1-2 ticks INSIDE the value-area edge, not a full
+            vah = amt_vah
+            step = ctx.tick_size
+            if ctx.leg_lvn and ctx.leg_lvn > 0 and entry < ctx.leg_lvn:
+                anchor = ctx.leg_lvn
+            elif vah is not None and entry < vah:
+                anchor = vah
+            else:
+                anchor = vah or ctx.poc or (entry + 5 * TICK_SIZE_NSE_OPTIONS)
+            # Fabio: SL sits 1-2 ticks INSIDE the value-area/LVN edge, not a full
             # profile bucket outside it.
             sl = anchor + 2 * TICK_SIZE_NSE_OPTIONS
             if sl <= anchor:  # degenerate profile safety net
@@ -147,7 +154,7 @@ class SignalBuilder:
             rr=rr,
             model_label=model_label,
             symbol=ctx.symbol,
-            timestamp=state.time,
+            timestamp=ctx.time_str,
         )
 
     @staticmethod
@@ -162,10 +169,10 @@ class SignalBuilder:
         """Pick the nearest structural TP target that meets minimum R:R.
 
         Fabio's rule: target the previous balance area / prior POC / nearest
-        unfilled naked POC. Fall back to the fixed R:R multiplier when no
-        structural target qualifies.
+        unfilled naked POC / opposite Value Area boundary. Fall back to the fixed
+        R:R multiplier when no structural target qualifies.
 
-        Priority: nearest NPOC > prior POC > fixed R:R.
+        Priority: nearest NPOC > prior POC > opposite VA edge > fixed R:R.
         """
         risk = abs(entry - sl)
         if risk <= 0:
@@ -179,11 +186,15 @@ class SignalBuilder:
                 candidates.append(ctx.npoc_above)
             if ctx.prior_poc and ctx.prior_poc > entry:
                 candidates.append(ctx.prior_poc)
+            if ctx.vah and ctx.vah > entry:
+                candidates.append(ctx.vah)
         else:
             if ctx.npoc_below and ctx.npoc_below < entry and ctx.npoc_below > 0:
                 candidates.append(ctx.npoc_below)
             if ctx.prior_poc and ctx.prior_poc < entry and ctx.prior_poc > 0:
                 candidates.append(ctx.prior_poc)
+            if ctx.val and ctx.val < entry and ctx.val > 0:
+                candidates.append(ctx.val)
 
         # Filter: must give R:R >= min_rr
         valid = []

@@ -6,11 +6,7 @@ from quant.decision.signal_builder import Signal
 from quant.execution.exits import ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.order import Position
-from quant.auction_state import AuctionState
-from quant.vwap import VWAPState
-from quant.volume_profile import VolumeProfile
-from quant.order_flow import OrderFlowState
-from quant.location import LocationState
+
 
 
 def _make_signal(entry: float = 100.0, sl: float = 95.0, tp: float = 110.0, direction: str = "LONG") -> Signal:
@@ -84,29 +80,9 @@ def test_is_risk_free_at_08r_profit():
 
     assert exits.is_risk_free(pos) is False
 
-    state = AuctionState(
-        time="t1", close=105.0,  # 0.5R profit -> not yet risk-free
-        volume_profile=VolumeProfile(levels=(), poc=100, vah=105, val=95, step=1, total_volume=100),
-        vwap=VWAPState(value=100, upper_1=102, lower_1=98, upper_2=104, lower_2=96, std=2, deviation_sigmas=0),
-        order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=0.0, cvd_divergence="NONE", aggressive_prints=()),
-        absorption=None,
-        location=LocationState(ib_high=105, ib_low=95, ib_complete=True, zone="INSIDE_VA", nearest_level=100, distance_to_level=0),
-        triple_a_phase="WAITING",
-        triple_a_signal=None,
-    )
-    exits.evaluate(pos, state, bar_index=1, bar_high=105.0, bar_low=100.0)
+    exits.evaluate(pos, bar_close=105.0, bar_index=1, bar_high=105.0, bar_low=100.0)
     assert exits.is_risk_free(pos) is False
 
     # Price advances to 108.0 (+0.8R = +8.0)
-    state_08r = AuctionState(
-        time="t2", close=108.0,
-        volume_profile=VolumeProfile(levels=(), poc=100, vah=105, val=95, step=1, total_volume=100),
-        vwap=VWAPState(value=100, upper_1=102, lower_1=98, upper_2=104, lower_2=96, std=2, deviation_sigmas=0),
-        order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=0.0, cvd_divergence="NONE", aggressive_prints=()),
-        absorption=None,
-        location=LocationState(ib_high=105, ib_low=95, ib_complete=True, zone="INSIDE_VA", nearest_level=100, distance_to_level=0),
-        triple_a_phase="WAITING",
-        triple_a_signal=None,
-    )
-    exits.evaluate(pos, state_08r, bar_index=2, bar_high=108.5, bar_low=104.0)
+    exits.evaluate(pos, bar_close=108.0, bar_index=2, bar_high=108.5, bar_low=104.0)
     assert exits.is_risk_free(pos) is True

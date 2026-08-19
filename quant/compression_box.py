@@ -10,7 +10,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 from quant.bars import Bar
-from quant.volume_profile import VolumeProfile, VolumeProfileBuilder
+from quant.amt.profile.volume_profile import (
+    VolumeProfileSnapshot,
+    build_snapshot,
+    create_profile,
+)
 
 
 @dataclass(frozen=True)
@@ -21,7 +25,7 @@ class CompressionBox:
     high: float
     low: float
     range_span: float
-    micro_profile: VolumeProfile
+    micro_profile: VolumeProfileSnapshot
     micro_poc: float
     micro_vah: float
     micro_val: float
@@ -64,10 +68,8 @@ class CompressionBoxDetector:
 
             if box_range <= self.max_box_range:
                 # Valid compression box detected: build micro-profile
-                builder = VolumeProfileBuilder(tick_size=self.tick_size)
-                for b in window:
-                    builder.update(b)
-                micro_vp = builder.snapshot()
+                prof = create_profile(window, tick_size=self.tick_size)
+                micro_vp = build_snapshot(prof)
 
                 last_close = float(bar.close)
                 prior_high = self._current_box.high if self._current_box else box_high

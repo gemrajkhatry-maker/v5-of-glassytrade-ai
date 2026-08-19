@@ -11,12 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from quant.auction_state import AuctionState
 from quant.contracts.timezones import IST
 from quant.decision.decision_service import QuantDecision
 from quant.events import (
     AmtUpdated,
-    AuctionUpdated,
     BarClosed,
     DecisionProduced,
     DepthUpdated,
@@ -43,65 +41,7 @@ class ViewState:
     amt: dict | None = None
 
 
-def _auction_to_view(state: AuctionState) -> dict:
-    """Serialize an AuctionState to the camelCase WS ``auction`` DTO.
 
-    Mirrors ``auction_state_to_dto`` in the backend serializer so the keys the
-    frontend reads (tripleAPhase, volumeProfile, vwap, orderFlow, ...) match
-    exactly.
-    """
-    vp = state.volume_profile
-    vw = state.vwap
-    of = state.order_flow
-    loc = state.location
-    ab = state.absorption
-    return {
-        "time": _epoch_to_iso(state.time),
-        "close": round(float(state.close), 4),
-        "volumeProfile": {
-            "poc": round(vp.poc, 4),
-            "vah": round(vp.vah, 4),
-            "val": round(vp.val, 4),
-            "step": round(vp.step, 4),
-            "totalVolume": round(vp.total_volume, 2),
-        },
-        "vwap": {
-            "value": round(vw.value, 4),
-            "upper1": round(vw.upper_1, 4),
-            "lower1": round(vw.lower_1, 4),
-            "upper2": round(vw.upper_2, 4),
-            "lower2": round(vw.lower_2, 4),
-            "std": round(vw.std, 4),
-            "deviationSigmas": round(vw.deviation_sigmas, 4),
-        },
-        "orderFlow": {
-            "delta": round(of.delta, 2),
-            "cvd": round(of.cvd, 2),
-            "cvdSlope": round(of.cvd_slope, 4),
-            "cvdDivergence": of.cvd_divergence,
-        },
-        "absorption": (
-            {
-                "side": ab.side,
-                "price": round(ab.price, 4),
-                "volume": round(ab.volume, 2),
-                "strength": round(ab.strength, 4),
-                "barAge": ab.bar_age,
-            }
-            if ab is not None
-            else None
-        ),
-        "location": {
-            "ibHigh": round(loc.ib_high, 4),
-            "ibLow": round(loc.ib_low, 4),
-            "ibComplete": loc.ib_complete,
-            "zone": loc.zone,
-            "nearestLevel": round(loc.nearest_level, 4),
-            "distanceToLevel": round(loc.distance_to_level, 4),
-        },
-        "tripleAPhase": state.triple_a_phase,
-        "tripleASignal": state.triple_a_signal,
-    }
 
 
 def _epoch_to_iso(time_str: str) -> str:
@@ -220,12 +160,12 @@ class StateProjector:
         self._state: dict[str, dict] = {}
         self._lock = threading.RLock()
 
-    def on_quote(self, symbol: str, tick) -> None:
-        """Per-tick LTP/OI/depth refresh (not an Event — bypasses bus/journal).
+    def on_quote(self, symbol: str, tick, current_bar=None) -> None:
+        """Per-tick LTP/OI/depth and live forming candle refresh.
 
         Called by the engine on every raw tick so the WS snapshot carries a
-        live ``ltp``/``oi``/``depth`` between bar closes (the gameloop polls
-        snapshots every 0.5s, so the sidebar and order-flow cards stay live).
+        live ``ltp``/``oi``/``depth`` and real-time forming ``tick`` (candle)
+        between bar closes, enabling the frontend chart to paint the live candle.
         """
         with self._lock:
             s = self._symbol_state(symbol)
@@ -233,6 +173,8 @@ class StateProjector:
             s["oi"] = float(tick.oi)
             if tick.depth is not None:
                 s["depth"] = tick.depth
+            if current_bar is not None:
+                s["tick"] = _bar_to_tick(current_bar)
 
     def on_event(self, event: Event) -> None:
         with self._lock:
@@ -241,8 +183,6 @@ class StateProjector:
                 s["ltp"] = float(event.bar.close)
                 s["oi"] = float(getattr(event.bar, "oi", 0.0) or 0.0)
                 s["tick"] = _bar_to_tick(event.bar)
-            elif isinstance(event, AuctionUpdated):
-                s["auction"] = _auction_to_view(event.auction)
             elif isinstance(event, DecisionProduced):
                 s["quant_decision"] = _decision_to_view(event.decision)
             elif isinstance(event, RiskUpdated):
@@ -303,7 +243,7 @@ class StateProjector:
         """
         # Contract defaults — MUST mirror quant/ws_adapter.view_state_to_ws and
         # the frontend createInstrumentState (hooks/useServerTradingSystem.ts).
-        # Paper account capital: ₹10 lakh (1M).
+        # Paper account capital: ₹1 crore (10M).
         base = {
             "balance": 1_000_000.0,
             "equity": 1_000_000.0,

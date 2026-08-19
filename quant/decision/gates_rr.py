@@ -15,29 +15,33 @@ def gate_risk_reward(
     max_distance_ticks: float = 999999.0,
 ) -> GateResult:
     """Gate 4 — risk-reward check (Fabio: R:R >= 1.5)."""
-    if ctx is None or ctx.state is None:
-        return GateResult(4, False, "RR fail", "no state")
+    if ctx is None or ctx.bar is None:
+        return GateResult(4, False, "RR fail", "no bar")
     direction = ctx.agent_direction
     if direction not in ("LONG", "SHORT"):
         return GateResult(4, False, "RR fail", "No direction")
-    state = ctx.state
-    entry = float(state.close)
-    vp = state.volume_profile
-    loc = state.location
-    nearest = loc.nearest_level if loc is not None else None
+    entry = float(ctx.bar.close)
     tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else TICK_SIZE_NSE_OPTIONS
-    amt_val = ctx.val if ctx.val and ctx.val > 0 else None
-    amt_vah = ctx.vah if ctx.vah and ctx.vah > 0 else None
+    val = ctx.val if ctx.val and ctx.val > 0 else None
+    vah = ctx.vah if ctx.vah and ctx.vah > 0 else None
     if direction == "LONG":
-        val = amt_val if amt_val is not None else (vp.val if vp is not None else None)
-        anchor = val if val is not None and entry > val else nearest
+        if ctx.leg_lvn and ctx.leg_lvn > 0 and entry > ctx.leg_lvn:
+            anchor = ctx.leg_lvn
+        elif val is not None and entry > val:
+            anchor = val
+        else:
+            anchor = val or ctx.poc or (entry - 5 * tick)
         sl = anchor - 2 * tick if anchor is not None else (entry - 2 * tick)
         if sl is not None and sl >= entry:
             sl = entry - 2 * tick
         tp = entry + (entry - sl) * DEFAULT_TP_MULTIPLIER if sl is not None else (entry + 4 * tick)
     else:
-        vah = amt_vah if amt_vah is not None else (vp.vah if vp is not None else None)
-        anchor = vah if vah is not None and entry < vah else nearest
+        if ctx.leg_lvn and ctx.leg_lvn > 0 and entry < ctx.leg_lvn:
+            anchor = ctx.leg_lvn
+        elif vah is not None and entry < vah:
+            anchor = vah
+        else:
+            anchor = vah or ctx.poc or (entry + 5 * tick)
         sl = anchor + 2 * tick if anchor is not None else (entry + 2 * tick)
         if sl is not None and sl <= entry:
             sl = entry + 2 * tick

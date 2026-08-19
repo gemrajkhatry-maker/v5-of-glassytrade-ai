@@ -8,7 +8,7 @@ from quant.contracts.enums import MarketState
 
 from dataclasses import dataclass
 
-from quant.auction_state import AuctionState
+
 from quant.execution.exit_rules import get_session_time_stop
 from quant.execution.order import Position
 
@@ -74,11 +74,12 @@ class ExitEngine:
     def evaluate(
         self,
         position: Position,
-        state: AuctionState,
-        bar_index: int,
+        state: dict | float | None = None,
+        bar_index: int = 0,
         bar_high: float | None = None,
         bar_low: float | None = None,
         *,
+        amt_dto: dict | None = None,
         best_bid: float | None = None,
         best_ask: float | None = None,
         market_state: MarketState = MarketState.BALANCED,
@@ -87,8 +88,17 @@ class ExitEngine:
         time_to_close: float = 0.0,
         entry_time_epoch: float = 0.0,
         now_epoch: float = 0.0,
+        bar_close: float | None = None,
     ) -> ExitDecision:
-        close = float(state.close)
+        if bar_close is not None:
+            close = float(bar_close)
+        elif isinstance(state, (int, float)):
+            close = float(state)
+            state = None
+        else:
+            close = 0.0
+
+        dto = amt_dto or (state if isinstance(state, dict) else {})
         long = position.size > 0
         sl = float(position.order.signal.sl)
         tp = float(position.order.signal.tp)
@@ -114,7 +124,7 @@ class ExitEngine:
         if not long and low <= tp:
             return ExitDecision(True, "TP", close)
 
-        slope = float(state.order_flow.cvd_slope)
+        slope = float(dto.get("cvdSlope") or 0.0)
         if long and slope < -self.cvd_kill_threshold:
             return ExitDecision(True, "CVD_KILL", close)
         if not long and slope > self.cvd_kill_threshold:
@@ -131,7 +141,7 @@ class ExitEngine:
             
             # CVD-based early breakeven: if profit > 0 and CVD slope strongly
             # confirms direction, lock in breakeven immediately (Fabio Gap #5).
-            cvd_slope = float(state.order_flow.cvd_slope)
+            cvd_slope = float(dto.get("cvdSlope") or 0.0)
             if be_floor is None and profit > 0:
                 cvd_confirms = (
                     (long and cvd_slope > self.cvd_be_threshold)

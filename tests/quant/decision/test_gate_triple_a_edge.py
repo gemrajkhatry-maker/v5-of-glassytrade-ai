@@ -5,94 +5,112 @@ auctions (the playbook trades the same absorption/VWAP-breakout setup
 everywhere); only a DEAD market rejects.
 """
 
+from quant.bars import Bar
 from quant.decision.context import DecisionContext
 from quant.decision.gates_edge import gate_triple_a_edge
-from quant.auction_state import AuctionState
-from quant.vwap import VWAPState
-from quant.volume_profile import VolumeProfile
-from quant.order_flow import OrderFlowState
-from quant.location import LocationState
-from quant.absorption import Absorption
 
 
 def _ctx(**kw):
+    close = kw.pop("close", 100.0)
+    bar = Bar(time="t", open=close, high=close, low=close, close=close, volume=100.0)
     agent_direction = kw.pop("agent_direction", "LONG")
     market_state = kw.pop("market_state", "IMBALANCED")
     obi = kw.pop("obi", 0.0)
+    drive_entry_valid = kw.pop("drive_entry_valid", False)
+    leg_lvn = kw.pop("leg_lvn", 0.0)
+    break_direction = kw.pop("break_direction", "")
+    break_type = kw.pop("break_type", "")
+    vwap_upper_2 = kw.pop("upper_2", 103.0)
+    vwap_lower_2 = kw.pop("lower_2", 97.0)
+    cvd_slope = kw.pop("cvd_slope", 0.0)
+    absorption_side = kw.pop("absorption_side", "")
     return DecisionContext(
-        state=_state(**kw), bar=None,
+        state=None, bar=bar, symbol="SYM", time_str="t",
         agent_direction=agent_direction,
         agent_probability=0.7,
         market_state=market_state,
         obi=obi,
-    )
-
-
-def _state(triple_a_phase="", triple_a_signal=None, close=100.0,
-           absorption=None, upper_1=101.0, lower_1=99.0):
-    return AuctionState(
-        time="t", close=close,
-        volume_profile=VolumeProfile(levels=(), poc=100, vah=102, val=98, step=1, total_volume=100),
-        vwap=VWAPState(value=100, upper_1=upper_1, lower_1=lower_1,
-                       upper_2=102, lower_2=98, std=1, deviation_sigmas=0),
-        order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=0,
-                                  cvd_divergence="NONE", aggressive_prints=()),
-        absorption=absorption,
-        location=LocationState(ib_high=105, ib_low=95, ib_complete=True,
-                               zone="INSIDE_VA", nearest_level=100, distance_to_level=0),
-        triple_a_phase=triple_a_phase, triple_a_signal=triple_a_signal,
+        drive_entry_valid=drive_entry_valid,
+        leg_lvn=leg_lvn,
+        break_direction=break_direction,
+        break_type=break_type,
+        vwap_upper_2=vwap_upper_2,
+        vwap_lower_2=vwap_lower_2,
+        cvd_slope=cvd_slope,
+        absorption_side=absorption_side,
+        tick_size=0.05,
     )
 
 
 def test_passes_on_aggression_signal():
-    r = gate_triple_a_edge(_ctx(triple_a_phase="AGGRESSION", triple_a_signal="LONG"))
+    r = gate_triple_a_edge(_ctx(triple_a_phase="AGGRESSION", triple_a_signal="LONG", cvd_slope=1.5))
     assert r.passed and r.gate == 3
 
 
-def test_passes_on_fresh_absorption_breakout():
-    r = gate_triple_a_edge(_ctx(
-        absorption=Absorption(0, 100, 500, "BUY", 0.5, 0), upper_1=99.0, close=100.5))
-    assert r.passed
-
-
-def test_rejects_triple_a_direction_divergence():
-    r = gate_triple_a_edge(_ctx(triple_a_phase="AGGRESSION", triple_a_signal="SHORT"))
+def test_rejects_raw_absorption_without_accumulation_aggression():
+    r = gate_triple_a_edge(_ctx(market_state="BALANCED", agent_direction="LONG", close=100.5))
     assert not r.passed
-    assert "direction" in r.reason.lower()
+    assert "No Triple-A edge" in r.reason
 
 
-def test_rejects_absorption_direction_conflict():
+def test_rejects_climax_overextension_long():
+    """Price > VWAP +2.0σ is statistical exhaustion; reject climax top buying."""
     r = gate_triple_a_edge(_ctx(
-        absorption=Absorption(0, 100, 500, "BUY", 0.5, 0), upper_1=99.0, close=100.5,
-        agent_direction="SHORT"))
+        triple_a_phase="AGGRESSION", triple_a_signal="LONG",
+        close=104.0, upper_2=103.0, cvd_slope=1.0,
+    ))
     assert not r.passed
-    assert "direction" in r.reason.lower()
+    assert "climax" in r.reason.lower()
 
 
-def test_fails_no_edge():
-    r = gate_triple_a_edge(_ctx())
-    assert not r.passed and r.gate == 3
-
-
-def test_stale_absorption_no_edge():
+def test_rejects_climax_overextension_short():
+    """Price < VWAP -2.0σ is statistical exhaustion; reject climax bottom selling."""
     r = gate_triple_a_edge(_ctx(
-        absorption=Absorption(0, 100, 500, "BUY", 0.5, 10), upper_1=99.0, close=100.5))
+        agent_direction="SHORT",
+        triple_a_phase="AGGRESSION", triple_a_signal="SHORT",
+        close=96.0, lower_2=97.0, cvd_slope=-1.0,
+    ))
     assert not r.passed
+    assert "climax" in r.reason.lower()
 
 
-def test_passes_in_balanced_market_with_edge():
-    """Fabio playbook (simplified): the Triple-A edge is valid in balance too —
-    same absorption/breakout rule, no imbalance-only restriction."""
-    r = gate_triple_a_edge(_ctx(triple_a_phase="AGGRESSION",
-                                triple_a_signal="LONG", market_state="BALANCED"))
-    assert r.passed
-
-
-def test_passes_balanced_fresh_absorption_breakout():
+def test_rejects_negative_cvd_slope_on_long():
+    """Order flow pressure must agree: negative CVD slope blocks LONG entry."""
     r = gate_triple_a_edge(_ctx(
-        absorption=Absorption(0, 100, 500, "BUY", 0.5, 0), upper_1=99.0, close=100.5,
-        market_state="BALANCED"))
+        triple_a_phase="AGGRESSION", triple_a_signal="LONG",
+        close=101.5, cvd_slope=-2.5,
+    ))
+    assert not r.passed
+    assert "CVD slope aggressively negative" in r.reason
+
+
+def test_rejects_positive_cvd_slope_on_short():
+    """Order flow pressure must agree: positive CVD slope blocks SHORT entry."""
+    r = gate_triple_a_edge(_ctx(
+        agent_direction="SHORT",
+        triple_a_phase="AGGRESSION", triple_a_signal="SHORT",
+        close=98.5, cvd_slope=2.5,
+    ))
+    assert not r.passed
+    assert "CVD slope aggressively positive" in r.reason
+
+
+def test_passes_on_ib_second_drive_reclaim():
+    """Path B: Second drive after failed auction is a valid institutional reclaim."""
+    r = gate_triple_a_edge(_ctx(drive_entry_valid=True, cvd_slope=1.0))
     assert r.passed
+    assert "Second Drive" in r.reason
+
+
+def test_passes_on_impulse_leg_lvn_sniper():
+    r = gate_triple_a_edge(_ctx(
+        leg_lvn=100.0,
+        close=100.05,
+        absorption_side="SELL_ABSORBED",
+        cvd_slope=1.0,
+    ))
+    assert r.passed
+    assert "LVN Sniper" in r.reason
 
 
 def test_rejects_dead_market():
@@ -102,32 +120,30 @@ def test_rejects_dead_market():
     assert "dead" in r.reason.lower()
 
 
-def test_passes_on_strong_bid_obi_breakout():
-    """Depth reaches gate 3: a strong bid-side order book imbalance (OBI > 0)
-    with price breaking beyond the upper VWAP band is the order-flow aggression
-    leg of the Triple-A edge — no bar absorption required."""
-    r = gate_triple_a_edge(_ctx(obi=0.65, upper_1=99.0, close=100.5))
-    assert r.passed
-    assert r.gate == 3
-
-
-def test_passes_on_strong_ask_obi_breakout_short():
-    """Ask-side imbalance (OBI < 0) below the lower VWAP band passes for SHORT."""
+def test_passes_on_initiative_breakout_long():
+    """Path D: Initiative breakout in direction of break passes Gate 3."""
     r = gate_triple_a_edge(_ctx(
-        agent_direction="SHORT", obi=-0.7, lower_1=101.0, close=99.5))
+        agent_direction="LONG",
+        break_direction="UP",
+        break_type="INITIATIVE",
+        cvd_slope=1.0,
+    ))
     assert r.passed
+    assert "Initiative upside breakout" in r.reason
 
 
-def test_rejects_obi_direction_conflict():
-    """OBI pointing one way while the price is beyond the opposite VWAP band is
-    not an aggression signal — the book and the move must agree."""
-    r = gate_triple_a_edge(_ctx(obi=0.65, lower_1=101.0, close=99.5))
-    assert not r.passed
+def test_passes_on_initiative_breakdown_short():
+    """Path D: Initiative breakdown in direction of break passes Gate 3."""
+    r = gate_triple_a_edge(_ctx(
+        agent_direction="SHORT",
+        break_direction="DOWN",
+        break_type="INITIATIVE",
+        cvd_slope=-1.0,
+    ))
+    assert r.passed
+    assert "Initiative downside breakdown" in r.reason
 
 
-def test_rejects_weak_obi_with_breakout():
-    """A near-balanced book (|OBI| below the aggression threshold) is not enough
-    on its own — the depth signal must be one-sided."""
-    r = gate_triple_a_edge(_ctx(obi=0.15, upper_1=99.0, close=100.5))
-    assert not r.passed
-    assert "No Triple-A edge" in r.reason
+def test_fails_no_edge():
+    r = gate_triple_a_edge(_ctx(market_state="BALANCED", agent_direction=None))
+    assert not r.passed and r.gate == 3

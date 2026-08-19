@@ -83,7 +83,7 @@ def _storage_port():
 
 
 def _quant_coordinator():
-    from quant.coordinator import QuantCoordinator
+    from quant.multi_engine import QuantCoordinator
     return QuantCoordinator
 
 
@@ -117,7 +117,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     WS viewer + REST shell. Reuses the same market-data / broker adapters
     registered for the app; the coordinator only starts its engines when
     main.py gates it via GREENFIELD_ENGINE=1."""
-    from quant.coordinator import QuantCoordinator
+    from quant.multi_engine import QuantCoordinator
     from quant.contracts.ports.market_data import IMarketData
     from quant.contracts.ports.broker import IBroker
 
@@ -125,18 +125,22 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     broker = container.resolve(IBroker)
 
     candle_minutes = int(getattr(config, "candle_timeframe_minutes", 5) or 5)
+    scanner_cfg = getattr(config, "scanner", None)
+    include_futures = getattr(scanner_cfg, "include_futures", True) if scanner_cfg else True
+
     coord_config = {
         "underlyings": list(_settings.SCANNER_UNDERLYINGS or []),
-        "n": int(_settings.SCANNER_TOP_N or 4),
+        "n": int(_settings.SCANNER_TOP_N or 8),
         "exchange": _settings.DEFAULT_EXCHANGE or "NSE",
         "expiry_index": int(_settings.SCANNER_EXPIRY_INDEX or 0),
         "strikes_around_atm": int(_settings.STRIKES_AROUND_ATM or 2),
         "interval_seconds": candle_minutes * 60,
+        "include_futures": include_futures,
         "underlying_priority": _settings.SCANNER_UNDERLYING_PRIORITY,
     }
     logger.info(
         "QuantCoordinator config: underlyings=%s n=%d exchange=%s expiry_index=%d "
-        "strikes_around_atm=%d interval_seconds=%d priority=%s",
+        "strikes_around_atm=%d interval_seconds=%d priority=%s include_futures=%s",
         coord_config["underlyings"],
         coord_config["n"],
         coord_config["exchange"],
@@ -144,6 +148,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         coord_config["strikes_around_atm"],
         coord_config["interval_seconds"],
         coord_config["underlying_priority"],
+        coord_config["include_futures"],
     )
     return QuantCoordinator(
         market_data=market_data,

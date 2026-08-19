@@ -36,7 +36,7 @@ def _ticks():
 
 
 def test_session_scope_keeps_latest_date_only():
-    from quant.runtime import QuantEngine
+    from quant.amt_engine import session_scope
     from quant.contracts.value_objects import OHLC
 
     # Two sessions: yesterday (2026-08-06) and today (2026-08-07, 6 candles)
@@ -47,13 +47,13 @@ def test_session_scope_keeps_latest_date_only():
         OHLC(time=f"2026-08-07T09:{i:02d}:00+05:30", open=100, high=101, low=99, close=100, volume=10)
         for i in range(6)
     ]
-    scoped = QuantEngine._session_scope(candles)
+    scoped = session_scope(candles)
     assert len(scoped) == 6
     assert all(c.time.startswith("2026-08-07") for c in scoped)
 
 
 def test_session_scope_keeps_only_today_when_thin():
-    from quant.runtime import QuantEngine
+    from quant.amt_engine import session_scope
     from quant.contracts.value_objects import OHLC
 
     # Today has only 2 candles (< 5) — still keep ONLY today's, never pull
@@ -63,7 +63,7 @@ def test_session_scope_keeps_only_today_when_thin():
              open=100, high=101, low=99, close=100, volume=10)
         for i in range(6)
     ]
-    scoped = QuantEngine._session_scope(candles)
+    scoped = session_scope(candles)
     assert len(scoped) == 2
     assert all(c.time.startswith("2026-08-07") for c in scoped)
 
@@ -171,12 +171,14 @@ def test_engine_gate1_blocks_until_warmup_complete():
 
 def test_engine_squares_off_position_on_session_close(monkeypatch):
     """Phase 5 / post-market force-exit closes the open position."""
-    from quant.runtime import QuantEngine as QE
-    eng = QE(SyntheticGateway(_epoch_ticks(_long_price_volume(), _ist_epoch(10, 0))),
+    import quant.runtime as rt
+    import quant.position_manager as pm
+    eng = rt.QuantEngine(SyntheticGateway(_epoch_ticks(_long_price_volume(), _ist_epoch(10, 0))),
              "SYM", interval_seconds=1)
+    # Monkeypatch both modules since PositionManager imports directly
     monkeypatch.setattr(
-        QE, "_session_force_exit",
-        staticmethod(lambda t, market="NSE", contract_expiry=None: True),
+        pm, "session_force_exit",
+        lambda t, market="NSE", contract_expiry=None: True,
     )
     trace = eng.run()
     closes = [e for e in trace if isinstance(e, PositionClosed)]
@@ -185,47 +187,49 @@ def test_engine_squares_off_position_on_session_close(monkeypatch):
 
 
 def test_session_force_exit_helpers():
+    from quant.session_gates import session_allow_entry, session_force_exit
     # Synthetic times (unit/replay determinism) never force or block.
-    assert QuantEngine._session_force_exit("t300") is False
-    assert QuantEngine._session_allow_entry("t300") is True
+    assert session_force_exit("t300") is False
+    assert session_allow_entry("t300") is True
     # Phase 5 window (15:20 IST) forces exit and blocks new entries.
-    assert QuantEngine._session_force_exit(str(_ist_epoch(15, 20))) is True
-    assert QuantEngine._session_allow_entry(str(_ist_epoch(15, 20))) is False
+    assert session_force_exit(str(_ist_epoch(15, 20))) is True
+    assert session_allow_entry(str(_ist_epoch(15, 20))) is False
     # Pre-market blocks; post-market blocks and forces.
-    assert QuantEngine._session_allow_entry(str(_ist_epoch(9, 10))) is False
-    assert QuantEngine._session_force_exit(str(_ist_epoch(15, 45))) is True
-    assert QuantEngine._session_allow_entry(str(_ist_epoch(15, 45))) is False
+    assert session_allow_entry(str(_ist_epoch(9, 10))) is False
+    assert session_force_exit(str(_ist_epoch(15, 45))) is True
+    assert session_allow_entry(str(_ist_epoch(15, 45))) is False
 
 
 def test_mcx_session_gate_is_exchange_aware():
     """MCX trades until 23:30, so 16:45 IST must be an OPEN session for an
     MCX engine even though NSE is in close-protection/post-market there."""
+    from quant.session_gates import session_allow_entry, session_force_exit
     ts = str(_ist_epoch(16, 45))
     # NSE: 16:45 is post-market — entries blocked, positions forced out.
-    assert QuantEngine._session_allow_entry(ts) is False
-    assert QuantEngine._session_force_exit(ts) is True
+    assert session_allow_entry(ts) is False
+    assert session_force_exit(ts) is True
     # MCX: 16:45 is MCX_AFTERNOON (14:00-18:00) — entries allowed, no exit.
-    assert QuantEngine._session_allow_entry(ts, market="MCX") is True
-    assert QuantEngine._session_force_exit(ts, market="MCX") is False
+    assert session_allow_entry(ts, market="MCX") is True
+    assert session_force_exit(ts, market="MCX") is False
     # MCX close window (23:20) blocks new entries and forces the square-off.
     ts_close = str(_ist_epoch(23, 20))
-    assert QuantEngine._session_allow_entry(ts_close, market="MCX") is False
-    assert QuantEngine._session_force_exit(ts_close, market="MCX") is True
+    assert session_allow_entry(ts_close, market="MCX") is False
+    assert session_force_exit(ts_close, market="MCX") is True
 
 
 def test_parse_contract_expiry():
     """MCX option symbols embed the expiry day+month; year is inferred from
     the current IST date (past dates roll to next year)."""
     from datetime import date
-    from quant.runtime import QuantEngine
+    from quant.session_gates import parse_contract_expiry
 
-    assert QuantEngine._parse_contract_expiry("CRUDEOIL 17 AUG 7450 CALL").month == 8
-    assert QuantEngine._parse_contract_expiry("GOLDM 28 AUG 150500 CALL").day == 28
-    assert QuantEngine._parse_contract_expiry("NATURALGAS 24 AUG 245 CALL") is not None
+    assert parse_contract_expiry("CRUDEOIL 17 AUG 7450 CALL").month == 8
+    assert parse_contract_expiry("GOLDM 28 AUG 150500 CALL").day == 28
+    assert parse_contract_expiry("NATURALGAS 24 AUG 245 CALL") is not None
     # No month token -> None (synthetic/test symbols, futures, unknown).
-    assert QuantEngine._parse_contract_expiry("SYM") is None
-    assert QuantEngine._parse_contract_expiry("SYM 100 CALL") is None
-    assert QuantEngine._parse_contract_expiry("CRUDEOIL") is None
+    assert parse_contract_expiry("SYM") is None
+    assert parse_contract_expiry("SYM 100 CALL") is None
+    assert parse_contract_expiry("CRUDEOIL") is None
     # Parsed date is never in the past: a January contract while it is
     # December must be next year's.
     from datetime import datetime as dt, timedelta, timezone
@@ -233,7 +237,7 @@ def test_parse_contract_expiry():
     # Use a fixed "today" (2026-08-10 IST) via monkeypatching-free check:
     # any parsed date < today is bumped to next year.
     today = dt.now(timezone(timedelta(hours=5, minutes=30))).date()
-    parsed = QuantEngine._parse_contract_expiry("CRUDEOIL 10 JAN 7450 CALL")
+    parsed = parse_contract_expiry("CRUDEOIL 10 JAN 7450 CALL")
     if today.month > 1 or (today.month == 1 and today.day > 10):
         assert parsed.year == today.year + 1
     else:
@@ -244,19 +248,19 @@ def test_mcx_contract_expiry_day_gates_entries():
     """On the contract's own expiry day, MCX entries close at 21:00 IST
     (option buying stops at 22:00) — before that the normal phases apply."""
     from datetime import date
-    from quant.runtime import QuantEngine
+    from quant.session_gates import session_allow_entry
 
     expiry = date(2026, 8, 11)
     # 20:30 on expiry day: still open for entries.
-    assert QuantEngine._session_allow_entry(
+    assert session_allow_entry(
         str(_ist_epoch(20, 30)), market="MCX", contract_expiry=expiry
     ) is True
     # 21:15 on expiry day: entries blocked.
-    assert QuantEngine._session_allow_entry(
+    assert session_allow_entry(
         str(_ist_epoch(21, 15)), market="MCX", contract_expiry=expiry
     ) is False
     # Not the expiry day: no gating even at 21:15 (normal MCX evening).
-    assert QuantEngine._session_allow_entry(
+    assert session_allow_entry(
         str(_ist_epoch(21, 15)), market="MCX", contract_expiry=date(2026, 8, 12)
     ) is True
 
@@ -265,27 +269,27 @@ def test_mcx_contract_expiry_day_forces_square_off():
     """On expiry day, an open position is force-squared from 21:30 IST so an
     ITM option can never devolve into a futures position at expiry."""
     from datetime import date
-    from quant.runtime import QuantEngine
+    from quant.session_gates import session_force_exit
 
     expiry = date(2026, 8, 11)
     # 21:15 on expiry day: not yet force-exit.
-    assert QuantEngine._session_force_exit(
+    assert session_force_exit(
         str(_ist_epoch(21, 15)), market="MCX", contract_expiry=expiry
     ) is False
     # 21:45 on expiry day: force square-off.
-    assert QuantEngine._session_force_exit(
+    assert session_force_exit(
         str(_ist_epoch(21, 45)), market="MCX", contract_expiry=expiry
     ) is True
     # 21:45 but NOT the expiry day: normal evening, no force-exit.
-    assert QuantEngine._session_force_exit(
+    assert session_force_exit(
         str(_ist_epoch(21, 45)), market="MCX", contract_expiry=date(2026, 8, 12)
     ) is False
     # NSE never gets the MCX expiry-day treatment: 21:45 is NSE post-market
     # (force-exit for its own reason) and the MCX expiry param changes nothing.
-    assert QuantEngine._session_force_exit(
+    assert session_force_exit(
         str(_ist_epoch(21, 45)), market="NSE", contract_expiry=expiry
     ) is True
-    assert QuantEngine._session_force_exit(
+    assert session_force_exit(
         str(_ist_epoch(21, 45)), market="NSE"
     ) is True
 
@@ -294,23 +298,23 @@ def test_nse_contract_expiry_day_closes_entries_at_1400():
     """On the contract's own expiry day (NIFTY Tuesday), no fresh NSE entries
     after 14:00 IST — the final hour's gamma/theta distortion is avoided."""
     from datetime import date
-    from quant.runtime import QuantEngine
+    from quant.session_gates import session_allow_entry
 
     expiry = date(2026, 8, 11)  # a Tuesday
     # 13:45 on expiry day: entries still open (Phase 3/4).
-    assert QuantEngine._session_allow_entry(
+    assert session_allow_entry(
         str(_ist_epoch(13, 45)), market="NSE", contract_expiry=expiry
     ) is True
     # 14:15 on expiry day: blocked (was POWER_HOUR before the gate).
-    assert QuantEngine._session_allow_entry(
+    assert session_allow_entry(
         str(_ist_epoch(14, 15)), market="NSE", contract_expiry=expiry
     ) is False
     # 14:15 but NOT the expiry day: normal POWER_HOUR, entries allowed.
-    assert QuantEngine._session_allow_entry(
+    assert session_allow_entry(
         str(_ist_epoch(14, 15)), market="NSE", contract_expiry=date(2026, 8, 12)
     ) is True
     # MCX expiry cut-off (21:00) does not apply to NSE.
-    assert QuantEngine._session_allow_entry(
+    assert session_allow_entry(
         str(_ist_epoch(21, 15)), market="NSE", contract_expiry=expiry
     ) is False  # NSE post-market anyway
 
@@ -319,19 +323,19 @@ def test_nse_contract_expiry_day_squares_off_by_1515():
     """NSE Phase 5 close-protection starts 15:15 — an open position on expiry
     day is force-squared by then regardless of the expiry param."""
     from datetime import date
-    from quant.runtime import QuantEngine
+    from quant.session_gates import session_force_exit
 
     expiry = date(2026, 8, 11)
     # 15:10: still POWER_HOUR — no force-exit yet.
-    assert QuantEngine._session_force_exit(
+    assert session_force_exit(
         str(_ist_epoch(15, 10)), market="NSE", contract_expiry=expiry
     ) is False
     # 15:20: Phase 5 close-protection — force square-off.
-    assert QuantEngine._session_force_exit(
+    assert session_force_exit(
         str(_ist_epoch(15, 20)), market="NSE", contract_expiry=expiry
     ) is True
     # Same on a non-expiry day (the phase table is date-independent).
-    assert QuantEngine._session_force_exit(
+    assert session_force_exit(
         str(_ist_epoch(15, 20)), market="NSE", contract_expiry=date(2026, 8, 12)
     ) is True
 
@@ -364,12 +368,13 @@ def test_engine_wires_contract_expiry_from_symbol():
 def test_engine_session_gate_uses_its_own_market():
     """The engine instance gates on its configured market (default NSE); an
     MCX engine stays open at 16:45 IST."""
+    from quant.session_gates import session_allow_entry
     nse = QuantEngine(SyntheticGateway([]), "SYM", interval_seconds=1)
     assert nse._market == "NSE"
-    assert nse._session_allow_entry(str(_ist_epoch(16, 45))) is False
+    assert session_allow_entry(str(_ist_epoch(16, 45)), market=nse._market) is False
     mcx = QuantEngine(SyntheticGateway([]), "SYM", interval_seconds=1, market="MCX")
     assert mcx._market == "MCX"
-    assert mcx._session_allow_entry(str(_ist_epoch(16, 45)), market=mcx._market) is True
+    assert session_allow_entry(str(_ist_epoch(16, 45)), market=mcx._market) is True
 
 
 def test_engine_position_size_is_lot_aware():
@@ -414,9 +419,26 @@ class _FixedDecisionService:
         return QuantDecision(True, self._signal, "Triple-A", "AGGRESSION", ())
 
 
+class _FixedStrategy:
+    """Strategy that delegates to a fixed decision service."""
+
+    def __init__(self, signal: Signal) -> None:
+        self._service = _FixedDecisionService(signal)
+
+    def on_bar(self, bar, auction, amt_dto):
+        pass
+
+    def should_enter(self, ctx):
+        return self._service.evaluate(ctx)
+
+    def should_exit(self, position, state, bar, held_bars):
+        from quant.execution.exits import ExitDecision
+        return ExitDecision(False, "", 0.0)
+
+
 def _run_with_signal(signal: Signal):
     eng = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1)
-    eng._decision_service = _FixedDecisionService(signal)
+    eng._strategy = _FixedStrategy(signal)
     trace = eng.run()
     return next(e for e in trace if isinstance(e, PositionOpened))
 
@@ -440,7 +462,7 @@ def test_runtime_clamps_thin_stop_quantity_to_max():
 
 def test_runtime_leaves_healthy_stop_quantity_unclamped():
     opened = _run_with_signal(_healthy_stop_signal())
-    # 1M (SessionRisk default) * 0.25% (CONSERVATIVE tier) / 20.0 = 125 units, under the ceiling.
+    # 10M (SessionRisk default) * 0.25% (CONSERVATIVE tier) / 20.0 = 1250 units, under the ceiling.
     # Fabio cushion system starts trades in CONSERVATIVE tier at 0.25%.
     assert opened.position.order.quantity == pytest.approx(1_000_000.0 * 0.0025 / 20.0)
 
@@ -457,24 +479,24 @@ def test_engine_rolls_prior_session_levels_on_date_change():
     eng = QuantEngine(SyntheticGateway([]), "NIFTY 11 AUG 24600 CALL",
                       interval_seconds=1, session_levels=store)
     # Simulate a completed session: the last DTO of 2026-08-10 is in hand.
-    eng._session_date = "2026-08-10"
-    eng._last_amt_dto = {
+    eng._amt_engine._session_date = "2026-08-10"
+    eng._amt_engine._last_amt_dto = {
         "poc": 24600.0, "valueAreaHigh": 24680.0, "valueAreaLow": 24520.0,
     }
     # First bar of the new session triggers the rollover.
     day2 = _ist_epoch(9, 20)  # 2026-08-11 09:20 IST
-    eng._amt_analyze(Bar(time=str(day2), open=24500.0, high=24510.0,
+    eng._amt_engine.analyze(Bar(time=str(day2), open=24500.0, high=24510.0,
                          low=24490.0, close=24505.0, volume=100.0))
     rec = store.load_levels("NIFTY 11 AUG 24600 CALL")
     assert rec["date"] == "2026-08-10"
     assert rec["poc"] == 24600.0
     assert rec["vah"] == 24680.0 and rec["val"] == 24520.0
     # The engine now carries them as the prior session for this contract.
-    assert eng._prior["poc"] == 24600.0
-    assert eng._session_date == "2026-08-11"
+    assert eng._amt_engine._prior["poc"] == 24600.0
+    assert eng._amt_engine._session_date == "2026-08-11"
     # The underlying's prior-session POC became an active NPOC magnet.
-    assert eng._npoc.get_active_npocs("NIFTY", 24500.0).nearest_above is not None
-    assert eng._npoc.get_active_npocs("NIFTY", 24500.0).nearest_above.price == 24600.0
+    assert eng._amt_engine._npoc.get_active_npocs("NIFTY", 24500.0).nearest_above is not None
+    assert eng._amt_engine._npoc.get_active_npocs("NIFTY", 24500.0).nearest_above.price == 24600.0
 
 
 def test_engine_does_not_roll_on_synthetic_times():
@@ -486,8 +508,8 @@ def test_engine_does_not_roll_on_synthetic_times():
     store = SessionLevelStore()
     eng = QuantEngine(SyntheticGateway([]), "SYM", interval_seconds=1,
                       session_levels=store)
-    eng._amt_analyze(Bar(time="t0", open=100.0, high=101.0, low=99.0,
+    eng._amt_engine.analyze(Bar(time="t0", open=100.0, high=101.0, low=99.0,
                          close=100.0, volume=100.0))
-    assert eng._session_date is None
-    assert eng._prior["poc"] == 0.0
+    assert eng._amt_engine._session_date is None
+    assert eng._amt_engine._prior["poc"] == 0.0
     assert store.load_levels("SYM")["poc"] == 0.0

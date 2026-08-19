@@ -2,7 +2,7 @@ import asyncio
 import logging
 import datetime
 from quant.brokers.gateway import Tick
-from quant.coordinator import QuantCoordinator
+from quant.multi_engine import QuantCoordinator
 
 # Configure tight logging to trace execution sequence
 logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(name)s | %(levelname)s | %(message)s")

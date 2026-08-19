@@ -116,3 +116,5 @@ skills-lock.json
 # Agent/test caches (not project code)
 .hypothesis/
 .superpowers/
+.freebuff/
+backend/.active_contracts.json

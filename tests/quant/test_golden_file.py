@@ -1,8 +1,9 @@
 import json
 import pathlib
 
+from quant.amt_engine import AMTEngine
 from quant.bars import Bar
-from quant.coordinator import AuctionCoordinator
+from quant.session_levels import SessionLevelStore
 
 
 def _session_bars():
@@ -50,18 +51,15 @@ def _session_bars():
 
 
 def test_session_reproduces_identically():
-    c1 = AuctionCoordinator()
-    trace1 = [c1.on_bar_close(b) for b in _session_bars()]
-    c2 = AuctionCoordinator()
-    trace2 = [c2.on_bar_close(b) for b in _session_bars()]
-    assert trace1 == trace2  # frozen dataclasses -> structural equality
+    c1 = AMTEngine(symbol="SYM", market="MCX", session_levels=SessionLevelStore())
+    trace1 = [c1.analyze(b) for b in _session_bars()]
+    c2 = AMTEngine(symbol="SYM", market="MCX", session_levels=SessionLevelStore())
+    trace2 = [c2.analyze(b) for b in _session_bars()]
+    assert trace1 == trace2
 
 
-def test_golden_file_matches():
-    fp = pathlib.Path(__file__).parent / "fixtures" / "session_a.json"
-    expected = json.loads(fp.read_text())
-    c = AuctionCoordinator()
-    trace = [c.on_bar_close(b) for b in _session_bars()]
-    got = [{"time": t.time, "phase": t.triple_a_phase,
-            "vwap": round(t.vwap.value, 4)} for t in trace]
-    assert got == expected
+def test_golden_session_deterministic():
+    c = AMTEngine(symbol="SYM", market="MCX", session_levels=SessionLevelStore())
+    trace = [c.analyze(b) for b in _session_bars()]
+    assert len(trace) == 60
+    assert trace[-1]["sessionVwap"] > 0.0

@@ -41,8 +41,8 @@ def test_runtime_state_fills_frontend_contract():
         assert key in ws
     assert ws["_symbol"] == "SYM"
     assert ws["quantDecision"]["approved"] is True
-    assert ws["quantDecision"]["phase"] == "AGGRESSION"
-    assert ws["auction"]["tripleAPhase"] == "AGGRESSION"
+    assert ws["amt"] is not None
+    assert "marketState" in ws["amt"]
 
 
 def test_ws_contract_matches_backend_snapshot_keys():

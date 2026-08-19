@@ -1,43 +1,20 @@
-from quant.absorption import Absorption
-from quant.auction_state import AuctionState
 from quant.bars import Bar
 from quant.decision.decision_service import QuantDecision
 from quant.decision.signal_builder import Signal
 from quant.events import (
-    AuctionUpdated,
+    AmtUpdated,
     BarClosed,
     DecisionProduced,
     RiskUpdated,
 )
 from quant.execution.risk import RiskState
-from quant.location import LocationState
-from quant.order_flow import OrderFlowState
 from quant.state import StateProjector
-from quant.volume_profile import VolumeProfile
-from quant.vwap import VWAPState
 from quant.ws_adapter import view_state_to_ws
 
 WS_KEYS = {
     "_symbol", "portfolio", "amt", "auction", "quantDecision",
     "agentDecision", "riskState", "tick", "ltp", "oi", "depth",
 }
-
-
-def _auction():
-    return AuctionState(
-        time="t", close=100.0,
-        volume_profile=VolumeProfile(levels=(), poc=100, vah=102, val=98,
-                                     step=1, total_volume=100),
-        vwap=VWAPState(value=100, upper_1=101, lower_1=99, upper_2=102,
-                       lower_2=98, std=1, deviation_sigmas=0),
-        order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=0.0,
-                                  cvd_divergence="NONE", aggressive_prints=()),
-        absorption=Absorption(0, 100.5, 500, "BUY", 0.6, 0),
-        location=LocationState(ib_high=105, ib_low=95, ib_complete=True,
-                               zone="INSIDE_VA", nearest_level=100,
-                               distance_to_level=0),
-        triple_a_phase="AGGRESSION", triple_a_signal="LONG",
-    )
 
 
 def _sig():
@@ -51,7 +28,7 @@ def _projector():
     p.on_event(BarClosed(symbol="S", time="t1",
                          bar=Bar(time="t1", open=100, high=101, low=99,
                                  close=100, volume=100)))
-    p.on_event(AuctionUpdated(symbol="S", time="t1", auction=_auction()))
+    p.on_event(AmtUpdated(symbol="S", time="t1", amt={"poc": 100.0, "marketState": "IMBALANCED"}))
     p.on_event(DecisionProduced(symbol="S", time="t1",
                                 decision=QuantDecision(True, _sig(), "Triple-A",
                                                        "AGGRESSION", ())))
@@ -82,7 +59,7 @@ def test_agent_decision_projected_from_quant_decision():
 def test_ws_snapshot_fields():
     ws = view_state_to_ws(_projector().snapshot("S"))
     assert ws["_symbol"] == "S"
-    assert ws["auction"] is not None and "tripleAPhase" in ws["auction"]
+    assert ws["amt"] is not None and "marketState" in ws["amt"]
     assert ws["quantDecision"] is not None and "approved" in ws["quantDecision"]
     assert ws["quantDecision"]["approved"] is True
     assert ws["riskState"] is not None and "halted" in ws["riskState"]
@@ -90,7 +67,7 @@ def test_ws_snapshot_fields():
 
 def test_ws_snapshot_passthrough_values():
     ws = view_state_to_ws(_projector().snapshot("S"))
-    assert ws["auction"]["tripleAPhase"] == "AGGRESSION"
+    assert ws["amt"]["marketState"] == "IMBALANCED"
     assert ws["quantDecision"]["signal"]["type"] == "LONG"
     assert ws["riskState"]["consecutiveLosses"] == 2
     assert ws["ltp"] == 100.0

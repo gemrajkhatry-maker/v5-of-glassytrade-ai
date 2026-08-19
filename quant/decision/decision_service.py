@@ -25,7 +25,7 @@ class QuantDecision:
     approved: bool
     signal: Signal | None
     reason: str          # "Triple-A" | "LVN_Sniper" | "VA_FADE" | "NO_EDGE" | "GATE_REJECTED" | "HALTED"
-    phase: str           # AuctionState.triple_a_phase
+    phase: str           # "" (deprecated)
     gate_results: tuple[GateResult, ...]
     # Every failed gate as "NAME: reason" (GateResult.name) so UI/logs can
     # show the full rejection detail, not just one gate's reason.
@@ -54,7 +54,7 @@ class DecisionService:
         self.min_rr = min_rr
 
     def evaluate(self, ctx: DecisionContext) -> QuantDecision:
-        if ctx.state is None:
+        if ctx.bar is None:
             return QuantDecision(False, None, "NO_EDGE", "", ())
 
         # Hard safety: if risk is halted, emit an explicit HALTED decision so
@@ -66,7 +66,7 @@ class DecisionService:
                 approved=False,
                 signal=None,
                 reason="HALTED",
-                phase=ctx.state.triple_a_phase,
+                phase="",
                 gate_results=(),
                 block_reasons=("Risk: session halted",),
                 model_label="",
@@ -79,32 +79,32 @@ class DecisionService:
             sig = SignalBuilder().build(ctx, results, model_label=label)
             if sig is not None:
                 return QuantDecision(
-                    True, sig, label, ctx.state.triple_a_phase, results,
+                    True, sig, label, "", results,
                     model_label=label,
                 )
             return QuantDecision(
-                False, None, "GATE_REJECTED", ctx.state.triple_a_phase, results, blocked,
+                False, None, "GATE_REJECTED", "", results, blocked,
             )
         # VA-fade fallback — the balance-returning reversion trade. It targets
         # the POC and requires price OUTSIDE the value area, so it never fires
         # in balanced rotation; a dead market refuses even the reversion.
         if str(getattr(ctx.market_state, "value", ctx.market_state) or "").upper() == "DEAD":
-            return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results), blocked)
-        fade = detect_va_fade(ctx.state, ctx)
+            return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
+        fade = detect_va_fade(ctx)
         if fade:
             import logging
             log = logging.getLogger(__name__)
             log.info(f"FADE EVAL {ctx.symbol}: fade={fade} agent_dir={ctx.agent_direction} rr={fade.rr} min_rr={self.min_rr}")
         if fade and (ctx.agent_direction in (fade.direction, None)) and fade.rr >= self.min_rr:
             if not is_min_stop_met(fade.entry, fade.sl):
-                return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results), blocked)
+                return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
             sig = Signal(
                 type=fade.direction, reason="Value-Area fade", entry=fade.entry,
                 sl=fade.sl, tp=fade.tp, rr=fade.rr, model_label="VA_Fade",
-                symbol=ctx.symbol, timestamp=ctx.state.time,
+                symbol=ctx.symbol, timestamp=ctx.time_str,
             )
             return QuantDecision(
-                True, sig, "VA_FADE", ctx.state.triple_a_phase, tuple(results),
+                True, sig, "VA_FADE", "", tuple(results),
                 model_label="VA_Fade",
             )
-        return QuantDecision(False, None, "NO_EDGE", ctx.state.triple_a_phase, tuple(results), blocked)
+        return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)

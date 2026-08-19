@@ -6,6 +6,11 @@
 /** Extract a short display name and option type from a Dhan symbol. */
 export function shortSymbol(sym: string): { name: string; tag: string } {
     const parts = sym.split(' ');
+    if (parts.length >= 3 && sym.toUpperCase().endsWith('FUT')) {
+        const underlying = parts[0];
+        const expiry = parts.slice(1, -1).join(' ');
+        return { name: expiry ? `${underlying} ${expiry}` : `${underlying} FUT`, tag: 'FUT' };
+    }
     if (parts.length >= 4) {
         const underlying = parts[0];
         const strike = parts[parts.length - 2];

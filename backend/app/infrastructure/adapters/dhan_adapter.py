@@ -17,10 +17,8 @@ import sys
 import threading
 import time
 from dataclasses import asdict
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import AsyncIterator
-
-# Add project root to sys.path so `from brokers.broker...` resolves correctly.
 # Discovers the root by walking up until we find the brokers/ directory.
 _here = pathlib.Path(__file__).resolve()
 for _ancestor in _here.parents:
@@ -436,14 +434,45 @@ class DhanMarketDataAdapter(IMarketData):
             logger.warning("LTP fetch failed for %s", symbol, exc_info=True)
             return 0.0
     
+    def get_nearest_futures(self, underlying: str, exchange: str | None = None) -> str | None:
+        """Resolve the active front-month futures contract symbol for an underlying."""
+        try:
+            self.ensure_initialized_sync()
+            broker = self.get_broker()
+            mapper = getattr(broker, "_symbol_mapper", None)
+            if mapper is None:
+                from brokers.broker.dhan.infrastructure.symbol_mapper import DhanSymbolMapper
+                mapper = DhanSymbolMapper()
+            from brokers.broker.dhan.domain import ExchangeSegment
+            is_mcx = (exchange or self._exchange_str or "NSE").upper() == "MCX" or ExchangeConfig.for_exchange("MCX").is_underlying(underlying.upper())
+            seg = ExchangeSegment.MCX if is_mcx else ExchangeSegment.NSE_FNO
+            inst = mapper.get_nearest_futures_contract_sync(underlying, exchange=seg) if hasattr(mapper, "get_nearest_futures_contract_sync") else None
+            if inst is None:
+                # Direct lookup in cached instruments dict
+                inst = mapper._by_trading_symbol.get(f"{underlying.upper()} FUT") or None
+                if not inst:
+                    today = date.today()
+                    candidates = [
+                        i for i in mapper._by_security_id.values()
+                        if (i.symbol == underlying.upper() or i.trading_symbol.startswith(f"{underlying.upper()}-") or i.trading_symbol.startswith(f"{underlying.upper()} "))
+                        and (i.instrument_type.value in ("FUTIDX", "FUTSTK", "FUTCOM", "FUTURES") if hasattr(i.instrument_type, "value") else True)
+                        and (i.expiry_date and i.expiry_date >= today)
+                    ]
+                    if candidates:
+                        candidates.sort(key=lambda x: x.expiry_date or date.max)
+                        inst = candidates[0]
+            if inst is None:
+                return None
+            return inst.trading_symbol or inst.symbol
+        except Exception:
+            logger.warning("get_nearest_futures failed for %s", underlying, exc_info=True)
+            return None
+
     def get_lot_size(self, symbol: str) -> int:
-        """Get the OPTION lot size for a symbol (exchange-authoritative).
+        """Get the lot size for a symbol (exchange-authoritative).
 
         Routes through the broker's exchange config, which resolves an actual
-        NFO option contract of the underlying. Resolving the bare index (e.g.
-        "NIFTY" -> IDX_I) is NOT enough: index instruments carry lot_size=1
-        and would under-size NIFTY positions ~65x. Errors propagate — no
-        silent ``return 1``.
+        contract of the underlying.
         """
         self.ensure_initialized_sync()
         broker = self.get_broker()

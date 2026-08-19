@@ -136,37 +136,31 @@ def find_lvns(
     *,
     lvn_percentile: float = 25.0,
     min_separation: float = 0.0,
+    max_nodes: int = 4,
 ) -> list[LVNLevel]:
-    """Detect Low Volume Nodes using percentile-based thresholds.
+    """Detect Low Volume Nodes using adaptive percentile and prominence thresholds.
 
     Candidate = bucket i where ALL:
       H_smooth[i] <= percentile(lvn_percentile) of the smoothed distribution
       H_smooth[i] < H_smooth[i-1]    (local minimum — lower than neighbor above)
       H_smooth[i] < H_smooth[i+1]    (local minimum — lower than neighbor below)
 
-    After finding raw candidates, nearby nodes within ``min_separation`` price
-    distance are clustered; only the weakest-volume node per cluster is kept.
-
-    Args:
-        profile: Volume profile buckets sorted by price.
-        lvn_threshold: Legacy parameter — no longer used for filtering.
-        smoothing_window: Width of centered SMA smoothing kernel.
-        smooth_fn: Optional custom smoothing callable (raw, window) -> smoothed.
-        lvn_percentile: Bottom N-th percentile cutoff (default 25).
-        min_separation: Minimum price gap between distinct LVN nodes.  When
-            0.0 (default) no clustering is applied.
-
-    Returns:
-        List of LVNLevel sorted by price.
+    After finding raw candidates, adaptive price clustering is applied, and the
+    top `max_nodes` strongest LVNs (lowest volume troughs) are returned.
     """
     if len(profile) < 3:
         return []
 
+    # Adaptive smoothing: scale kernel with profile resolution (minimum 5, odd)
+    effective_window = smoothing_window
+    if smoothing_window <= 3 and len(profile) > 50:
+        effective_window = max(5, int(len(profile) * 0.025)) | 1
+
     raw = [p.volume for p in profile]
     sm = (
-        smooth_fn(raw, smoothing_window)
+        smooth_fn(raw, effective_window)
         if smooth_fn
-        else _smooth_array(raw, smoothing_window)
+        else _smooth_array(raw, effective_window)
     )
     mean_vol = sum(sm) / len(sm) if sm else 0.0
     if mean_vol <= 0:
@@ -187,8 +181,17 @@ def find_lvns(
                 )
             )
 
-    if min_separation > 0 and len(lvns) > 1:
-        lvns = _cluster_nodes(lvns, min_separation, keep_highest=False)
+    # Adaptive separation: min_separation scaled to price range
+    price_range = profile[-1].price - profile[0].price if len(profile) > 1 else 0.0
+    tick_size = (profile[1].price - profile[0].price) if len(profile) > 1 else 0.05
+    eff_separation = max(min_separation, 0.04 * price_range, 8.0 * tick_size)
+
+    if eff_separation > 0 and len(lvns) > 1:
+        lvns = _cluster_nodes(lvns, eff_separation, keep_highest=False)
+
+    # Return top max_nodes ranked by strength (lowest volume trough = highest strength)
+    if max_nodes > 0 and len(lvns) > max_nodes:
+        lvns = sorted(sorted(lvns, key=lambda n: n.strength, reverse=True)[:max_nodes], key=lambda n: n.price)
 
     return lvns
 
@@ -201,35 +204,29 @@ def find_hvns(
     *,
     hvn_percentile: float = 75.0,
     min_separation: float = 0.0,
+    max_nodes: int = 4,
 ) -> list[HVNLevel]:
-    """Detect High Volume Nodes using percentile-based thresholds.
+    """Detect High Volume Nodes using adaptive percentile and prominence thresholds.
 
     HVN = local maximum whose smoothed volume >= percentile(hvn_percentile).
     HVN strength = H_smooth[i] / mean(H_smooth) (normalized).
 
-    After finding raw candidates, nearby nodes within ``min_separation`` price
-    distance are clustered; only the strongest-volume node per cluster is kept.
-
-    Args:
-        profile: Volume profile buckets sorted by price.
-        hvn_threshold: Legacy parameter — no longer used for filtering.
-        smoothing_window: Width of centered SMA smoothing kernel.
-        smooth_fn: Optional custom smoothing callable (raw, window) -> smoothed.
-        hvn_percentile: Top N-th percentile cutoff (default 75, i.e. top 25%).
-        min_separation: Minimum price gap between distinct HVN nodes.  When
-            0.0 (default) no clustering is applied.
-
-    Returns:
-        List of HVNLevel sorted by price.
+    After finding raw candidates, adaptive price clustering is applied, and the
+    top `max_nodes` strongest HVNs (highest volume bulges) are returned.
     """
     if len(profile) < 3:
         return []
 
+    # Adaptive smoothing: scale kernel with profile resolution (minimum 5, odd)
+    effective_window = smoothing_window
+    if smoothing_window <= 3 and len(profile) > 50:
+        effective_window = max(5, int(len(profile) * 0.025)) | 1
+
     raw = [p.volume for p in profile]
     sm = (
-        smooth_fn(raw, smoothing_window)
+        smooth_fn(raw, effective_window)
         if smooth_fn
-        else _smooth_array(raw, smoothing_window)
+        else _smooth_array(raw, effective_window)
     )
     mean_vol = sum(sm) / len(sm) if sm else 0.0
     if mean_vol <= 0:
@@ -253,8 +250,17 @@ def find_hvns(
                 )
             )
 
-    if min_separation > 0 and len(hvns) > 1:
-        hvns = _cluster_nodes(hvns, min_separation, keep_highest=True)
+    # Adaptive separation: min_separation scaled to price range
+    price_range = profile[-1].price - profile[0].price if len(profile) > 1 else 0.0
+    tick_size = (profile[1].price - profile[0].price) if len(profile) > 1 else 0.05
+    eff_separation = max(min_separation, 0.04 * price_range, 8.0 * tick_size)
+
+    if eff_separation > 0 and len(hvns) > 1:
+        hvns = _cluster_nodes(hvns, eff_separation, keep_highest=True)
+
+    # Return top max_nodes ranked by strength (highest volume peak = highest strength)
+    if max_nodes > 0 and len(hvns) > max_nodes:
+        hvns = sorted(sorted(hvns, key=lambda n: n.strength, reverse=True)[:max_nodes], key=lambda n: n.price)
 
     return hvns
 
@@ -314,23 +320,24 @@ class LVNPersistenceTracker:
 
         # 1. Update candidates: add new, refresh existing
         matched_raw: set[float] = set()
+        raw_prices = [r.price if hasattr(r, "price") else float(r) for r in raw_lvns]
 
         for price in list(self._candidates.keys()):
             found_match = False
-            for rlvn in raw_lvns:
-                if abs(rlvn - price) < snap:
+            for r_price in raw_prices:
+                if abs(r_price - price) < snap:
                     found_match = True
-                    matched_raw.add(rlvn)
+                    matched_raw.add(r_price)
                     break
             if not found_match and price not in self._emitted_lvns:
                 del self._candidates[price]
 
         # Add new candidates
-        for rlvn in raw_lvns:
-            if rlvn not in matched_raw:
-                is_new = all(abs(rlvn - p) >= snap for p in self._candidates)
+        for r_price in raw_prices:
+            if r_price not in matched_raw:
+                is_new = all(abs(r_price - p) >= snap for p in self._candidates)
                 if is_new:
-                    self._candidates[rlvn] = (self._bar_index, False)
+                    self._candidates[r_price] = (self._bar_index, False)
 
         # 2. Promote candidates that have persisted long enough
         for price, (birth, emitted) in list(self._candidates.items()):
@@ -342,7 +349,7 @@ class LVNPersistenceTracker:
         # 3. Check removal of emitted LVNs
         if profile:
             mean_vol = sum(p.volume for p in profile) / len(profile)
-            removal_threshold = mean_vol * self._removal_threshold
+            removal_threshold = mean_vol * max(self._removal_threshold, 0.80)
             for price in list(self._emitted_lvns):
                 nearest_idx = min(
                     range(len(profile)),
