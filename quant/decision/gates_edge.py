@@ -55,7 +55,16 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
     if ctx.agent_direction == "SHORT" and ctx.vwap_lower_2 > 0 and close_px < ctx.vwap_lower_2:
         return GateResult(3, False, f"Price {close_px:.2f} < VWAP -2.0σ ({ctx.vwap_lower_2:.2f}) — climax overextension")
 
-    # ── 2. CVD Order Flow Direction Guard ────────────────────────────────────
+    # ── 2. Contested Zone Guard ──────────────────────────────────────────────
+    if getattr(ctx, "contested_bubble_zone", False):
+        return GateResult(3, False, "Contested buy/sell bubble cluster — flat until resolution")
+
+    # ── 3. Drive Exhaustion Guard ────────────────────────────────────────────
+    # 3+ drives into a level indicates exhaustion (Fabio Valentini rule)
+    if getattr(ctx, "drive_number", 0) >= 3 and not getattr(ctx, "drive_entry_valid", False):
+        return GateResult(3, False, f"Drive count exhausted ({ctx.drive_number})")
+
+    # ── 4. CVD Order Flow Direction Guard ────────────────────────────────────
     # Order flow pressure must not aggressively oppose the trade direction.
     cvd_slope = ctx.cvd_slope
     if ctx.agent_direction == "LONG" and cvd_slope < -0.5:
@@ -63,39 +72,44 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
     if ctx.agent_direction == "SHORT" and cvd_slope > 0.5:
         return GateResult(3, False, f"CVD slope aggressively positive ({cvd_slope:.2f}) conflicts with SHORT")
 
-    # ── Path B: IB Second Drive (D1 rejected → D2 re-approach) ───────────────
+    # ── Setup B: Second-Drive Rejection (D1 rejected → D2 weaker re-approach) ─
     if ctx.drive_entry_valid:
-        return GateResult(3, True, "IB Second Drive reclaim")
+        return GateResult(3, True, "Second-Drive rejection confirmed")
 
-    # ── Path C: Impulse Leg LVN Sniper (Playbook C) ───────────────────────────
+    # ── Setup C: Impulse Leg LVN Sniper (Playbook C) ─────────────────────────
     leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0
     if leg_lvn > 0 and ctx.bar:
         tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
         price = float(ctx.bar.close)
         if abs(price - leg_lvn) <= 2.0 * tick:
-            if ctx.absorption_side == "SELL_ABSORBED" and ctx.agent_direction == "LONG":
+            if ctx.absorption_side == "SELL_ABSORBED" and ctx.agent_direction == "LONG" and cvd_slope >= -0.2:
                 return GateResult(3, True, f"LVN Sniper LONG @ {leg_lvn:.2f}")
-            if ctx.absorption_side == "BUY_ABSORBED" and ctx.agent_direction == "SHORT":
+            if ctx.absorption_side == "BUY_ABSORBED" and ctx.agent_direction == "SHORT" and cvd_slope <= 0.2:
                 return GateResult(3, True, f"LVN Sniper SHORT @ {leg_lvn:.2f}")
 
-    # ── Path C.1: Fresh Absorption + OB Imbalance (Replacing raw Triple-A) ────
-    if ctx.agent_direction == "LONG" and ctx.absorption_side == "SELL_ABSORBED" and ctx.obi >= 0.15:
+    # ── Setup A.1: Fresh Absorption + OB Imbalance (Microstructure Confirmation)
+    if ctx.agent_direction == "LONG" and ctx.absorption_side == "SELL_ABSORBED" and ctx.obi >= 0.15 and cvd_slope > -0.3:
         return GateResult(3, True, "Absorption cluster confirmed by order flow imbalance")
-    if ctx.agent_direction == "SHORT" and ctx.absorption_side == "BUY_ABSORBED" and ctx.obi <= -0.15:
+    if ctx.agent_direction == "SHORT" and ctx.absorption_side == "BUY_ABSORBED" and ctx.obi <= -0.15 and cvd_slope < 0.3:
         return GateResult(3, True, "Absorption cluster confirmed by order flow imbalance")
 
-    # ── Path D: Initiative Breakout (Fabio Model 1: IB / VA Breakout) ──────────
+    # ── Setup A.2: Initiative Breakout (Model 1: IB / VA Breakout) ───────────
+    # In Midday session (allow_trend=False), blind breakouts are blocked.
+    allow_trend = getattr(ctx, "allow_trend", True)
     break_dir = getattr(ctx, "break_direction", "") or ""
     break_type = getattr(ctx, "break_type", "") or ""
-    if break_type == "INITIATIVE":
-        if break_dir == "UP" and ctx.agent_direction == "LONG":
+    if break_type == "INITIATIVE" and allow_trend:
+        if break_dir == "UP" and ctx.agent_direction == "LONG" and cvd_slope > -0.2:
             return GateResult(3, True, "Initiative upside breakout confirmed")
-        if break_dir == "DOWN" and ctx.agent_direction == "SHORT":
+        if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
             return GateResult(3, True, "Initiative downside breakdown confirmed")
 
-    # ── Path A: Imbalanced Trend / Aggression Breakout (Fabio Model 2 fallback)
-    if ms_val == MarketState.IMBALANCED or getattr(market_state, "name", str(market_state)) == "IMBALANCED":
-        if ctx.agent_direction in ("LONG", "SHORT"):
-            return GateResult(3, True, "Triple-A AGGRESSION confirmed")
+    # ── Setup A.3: Triple-A Continuation (Model 2 Continuation) ──────────────
+    # Continuation requires directional breakout beyond VA or confirmed imbalance with CVD agreement.
+    if allow_trend and (ms_val in (MarketState.IMBALANCED, "IMBALANCED") or (ctx.vah > 0 and close_px > ctx.vah) or (ctx.val > 0 and close_px < ctx.val)):
+        if ctx.agent_direction == "LONG" and cvd_slope > -0.2:
+            return GateResult(3, True, "Triple-A Continuation LONG confirmed")
+        elif ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
+            return GateResult(3, True, "Triple-A Continuation SHORT confirmed")
 
-    return GateResult(3, False, "No Triple-A edge")
+    return GateResult(3, False, "No valid Fabio AMT setup")

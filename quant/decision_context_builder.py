@@ -11,7 +11,8 @@ import logging
 
 from quant.contracts.enums import MarketState
 from quant.decision.context import DecisionContext
-from quant.session_gates import session_allow_entry
+from quant.session_gates import ist_dt, session_allow_entry
+from quant.amt.session.context import get_session_info
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,28 @@ class DecisionContextBuilder:
         raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
         break_dir = str(amt_dto.get("breakDirection") or "").upper()
         break_type = str(amt_dto.get("breakType") or "").upper()
+
+        # Session & Expiry Context
+        session_info = None
+        bar_text = str(bar.time if bar else "").strip()
+        is_epoch = (
+            bar_text.replace(".", "", 1).lstrip("-").isdigit()
+            and len(bar_text) >= 9
+            and "T" not in bar_text
+        )
+        is_iso = "T" in bar_text or "+" in bar_text or ":" in bar_text
+        if is_epoch or is_iso:
+            try:
+                session_info = get_session_info(bar.time, market=market)
+            except Exception:
+                pass
+
+        session_phase = session_info.session if session_info else "PRIMARY"
+        allow_trend = session_info.allow_trend if session_info else True
+        allow_reversion = session_info.allow_reversion if session_info else True
+
+        bar_dt = ist_dt(bar.time) if (bar and bar.time and (is_epoch or is_iso)) else None
+        is_expiry = (bar_dt.date() == contract_expiry) if (contract_expiry and bar_dt) else False
 
         # Direction input to the gates follows a strict hierarchy of intent:
         # 1. Initiative Breakouts (structural, overrides local mean-reversion)
@@ -128,6 +151,7 @@ class DecisionContextBuilder:
             market_state=amt_market_state,
             balance_ratio=float(amt_dto.get("balanceRatio") or 0.0),
             drive_entry_valid=bool(amt_dto.get("isSecondDrive") or False),
+            drive_number=int(amt_dto.get("driveNumber") or 0),
             break_direction=break_dir,
             break_type=break_type,
             obi=obi,
@@ -149,4 +173,11 @@ class DecisionContextBuilder:
             bid=float(amt_dto.get("bid") or getattr(bar, "bid", 0.0) or 0.0),
             ask=float(amt_dto.get("ask") or getattr(bar, "ask", 0.0) or 0.0),
             time_str=str(bar.time if bar else ""),
+            session_phase=session_phase,
+            allow_trend=allow_trend,
+            allow_reversion=allow_reversion,
+            is_expiry=is_expiry,
+            profile_shape=str(amt_dto.get("profileShape") or ""),
+            option_delta=float(amt_dto.get("optionDelta") or 0.50),
+            contested_bubble_zone=bool(amt_dto.get("contestedZone") or False),
         )

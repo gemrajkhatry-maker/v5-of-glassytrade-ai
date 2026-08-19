@@ -77,3 +77,11 @@ class DecisionContext:
     bid: float = 0.0
     ask: float = 0.0
     time_str: str = ""
+    # Fabio 5-Phase Session & Expiry Context
+    session_phase: str = ""
+    allow_trend: bool = True
+    allow_reversion: bool = True
+    is_expiry: bool = False
+    profile_shape: str = ""
+    option_delta: float = 0.50
+    contested_bubble_zone: bool = False

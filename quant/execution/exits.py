@@ -106,29 +106,34 @@ class ExitEngine:
         high = close if bar_high is None else bar_high
 
         # 1. Spread blowout — the book is untradeable, get out at mid.
+        # On expiry day, allowable spread is halved (e.g. 1.5% instead of 3.0%).
+        effective_spread_pct = (self.spread_max_pct * 0.5) if is_expiry else self.spread_max_pct
         if (
             best_bid is not None
             and best_ask is not None
             and close > 0
-            and (best_ask - best_bid) / close >= self.spread_max_pct
+            and (best_ask - best_bid) / close >= effective_spread_pct
         ):
             return ExitDecision(True, "SPREAD_BLOWOUT", (best_bid + best_ask) / 2)
 
+        # 2. Hard stop-loss
         if long and low <= sl:
             return ExitDecision(True, "SL", close)
         if not long and high >= sl:
             return ExitDecision(True, "SL", close)
 
-        if long and high >= tp:
-            return ExitDecision(True, "TP", close)
-        if not long and low <= tp:
-            return ExitDecision(True, "TP", close)
-
+        # 3. Auction thesis invalidation (CVD kill)
         slope = float(dto.get("cvdSlope") or 0.0)
         if long and slope < -self.cvd_kill_threshold:
             return ExitDecision(True, "CVD_KILL", close)
         if not long and slope > self.cvd_kill_threshold:
             return ExitDecision(True, "CVD_KILL", close)
+
+        # 4. Structural target (Take Profit)
+        if long and high >= tp:
+            return ExitDecision(True, "TP", close)
+        if not long and low <= tp:
+            return ExitDecision(True, "TP", close)
 
         # 3b. Breakeven logic — Fabio: move SL to entry at 1R or on CVD confirmation.
         # The breakeven floor ensures the trail can never drop below entry once armed.
