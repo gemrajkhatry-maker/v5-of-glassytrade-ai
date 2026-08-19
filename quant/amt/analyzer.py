@@ -894,10 +894,12 @@ class AMTAnalyzer:
                 _effective_market_state = "DEAD"
         return _effective_market_state
 
-    def _compute_per_symbol_delta(self, option_tick) -> float:
-        """Compute per-symbol delta from option tick (not underlying)."""
-        if option_tick is not None and option_tick.volume > 0:
-            return float(option_tick.delta) / float(option_tick.volume)
+    def _compute_per_symbol_delta(self, option_tick, current_candle: OHLC | None = None) -> float:
+        """Compute per-symbol normalized delta (-1.0 to +1.0) from option tick or current candle."""
+        if option_tick is not None and getattr(option_tick, "volume", 0) > 0:
+            return max(-1.0, min(1.0, float(option_tick.delta) / float(option_tick.volume)))
+        if current_candle is not None and getattr(current_candle, "volume", 0) > 0:
+            return max(-1.0, min(1.0, float(current_candle.delta) / float(current_candle.volume)))
         return 0.0
 
     def _track_drives(self, live_price, poc, lvns, hvns, vah, val, tick_size, current) -> tuple[int, bool]:
@@ -1277,7 +1279,7 @@ class AMTAnalyzer:
         )
 
         # Per-symbol delta
-        delta_normalized_option = self._compute_per_symbol_delta(option_tick)
+        delta_normalized_option = self._compute_per_symbol_delta(option_tick, current)
 
         # Drive Tracking
         _live_price = float(current.close)

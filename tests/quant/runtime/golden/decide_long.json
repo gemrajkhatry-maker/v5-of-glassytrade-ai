@@ -2266,10 +2266,13 @@
     },
     {
       "approved": false,
-      "reason": "GATE_REJECTED",
+      "reason": "NO_EDGE",
       "phase": "",
       "model_label": "",
-      "block_reasons": [],
+      "block_reasons": [
+        "TRIPLE_A_EDGE: No direction",
+        "RISK_REWARD: RR fail"
+      ],
       "signal_type": null,
       "signal_entry": null,
       "signal_sl": null,
@@ -2278,10 +2281,13 @@
     },
     {
       "approved": false,
-      "reason": "GATE_REJECTED",
+      "reason": "NO_EDGE",
       "phase": "",
       "model_label": "",
-      "block_reasons": [],
+      "block_reasons": [
+        "TRIPLE_A_EDGE: No direction",
+        "RISK_REWARD: RR fail"
+      ],
       "signal_type": null,
       "signal_entry": null,
       "signal_sl": null,
@@ -2290,10 +2296,13 @@
     },
     {
       "approved": false,
-      "reason": "GATE_REJECTED",
+      "reason": "NO_EDGE",
       "phase": "",
       "model_label": "",
-      "block_reasons": [],
+      "block_reasons": [
+        "TRIPLE_A_EDGE: No direction",
+        "RISK_REWARD: RR fail"
+      ],
       "signal_type": null,
       "signal_entry": null,
       "signal_sl": null,
@@ -2308,8 +2317,8 @@
       "block_reasons": [],
       "signal_type": "LONG",
       "signal_entry": 100.6,
-      "signal_sl": 99.89654,
-      "signal_tp": 102.00691999999998,
+      "signal_sl": 99.87002000000001,
+      "signal_tp": 102.05995999999996,
       "signal_rr": 2.0
     }
   ],
@@ -2317,8 +2326,8 @@
     {
       "type": "LONG",
       "entry": 100.6,
-      "sl": 99.89654,
-      "tp": 102.00691999999998,
+      "sl": 99.87002000000001,
+      "tp": 102.05995999999996,
       "rr": 2.0,
       "reason": "All 4 gates passed"
     }

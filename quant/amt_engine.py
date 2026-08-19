@@ -332,6 +332,7 @@ class AMTEngine:
                 prior_vah=self._prior["vah"],
                 prior_val=self._prior["val"],
                 npoc_tracker=self._npoc,
+                option_tick=ohlc,
                 footprint_accumulator=self._footprint,
             )
         except Exception:
