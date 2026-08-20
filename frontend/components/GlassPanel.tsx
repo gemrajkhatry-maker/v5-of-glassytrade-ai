@@ -37,7 +37,7 @@ const GlassPanel: React.FC<GlassPanelProps> = ({
       shadow-[0_4px_16px_rgba(0,0,0,0.4)]
       rounded-md
       text-glassy-text-primary
-      transition-all duration-300
+      transition-transform duration-300
       ${className}
     `}>
       {/* Content */}

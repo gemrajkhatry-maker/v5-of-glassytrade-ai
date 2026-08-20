@@ -168,7 +168,7 @@ function App() {
 
             {/* LEFT: Sidebar (Market Scanner) */}
             <div className={`
-          absolute left-0 top-0 h-full z-20 transition-all duration-300
+          absolute left-0 top-0 h-full z-20 transition-transform duration-300
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
                 <ErrorBoundary name="Sidebar">
@@ -182,7 +182,7 @@ function App() {
 
             {/* CENTER: Main Content */}
             <div className={`
-        flex-1 relative h-full transition-all duration-300 flex flex-col
+        flex-1 relative h-full transition-transform duration-300 flex flex-col
         ${sidebarOpen ? 'ml-[280px]' : 'ml-0'}
         ${rightSidebarOpen ? 'mr-[320px]' : 'mr-0'}
       `}>
@@ -302,7 +302,7 @@ function App() {
 
             {/* RIGHT: Sidebar (Analysis & AI) */}
             <div className={`
-          absolute right-0 top-0 h-full w-[320px] z-20 transition-all duration-300
+          absolute right-0 top-0 h-full w-[320px] z-20 transition-transform duration-300
           bg-glassy-bg-secondary/80 backdrop-blur-md border-l border-glassy-border-default flex flex-col
           ${rightSidebarOpen ? 'translate-x-0' : 'translate-x-full'}
       `}>

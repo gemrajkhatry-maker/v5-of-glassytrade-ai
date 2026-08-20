@@ -209,17 +209,19 @@ const ChartScene: React.FC<ChartSceneProps> = ({
 
     candleSeries.applyOptions({ visible: true });
 
+    // ponytail: rAF debounce — ResizeObserver fires per-frame during 300ms sidebar slide
+    let raf = 0;
     const resizeObserver = new ResizeObserver(entries => {
-      if (entries.length === 0 || !entries[0].contentRect) return;
-      if (entries[0].contentRect.width === 0 || entries[0].contentRect.height === 0) return;
-
+      if (!entries[0]?.contentRect) return;
       const { width, height } = entries[0].contentRect;
-      chart.applyOptions({ width, height });
-
-      if (overlayRef.current) {
-        overlayRef.current.width = width;
-        overlayRef.current.height = height;
-      }
+      if (width===0 || height===0) return;
+      if (chartRef.current && (chartRef.current as any)._lastW===width && (chartRef.current as any)._lastH===height) return;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        chart.applyOptions({ width, height });
+        if (overlayRef.current) { overlayRef.current.width = width; overlayRef.current.height = height; }
+        (chartRef.current as any)._lastW = width; (chartRef.current as any)._lastH = height;
+      });
     });
 
     resizeObserver.observe(chartContainerRef.current);
@@ -242,6 +244,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     }
 
     return () => {
+      cancelAnimationFrame(raf);
       resizeObserver.disconnect();
       chart.remove();
       initializedRef.current = false;
