@@ -130,6 +130,7 @@ class QuantCoordinator:
         self._threads: dict[str, threading.Thread] = {}
         self._decisions: queue.Queue = queue.Queue()
         self._stop = threading.Event()
+        self._lock = threading.Lock()
         self.started = False
 
     def start(self) -> None:
@@ -162,13 +163,15 @@ class QuantCoordinator:
         self.started = False
 
     def snapshot(self, symbol: str) -> dict:
-        engine = self._engines.get(symbol)
+        with self._lock:
+            engine = self._engines.get(symbol)
         if engine is None:
             return {"_symbol": symbol}
         return view_state_to_ws(engine.projector.snapshot(symbol))
 
     def symbols(self) -> list[str]:
-        return list(self._engines.keys())
+        with self._lock:
+            return list(self._engines.keys())
 
     def decisions(self) -> queue.Queue:
         return self._decisions
@@ -283,22 +286,26 @@ class QuantCoordinator:
             target=engine.run, daemon=True, name=f"quant-{symbol}"
         )
         thread.start()
-        self._engines[symbol] = engine
-        self._gateways[symbol] = gateway
-        self._threads[symbol] = thread
+        with self._lock:
+            self._engines[symbol] = engine
+            self._gateways[symbol] = gateway
+            self._threads[symbol] = thread
 
     def _on_decision(self, event) -> None:
         self._decisions.put(event)
 
     def _stop_engine(self, symbol: str) -> None:
-        gateway = self._gateways.pop(symbol, None)
+        with self._lock:
+            gateway = self._gateways.pop(symbol, None)
+            thread = self._threads.pop(symbol, None)
+            self._engines.pop(symbol, None)
         if gateway is not None:
             gateway.close()
-        thread = self._threads.pop(symbol, None)
         if thread is not None:
             thread.join(timeout=1.0)
-        self._engines.pop(symbol, None)
 
     def _stop_engines(self) -> None:
-        for symbol in list(self._engines):
+        with self._lock:
+            symbols = list(self._engines.keys())
+        for symbol in symbols:
             self._stop_engine(symbol)

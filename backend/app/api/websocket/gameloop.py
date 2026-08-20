@@ -15,6 +15,7 @@ Server-driven mode:
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 
@@ -296,7 +297,7 @@ async def _coordinator_viewer_loop(
             ordered_symbols = [symbol] + [s for s in symbols_list if s != symbol]
             for s in ordered_symbols:
                 snap = coordinator.snapshot(s)
-                previous_states[s] = dict(snap)
+                previous_states[s] = copy.deepcopy(snap)
                 if not await _safe_send(ws, {**previous_states[s], "_type": "full"}):
                     return
 
@@ -336,7 +337,7 @@ async def _coordinator_viewer_loop(
                     if delta:
                         if not await _safe_send(ws, delta):
                             return
-                        previous_states[s] = dict(snap)
+                        previous_states[s] = copy.deepcopy(snap)
     finally:
         listener.cancel()
         try:
