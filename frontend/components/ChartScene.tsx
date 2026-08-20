@@ -869,12 +869,9 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
         lines.forEach(l => candleSeriesRef.current?.removePriceLine(l));
       });
       activePriceLinesRef.current.clear();
-
-      // Clear canvas overlay immediately
-      if (overlayRef.current) {
-        const ctx = overlayRef.current.getContext('2d');
-        ctx?.clearRect(0, 0, overlayRef.current.width, overlayRef.current.height);
-      }
+      // NOTE: do NOT clearRect here — the overlay effect (deps stableData) fires
+      // in the same React commit and repaints. Clearing here blanks the canvas
+      // for one frame before that paint lands.
     }
 
     if (data.length > 0) {
@@ -888,16 +885,26 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       }
 
       if (chartRef.current) {
-        // Auto-scale price scale to the new instrument's price range
-        chartRef.current.priceScale('right').applyOptions({
-          autoScale: true,
-          scaleMargins: { top: 0.15, bottom: 0.15 },
-        });
-
+        // Auto-scale price scale to the new instrument's price range.
+        // Defer the re-layout to rAF so the browser paints a stable frame
+        // before fitContent/scroll re-positions the chart (avoids a blank
+        // flash on symbol switch).
+        const chart = chartRef.current;
+        const doFit = () => {
+          chart.priceScale('right').applyOptions({
+            autoScale: true,
+            scaleMargins: { top: 0.15, bottom: 0.15 },
+          });
+          if (isSymbolChange || !initializedRef.current) {
+            chart.timeScale().fitContent();
+            chart.timeScale().scrollToPosition(0, false);
+            initializedRef.current = true;
+          }
+        };
         if (isSymbolChange || !initializedRef.current) {
-          chartRef.current.timeScale().fitContent();
-          chartRef.current.timeScale().scrollToPosition(0, false);
-          initializedRef.current = true;
+          requestAnimationFrame(doFit);
+        } else {
+          doFit();
         }
       }
     }
