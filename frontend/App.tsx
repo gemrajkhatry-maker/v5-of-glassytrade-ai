@@ -113,9 +113,9 @@ function App() {
     useKeyboardNavigation(getDefaultTradingHotkeys({
         onChartModeChange: setChartMode,
         onVpModeChange: setVpMode,
-        onToggleSidebar: () => setSidebarOpen(!sidebarOpen),
-        onToggleRightSidebar: () => setRightSidebarOpen(!rightSidebarOpen),
-        onToggleControls: () => setShowControls(!showControls),
+        onToggleSidebar: () => useUIStore.getState().toggleSidebar(),
+        onToggleRightSidebar: () => useUIStore.getState().toggleRightSidebar(),
+        onToggleControls: () => useUIStore.getState().toggleControls(),
         onNextSymbol: handleNextSymbol,
         onPrevSymbol: handlePrevSymbol,
         onSaveWorkspace: handleSaveWorkspace,

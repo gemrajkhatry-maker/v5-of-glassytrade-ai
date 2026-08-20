@@ -98,6 +98,8 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // Generation counter to prevent stale subscribe messages from racing with
     // rapid activeSymbol changes (e.g. user clicks multiple tabs quickly).
     const subscribeGenRef = useRef(0);
+    // ponytail: dedupe concurrent history fetches per symbol
+    const inFlightHistoryRef = useRef<Set<string>>(new Set());
     // RAF-batched state updates
     // Queue multiple WS messages into a single React render per animation frame.
     // Without this, 9 symbols × ~7 generations/sec = ~60 separate setState calls/sec.
@@ -107,10 +109,11 @@ export const useServerTradingSystem = (config: ChartConfig) => {
 
     const batchedSetInstruments = useCallback(
         (updater: (prev: Record<string, InstrumentState>) => Record<string, InstrumentState>) => {
-            // Backpressure: drop intermediate updates if queue is too large
-            if (pendingUpdatesRef.current.length >= MAX_RAF_QUEUE_SIZE) {
-                // Remove oldest update, keep latest
-                pendingUpdatesRef.current.splice(0, pendingUpdatesRef.current.length - 1);
+            // ponytail: coalesce per-symbol: keep last updater per symbol not just last overall
+            // cheapest: keep last N updaters (one per active symbol, N≈8) instead of 1
+            if (pendingUpdatesRef.current.length > MAX_RAF_QUEUE_SIZE) {
+                const keep = Math.max(1, MAX_RAF_QUEUE_SIZE - 2);
+                pendingUpdatesRef.current.splice(0, pendingUpdatesRef.current.length - keep);
             }
             
             pendingUpdatesRef.current.push(updater);
@@ -213,7 +216,6 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 return next;
             });
             setActiveSymbol(symbols[0]);
-            warmHistoryForSymbols(symbols, String(cfg.interval || '1m'));
         };
 
         const fetchConfig = async (attempt: number) => {
@@ -279,6 +281,8 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // Candles are merged with any live ticks that already streamed in.
     const warmHistoryForSymbols = useCallback((symbols: string[], interval: string) => {
         for (const sym of symbols) {
+            if (inFlightHistoryRef.current.has(sym)) continue;
+            inFlightHistoryRef.current.add(sym);
             const path = `/api/market/history/${encodeURIComponent(sym)}`;
             const url = `${backendUrl(path)}?interval=${encodeURIComponent(interval || '1m')}&limit=500`;
             fetch(url)
@@ -299,19 +303,28 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     }));
                     setInstruments(prev => {
                         const inst = prev[sym] || createInstrumentState(sym);
-                        // Union warm history + any already-streamed live bars,
-                        // sorted ascending and deduped by time.
-                        const byTime = new Map<string, OHLCData>();
-                        for (const c of history) byTime.set(c.time, c);
-                        for (const c of inst.data) byTime.set(c.time, c);
-                        const merged = [...byTime.values()].sort(
-                            (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime(),
-                        );
+                        if (history.length === 0) return prev;
+                        const lastHistory = history[history.length - 1];
+                        const lastHistoryMs = new Date(lastHistory.time).getTime();
+                        // ponytail: same-timestamp → replace with live tick's OHLC if live is newer (preserves forming bar)
+                        const existingByTime = new Map(inst.data.map(c => [new Date(c.time).getTime(), c] as const));
+                        let merged: OHLCData[];
+                        if (existingByTime.has(lastHistoryMs)) {
+                            const live = existingByTime.get(lastHistoryMs)!;
+                            merged = [...history.slice(0, -1), live];
+                            const newer = inst.data.filter(c => new Date(c.time).getTime() > lastHistoryMs);
+                            const seen = new Set(merged.map(c => c.time));
+                            for (const c of newer) if (!seen.has(c.time)) merged.push(c);
+                        } else {
+                            const freshLiveTicks = inst.data.filter(c => new Date(c.time).getTime() > lastHistoryMs);
+                            merged = [...history, ...freshLiveTicks];
+                        }
                         return { ...prev, [sym]: { ...inst, data: merged } };
                     });
                 })
+                .finally(() => inFlightHistoryRef.current.delete(sym))
                 .catch(() => {
-                    // Backend not ready or symbol unsupported — chart warms from live ticks.
+                    inFlightHistoryRef.current.delete(sym);
                 });
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -642,27 +655,20 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         };
     }, []);
 
-    // When activeSymbol changes, keep ref in sync and subscribe if connected.
-    // Debounce by 80ms so rapid tab-clicks only emit one subscribe message.
     useEffect(() => {
-        // Increment generation to invalidate any in-flight stale subscribes
         subscribeGenRef.current += 1;
         const gen = subscribeGenRef.current;
-
-        // Keep ref in sync for use in onopen callback
         activeSymbolRef.current = activeSymbol;
-
-        if (!connected || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !activeSymbol) {
-            return;
-        }
-
+        if (!activeSymbol) return;
         const timer = setTimeout(() => {
-            // Drop if a newer symbol was selected before the debounce fired
             if (subscribeGenRef.current !== gen) return;
-            wsRef.current!.send(JSON.stringify({ subscribe: activeSymbol }));
-            console.log(`[TradingSystem] Subscribed to symbol: ${activeSymbol} (gen=${gen})`);
+            if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ subscribe: activeSymbol }));
+                console.log(`[TradingSystem] Subscribed to symbol: ${activeSymbol} (gen=${gen})`);
+            } else {
+                // ponytail: WS not open yet — onopen will read activeSymbolRef, so just keep ref synced
+            }
         }, 80);
-
         return () => clearTimeout(timer);
     }, [activeSymbol, connected]);
 
