@@ -70,7 +70,7 @@ describe('GlassPanel', () => {
       </GlassPanel>
     );
     const outer = container.firstChild as HTMLElement;
-    expect(outer).toHaveClass('transition-all');
+    expect(outer).toHaveClass('transition-transform');
     expect(outer).toHaveClass('duration-300');
   });
 });
