@@ -24,12 +24,14 @@ vi.mock('lightweight-charts', () => ({
     remove: vi.fn(),
     applyOptions: vi.fn(),
     timeScale: vi.fn(() => ({
+      fitContent: vi.fn(),
       scrollToPosition: vi.fn(),
       subscribeVisibleLogicalRangeChange: vi.fn(),
       unsubscribeVisibleLogicalRangeChange: vi.fn(),
       getVisibleLogicalRange: vi.fn(() => ({ from: 0, to: 100 })),
       logicalToCoordinate: vi.fn(() => 50),
       priceToCoordinate: vi.fn(() => 100),
+      timeToCoordinate: vi.fn(() => 50),
       options: vi.fn(() => ({ barSpacing: 6 })),
     })),
     priceScale: vi.fn(() => ({
