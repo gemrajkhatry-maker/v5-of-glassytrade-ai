@@ -81,7 +81,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
         <button
             onClick={() => onSelect(sym)}
             className={`
-                w-full px-2 py-1.5 rounded-sm flex items-center gap-0 group transition-all duration-200 text-left border-l-2
+                w-full px-2 py-1.5 rounded-sm flex items-center gap-0 group transition-colors duration-200 text-left border-l-2
                 ${hasOpenPosition
                     ? isProfit
                         ? isActive
@@ -189,43 +189,38 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
     const [sortBy, setSortBy] = useState<'ACTION' | 'PROB'>('ACTION');
 
     const symbols = Object.keys(instruments);
+    // ponytail: coarse-grain the sort keys so 0.5s quantDecision jitter (e.g.
+    // 0.700→0.701) never reorders the list and re-animates every card.
+    const sortKey = (sym: string) => {
+        const inst = instruments[sym];
+        const isDead = inst.amtAnalysis?.marketState === 'DEAD';
+        const timing = inst.agentDecision?.timing || '';
+        const prob = Math.round((inst.agentDecision?.probability || 0) * 100) / 100; // 1dp
+        return `${isDead ? 1 : 0}|${timingRank(timing)}|${prob}`;
+    };
     const filtered = useMemo(() => {
         let f = symbols;
-        
+
         // Apply text filter
         if (filter) f = f.filter(s => s.toLowerCase().includes(filter.toLowerCase()));
-        
+
         // Apply Mode filter
         if (modeFilter !== 'ALL') f = f.filter(s => instruments[s].amtAnalysis?.marketState?.includes(modeFilter));
-        
+
         // Apply Action filter
         if (actionFilter !== 'ALL') f = f.filter(s => instruments[s].agentDecision?.timing === actionFilter);
 
         // Sort: Default to "Opportunity First" (ENTER_NOW > MONITOR > SKIP > DEAD)
-        return f.sort((a, b) => {
-            const instA = instruments[a];
-            const instB = instruments[b];
-            
-            const isDeadA = instA.amtAnalysis?.marketState === 'DEAD';
-            const isDeadB = instB.amtAnalysis?.marketState === 'DEAD';
-
-            // 0. Dead markets always at the bottom
-            if (isDeadA !== isDeadB) return isDeadA ? 1 : -1;
-
-            const pA = instA.agentDecision?.probability || 0;
-            const pB = instB.agentDecision?.probability || 0;
-            
-            if (sortBy === 'ACTION') {
-                const rankA = timingRank(instA.agentDecision?.timing);
-                const rankB = timingRank(instB.agentDecision?.timing);
-                if (rankA !== rankB) return rankB - rankA;
-                return pB - pA;
-            }
-            // Prob primary; full timing rank as tie-breaker
-            if (Math.abs(pA - pB) > 0.01) return pB - pA;
-            return timingRank(instB.agentDecision?.timing) - timingRank(instA.agentDecision?.timing);
-        });
-    }, [symbols, filter, modeFilter, actionFilter, instruments, sortBy]);
+        // Stable sort preserves input order for equal keys so the list doesn't
+        // reshuffle every 0.5s when only the probability jitter changes.
+        return f
+            .map((sym, i) => ({ sym, i, key: sortKey(sym) }))
+            .sort((a, b) => {
+                if (a.key !== b.key) return a.key < b.key ? 1 : -1;
+                return a.i - b.i;
+            })
+            .map(o => o.sym);
+    }, [symbols, filter, modeFilter, actionFilter, sortBy]);
 
     // Filter trades for the ACTIVE symbol only
     // (recent-trades panel removed — closedTrades is canonical in JournalPage)

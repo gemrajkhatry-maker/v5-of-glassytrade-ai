@@ -87,16 +87,19 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   tickBus,
   symbol,
 }) => {
-  const chartContainerRef = useRef<HTMLDivElement>(null);
-  const overlayRef = useRef<HTMLCanvasElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
-  const activePriceLinesRef = useRef<Map<string, IPriceLine[]>>(new Map());
-  const amtLinesRef = useRef<IPriceLine[]>([]);
-  const initializedRef = useRef(false);
-  const lastCandleTimeRef = useRef<number>(0);
-  const prevSymbolRef = useRef<string | undefined>(undefined);
+const chartContainerRef = useRef<HTMLDivElement>(null);
+    const overlayRef = useRef<HTMLCanvasElement>(null);
+    const chartRef = useRef<IChartApi | null>(null);
+    const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+    const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+    const activePriceLinesRef = useRef<Map<string, IPriceLine[]>>(new Map());
+    const amtLinesRef = useRef<IPriceLine[]>([]);
+    const initializedRef = useRef(false);
+    const lastCandleTimeRef = useRef<number>(0);
+    const prevSymbolRef = useRef<string | undefined>(undefined);
+    // Shared redraw trigger so the ResizeObserver can repaint the overlay
+    // without leaving a blank canvas during a sidebar slide.
+    const drawOverlayRef = useRef<(() => void) | null>(null);
 
   // Memoize amtAnalysis to prevent overlay redraws when profile data hasn't changed.
   // The backend sends new AMT objects on every tick, but profile/legProfile arrays
@@ -221,6 +224,9 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         chart.applyOptions({ width, height });
         if (overlayRef.current) { overlayRef.current.width = width; overlayRef.current.height = height; }
         (chartRef.current as any)._lastW = width; (chartRef.current as any)._lastH = height;
+        // canvas.width= clears the bitmap — repaint immediately so a sidebar
+        // slide never leaves the VP profile/VA box blank for a frame.
+        drawOverlayRef.current?.();
       });
     });
 
@@ -244,6 +250,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
     }
 
     return () => {
+      drawOverlayRef.current = null;
       cancelAnimationFrame(raf);
       resizeObserver.disconnect();
       chart.remove();
@@ -347,6 +354,10 @@ const ChartScene: React.FC<ChartSceneProps> = ({
         console.error("Overlay draw error", e);
       }
     };
+
+    // Expose the redraw to the ResizeObserver so a canvas resize never leaves
+    // a blank frame (canvas.width= clears the bitmap) without repainting.
+    drawOverlayRef.current = drawOverlay;
 
     // Draw once immediately when data changes
     drawOverlay();
