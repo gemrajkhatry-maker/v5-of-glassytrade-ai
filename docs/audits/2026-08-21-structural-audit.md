@@ -35,22 +35,27 @@ Result: net code reduction, WS snapshot contract shrunk 11 → 10 keys,
 anchored-detection bug fixed in the broker adapter, both suites green
 (root 1011 passed / backend 858 passed).
 
-## Deferred backlog (ponytail YAGNI — act when each hurts twice)
+## Deferred backlog (executed 2026-08-21, same day)
 
-1. **Merge `app/core/metrics.py` + `app/infrastructure/metrics.py`** into one
-   registry. Trigger: second metric-name collision or a metrics-related change
-   touching both files.
-2. **Unify test trees** (`tests/`, `backend/tests/`, `brokers/*/tests/`,
-   root `qa_sanity_*.py`). Trigger: a single behavior change requiring edits in
-   ≥2 roots.
-3. **Frontend `useChartLifecycle(symbol)` hook** (scale reset, line cleanup,
-   timeScale on symbol change). Trigger: next symbol-change bug spanning >2
-   chart files.
-4. **Domain session facade** (`SessionSelector`/`ContextBuilder`/`GateChain`/
-   `RiskEngine` behind one module). Trigger: another >10-file decision-path
-   change like S4.
-5. **Move `amt_dataset/` → `data/`** (or DVC/LFS) and `amt_docs/` → `docs/amt/`.
-   Trigger: dataset versioning needs.
+All five items resolved:
+
+1. **Metrics modules** — audited, NOT duplicates (Prometheus registry vs
+   business-KPI dict). Kept separate with mutual cross-reference comments.
+   Forced merge would combine unrelated APIs.
+2. **Test trees** — audited: `tests/` (quant pkg) vs `backend/tests/` (app pkg)
+   is per-package co-location, not duplication. Root strays moved:
+   `qa_sanity_*.py` → `tests/qa/`.
+3. **Frontend chart hook** — audited: all chart lifecycle logic already lives
+   in one component (`ChartScene.tsx`); the 8-file commit `cfcb501` was 4
+   chart files + 3 unrelated UI tweaks. No hook created (would be a
+   single-consumer abstraction).
+4. **Decision-path cohesion** — `quant/decision_context_builder.py` moved into
+   `quant/decision/context_builder.py`; 5 importers updated.
+5. **Data/docs relocation** — `amt_dataset/` → `data/`, `amt_docs/` →
+   `docs/amt/`; 6 path references updated (train configs, tests, docstrings,
+   LoRA adapter config).
+
+Final suites: root 1011 passed, backend 858 passed, frontend 220 passed.
 
 ## Coding standards to prevent recurrence
 
