@@ -122,3 +122,7 @@ backend/.active_contracts.json
 
 # local junk
 .env.bak-*
+
+# runtime audit generated artifacts
+runtime_audit/out/
+runtime_audit/fixtures/
