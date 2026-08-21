@@ -177,3 +177,29 @@ def test_engine_portfolio_gate_blocks_entry(monkeypatch):
     eng.run(max_steps=10)
     # The authority is saturated → no position may open regardless of gates.
     assert not opened, "portfolio gate failed to block entry"
+
+
+def test_session_risk_sizes_from_portfolio_equity():
+    """With a shared authority, sizing equity = starting + PORTFOLIO realized
+    P&L — an engine's own wins don't inflate its size beyond the book."""
+    from quant.execution.risk import SessionRisk
+
+    auth = PortfolioRiskAuthority(starting_equity=1_000_000.0)
+    auth.register_open(5_000)
+    auth.record_close(5_000, -20_000)  # portfolio down 2% today
+
+    risk = SessionRisk(starting_equity=1_000_000.0, portfolio_risk=auth,
+                       storage=None, symbol="SYM")
+    # Engine's OWN daily_pnl is 0 (equity 1M) but the book is down 20k.
+    qty_portfolio = risk.position_size(entry=100.0, sl=95.0)
+
+    solo = SessionRisk(starting_equity=1_000_000.0, storage=None, symbol="SOLO")
+    qty_solo = solo.position_size(entry=100.0, sl=95.0)
+
+    assert qty_portfolio < qty_solo, (
+        "sizing must shrink when the portfolio is down, even if this engine "
+        "has no losses of its own"
+    )
+    # Fresh engine starts in CONSERVATIVE tier (0.25% base risk).
+    expected = int((980_000 * 0.0025) // 5.0)  # risk budget / per-unit risk
+    assert qty_portfolio == expected

@@ -41,7 +41,12 @@ class SessionRisk:
                  *,
                  storage: Any | None = None,
                  symbol: str = "",
-                 date: str | None = None) -> None:
+                 date: str | None = None,
+                 portfolio_risk: Any | None = None) -> None:
+        # Optional shared PortfolioRiskAuthority: when present, SIZING equity
+        # reflects the whole book (starting capital + portfolio realized P&L)
+        # instead of this engine's private P&L — one winner no longer lets a
+        # single engine size up on phantom portfolio gains.
         self._starting_equity = starting_equity
         self._equity = starting_equity
         self._base_risk_pct = base_risk_pct
@@ -56,6 +61,7 @@ class SessionRisk:
         self._halt_reason = ""
         self._lock = threading.RLock()  # RLock: record_trade calls state() under the lock
         self._storage = storage
+        self._portfolio_risk = portfolio_risk
         self._symbol = symbol
         # Always use today's date — never inherit a None date key
         self._date = date if (date and date != "None") else _today()
@@ -170,7 +176,13 @@ class SessionRisk:
         if entry == sl:
             return 0.0
         with self._lock:
-            risk_amount = self._equity * self._risk_per_trade_pct()
+            sizing_equity = self._equity
+            if self._portfolio_risk is not None:
+                sizing_equity = (
+                    self._starting_equity
+                    + float(getattr(self._portfolio_risk, "realized_pnl", 0.0))
+                )
+            risk_amount = sizing_equity * self._risk_per_trade_pct()
             if max_rupee_risk_cap is not None and max_rupee_risk_cap > 0:
                 risk_amount = min(risk_amount, max_rupee_risk_cap)
             if is_expiry:

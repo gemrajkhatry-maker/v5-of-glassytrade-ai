@@ -991,11 +991,38 @@ class DhanAuthProvider(IAuthProvider):
                 logger.debug("No .env file found, skipping token persistence")
                 return
 
-            set_key(env_file, "DHAN_ACCESS_TOKEN", access_token)
-            set_key(env_file, "DHAN_ACCESS_TOKEN_SAVED_AT", str(int(time.time())))
+            # Atomic write: set_key mutates its target in place; running it on
+            # the live .env risks a crash mid-write corrupting every secret.
+            # Apply both keys to a STAGING COPY, then atomically rename over
+            # the real file. The real .env is only ever replaced wholesale.
+            import os as _os
+            import shutil
+            import tempfile
+
+            env_path = Path(env_file)
+            stage_dir = tempfile.mkdtemp(dir=str(env_path.parent))
+            try:
+                stage = Path(stage_dir) / ".env"
+                shutil.copy2(env_path, stage)
+                set_key(str(stage), "DHAN_ACCESS_TOKEN", access_token)
+                set_key(
+                    str(stage), "DHAN_ACCESS_TOKEN_SAVED_AT", str(int(time.time())),
+                )
+                staged_text = stage.read_text(encoding="utf-8")
+            finally:
+                shutil.rmtree(stage_dir, ignore_errors=True)
+
+            with tempfile.NamedTemporaryFile(
+                "w", encoding="utf-8", delete=False, dir=str(env_path.parent),
+                prefix=".env.", suffix=".tmp",
+            ) as tmp:
+                tmp.write(staged_text)
+                tmp_path = Path(tmp.name)
+            _os.replace(tmp_path, env_path)  # atomic on POSIX and Windows
+
             load_dotenv(env_file, override=True)
             os.environ["DHAN_ACCESS_TOKEN"] = access_token
-            logger.info("Token saved to .env")
+            logger.info("Token saved to .env (atomic write)")
         except Exception as e:
             logger.warning(f"Failed to save token to .env: {e}")
 

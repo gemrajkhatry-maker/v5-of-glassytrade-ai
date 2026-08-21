@@ -202,7 +202,8 @@ class QuantEngine:
         # is "daily_risk:SYMBOL:2026-08-17" — NOT "daily_risk:SYMBOL:None".
         # _session_date is always None at __init__ time (set on first bar), so
         # we pass None here and SessionRisk._today() fills it correctly.
-        self._risk = SessionRisk(storage=self._session_levels, symbol=self.symbol)
+        self._risk = SessionRisk(storage=self._session_levels, symbol=self.symbol,
+                                 portfolio_risk=self._portfolio_risk)
         self._bus = EventBus()
         self._projector = StateProjector()
         self._journal = Journal(path=journal_path) if journal_path else None
