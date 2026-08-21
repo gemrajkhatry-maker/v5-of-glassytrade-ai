@@ -8,7 +8,7 @@ Verifies that:
 """
 
 import pytest
-from quant.decision_context_builder import DecisionContextBuilder
+from quant.decision.context_builder import DecisionContextBuilder
 from quant.contracts.enums import MarketState
 from quant.bars import Bar
 

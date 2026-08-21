@@ -6,7 +6,7 @@ from quant.amt_engine import AMTEngine
 from quant.bars import Bar
 from quant.brokers.gateway import Tick
 from quant.decision.decision_service import DecisionService
-from quant.decision_context_builder import DecisionContextBuilder
+from quant.decision.context_builder import DecisionContextBuilder
 from quant.execution.exits import ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.risk import SessionRisk

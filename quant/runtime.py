@@ -30,7 +30,7 @@ from quant.contracts.value_objects import OrderBook, OrderBookLevel
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService
 from quant.decision.signal_builder import clamp_quantity
-from quant.decision_context_builder import DecisionContextBuilder
+from quant.decision.context_builder import DecisionContextBuilder
 from quant.position_manager import PositionManager
 from quant.session_gates import (
     bar_epoch_ms as _bar_epoch_ms,

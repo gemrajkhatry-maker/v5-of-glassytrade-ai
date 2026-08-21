@@ -2,7 +2,7 @@ from quant.amt_engine import AMTEngine
 from quant.amt.dto import amt_result_to_dto
 from quant.bars import Bar
 from quant.decision.decision_service import DecisionService
-from quant.decision_context_builder import DecisionContextBuilder
+from quant.decision.context_builder import DecisionContextBuilder
 
 
 def _session():

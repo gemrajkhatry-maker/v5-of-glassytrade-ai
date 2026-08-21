@@ -1,5 +1,6 @@
 """Metrics Collector — tracks signal counts, P&L, cache hits.
 
+Counterpart: app/core/metrics.py (Prometheus registry; do not merge — different purpose).
 Exposes metrics as a dict for the /api/v1/metrics endpoint.
 """
 
