@@ -279,9 +279,14 @@ class QuantEngine:
                         self._option_amt_dto = self._option_amt_engine.analyze(option_bar)
                         self._emit_merged_amt(self._option_amt_dto, option_bar.time)
 
-                # 2. Underlying futures ticks feed the underlying aggregator and AMT engine
+                # 2. Underlying futures ticks feed the underlying aggregator and AMT engine.
+                # Non-blocking drain: a blocking read here would strand this
+                # thread inside the futures queue whenever the futures feed is
+                # quieter than the option feed — option ticks would pile up
+                # unread and every snapshot would emit the UNDERLYING's AMT
+                # (profile/POC at futures scale) instead of the option's own.
                 if self._underlying_aggregator is not None:
-                    utick = self._underlying_gateway.next_tick()
+                    utick = self._underlying_gateway.try_next_tick()
                     while utick is not None:
                         ubar = self._underlying_aggregator.add_tick(utick)
                         self._amt_engine.on_tick(utick, self._underlying_aggregator.current_bar)
@@ -292,7 +297,7 @@ class QuantEngine:
                                 self._decide(self._underlying_amt_dto, ubar)
                             else:
                                 self._manage_exit(self._underlying_amt_dto, ubar)
-                        utick = self._underlying_gateway.next_tick()
+                        utick = self._underlying_gateway.try_next_tick()
             else:
                 bar = self._aggregator.add_tick(tick)
                 self._amt_engine.on_tick(tick, self._aggregator.current_bar)

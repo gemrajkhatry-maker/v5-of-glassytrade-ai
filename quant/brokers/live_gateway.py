@@ -29,6 +29,15 @@ class LiveGateway:
     def next_tick(self) -> Tick | None:
         return self._reader_queue.get() if self._reader_queue is not None else self._feed.next_tick(self._symbol)
 
+    def try_next_tick(self) -> Tick | None:
+        """Non-blocking read (None when no tick is available right now)."""
+        if self._reader_queue is not None:
+            try:
+                return self._reader_queue.get_nowait()
+            except Exception:
+                return None
+        return self._feed.try_next_tick(self._symbol)
+
     def close(self) -> None:
         if self._reader_queue is not None:
             self._feed.remove_reader(self._symbol, self._reader_queue)

@@ -205,6 +205,16 @@ class MultiplexedMarketFeed:
             return None
         return q.get()
 
+    def try_next_tick(self, symbol: str) -> Tick | None:
+        """Non-blocking read for one symbol (None when queue is empty)."""
+        q = self._queues.get(symbol)
+        if q is None:
+            return None
+        try:
+            return q.get_nowait()
+        except queue.Empty:
+            return None
+
     def add_reader(self, symbol: str) -> queue.Queue:
         """Return a non-consuming copy stream for a second engine."""
         reader = queue.Queue()

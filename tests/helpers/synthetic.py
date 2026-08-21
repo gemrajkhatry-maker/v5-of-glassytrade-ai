@@ -21,3 +21,7 @@ class SyntheticGateway:
         tick = self._ticks[self._index]
         self._index += 1
         return tick
+
+    def try_next_tick(self) -> Tick | None:
+        """Non-blocking read — same semantics as next_tick for a replay."""
+        return self.next_tick()
