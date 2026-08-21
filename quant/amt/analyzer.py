@@ -326,15 +326,23 @@ class AMTAnalyzer:
         (consecutive same-direction candles from the end). The strict displacement
         flag is set when the move also meets range expansion criteria.
         """
-        empty = {
-            "has_displacement": False,
-            "profile": [],
-            "lvns": [],
-            "poc": 0.0,
-            "vah": 0.0,
-            "val": 0.0,
-            "swing_delta": 0.0,
-        }
+        def _leg_result(*, has_displacement: bool, profile: list,
+                        lvns: list, poc: float, vah: float, val: float,
+                        swing_delta: float) -> dict:
+            """Single constructor for the leg-result shape — the former
+            inline literals had divergent key sets (audit SMELL-9)."""
+            return {
+                "has_displacement": has_displacement,
+                "profile": profile,
+                "lvns": lvns,
+                "poc": poc,
+                "vah": vah,
+                "val": val,
+                "swing_delta": swing_delta,
+            }
+
+        empty = _leg_result(has_displacement=False, profile=[], lvns=[],
+                            poc=0.0, vah=0.0, val=0.0, swing_delta=0.0)
         if len(data) < 5:
             return empty
 
@@ -362,15 +370,11 @@ class AMTAnalyzer:
         is_disp = detect_displacement(data, self.config.DISPLACEMENT_MULTIPLIER)
         leg_profile = create_profile(leg_candles, buckets=DELTA_PROFILE_BUCKETS)
         if len(leg_profile) < 3:
-            return {
-                "has_displacement": is_disp,
-                "profile": leg_profile,
-                "lvns": [],
-                "poc": 0.0,
-                "vah": 0.0,
-                "val": 0.0,
-                "swing_delta": sum(c.delta for c in leg_candles),
-            }
+            return _leg_result(
+                has_displacement=is_disp, profile=leg_profile, lvns=[],
+                poc=0.0, vah=0.0, val=0.0,
+                swing_delta=sum(c.delta for c in leg_candles),
+            )
         leg_lvns = find_lvns(leg_profile, self.config)
 
         # POC — VWAP tie-break (matches session logic)
@@ -427,15 +431,15 @@ class AMTAnalyzer:
         half_step = step / 2
         leg_vah = leg_profile[up_idx].price + half_step
         leg_val = leg_profile[down_idx].price - half_step
-        return {
-            "has_displacement": is_disp,
-            "profile": leg_profile,
-            "lvns": leg_lvns,
-            "poc": leg_poc,
-            "vah": leg_vah,
-            "val": leg_val,
-            "swing_delta": sum(c.delta for c in leg_candles),
-        }
+        return _leg_result(
+            has_displacement=is_disp,
+            profile=leg_profile,
+            lvns=leg_lvns,
+            poc=leg_poc,
+            vah=leg_vah,
+            val=leg_val,
+            swing_delta=sum(c.delta for c in leg_candles),
+        )
 
     def _update_session_vwap(self, current, typical_price) -> float:
         """Update session VWAP with session boundary detection and accumulation.
