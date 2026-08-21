@@ -1,0 +1,80 @@
+{
+ "_symbol": "S",
+ "agentDecision": {
+  "direction": "LONG",
+  "latencyUs": 0,
+  "modelLabel": "Triple-A",
+  "rationale": "Triple-A",
+  "regime": "AGGRESSION",
+  "sizeFraction": 0.0,
+  "timing": ""
+ },
+ "amt": {
+  "poc": 100.2
+ },
+ "depth": {
+  "asks": [],
+  "bids": []
+ },
+ "ltp": 100.5,
+ "oi": 0.0,
+ "portfolio": {
+  "balance": 1000000.0,
+  "closedTrades": [],
+  "equity": 1000000.0,
+  "leverage": 10,
+  "positions": [
+   {
+    "currentPrice": 100.5,
+    "entryPrice": 100.5,
+    "entryTime": "2026-08-21T09:15:00+05:30",
+    "id": "2026-08-21T09:15:00+05:30",
+    "pnl": 0.0,
+    "side": "LONG",
+    "size": 10.0,
+    "source": "AMT",
+    "status": "OPEN",
+    "stopLoss": 99.0,
+    "symbol": "S",
+    "takeProfit": 102.5
+   }
+  ]
+ },
+ "quantDecision": {
+  "approved": true,
+  "blockReasons": [],
+  "gateResults": [],
+  "modelLabel": "Triple-A",
+  "phase": "AGGRESSION",
+  "reason": "Triple-A",
+  "signal": {
+   "entry": 100.5,
+   "modelLabel": "Triple-A",
+   "rr": 2.0,
+   "sl": 99.0,
+   "tp": 102.5,
+   "type": "LONG"
+  }
+ },
+ "riskState": {
+  "consecutiveLosses": 0,
+  "dailyPnl": 0.0,
+  "driftAlert": false,
+  "driftMessage": "",
+  "equity": 1000000.0,
+  "haltReason": "",
+  "halted": false,
+  "tradesToday": 0
+ },
+ "tick": {
+  "close": 100.5,
+  "delta": 0.0,
+  "high": 101.0,
+  "low": 99.0,
+  "open": 100.0,
+  "takerBuyVolume": 0.0,
+  "time": "2026-08-21T09:15:00+05:30",
+  "volume": 10.0,
+  "vwap": 0.0
+ }
+}
