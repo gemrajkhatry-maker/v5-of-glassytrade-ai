@@ -94,9 +94,11 @@ class QuantEngine:
         session_levels: SessionLevelStore | None = None,
         underlying_gateway=None,
         strategy: TradingStrategy | None = None,
+        portfolio_risk=None,
     ) -> None:
         self._gateway = gateway
         self._underlying_gateway = underlying_gateway
+        self._portfolio_risk = portfolio_risk  # shared PortfolioRiskAuthority | None
         self.symbol = symbol
         self._tick_size = tick_size
         # Session market for the Fabio phase gates: NSE closes 15:30, MCX
@@ -469,6 +471,21 @@ class QuantEngine:
             quantity = clamp_quantity(
                 self._risk.position_size(signal.entry, signal.sl, lot_size=self._oms.lot_size)
             )
+            # Portfolio-level ceiling: aggregate open risk across ALL engines.
+            # Per-engine SessionRisk stays authoritative for its own halts;
+            # this is the cross-engine backstop (8 engines x 0.5% each would
+            # otherwise risk 4% of capital simultaneously).
+            if self._portfolio_risk is not None:
+                trade_risk = abs(float(signal.entry) - float(signal.sl)) * max(1.0, quantity)
+                ok, why = self._portfolio_risk.can_accept(trade_risk)
+                if not ok:
+                    logger.warning(
+                        "🛑 [PORTFOLIO RISK] %s: entry rejected — %s",
+                        self.symbol, why,
+                    )
+                    return
+                self._portfolio_risk.register_open(trade_risk)
+                self._open_trade_risk = trade_risk
             position = self._oms.submit(signal, quantity)
             self._entry_bar_index = self._bar_index
             self._position = position
@@ -517,6 +534,12 @@ class QuantEngine:
             self._pyramid_positions = pm.pyramid_positions
             self._pyramid_count = pm.pyramid_count
             self._last_close_bar_index = self._bar_index
+            if self._portfolio_risk is not None:
+                self._portfolio_risk.record_close(
+                    getattr(self, "_open_trade_risk", 0.0),
+                    float(getattr(closed, "pnl", 0.0) or 0.0),
+                )
+                self._open_trade_risk = 0.0
 
     def _check_pyramid(self, amt_dto: dict, bar) -> None:
         pm = self._get_position_manager()

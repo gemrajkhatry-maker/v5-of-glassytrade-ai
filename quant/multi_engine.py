@@ -144,6 +144,14 @@ class QuantCoordinator:
         # Lifecycle ops are rare admin actions; coarse serialization is the
         # correct ownership boundary here.
         self._lifecycle_lock = threading.RLock()
+        # Shared cross-engine risk ceiling: every engine registers entries and
+        # exits against ONE authority so the aggregate book can't risk more
+        # than the portfolio limit (8 engines x 0.5% each would otherwise
+        # simultaneously risk 4% of capital).
+        from quant.execution.portfolio_risk import PortfolioRiskAuthority
+        self._portfolio_risk = PortfolioRiskAuthority(
+            starting_equity=float(self.config.get("starting_equity", 1_000_000.0)),
+        )
         self.started = False
 
     def start(self) -> None:
@@ -365,6 +373,7 @@ class QuantCoordinator:
             session_levels=self._session_levels,
             underlying_gateway=underlying_gateway,
             strategy=self._strategy,
+            portfolio_risk=self._portfolio_risk,
         )
         thread = threading.Thread(
             target=engine.run, daemon=True, name=f"quant-{symbol}"
