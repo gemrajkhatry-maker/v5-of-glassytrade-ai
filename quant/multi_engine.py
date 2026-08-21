@@ -136,36 +136,48 @@ class QuantCoordinator:
         self._threads: dict[str, threading.Thread] = {}
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        # Serializes LIFECYCLE TRANSITIONS (start/rescan/switch/stop). These
+        # compose multiple steps over the shared dicts + threads above — a
+        # dict-level lock cannot close the check-then-act window between them
+        # (two concurrent switch_symbol(old, …) calls both passed the
+        # membership check and spawned DUPLICATE engines for the new symbol).
+        # Lifecycle ops are rare admin actions; coarse serialization is the
+        # correct ownership boundary here.
+        self._lifecycle_lock = threading.RLock()
         self.started = False
 
     def start(self) -> None:
-        symbols = self._scan()
-        self._feed.set_symbols(symbols)
-        for symbol in symbols:
-            self._spawn_engine(symbol)
-        self.started = True
+        with self._lifecycle_lock:
+            symbols = self._scan()
+            self._feed.set_symbols(symbols)
+            for symbol in symbols:
+                self._spawn_engine(symbol)
+            self.started = True
 
     def rescan(self) -> list[str]:
-        self._stop_engines()
-        symbols = self._scan(force=True)
-        self._feed.set_symbols(symbols)
-        for symbol in symbols:
-            self._spawn_engine(symbol)
-        return symbols
+        with self._lifecycle_lock:
+            self._stop_engines()
+            symbols = self._scan(force=True)
+            self._feed.set_symbols(symbols)
+            for symbol in symbols:
+                self._spawn_engine(symbol)
+            return symbols
 
     def switch_symbol(self, old: str, new: str) -> bool:
-        if old not in self._engines:
-            return False
-        self._stop_engine(old)
-        self._feed.subscribe(new)
-        self._spawn_engine(new)
-        return True
+        with self._lifecycle_lock:
+            if old not in self._engines:
+                return False
+            self._stop_engine(old)
+            self._feed.subscribe(new)
+            self._spawn_engine(new)
+            return True
 
     def stop(self) -> None:
-        self._stop.set()
-        self._stop_engines()
-        self._feed.close()
-        self.started = False
+        with self._lifecycle_lock:
+            self._stop.set()
+            self._stop_engines()
+            self._feed.close()
+            self.started = False
 
     def snapshot(self, symbol: str) -> dict:
         with self._lock:

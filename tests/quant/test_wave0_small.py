@@ -19,6 +19,8 @@ def test_coordinator_stop_shuts_down_engines_and_feed():
     coord._stop.set = MagicMock()
     coord._stop_engines = MagicMock()
     coord._feed = MagicMock(close=MagicMock())
+    import threading as _th
+    coord._lifecycle_lock = _th.RLock()
     coord.started = True
 
     coord.stop()

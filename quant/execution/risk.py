@@ -94,6 +94,10 @@ class SessionRisk:
                 self._trades_today = 0
                 self._halted = False
                 self._halt_reason = ""
+                # Persist the reset NOW — otherwise the corrupt value sits in
+                # the store until the next trade and any parallel reader
+                # (another engine, a restart) re-inherits it.
+                self._save()
             self._equity = self._starting_equity + self._daily_pnl
         except Exception:
             pass  # corrupt/absent store must not inherit a phantom halt

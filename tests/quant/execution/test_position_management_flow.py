@@ -1,6 +1,7 @@
 # tests/quant/execution/test_position_management_flow.py
 """Tests for 7-Level Deterministic Exit Priority and Position Management Flow (Task 7)."""
 
+import uuid
 import pytest
 from quant.execution.exits import ExitEngine, ExitDecision
 from quant.contracts.enums import MarketState
@@ -21,6 +22,8 @@ class DummyPosition:
     size = 1.0
     current_stop = 95.0
     unrealized_r = 0.0
+    # ExitEngine keys trail/BE state by position._id (stable UUID), not id().
+    _id = str(uuid.uuid4())
 
 
 def test_spread_emergency_precedes_all_other_exits():
@@ -89,7 +92,7 @@ def test_breakeven_arms_at_point_eight_r():
         bar_close=104.0,
     )
     assert dec.should_exit is False
-    assert engine._breakeven.get(id(pos)) == 100.0
+    assert engine._breakeven.get(pos._id) == 100.0
 
 
 def test_trailing_stop_ratchets_above_one_r():
@@ -108,7 +111,7 @@ def test_trailing_stop_ratchets_above_one_r():
         bar_close=106.0,
     )
     assert dec.should_exit is False
-    tr = engine._trail.get(id(pos))
+    tr = engine._trail.get(pos._id)
     assert tr is not None
     assert tr.active is True
     assert tr.stop >= 104.0
