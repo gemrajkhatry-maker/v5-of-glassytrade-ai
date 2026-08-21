@@ -92,10 +92,17 @@ async def health_check(
         try:
             started = bool(getattr(coordinator, "started", False))
             symbols = list(coordinator.symbols() or [])
+            crashed = []
+            if started and hasattr(coordinator, "crashed_engines"):
+                try:
+                    crashed = coordinator.crashed_engines()
+                except Exception:
+                    logger.exception("Health check: crashed_engines failed")
             checks["coordinator"] = {
                 "started": started,
                 "symbols": symbols,
-                "status": "ok" if started else "not_started",
+                "crashedEngines": crashed,
+                "status": "degraded" if crashed else ("ok" if started else "not_started"),
             }
         except Exception as e:
             logger.warning("Health check: coordinator check failed: %s", e)

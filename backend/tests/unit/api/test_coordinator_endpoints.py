@@ -115,6 +115,7 @@ def test_health_includes_coordinator_check(client):
     assert checks["coordinator"] == {
         "started": True,
         "symbols": ["SYM"],
+        "crashedEngines": [],  # F1 liveness surface (engine crash guard)
         "status": "ok",
     }
 

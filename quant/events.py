@@ -124,6 +124,23 @@ class EventBus:
         handlers.sort(key=lambda x: x[0], reverse=True)
 
     def publish(self, event: Event) -> None:
-        """Publish an event to all subscribed handlers."""
+        """Publish an event to all subscribed handlers.
+
+        Handler isolation: one failing handler MUST NOT poison later handlers
+        or propagate into the publisher (proven empirically: a journal disk-
+        full error killed the whole engine thread because the journal
+        subscriber shares this bus). Failures are logged with the event type
+        so they stay visible; the event stream continues.
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
         for _, handler in self._handlers.get(type(event), ()):
-            handler(event)
+            try:
+                handler(event)
+            except Exception:
+                logger.exception(
+                    "EventBus handler %r failed for %s — continuing",
+                    getattr(handler, "__name__", repr(handler)),
+                    type(event).__name__,
+                )

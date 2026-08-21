@@ -131,6 +131,7 @@ class QuantEngine:
         # memory-only store is used when none is injected (tests/replay).
         self._session_levels = session_levels or SessionLevelStore()
         self._last_depth: OrderBook | None = None
+        self._crashed: bool = False
         # AMT analysis engine — owns the candle ring, incremental profile,
         # analyzer, and seed logic. Receives callbacks for depth and risk PnL.
         self._option_amt_engine = None
@@ -244,7 +245,31 @@ class QuantEngine:
 
     def run(self, max_steps: int | None = None) -> list[Event]:
         """Consume ticks from the gateway, drive the full pipeline, and return
-        the event trace. Deterministic: same ticks -> same trace."""
+        the event trace. Deterministic: same ticks -> same trace.
+
+        Crash containment: the coordinator runs this on a bare thread with no
+        supervision — an unguarded exception here (e.g. OMS failure, journal
+        disk-full) silently killed the thread and the symbol stopped trading
+        with no signal anywhere (proven empirically). The guard converts a
+        thread death into a loud, logged failure; the engine stays dead by
+        design (fail-stop for trading state) but the coordinator's liveness
+        check now sees it."""
+        global _UNDERLYING_WARNED
+        try:
+            return self._run_inner(max_steps)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).critical(
+                "ENGINE THREAD DIED — symbol %s stopped trading. "
+                "positions_open=%s last_bar_index=%s",
+                self.symbol, self._position is not None, self._bar_index,
+                exc_info=True,
+            )
+            self._crashed = True
+            raise
+
+    def _run_inner(self, max_steps: int | None = None) -> list[Event]:
         global _UNDERLYING_WARNED
         if not self._subscribed:
             self._gateway.subscribe(self.symbol)

@@ -106,3 +106,71 @@ def test_rescan_and_switch_do_not_interleave(monkeypatch):
     if ok and "CRUDEOIL 17 SEP 8300 CALL" not in syms:
         assert "SILVERM AUG FUT" in syms, "rescan must have run after switch"
     coord.stop()
+
+
+def test_engine_survives_handler_exception_via_bus_isolation():
+    """F2: a failing bus handler (e.g. journal disk-full) must not kill the
+    engine thread nor block lower-priority handlers."""
+    from quant.events import BarClosed, EventBus
+    from quant.bars import Bar
+
+    bus = EventBus()
+    ran = []
+    bus.subscribe(BarClosed, lambda e: (_ for _ in ()).throw(RuntimeError("boom")),
+                  priority=10)
+    bus.subscribe(BarClosed, lambda e: ran.append("after"), priority=0)
+
+    bus.publish(BarClosed(symbol="S", time="t",
+                          bar=Bar(time="t", open=1, high=1, low=1, close=1, volume=1)))
+    assert ran == ["after"], "handler isolation broken"
+
+
+def test_engine_crash_is_flagged_for_liveness():
+    """F1: an exception escaping run() must set _crashed so the coordinator's
+    health surface can report the dead symbol instead of failing silently."""
+    from quant.brokers.gateway import Tick
+    from quant.runtime import QuantEngine
+
+    class GW:
+        def __init__(self):
+            self._t = [Tick(str(i), 100.0, 10, 5, 5) for i in range(4)]
+
+        def subscribe(self, s):
+            pass
+
+        def next_tick(self):
+            return self._t.pop(0) if self._t else None
+
+        def try_next_tick(self):
+            return self.next_tick()
+
+    # Ticks must span >60s so a bar closes and the decide path fires.
+    class GW2:
+        def __init__(self):
+            self._t = [Tick(str(i * 61), 100.0, 10, 5, 5) for i in range(4)]
+
+        def subscribe(self, s):
+            pass
+
+        def next_tick(self):
+            return self._t.pop(0) if self._t else None
+
+        def try_next_tick(self):
+            return self.next_tick()
+
+    eng = QuantEngine(GW2(), "TEST CALL", interval_seconds=60)
+
+    def boom(self, amt_dto, bar):
+        raise RuntimeError("decision explosion")
+
+    original_decide = QuantEngine._decide
+    QuantEngine._decide = boom
+    try:
+        import threading
+        t = threading.Thread(target=eng.run, daemon=True)
+        t.start()
+        t.join(timeout=10)
+    finally:
+        QuantEngine._decide = original_decide
+    assert not t.is_alive()
+    assert eng._crashed is True, "crash flag not set — liveness blind spot"

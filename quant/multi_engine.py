@@ -199,6 +199,18 @@ class QuantCoordinator:
         with self._lock:
             return list(self._engines.keys())
 
+    def crashed_engines(self) -> list[str]:
+        """Symbols whose engine thread died from an exception (F1 fix).
+
+        Exposed for the /health endpoint — a dead engine previously meant a
+        symbol silently stopped trading with no observable signal.
+        """
+        with self._lock:
+            return sorted(
+                sym for sym, eng in self._engines.items()
+                if getattr(eng, "_crashed", False)
+            )
+
     def check_spot_drift(self, underlying: str, spot_price: float) -> bool:
         """Detect when price moves > 1.5 strike intervals away from active option strikes."""
         from quant.amt.session.scanner import OptionScannerService
