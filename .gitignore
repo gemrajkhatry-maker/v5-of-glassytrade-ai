@@ -118,3 +118,4 @@ skills-lock.json
 .superpowers/
 .freebuff/
 backend/.active_contracts.json
+.worktrees/
