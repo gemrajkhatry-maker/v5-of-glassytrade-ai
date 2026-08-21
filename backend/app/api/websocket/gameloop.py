@@ -253,7 +253,11 @@ async def _coordinator_viewer_loop(
                 # which case the coordinator swaps its engine over to it.
                 if previous is not None and previous in symbols:
                     try:
-                        if coordinator.switch_symbol(previous, symbol):
+                        # switch_symbol joins engine threads (up to 1s) and may
+                        # touch the broker — never run that on the event loop.
+                        if await asyncio.to_thread(
+                            coordinator.switch_symbol, previous, symbol
+                        ):
                             resolved = symbol
                     except Exception:
                         logger.warning(

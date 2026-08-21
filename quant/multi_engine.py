@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import queue
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -19,7 +18,7 @@ from quant.brokers.live_gateway import LiveGateway
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 from quant.contracts.timezones import IST
 from quant.contracts.exchange_config import ExchangeConfig
-from quant.events import DecisionProduced, SignalApproved
+from quant.events import BarClosed
 from quant.runtime import QuantEngine
 from quant.session_levels import SessionLevelStore
 from quant.ws_adapter import view_state_to_ws
@@ -117,7 +116,7 @@ class QuantCoordinator:
     """Owns one :class:`QuantEngine` per scanned contract, all fed by a
     single multiplexed :class:`MultiplexedMarketFeed` — one WebSocket
     connection for every symbol (Dhan allows up to 1000 instruments per
-    connection). Plus a shared decision queue."""
+    connection)."""
 
     def __init__(self, market_data, broker=None, config=None, strategy=None) -> None:
         self.market_data = market_data
@@ -135,7 +134,6 @@ class QuantCoordinator:
         self._gateways: dict[str, LiveGateway] = {}
         self._underlying_gateways: dict[str, LiveGateway] = {}
         self._threads: dict[str, threading.Thread] = {}
-        self._decisions: queue.Queue = queue.Queue()
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self.started = False
@@ -179,9 +177,6 @@ class QuantCoordinator:
     def symbols(self) -> list[str]:
         with self._lock:
             return list(self._engines.keys())
-
-    def decisions(self) -> queue.Queue:
-        return self._decisions
 
     def check_spot_drift(self, underlying: str, spot_price: float) -> bool:
         """Detect when price moves > 1.5 strike intervals away from active option strikes."""
@@ -359,8 +354,6 @@ class QuantCoordinator:
             underlying_gateway=underlying_gateway,
             strategy=self._strategy,
         )
-        engine._bus.subscribe(DecisionProduced, self._on_decision)
-        engine._bus.subscribe(SignalApproved, self._on_decision)
         thread = threading.Thread(
             target=engine.run, daemon=True, name=f"quant-{symbol}"
         )
@@ -372,9 +365,6 @@ class QuantCoordinator:
                 self._underlying_gateways[symbol] = underlying_gateway
             self._threads[symbol] = thread
         return engine
-
-    def _on_decision(self, event) -> None:
-        self._decisions.put(event)
 
     def _stop_engine(self, symbol: str) -> None:
         with self._lock:

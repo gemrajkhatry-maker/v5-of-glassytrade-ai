@@ -91,11 +91,17 @@ E = TypeVar("E", bound=Event)
 
 class EventBus:
     """Synchronous event bus with priority support.
-    
+
     Handlers are invoked in priority order (higher priority first) within
     each event type. Default priority is 0. Critical handlers (position
     tracking, risk) should use higher priority; non-critical handlers
     (journal, UI) should use lower priority.
+
+    Threading contract: all ``subscribe`` calls happen BEFORE engines start
+    their run threads; subscribing while another thread may ``publish`` is
+    unsupported by design (handler lists are intentionally lock-free on the
+    publish hot path). Engine-owned buses only ever see publishes from their
+    own engine thread, serialized through ``QuantEngine._emit_lock``.
     """
 
     def __init__(self) -> None:
