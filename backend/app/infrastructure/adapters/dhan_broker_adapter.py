@@ -4,22 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
-import pathlib
-import sys
 import threading
 import time
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-# Ensure the brokers package at repository root is importable from backend modules.
-_this_file = pathlib.Path(__file__).resolve()
-for _ancestor in _this_file.parents:
-    if (_ancestor / "brokers").is_dir():
-        root = str(_ancestor)
-        if root not in sys.path:
-            sys.path.insert(0, root)
-        break
+from app.infrastructure.adapters._dhan_common import _exchange_enum, classify_symbol  # noqa: F401  (bootstrap + re-export)
 
 from app.config import Configuration, settings
 from quant.contracts.numeric import to_float
@@ -39,21 +30,6 @@ from brokers.broker.dhan.application.broker import DhanBroker
 from brokers.broker.dhan.domain.errors import DhanError
 
 logger = logging.getLogger(__name__)
-
-
-def _exchange_enum(exchange_str: str | None) -> Exchange:
-    mapping = {
-        "NSE": Exchange.NSE,
-        "NFO": Exchange.NFO,
-        "MCX": Exchange.MCX,
-        "BSE": Exchange.NSE,
-        "INDEX": Exchange.NSE,
-    }
-    result = mapping.get((exchange_str or "NSE").upper())
-    if result is None:
-        logger.warning("Unknown exchange '%s', defaulting to NSE", exchange_str)
-        result = Exchange.NSE
-    return result
 
 
 def _to_decimal(value: Any, default: str = "0") -> Decimal:
@@ -340,13 +316,7 @@ class DhanBrokerAdapter(IBroker):
                 exchange_hint = _prefix.strip()
             clean_symbol = _symbol.strip()
 
-        sym_upper = clean_symbol.upper()
-        is_option = (
-            ("CALL" in sym_upper)
-            or ("PUT" in sym_upper)
-            or sym_upper.endswith("CE")
-            or sym_upper.endswith("PE")
-        )
+        is_option, _is_call, _is_put, is_mcx = classify_symbol(clean_symbol)
         option_type = meta.get("option_type")
         if option_type is not None and not isinstance(option_type, str):
             option_type = str(option_type)
@@ -360,7 +330,6 @@ class DhanBrokerAdapter(IBroker):
             )
 
         if is_option:
-            is_mcx = ExchangeConfig.for_exchange("MCX").is_underlying(sym_upper)
             exchange = _exchange_enum("MCX" if is_mcx else "NFO")
             return Instrument(
                 symbol=clean_symbol,

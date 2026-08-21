@@ -11,22 +11,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import pathlib
-import re
-import sys
 import threading
 import time
 from dataclasses import asdict
 from datetime import date, datetime, timedelta, timezone
 from typing import AsyncIterator
-# Discovers the root by walking up until we find the brokers/ directory.
-_here = pathlib.Path(__file__).resolve()
-for _ancestor in _here.parents:
-    if (_ancestor / "brokers").is_dir():
-        if str(_ancestor) not in sys.path:
-            sys.path.insert(0, str(_ancestor))
-        break
 
+from app.infrastructure.adapters._dhan_common import _exchange_enum, classify_symbol
 from quant.contracts.value_objects import OHLC, OrderBook, OrderBookLevel
 from quant.contracts.ports.market_data import IMarketData
 from quant.contracts.market_data_utils import compute_vwap_approx, estimate_tick_delta
@@ -45,23 +36,6 @@ def _delta_proxy(
 
 
 # ---------------------------------------------------------------------------
-
-
-def _exchange_enum(exchange_str: str | None):
-    """Convert exchange string to brokers Exchange enum."""
-    from brokers.broker.types import Exchange
-
-    mapping = {
-        "NSE": Exchange.NSE,
-        "NFO": Exchange.NFO,
-        "MCX": Exchange.MCX,
-        "BSE": Exchange.NSE,  # fallback
-    }
-    result = mapping.get((exchange_str or "NSE").upper())
-    if result is None:
-        logger.warning("Unknown exchange '%s', defaulting to NSE", exchange_str)
-        result = Exchange.NSE
-    return result
 
 
 class DhanMarketDataAdapter(IMarketData):
@@ -189,19 +163,8 @@ class DhanMarketDataAdapter(IMarketData):
         from brokers.broker.entities import Instrument, OptionType
 
         sym_upper = symbol.upper()
-        # Anchored detection (trailing CALL/PUT word, or digit-suffixed CE/PE)
-        # so an underlying name containing CALL/PUT/CE/PE as a substring can
-        # never mislabel the contract or misroute the exchange segment.
-        is_call = sym_upper.endswith("CALL") or bool(
-            re.search(r"\d+\s*CE$", sym_upper)
-        )
-        is_put = sym_upper.endswith("PUT") or bool(
-            re.search(r"\d+\s*PE$", sym_upper)
-        )
-        is_option = is_call or is_put
+        is_option, is_call, is_put, is_mcx = classify_symbol(symbol)
         if is_option:
-            # Detect exchange from the underlying name embedded in the symbol
-            is_mcx = ExchangeConfig.for_exchange("MCX").is_underlying(sym_upper)
             exchange = _exchange_enum("MCX" if is_mcx else "NFO")
             option_type = OptionType.CALL if is_call else OptionType.PUT
             return Instrument(symbol=symbol, exchange=exchange, option_type=option_type)

@@ -47,3 +47,19 @@ class TestDomainInfrastructureBoundary:
             if "app.infrastructure" in mod
         ]
         assert violations == [], f"domain/ imports infrastructure/: {violations}"
+
+
+ADAPTERS_DIR = BACKEND / "infrastructure" / "adapters"
+
+
+class TestBrokersImportBoundary:
+    """Only infrastructure/adapters may import the root-level brokers package."""
+
+    def test_brokers_imports_only_in_adapters(self):
+        violations = [
+            (f.relative_to(BACKEND), mod)
+            for f, mod in _collect_imports(BACKEND)
+            if (mod == "brokers" or mod.startswith("brokers."))
+            and ADAPTERS_DIR not in f.parents
+        ]
+        assert violations == [], f"brokers/ imported outside adapters/: {violations}"
