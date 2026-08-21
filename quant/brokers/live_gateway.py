@@ -18,15 +18,19 @@ from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 class LiveGateway:
     """BrokerGateway protocol backed by a shared MultiplexedMarketFeed."""
 
-    def __init__(self, feed: MultiplexedMarketFeed, symbol: str) -> None:
+    def __init__(self, feed: MultiplexedMarketFeed, symbol: str, reader_queue=None) -> None:
         self._feed = feed
         self._symbol = symbol
+        self._reader_queue = reader_queue
 
     def subscribe(self, symbol: str) -> None:
         self._feed.subscribe(symbol)
 
     def next_tick(self) -> Tick | None:
-        return self._feed.next_tick(self._symbol)
+        return self._reader_queue.get() if self._reader_queue is not None else self._feed.next_tick(self._symbol)
 
     def close(self) -> None:
-        self._feed.unsubscribe(self._symbol)
+        if self._reader_queue is not None:
+            self._feed.remove_reader(self._symbol, self._reader_queue)
+        else:
+            self._feed.unsubscribe(self._symbol)

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 
@@ -140,9 +140,7 @@ describe('MarketSidebar to ChartScene Integration', () => {
     expect(screen.getByText('STANDARD CANDLESTICKS')).toBeInTheDocument();
   });
 
-  it('updates activeSymbol in ChartScene when MarketSidebar selection changes', async () => {
-    const user = userEvent.setup();
-    
+  it('updates activeSymbol in ChartScene when MarketSidebar selection changes', () => {
     const { rerender } = render(
       <>
         <MarketSidebar 
@@ -169,7 +167,7 @@ describe('MarketSidebar to ChartScene Integration', () => {
     expect(items.length).toBe(2);
     
     // First click selects NIFTY (already active), second click selects BANKNIFTY
-    await user.click(items[1]);
+    fireEvent.click(items[1]);
 
     // Verify onSelect was called with BANKNIFTY
     expect(onSelectCallback).toHaveBeenCalled();

@@ -76,7 +76,7 @@ describe('AIAnalysisPanel quant decision precedence (F-07)', () => {
     approved: true,
     reason: 'Triple-A',
     phase: 'AGGRESSION',
-    signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, confidence: 1.0 },
+    signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, modelLabel: 'Triple-A' },
   };
 
   const quantRejected: QuantDecisionAnalysis = {

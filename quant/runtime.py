@@ -116,6 +116,11 @@ class QuantEngine:
         # an ITM option never devolves into a futures position at expiry.
         self._contract_expiry = parse_contract_expiry(symbol)
         self._aggregator = BarAggregator(interval_seconds=interval_seconds)
+        self._underlying_aggregator = (
+            BarAggregator(interval_seconds=interval_seconds)
+            if self._underlying_gateway is not None
+            else None
+        )
         self._history_source = history_source
         # Phase 1 — prior-session levels + naked-POC tracking: the store
         # persists per-symbol {poc, vah, val} across sessions (shared by the
@@ -126,8 +131,12 @@ class QuantEngine:
         self._last_depth: OrderBook | None = None
         # AMT analysis engine — owns the candle ring, incremental profile,
         # analyzer, and seed logic. Receives callbacks for depth and risk PnL.
+        seed_symbol = (
+            getattr(self._underlying_gateway, "_symbol", None)
+            or symbol
+        )
         self._amt_engine = AMTEngine(
-            symbol=symbol,
+            symbol=seed_symbol,
             market=self._market,
             session_levels=self._session_levels,
             history_source=history_source,
@@ -227,16 +236,29 @@ class QuantEngine:
             if tick is None:
                 break
             steps += 1
-            # When an underlying feed is present, the option tick only drives
-            # quotes/depth/fills — auction bars come from the futures stream.
+            # When an underlying feed is present, option ticks aggregate into option candles,
+            # while underlying futures ticks feed the AMT auction structure engine.
             if self._underlying_gateway is not None:
-                utick = self._underlying_gateway.next_tick()
-                while utick is not None:
-                    bar = self._aggregator.add_tick(utick)
-                    self._amt_engine.on_tick(utick, self._aggregator.current_bar)
-                    if bar is not None:
-                        self._on_bar_closed(bar)
+                # 1. Option's OWN ticks feed the option's aggregator to form real option candles
+                option_bar = self._aggregator.add_tick(tick)
+                if option_bar is not None:
+                    self._bar_index += 1
+                    self._emit(BarClosed(symbol=self.symbol, time=option_bar.time, bar=option_bar))
+
+                # 2. Underlying futures ticks feed the underlying aggregator and AMT engine
+                if self._underlying_aggregator is not None:
                     utick = self._underlying_gateway.next_tick()
+                    while utick is not None:
+                        ubar = self._underlying_aggregator.add_tick(utick)
+                        self._amt_engine.on_tick(utick, self._underlying_aggregator.current_bar)
+                        if ubar is not None:
+                            amt_dto = self._amt_engine.analyze(ubar)
+                            self._emit(AmtUpdated(symbol=self.symbol, time=ubar.time, amt=amt_dto))
+                            if self._position is None:
+                                self._decide(amt_dto, ubar)
+                            else:
+                                self._manage_exit(amt_dto, ubar)
+                        utick = self._underlying_gateway.next_tick()
             else:
                 bar = self._aggregator.add_tick(tick)
                 self._amt_engine.on_tick(tick, self._aggregator.current_bar)
@@ -244,8 +266,7 @@ class QuantEngine:
                     self._on_bar_closed(bar)
 
             # Per-tick live LTP/OI/depth and real-time forming live candle —
-            # the gameloop polls snapshots at 0.5s so the sidebar, chart candle,
-            # and order-flow stay continuously live between 1-minute bar closes.
+            # the option's own forming candle is self._aggregator.current_bar
             self._projector.on_quote(
                 self.symbol, tick, current_bar=self._aggregator.current_bar
             )

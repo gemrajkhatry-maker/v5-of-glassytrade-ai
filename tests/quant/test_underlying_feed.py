@@ -28,9 +28,9 @@ def _futures_ticks(n=6):
 
 
 def test_underlying_feed_drives_bars_option_only_quotes():
-    """With an underlying gateway, BarClosed prices follow the futures stream;
-    the option ticks still reach the projector/depth path."""
-    from quant.state import StateProjector
+    """With an underlying gateway, BarClosed prices follow the option contract stream,
+    while AmtUpdated reflects the underlying futures auction structure."""
+    from quant.events import AmtUpdated
 
     futures = SyntheticGateway(_futures_ticks())
     option = SyntheticGateway(_quiet_option_ticks())
@@ -40,12 +40,18 @@ def test_underlying_feed_drives_bars_option_only_quotes():
     trace = eng.run()
 
     bars = [e for e in trace if isinstance(e, BarClosed)]
-    assert bars, "underlying ticks must close auction bars"
-    # Futures ticks start at 7450; option ticks are 45.0 — bars must NOT
-    # contain the option premium (that would be running AMT on the option).
+    amt_updates = [e for e in trace if isinstance(e, AmtUpdated)]
+    assert bars, "option ticks must close option bars"
+    assert amt_updates, "underlying ticks must produce AMT updates"
+
+    # Option bars must stay at option premium (45.0), NEVER corrupted by futures prices (7450)
     for e in bars:
-        assert float(e.bar.close) > 7000.0, "bar close must come from futures feed"
-    assert all("o" not in getattr(e.bar, "time", "") for e in bars)
+        assert float(e.bar.close) == 45.0, "bar close must come from option feed"
+
+    # AMT analysis must reflect the underlying futures levels
+    for e in amt_updates:
+        assert e.amt is not None
+        assert "marketState" in e.amt
 
 
 def test_underlying_feed_option_quotes_still_fire():

@@ -48,7 +48,10 @@ exchanges:
 scanner:
   mode: "mcx_options"
   underlyings: ["CRUDEOIL", "NATURALGAS", "GOLDM", "SILVERM"]
-  top_n: 4
+  # 4 futures are required (one engine per root), so top_n must exceed 4 or
+  # n_options = max(0, top_n - len(futures)) = 0 and no option contract is ever
+  # spawned — the scanner then silently serves futures only.
+  top_n: 8
   top_per_underlying: 2
   strikes_around_atm: 2
   expiry_index: 0

@@ -111,6 +111,20 @@ def test_packets_demuxed_into_per_symbol_queues():
         feed.close()
 
 
+def test_reader_receives_copy_without_stealing_primary_tick():
+    md = _FakeMarketData({"FUT": [_pkt("FUT", 1, 100.0)]})
+    feed = _make_feed(md)
+    reader = feed.add_reader("FUT")
+    feed.set_symbols(["FUT"])
+    try:
+        _wait_until(lambda: feed._queues["FUT"].qsize() >= 1 and reader.qsize() >= 1)
+        assert feed.next_tick("FUT").price == 100.0
+        assert reader.get().price == 100.0
+    finally:
+        feed.remove_reader("FUT", reader)
+        feed.close()
+
+
 def test_cumulative_volume_converted_to_per_tick_delta():
     """Dhan WS volume is cumulative — ticks must carry per-tick deltas.
 
@@ -351,3 +365,25 @@ def test_close_wakes_blocked_readers():
         if t.is_alive():
             feed.close()
             t.join(timeout=1.0)
+
+
+def test_close_wakes_blocked_dedicated_reader():
+    feed = _make_feed(_FakeMarketData({"FUT": []}))
+    reader = feed.add_reader("FUT")
+    result: list = []
+
+    def read_dedicated_queue():
+        result.append(reader.get())
+
+    t = threading.Thread(target=read_dedicated_queue)
+    t.start()
+    try:
+        _wait_until(t.is_alive)
+        feed.close()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "close() must wake a dedicated reader with None"
+        assert result == [None]
+    finally:
+        feed.remove_reader("FUT", reader)
+        t.join(timeout=1.0)
+        feed.close()

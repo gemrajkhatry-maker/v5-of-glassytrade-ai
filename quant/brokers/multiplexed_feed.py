@@ -54,6 +54,7 @@ class MultiplexedMarketFeed:
     def __init__(self, market_data) -> None:
         self._md = market_data
         self._queues: dict[str, queue.Queue] = {}
+        self._readers: dict[str, set[queue.Queue]] = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._resync = threading.Event()
@@ -204,6 +205,22 @@ class MultiplexedMarketFeed:
             return None
         return q.get()
 
+    def add_reader(self, symbol: str) -> queue.Queue:
+        """Return a non-consuming copy stream for a second engine."""
+        reader = queue.Queue()
+        with self._lock:
+            self._readers.setdefault(symbol, set()).add(reader)
+        return reader
+
+    def remove_reader(self, symbol: str, reader: queue.Queue) -> None:
+        with self._lock:
+            readers = self._readers.get(symbol)
+            if readers is not None:
+                readers.discard(reader)
+                if not readers:
+                    self._readers.pop(symbol, None)
+        reader.put(None)
+
     def close(self) -> None:
         """Stop the producer thread and unblock every reader."""
         self._stop.set()
@@ -213,8 +230,17 @@ class MultiplexedMarketFeed:
         with self._lock:
             self._prev_cum.clear()
             self._prev_price.clear()
-            for q in self._queues.values():
-                q.put(None)
+            queues = tuple(self._queues.values())
+            readers = tuple(
+                reader
+                for symbol_readers in self._readers.values()
+                for reader in symbol_readers
+            )
+            self._readers.clear()
+        for q in queues:
+            q.put(None)
+        for reader in readers:
+            reader.put(None)
 
     # ------------------------------------------------------------------
     # Producer
@@ -386,6 +412,8 @@ class MultiplexedMarketFeed:
         q = self._queues.get(symbol)
         if q is not None:
             q.put(tick)
+        for reader in tuple(self._readers.get(symbol, ())):
+            reader.put(tick)
 
     def _normalize_dhan_packet(self, pkt: dict, symbol: str) -> dict:
         """Translate Dhan-specific WebSocket packet fields to canonical names.

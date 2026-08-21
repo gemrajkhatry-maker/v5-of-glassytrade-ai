@@ -60,17 +60,20 @@ const hexToRgba = (hex: string, alpha: number) => {
 };
 
 /**
- * Shallow array equality check
- * Returns true if arrays have same length and all elements are strictly equal
- * O(n) complexity vs JSON.stringify O(n²)
+ * Profile levels are JSON-decoded on every WS snapshot, so object identity is
+ * never stable across ticks. Compare the rendered fields instead.
  */
-function arraysShallowEqual<T>(a: T[] | undefined, b: T[] | undefined): boolean {
+function arraysShallowEqual<T extends object>(a: T[] | undefined, b: T[] | undefined): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   if (a.length !== b.length) return false;
   
   for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false;
+    const left = a[i] as Record<string, unknown>;
+    const right = b[i] as Record<string, unknown>;
+    if (left === right) continue;
+    const keys = Object.keys(left);
+    if (keys.length !== Object.keys(right).length || keys.some(key => left[key] !== right[key])) return false;
   }
   
   return true;
@@ -97,6 +100,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     const initializedRef = useRef(false);
     const lastCandleTimeRef = useRef<number>(0);
     const prevSymbolRef = useRef<string | undefined>(undefined);
+    const prevDataLenRef = useRef<number>(0);
     // Shared redraw trigger so the ResizeObserver can repaint the overlay
     // without leaving a blank canvas during a sidebar slide.
     const drawOverlayRef = useRef<(() => void) | null>(null);
@@ -123,7 +127,9 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       prev.legPoc === amtAnalysis.legPoc &&
       prev.legVah === amtAnalysis.legVah &&
       prev.legVal === amtAnalysis.legVal &&
-      prev.sessionVwap === amtAnalysis.sessionVwap;
+      prev.breakDirection === amtAnalysis.breakDirection &&
+      prev.breakLevel === amtAnalysis.breakLevel &&
+      prev.ibComplete === amtAnalysis.ibComplete;
 
     if (profileSame && legSame && printsSame && levelsSame) {
       return prev; // Return old reference to skip redraw
@@ -874,10 +880,22 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       // for one frame before that paint lands.
     }
 
-    if (data.length > 0) {
+    // Guard: only call setData() when the chart actually needs a full rebuild.
+    // tickBus (effect #2) already handles intra-candle tick updates via
+    // candleSeries.update(). Calling setData() on every data reference change
+    // causes a full chart redraw + visible flicker with zero benefit.
+    const dataLenChanged = data.length !== prevDataLenRef.current;
+    const needsFullRebuild = isSymbolChange || !initializedRef.current || dataLenChanged;
+    prevDataLenRef.current = data.length;
+
+    if (data.length > 0 && needsFullRebuild) {
       const formattedCandles = data.map(formatCandle);
       candleSeriesRef.current.setData(formattedCandles);
       volumeSeriesRef.current.setData(data.map(formatVolume));
+
+      // Redraw overlay AFTER setData so priceToCoordinate() uses the new
+      // chart data — fixes volume profile blank on symbol switch.
+      drawOverlayRef.current?.();
 
       const lastCandle = formattedCandles[formattedCandles.length - 1];
       if (lastCandle) {
@@ -885,10 +903,6 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       }
 
       if (chartRef.current) {
-        // Auto-scale price scale to the new instrument's price range.
-        // Defer the re-layout to rAF so the browser paints a stable frame
-        // before fitContent/scroll re-positions the chart (avoids a blank
-        // flash on symbol switch).
         const chart = chartRef.current;
         const doFit = () => {
           chart.priceScale('right').applyOptions({
@@ -900,12 +914,20 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
             chart.timeScale().scrollToPosition(0, false);
             initializedRef.current = true;
           }
+          // Overlay must redraw again after fitContent shifts the visible range
+          drawOverlayRef.current?.();
         };
         if (isSymbolChange || !initializedRef.current) {
           requestAnimationFrame(doFit);
         } else {
           doFit();
         }
+      }
+    } else if (data.length > 0) {
+      // Intra-candle tick: update lastCandleTimeRef for the tickBus guard
+      const lastD = data[data.length - 1];
+      if (lastD) {
+        lastCandleTimeRef.current = (new Date(lastD.time).getTime() / 1000 + IST_OFFSET_SECONDS);
       }
     }
   }, [data, symbol, config.bullColor, config.bearColor, mode]);

@@ -18,12 +18,18 @@ from quant.amt.session.scanner import OptionScannerService
 from quant.brokers.live_gateway import LiveGateway
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 from quant.contracts.timezones import IST
+from quant.contracts.exchange_config import ExchangeConfig
 from quant.events import DecisionProduced, SignalApproved
 from quant.runtime import QuantEngine
 from quant.session_levels import SessionLevelStore
 from quant.ws_adapter import view_state_to_ws
 
 logger = logging.getLogger(__name__)
+
+
+def _is_futures_symbol(symbol: str) -> bool:
+    """Whether *symbol* uses one of the broker's futures contract formats."""
+    return symbol.strip().upper().endswith("FUT")
 
 
 # Persist the coordinator's active contracts (JSON, stdlib-only) so a backend
@@ -127,6 +133,7 @@ class QuantCoordinator:
         self._feed = MultiplexedMarketFeed(market_data)
         self._engines: dict[str, QuantEngine] = {}
         self._gateways: dict[str, LiveGateway] = {}
+        self._underlying_gateways: dict[str, LiveGateway] = {}
         self._threads: dict[str, threading.Thread] = {}
         self._decisions: queue.Queue = queue.Queue()
         self._stop = threading.Event()
@@ -194,39 +201,77 @@ class QuantCoordinator:
                 symbols.append(fut_sym)
         return symbols
 
+    def _persisted_matches_futures(
+        self, persisted: list[str], futures_symbols: list[str]
+    ) -> bool:
+        """Whether a cached selection still has the required futures topology."""
+        if not self._persisted_within_configured_n(persisted):
+            return False
+        futures = [s for s in persisted if _is_futures_symbol(s)]
+        if set(futures) != set(futures_symbols):
+            return False
+        config = ExchangeConfig.for_exchange(self.config.get("exchange", "NSE"))
+        roots = {config.extract_underlying(symbol) for symbol in futures_symbols}
+        return all(
+            config.extract_underlying(symbol) in roots
+            for symbol in persisted
+            if not _is_futures_symbol(symbol)
+        )
+
+    def _persisted_within_configured_n(self, persisted: list[str]) -> bool:
+        return (
+            len(persisted) <= self.config.get("n", 8)
+            and len({symbol.upper() for symbol in persisted}) == len(persisted)
+        )
+
     def _scan(self, *, force: bool = False) -> list[str]:
         """Select active contracts: reuse today's persisted selection unless a
         fresh scan is forced (e.g. an explicit rescan request), otherwise run
         the hybrid futures + option scanner and persist the result."""
-        if not force:
-            persisted = load_persisted_contracts(
-                self._contracts_file, exchange=self.config.get("exchange")
-            )
-            if persisted:
-                logger.info(
-                    "QuantCoordinator: reusing persisted contracts: %s", persisted
-                )
-                return persisted
-
         futures_symbols: list[str] = []
         if self.config.get("include_futures", True):
             futures_symbols = self._resolve_futures_symbols()
             logger.info("QuantCoordinator: resolved futures contracts: %s", futures_symbols)
 
-        # Allocate remaining scanner slots to options
         total_slots = self.config.get("n", 8)
-        n_options = max(2, total_slots - len(futures_symbols)) if self.config.get("include_futures", True) else total_slots
+        if len(futures_symbols) > total_slots:
+            raise ValueError(
+                f"configured n={total_slots} cannot fit {len(futures_symbols)} required futures"
+            )
 
-        scanner = OptionScannerService(self.market_data)
-        results = scanner.scan_top_n(
-            n=n_options,
-            underlyings=self.config["underlyings"],
-            exchange=self.config["exchange"],
-            expiry_index=self.config["expiry_index"],
-            strikes_around_atm=self.config["strikes_around_atm"],
-            underlying_priority=self.config.get("underlying_priority"),
-        )
-        option_symbols = [r.symbol for r in results if (r.ltp or 0) > 0]
+        if not force:
+            persisted = load_persisted_contracts(
+                self._contracts_file, exchange=self.config.get("exchange")
+            )
+            if persisted and self._persisted_within_configured_n(persisted) and (
+                not self.config.get("include_futures", True)
+                or self._persisted_matches_futures(persisted, futures_symbols)
+            ):
+                logger.info(
+                    "QuantCoordinator: reusing persisted contracts: %s", persisted
+                )
+                if self.config.get("include_futures", True):
+                    return futures_symbols + [
+                        symbol for symbol in persisted if not _is_futures_symbol(symbol)
+                    ]
+                return persisted
+
+        # Allocate remaining scanner slots to options
+        n_options = max(0, total_slots - len(futures_symbols))
+        option_symbols: list[str] = []
+        if n_options:
+            scanner = OptionScannerService(self.market_data)
+            results = scanner.scan_top_n(
+                n=n_options,
+                underlyings=self.config["underlyings"],
+                exchange=self.config["exchange"],
+                expiry_index=self.config["expiry_index"],
+                strikes_around_atm=self.config["strikes_around_atm"],
+                underlying_priority=self.config.get("underlying_priority"),
+            )
+            option_symbols = [
+                r.symbol for r in results if (r.ltp or 0) > 0
+            ][:n_options]
         symbols = futures_symbols + option_symbols
         if symbols:
             save_persisted_contracts(
@@ -270,6 +315,19 @@ class QuantCoordinator:
 
     def _spawn_engine(self, symbol: str) -> None:
         gateway = LiveGateway(self._feed, symbol)
+        underlying_gateway = None
+        if not _is_futures_symbol(symbol):
+            config = ExchangeConfig.for_exchange(self.config.get("exchange", "NSE"))
+            root = config.extract_underlying(symbol)
+            futures = {
+                config.extract_underlying(future): future
+                for future in self._engines
+                if _is_futures_symbol(future)
+            }
+            futures_symbol = futures.get(root)
+            if futures_symbol:
+                reader = self._feed.add_reader(futures_symbol)
+                underlying_gateway = LiveGateway(self._feed, futures_symbol, reader_queue=reader)
         engine = QuantEngine(
             gateway,
             symbol,
@@ -278,6 +336,7 @@ class QuantCoordinator:
             lot_size=self._resolve_lot_size(symbol),
             market=self.config.get("exchange") or "NSE",
             session_levels=self._session_levels,
+            underlying_gateway=underlying_gateway,
             strategy=self._strategy,
         )
         engine._bus.subscribe(DecisionProduced, self._on_decision)
@@ -289,6 +348,8 @@ class QuantCoordinator:
         with self._lock:
             self._engines[symbol] = engine
             self._gateways[symbol] = gateway
+            if underlying_gateway is not None:
+                self._underlying_gateways[symbol] = underlying_gateway
             self._threads[symbol] = thread
 
     def _on_decision(self, event) -> None:
@@ -297,10 +358,13 @@ class QuantCoordinator:
     def _stop_engine(self, symbol: str) -> None:
         with self._lock:
             gateway = self._gateways.pop(symbol, None)
+            underlying_gateway = self._underlying_gateways.pop(symbol, None)
             thread = self._threads.pop(symbol, None)
             self._engines.pop(symbol, None)
         if gateway is not None:
             gateway.close()
+        if underlying_gateway is not None:
+            underlying_gateway.close()
         if thread is not None:
             thread.join(timeout=1.0)
 

@@ -30,43 +30,6 @@ function App() {
     const vpMode = useUIStore(selectVpMode) as 'session' | 'leg' | 'combined' | 'off';
     const setVpMode = useUIStore(s => s.setVpMode);
     const currentSymbolIndex = useRef(0);
-    // Draggable overseer box
-    const [overseerPos, setOverseerPos] = useState({ x: -1, y: 16 }); // -1 = auto right
-    const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
-    const overseerBoxRef = useRef<HTMLDivElement>(null);
-    // Track active drag listeners for cleanup on unmount
-    const dragCleanupRef = useRef<(() => void) | null>(null);
-    const onOverseerMouseDown = useCallback((e: React.MouseEvent) => {
-        e.preventDefault();
-        const box = overseerBoxRef.current;
-        if (!box) return;
-        const rect = box.getBoundingClientRect();
-        const parentRect = box.parentElement?.getBoundingClientRect();
-        if (!parentRect) return;
-        const curX = rect.left - parentRect.left;
-        const curY = rect.top - parentRect.top;
-        dragRef.current = { startX: e.clientX, startY: e.clientY, origX: curX, origY: curY };
-        const onMove = (ev: MouseEvent) => {
-            if (!dragRef.current) return;
-            setOverseerPos({
-                x: dragRef.current.origX + (ev.clientX - dragRef.current.startX),
-                y: dragRef.current.origY + (ev.clientY - dragRef.current.startY),
-            });
-        };
-        const cleanup = () => {
-            dragRef.current = null;
-            window.removeEventListener('mousemove', onMove);
-            window.removeEventListener('mouseup', cleanup);
-            dragCleanupRef.current = null;
-        };
-        dragCleanupRef.current = cleanup;
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('mouseup', cleanup);
-    }, []);
-    // Clean up drag listeners on unmount to prevent memory leaks
-    useEffect(() => {
-        return () => { dragCleanupRef.current?.(); };
-    }, []);
 
     // 2. Server-driven trading system (all logic on backend)
     const {
@@ -81,7 +44,7 @@ function App() {
 
     // Symbols for Tab/Shift+Tab navigation, derived from the live WS instrument
     // state (the legacy instruments store is unused and was removed).
-    const allSymbols = useMemo(() => Object.keys(instruments), [instruments]);
+    const allSymbols = useMemo(() => Object.keys(instruments), [Object.keys(instruments).join(',')]);
 
     // 3. Keyboard Navigation
     const handleNextSymbol = useCallback(() => {
@@ -132,8 +95,10 @@ function App() {
 
     const effectiveConfig = useMemo<ChartConfig>(() => ({
         ...config,
+        vpMode: vpMode || config.vpMode,
+        showVolumeProfile: vpMode !== 'off',
         symbol: activeInstrument?.symbol || config.symbol,
-    }), [config, activeInstrument?.symbol]);
+    }), [config, vpMode, activeInstrument?.symbol]);
 
     // --- Rendering ---
 
@@ -191,6 +156,7 @@ function App() {
                 <div className="absolute inset-0 z-0">
                     <ErrorBoundary name="Chart">
                         <ChartScene
+                            key={`${activeInstrument.symbol}-${effectiveConfig.interval}`}
                             data={activeInstrument.data}
                             tickBus={tickBus}
                             symbol={activeInstrument.symbol}
@@ -259,8 +225,11 @@ function App() {
                                 ] as const).map(({ key, label }) => (
                                     <button
                                         key={key}
-                                        onClick={() => setConfig(s => ({ ...s, vpMode: key, showVolumeProfile: key !== 'off' }))}
-                                        className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${config.vpMode === key
+                                        onClick={() => {
+                                            setVpMode(key);
+                                            setConfig(s => ({ ...s, vpMode: key, showVolumeProfile: key !== 'off' }));
+                                        }}
+                                        className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${vpMode === key
                                             ? 'bg-glassy-neutral-cool/20 text-glassy-neutral-cool border border-glassy-neutral-cool/30'
                                             : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'
                                             }`}

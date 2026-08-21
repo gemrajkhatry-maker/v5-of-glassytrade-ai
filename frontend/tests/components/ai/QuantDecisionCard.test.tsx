@@ -7,7 +7,7 @@ const approved: QuantDecisionAnalysis = {
   approved: true,
   reason: 'Triple-A',
   phase: 'AGGRESSION',
-  signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, confidence: 0.87 },
+  signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, modelLabel: 'Triple-A' },
 };
 
 const rejected: QuantDecisionAnalysis = {
@@ -61,7 +61,7 @@ describe('QuantDecisionCard', () => {
         { gate: 6, name: 'G6_RiskReward', passed: true, reason: 'RR > 1.5' },
         { gate: 7, name: 'G7_Timing', passed: true, reason: 'Initiative tick confirmed' },
       ],
-      signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, confidence: 0.95 },
+      signal: { type: 'LONG', entry: 104.0, sl: 99.54, tp: 112.92, rr: 2.0, modelLabel: 'Triple-A' },
     };
 
     render(<QuantDecisionCard quantDecision={with7Gates} />);

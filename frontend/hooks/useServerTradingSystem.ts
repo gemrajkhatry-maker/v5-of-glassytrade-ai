@@ -675,7 +675,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // ----------------------------------------------------------------
     // 4.  Derived state
     // ----------------------------------------------------------------
-    const activeInstrument = instruments[activeSymbol];
+    const activeInstrument = instruments[activeSymbol] || (activeSymbol ? createInstrumentState(activeSymbol) : null);
 
     return {
         instruments,

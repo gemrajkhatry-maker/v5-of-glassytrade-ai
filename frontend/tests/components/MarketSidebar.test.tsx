@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import MarketSidebar from '../../components/MarketSidebar';
 import { InstrumentState, TradePosition } from '../../types';
@@ -66,12 +66,11 @@ describe('MarketSidebar', () => {
     expect(screen.getByPlaceholderText('Filter symbols...')).toBeInTheDocument();
   });
 
-  it('filters symbols based on search input', async () => {
-    const user = userEvent.setup();
+  it('filters symbols based on search input', () => {
     render(<MarketSidebar {...defaultProps} />);
     
     const input = screen.getByPlaceholderText('Filter symbols...');
-    await user.type(input, '25600');
+    fireEvent.change(input, { target: { value: '25600' } });
     
     // After filtering, should show only the symbol with 25600
     const symbols = screen.getAllByRole('button');
@@ -148,7 +147,7 @@ describe('MarketSidebar', () => {
         'NIFTY 27 FEB 25500 CALL': createMockInstrument('NIFTY 27 FEB 25500 CALL', {
           agentDecision: {
             direction: 'LONG' as const,
-            probability: 0.6,
+            modelLabel: 'Triple-A',
             regime: 'TRENDING',
             timing: 'ENTER_NOW',
             sizeFraction: 0.5,

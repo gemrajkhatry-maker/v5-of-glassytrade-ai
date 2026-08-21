@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, fireEvent } from '@testing-library/react';
 import GlassPanel from '../../components/GlassPanel';
 
 describe('GlassPanel', () => {
@@ -38,9 +37,8 @@ describe('GlassPanel', () => {
     expect(outer).toHaveClass('rounded-md');
   });
 
-  it('handles click events', async () => {
+  it('handles click events', () => {
     const handleClick = vi.fn();
-    const user = userEvent.setup();
     
     render(
       <GlassPanel>
@@ -48,7 +46,7 @@ describe('GlassPanel', () => {
       </GlassPanel>
     );
     
-    await user.click(screen.getByRole('button'));
+    fireEvent.click(screen.getByRole('button'));
     expect(handleClick).toHaveBeenCalledTimes(1);
   });
 

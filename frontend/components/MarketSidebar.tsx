@@ -36,9 +36,8 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
 
     const price = inst.ltp ?? (lastCandle?.close || 0);
     const prevPrice = prevCandle?.close || price;
-    const percentChange = price > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
+    const percentChange = price > 0 && prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
     const isUp = percentChange >= 0;
-    const hasData = inst.data.length > 0;
     const { name, tag } = shortSymbol(sym);
 
     // --- Live PnL from open positions ---
@@ -105,19 +104,13 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
             <div className="flex flex-col w-[38%] overflow-hidden pr-2">
                 <div className="flex items-center gap-1.5 min-h-[14px]">
                     {hasOpenPosition ? (
-                        <span className={`text-[9px] font-bold animate-pulse ${isProfit ? 'text-emerald-400' : isLoss ? 'text-rose-400' : 'text-blue-400'}`}>●</span>
-                    ) : hasData ? (
-                        <Radio size={8} className="text-glassy-bull-primary" />
+                        <span className={`text-[9px] font-bold ${isProfit ? 'text-emerald-400' : isLoss ? 'text-rose-400' : 'text-blue-400'}`}>●</span>
                     ) : (
-                        <span className="w-2 h-2 rounded-full bg-glassy-text-disabled/30 animate-pulse shrink-0" />
+                        <Radio size={8} className="text-glassy-bull-primary shrink-0" />
                     )}
-                    {!hasData && !hasOpenPosition ? (
-                        <span className="h-2.5 flex-1 max-w-[80%] rounded bg-glassy-text-disabled/20 animate-pulse" />
-                    ) : (
-                        <span className="font-bold text-[10px] text-glassy-text-primary truncate tabular-nums">
-                            {name}
-                        </span>
-                    )}
+                    <span className="font-bold text-[10px] text-glassy-text-primary truncate tabular-nums">
+                        {name}
+                    </span>
                 </div>
                 <div className="flex items-center gap-1 ml-3 mt-0.5">
                     {tag === 'FUT' ? (
@@ -133,7 +126,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                             PE
                         </span>
                     ) : (
-                        <span className="text-[8px] text-glassy-text-tertiary font-mono">{hasData || hasOpenPosition ? tag : '\u00A0'}</span>
+                        <span className="text-[8px] text-glassy-text-tertiary font-mono">{tag || '\u00A0'}</span>
                     )}
                 </div>
             </div>
@@ -144,10 +137,8 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                     <span className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[7.5px] font-mono font-bold tracking-tight uppercase truncate ${pnlBadgeColor}`}>
                         {posSide} · {totalSize.toFixed(0)}
                     </span>
-                ) : !hasData ? (
-                    <span className="h-4 w-full max-w-[5.5rem] rounded bg-glassy-text-disabled/20 animate-pulse" />
                 ) : isDead ? (
-                    <span className="inline-flex text-[8px] font-mono font-bold text-glassy-bear-primary/70 border border-glassy-bear-primary/20 px-1 rounded-sm animate-pulse">
+                    <span className="inline-flex text-[8px] font-mono font-bold text-glassy-bear-primary/70 border border-glassy-bear-primary/20 px-1 rounded-sm">
                         DEAD
                     </span>
                 ) : inst.riskState?.halted ? (
@@ -168,8 +159,6 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                     <span className={`text-[9.5px] font-mono tabular-nums whitespace-nowrap ${pnlTextColor}`}>
                         {formatPnl(totalPnl)}
                     </span>
-                ) : !hasData ? (
-                    <span className="inline-block h-2 w-8 rounded bg-glassy-text-disabled/20 animate-pulse ml-auto" />
                 ) : (
                     <span className={`text-[9px] font-mono tabular-nums whitespace-nowrap ${isUp ? 'text-glassy-bull-primary/80' : 'text-glassy-bear-primary/80'}`}>
                         {isUp ? '+' : ''}{percentChange.toFixed(1)}%
@@ -188,16 +177,8 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
     const [actionFilter, setActionFilter] = useState('ALL');
     const [sortBy, setSortBy] = useState<'ACTION' | 'PROB'>('ACTION');
 
-    const symbols = Object.keys(instruments);
-    // ponytail: coarse-grain the sort keys so 0.5s quantDecision jitter (e.g.
-    // 0.700→0.701) never reorders the list and re-animates every card.
-    const sortKey = (sym: string) => {
-        const inst = instruments[sym];
-        const isDead = inst.amtAnalysis?.marketState === 'DEAD';
-        const timing = inst.agentDecision?.timing || '';
-        const prob = Math.round((inst.agentDecision?.probability || 0) * 100) / 100; // 1dp
-        return `${isDead ? 1 : 0}|${timingRank(timing)}|${prob}`;
-    };
+    const symbols = useMemo(() => Object.keys(instruments), [Object.keys(instruments).join(',')]);
+    
     const filtered = useMemo(() => {
         let f = symbols;
 
@@ -205,22 +186,14 @@ const MarketSidebar: React.FC<MarketSidebarProps> = ({ instruments, activeSymbol
         if (filter) f = f.filter(s => s.toLowerCase().includes(filter.toLowerCase()));
 
         // Apply Mode filter
-        if (modeFilter !== 'ALL') f = f.filter(s => instruments[s].amtAnalysis?.marketState?.includes(modeFilter));
+        if (modeFilter !== 'ALL') f = f.filter(s => instruments[s]?.amtAnalysis?.marketState?.includes(modeFilter));
 
         // Apply Action filter
-        if (actionFilter !== 'ALL') f = f.filter(s => instruments[s].agentDecision?.timing === actionFilter);
+        if (actionFilter !== 'ALL') f = f.filter(s => instruments[s]?.agentDecision?.timing === actionFilter);
 
-        // Sort: Default to "Opportunity First" (ENTER_NOW > MONITOR > SKIP > DEAD)
-        // Stable sort preserves input order for equal keys so the list doesn't
-        // reshuffle every 0.5s when only the probability jitter changes.
-        return f
-            .map((sym, i) => ({ sym, i, key: sortKey(sym) }))
-            .sort((a, b) => {
-                if (a.key !== b.key) return a.key < b.key ? 1 : -1;
-                return a.i - b.i;
-            })
-            .map(o => o.sym);
-    }, [symbols, filter, modeFilter, actionFilter, sortBy]);
+        // Keep stable symbol ordering to avoid DOM reshuffling and card jumping
+        return f;
+    }, [symbols, filter, modeFilter, actionFilter, instruments]);
 
     // Filter trades for the ACTIVE symbol only
     // (recent-trades panel removed — closedTrades is canonical in JournalPage)

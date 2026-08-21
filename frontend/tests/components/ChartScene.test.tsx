@@ -185,7 +185,7 @@ describe('ChartScene', () => {
         positions={[]}
         agentDecision={{
           direction: 'LONG',
-          probability: 0.8,
+          modelLabel: 'Triple-A',
           regime: 'TRENDING',
           timing: 'ENTER_NOW',
           sizeFraction: 0.5,
@@ -195,5 +195,46 @@ describe('ChartScene', () => {
       />
     );
     expect(screen.getByText(/▲ LONG/)).toBeInTheDocument();
+  });
+
+  it('stabilizes redraws when re-rendered with separately decoded but equal profile arrays', () => {
+    const initialAmt = {
+      poc: 25050,
+      valueAreaHigh: 25100,
+      valueAreaLow: 25000,
+      profile: [{ price: 25000, volume: 100, delta: 10 }, { price: 25050, volume: 500, delta: 50 }],
+      legProfile: [{ price: 25020, volume: 80, delta: 5 }],
+      aggressivePrints: [],
+    } as any;
+
+    const { rerender } = render(
+      <ChartScene
+        data={mockData}
+        config={defaultConfig}
+        positions={[]}
+        amtAnalysis={initialAmt}
+      />
+    );
+
+    // Separately decoded JSON clone with different object references
+    const clonedAmt = {
+      poc: 25050,
+      valueAreaHigh: 25100,
+      valueAreaLow: 25000,
+      profile: [{ price: 25000, volume: 100, delta: 10 }, { price: 25050, volume: 500, delta: 50 }],
+      legProfile: [{ price: 25020, volume: 80, delta: 5 }],
+      aggressivePrints: [],
+    } as any;
+
+    rerender(
+      <ChartScene
+        data={mockData}
+        config={defaultConfig}
+        positions={[]}
+        amtAnalysis={clonedAmt}
+      />
+    );
+
+    expect(screen.getByText('STANDARD CANDLESTICKS')).toBeInTheDocument();
   });
 });
