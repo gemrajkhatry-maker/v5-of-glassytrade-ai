@@ -142,29 +142,29 @@ class TestIndicators:
 class TestSignalGeneration:
     def test_long_signal_builds_valid_rr(self):
         sb = SignalBuilder()
-        # close 100, VAL 98, step 1; SL sits 2 NSE-option ticks INSIDE the
-        # value-area edge (98 - 2*0.05 = 97.9), not a full bucket outside.
+        # close 100, VAL 98, step 1; SL sits 2 ticks INSIDE the value-area
+        # edge using ctx.tick_size (= step = 1.0): 98 - 2*1.0 = 96.0.
         state = _state(close=100.0, val=98.0, step=1.0, nearest=98.0)
         sig = sb.build(_ctx(state, "LONG"), _pass_results())
         assert sig is not None
         assert sig.type == "LONG"
         assert sig.entry == pytest.approx(100.0)
         assert sig.sl < sig.entry < sig.tp
-        assert sig.sl == pytest.approx(97.9)
-        assert sig.tp == pytest.approx(104.2)
+        assert sig.sl == pytest.approx(96.0)
+        assert sig.tp == pytest.approx(108.0)
         assert sig.rr == pytest.approx(2.0)
 
     def test_short_signal_is_sell(self):
         sb = SignalBuilder()
         # close 100, anchor level 102 (nearest, above entry); SL sits 2 ticks
-        # INSIDE it (102 + 2*0.05 = 102.1), TP 2R below entry.
+        # INSIDE it using ctx.tick_size (= 1.0): 102 + 2*1.0 = 104.0.
         state = _state(close=100.0, val=98.0, step=1.0, nearest=102.0)
         sig = sb.build(_ctx(state, "SHORT"), _pass_results())
         assert sig is not None
         assert sig.type == "SHORT"
         assert sig.sl > sig.entry > sig.tp
-        assert sig.sl == pytest.approx(102.1)
-        assert sig.tp == pytest.approx(95.8)
+        assert sig.sl == pytest.approx(104.0)
+        assert sig.tp == pytest.approx(92.0)
 
     def test_thin_stop_rejected(self):
         from quant.decision.signal_builder import (
@@ -176,13 +176,14 @@ class TestSignalGeneration:
         # ~0.02%) is noise and must not clear the 0.1% structural-stop floor.
         assert is_stop_too_thin(entry=104.92, sl=104.90)
         assert not is_min_stop_met(entry=104.92, sl=104.90)
-        # The Triple-A builder's 2-tick-inside SL (104.81, ~0.105% away)
-        # clears the floor and emits a signal.
+        # The Triple-A builder's 2-tick-inside SL must clear the 0.1% floor
+        # and emit a signal. With ctx-based ticks, step=0.1 gives
+        # sl = 104.91 - 2*0.1 = 104.71 (0.2% away) — clears the floor.
         sb = SignalBuilder()
-        state = _state(close=104.92, val=104.91, step=0.01, nearest=104.9)
+        state = _state(close=104.92, val=104.91, step=0.1, nearest=104.9)
         sig = sb.build(_ctx(state, "LONG"), _pass_results())
         assert sig is not None
-        assert sig.sl == pytest.approx(104.81)
+        assert sig.sl == pytest.approx(104.71)
 
     def test_failing_gate_returns_none(self):
         sb = SignalBuilder()

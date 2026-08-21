@@ -46,3 +46,49 @@ def test_no_raw_market_state_literals_outside_allowlist():
         "Raw MarketState string literals found — use MarketState members "
         f"or route through amt/dto.py:\n" + "\n".join(hits)
     )
+
+
+def test_tick_size_is_exchange_authoritative():
+    """REF-3: MCX futures tick sizes come from ExchangeConfig, not the
+    legacy 0.05 NSE-option default."""
+    from quant.contracts.exchange_config import ExchangeConfig
+
+    mcx = ExchangeConfig.for_exchange("MCX")
+    assert mcx.get_tick_size("GOLDM") == 1.0
+    assert mcx.get_tick_size("CRUDEOIL") == 1.0
+
+    nse = ExchangeConfig.for_exchange("NSE")
+    # Fallback for unlisted NSE symbols stays 0.05 (option scale).
+    assert nse.get_tick_size("UNKNOWN_SYM") == 0.05
+
+
+def test_coordinator_resolves_per_symbol_tick_size(monkeypatch):
+    """Engines spawned by the coordinator get the exchange-correct tick size,
+    not the global default."""
+    from quant.multi_engine import QuantCoordinator
+
+    class _FakeMD:
+        def get_nearest_futures(self, underlying, exchange=None):
+            return None
+
+        def fetch_history(self, *a, **k):
+            return []
+
+        def get_lot_size(self, symbol):
+            return 1
+
+    coord = QuantCoordinator(
+        market_data=_FakeMD(),
+        config={"include_futures": False, "n": 2, "exchange": "MCX",
+                "underlyings": [], "contracts_file": "/tmp/nonexistent-ts.json"},
+    )
+    monkeypatch.setattr(coord, "_scan",
+                        lambda force=False: ["GOLDM SEP FUT"], raising=True)
+    coord.start()
+    try:
+        eng = coord._engines["GOLDM SEP FUT"]
+        assert eng._tick_size == 1.0, (
+            f"engine tick_size={eng._tick_size}, expected exchange value 1.0"
+        )
+    finally:
+        coord.stop()

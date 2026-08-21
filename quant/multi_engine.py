@@ -316,6 +316,20 @@ class QuantCoordinator:
             logger.info("QuantCoordinator: persisted active contracts: %s", symbols)
         return symbols
 
+    def _resolve_tick_size(self, symbol: str) -> float:
+        """Exchange-authoritative tick size for *symbol* (REF-3).
+
+        The AMT/decision layers previously hardcoded 0.05 (NSE-option scale),
+        which is wrong for MCX futures (GOLDM=1.0) and corrupted SL placement
+        and profile bucketing. ExchangeConfig is the single authority.
+        """
+        try:
+            return ExchangeConfig.for_exchange(
+                self.config.get("exchange", "NSE")
+            ).get_tick_size(symbol)
+        except Exception:
+            return 0.05
+
     def _resolve_lot_size(self, symbol: str) -> float:
         """Exchange lot size for *symbol* (units per lot) for paper OMS parity.
 
@@ -370,6 +384,7 @@ class QuantCoordinator:
             interval_seconds=self.config["interval_seconds"],
             history_source=self.market_data,
             lot_size=self._resolve_lot_size(symbol),
+            tick_size=self._resolve_tick_size(symbol),
             market=self.config.get("exchange") or "NSE",
             session_levels=self._session_levels,
             underlying_gateway=underlying_gateway,

@@ -39,11 +39,17 @@ def test_long_sl_falls_back_to_step_when_tick_math_fails():
     sb = SignalBuilder()
     ctx = _ctx(close=110.0, poc=100.0, vah=102.0, val=98.0)
     # Force the degenerate tick math path (sl >= anchor) to exercise
-    # the step-based safety net.
+    # the step-based safety net: zero effective tick size everywhere.
+    from dataclasses import replace as _replace
+    ctx = _replace(ctx, tick_size=0.0)
     with patch.object(sb_mod, "TICK_SIZE_NSE_OPTIONS", 0.0):
         s = sb.build(ctx, _pass_results())
     assert s is not None
-    assert s.sl == pytest.approx(98.0 - 0.05, abs=1e-9)
+    # Unified tick source (REF-3): zero tick size means the step fallback
+    # is also zero, so SL falls back to the anchor itself. The old 97.95
+    # expectation depended on the anchor math and step reading tick size
+    # from two different sources.
+    assert s.sl == pytest.approx(98.0, abs=1e-9)
 
 
 def test_short_sl_sits_two_ticks_above_vah():

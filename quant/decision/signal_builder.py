@@ -105,10 +105,10 @@ class SignalBuilder:
             elif hasattr(ctx.bar, "low") and float(ctx.bar.low) < entry:
                 anchor = float(ctx.bar.low)
             else:
-                anchor = val or ctx.poc or (entry - 5 * TICK_SIZE_NSE_OPTIONS)
+                anchor = val or ctx.poc or (entry - 5 * (ctx.tick_size or TICK_SIZE_NSE_OPTIONS))
             # Fabio: SL sits 1-2 ticks INSIDE the value-area/LVN edge, not a full
             # profile bucket outside it.
-            sl = anchor - 2 * TICK_SIZE_NSE_OPTIONS
+            sl = anchor - 2 * (ctx.tick_size or TICK_SIZE_NSE_OPTIONS)
             if sl >= anchor:  # degenerate profile safety net
                 sl = anchor - step if step > 0 else anchor
             if (val is None or vah is None or val <= vah) and sl >= entry:
@@ -131,10 +131,10 @@ class SignalBuilder:
             elif hasattr(ctx.bar, "high") and float(ctx.bar.high) > entry:
                 anchor = float(ctx.bar.high)
             else:
-                anchor = vah or ctx.poc or (entry + 5 * TICK_SIZE_NSE_OPTIONS)
+                anchor = vah or ctx.poc or (entry + 5 * (ctx.tick_size or TICK_SIZE_NSE_OPTIONS))
             # Fabio: SL sits 1-2 ticks INSIDE the value-area/LVN edge, not a full
             # profile bucket outside it.
-            sl = anchor + 2 * TICK_SIZE_NSE_OPTIONS
+            sl = anchor + 2 * (ctx.tick_size or TICK_SIZE_NSE_OPTIONS)
             if sl <= anchor:  # degenerate profile safety net
                 sl = anchor + step if step > 0 else anchor
             if (val is None or vah is None or val <= vah) and sl <= entry:
