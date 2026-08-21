@@ -3,9 +3,9 @@
 frontend WS contract that the legacy backend snapshot builder defines.
 
 The engine consumes the same ``_ticks()`` fixture as the runtime test but stops
-right after the AGGRESSION-LONG bar (t306) so the final snapshot's auction
-phase IS the phase the LONG fired in — the projected state is the WS state the
-frontend would receive at the moment of the signal.
+right after the AGGRESSION-LONG bar (t306) so the final snapshot's decision
+state IS the state at the moment the LONG fired — the projected state is the
+WS state the frontend would receive at that moment.
 """
 
 from tests.helpers.synthetic import SyntheticGateway
@@ -14,7 +14,7 @@ from quant.ws_adapter import view_state_to_ws
 from tests.quant.runtime.test_runtime import _ticks
 
 WS_CONTRACT_KEYS = (
-    "_symbol", "portfolio", "amt", "auction", "quantDecision",
+    "_symbol", "portfolio", "amt", "quantDecision",
     "agentDecision", "riskState", "tick", "ltp", "oi", "depth",
 )
 
@@ -22,7 +22,7 @@ WS_CONTRACT_KEYS = (
 # keys (genAIAnalysis, overseerAction, overseerReason) were removed with the
 # LLM layer; agentDecision is projected from the deterministic quantDecision.
 BACKEND_SNAPSHOT_KEYS = {
-    "_symbol", "portfolio", "amt", "auction", "quantDecision",
+    "_symbol", "portfolio", "amt", "quantDecision",
     "agentDecision", "riskState",
 }
 ENGINE_ADDED_KEYS = {"tick", "ltp", "oi", "depth"}

@@ -21,7 +21,6 @@ class _RawView:
         self.tick = d.get("tick")
         self.ltp = d.get("ltp")
         self.oi = d.get("oi")
-        self.auction = d.get("auction")
         self.quant_decision = d.get("quantDecision")
         self.risk_state = d.get("riskState")
         self.portfolio = d.get("portfolio")
@@ -47,7 +46,6 @@ class _FakeCoordinator:
                     "close": 25000.0,
                     "volume": 1200,
                 },
-                "auction": {"phase": "BALANCED", "bias": None},
                 "portfolio": {"equity": 1_000_000.0, "positions": []},
                 "depth": {"bids": [], "asks": []},
                 "ltp": 25000.0,
@@ -133,7 +131,7 @@ def test_ws_gameloop_streams_coordinator_snapshot(client):
         full = ws.receive_json()
         assert full["_type"] == "full"
         assert full["_symbol"] == "SYM"
-        for key in ("_symbol", "tick", "auction", "portfolio", "ltp", "oi", "depth"):
+        for key in ("_symbol", "tick", "portfolio", "ltp", "oi", "depth"):
             assert key in full
 
         ws.send_json({"ping": True})

@@ -43,7 +43,6 @@ from quant.session_levels import SessionLevelStore
 from quant.strategy import TradingStrategy
 from quant.events import (
     AmtUpdated,
-    AuctionUpdated,
     BarClosed,
     DecisionProduced,
     DepthUpdated,
@@ -208,7 +207,7 @@ class QuantEngine:
                 self._journal.append(
                     {"type": event.__class__.__name__, **asdict(event)}
                 )
-            for evt_type in (BarClosed, AuctionUpdated, DecisionProduced,
+            for evt_type in (BarClosed, DecisionProduced,
                             SignalApproved, PositionOpened, PositionClosed,
                             RiskUpdated, DepthUpdated, AmtUpdated):
                 self._bus.subscribe(evt_type, _journal_subscriber, priority=-100)

@@ -131,7 +131,6 @@ class TestValidateWsSnapshot:
             "_symbol": "NIFTY",
             "portfolio": {},
             "amt": None,
-            "auction": None,
             "quantDecision": None,
             "agentDecision": None,
             "riskState": None,

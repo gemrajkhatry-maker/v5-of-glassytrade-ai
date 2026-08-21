@@ -17,7 +17,7 @@ full event trace:
   D. idempotent exits      each position closes exactly once
 
 plus the WS contract assertion that the approved setup bar still carries the
-``auction`` and ``quantDecision`` keys.
+``quantDecision`` keys.
 """
 
 import logging
@@ -289,7 +289,7 @@ def test_each_position_closes_exactly_once():
 # WS contract on the approved setup bars
 # ---------------------------------------------------------------------------
 
-def test_ws_contract_carries_auction_and_quant_decision_on_approved_bars():
+def test_ws_contract_carries_quant_decision_on_approved_bars():
     trace = _run_trace()
     proj = StateProjector()
     checks = 0

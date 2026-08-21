@@ -1,9 +1,9 @@
 """StateProjector — folds the quant event stream into the frontend view-state.
 
 Pure and deterministic: feeding the same event sequence always produces the
-same per-symbol snapshot. The ``auction`` dict mirrors the camelCase keys the
-backend serializer emits (``backend.app.application.services.quant_bridge``),
-which is the WS contract the frontend already reads.
+same per-symbol snapshot. The snapshot fields mirror the camelCase keys the
+WS adapter (``quant.ws_adapter``) emits, which is the contract the frontend
+reads.
 """
 
 from __future__ import annotations
@@ -33,7 +33,6 @@ class ViewState:
     tick: dict | None = None
     ltp: float | None = None
     oi: float | None = None
-    auction: dict | None = None
     quant_decision: dict | None = None
     risk_state: dict | None = None
     portfolio: dict | None = None
@@ -208,7 +207,6 @@ class StateProjector:
                 tick=s["tick"],
                 ltp=s["ltp"],
                 oi=s["oi"],
-                auction=s["auction"],
                 quant_decision=s["quant_decision"],
                 risk_state=s["risk_state"],
                 portfolio=self._portfolio(s["portfolio"], ltp=s["ltp"]),
@@ -222,7 +220,6 @@ class StateProjector:
                 "tick": None,
                 "ltp": None,
                 "oi": None,
-                "auction": None,
                 "quant_decision": None,
                 "risk_state": None,
                 "portfolio": None,

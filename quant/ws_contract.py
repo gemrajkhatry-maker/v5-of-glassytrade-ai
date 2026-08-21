@@ -60,7 +60,6 @@ class WSSnapshot:
         _symbol: The instrument symbol
         portfolio: Account portfolio state
         amt: AMT analysis DTO (60-field dict from amt_result_to_dto)
-        auction: Auction state from AuctionCoordinator
         quantDecision: The deterministic quant decision
         agentDecision: Projected agent decision for frontend display
         riskState: Session risk state
@@ -72,7 +71,6 @@ class WSSnapshot:
     _symbol: str
     portfolio: WSPortfolio | dict
     amt: dict | None = None
-    auction: dict | None = None
     quantDecision: dict | None = None
     agentDecision: WSAgentDecision | dict | None = None
     riskState: dict | None = None
@@ -105,7 +103,6 @@ class WSSnapshot:
             "_symbol": self._symbol,
             "portfolio": portfolio_dict,
             "amt": self.amt,
-            "auction": self.auction,
             "quantDecision": self.quantDecision,
             "agentDecision": agent_dict,
             "riskState": self.riskState,
@@ -121,7 +118,6 @@ WS_SNAPSHOT_KEYS = frozenset({
     "_symbol",
     "portfolio",
     "amt",
-    "auction",
     "quantDecision",
     "agentDecision",
     "riskState",

@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, TypeVar
 
 if TYPE_CHECKING:
-    from quant.auction_state import AuctionState
     from quant.bars import Bar
     from quant.decision.decision_service import QuantDecision
     from quant.decision.signal_builder import Signal
@@ -49,11 +48,6 @@ class Event:
 @dataclass(frozen=True)
 class BarClosed(Event):
     bar: "Bar"
-
-
-@dataclass(frozen=True)
-class AuctionUpdated(Event):
-    auction: "AuctionState"
 
 
 @dataclass(frozen=True)

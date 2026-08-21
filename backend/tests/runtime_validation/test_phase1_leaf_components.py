@@ -18,25 +18,22 @@ Coverage per component:
 from __future__ import annotations
 
 import pytest
+from dataclasses import replace as _dc_replace
 from decimal import Decimal
 
 from tests.helpers.market_data import generate_market_data
-from quant.auction_state import AuctionState
+from quant.decision.result import GateResult
+from quant.bars import Bar
 from quant.contracts.value_objects import OHLC
 from quant.contracts.entities import Position, Signal
 from quant.contracts.aggregates import Portfolio, INITIAL_CAPITAL
 from quant.contracts.enums import SignalType, SetupType, Source, Side, PositionStatus
 from quant.decision.context import DecisionContext
-from quant.decision.result import GateResult
 from quant.decision.signal_builder import SignalBuilder
 from quant.execution.exit_rules import update_excursions
 from quant.execution.exits import ExitEngine as LiveExitEngine
 from quant.execution.order import Order as LiveOrder
 from quant.execution.order import Position as LivePosition
-from quant.location import LocationState
-from quant.order_flow import OrderFlowState
-from quant.volume_profile import VolumeProfile
-from quant.vwap import VWAPState
 from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
 
 
@@ -54,28 +51,27 @@ def _signal(price=100.0, sl=95.0, tp=110.0, is_buy=True, source=Source.AMT, **me
     )
 
 
-def _state(close, val, step, nearest) -> AuctionState:
-    return AuctionState(
-        time="2026-08-05T09:20:00Z", close=close,
-        volume_profile=VolumeProfile(
-            levels=(), poc=close, vah=val + 2 * step, val=val, step=step,
-            total_volume=100),
-        vwap=VWAPState(value=close, upper_1=close + 1, lower_1=close - 1,
-                       upper_2=close + 2, lower_2=close - 2, std=1,
-                       deviation_sigmas=0),
-        order_flow=OrderFlowState(delta=0, cvd=0, cvd_slope=0,
-                                  cvd_divergence="NONE", aggressive_prints=()),
-        absorption=None,
-        location=LocationState(ib_high=close + 5, ib_low=close - 5,
-                               ib_complete=True, zone="INSIDE_VA",
-                               nearest_level=nearest, distance_to_level=0),
-        triple_a_phase="AGGRESSION", triple_a_signal="LONG",
+def _bar(close, low=None, high=None) -> Bar:
+    return Bar(time="2026-08-05T09:20:00Z", open=close, high=high or close + 0.1,
+               low=low or close - 0.1, close=close, volume=100)
+
+
+def _state(close, val, step, nearest) -> DecisionContext:
+    """Live-API context: SignalBuilder anchors SL on ctx.val/vah/tick_size,
+    so the fixture sets those directly (the old AuctionState shape is gone)."""
+    return DecisionContext(
+        bar=_bar(close), symbol="NIFTY", agent_direction=None,
+        val=val,
+        # An overhead `nearest` level is the short side's SL anchor in the
+        # live API (ctx.vah); below-price nearest levels don't affect it.
+        vah=max(nearest, val + 2 * step) if nearest > close else val + 2 * step,
+        poc=close, tick_size=step,
+        time_str="2026-08-05T09:20:00Z",
     )
 
 
 def _ctx(state, direction="LONG") -> DecisionContext:
-    return DecisionContext(state=state, bar=None, symbol="NIFTY",
-                           agent_direction=direction, agent_probability=0.7)
+    return _dc_replace(state, agent_direction=direction, agent_probability=0.7)
 
 
 def _pass_results():
@@ -265,8 +261,7 @@ class TestOMS:
         pos = LivePosition(order=LiveOrder(live_sig, 10),
                            open_price=100.0, open_time="t0", size=10)
         engine = LiveExitEngine()
-        state = _state(close=94.0, val=98.0, step=1.0, nearest=98.0)
-        dec = engine.evaluate(pos, state, bar_index=5)
+        dec = engine.evaluate(pos, 94.0, bar_index=5)
         assert dec.should_exit
         assert dec.reason == "SL"
 
@@ -280,8 +275,7 @@ class TestOMS:
         pos = LivePosition(order=LiveOrder(live_sig, 10),
                            open_price=100.0, open_time="t0", size=10)
         engine = LiveExitEngine(time_stop_bars=30)
-        state = _state(close=101.0, val=98.0, step=1.0, nearest=98.0)
-        dec = engine.evaluate(pos, state, bar_index=5)
+        dec = engine.evaluate(pos, 101.0, bar_index=5)
         assert not dec.should_exit
 
     def test_closed_trade_accounts_commission(self):

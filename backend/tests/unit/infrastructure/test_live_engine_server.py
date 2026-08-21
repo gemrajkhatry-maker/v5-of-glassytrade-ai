@@ -39,7 +39,6 @@ def test_view_state_to_ws_has_frontend_snapshot_keys():
         "_symbol",
         "portfolio",
         "amt",
-        "auction",
         "quantDecision",
         "agentDecision",
         "riskState",
@@ -52,4 +51,3 @@ def test_view_state_to_ws_has_frontend_snapshot_keys():
     assert ws["_symbol"] == "NIFTY"
     assert ws["tick"] is not None
     assert ws["ltp"] is not None
-    assert ws["auction"] is not None

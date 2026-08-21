@@ -1,7 +1,7 @@
 """WS adapter — maps StateProjector output to the frontend WS snapshot shape.
 
 Pure mapper: StateProjector.ViewState -> the existing WS snapshot dict the
-frontend already consumes (``_symbol, portfolio, amt, auction, quantDecision,
+frontend already consumes (``_symbol, portfolio, amt, quantDecision,
 agentDecision, riskState, tick, ltp, oi, depth``). No I/O, no backend imports.
 
 The LLM layer is gone, so the LLM-derived keys (``genAIAnalysis``,
@@ -55,7 +55,6 @@ def view_state_to_ws(vs) -> dict:
             "closedTrades": portfolio.get("closedTrades", []),
         },
         "amt": vs.amt,
-        "auction": vs.auction,
         "quantDecision": vs.quant_decision,
         "agentDecision": _agent_decision_from_quant(vs.quant_decision),
         "riskState": vs.risk_state,

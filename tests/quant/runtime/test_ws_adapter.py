@@ -12,7 +12,7 @@ from quant.state import StateProjector
 from quant.ws_adapter import view_state_to_ws
 
 WS_KEYS = {
-    "_symbol", "portfolio", "amt", "auction", "quantDecision",
+    "_symbol", "portfolio", "amt", "quantDecision",
     "agentDecision", "riskState", "tick", "ltp", "oi", "depth",
 }
 
@@ -43,7 +43,7 @@ def _projector():
 def test_ws_snapshot_has_all_frontend_keys():
     ws = view_state_to_ws(_projector().snapshot("S"))
     assert set(ws) == WS_KEYS
-    assert len(ws) == 11
+    assert len(ws) == 10
 
 
 def test_agent_decision_projected_from_quant_decision():
@@ -77,7 +77,6 @@ def test_ws_snapshot_empty_state_does_not_crash():
     ws = view_state_to_ws(StateProjector().snapshot("S"))
     assert set(ws) == WS_KEYS
     assert ws["_symbol"] == "S"
-    assert ws["auction"] is None
     assert ws["quantDecision"] is None
     assert ws["riskState"] is None
     # Portfolio is ALWAYS the full frontend contract shape (never `{}`) so

@@ -47,7 +47,6 @@ def test_snapshot_defaults_empty_state():
     assert v.tick is None
     assert v.ltp is None
     assert v.oi is None
-    assert v.auction is None
     assert v.quant_decision is None
     assert v.risk_state is None
     assert v.depth is None
