@@ -7,6 +7,7 @@ act as price magnets and potential secondary targets for P3 trailing.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 
 from quant.contracts.ports.npoc import INPOC as NPOCPort, NPOCRecord, NPOCResult
@@ -39,6 +40,7 @@ class NPOCTracker(NPOCPort):
         self._storage = storage_port
         # In-memory cache: underlying -> list of NPOCRecord
         self._active_npocs: dict[str, list[NPOCRecord]] = {}
+        self._lock = threading.Lock()
 
     def add_session_poc(self, underlying: str, date: str, poc: float) -> None:
         """Record a session's POC as a new NPOC.
@@ -59,19 +61,20 @@ class NPOCTracker(NPOCPort):
             filled_at=None,
         )
 
-        if underlying not in self._active_npocs:
-            self._active_npocs[underlying] = []
+        with self._lock:
+            if underlying not in self._active_npocs:
+                self._active_npocs[underlying] = []
 
-        # Prevent duplicate entries for the same session
-        existing_dates = {r.session_date for r in self._active_npocs[underlying]}
-        if date in existing_dates:
-            logger.debug(
-                "NPOC already tracked for %s on %s — skipping duplicate",
-                underlying, date,
-            )
-            return
+            # Prevent duplicate entries for the same session
+            existing_dates = {r.session_date for r in self._active_npocs[underlying]}
+            if date in existing_dates:
+                logger.debug(
+                    "NPOC already tracked for %s on %s — skipping duplicate",
+                    underlying, date,
+                )
+                return
 
-        self._active_npocs[underlying].append(record)
+            self._active_npocs[underlying].append(record)
         ensure_sync_adapter_result(
             "storage.save_npoc",
             self._storage.save_npoc,

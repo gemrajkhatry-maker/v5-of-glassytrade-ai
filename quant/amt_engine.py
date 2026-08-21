@@ -354,6 +354,7 @@ class AMTEngine:
 
     @property
     def last_amt_dto(self) -> dict | None:
-        return self._last_amt_dto
+        with self._amt_lock:
+            return self._last_amt_dto
 
 

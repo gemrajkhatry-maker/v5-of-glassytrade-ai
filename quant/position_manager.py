@@ -88,7 +88,8 @@ class PositionManager:
             best_bid = float(book.bids[0].price) if book and book.bids else None
             best_ask = float(book.asks[0].price) if book and book.asks else None
             ist_dt = _ist_dt(bar.time)
-            amt_dto = self._get_amt_dto() or {}
+            # Use the passed-in amt_dto (from the engine's analyze() call)
+            # instead of re-reading last_amt_dto which could be stale.
             raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
             if raw_ms == "IMBALANCED":
                 market_state = MarketState.IMBALANCED

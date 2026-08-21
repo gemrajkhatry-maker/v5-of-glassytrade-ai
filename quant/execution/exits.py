@@ -52,14 +52,14 @@ class ExitEngine:
         self.trail_giveback_pct = trail_giveback_pct
         self.spread_max_pct = spread_max_pct
         self.cvd_be_threshold = cvd_be_threshold
-        # Trailing state is keyed by id(position) because Position is frozen.
-        self._trail: dict[int, _Trail] = {}
-        self._breakeven: dict[int, float | None] = {}  # id(position) -> BE floor price
+        # Trailing state is keyed by position._id (UUID) to prevent GC-recycling hazards.
+        self._trail: dict[str, _Trail] = {}
+        self._breakeven: dict[str, float | None] = {}  # position._id -> BE floor price
 
     def pop_trail(self, position: Position) -> None:
         """Drop trailing state for a closed position."""
-        self._trail.pop(id(position), None)
-        self._breakeven.pop(id(position), None)
+        self._trail.pop(position._id, None)
+        self._breakeven.pop(position._id, None)
 
     def is_risk_free(self, position: Position) -> bool:
         """Return True when this position has reached the 0.8R breakeven floor.
@@ -68,7 +68,7 @@ class ExitEngine:
         base trade must be risk-free (SL at entry or better) before any
         pyramid entry is permitted.
         """
-        be_floor = self._breakeven.get(id(position))
+        be_floor = self._breakeven.get(position._id)
         return be_floor is not None
 
     def evaluate(
@@ -139,7 +139,7 @@ class ExitEngine:
         # The breakeven floor ensures the trail can never drop below entry once armed.
         entry = float(position.order.signal.entry)
         risk = abs(entry - sl)
-        be_floor = self._breakeven.get(id(position))
+        be_floor = self._breakeven.get(position._id)
 
         if risk > 0:
             profit = (close - entry) if long else (entry - close)
@@ -154,24 +154,24 @@ class ExitEngine:
                 )
                 if cvd_confirms:
                     be_floor = entry
-                    self._breakeven[id(position)] = be_floor
+                    self._breakeven[position._id] = be_floor
             
             # Standard 0.8R breakeven: once profit reaches 0.8R, floor at entry.
             # Spec §13.1: "Price breaks +0.8R advance → SL ← entry_price instantly."
             # Triggers before full 1R to lock in risk-free status early and enable pyramiding.
             if be_floor is None and profit >= risk * 0.8:
                 be_floor = entry
-                self._breakeven[id(position)] = be_floor
+                self._breakeven[position._id] = be_floor
 
         # 4. Trailing stop — only once the trade has reached 1R profit.
-        tr = self._trail.get(id(position))
+        tr = self._trail.get(position._id)
         if risk > 0:
             # Ratchet ONLY at/above 1R; once armed, enforce on every bar so a
             # giveback below 1R can't silently ride back to the original SL.
             if profit >= risk:
                 if tr is None:
                     tr = _Trail()
-                    self._trail[id(position)] = tr
+                    self._trail[position._id] = tr
                 tr.active = True
                 candidate = (
                     close - self.trail_giveback_pct * profit
