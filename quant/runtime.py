@@ -435,19 +435,10 @@ class QuantEngine:
                 cur_bar = self._aggregator.current_bar
                 opt_ltp = float(cur_bar.close) if (cur_bar and cur_bar.close > 0) else (float(bar.close) if bar else 0.0)
                 if opt_ltp > 0 and abs(opt_ltp - signal.entry) > 1.0:
-                    # Scale sanity gate: a signal whose price is nowhere near
-                    # the option's own premium cannot be translated safely —
-                    # DROP it. Filling a futures-scale price on an option
-                    # instrument produced crore-scale phantom P&L.
-                    if signal.entry > opt_ltp * 5 or signal.entry < opt_ltp / 5:
-                        logger.error(
-                            "🚫 [SCALE GUARD] %s: dropping signal entry=%.2f "
-                            "vs option ltp=%.2f — cross-scale contamination",
-                            self.symbol, signal.entry, opt_ltp,
-                        )
-                        return
                     delta = float(getattr(ctx, "option_delta", 0.50) or 0.50)
                     selector = OptionSelector()
+                    # The selector owns the scale policy: returns None on
+                    # cross-scale contamination instead of mistranslating.
                     signal = selector.translate_underlying_signal_to_option(
                         signal=signal,
                         option_symbol=self.symbol,
@@ -455,6 +446,8 @@ class QuantEngine:
                         delta=delta,
                         tick_size=self._tick_size,
                     )
+                    if signal is None:
+                        return
 
             logger.info(
                 "⚡ [APPROVED SIGNAL] %s: %s @ %.2f (SL=%.2f, TP=%.2f, RR=%.2f) — %s | trades_today=%d equity=₹%.0f",

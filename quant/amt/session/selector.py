@@ -14,6 +14,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +399,19 @@ class OptionSelector:
             opt_tp = opt_entry + opt_reward
         """
         from quant.decision.signal_builder import Signal
+        # Scale sanity gate (owns the policy): a signal whose price is nowhere
+        # near the option's own premium cannot be translated safely. Returning
+        # None lets callers drop it instead of filling futures-scale prices on
+        # an option instrument (crore-scale phantom P&L).
+        if option_ltp > 0 and (
+            float(signal.entry) > option_ltp * 5 or float(signal.entry) < option_ltp / 5
+        ):
+            logger.error(
+                "[SCALE GUARD] %s: rejecting signal entry=%.2f vs option ltp=%.2f "
+                "- cross-scale contamination",
+                option_symbol, signal.entry, option_ltp,
+            )
+            return None
         eff_delta = max(0.20, min(1.0, abs(delta)))
         underlying_risk = abs(signal.entry - signal.sl)
         underlying_reward = abs(signal.tp - signal.entry)
