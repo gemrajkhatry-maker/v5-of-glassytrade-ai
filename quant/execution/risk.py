@@ -1,8 +1,11 @@
 import json
+import logging
 import threading
 from dataclasses import dataclass
 from datetime import date as _date_type, datetime, timezone, timedelta
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -74,6 +77,23 @@ class SessionRisk:
                 self._halted = False
                 self._halt_reason = ""
             # Restore equity: starting capital adjusted by daily P&L
+            # Sanity clamp: this system risks 0.5%/trade with a 2% daily-loss
+            # halt, so a legit |daily_pnl| can never approach half the
+            # starting capital. Anything larger is cross-scale corruption
+            # (e.g. futures-priced fills on an option instrument) — reset
+            # instead of poisoning sizing/halts for the rest of the day.
+            if abs(self._daily_pnl) > self._starting_equity * 0.5:
+                logger.error(
+                    "SessionRisk %s: persisted daily_pnl=%.2f exceeds 50%% of "
+                    "starting equity %.2f — treating as corrupt, resetting",
+                    self._symbol or "?", self._daily_pnl, self._starting_equity,
+                )
+                self._daily_pnl = 0.0
+                self._consecutive_losses = 0
+                self._consecutive_wins = 0
+                self._trades_today = 0
+                self._halted = False
+                self._halt_reason = ""
             self._equity = self._starting_equity + self._daily_pnl
         except Exception:
             pass  # corrupt/absent store must not inherit a phantom halt
