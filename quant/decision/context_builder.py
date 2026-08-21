@@ -13,6 +13,7 @@ from quant.contracts.enums import MarketState
 from quant.decision.context import DecisionContext
 from quant.session_gates import ist_dt, session_allow_entry
 from quant.amt.session.context import get_session_info
+from quant.bars import DEFAULT_INTERVAL_SEC
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class DecisionContextBuilder:
         cooldown_remaining_sec: float,
         risk_state,
         amt_dto: dict,
-        interval_seconds: int = 60,
+        interval_seconds: int = DEFAULT_INTERVAL_SEC,
     ) -> DecisionContext:
         """Build a DecisionContext from the given inputs.
         

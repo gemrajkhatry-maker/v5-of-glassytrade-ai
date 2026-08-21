@@ -58,6 +58,7 @@ from quant.execution.oms import PaperOMS
 from quant.execution.risk import SessionRisk
 from quant.persistence import Journal
 from quant.state import StateProjector, _epoch_to_iso
+from quant.bars import DEFAULT_INTERVAL_SEC
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ class QuantEngine:
         self,
         gateway,
         symbol: str,
-        interval_seconds: int = 60,
+        interval_seconds: int = DEFAULT_INTERVAL_SEC,
         journal_path: str | None = None,
         min_rr: float = 1.5,
         tick_size: float = 0.05,
@@ -399,7 +400,7 @@ class QuantEngine:
         cooldown_bars_remaining = max(0, self._cooldown_bars - bars_since_close)
         # Convert bars to seconds for the DecisionContext contract
         cooldown_remaining_sec = cooldown_bars_remaining * int(
-            getattr(self._aggregator, "interval_seconds", 60) or 60
+            getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC) or DEFAULT_INTERVAL_SEC
         )
         if cooldown_bars_remaining > 0:
             logger.debug(

@@ -7,10 +7,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from quant.contracts.aggregates import INITIAL_CAPITAL
+from quant.contracts.timezones import IST
 
 logger = logging.getLogger(__name__)
 
-_IST = timezone(timedelta(hours=5, minutes=30))
+_IST = IST  # canonical — see contracts/timezones
 
 
 def _today() -> str:

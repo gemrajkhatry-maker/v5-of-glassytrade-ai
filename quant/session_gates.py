@@ -13,11 +13,12 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 
 from quant.amt.session.context import get_session_info
+from quant.contracts.timezones import IST
 
 logger = logging.getLogger(__name__)
 
 # IST offset: UTC+5:30
-_IST = timezone(timedelta(hours=5, minutes=30))
+_IST = IST  # canonical — see contracts/timezones
 
 
 def bar_epoch_ms(bar_time: str) -> int:
