@@ -133,6 +133,10 @@ class QuantEngine:
         self._option_amt_engine = None
         self._option_amt_dto: dict | None = None
         self._underlying_amt_dto: dict | None = None
+        # Last seen option-premium close — the ONLY valid price scale for
+        # signals/positions on this (option) engine. Futures-scale prices on
+        # an option instrument produce crore-scale phantom P&L.
+        self._last_option_close: float = 0.0
 
         if self._underlying_gateway is not None:
             underlying_symbol = (
@@ -278,6 +282,14 @@ class QuantEngine:
                     if self._option_amt_engine is not None:
                         self._option_amt_dto = self._option_amt_engine.analyze(option_bar)
                         self._emit_merged_amt(self._option_amt_dto, option_bar.time)
+                        # Decisions AND exits run on the OPTION's own bars —
+                        # futures bars are a different price scale; comparing
+                        # premium SL/TP against futures prices produced
+                        # crore-scale phantom P&L.
+                        if self._position is None:
+                            self._decide(self._option_amt_dto, option_bar)
+                        else:
+                            self._manage_exit(self._option_amt_dto, option_bar)
 
                 # 2. Underlying futures ticks feed the underlying aggregator and AMT engine.
                 # Non-blocking drain: a blocking read here would strand this
@@ -291,12 +303,11 @@ class QuantEngine:
                         ubar = self._underlying_aggregator.add_tick(utick)
                         self._amt_engine.on_tick(utick, self._underlying_aggregator.current_bar)
                         if ubar is not None:
+                            # Futures bars only update the auction-structure DTO
+                            # (decision evidence). They NEVER drive entries or
+                            # exits on an option engine — different price scale.
                             self._underlying_amt_dto = self._amt_engine.analyze(ubar)
                             self._emit_merged_amt(self._underlying_amt_dto, ubar.time)
-                            if self._position is None:
-                                self._decide(self._underlying_amt_dto, ubar)
-                            else:
-                                self._manage_exit(self._underlying_amt_dto, ubar)
                         utick = self._underlying_gateway.try_next_tick()
             else:
                 bar = self._aggregator.add_tick(tick)
@@ -421,6 +432,17 @@ class QuantEngine:
                 cur_bar = self._aggregator.current_bar
                 opt_ltp = float(cur_bar.close) if (cur_bar and cur_bar.close > 0) else (float(bar.close) if bar else 0.0)
                 if opt_ltp > 0 and abs(opt_ltp - signal.entry) > 1.0:
+                    # Scale sanity gate: a signal whose price is nowhere near
+                    # the option's own premium cannot be translated safely —
+                    # DROP it. Filling a futures-scale price on an option
+                    # instrument produced crore-scale phantom P&L.
+                    if signal.entry > opt_ltp * 5 or signal.entry < opt_ltp / 5:
+                        logger.error(
+                            "🚫 [SCALE GUARD] %s: dropping signal entry=%.2f "
+                            "vs option ltp=%.2f — cross-scale contamination",
+                            self.symbol, signal.entry, opt_ltp,
+                        )
+                        return
                     delta = float(getattr(ctx, "option_delta", 0.50) or 0.50)
                     selector = OptionSelector()
                     signal = selector.translate_underlying_signal_to_option(
