@@ -1,6 +1,6 @@
 """Value-Area fade signal (tier-2 hierarchy): VAL bounce LONG / VAH rejection SHORT.
 
-Per amt_docs: when price trades outside the value area against the mean-reversion
+Per docs/amt: when price trades outside the value area against the mean-reversion
 pull of VWAP and order flow, fade back toward the POC.
 """
 

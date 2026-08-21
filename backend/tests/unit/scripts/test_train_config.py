@@ -11,7 +11,7 @@ _CONFIG = _REPO_ROOT / "backend" / "scripts" / "mlx_lora_retrain.yaml"
 def test_train_config_matches_shipped_adapter():
     cfg = yaml.safe_load(open(_CONFIG))
     assert cfg["model"] == "models/vibethinker-3b"
-    assert cfg["data"] in ("amt_dataset/nifty_amt_data_livefmt", "amt_dataset/nifty_amt_data")
+    assert cfg["data"] in ("data/nifty_amt_data_livefmt", "data/nifty_amt_data")
     assert cfg["iters"] == 300
     assert cfg["learning_rate"] == 2e-05
     assert cfg["num_layers"] == 16

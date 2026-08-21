@@ -3,7 +3,7 @@
     "batch_size": 1,
     "clear_cache_threshold": 0,
     "config": "backend/scripts/mlx_lora_retrain_lfm.yaml",
-    "data": "amt_dataset/amt_data_livefmt",
+    "data": "data/amt_data_livefmt",
     "fine_tune_type": "lora",
     "grad_accumulation_steps": 1,
     "grad_checkpoint": true,

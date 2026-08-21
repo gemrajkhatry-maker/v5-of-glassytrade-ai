@@ -2,7 +2,7 @@
 # Mirrors models/vibethinker-amt-lora/adapter_config.json (steps_per_eval=200,
 # seed=0, steps_per_report=10 are taken from the shipped adapter).
 model: models/vibethinker-3b
-data: amt_dataset/nifty_amt_data_livefmt
+data: data/nifty_amt_data_livefmt
 iters: 300
 learning_rate: 2.0e-05
 num_layers: 16

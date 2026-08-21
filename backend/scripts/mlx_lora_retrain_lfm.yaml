@@ -1,11 +1,11 @@
 # Reproducible LoRA retrain config for the LFM2.5-2.6B AMT entry model.
-# Trains on the COMBINED live-format dataset (amt_dataset/amt_data_livefmt:
+# Trains on the COMBINED live-format dataset (data/amt_data_livefmt:
 # NSE nifty_amt_data_livefmt + MCX mcx_amt_data_livefmt), which is rendered
 # byte-for-byte in the live prompt shape (QuantEngine._llm_instruction system
 # + render_entry_prompt user narrative).
 model: models/lfm2.5-2.6b-mlx-8bit
 adapter_path: models/lfm2.5-amt-lora-v2
-data: amt_dataset/amt_data_livefmt
+data: data/amt_data_livefmt
 iters: 500
 train: true
 test: false

@@ -1,6 +1,6 @@
 """GatePipeline — Fabio AMT playbook gates (1..4), run in order.
 
-Simplified to the documented Valentini rules (see amt_docs/ and the online
+Simplified to the documented Valentini rules (see docs/amt/ and the online
 Fabio AMT playbook): trade one session, one position at a time, enter on the
 Triple-A edge (absorption -> accumulation -> aggression / VWAP breakout) with
 R:R >= 1.5, and stop after the daily-loss limit (SessionRisk at execution).
