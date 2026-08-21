@@ -88,7 +88,7 @@ class DecisionService:
         # VA-fade fallback — the balance-returning reversion trade. It targets
         # the POC and requires price OUTSIDE the value area, so it never fires
         # in balanced rotation; a dead market refuses even the reversion.
-        if str(getattr(ctx.market_state, "value", ctx.market_state) or "").upper() == "DEAD":
+        if ctx.market_state == MarketState.DEAD:
             return QuantDecision(False, None, "NO_EDGE", "", tuple(results), blocked)
         fade = detect_va_fade(ctx)
         if fade:

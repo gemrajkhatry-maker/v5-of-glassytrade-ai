@@ -29,10 +29,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 TIME_STOP_TABLE: dict[tuple[str, str], float] = {
-    ("MORNING", "BALANCED"): 1200,
-    ("MORNING", "IMBALANCED"): 2700,
-    ("AFTERNOON", "BALANCED"): 900,
-    ("AFTERNOON", "IMBALANCED"): 1800,
+    ("MORNING", MarketState.BALANCED.value): 1200,
+    ("MORNING", MarketState.IMBALANCED.value): 2700,
+    ("AFTERNOON", MarketState.BALANCED.value): 900,
+    ("AFTERNOON", MarketState.IMBALANCED.value): 1800,
 }
 
 EXPIRY_TIME_STOP: float = 600

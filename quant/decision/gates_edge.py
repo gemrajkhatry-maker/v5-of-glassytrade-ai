@@ -44,7 +44,7 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
         return GateResult(3, False, "No direction")
     market_state = ctx.market_state
     ms_val = getattr(market_state, "value", market_state)
-    if ms_val in ("DEAD", "DEAD_MARKET"):
+    if ms_val in (MarketState.DEAD.value, "DEAD_MARKET"):
         return GateResult(3, False, "Dead market — no edge")
 
     # ── 0. SetupEvidence Evaluation (if explicit evidence provided) ─────────

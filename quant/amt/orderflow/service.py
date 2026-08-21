@@ -27,6 +27,7 @@ from quant.amt.orderflow.aggressive_prints import AggressivePrintRegistry
 
 
 from dataclasses import dataclass
+from quant.contracts.enums import MarketState
 
 
 @dataclass
@@ -238,7 +239,7 @@ class OrderFlowService:
         if cvd_state is None:
             return False
         # Simplified check - expand based on original logic
-        if market_state.name in ("IMBALANCED") and cvd_state.slope != 0:
+        if market_state == MarketState.IMBALANCED and cvd_state.slope != 0:
             return True
         if cvd_state.has_divergence:
             return True

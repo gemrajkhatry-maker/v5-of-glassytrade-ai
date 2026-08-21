@@ -891,7 +891,7 @@ class AMTAnalyzer:
             _latest_vol = float(recent_data[-1].volume)
             _vol_ratio = _latest_vol / _ema_vol if _ema_vol > 0 else 0.0
             if float(current.close) <= 0 or _vol_ratio < 0.01:
-                _effective_market_state = "DEAD"
+                _effective_market_state = MarketState.DEAD.value
         return _effective_market_state
 
     def _compute_per_symbol_delta(self, option_tick, current_candle: OHLC | None = None) -> float:

@@ -167,6 +167,7 @@ class MarketState(str, Enum):
 
     BALANCED = "BALANCED"
     IMBALANCED = "IMBALANCED"
+    DEAD = "DEAD"  # volume-collapse state; wire-compatible with legacy strings
 
 
 class MarketStructureState(str, Enum):

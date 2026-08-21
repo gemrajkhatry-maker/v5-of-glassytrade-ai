@@ -189,7 +189,7 @@ class PersistentAggressionScorer:
         PROBING/IMBALANCED: 2 bars (10 min — moves are fast)
         BALANCED: 3 bars (15 min — mean reversion needs more confirmation)
         """
-        if market_state in ("PROBING", "IMBALANCED"):
+        if market_state in ("PROBING", MarketState.IMBALANCED.value):
             self._persistence_bars = 2
         elif market_state == MarketState.BALANCED:
             self._persistence_bars = 3
