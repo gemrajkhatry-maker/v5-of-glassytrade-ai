@@ -2,8 +2,11 @@ import json
 import logging
 import threading
 from dataclasses import dataclass
-from datetime import date as _date_type, datetime, timezone, timedelta
+from datetime import date as _date_type
+from datetime import datetime, timedelta, timezone
 from typing import Any
+
+from quant.contracts.aggregates import INITIAL_CAPITAL
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +25,12 @@ class RiskState:
     halt_reason: str
     risk_per_trade_pct: float
     trades_today: int = 0
-    equity: float = 1_000_000.0
+    equity: float = float(INITIAL_CAPITAL)
     cushion_tier: str = "CONSERVATIVE"
 
 
 class SessionRisk:
-    def __init__(self, starting_equity: float = 1_000_000.0,
+    def __init__(self, starting_equity: float = float(INITIAL_CAPITAL),
                  base_risk_pct: float = 0.005,          # 0.5% risk per trade (was 1%)
                  max_daily_loss_pct: float = 0.02,       # 2% max daily loss (was 3%)
                  max_consecutive_losses: int = 3,

@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import threading
 
+from quant.contracts.aggregates import INITIAL_CAPITAL
+
 
 class PortfolioRiskAuthority:
     def __init__(
         self,
-        starting_equity: float = 1_000_000.0,
+        starting_equity: float = float(INITIAL_CAPITAL),
         max_portfolio_risk_pct: float = 0.04,   # max aggregate open risk: 4% of capital
         max_portfolio_daily_loss_pct: float = 0.06,  # global kill: 6% realized daily loss
     ) -> None:

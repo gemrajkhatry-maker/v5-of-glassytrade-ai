@@ -12,6 +12,8 @@ sidebar sorting/filtering keeps working on engine output alone.
 
 from __future__ import annotations
 
+from quant.contracts.aggregates import INITIAL_CAPITAL
+
 
 def _agent_decision_from_quant(qd: dict | None) -> dict | None:
     """Project the deterministic decision into the frontend ``AgentDecision``
@@ -48,8 +50,8 @@ def view_state_to_ws(vs) -> dict:
     return {
         "_symbol": vs.symbol,
         "portfolio": {
-            "balance": portfolio.get("balance", 1_000_000.0),
-            "equity": portfolio.get("equity", 1_000_000.0),
+            "balance": portfolio.get("balance", float(INITIAL_CAPITAL)),
+            "equity": portfolio.get("equity", float(INITIAL_CAPITAL)),
             "leverage": portfolio.get("leverage", 10),
             "positions": portfolio.get("positions", []),
             "closedTrades": portfolio.get("closedTrades", []),

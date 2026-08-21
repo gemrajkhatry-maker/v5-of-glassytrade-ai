@@ -16,8 +16,9 @@ from pathlib import Path
 from quant.amt.session.scanner import OptionScannerService
 from quant.brokers.live_gateway import LiveGateway
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
-from quant.contracts.timezones import IST
+from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.exchange_config import ExchangeConfig
+from quant.contracts.timezones import IST
 from quant.events import BarClosed
 from quant.runtime import QuantEngine
 from quant.session_levels import SessionLevelStore
@@ -150,7 +151,7 @@ class QuantCoordinator:
         # simultaneously risk 4% of capital).
         from quant.execution.portfolio_risk import PortfolioRiskAuthority
         self._portfolio_risk = PortfolioRiskAuthority(
-            starting_equity=float(self.config.get("starting_equity", 1_000_000.0)),
+            starting_equity=float(self.config.get("starting_equity", float(INITIAL_CAPITAL))),
         )
         self.started = False
 

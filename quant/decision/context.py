@@ -1,9 +1,10 @@
-from quant.contracts.enums import MarketState
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from quant.contracts.value_objects import AMTResult
 from quant.bars import Bar
+from quant.contracts.aggregates import INITIAL_CAPITAL
+from quant.contracts.enums import MarketState
+from quant.contracts.value_objects import AMTResult
 
 
 @dataclass(frozen=True)
@@ -58,7 +59,7 @@ class DecisionContext:
     vah: float = 0.0
     val: float = 0.0
     # capital for sizing
-    equity: float = 1_000_000.0
+    equity: float = float(INITIAL_CAPITAL)
     risk_per_trade_pct: float = 0.01
     tick_size: float = 0.05
     vwap_std: float = 0.0

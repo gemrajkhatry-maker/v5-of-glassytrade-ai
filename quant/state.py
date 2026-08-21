@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.timezones import IST
 from quant.decision.decision_service import QuantDecision
 from quant.events import (
@@ -117,7 +118,7 @@ def _risk_to_view(risk: RiskState) -> dict:
         "consecutiveLosses": risk.consecutive_losses,
         "dailyPnl": risk.daily_pnl,
         "tradesToday": getattr(risk, "trades_today", 0),
-        "equity": getattr(risk, "equity", 1_000_000.0),
+        "equity": getattr(risk, "equity", float(INITIAL_CAPITAL)),
         # Contract parity with the legacy risk DTO — SessionRisk does not yet
         # track drift, so these default off until a drift source exists.
         "driftAlert": False,
@@ -242,8 +243,8 @@ class StateProjector:
         # the frontend createInstrumentState (hooks/useServerTradingSystem.ts).
         # Paper account capital: ₹1 crore (10M).
         base = {
-            "balance": 1_000_000.0,
-            "equity": 1_000_000.0,
+            "balance": float(INITIAL_CAPITAL),
+            "equity": float(INITIAL_CAPITAL),
             "leverage": 10,
             "positions": [],
             "closedTrades": [],

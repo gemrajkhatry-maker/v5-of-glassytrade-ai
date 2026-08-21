@@ -16,12 +16,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from quant.contracts.aggregates import INITIAL_CAPITAL
+
 
 @dataclass(frozen=True)
 class WSPortfolio:
     """Portfolio state sent over WebSocket."""
-    balance: float = 1_000_000.0
-    equity: float = 1_000_000.0
+    balance: float = float(INITIAL_CAPITAL)
+    equity: float = float(INITIAL_CAPITAL)
     leverage: int = 10
     positions: list = field(default_factory=list)
     closedTrades: list = field(default_factory=list)
