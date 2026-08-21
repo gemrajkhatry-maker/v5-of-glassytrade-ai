@@ -47,13 +47,24 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
     if ms_val in ("DEAD", "DEAD_MARKET"):
         return GateResult(3, False, "Dead market — no edge")
 
+    # ── 0. SetupEvidence Evaluation (if explicit evidence provided) ─────────
+    if getattr(ctx, "setup_evidence", None) is not None:
+        ev = ctx.setup_evidence
+        if not ev.is_complete():
+            return GateResult(3, False, ev.rejection_reason())
+        if ev.setup_type in ("TRIPLE_A", "NONE") and not getattr(ctx, "allow_trend", True):
+            return GateResult(3, False, "SESSION_PHASE: Trend continuation blocked in this session phase")
+        if ev.setup_type == "VA_FADE" and not getattr(ctx, "allow_reversion", True):
+            return GateResult(3, False, "SESSION_PHASE: Mean reversion blocked in this session phase")
+        return GateResult(3, True, f"{ev.setup_type} confirmed")
+
     # ── 1. Anti-Climax / Overextension Guard ─────────────────────────────────
     # Price beyond ±2.0σ is a statistical exhaustion zone. Never enter new breakouts there.
     close_px = float(ctx.bar.close) if ctx.bar else 0.0
     if ctx.agent_direction == "LONG" and ctx.vwap_upper_2 > 0 and close_px > ctx.vwap_upper_2:
-        return GateResult(3, False, f"Price {close_px:.2f} > VWAP +2.0σ ({ctx.vwap_upper_2:.2f}) — climax overextension")
+        return GateResult(3, False, f"Anti-Climax: LONG rejected at +{ctx.vwap_std:.1f}σ extension")
     if ctx.agent_direction == "SHORT" and ctx.vwap_lower_2 > 0 and close_px < ctx.vwap_lower_2:
-        return GateResult(3, False, f"Price {close_px:.2f} < VWAP -2.0σ ({ctx.vwap_lower_2:.2f}) — climax overextension")
+        return GateResult(3, False, f"Anti-Climax: SHORT rejected at -{ctx.vwap_std:.1f}σ extension")
 
     # ── 2. Contested Zone Guard ──────────────────────────────────────────────
     if getattr(ctx, "contested_bubble_zone", False):
@@ -74,7 +85,7 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
 
     # ── Setup B: Second-Drive Rejection (D1 rejected → D2 weaker re-approach) ─
     if ctx.drive_entry_valid:
-        return GateResult(3, True, "Second-Drive rejection confirmed")
+        return GateResult(3, True, "Second Drive reclaim confirmed")
 
     # ── Setup C: Impulse Leg LVN Sniper (Playbook C) ─────────────────────────
     leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0
@@ -98,7 +109,9 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
     allow_trend = getattr(ctx, "allow_trend", True)
     break_dir = getattr(ctx, "break_direction", "") or ""
     break_type = getattr(ctx, "break_type", "") or ""
-    if break_type == "INITIATIVE" and allow_trend:
+    if break_type == "INITIATIVE":
+        if not allow_trend:
+            return GateResult(3, False, "SESSION_PHASE: Trend continuation blocked in this session phase")
         if break_dir == "UP" and ctx.agent_direction == "LONG" and cvd_slope > -0.2:
             return GateResult(3, True, "Initiative upside breakout confirmed")
         if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
@@ -112,4 +125,4 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
         elif ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
             return GateResult(3, True, "Triple-A Continuation SHORT confirmed")
 
-    return GateResult(3, False, "No valid Fabio AMT setup")
+    return GateResult(3, False, "No Triple-A edge: no valid setup")

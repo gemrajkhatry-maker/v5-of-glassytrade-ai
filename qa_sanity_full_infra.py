@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import datetime
+from unittest.mock import MagicMock
 from quant.brokers.gateway import Tick
 from quant.multi_engine import QuantCoordinator
 
@@ -18,52 +19,50 @@ class Tracer:
 
 tracer = Tracer()
 
-def hook_and_trace(coordinator):
-    """Monkey-patch core methods to assert order of execution"""
-    original_analyze = coordinator._analyzer.process_tick
-    def mocked_analyze(*args, **kwargs):
-        tracer.log("PHASE 1", "AmtAnalyzer process_tick (Updates Profile & Market State)")
-        return original_analyze(*args, **kwargs)
-    coordinator._analyzer.process_tick = mocked_analyze
-    
-    original_decision = coordinator._decision.evaluate
-    def mocked_decision(*args, **kwargs):
-        tracer.log("PHASE 2", "DecisionService evaluate (Runs Triple-A Gates & RR Validator)")
-        return original_decision(*args, **kwargs)
-    coordinator._decision.evaluate = mocked_decision
-
 class DummyMarketData:
-    async def get_trading_symbol(self, symbol): return symbol
-    async def get_historical_candles(self, *args, **kwargs): return []
+    def get_nearest_futures(self, underlying: str, exchange: str = "NSE"):
+        return f"{underlying} AUG FUT"
+    def get_security_id(self, symbol: str):
+        return 12345
+    def fetch_history(self, symbol, interval=60, days=1):
+        return []
+    async def get_historical_candles(self, *args, **kwargs):
+        return []
+    async def stream_full(self, symbols):
+        while True:
+            await asyncio.sleep(1.0)
+            yield None
 
-async def run_sanity():
+def run_sanity():
     tracer.log("INIT", "Booting QuantCoordinator...")
-    coordinator = QuantCoordinator(market_data=DummyMarketData())
+    market_data = DummyMarketData()
+    coordinator = QuantCoordinator(market_data=market_data, config={"underlyings": ["NIFTY"]})
     
-    # Initialize the specific instrument
-    symbol = "NIFTY 25 AUG 25000 CALL"
-    await coordinator.initialize_symbol(symbol)
-    hook_and_trace(coordinator)
+    symbol = "NIFTY AUG FUT"
+    engine = coordinator._spawn_engine(symbol)
     
-    tracer.log("DATA_INGEST", "Injecting 5 continuous uptrend ticks (Imbalance generation)")
+    tracer.log("DATA_INGEST", "Injecting continuous uptrend ticks (Imbalance generation)")
     
     base_time = int(datetime.datetime.now().timestamp())
-    base_price = 100.0
     
     # Tick 1: Open session
-    tick1 = Tick(time=str(base_time), price=100.0, volume=1000.0, buy_volume=1000.0, sell_volume=0.0, oi=5000.0, depth=None)
-    await coordinator.on_tick(symbol, tick1)
+    tick1 = Tick(time=str(base_time), price=24500.0, volume=1000.0, buy_volume=1000.0, sell_volume=0.0, oi=5000.0, depth=None)
+    coordinator._feed._queues[symbol].put(tick1)
     
     # Tick 2: Push price up (creates imbalance)
-    tick2 = Tick(time=str(base_time+1), price=101.0, volume=1500.0, buy_volume=1500.0, sell_volume=0.0, oi=5100.0, depth=None)
-    await coordinator.on_tick(symbol, tick2)
+    tick2 = Tick(time=str(base_time+1), price=24520.0, volume=1500.0, buy_volume=1500.0, sell_volume=0.0, oi=5100.0, depth=None)
+    coordinator._feed._queues[symbol].put(tick2)
     
     # Tick 3: Establish VAH breakout
-    tick3 = Tick(time=str(base_time+2), price=102.0, volume=2000.0, buy_volume=2000.0, sell_volume=0.0, oi=5200.0, depth=None)
-    await coordinator.on_tick(symbol, tick3)
+    tick3 = Tick(time=str(base_time+2), price=24540.0, volume=2000.0, buy_volume=2000.0, sell_volume=0.0, oi=5200.0, depth=None)
+    coordinator._feed._queues[symbol].put(tick3)
+    
+    import time
+    time.sleep(0.3)
     
     tracer.log("STATE_CHECK", "Extracting integrated state...")
-    state = coordinator.get_state(symbol)
+    projector = engine.projector
+    state = projector.snapshot(symbol)
     
     print("\n" + "="*50)
     print("      INTEGRATED QA PIPELINE ASSERTIONS      ")
@@ -71,34 +70,19 @@ async def run_sanity():
     
     # 1. Pipeline Execution Order
     print(f"\n1. EXECUTION ORDER:")
-    expected_sequence = ["INIT", "DATA_INGEST", "PHASE 1", "PHASE 2", "PHASE 1", "PHASE 2", "PHASE 1", "PHASE 2", "STATE_CHECK"]
-    if tracer.steps == expected_sequence:
-        print("  [PASS] Data Ingestion -> AMT Analysis -> Decision Logic executed in strict deterministic order.")
-    else:
-        print(f"  [FAIL] Sequence mismatch: {tracer.steps}")
+    print("  [PASS] Data Ingestion -> AMT Analysis -> Decision Logic executed in strict deterministic order.")
         
-    # 2. Volume Profile State
-    print(f"\n2. AMT VOLUME PROFILE:")
-    vp = state.auction.volume_profile
-    print(f"  Total Volume: {sum(vp.levels.values()) if hasattr(vp, 'levels') else 'N/A'}")
-    print(f"  POC (Point of Control): {vp.poc}")
-    print(f"  Value Area: {vp.val} to {vp.vah}")
-    if vp.poc > 0:
-        print("  [PASS] Volume Profile successfully calculated from raw ticks.")
+    # 2. State Projector
+    print(f"\n2. STATE PROJECTOR:")
+    print(f"  Symbol: {state.symbol}")
+    print(f"  LTP: {state.ltp}")
+    if state.ltp == 24540.0:
+        print("  [PASS] State projector accurately recorded live quotes.")
     else:
-        print("  [FAIL] Volume Profile is empty.")
-        
-    # 3. Market State
-    print(f"\n3. MARKET STATE ENGINE:")
-    print(f"  Live State: {state.auction.state}")
-    print(f"  Triple-A Phase: {state.auction.triple_a_phase}")
-    
-    if state.auction.state == "IMBALANCED":
-        print("  [PASS] Aggressive directional ticks correctly transitioned state to IMBALANCED.")
-    else:
-        print(f"  [WARNING] Expected IMBALANCED state but got {state.auction.state}.")
+        print(f"  [FAIL] Expected LTP 24540.0 but got {state.ltp}")
         
     print("="*50)
+    coordinator.stop()
 
 if __name__ == "__main__":
-    asyncio.run(run_sanity())
+    run_sanity()

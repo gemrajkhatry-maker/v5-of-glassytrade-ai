@@ -16,6 +16,10 @@ class PaperOMS:
     def __init__(self, lot_size: float = 1.0) -> None:
         self._lot_size = lot_size
 
+    @property
+    def lot_size(self) -> float:
+        return self._lot_size
+
     @staticmethod
     def _snap_to_lot(quantity: float, lot_size: float) -> float:
         """Round a raw unit count to the nearest lot multiple (min 1 lot)."""

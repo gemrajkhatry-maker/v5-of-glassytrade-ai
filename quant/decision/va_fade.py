@@ -49,7 +49,10 @@ def detect_va_fade(ctx: DecisionContext) -> VAFadeSignal | None:
     # Fabio: only fade back toward POC when order flow confirms the rejection
     if zone == "BELOW_VA" and cvd > 0 and close < poc:
         entry = close
-        sl = entry - step
+        probe_low = float(ctx.bar.low) if hasattr(ctx.bar, "low") else entry
+        sl = min(entry - step, probe_low - step) if probe_low < entry else entry - step
+        if sl >= entry:
+            sl = entry - step
         tp = poc
         risk = entry - sl
         rr = (tp - entry) / risk if risk > 0 else 0.0
@@ -59,7 +62,10 @@ def detect_va_fade(ctx: DecisionContext) -> VAFadeSignal | None:
     # SHORT: price probed above VAH and sellers are in control (negative CVD)
     if zone == "ABOVE_VA" and cvd < 0 and close > poc:
         entry = close
-        sl = entry + step
+        probe_high = float(ctx.bar.high) if hasattr(ctx.bar, "high") else entry
+        sl = max(entry + step, probe_high + step) if probe_high > entry else entry + step
+        if sl <= entry:
+            sl = entry + step
         tp = poc
         risk = sl - entry
         rr = (entry - tp) / risk if risk > 0 else 0.0

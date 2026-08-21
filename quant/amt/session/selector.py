@@ -375,3 +375,46 @@ class OptionSelector:
             return parsed[0].isoformat()
 
         return None
+
+    def translate_underlying_signal_to_option(
+        self,
+        signal,
+        option_symbol: str,
+        option_ltp: float,
+        delta: float = 0.50,
+        tick_size: float = 0.05,
+    ):
+        """Translate an underlying futures/index signal into an option contract signal.
+        
+        - Underlying LONG -> Buys Call Option at option_ltp
+        - Underlying SHORT -> Buys Put Option at option_ltp
+        - Delta-adjusted stop & target:
+            opt_risk_pts = max(tick_size, abs(signal.entry - signal.sl) * max(0.20, min(1.0, abs(delta))))
+            opt_reward_pts = max(tick_size * 2, abs(signal.tp - signal.entry) * max(0.20, min(1.0, abs(delta))))
+            opt_entry = float(option_ltp)
+            opt_sl = max(tick_size, opt_entry - opt_risk)
+            opt_tp = opt_entry + opt_reward
+        """
+        from quant.decision.signal_builder import Signal
+        eff_delta = max(0.20, min(1.0, abs(delta)))
+        underlying_risk = abs(signal.entry - signal.sl)
+        underlying_reward = abs(signal.tp - signal.entry)
+        
+        opt_risk = max(tick_size, underlying_risk * eff_delta)
+        opt_reward = max(tick_size * 2, underlying_reward * eff_delta)
+        opt_entry = float(option_ltp)
+        opt_sl = max(tick_size, opt_entry - opt_risk)
+        opt_tp = opt_entry + opt_reward
+        rr = opt_reward / opt_risk if opt_risk > 0 else signal.rr
+        
+        return Signal(
+            type="LONG",  # Option buying is always LONG on the option contract
+            reason=f"{signal.reason} [OptTranslated {signal.type}->{option_symbol}]",
+            entry=opt_entry,
+            sl=opt_sl,
+            tp=opt_tp,
+            rr=rr,
+            model_label=signal.model_label,
+            symbol=option_symbol,
+            timestamp=signal.timestamp,
+        )

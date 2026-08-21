@@ -130,12 +130,69 @@ class SessionRisk:
                 return False, f"max trades/session reached ({self._max_trades_per_session})"
             return True, ""
 
-    def position_size(self, entry: float, sl: float) -> float:
+    def position_size(
+        self,
+        entry: float,
+        sl: float,
+        lot_size: float = 1.0,
+        max_rupee_risk_cap: float | None = None,
+        is_expiry: bool = False,
+        max_lots: int | None = None,
+    ) -> float:
         if entry == sl:
             return 0.0
         with self._lock:
             risk_amount = self._equity * self._risk_per_trade_pct()
-            return risk_amount / abs(entry - sl)
+            if max_rupee_risk_cap is not None and max_rupee_risk_cap > 0:
+                risk_amount = min(risk_amount, max_rupee_risk_cap)
+            if is_expiry:
+                risk_amount *= 0.5
+            loss_per_unit = abs(entry - sl)
+            if loss_per_unit <= 0:
+                return 0.0
+            if lot_size and lot_size > 1.0:
+                loss_per_lot = loss_per_unit * lot_size
+                lots = int(risk_amount // loss_per_lot) if loss_per_lot > 0 else 0
+                if max_lots is not None and max_lots > 0:
+                    lots = min(lots, max_lots)
+                return float(lots * lot_size)
+            else:
+                qty = risk_amount / loss_per_unit
+                if max_lots is not None and max_lots > 0:
+                    qty = min(qty, float(max_lots))
+                return qty
+
+    def pyramid_position_size(
+        self,
+        entry: float,
+        sl: float,
+        lot_size: float = 1.0,
+        is_expiry: bool = False,
+        max_lots: int | None = None,
+    ) -> float:
+        base = self.position_size(entry, sl, lot_size=lot_size, is_expiry=is_expiry, max_lots=max_lots)
+        if lot_size and lot_size > 1.0:
+            lots = int(base // lot_size)
+            pyr_lots = max(0, lots // 2)
+            return float(pyr_lots * lot_size)
+        return base * 0.5
+
+    def rupee_risk_for_quantity(self, entry: float, sl: float, quantity: float) -> float:
+        return abs(entry - sl) * quantity
+
+    def reset_session(self, date: str | None = None) -> RiskState:
+        with self._lock:
+            self._daily_pnl = 0.0
+            self._consecutive_losses = 0
+            self._consecutive_wins = 0
+            self._trades_today = 0
+            self._halted = False
+            self._halt_reason = ""
+            self._equity = self._starting_equity
+            if date:
+                self._date = date
+            self._save()
+            return self.state()
 
     def state(self) -> RiskState:
         with self._lock:

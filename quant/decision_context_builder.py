@@ -98,6 +98,7 @@ class DecisionContextBuilder:
         # 3. Fresh Absorption Cluster (microstructure edge)
         # 4. Deep Book OBI Imbalance (depth edge)
         # 5. Value Area Reversion (contextual mean-reversion)
+        # 5. Value Area Reversion (contextual mean-reversion)
         close_px = float(bar.close if bar else 0.0)
         vah = float(amt_dto.get("valueAreaHigh") or 0.0)
         val = float(amt_dto.get("valueAreaLow") or 0.0)
@@ -134,6 +135,81 @@ class DecisionContextBuilder:
         else:
             amt_market_state = MarketState.BALANCED
 
+        # Derive nearest leg LVN from legLvns list or legLvn float
+        leg_lvns_raw = amt_dto.get("legLvns")
+        nearest_leg_lvn = 0.0
+        if isinstance(leg_lvns_raw, (list, tuple)) and leg_lvns_raw:
+            valid_lvns = [float(x) for x in leg_lvns_raw if float(x) > 0]
+            if valid_lvns:
+                nearest_leg_lvn = min(valid_lvns, key=lambda x: abs(x - close_px))
+        elif amt_dto.get("legLvn"):
+            nearest_leg_lvn = float(amt_dto.get("legLvn"))
+
+        # Build SetupEvidence
+        from quant.decision.setup_state import SetupEvidence
+        setup_type = str(amt_dto.get("setupType") or "").upper()
+        setup_dir = str(amt_dto.get("setupDirection") or agent_direction or "").upper()
+        cvd_val = float(amt_dto.get("cvdSlope") or 0.0)
+        cvd_agrees = bool(
+            amt_dto.get("cvdAgrees")
+            or (setup_dir == "LONG" and cvd_val >= -0.2)
+            or (setup_dir == "SHORT" and cvd_val <= 0.2)
+        )
+
+        rejection_at_high = bool(amt_dto.get("rejectionAtHigh"))
+        rejection_at_low = bool(amt_dto.get("rejectionAtLow"))
+        acceptance_above = bool(amt_dto.get("acceptanceAbove"))
+        acceptance_below = bool(amt_dto.get("acceptanceBelow"))
+        is_second_drive = bool(amt_dto.get("isSecondDrive"))
+        drive_number = int(amt_dto.get("driveNumber") or 0)
+
+        setup_evidence = None
+        if setup_type == "TRIPLE_A":
+            setup_evidence = SetupEvidence(
+                setup_type="TRIPLE_A",
+                direction=setup_dir or ("LONG" if cvd_val >= 0 else "SHORT"),
+                absorption=bool(amt_dto.get("absorption")),
+                accumulation=bool(amt_dto.get("accumulation")),
+                aggression=bool(amt_dto.get("aggression")),
+                acceptance=bool(amt_dto.get("acceptance")),
+                cvd_agrees=cvd_agrees,
+            )
+        elif is_second_drive or drive_number == 2 or setup_type == "SECOND_DRIVE":
+            setup_evidence = SetupEvidence(
+                setup_type="SECOND_DRIVE",
+                direction=setup_dir or ("SHORT" if rejection_at_high else ("LONG" if rejection_at_low else "LONG")),
+                drive_number=drive_number or 2,
+                d1_rejected=True,
+                rejection=rejection_at_high or rejection_at_low or bool(amt_dto.get("rejection")),
+                cvd_agrees=cvd_agrees,
+            )
+        elif rejection_at_high or rejection_at_low or setup_type == "VA_FADE":
+            rejection = rejection_at_high or rejection_at_low or bool(amt_dto.get("rejection"))
+            acceptance = acceptance_above or acceptance_below or bool(amt_dto.get("acceptance", False))
+            direction = "SHORT" if rejection_at_high else ("LONG" if rejection_at_low else (setup_dir or "LONG"))
+            setup_evidence = SetupEvidence(
+                setup_type="VA_FADE",
+                direction=direction,
+                rejection=rejection,
+                acceptance=acceptance,
+                cvd_agrees=cvd_agrees,
+            )
+        elif nearest_leg_lvn > 0 and (amt_dto.get("absorptionSide") in ("SELL_ABSORBED", "BUY_ABSORBED") or setup_type == "LVN_SNIPER"):
+            direction = "LONG" if amt_dto.get("absorptionSide") == "SELL_ABSORBED" else ("SHORT" if amt_dto.get("absorptionSide") == "BUY_ABSORBED" else (setup_dir or "LONG"))
+            setup_evidence = SetupEvidence(
+                setup_type="LVN_SNIPER",
+                direction=direction,
+                level=nearest_leg_lvn,
+                absorption=True,
+                cvd_agrees=cvd_agrees,
+            )
+        elif setup_type and setup_type != "NONE":
+            setup_evidence = SetupEvidence(
+                setup_type=setup_type,  # type: ignore
+                direction=setup_dir,
+                cvd_agrees=cvd_agrees,
+            )
+
         return DecisionContext(
             state=None,
             bar=bar,
@@ -148,6 +224,7 @@ class DecisionContextBuilder:
             consecutive_losses=risk_state.consecutive_losses,
             agent_direction=agent_direction,
             agent_probability=_DETERMINISTIC_CONVICTION,
+            setup_evidence=setup_evidence,
             market_state=amt_market_state,
             balance_ratio=float(amt_dto.get("balanceRatio") or 0.0),
             drive_entry_valid=bool(amt_dto.get("isSecondDrive") or False),
@@ -169,7 +246,7 @@ class DecisionContextBuilder:
             absorption_side=amt_dto.get("absorptionSide") or "",
             equity=risk_state.equity,
             risk_per_trade_pct=risk_state.risk_per_trade_pct,
-            leg_lvn=float(amt_dto.get("legLvn") or 0.0),
+            leg_lvn=nearest_leg_lvn,
             bid=float(amt_dto.get("bid") or getattr(bar, "bid", 0.0) or 0.0),
             ask=float(amt_dto.get("ask") or getattr(bar, "ask", 0.0) or 0.0),
             time_str=str(bar.time if bar else ""),

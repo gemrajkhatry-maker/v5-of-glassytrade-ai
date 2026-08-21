@@ -70,7 +70,7 @@ def decision_for(
         agent_direction=direction,
         agent_probability=0.75,
         market_state=market_state,
-        setup_evidence=evidence if setup_type != "NONE" else None,
+        setup_evidence=evidence,
         vah=vah,
         val=val,
         poc=97.0,

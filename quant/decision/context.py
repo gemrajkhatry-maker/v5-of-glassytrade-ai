@@ -1,6 +1,6 @@
 from quant.contracts.enums import MarketState
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from quant.contracts.value_objects import AMTResult
 from quant.bars import Bar
@@ -9,8 +9,8 @@ from quant.bars import Bar
 @dataclass(frozen=True)
 class DecisionContext:
     # state is deprecated, all context is directly populated
-    state: Optional[AMTResult]
-    bar: Optional[Bar]             # the bar that closed to produce state
+    state: Optional[AMTResult] = None
+    bar: Optional[Bar] = None             # the bar that closed to produce state
     symbol: str = ""
     # session / risk facts
     session_open: bool = True
@@ -22,6 +22,7 @@ class DecisionContext:
     # intended direction from a higher-level agent (may be None -> gates decide)
     agent_direction: Optional[str] = None   # "LONG" | "SHORT" | "FLAT" | None
     agent_probability: float = 0.0
+    setup_evidence: Any | None = None
     # AMT market state (Fabio 2-state model) from the AMT analyzer. The
     # Triple-A edge (absorption → accumulation → VWAP breakout) fires in both
     # BALANCED and IMBALANCED auctions; a DEAD market (volume collapse)

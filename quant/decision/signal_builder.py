@@ -93,11 +93,17 @@ class SignalBuilder:
 
         if direction == "LONG":
             val = amt_val
+            vah = amt_vah
             step = ctx.tick_size
-            if ctx.leg_lvn and ctx.leg_lvn > 0 and entry > ctx.leg_lvn:
+            if val is not None and vah is not None and val > vah:
+                # Corrupt / inverted profile -> triggers inverted SL rejection
+                anchor = val
+            elif ctx.leg_lvn and ctx.leg_lvn > 0 and entry > ctx.leg_lvn:
                 anchor = ctx.leg_lvn
             elif val is not None and entry > val:
                 anchor = val
+            elif hasattr(ctx.bar, "low") and float(ctx.bar.low) < entry:
+                anchor = float(ctx.bar.low)
             else:
                 anchor = val or ctx.poc or (entry - 5 * TICK_SIZE_NSE_OPTIONS)
             # Fabio: SL sits 1-2 ticks INSIDE the value-area/LVN edge, not a full
@@ -105,19 +111,25 @@ class SignalBuilder:
             sl = anchor - 2 * TICK_SIZE_NSE_OPTIONS
             if sl >= anchor:  # degenerate profile safety net
                 sl = anchor - step if step > 0 else anchor
-            if sl >= entry:
-                sl = entry - 2 * TICK_SIZE_NSE_OPTIONS
+            if (val is None or vah is None or val <= vah) and sl >= entry:
+                sl = entry - max(step * 2, abs(entry) * (self.min_stop_distance_pct / 100.0))
             # Fabio: target structural levels (prior POC / naked POC / opposite VA) when available.
             # Fall back to fixed R:R multiplier when no structure qualifies.
             fixed_tp = entry + (entry - sl) * self.tp_multiplier
             tp = self._structural_tp(ctx, entry, sl, "LONG", fixed_tp)
         else:
+            val = amt_val
             vah = amt_vah
             step = ctx.tick_size
-            if ctx.leg_lvn and ctx.leg_lvn > 0 and entry < ctx.leg_lvn:
+            if val is not None and vah is not None and val > vah:
+                # Corrupt / inverted profile -> triggers inverted SL rejection
+                anchor = vah
+            elif ctx.leg_lvn and ctx.leg_lvn > 0 and entry < ctx.leg_lvn:
                 anchor = ctx.leg_lvn
             elif vah is not None and entry < vah:
                 anchor = vah
+            elif hasattr(ctx.bar, "high") and float(ctx.bar.high) > entry:
+                anchor = float(ctx.bar.high)
             else:
                 anchor = vah or ctx.poc or (entry + 5 * TICK_SIZE_NSE_OPTIONS)
             # Fabio: SL sits 1-2 ticks INSIDE the value-area/LVN edge, not a full
@@ -125,8 +137,8 @@ class SignalBuilder:
             sl = anchor + 2 * TICK_SIZE_NSE_OPTIONS
             if sl <= anchor:  # degenerate profile safety net
                 sl = anchor + step if step > 0 else anchor
-            if sl <= entry:
-                sl = entry + 2 * TICK_SIZE_NSE_OPTIONS
+            if (val is None or vah is None or val <= vah) and sl <= entry:
+                sl = entry + max(step * 2, abs(entry) * (self.min_stop_distance_pct / 100.0))
             fixed_tp = entry - (sl - entry) * self.tp_multiplier
             tp = self._structural_tp(ctx, entry, sl, "SHORT", fixed_tp)
 
@@ -181,7 +193,10 @@ class SignalBuilder:
         candidates: list[float] = []
 
         # Collect structural targets in the right direction
+        is_va_fade = getattr(ctx, "setup_evidence", None) and getattr(ctx.setup_evidence, "setup_type", "") == "VA_FADE"
         if direction == "LONG":
+            if is_va_fade and ctx.poc and ctx.poc > entry:
+                candidates.append(ctx.poc)
             if ctx.npoc_above and ctx.npoc_above > entry:
                 candidates.append(ctx.npoc_above)
             if ctx.prior_poc and ctx.prior_poc > entry:
@@ -189,6 +204,8 @@ class SignalBuilder:
             if ctx.vah and ctx.vah > entry:
                 candidates.append(ctx.vah)
         else:
+            if is_va_fade and ctx.poc and ctx.poc < entry and ctx.poc > 0:
+                candidates.append(ctx.poc)
             if ctx.npoc_below and ctx.npoc_below < entry and ctx.npoc_below > 0:
                 candidates.append(ctx.npoc_below)
             if ctx.prior_poc and ctx.prior_poc < entry and ctx.prior_poc > 0:

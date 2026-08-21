@@ -216,9 +216,15 @@ class OptionScannerService:
             opt.symbol,
         )
 
+        if hasattr(chain.expiry, "date"):
+            expiry_str = chain.expiry.date().isoformat()
+        elif hasattr(chain.expiry, "isoformat"):
+            expiry_str = chain.expiry.isoformat()
+        else:
+            expiry_str = str(chain.expiry)
         return ScanResult(
             symbol=opt.symbol, underlying=u, strike=strike,
-            option_type=opt_type, expiry=chain.expiry.date().isoformat(),
+            option_type=opt_type, expiry=expiry_str,
             ltp=ltp, oi=oi, volume=vol,
             spread=ask - bid if bid > 0 and ask > 0 else 0,
             score=score, bias=bias, bias_reason=bias_reason,
@@ -257,12 +263,12 @@ class OptionScannerService:
             expiry_date = (
                 chain.expiry.date()
                 if hasattr(chain.expiry, "date")
-                else chain.expiry
+                else (date.fromisoformat(chain.expiry) if isinstance(chain.expiry, str) else chain.expiry)
             )
-            if expiry_date <= date.today():
+            if expiry_date < date.today():
                 effective_expiry_index += 1
                 logger.info(
-                    "%s: exp %s is today/past — advancing to index %d",
+                    "%s: exp %s is past — advancing to index %d",
                     u,
                     expiry_date,
                     effective_expiry_index,

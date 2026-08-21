@@ -183,6 +183,26 @@ class QuantCoordinator:
     def decisions(self) -> queue.Queue:
         return self._decisions
 
+    def check_spot_drift(self, underlying: str, spot_price: float) -> bool:
+        """Detect when price moves > 1.5 strike intervals away from active option strikes."""
+        from quant.amt.session.scanner import OptionScannerService
+        step = OptionScannerService._STRIKE_INTERVALS.get(underlying.upper(), 50)
+        strikes = []
+        with self._lock:
+            active_symbols = list(self._engines.keys())
+        for sym in active_symbols:
+            if _is_futures_symbol(sym):
+                continue
+            if sym.upper().startswith(underlying.upper()):
+                tokens = sym.split()
+                for tok in tokens:
+                    if tok.isdigit() and int(tok) > 1000:
+                        strikes.append(int(tok))
+        if not strikes:
+            return False
+        mean_strike = sum(strikes) / len(strikes)
+        return abs(spot_price - mean_strike) > 1.5 * step
+
     def _resolve_futures_symbols(self) -> list[str]:
         """Resolve active front-month futures for the configured underlyings."""
         symbols = []
@@ -351,6 +371,7 @@ class QuantCoordinator:
             if underlying_gateway is not None:
                 self._underlying_gateways[symbol] = underlying_gateway
             self._threads[symbol] = thread
+        return engine
 
     def _on_decision(self, event) -> None:
         self._decisions.put(event)

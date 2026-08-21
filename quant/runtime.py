@@ -131,20 +131,48 @@ class QuantEngine:
         self._last_depth: OrderBook | None = None
         # AMT analysis engine — owns the candle ring, incremental profile,
         # analyzer, and seed logic. Receives callbacks for depth and risk PnL.
-        seed_symbol = (
-            getattr(self._underlying_gateway, "_symbol", None)
-            or symbol
-        )
-        self._amt_engine = AMTEngine(
-            symbol=seed_symbol,
-            market=self._market,
-            session_levels=self._session_levels,
-            history_source=history_source,
-            underlying_fn=self._underlying,
-            get_depth=lambda: self._last_depth,
-            get_risk_pnl=lambda: self._risk.state().daily_pnl if hasattr(self, '_risk') else 0.0,
-            interval_seconds=interval_seconds,
-        )
+        self._option_amt_engine = None
+        self._option_amt_dto: dict | None = None
+        self._underlying_amt_dto: dict | None = None
+
+        if self._underlying_gateway is not None:
+            underlying_symbol = (
+                getattr(self._underlying_gateway, "_symbol", None)
+                or self._underlying()
+            )
+            # 1. Underlying futures AMT engine (decision brain)
+            self._amt_engine = AMTEngine(
+                symbol=underlying_symbol,
+                market=self._market,
+                session_levels=self._session_levels,
+                history_source=history_source,
+                underlying_fn=self._underlying,
+                get_depth=lambda: self._last_depth,
+                get_risk_pnl=lambda: self._risk.state().daily_pnl if hasattr(self, '_risk') else 0.0,
+                interval_seconds=interval_seconds,
+            )
+            # 2. Option contract AMT engine (option volume profile, POC, VAH, VAL)
+            self._option_amt_engine = AMTEngine(
+                symbol=self.symbol,
+                market=self._market,
+                session_levels=self._session_levels,
+                history_source=history_source,
+                underlying_fn=self._underlying,
+                get_depth=lambda: self._last_depth,
+                get_risk_pnl=lambda: self._risk.state().daily_pnl if hasattr(self, '_risk') else 0.0,
+                interval_seconds=interval_seconds,
+            )
+        else:
+            self._amt_engine = AMTEngine(
+                symbol=symbol,
+                market=self._market,
+                session_levels=self._session_levels,
+                history_source=history_source,
+                underlying_fn=self._underlying,
+                get_depth=lambda: self._last_depth,
+                get_risk_pnl=lambda: self._risk.state().daily_pnl if hasattr(self, '_risk') else 0.0,
+                interval_seconds=interval_seconds,
+            )
         self._decision_service = DecisionService(min_rr=min_rr)
         # Lot-aware paper OMS: the position size is snapped to lot multiples
         # (units per lot from the broker) so paper rupee P&L matches live
@@ -228,6 +256,8 @@ class QuantEngine:
                 self.symbol,
             )
         self._amt_engine.seed()
+        if self._option_amt_engine is not None:
+            self._option_amt_engine.seed()
         steps = 0
         while True:
             if max_steps is not None and steps >= max_steps:
@@ -241,9 +271,14 @@ class QuantEngine:
             if self._underlying_gateway is not None:
                 # 1. Option's OWN ticks feed the option's aggregator to form real option candles
                 option_bar = self._aggregator.add_tick(tick)
+                if self._option_amt_engine is not None:
+                    self._option_amt_engine.on_tick(tick, self._aggregator.current_bar)
                 if option_bar is not None:
                     self._bar_index += 1
                     self._emit(BarClosed(symbol=self.symbol, time=option_bar.time, bar=option_bar))
+                    if self._option_amt_engine is not None:
+                        self._option_amt_dto = self._option_amt_engine.analyze(option_bar)
+                        self._emit_merged_amt(self._option_amt_dto, option_bar.time)
 
                 # 2. Underlying futures ticks feed the underlying aggregator and AMT engine
                 if self._underlying_aggregator is not None:
@@ -252,12 +287,12 @@ class QuantEngine:
                         ubar = self._underlying_aggregator.add_tick(utick)
                         self._amt_engine.on_tick(utick, self._underlying_aggregator.current_bar)
                         if ubar is not None:
-                            amt_dto = self._amt_engine.analyze(ubar)
-                            self._emit(AmtUpdated(symbol=self.symbol, time=ubar.time, amt=amt_dto))
+                            self._underlying_amt_dto = self._amt_engine.analyze(ubar)
+                            self._emit_merged_amt(self._underlying_amt_dto, ubar.time)
                             if self._position is None:
-                                self._decide(amt_dto, ubar)
+                                self._decide(self._underlying_amt_dto, ubar)
                             else:
-                                self._manage_exit(amt_dto, ubar)
+                                self._manage_exit(self._underlying_amt_dto, ubar)
                         utick = self._underlying_gateway.next_tick()
             else:
                 bar = self._aggregator.add_tick(tick)
@@ -281,6 +316,25 @@ class QuantEngine:
     @property
     def projector(self) -> StateProjector:
         return self._projector
+
+    def _emit_merged_amt(self, base_dto: dict, time_str: str) -> None:
+        merged = dict(self._underlying_amt_dto or base_dto)
+        if self._option_amt_dto and self._option_amt_dto.get("profile"):
+            merged["profile"] = self._option_amt_dto["profile"]
+            if self._option_amt_dto.get("poc"):
+                merged["poc"] = self._option_amt_dto["poc"]
+            if self._option_amt_dto.get("valueAreaHigh"):
+                merged["valueAreaHigh"] = self._option_amt_dto["valueAreaHigh"]
+            if self._option_amt_dto.get("valueAreaLow"):
+                merged["valueAreaLow"] = self._option_amt_dto["valueAreaLow"]
+            merged["hvns"] = self._option_amt_dto.get("hvns", [])
+            merged["lvns"] = self._option_amt_dto.get("lvns", [])
+            if self._option_amt_dto.get("legProfile"):
+                merged["legProfile"] = self._option_amt_dto["legProfile"]
+                merged["legPoc"] = self._option_amt_dto.get("legPoc")
+                merged["legVah"] = self._option_amt_dto.get("legVah")
+                merged["legVal"] = self._option_amt_dto.get("legVal")
+        self._emit(AmtUpdated(symbol=self.symbol, time=time_str, amt=merged))
 
     def _on_bar_closed(self, bar) -> None:
         self._bar_index += 1
@@ -356,6 +410,23 @@ class QuantEngine:
 
         if decision.approved and decision.signal is not None:
             signal = decision.signal
+
+            # If running on an option contract with underlying futures feed, translate signal to option premium
+            if self._underlying_gateway is not None:
+                from quant.amt.session.selector import OptionSelector
+                cur_bar = self._aggregator.current_bar
+                opt_ltp = float(cur_bar.close) if (cur_bar and cur_bar.close > 0) else (float(bar.close) if bar else 0.0)
+                if opt_ltp > 0 and abs(opt_ltp - signal.entry) > 1.0:
+                    delta = float(getattr(ctx, "option_delta", 0.50) or 0.50)
+                    selector = OptionSelector()
+                    signal = selector.translate_underlying_signal_to_option(
+                        signal=signal,
+                        option_symbol=self.symbol,
+                        option_ltp=opt_ltp,
+                        delta=delta,
+                        tick_size=self._tick_size,
+                    )
+
             logger.info(
                 "⚡ [APPROVED SIGNAL] %s: %s @ %.2f (SL=%.2f, TP=%.2f, RR=%.2f) — %s | trades_today=%d equity=₹%.0f",
                 self.symbol,
@@ -369,7 +440,9 @@ class QuantEngine:
                 risk_st.equity,
             )
             self._emit(SignalApproved(symbol=self.symbol, time=bar.time, signal=signal))
-            quantity = clamp_quantity(self._risk.position_size(signal.entry, signal.sl))
+            quantity = clamp_quantity(
+                self._risk.position_size(signal.entry, signal.sl, lot_size=self._oms.lot_size)
+            )
             position = self._oms.submit(signal, quantity)
             self._entry_bar_index = self._bar_index
             self._position = position
