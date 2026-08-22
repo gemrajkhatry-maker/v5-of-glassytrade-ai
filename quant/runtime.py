@@ -435,7 +435,10 @@ class QuantEngine:
             )
             return  # Skip decision entirely during cooldown
 
-        amt_dto = self._amt_engine.last_amt_dto or {}
+        # Event purity (F5): the decision uses the DTO that arrived WITH this
+        # bar — re-reading mutable last_amt_dto here could pick up evidence
+        # from a LATER bar's analyze() on a multi-threaded consumer.
+        amt_dto = amt_dto or self._amt_engine.last_amt_dto or {}
         risk_st = self._risk.state()
         ctx = DecisionContextBuilder().build(
             bar=bar,

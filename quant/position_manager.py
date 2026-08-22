@@ -187,8 +187,9 @@ class PositionManager:
         if not can_trade:
             return
 
-        # Need the Impulse Leg LVN from the AMT DTO
-        amt_dto = self._get_amt_dto() or {}
+        # Need the Impulse Leg LVN from the AMT DTO — use the caller-passed
+        # payload (event purity), not a fresh read of mutable state.
+        amt_dto = amt_dto or self._get_amt_dto() or {}
         leg_lvn = float(amt_dto.get("legLvn") or 0.0)
         if leg_lvn <= 0:
             return  # No Layer 3 LVN available yet
