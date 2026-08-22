@@ -176,6 +176,13 @@ class PositionManager:
         if self.pyramid_count >= 2:
             return  # Max 2 add-ons reached
 
+        # Gate 1 (spec §13.2): base trade must be risk-free (SL at breakeven
+        # or better). Enforced HERE, not just in the manage_exit caller —
+        # certification found the add-on path was unguarded against any
+        # future/direct invocation pyramiding a losing base.
+        if not self._exits.is_risk_free(position):
+            return
+
         # Guard: session must allow new entries
         if not session_allow_entry(
             bar.time, market=self._market, contract_expiry=self._contract_expiry
