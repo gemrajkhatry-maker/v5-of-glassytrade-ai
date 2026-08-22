@@ -1,0 +1,182 @@
+"""Technical indicators — stdlib implementation with optional numpy acceleration."""
+
+from __future__ import annotations
+
+from decimal import Decimal
+
+NumericValue = float | Decimal
+
+
+def _to_float(value: NumericValue) -> float:
+    """Convert Decimal or float to float."""
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
+def sma(values: list, period: int) -> list:
+    """Simple Moving Average.
+
+    Args:
+        values: List of numeric values (Decimal or float)
+        period: Window size
+
+    Returns:
+        List of SMA values (same length as input, None-padded at start)
+    """
+    if period <= 0:
+        raise ValueError("period must be positive")
+    if len(values) < period:
+        return [None] * len(values)
+
+    floats = [_to_float(v) for v in values]
+    result: list[float | None] = [None] * (period - 1)
+
+    window_sum = sum(floats[:period])
+    result.append(window_sum / period)
+
+    for i in range(period, len(floats)):
+        window_sum += floats[i] - floats[i - period]
+        result.append(window_sum / period)
+
+    return result
+
+
+def ema(values: list, period: int) -> list:
+    """Exponential Moving Average.
+
+    Args:
+        values: List of numeric values (Decimal or float)
+        period: Window size
+
+    Returns:
+        List of EMA values (same length as input, None-padded at start)
+    """
+    if period <= 0:
+        raise ValueError("period must be positive")
+    if len(values) < period:
+        return [None] * len(values)
+
+    floats = [_to_float(v) for v in values]
+    result: list[float | None] = [None] * (period - 1)
+
+    # Initial SMA for first EMA value
+    initial_sma = sum(floats[:period]) / period
+    result.append(initial_sma)
+
+    multiplier = 2.0 / (period + 1)
+    prev_ema = initial_sma
+
+    for i in range(period, len(floats)):
+        current_ema = (floats[i] - prev_ema) * multiplier + prev_ema
+        result.append(current_ema)
+        prev_ema = current_ema
+
+    return result
+
+
+def rsi(values: list, period: int = 14) -> list:
+    """Relative Strength Index.
+
+    Args:
+        values: List of numeric values (Decimal or float)
+        period: Lookback period (default: 14)
+
+    Returns:
+        List of RSI values (0-100, None-padded at start)
+    """
+    if period <= 0:
+        raise ValueError("period must be positive")
+    if len(values) < period + 1:
+        return [None] * len(values)
+
+    floats = [_to_float(v) for v in values]
+    result: list[float | None] = [None] * period
+
+    # Calculate gains and losses
+    gains = []
+    losses = []
+    for i in range(1, len(floats)):
+        change = floats[i] - floats[i - 1]
+        gains.append(max(0, change))
+        losses.append(max(0, -change))
+
+    # Initial average gain/loss
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+
+    if avg_loss == 0:
+        result.append(100.0)
+    else:
+        rs = avg_gain / avg_loss
+        result.append(100.0 - (100.0 / (1.0 + rs)))
+
+    # Smoothed averages
+    for i in range(period, len(gains)):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
+        if avg_loss == 0:
+            result.append(100.0)
+        else:
+            rs = avg_gain / avg_loss
+            result.append(100.0 - (100.0 / (1.0 + rs)))
+
+    return result
+
+
+def roc(values: list, period: int = 10) -> list:
+    """Rate of Change — percentage change over *period* bars.
+
+    Args:
+        values: List of numeric values (Decimal or float)
+        period: Lookback period (default: 10)
+
+    Returns:
+        List of ROC percentages (None-padded at start; 0.0 for flat base)
+    """
+    if period <= 0:
+        raise ValueError("period must be positive")
+    if len(values) < period + 1:
+        return [None] * len(values)
+
+    floats = [_to_float(v) for v in values]
+    result: list[float | None] = [None] * period
+    for i in range(period, len(floats)):
+        base = floats[i - period]
+        if base == 0:
+            result.append(0.0)
+        else:
+            result.append(((floats[i] - base) / base) * 100.0)
+    return result
+
+
+def macd(values: list, period: int = 26) -> list:
+    """MACD line — fast EMA minus slow EMA.
+
+    The uniform indicator signature takes a single ``period``; here it is the
+    slow EMA period and the fast EMA is ``period // 2`` (e.g. 26 -> fast 13),
+    giving the standard fast/slow spread without extra parameters.
+
+    Args:
+        values: List of numeric values (Decimal or float)
+        period: Slow EMA period (default: 26)
+
+    Returns:
+        List of MACD-line values (None-padded at start)
+    """
+    if period < 2:
+        raise ValueError("period must be at least 2")
+    fast_period = max(2, period // 2)
+    fast = ema(values, fast_period)
+    slow = ema(values, period)
+    result: list[float | None] = []
+    for f, s in zip(fast, slow, strict=True):
+        if f is None or s is None:
+            result.append(None)
+        else:
+            result.append(f - s)
+    return result
+
+
+__all__ = ["sma", "ema", "rsi", "roc", "macd"]

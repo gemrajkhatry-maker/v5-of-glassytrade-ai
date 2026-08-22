@@ -1,0 +1,183 @@
+"""Tests for ParquetStorage — Hive-partitioned Parquet store."""
+
+from __future__ import annotations
+
+from datetime import datetime, time
+
+import pandas as pd
+from tradex_domain.instruments import Equity, Future
+
+from tradex_trading.datalake.parquet_storage import ParquetStorage
+
+
+def _frame(rows: list[dict]) -> pd.DataFrame:
+    defaults = dict(symbol="RELIANCE", exchange="NSE", kind="equity",
+                    timeframe="1m", volume=1000)
+    for r in rows:
+        for k, v in defaults.items():
+            r.setdefault(k, v)
+    return pd.DataFrame(rows)
+
+
+class TestParquetStorage:
+    def test_upsert_and_read(self, tmp_path):
+        store = ParquetStorage(tmp_path)
+        df = _frame([
+            dict(timestamp="2026-07-01 09:15:00", open=100, high=101, low=99, close=100),
+            dict(timestamp="2026-07-01 09:16:00", open=100, high=102, low=99, close=101),
+        ])
+        written = store.upsert(df)
+        assert written == 2
+
+        result = store.read(symbols=["RELIANCE"])
+        assert len(result) == 2
+
+    def test_catalog_round_trip(self, tmp_path):
+        """write_catalog persists instrument metadata; symbols() prefers it."""
+        store = ParquetStorage(tmp_path)
+        assert store.catalog() == {}
+
+        instruments = [
+            Equity.of("NSE", "RELIANCE"),
+            Future.of("NSE", "BANKNIFTY", datetime(2026, 9, 1)),
+        ]
+        assert store.write_catalog(instruments) == 2
+
+        catalog = store.catalog()
+        assert catalog["RELIANCE"]["exchange"] == "NSE"
+        assert catalog["RELIANCE"]["kind"] == "EQUITY"
+        assert catalog["BANKNIFTY"]["kind"] == "FUTURE"
+        # symbols() reads from the catalog without scanning partitions.
+        assert store.symbols() == ["BANKNIFTY", "RELIANCE"]
+
+    def test_symbols_falls_back_to_partitions_without_catalog(self, tmp_path):
+        """No catalog → symbols() scans the Hive partitions as before."""
+        store = ParquetStorage(tmp_path)
+        store.upsert(_frame([
+            dict(timestamp="2026-07-01 09:15:00", open=100, high=101, low=99, close=100),
+        ]))
+        assert store.symbols() == ["RELIANCE"]
+        assert store.catalog() == {}
+
+    def test_clear_removes_catalog(self, tmp_path):
+        store = ParquetStorage(tmp_path)
+        store.write_catalog([Equity.of("NSE", "RELIANCE")])
+        store.clear()
+        assert store.catalog() == {}
+
+    def test_upsert_is_idempotent(self, tmp_path):
+        """Re-upserting same data replaces overlapping rows, not duplicates."""
+        store = ParquetStorage(tmp_path)
+        df = _frame([
+            dict(timestamp="2026-07-01 09:15:00", open=100, high=101, low=99, close=100),
+        ])
+        store.upsert(df)
+        store.upsert(df)  # same data again
+        result = store.read(symbols=["RELIANCE"])
+        assert len(result) == 1  # not 2
+
+    def test_upsert_replaces_overlapping(self, tmp_path):
+        """New data for same timestamp replaces old values."""
+        store = ParquetStorage(tmp_path)
+        df1 = _frame([dict(timestamp="2026-07-01 09:15:00", open=100, high=101, low=99, close=100)])
+        df2 = _frame([dict(timestamp="2026-07-01 09:15:00",
+                           open=200, high=201, low=199, close=200)])
+        store.upsert(df1)
+        store.upsert(df2)
+        result = store.read(symbols=["RELIANCE"])
+        assert len(result) == 1
+        assert float(result.iloc[0]["open"]) == 200.0
+
+    def test_read_with_date_filter(self, tmp_path):
+        store = ParquetStorage(tmp_path)
+        df = _frame([
+            dict(timestamp="2026-07-01 09:15:00", open=100, high=101, low=99, close=100),
+            dict(timestamp="2026-08-01 09:15:00", open=200, high=201, low=199, close=200),
+        ])
+        store.upsert(df)
+        result = store.read(symbols=["RELIANCE"],
+                           start=datetime(2026, 7, 15), end=datetime(2026, 8, 15))
+        assert len(result) == 1
+
+    def test_symbols_list(self, tmp_path):
+        store = ParquetStorage(tmp_path)
+        df = _frame([dict(timestamp="2026-07-01 09:15:00", open=100, high=101, low=99, close=100)])
+        store.upsert(df)
+        assert "RELIANCE" in store.symbols()
+
+    def test_empty_upsert_returns_zero(self, tmp_path):
+        store = ParquetStorage(tmp_path)
+        assert store.upsert(pd.DataFrame()) == 0
+
+    def test_read_empty_store(self, tmp_path):
+        store = ParquetStorage(tmp_path)
+        result = store.read(symbols=["NONEXISTENT"])
+        assert result.empty
+
+    def test_clear(self, tmp_path):
+        store = ParquetStorage(tmp_path)
+        df = _frame([dict(timestamp="2026-07-01 09:15:00", open=100, high=101, low=99, close=100)])
+        store.upsert(df)
+        store.clear()
+        assert store.read(symbols=["RELIANCE"]).empty
+
+    def test_multiple_symbols(self, tmp_path):
+        store = ParquetStorage(tmp_path)
+        df1 = _frame([dict(timestamp="2026-07-01 09:15:00", open=100, high=101, low=99, close=100)])
+        df2 = _frame([dict(timestamp="2026-07-01 09:15:00",
+                           open=200, high=201, low=199, close=200)])
+        df2["symbol"] = "TCS"
+        store.upsert(pd.concat([df1, df2], ignore_index=True))
+        syms = store.symbols()
+        assert "RELIANCE" in syms
+        assert "TCS" in syms
+
+    def test_partition_pruning(self, tmp_path):
+        """Read only scans the months that overlap the date range."""
+        store = ParquetStorage(tmp_path)
+        # Data spanning 3 months
+        rows = []
+        for month in [6, 7, 8]:
+            rows.append(dict(timestamp=f"2026-{month:02d}-15 09:15:00",
+                            open=100, high=101, low=99, close=100))
+        store.upsert(_frame(rows))
+        # Read only July
+        result = store.read(symbols=["RELIANCE"],
+                           start=datetime(2026, 7, 1), end=datetime(2026, 7, 31))
+        assert len(result) == 1
+
+    def test_read_strips_post_market_bars_by_default(self, tmp_path):
+        """Bars outside 09:15-15:30 IST are excluded from read() by default."""
+        store = ParquetStorage(tmp_path)
+        df = _frame([
+            dict(timestamp="2026-07-01 09:15:00", open=100, high=101, low=99, close=100),
+            dict(timestamp="2026-07-01 17:00:00", open=100, high=101, low=99, close=100),
+        ])
+        store.upsert(df)
+        result = store.read(symbols=["RELIANCE"])
+        assert len(result) == 1
+        assert result["timestamp"].dt.time.max() <= time(15, 30)
+
+    def test_upsert_converts_utc_tz_aware_to_ist(self, tmp_path):
+        """A tz-aware UTC timestamp is converted to IST before storage."""
+        store = ParquetStorage(tmp_path)
+        # 04:00 UTC == 09:30 IST
+        df = _frame([
+            dict(timestamp="2026-07-01 04:00:00+00:00",
+                 open=100, high=101, low=99, close=100),
+        ])
+        store.upsert(df)
+        result = store.read(symbols=["RELIANCE"])
+        assert len(result) == 1
+        assert result["timestamp"].dt.time.iloc[0] == time(9, 30)
+
+    def test_read_keeps_post_market_bars_when_disabled(self, tmp_path):
+        """strip_post_market=False returns the raw stored bars."""
+        store = ParquetStorage(tmp_path)
+        df = _frame([
+            dict(timestamp="2026-07-01 09:15:00", open=100, high=101, low=99, close=100),
+            dict(timestamp="2026-07-01 17:00:00", open=100, high=101, low=99, close=100),
+        ])
+        store.upsert(df)
+        result = store.read(symbols=["RELIANCE"], strip_post_market=False)
+        assert len(result) == 2
