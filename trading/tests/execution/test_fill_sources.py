@@ -87,6 +87,45 @@ class TestPaperFillSource:
         assert fill is not None
         assert fill.price.value == Decimal("3000.00")
 
+    def test_delegates_to_book_source_when_depth_available(self) -> None:
+        """With a live L2 book, paper matches against it (sweep) instead of LTP."""
+        from datetime import UTC, datetime
+
+        from tradex_domain.market import Depth
+
+        from tradex_trading.execution.book_fill_source import BookFillSource
+
+        inst = Equity.of("NSE", "RELIANCE")
+        book = BookFillSource()
+        book.update_depth(
+            Depth(
+                instrument=inst,
+                bids=((Price(value=Decimal("2999")), Quantity(value=Decimal("50"))),),
+                asks=((Price(value=Decimal("3000")), Quantity(value=Decimal("50"))),),
+                timestamp=datetime(2026, 8, 1, 9, 15, tzinfo=UTC),
+            )
+        )
+        fill_source = PaperFillSource(book_source=book)
+        req = _make_request(price=Decimal("3000.00"))
+
+        order, fill = fill_source.submit(req)
+
+        assert fill is not None
+        assert fill.price.value == Decimal("3000.00")  # swept at the best ask
+        assert order.status is OrderStatus.FILLED
+
+    def test_falls_back_to_ltp_without_book(self) -> None:
+        """No book for the instrument → historical LTP-at-price behavior."""
+        from tradex_trading.execution.book_fill_source import BookFillSource
+
+        fill_source = PaperFillSource(book_source=BookFillSource())
+        req = _make_request(price=Decimal("3000.00"))
+
+        order, fill = fill_source.submit(req)
+
+        assert fill is not None
+        assert fill.price.value == Decimal("3000.00")
+
 
 class TestBrokerFillSource:
     """BrokerFillSource delegates to broker adapter's submit_order."""

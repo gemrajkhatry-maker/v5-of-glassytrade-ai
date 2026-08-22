@@ -4,6 +4,7 @@ Provides the reactive execution pipeline, order/position management,
 fill sources, fee calculation, reconciliation, and persistent storage.
 """
 
+from tradex_trading.execution.book_fill_source import BookFillSource
 from tradex_trading.execution.engine import (
     ExecutionEngine,
     IdempotencyDuplicate,
@@ -40,6 +41,7 @@ from tradex_trading.execution.sqlite_store import SQLiteIdempotencyGuard, SQLite
 from tradex_trading.execution.trading_cache import TradingCache
 
 __all__ = [
+    "BookFillSource",
     "BrokerFillSource",
     "DriftItem",
     "DriftSeverity",

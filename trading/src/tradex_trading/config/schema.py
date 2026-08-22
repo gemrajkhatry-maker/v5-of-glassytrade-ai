@@ -115,6 +115,11 @@ class AppConfig:
         Optional path for the session event journal (P0-2). When set, every
         bus DomainEvent is durably recorded to this JSONL file and closed on
         session stop; enables full-session replay for audit/debugging.
+    depth_tape_path : str | None
+        Optional path for the session depth tape (P1a). When set, every bus
+        Depth snapshot is durably recorded to this JSONL file and closed on
+        session stop; captures a live/paper session's real order book so it
+        can drive tick-level L2 backtests later.
     """
 
     broker_id: BrokerId = BrokerId.PAPER
@@ -129,6 +134,7 @@ class AppConfig:
     persistence: PersistenceConfig = field(default_factory=PersistenceConfig)
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     journal_path: str | None = None
+    depth_tape_path: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -146,6 +152,7 @@ class AppConfig:
             "persistence",
             "execution",
             "journal_path",
+            "depth_tape_path",
         }
         unknown = set(data) - allowed
         if unknown:
@@ -178,6 +185,7 @@ class AppConfig:
             persistence=persistence,
             execution=execution,
             journal_path=data.get("journal_path"),
+            depth_tape_path=data.get("depth_tape_path"),
         )
 
 

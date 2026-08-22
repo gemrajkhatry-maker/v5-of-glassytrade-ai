@@ -7,7 +7,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from tradex_domain import Candle, Clock, Fill, Quote, Signal, SignalStrengthSizer, TestClock
+from tradex_domain import Candle, Clock, Depth, Fill, Quote, Signal, SignalStrengthSizer, TestClock
 from tradex_domain.accounting import _q2
 from tradex_domain.enums import OrderStatus, OrderType
 from tradex_domain.events import OrderFilled, PlaceOrderCommand
@@ -190,6 +190,15 @@ class BacktestEngine:
         fill_source = self._fill_source or SimulatedFillSource(
             slippage_model=self._slippage_model,
         )
+        # L2 sources (BookFillSource) publish OrderFilled for resting orders
+        # that fill on later Depth ticks — they need the bus to do so.
+        if hasattr(fill_source, "bind_bus"):
+            fill_source.bind_bus(bus)
+        # A book source reused across runs must start fresh — run N+1 would
+        # otherwise inherit run N's consumed book and resting orders (the same
+        # dedication the risk manager gets below).
+        if hasattr(fill_source, "reset"):
+            fill_source.reset()
         engine = ExecutionEngine(
             bus,
             fill_source,
@@ -345,6 +354,16 @@ class BacktestEngine:
             elif isinstance(event, Fill):
                 bus.publish(event)
                 _capture_claimed()
+            elif isinstance(event, Depth):
+                # Tick-level L2: the book snapshot reaches strategies (on_depth)
+                # through the bus AND the fill source (BookFillSource matches
+                # against it). A tape with Depth events gives the backtest real
+                # order-book matching instead of guaranteed next-open fills
+                # (P1a scalping realism).
+                bus.publish(event)
+                _capture_claimed()
+                if hasattr(fill_source, "update_depth"):
+                    fill_source.update_depth(event)
 
         # --- Flush orders deferred past the last bar (next_open) --------------
         # next_open fills a signal at the FOLLOWING candle's open, so a signal

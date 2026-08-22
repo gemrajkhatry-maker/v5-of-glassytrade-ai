@@ -726,6 +726,10 @@ class ExecutionEngine:
                 self._position_manager.on_fill(fill)
                 self._apply_fee(fill)
             self._order_manager.on_order_filled(order, fill)
+            # Self-register: this pipeline-applied fill must not be re-applied
+            # by the inbound-fill bridge when it sees our own OrderFilled event
+            # (it would double the position for partial fills).
+            self._mark_fill_applied(fill)
             self._bus.publish(OrderFilled(fill=fill))
             # Record idempotency result for replay
             if self._guard is not None and cid is not None:
@@ -795,13 +799,7 @@ class ExecutionEngine:
         a re-publish.
         """
         fill = event.fill
-        if fill.fill_id is not None:
-            key: tuple = (fill.fill_id,)
-        else:
-            key = (
-                fill.order_id.value, fill.side.value, str(fill.quantity.value),
-                str(fill.price.value),
-            )
+        key = self._fill_fingerprint(fill)
         # The caller holds the single-writer mutex, so this dedup set is only
         # ever touched from one thread at a time (no separate lock needed).
         if key in self._applied_fills:
@@ -845,6 +843,38 @@ class ExecutionEngine:
             "Inbound fill applied: %s qty=%s price=%s (engine fill bridge)",
             fill.order_id, fill.quantity, fill.price,
         )
+
+    @staticmethod
+    def _fill_fingerprint(fill: Fill) -> tuple:
+        """Dedup key for one fill occurrence (bridge fingerprint).
+
+        When the venue provides a ``fill.fill_id`` (exchange trade id) it
+        uniquely identifies the occurrence; otherwise the fingerprint falls
+        back to (order, side, quantity, price). Shared by the inbound-fill
+        bridge and the sync pipeline's self-registration so both compute the
+        exact same key for the same fill.
+        """
+        if fill.fill_id is not None:
+            return (fill.fill_id,)
+        return (
+            fill.order_id.value, fill.side.value, str(fill.quantity.value),
+            str(fill.price.value),
+        )
+
+    def _mark_fill_applied(self, fill: Fill) -> None:
+        """Register a fill as already applied (caller holds the engine mutex).
+
+        The sync pipeline applies a fill and then publishes ``OrderFilled``;
+        the inbound-fill bridge subscribes to that event and would otherwise
+        re-apply the fill — a double position. Registering the fingerprint
+        here makes the bridge's dedup treat the event as a no-op, exactly
+        like a re-published broker fill. Keeps partial fills (a sync source
+        may return ``PARTIALLY_FILLED``) from double-applying too.
+        """
+        key = self._fill_fingerprint(fill)
+        self._applied_fills[key] = None
+        if len(self._applied_fills) > self._applied_fills_max:
+            self._applied_fills.popitem(last=False)
 
     def submit(self, request: OrderRequest) -> OrderReceipt:
         """Synchronous submit — bridges to reactive pipeline.

@@ -1,118 +1,43 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
-
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
 *.egg-info/
-*.bak
-venv/
-.env
-
-# ML models - exclude all model files
-poc*/models/
-poc*/checkpoint-*/
-poc*/*.safetensors
-poc*/*.bin
-poc*/*.gguf
-poc*/*.pth
-poc*/*.pt
-poc*/*.h5
-poc*/*.pb
-poc*/*.onnx
-**/*.safetensors
-**/*.bin
-**/*.gguf
-**/*.pth
-**/*.pt
-**/*.h5
-**/*.pb
-**/*.onnx
-**/tokenizer.json
-
-# OS
-.DS_Store
-*.db
-*.db-shm
-*.db-wal
-
-# Large data directories and backups
-poc*/
-brokers_backup/
-archive/
-backend/live_trading_logs/
-backend/models/
-backend/.vite/
-**/*.jsonl
-**/*.csv
-!backend/tests/**/*.csv
-# WS-replay golden fixtures are small and versioned so a fresh clone can
-# re-run the drift gate without regenerating them
-!tests/fixtures/replay/*.jsonl
-# AMT training datasets are small and versioned so a fresh clone can retrain
-!amt_dataset/**/*.jsonl
-
-# Environment and large logs
-backend/rl_logs/
-*.tfevents.*
-node_modules/
+.eggs/
+build/
 dist/
 
-# Test coverage
-.coverage*
-coverage.json
+# Virtual environments
+venv/
+.venv/
+env/
+*.venv/
+
+# Environment / secrets (never commit live credentials)
+.env
+.env.local
+# Root token-state dir only — an un-anchored `runtime/` also swallowed the
+# trading/src/tradex_trading/runtime/ Python package (the boot path was never
+# committed; fresh clones could not boot).
+/runtime/
+# Broker runtime state under trading/ (instrument caches, token/totp state).
+trading/runtime/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
 htmlcov/
-
-# AI IDE files
-.poolside/
-
-# AI tool skills directories
-.agents/
-.augment/
-.claude/
-.continue/
-.crush/
-.goose/
-.kilocode/
-.kiro/
-.pi/
-.qwen/
-.qoder/
-.trae/
-.vibe/
-.windsurf/
-.zencoder/
-
-# Skills lock file
-skills-lock.json
-
-# Agent/test caches (not project code)
 .hypothesis/
-.superpowers/
 
-# Stale tooling caches and runtime spool artifacts
+# graphify knowledge-graph output (regenerated; see `graphify update .`)
 graphify-out/
-MagicMock/
-*.fallback.jsonl.lock

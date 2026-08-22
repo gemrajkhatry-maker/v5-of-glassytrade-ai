@@ -10,7 +10,7 @@ shared ``FillModel`` so identical input events fill identically in every mode
 from __future__ import annotations
 
 import uuid
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from tradex_domain.enums import OrderStatus
 from tradex_domain.execution import Fill, Order, OrderRequest
@@ -18,6 +18,9 @@ from tradex_domain.protocols import TradingCacheProtocol
 from tradex_domain.value_objects import OrderId, Price
 
 from tradex_trading.execution.fill_model import FillModel
+
+if TYPE_CHECKING:
+    from tradex_trading.execution.book_fill_source import BookFillSource
 
 
 @runtime_checkable
@@ -120,11 +123,25 @@ class PaperFillSource(FillModel):
         self,
         cache: object | None = None,
         slippage_model: object | None = None,
+        book_source: BookFillSource | None = None,
     ) -> None:
         super().__init__(slippage_model=slippage_model)
         self._cache = cache
+        #: Optional ``BookFillSource`` fed by the session's live Depth stream.
+        #: When it holds a book for the instrument, the fill is matched
+        #: against the book (L2 sweep — realistic spread crossing and partial
+        #: fills); without one, the historical LTP-at-price path below is
+        #: unchanged. Graceful degradation: no depth subscribed → no book →
+        #: LTP fills exactly as before.
+        self._book_source = book_source
 
     def submit(self, request: OrderRequest) -> tuple[Order, Fill | None]:
+        # L2 path: when live depth is available, match against the book.
+        if self._book_source is not None and self._book_source.has_book(
+            request.instrument
+        ):
+            return self._book_source.submit(request)
+
         order = _make_order(request, status=OrderStatus.FILLED)
 
         # Paper-specific: prefer the LTP from the cache quote (mode-specific

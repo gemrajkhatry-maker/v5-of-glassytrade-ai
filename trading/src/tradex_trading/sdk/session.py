@@ -22,6 +22,7 @@ from tradex_domain import BrokerId, SessionStateError
 from tradex_domain.capabilities import BrokerCapabilities
 from tradex_domain.errors import CapabilityNotSupportedError, OrderRejectedError
 from tradex_domain.instruments import Equity, Future, Index, Instrument, Option
+from tradex_domain.market import Depth
 from tradex_domain.protocols import BrokerAdapter
 from tradex_domain.strategy import ScannerDefinition
 from tradex_domain.value_objects import Price
@@ -125,6 +126,9 @@ class TradingSession:
         #: Optional event journal (P0-2) recording this session's bus events;
         #: closed during ``stop()``. Bound via ``bind_journal``.
         self._journal: Any | None = None
+        #: Optional depth-tape recorder (P1a) capturing this session's Depth
+        #: snapshots; closed during ``stop()``. Bound via ``bind_depth_tape``.
+        self._depth_tape: Any | None = None
 
     def start(self) -> None:
         """Transition to READY state. Idempotent: no-op if already READY."""
@@ -183,6 +187,13 @@ class TradingSession:
             except Exception:  # pragma: no cover – defensive teardown
                 log.warning("event journal close failed", exc_info=True)
             self._journal = None
+        # Close the depth-tape recorder (durable flush + release). Idempotent.
+        if self._depth_tape is not None:
+            try:
+                self._depth_tape.close()
+            except Exception:  # pragma: no cover – defensive teardown
+                log.warning("depth tape close failed", exc_info=True)
+            self._depth_tape = None
         # Tear down the broker's WebSocket sockets (market/depth/order feeds).
         # Nothing else ever closes them, so without this the daemon receive
         # loops and the reconnect machinery stay alive — minting fresh tokens
@@ -394,6 +405,7 @@ class TradingSession:
         """
         from tradex_brokers.paper.adapter import PaperBroker
 
+        from tradex_trading.execution.book_fill_source import BookFillSource
         from tradex_trading.execution.fill_sources import PaperFillSource
         from tradex_trading.execution.slippage import PercentageSlippageModel
 
@@ -408,9 +420,17 @@ class TradingSession:
         )
         broker = PaperBroker()
         _bus = bus or ReactiveBus()
+        # Paper matches against the live L2 book when Depth events flow (via
+        # the session's market feed); no depth → LTP-at-price fallback.
+        book_source = BookFillSource()
+        _bus.of_type(Depth).subscribe(
+            lambda depth: book_source.update_depth(depth)
+        )
         _engine = ExecutionEngine(
             bus=_bus,
-            fill_source=PaperFillSource(slippage_model=slippage_model),
+            fill_source=PaperFillSource(
+                slippage_model=slippage_model, book_source=book_source,
+            ),
             fee_calculator=fee_calculator,
         )
         from tradex_trading.runtime.compose import compose
@@ -473,6 +493,16 @@ class TradingSession:
         (durable flush + release) without a private-field poke.
         """
         self._journal = journal
+
+    def bind_depth_tape(self, recorder: object) -> None:
+        """Declaratively bind the session's depth-tape recorder (P1a).
+
+        ``runtime.startup.boot`` attaches a :class:`DepthTapeRecorder`
+        capturing the session's Depth snapshots and binds it here so
+        ``stop()`` closes it (durable flush + release) without a private-field
+        poke.
+        """
+        self._depth_tape = recorder
 
     @classmethod
     def live(
