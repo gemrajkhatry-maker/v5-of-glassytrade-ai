@@ -178,3 +178,20 @@ def test_print_wall_anchors_sl_for_short():
     sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
     assert sig is not None
     assert sig.sl == pytest.approx(100.90)
+
+
+def test_contested_bubble_zone_blocks_entry():
+    """Fabio contested zone: both BUY and SELL stacked imbalances recently =
+    neither side has control = FLAT is the only trade."""
+    from quant.decision.context import DecisionContext
+    from quant.decision.gates_edge import gate_triple_a_edge
+    from quant.bars import Bar
+
+    bar = Bar(time="t", open=100, high=101, low=99, close=100.5, volume=10)
+    ctx = DecisionContext(
+        bar=bar, symbol="S", agent_direction="LONG",
+        contested_bubble_zone=True,
+    )
+    res = gate_triple_a_edge(ctx)
+    assert not res.passed
+    assert "Contested bubble zone" in (res.reason or "")

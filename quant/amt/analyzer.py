@@ -1298,10 +1298,21 @@ class AMTAnalyzer:
         elif market_state == MarketState.IMBALANCED:
             _setup = SetupType.TREND_MODEL
 
-        # Get footprints from accumulator if available
+        # Get footprints from accumulator if available + contested-zone flag
+        # (both BUY and SELL stacked imbalances in the recent window = FLAT,
+        # Fabio Gap #2: neither side has control).
+        _contested_zone = False
         _footprints = {}
         if footprint_accumulator is not None:
+            from quant.amt.orderflow.footprint import detect_contested_zone
+
             _footprints = footprint_accumulator.get_all()
+            try:
+                _contested_zone = detect_contested_zone(
+                    list(_footprints.values())
+                )
+            except Exception:
+                logger.debug("contested-zone detection failed", exc_info=True)
 
         return AMTResult(
             market_state=_effective_market_state,
@@ -1419,6 +1430,7 @@ class AMTAnalyzer:
             underlying_price=float(current.close) if data else 0.0,
             option_type=self._detect_option_type(symbol),
             footprints=_footprints,
+            contested_zone=_contested_zone,
         )
 
     # -------------------------------------------------------------------

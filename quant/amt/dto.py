@@ -128,6 +128,7 @@ def amt_result_to_dto(r) -> dict:
         "swingDelta": r.swing_delta,
         # Per-symbol delta (isolated per option contract)
         "deltaNormalizedOption": r.delta_normalized_option,
+        "contestedZone": r.contested_zone,
         "footprints": {
             k: {
                 "time": v.time,

@@ -58,6 +58,12 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
                 3, False,
                 f"Opposing stacked {si_dir} imbalance x{mag} at {lo:.2f}-{hi:.2f}",
             )
+
+    # Contested zone (Fabio): both BUY and SELL stacked imbalances in the
+    # recent window — neither side has control. FLAT is the only trade.
+    if getattr(ctx, "contested_bubble_zone", False):
+        return GateResult(3, False, "Contested bubble zone — both sides stacked, stay flat")
+
     if ctx.agent_direction not in ("LONG", "SHORT"):
         return GateResult(3, False, "No direction")
     market_state = ctx.market_state

@@ -280,6 +280,7 @@ class AMTResult:
     value_migration: ValueMigration = ValueMigration()
     # Live tick-based footprints (candle time -> FootprintCandle)
     footprints: dict[str, FootprintCandle] = field(default_factory=dict)
+    contested_zone: bool = False
 
 
 # ---------------------------------------------------------------------------
