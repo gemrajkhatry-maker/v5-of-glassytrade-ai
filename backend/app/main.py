@@ -31,6 +31,7 @@ from app.api.routers import (
     trading_router,
     journal_router,
     metrics_router,
+    testing_router,
 )
 from app.api.routers.observability import router as observability_router
 from app.api.routers.alerts import router as alerts_router
@@ -433,6 +434,9 @@ def create_application() -> FastAPI:
         app.include_router(trading_router, prefix="/api", tags=["trading"])
         app.include_router(gameloop_router, prefix="/api", tags=["websocket"])
         app.include_router(journal_router, prefix="/api", tags=["journal"])
+        # Dev-only tick injection for cross-process E2E. The router itself
+        # re-checks GLASSYTRADE_ENV per request (defense in depth).
+        app.include_router(testing_router, prefix="/api")
         app.include_router(metrics_router, prefix="/metrics", tags=["metrics"])
         app.include_router(observability_router, prefix="/api", tags=["observability"])
         app.include_router(alerts_router, prefix="/api", tags=["alerts"])
