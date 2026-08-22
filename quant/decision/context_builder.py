@@ -24,6 +24,40 @@ logger = logging.getLogger(__name__)
 _DETERMINISTIC_CONVICTION = 0.7
 
 
+def _latest_stacked_imbalance(amt_dto: dict) -> tuple[str, int, float, float]:
+    """Summarize the most recent stacked footprint imbalance.
+
+    Returns (direction, magnitude, price_low, price_high). Empty/zero when no
+    stacked imbalance exists in the latest footprint candle. Fabio: 3+
+    consecutive 3:1 diagonal imbalances = institutional volume bubble.
+    """
+    fps = amt_dto.get("footprints") or {}
+    if not fps:
+        return "", 0, 0.0, 0.0
+    latest_key = max(fps.keys())  # epoch-string keys sort chronologically
+    levels = (fps[latest_key] or {}).get("levels") or []
+    best_dir, best_n = "", 0
+    run_dir, run_n, run_prices = "", 0, []
+    for lvl in levels:
+        if not lvl.get("stacked"):
+            # close any open run only if direction differs; stacked flags mark
+            # ALL levels of a run, so a non-stacked level ends the run
+            run_dir, run_n, run_prices = "", 0, []
+            continue
+        d = "BUY" if lvl.get("ask", 0) > lvl.get("bid", 0) else "SELL"
+        if d != run_dir:
+            run_dir, run_n, run_prices = d, 1, [lvl.get("price", 0.0)]
+        else:
+            run_n += 1
+            run_prices.append(lvl.get("price", 0.0))
+        if run_n > best_n:
+            best_dir, best_n = run_dir, run_n
+            best_prices = list(run_prices)
+    if best_n < 3:
+        return "", 0, 0.0, 0.0
+    return best_dir, best_n, min(best_prices), max(best_prices)
+
+
 class DecisionContextBuilder:
     """Builds a DecisionContext from engine state and AMT analysis.
     
@@ -87,6 +121,7 @@ class DecisionContextBuilder:
                 pass
 
         session_phase = session_info.session if session_info else "PRIMARY"
+        _si_dir, _si_mag, _si_low, _si_high = _latest_stacked_imbalance(amt_dto)
         allow_trend = session_info.allow_trend if session_info else True
         allow_reversion = session_info.allow_reversion if session_info else True
 
@@ -258,4 +293,8 @@ class DecisionContextBuilder:
             profile_shape=str(amt_dto.get("profileShape") or ""),
             option_delta=float(amt_dto.get("optionDelta") or 0.50),
             contested_bubble_zone=bool(amt_dto.get("contestedZone") or False),
+            stacked_imbalance_direction=_si_dir,
+            stacked_imbalance_magnitude=_si_mag,
+            stacked_imbalance_price_low=_si_low,
+            stacked_imbalance_price_high=_si_high,
         )

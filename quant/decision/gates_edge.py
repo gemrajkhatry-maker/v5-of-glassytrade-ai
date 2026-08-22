@@ -40,6 +40,24 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
     """
     if ctx.bar is None:
         return GateResult(3, False, "No bar")
+
+    # Volume bubble guard (Fabio Gap #2): stacked footprint imbalance is the
+    # highest-conviction institutional signal. A stacked run OPPOSING the
+    # intended direction means real size is fighting our entry — stand down.
+    si_dir = getattr(ctx, "stacked_imbalance_direction", "")
+    if si_dir and ctx.agent_direction:
+        opposing = (
+            (ctx.agent_direction == "LONG" and si_dir == "SELL")
+            or (ctx.agent_direction == "SHORT" and si_dir == "BUY")
+        )
+        if opposing:
+            mag = getattr(ctx, "stacked_imbalance_magnitude", 0)
+            lo = getattr(ctx, "stacked_imbalance_price_low", 0.0)
+            hi = getattr(ctx, "stacked_imbalance_price_high", 0.0)
+            return GateResult(
+                3, False,
+                f"Opposing stacked {si_dir} imbalance x{mag} at {lo:.2f}-{hi:.2f}",
+            )
     if ctx.agent_direction not in ("LONG", "SHORT"):
         return GateResult(3, False, "No direction")
     market_state = ctx.market_state

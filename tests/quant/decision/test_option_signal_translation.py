@@ -104,3 +104,38 @@ def test_translate_accepts_near_scale_signal():
         delta=0.5, tick_size=0.05,
     )
     assert out is not None and out.entry == pytest.approx(45.0)
+
+
+def test_opposing_stacked_imbalance_blocks_entry():
+    """C1: stacked SELL imbalance must block a LONG entry (Fabio volume
+    bubble guard — institutional size fighting the trade)."""
+    from quant.decision.context import DecisionContext
+    from quant.decision.gates_edge import gate_triple_a_edge
+    from quant.bars import Bar
+
+    bar = Bar(time="t", open=100, high=101, low=99, close=100.5, volume=10)
+    ctx = DecisionContext(
+        bar=bar, symbol="S", agent_direction="LONG",
+        stacked_imbalance_direction="SELL", stacked_imbalance_magnitude=4,
+        stacked_imbalance_price_low=99.0, stacked_imbalance_price_high=100.0,
+    )
+    res = gate_triple_a_edge(ctx)
+    assert not res.passed
+    assert "Opposing stacked SELL" in (res.reason or "")
+
+
+def test_aligned_stacked_imbalance_does_not_block():
+    """Aligned stacked flow must NOT block the entry."""
+    from quant.decision.context import DecisionContext
+    from quant.decision.gates_edge import gate_triple_a_edge
+    from quant.bars import Bar
+
+    bar = Bar(time="t", open=100, high=101, low=99, close=100.5, volume=10)
+    ctx = DecisionContext(
+        bar=bar, symbol="S", agent_direction="LONG",
+        stacked_imbalance_direction="BUY", stacked_imbalance_magnitude=4,
+        stacked_imbalance_price_low=100.0, stacked_imbalance_price_high=101.0,
+    )
+    # Gate may fail for other reasons but must NOT cite opposing imbalance.
+    res = gate_triple_a_edge(ctx)
+    assert "Opposing stacked" not in (res.reason or "")

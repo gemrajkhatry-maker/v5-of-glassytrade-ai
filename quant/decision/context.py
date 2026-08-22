@@ -87,3 +87,11 @@ class DecisionContext:
     profile_shape: str = ""
     option_delta: float = 0.50
     contested_bubble_zone: bool = False
+    # Stacked footprint imbalance (Fabio volume bubble, audit Gap #2):
+    # direction ("BUY"/"SELL"/""), magnitude (consecutive 3:1 levels), and
+    # the price band. Derived from the latest footprint candle in
+    # context_builder — opposing stacked flow BLOCKS entry.
+    stacked_imbalance_direction: str = ""
+    stacked_imbalance_magnitude: int = 0
+    stacked_imbalance_price_low: float = 0.0
+    stacked_imbalance_price_high: float = 0.0
