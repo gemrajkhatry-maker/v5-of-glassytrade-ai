@@ -13,7 +13,7 @@ from quant.amt.session.ib_scalp import (
     IBScalpType,
 )
 from quant.amt.session.ib_engine import IBLocation, IBState
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 
 def _ib_state(

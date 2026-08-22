@@ -8,7 +8,7 @@ from quant.amt.session.eia import (
     EIA_SCHEDULE,
 )
 from quant.amt.session.eia import EIACalendar, EIAWindow, EIA_SCHEDULE
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 _ET = timezone(timedelta(hours=-5))

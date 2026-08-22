@@ -22,3 +22,11 @@ else:
 
 if _backend not in sys.path:
     sys.path.append(_backend)
+
+# Root must PRECEDE backend on sys.path: backend/tests/__init__.py creates a
+# competing ``tests`` package that shadows tests/helpers/synthetic.py etc.
+# (the source of every 'No module named tests.helpers' collection error).
+_repo = str(Path(__file__).resolve().parent)
+if _repo in sys.path:
+    sys.path.remove(_repo)
+sys.path.insert(0, _repo)

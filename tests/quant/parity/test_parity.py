@@ -1,6 +1,6 @@
 import pytest
 
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 
 def _legacy_near():

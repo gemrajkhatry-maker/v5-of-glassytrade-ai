@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from quant.amt.session.ib_engine import IBLocation, IBState, InitialBalanceEngine
 from quant.contracts.value_objects import OHLC
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 
 def _make_candle(time: str, o: float, h: float, l: float, c: float) -> OHLC:

@@ -6,7 +6,7 @@ all-True, and mixed.
 
 import pytest
 from quant.amt.orderflow.aggression import AggressionScorer as NewScorer
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 
 def _kw(i):

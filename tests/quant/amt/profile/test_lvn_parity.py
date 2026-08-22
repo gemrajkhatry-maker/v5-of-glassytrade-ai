@@ -3,7 +3,7 @@
 from quant.amt.profile.lvn import find_hvns as new_find_hvns
 from quant.amt.profile.lvn import find_lvns as new_find_lvns
 from quant.contracts.value_objects import VolumeProfileLevel
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 
 def _uniform(n: int, vol: float = 1000) -> list[VolumeProfileLevel]:

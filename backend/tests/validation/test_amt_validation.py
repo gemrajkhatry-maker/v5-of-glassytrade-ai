@@ -9,12 +9,6 @@ based on Fabio's AMT methodology.
 
 from __future__ import annotations
 
-import sys
-import os
-
-# Add project root to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
 import pytest
 from types import SimpleNamespace
 

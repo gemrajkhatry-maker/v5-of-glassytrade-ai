@@ -12,7 +12,7 @@ from quant.amt.session.selector import (
     OptionSelectorConfig,
     OptionSelection,
 )
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 
 def _make_option(ltp=100.0, oi=1_000_000, volume=50_000, bid=None, ask=None,

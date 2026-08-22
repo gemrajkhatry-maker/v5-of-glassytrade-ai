@@ -8,7 +8,7 @@ through both implementations via assert_parity.
 from __future__ import annotations
 
 from quant.amt.session.one_min_bar import OneMinBarEngine, OneMinBarState
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 
 def _ticks():

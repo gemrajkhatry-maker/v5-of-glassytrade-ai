@@ -30,12 +30,21 @@ _project_root = str(
 if _project_root not in sys.path:
     sys.path.insert(0, _project_root)
 
-# Also ensure backend/ is importable (sibling of project root relative to tests/)
+# Also ensure backend/ is importable (sibling of project root relative to
+# tests/). APPEND, never insert(0): backend/tests/__init__.py creates a
+# competing ``tests`` package and inserting backend first shadows the root
+# tests/ package (helpers like synthetic.py vanish mid-collection).
 _backend_root = str(Path(__file__).resolve().parent.parent)  # backend/
 if _backend_root not in sys.path:
-    sys.path.insert(0, _backend_root)
+    sys.path.append(_backend_root)
+# Re-assert root-first in case any prior import inserted backend ahead.
+_root = str(Path(__file__).resolve().parent.parent.parent)
+if _root in sys.path:
+    sys.path.remove(_root)
+sys.path.insert(0, _root)
 
 # ---------------------------------------------------------------------------
 # No global mocks needed — stub modules provide importable types.
 # Tests that require network/hardware should mock at the test level.
 # ---------------------------------------------------------------------------
+

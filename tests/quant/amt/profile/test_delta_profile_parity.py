@@ -1,7 +1,7 @@
 """Parity: delta_profile moved module vs legacy shim."""
 
 from quant.amt.profile.delta_profile import detect_high_delta_zones as new
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 
 # bucket map: price -> [buy, sell, net, active]; active=1 counts toward the mean

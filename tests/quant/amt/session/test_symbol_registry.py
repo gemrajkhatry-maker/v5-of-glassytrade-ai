@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from quant.amt.session.symbol_registry import SymbolRegistry
 from quant.contracts.exchange_config import ExchangeConfig
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 
 # ======================================================================

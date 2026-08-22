@@ -8,7 +8,7 @@ from quant.amt.profile.classifier import (
     POCMigrationTracker as new_tracker,
 )
 from quant.contracts.value_objects import VolumeProfileLevel
-from tests.quant.parity import assert_parity
+from tests.quant.parity_harness import assert_parity
 
 
 def _p_shape():
