@@ -98,6 +98,11 @@ class SignalBuilder:
             if val is not None and vah is not None and val > vah:
                 # Corrupt / inverted profile -> triggers inverted SL rejection
                 anchor = val
+            elif (getattr(ctx, "nearest_buy_print_below", 0.0) or 0.0) > 0 \
+                    and entry > ctx.nearest_buy_print_below:
+                # A big BUY print below = institutional support. Anchor there
+                # (Fabio Gap #10): prints create structural levels.
+                anchor = ctx.nearest_buy_print_below
             elif ctx.leg_lvn and ctx.leg_lvn > 0 and entry > ctx.leg_lvn:
                 anchor = ctx.leg_lvn
             elif val is not None and entry > val:
@@ -124,6 +129,9 @@ class SignalBuilder:
             if val is not None and vah is not None and val > vah:
                 # Corrupt / inverted profile -> triggers inverted SL rejection
                 anchor = vah
+            elif (getattr(ctx, "nearest_sell_print_above", 0.0) or 0.0) > 0 \
+                    and entry < ctx.nearest_sell_print_above:
+                anchor = ctx.nearest_sell_print_above
             elif ctx.leg_lvn and ctx.leg_lvn > 0 and entry < ctx.leg_lvn:
                 anchor = ctx.leg_lvn
             elif vah is not None and entry < vah:

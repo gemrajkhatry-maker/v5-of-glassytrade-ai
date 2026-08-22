@@ -91,6 +91,11 @@ class DecisionContext:
     # direction ("BUY"/"SELL"/""), magnitude (consecutive 3:1 levels), and
     # the price band. Derived from the latest footprint candle in
     # context_builder — opposing stacked flow BLOCKS entry.
+    # Aggressive prints as structural levels (Fabio Gap #10): a massive
+    # print at a price MAKES that price support/resistance. Nearest big
+    # BUY print below = support; nearest big SELL print above = resistance.
+    nearest_buy_print_below: float = 0.0
+    nearest_sell_print_above: float = 0.0
     stacked_imbalance_direction: str = ""
     stacked_imbalance_magnitude: int = 0
     stacked_imbalance_price_low: float = 0.0

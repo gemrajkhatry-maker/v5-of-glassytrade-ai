@@ -139,3 +139,42 @@ def test_aligned_stacked_imbalance_does_not_block():
     # Gate may fail for other reasons but must NOT cite opposing imbalance.
     res = gate_triple_a_edge(ctx)
     assert "Opposing stacked" not in (res.reason or "")
+
+
+def test_print_wall_anchors_sl_for_long():
+    """Gap #10: a big BUY print below price becomes SL support — the wall
+    beats VA/LVN in anchor priority."""
+    from dataclasses import replace as _dc_replace
+    from quant.decision.context import DecisionContext
+    from quant.decision.signal_builder import SignalBuilder
+    from quant.decision.result import GateResult
+    from quant.bars import Bar
+
+    bar = Bar(time="t", open=100.0, high=100.1, low=99.9, close=100.0, volume=10)
+    ctx = DecisionContext(
+        bar=bar, symbol="S", agent_direction="LONG",
+        val=98.0, vah=102.0, poc=100.0, tick_size=0.05,
+        nearest_buy_print_below=99.4,  # big BUY print at 99.4
+    )
+    sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
+    assert sig is not None
+    # SL = 2 ticks inside the print wall: 99.4 - 0.10
+    assert sig.sl == pytest.approx(99.30)
+
+
+def test_print_wall_anchors_sl_for_short():
+    """A big SELL print above price is short-side resistance anchor."""
+    from quant.decision.context import DecisionContext
+    from quant.decision.signal_builder import SignalBuilder
+    from quant.decision.result import GateResult
+    from quant.bars import Bar
+
+    bar = Bar(time="t", open=100.0, high=100.1, low=99.9, close=100.0, volume=10)
+    ctx = DecisionContext(
+        bar=bar, symbol="S", agent_direction="SHORT",
+        val=98.0, vah=102.0, poc=100.0, tick_size=0.05,
+        nearest_sell_print_above=100.8,
+    )
+    sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
+    assert sig is not None
+    assert sig.sl == pytest.approx(100.90)

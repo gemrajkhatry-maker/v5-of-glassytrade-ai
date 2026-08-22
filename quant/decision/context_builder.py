@@ -24,6 +24,35 @@ logger = logging.getLogger(__name__)
 _DETERMINISTIC_CONVICTION = 0.7
 
 
+def _print_levels_from_dto(amt_dto: dict, bar) -> tuple[float, float]:
+    """Nearest big aggressive-print levels relative to the current close.
+
+    A large BUY print below price acts as support; a large SELL print above
+    acts as resistance (Fabio Gap #10: prints CREATE structural levels).
+    "Big" = volume >= 2x the mean print volume. Returns (support, resistance)
+    with 0.0 when absent.
+    """
+    prints = amt_dto.get("aggressivePrints") or []
+    if not prints:
+        return 0.0, 0.0
+    px = float(getattr(bar, "close", 0) or 0) if bar is not None else 0.0
+    if px <= 0:
+        return 0.0, 0.0
+    mean_vol = sum(float(p.get("volume") or 0) for p in prints) / len(prints)
+    big = [p for p in prints if float(p.get("volume") or 0) >= 2.0 * mean_vol]
+    support = max(
+        (float(p["price"]) for p in big
+         if p.get("side") == "BUY" and float(p["price"]) < px),
+        default=0.0,
+    )
+    resistance = min(
+        (float(p["price"]) for p in big
+         if p.get("side") == "SELL" and float(p["price"]) > px),
+        default=0.0,
+    )
+    return support, resistance
+
+
 def _latest_stacked_imbalance(amt_dto: dict) -> tuple[str, int, float, float]:
     """Summarize the most recent stacked footprint imbalance.
 
@@ -122,6 +151,7 @@ class DecisionContextBuilder:
 
         session_phase = session_info.session if session_info else "PRIMARY"
         _si_dir, _si_mag, _si_low, _si_high = _latest_stacked_imbalance(amt_dto)
+        _buy_wall_below, _sell_wall_above = _print_levels_from_dto(amt_dto, bar)
         allow_trend = session_info.allow_trend if session_info else True
         allow_reversion = session_info.allow_reversion if session_info else True
 
@@ -297,4 +327,6 @@ class DecisionContextBuilder:
             stacked_imbalance_magnitude=_si_mag,
             stacked_imbalance_price_low=_si_low,
             stacked_imbalance_price_high=_si_high,
+            nearest_buy_print_below=_buy_wall_below,
+            nearest_sell_print_above=_sell_wall_above,
         )
