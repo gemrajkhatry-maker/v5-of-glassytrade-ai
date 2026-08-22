@@ -132,6 +132,9 @@ class QuantEngine:
         self._session_levels = session_levels or SessionLevelStore()
         self._last_depth: OrderBook | None = None
         self._crashed: bool = False
+        # S1 certification records (bounded; drained by cert harness)
+        from collections import deque as _dq
+        self.cert_records = _dq(maxlen=5_000)
         # AMT analysis engine — owns the candle ring, incremental profile,
         # analyzer, and seed logic. Receives callbacks for depth and risk PnL.
         self._option_amt_engine = None
@@ -268,6 +271,22 @@ class QuantEngine:
             )
             self._crashed = True
             raise
+
+    def _cert_trace(self, bar=None, stage: str = "", **fields) -> None:
+        """S1 decision traceability: append a certification record for this
+        bar. Bounded buffer; consumed by tests/nightly certification runs
+        via engine.cert_records. Nothing here can raise into the run loop."""
+        try:
+            rec = {"symbol": self.symbol,
+                   "time": getattr(bar, "time", "") if bar else "",
+                   "stage": stage}
+            rec.update(fields)
+            if bar is not None:
+                rec["bar_index"] = self._bar_index
+                rec["position_open"] = self._position is not None
+            self.cert_records.append(rec)
+        except Exception:
+            pass  # certification must never break trading
 
     def _run_inner(self, max_steps: int | None = None) -> list[Event]:
         global _UNDERLYING_WARNED
@@ -440,6 +459,28 @@ class QuantEngine:
         # from a LATER bar's analyze() on a multi-threaded consumer.
         amt_dto = amt_dto or self._amt_engine.last_amt_dto or {}
         risk_st = self._risk.state()
+        self._cert_trace(
+            bar=bar,
+            stage="context",
+            market_data={
+                "open": float(bar.open), "high": float(bar.high),
+                "low": float(bar.low), "close": float(bar.close),
+                "volume": float(bar.volume),
+            },
+            profile_data={
+                "poc": amt_dto.get("poc"), "vah": amt_dto.get("valueAreaHigh"),
+                "val": amt_dto.get("valueAreaLow"),
+                "lvns": amt_dto.get("lvns") or [],
+                "hvns": amt_dto.get("hvns") or [],
+                "leg_lvn": amt_dto.get("legLvn"),
+            },
+            context={
+                "market_state": amt_dto.get("marketState"),
+                "profile_shape": amt_dto.get("profileShape"),
+                "session_phase": getattr(self, "_last_session_phase", ""),
+                "balance_ratio": amt_dto.get("balanceRatio"),
+            },
+        )
         ctx = DecisionContextBuilder().build(
             bar=bar,
             symbol=self.symbol,
@@ -453,6 +494,29 @@ class QuantEngine:
             amt_dto=amt_dto,
         )
         decision = self._strategy.should_enter(ctx)
+        # S1: record the decision itself — gates with pass/fail and reasons.
+        try:
+            self.cert_records.append({
+                "symbol": self.symbol, "time": bar.time,
+                "stage": "decision",
+                "approved": decision.approved, "reason": decision.reason,
+                "block_reasons": list(decision.block_reasons or ()),
+                "gate_results": [
+                    {"gate": g.gate if hasattr(g, 'gate') else getattr(g, 'name', '?'),
+                     "passed": bool(getattr(g, 'passed', False))}
+                    for g in (decision.gate_results or ())
+                ],
+                "signal": {
+                    "type": decision.signal.type,
+                    "entry": float(decision.signal.entry),
+                    "sl": float(decision.signal.sl),
+                    "tp": float(decision.signal.tp),
+                    "rr": float(decision.signal.rr),
+                } if decision.signal else None,
+                "position_size": None,
+            })
+        except Exception:
+            pass
         self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
 
         if decision.approved and decision.signal is not None:
