@@ -390,6 +390,12 @@ class QuantCoordinator:
             if futures_symbol:
                 reader = self._feed.add_reader(futures_symbol)
                 underlying_gateway = LiveGateway(self._feed, futures_symbol, reader_queue=reader)
+        # Per-day event journal (fsync JSONL) — feeds the L1 nightly replay
+        # determinism loop. One file per symbol per day keeps writes bounded.
+        from datetime import datetime as _dt
+        from pathlib import Path as _Path
+
+        _journal_dir = self.config.get("journal_dir")
         engine = QuantEngine(
             gateway,
             symbol,
@@ -403,6 +409,15 @@ class QuantCoordinator:
             strategy=self._strategy,
             portfolio_risk=self._portfolio_risk,
         )
+        if _journal_dir:
+            from quant.persistence import Journal
+
+            day = _dt.now().strftime("%Y-%m-%d")
+            safe = "".join(ch if ch.isalnum() or ch in " -" else "_" for ch in symbol)
+            jdir = _Path(_journal_dir)
+            jdir.mkdir(parents=True, exist_ok=True)
+            engine.journal_path = str(jdir / f"{day}_{safe}.jsonl")
+            engine.attach_journal()
         thread = threading.Thread(
             target=engine.run, daemon=True, name=f"quant-{symbol}"
         )

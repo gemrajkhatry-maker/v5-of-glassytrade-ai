@@ -210,19 +210,29 @@ class QuantEngine:
                                  portfolio_risk=self._portfolio_risk)
         self._bus = EventBus()
         self._projector = StateProjector()
-        self._journal = Journal(path=journal_path) if journal_path else None
-        # Journal persistence via low-priority bus subscriber — keeps JSON
-        # serialization off the hot path in _emit(). Subscribe to all event
-        # types since the bus uses exact-type matching.
-        if self._journal is not None:
+        self._journal_subscribed = False
+        self._journal = None
+        if journal_path:
+            # Constructor-provided journal: attach immediately so the bus
+            # subscription exists before run() starts capturing events.
+            from quant.persistence import Journal
+
+            self._journal = Journal(path=journal_path)
+            self._journal_subscribed = True
+
             def _journal_subscriber(event: Event) -> None:
                 self._journal.append(
                     {"type": event.__class__.__name__, **asdict(event)}
                 )
+
             for evt_type in (BarClosed, DecisionProduced,
                             SignalApproved, PositionOpened, PositionClosed,
                             RiskUpdated, DepthUpdated, AmtUpdated):
-                self._bus.subscribe(evt_type, _journal_subscriber, priority=-100)
+                self._bus.subscribe(evt_type, _journal_subscriber,
+                                    priority=-100)
+        else:
+            self._pending_journal_path = None
+        self._journal_subscribed = False
         # ponytail: bounded ring for the whole-session trace. 10k bars @ ~10 events
         # per bar covers a 6.5-hour NSE session; older events fall out of memory.
         # Full history still lands in the tick journal (quant/persistence.Journal).
@@ -271,6 +281,34 @@ class QuantEngine:
             )
             self._crashed = True
             raise
+
+    def attach_journal(self, path: str | None = None) -> None:
+        """Attach the fsync JSONL event journal and subscribe it to the bus.
+
+        Called by the coordinator after construction so journals land in a
+        per-day directory. Subscribes lazily so late attachment (post
+        constructor, pre-run) still captures every event.
+        """
+        from quant.persistence import Journal
+
+        path = path or self._pending_journal_path
+        if not path or self._journal is not None:
+            return
+        self._journal = Journal(path=path)
+        self._pending_journal_path = None
+        if self._journal_subscribed:
+            return
+        self._journal_subscribed = True
+
+        def _journal_subscriber(event: Event) -> None:
+            self._journal.append(
+                {"type": event.__class__.__name__, **asdict(event)}
+            )
+
+        for evt_type in (BarClosed, DecisionProduced,
+                        SignalApproved, PositionOpened, PositionClosed,
+                        RiskUpdated, DepthUpdated, AmtUpdated):
+            self._bus.subscribe(evt_type, _journal_subscriber, priority=-100)
 
     def _cert_trace(self, bar=None, stage: str = "", **fields) -> None:
         """S1 decision traceability: append a certification record for this

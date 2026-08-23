@@ -66,3 +66,58 @@ def test_duplicate_event_ids_flag(tmp_path, capsys):
     p = _write_journal(tmp_path, records)
     assert rj.main([sys.argv[0], p]) == 1
     assert "duplicate event_ids" in capsys.readouterr().out
+
+
+def test_engine_attach_journal_captures_events(tmp_path):
+    """L1 enabler: coordinator attaches a per-day journal; the journal must
+    capture BarClosed + DecisionProduced events from a live run."""
+    from quant.brokers.gateway import Tick
+    from quant.runtime import QuantEngine
+
+    jpath = tmp_path / "day_SYM.jsonl"
+
+    class GW:
+        def __init__(self):
+            self._t = [Tick(str(i * 61), 100.0, 10, 5, 5) for i in range(4)]
+
+        def subscribe(self, s):
+            pass
+
+        def next_tick(self):
+            return self._t.pop(0) if self._t else None
+
+        def try_next_tick(self):
+            return self.next_tick()
+
+    eng = QuantEngine(GW(), "TEST CALL", interval_seconds=60)
+    eng.attach_journal(str(jpath))
+    assert eng._journal is not None, "attach_journal did not create journal"
+
+    eng.run(max_steps=10)
+
+    rows = [json.loads(l) for l in jpath.read_text().splitlines() if l.strip()]
+    types = {r["type"] for r in rows}
+    assert "BarClosed" in types, f"journal missing bars: {types}"
+    assert any(r["type"] == "DecisionProduced" for r in rows)
+
+
+def test_attach_journal_is_idempotent(tmp_path):
+    from quant.brokers.gateway import Tick
+    from quant.runtime import QuantEngine
+
+    class GW:
+        def subscribe(self, s):
+            pass
+
+        def next_tick(self):
+            return None
+
+        def try_next_tick(self):
+            return None
+
+    eng = QuantEngine(GW(), "S", interval_seconds=60)
+    p1 = str(tmp_path / "a.jsonl")
+    p2 = str(tmp_path / "b.jsonl")
+    eng.attach_journal(p1)
+    eng.attach_journal(p2)  # second attach must be a no-op
+    assert eng._journal._path == p1, "second attach replaced the journal"

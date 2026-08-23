@@ -11,6 +11,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from app.config_models import SystemConfig as Configuration
 from app.config import settings as _settings
@@ -129,6 +130,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     include_futures = getattr(scanner_cfg, "include_futures", True) if scanner_cfg else True
 
     coord_config = {
+            "journal_dir": str(Path(__file__).resolve().parents[3] / "journals"),
         "underlyings": list(_settings.SCANNER_UNDERLYINGS or []),
         "n": int(_settings.SCANNER_TOP_N or 8),
         "exchange": _settings.DEFAULT_EXCHANGE or "NSE",
