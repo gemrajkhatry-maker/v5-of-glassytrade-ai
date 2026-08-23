@@ -23,11 +23,15 @@ router = APIRouter(tags=["testing"])
 logger = logging.getLogger(__name__)
 
 
+_ALLOWED_ENVS = {"development", "paper"}
+
+
 def _env_allows() -> tuple[bool, str]:
+    """Injection is for validating the paper loop; live mode stays blocked."""
     env = os.environ.get("GLASSYTRADE_ENV", "").strip().lower()
-    if env != "development":
+    if env not in _ALLOWED_ENVS:
         return False, (
-            f"tick injection requires GLASSYTRADE_ENV=development "
+            f"tick injection requires GLASSYTRADE_ENV in {sorted(_ALLOWED_ENVS)} "
             f"(current: {env or 'unset'})"
         )
     return True, ""

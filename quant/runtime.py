@@ -291,7 +291,11 @@ class QuantEngine:
         """
         from quant.persistence import Journal
 
-        path = path or self._pending_journal_path
+        path = (
+            path
+            or getattr(self, "journal_path", None)
+            or self._pending_journal_path
+        )
         if not path or self._journal is not None:
             return
         self._journal = Journal(path=path)

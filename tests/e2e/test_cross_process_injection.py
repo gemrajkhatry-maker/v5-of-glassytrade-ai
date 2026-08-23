@@ -164,11 +164,16 @@ def test_leg_a_guard_rejects_non_dev_env(monkeypatch):
     app.state.coordinator = None
     client = TestClient(app)
 
+    # Paper is ALLOWED (journals for the nightly replay loop); live blocked.
     monkeypatch.setenv("GLASSYTRADE_ENV", "paper")
     r = client.post("/api/inject-tick", json=[{"symbol": "S"}])
-    assert r.status_code == 403
-    assert "development" in r.json()["detail"]
+    assert r.status_code == 503  # guard passes; fails only on no-coordinator
 
     monkeypatch.setenv("GLASSYTRADE_ENV", "development")
     r2 = client.post("/api/inject-tick", json=[{"symbol": "S"}])
-    assert r2.status_code == 503  # guard passes; fails only on no-coordinator
+    assert r2.status_code == 503
+
+    # LIVE mode must stay blocked — injection is a paper/dev validation tool.
+    monkeypatch.setenv("GLASSYTRADE_ENV", "live")
+    r3 = client.post("/api/inject-tick", json=[{"symbol": "S"}])
+    assert r3.status_code == 403
