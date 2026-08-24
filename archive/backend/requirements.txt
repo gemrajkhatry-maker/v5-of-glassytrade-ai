@@ -1,0 +1,29 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+pydantic>=2.10.0
+httpx>=0.28.0
+websockets>=14.0
+python-dotenv>=1.0.0
+# Prometheus metrics registry (backend/app/core/metrics.py)
+prometheus_client>=0.26.0
+pytest>=8.3.0
+pytest-asyncio>=0.25.0
+# AI / ML
+torch>=2.0.0
+transformers>=4.40.0
+peft>=0.4.0
+accelerate>=0.25.0
+numpy>=1.26.0
+# Apple Silicon ML (MLX) is optional and installed separately from
+# backend/requirements-mlx.txt. Runtime imports are lazy so Linux/CI can run
+# the backend without Apple-specific packages.
+# Probability engine
+lightgbm>=4.0.0
+# Reinforcement learning (RL) — ValentiniAMTEnv
+# gymnasium is required (valentini_env is part of the core domain).
+gymnasium>=1.0.0
+# Optional: RL training (ValentiniTrainer). Heavy (pulls torch); runtime code
+# degrades gracefully when absent, so it is intentionally not pinned here.
+# stable-baselines3>=2.0.0
+# Config
+pyyaml>=6.0

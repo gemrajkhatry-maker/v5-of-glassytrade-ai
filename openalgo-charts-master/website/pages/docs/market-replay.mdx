@@ -1,0 +1,232 @@
+---
+title: Market Replay
+description: Walk a historical session forward bar by bar, with every indicator redrawn as it stood at that moment.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Market replay
+
+Replay walks a loaded session forward one bar at a time, so a trader can practise on
+history without seeing what happens next. `ReplayController` owns the playhead and the
+transitions. It ships no DOM: you render the transport bar, the scrub slider and the clock
+yourself from `replay.state()` and the `replay:*` events, the same way
+[`DrawingController`](/docs/drawing-tools) leaves the toolbar to you.
+
+```ts
+import { createChart, ReplayController } from 'openalgo-charts';
+
+const chart = createChart(el);
+const series = chart.addSeries('candlestick');
+series.setData(bars);
+
+// Constructing the controller enters replay and shows bar 200 immediately.
+const replay = new ReplayController(chart, { series, bars, startIndex: 200 });
+
+replay.play({ speed: 2 });   // two bars per barMs
+replay.pause();
+replay.step();               // one bar forward
+replay.stepBack();
+replay.seek(240);
+replay.stop();               // leave replay, put the chart back
+```
+
+## Indicators come along for free
+
+Replay does not fake a moment in time. It feeds the chart a **prefix** of the bar array
+through the ordinary `series.setData` path, and every indicator on the chart recomputes
+from that shortened history. An EMA, a Supertrend flip, a VWAP anchor, a pivot level, a
+legend reading: each is exactly what it was at that bar, because it is computed from
+exactly the bars that existed then.
+
+That also means `chart.dataLayer.length` shrinks to the replayed count, so nothing holds
+the shared time axis open at bars in the future. There is no replay-aware code anywhere in
+the indicator tier, and none is needed in yours.
+
+<Callout type="info">
+The right edge of the view anchors to the newest bar plus `rightOffset`, so the chart
+scrolls itself as replay advances. Zoom (`barSpacing`) is left alone, which is why a user
+can pan and zoom mid-replay and keep their view.
+</Callout>
+
+## Live demo
+
+Step, play, and exit. The buttons are plain DOM, driven entirely by `state()` and the
+`replay:*` events. The EMA(20) is a real indicator instance, recomputed on every frame.
+
+<RunnableExample height={430} tiers={['indicators']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 400, 3600);
+const series = chart.addSeries('candlestick');
+series.setData(bars);
+chart.addIndicator('ema', { length: 20 });
+chart.timeScale.setBarSpacing(6);
+
+// The engine ships no transport bar. This is one, in the host's own DOM.
+el.style.position = 'relative';
+const strip = document.createElement('div');
+strip.style.cssText = 'position:absolute;left:10px;top:8px;z-index:5;display:flex;gap:6px;align-items:center;font:12px ui-monospace,monospace;color:#cbd5e1';
+el.appendChild(strip);
+const button = (label) => {
+  const b = document.createElement('button');
+  b.textContent = label;
+  b.style.cssText = 'font:12px ui-monospace,monospace;padding:3px 9px;border-radius:5px;border:1px solid #3b4453;background:#1b2029;color:#cbd5e1;cursor:pointer';
+  strip.appendChild(b);
+  return b;
+};
+const back = button('Back');
+const toggle = button('Play');
+const fwd = button('Step');
+const exit = button('Exit');
+const clock = document.createElement('span');
+strip.appendChild(clock);
+
+const replay = new lib.ReplayController(chart, { series, bars, startIndex: 240, barMs: 140 });
+
+const stamp = (t) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ');
+const render = (s) => {
+  toggle.textContent = s.playing ? 'Pause' : 'Play';
+  clock.textContent = stamp(s.bar.time) + '   bar ' + (s.index + 1) + ' / ' + s.total;
+};
+chart.on('replay:frame', render);
+chart.on('replay:play', render);
+chart.on('replay:pause', render);
+chart.on('replay:stop', () => { toggle.textContent = 'Play'; clock.textContent = 'live'; });
+render(replay.state());
+
+back.onclick = () => replay.stepBack();
+fwd.onclick = () => replay.step();
+toggle.onclick = () => (replay.state().playing ? replay.pause() : replay.play());
+exit.onclick = () => replay.stop();
+
+// The demo frame tears the chart down on navigation; stop the timer with it.
+const destroy = chart.destroy.bind(chart);
+chart.destroy = () => { replay.stop(); destroy(); };
+return chart;`} caption="Play runs at 140 ms per bar. Exit restores the full history and the viewport you had." />
+
+## Options
+
+```ts
+new ReplayController(chart, options);
+```
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `series` | `SeriesApi \| SeriesApi[]` | `chart.primarySeries()` | The series replay drives. The first owns the timeline. Optional when the chart can name its own primary series. |
+| `bars` | `Bar[]` | the driven series' current data | The full session. Never mutated: each frame gets its own slice. |
+| `startIndex` | `number` | `0` | Bar to open at, 0-based. Clamped to the session. |
+| `barMs` | `number` | `1000` | Wall-clock milliseconds per bar at speed 1. |
+| `speed` | `number` | `1` | Initial multiplier over `barMs`. |
+| `onFrame` | `(state) => void` | none | Called on every playhead move, after the chart has been updated. |
+| `now` | `() => number` | `performance.now` | Playback clock. Inject one in tests. |
+| `scheduler` | `(cb, ms) => cancel` | `setInterval` | Playback timer. Inject one to drive replay from `requestAnimationFrame`, or by hand. |
+
+<Callout type="warning">
+**Constructing the controller enters replay.** It snapshots the chart's data and viewport
+and immediately shows `startIndex`. That is the gesture a replay button makes, and taking
+the snapshot before anything has moved is what lets `stop()` put the user back exactly
+where they were.
+</Callout>
+
+## Transport
+
+| Method | Effect |
+|---|---|
+| `seek(index)` | Jump the playhead. Out-of-range values clamp to the session. |
+| `step(n = 1)` | Move forward. Stops dead at the last bar. |
+| `stepBack(n = 1)` | Move back. Stops dead at the first bar. |
+| `play({ speed })` | Start or re-speed playback. On the last bar it reports `replay:end` rather than arming a timer that could never advance. |
+| `pause()` | Halt playback, leaving the playhead and the chart where they are. |
+| `stop()` | Leave replay. Safe to call twice. |
+| `state()` | Everything a transport bar needs, in one object. |
+
+Every transition, `seek` and `step` and each played frame alike, funnels through the same
+private apply step, so arriving at a bar leaves the chart in the same state however the
+user got there.
+
+### ReplayState
+
+```ts
+interface ReplayState {
+  index: number;    // 0-based index of the newest bar on the chart
+  total: number;    // bars in the replay set; a scrub bar's max is total - 1
+  playing: boolean;
+  speed: number;
+  bar: Bar | null;  // the bar at index: the replay clock's "now"
+}
+```
+
+## Events
+
+Every payload is a `ReplayState`, so one handler can drive the whole transport bar.
+
+| Event | Fires |
+|---|---|
+| `replay:start` | The first time the controller puts a bar on the chart. |
+| `replay:frame` | Every playhead move: seek, step, stepBack, and each played bar. |
+| `replay:play` | Playback armed or re-speeded. |
+| `replay:pause` | Playback halted; the playhead did not move. |
+| `replay:end` | The playhead reached the last bar. Preceded by `replay:pause` when it was playing. |
+| `replay:stop` | Replay left; data and viewport restored. |
+
+```ts
+chart.on('replay:frame', (s) => {
+  scrub.value = String(s.index);
+  clockEl.textContent = new Date(s.bar.time * 1000).toLocaleString();
+});
+chart.on('replay:end', () => playButton.disabled = true);
+```
+
+## Driving more than one series
+
+The [DataLayer](/docs/core-concepts) merges every series onto one time axis, so a series
+left at full length would drag future timestamps back onto the chart even though the price
+series had been cut. Pass the list, and replay truncates the followers **by time**, not by
+count, which is what a volume series that is shorter or starts later needs.
+
+```ts
+const replay = new ReplayController(chart, { series: [price, volume, comparison] });
+```
+
+Indicators added with `chart.addIndicator` are not in that list and must not be: they
+recompute from the primary series, which replay is already cutting.
+
+## Playback timing
+
+Bars owed on each tick are derived from the clock, not from the tick count, so a coarse or
+throttled timer still plays at the requested speed. A backgrounded tab throttles its timers
+to roughly one call a second, so a single tick is capped at **10 bars**: coming back to the
+tab resumes the session instead of fast-forwarding minutes of it in one frame.
+
+Playback is fully injectable, which is what makes replay testable without a clock:
+
+```ts
+let fire = () => {};
+let t = 0;
+const replay = new ReplayController(chart, {
+  series, bars,
+  now: () => t,
+  scheduler: (cb) => { fire = cb; return () => { fire = () => {}; }; },
+});
+
+replay.play();
+t += 3000; fire();          // three bars at the default 1000 ms
+expect(replay.state().index).toBe(3);
+```
+
+## Leaving replay
+
+`stop()` gives every driven series its pre-replay data back and restores `barSpacing` and
+`rightOffset`. Those two numbers, together with the base index that comes back with the
+data, reproduce the visible logical range exactly, even if the user panned and zoomed
+during replay.
+
+It is safe to call twice, and a later `seek`, `step` or `play` re-enters replay from
+`startIndex`, so a transport bar can toggle replay on and off without rebuilding the
+controller.
+
+<Callout type="info">
+**Live data and replay do not mix.** While replay owns the series, a `series.update(bar)`
+from your feed lands on the prefix and is wiped by the next frame. Unsubscribe the feed
+when replay starts (`replay:start`) and resubscribe on `replay:stop`.
+</Callout>

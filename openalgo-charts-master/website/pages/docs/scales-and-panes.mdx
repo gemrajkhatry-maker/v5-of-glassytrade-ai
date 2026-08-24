@@ -1,0 +1,506 @@
+---
+title: Scales & Panes
+description: Time scale, price scale, axis-drag rescale, and multi-pane layouts.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Scales & panes
+
+## Time scale
+
+The time scale is shared by all panes. Useful methods:
+
+```ts
+chart.timeScale.fitContent(barCount);      // fit all bars to the width
+chart.fitContent();                        // no-arg convenience (bar count from data)
+chart.timeScale.setBarSpacing(8);          // pixels per bar (zoom)
+chart.timeScale.setRightOffset(4);         // empty bars kept right of the last bar
+chart.resetScale();                        // back to fit-all + autoscale (same as double-click)
+```
+
+### Preserve zoom across a data reload
+
+Snapshot the visible logical range before replacing the data and restore it after, so a
+full-history reconcile does not throw away the user's zoom/scroll:
+
+```ts
+const range = chart.getVisibleLogicalRange();   // { from, to }
+mainSeries.setData(fullHistory);                 // would otherwise jump to the default view
+chart.setVisibleLogicalRange(range);             // restore the exact window
+```
+
+Both methods also exist directly on `chart.timeScale` (`getVisibleLogicalRange` /
+`setVisibleLogicalRange`); mutating the scale repaints automatically.
+
+## Price scale & axis-drag rescale
+
+Each pane has an independent price scale (linear by default, autoscaling to the visible
+range). Direct manipulation:
+
+- **Wheel** - zoom both axes around the cursor.
+- **Drag the price (Y) axis** up/down - expand / compress the price scale (switches that
+  pane to manual scale).
+- **Drag the time (X) axis** left/right - compress / expand bar spacing.
+- **Double-click** - reset: fit content and re-enable autoscale (`chart.resetScale()`).
+  Suppressed while a drawing tool is armed, where it finishes the shape instead.
+
+Programmatic conversion between price and pixels (for DOM overlays):
+
+```ts
+const y = chart.priceToCoordinate(101.5);   // price → container px
+const p = chart.coordinateToPrice(y);        // px → price
+```
+
+### One axis at a time
+
+`setPriceScaleOptions` and `setAutoScale` are chart-wide, which is what a settings dialog
+wants. A menu raised on one axis strip is the other case: it names a pane and a scale, and
+everything it offers has to be readable back so its own ticks are honest.
+
+```ts
+const s = chart.priceAxisState(0, 'right');   // PriceAxisState | null
+// { paneIndex, scaleId, side, active, autoFit, inverted, mode, scaled, lockRatio, movable }
+
+chart.setPriceAxisOptions(0, 'right', { mode: 'logarithmic', inverted: false });
+chart.setPriceAxisAutoFit(0, 'right', true);
+const locked = chart.setPriceAxisLockRatio(0, 'right', true);   // false: nothing measured
+const moved  = chart.movePriceAxis(0, 'right', 'left');         // false: that side is taken
+```
+
+**Pinning the price-per-bar ratio** holds the geometry the lock was taken at and rescales
+the visible span with `height / barSpacing` on every frame, in transformed space, so a
+logarithmic axis is correct too. A trend drawn at 45 degrees stays at 45 degrees while the
+time axis zooms. The axis goes manual while it holds, because auto-fit would re-fit the data
+every frame and undo the ratio; auto-fit or `resetScale()` releases it.
+
+**Moving an axis** swaps the two side scale objects rather than copying their state, so the
+range, mode, margins and formatter travel with the axis; the vacated strip starts again from
+the chart-wide defaults, and the column is freed when nothing is left on it. The pane's
+crosshair tag, last-price line, coordinate API and axis drag all follow the scale the prices
+are actually labelled in, and the left strip is draggable. `priceAxisMoved` fires on success.
+
+Turning these into a menu, including the disabled-but-visible rows, is covered on
+[Settings & Menus](/docs/settings-and-menus#the-price-axis-menu).
+
+## Multi-pane layouts
+
+Reference a new `paneIndex` and the pane is created on demand. Panes share the time axis, so
+they stay aligned bar-for-bar. A classic price + volume + RSI stack:
+
+<RunnableExample height={420} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 180, 3600);
+
+// pane 0: price
+chart.addSeries('candlestick').setData(bars);
+
+// pane 1: volume
+chart.addSeries('histogram', { paneIndex: 1 })
+     .setData(bars.map(b => ({ time: b.time, value: b.volume, close: b.volume })));
+
+// pane 2: RSI(14) with guides
+chart.addSeries('line', { paneIndex: 2, style: { color: '#e0b020' } }).setData(lib.rsiSeries(bars, 14));
+chart.addPriceLine({ price: 70, color: '#ef5350', lineWidth: 1, dashed: true, id: 'r70' }, 2);
+chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id: 'r30' }, 2);
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+
+## Resizing, reordering & removing panes
+
+Pane heights are relative **weights**, not pixels. Only the ratio matters. Users drag the
+boundary between two panes (the cursor becomes `row-resize` within 4px of it) and the height
+moves from one to the other, conserving their combined weight so the rest of the stack is
+untouched and neither side can collapse.
+
+| Method | Description |
+|---|---|
+| `chart.setPaneWeight(index, weight)` | Set a pane's relative height. |
+| `chart.paneWeight(index)` | Read it back. |
+| `chart.movePane(index, -1 \| 1)` | Move a pane one slot up or down. |
+| `chart.maximizePane(index)` | Give one pane the whole chart and hide the rest; call again to restore. |
+| `chart.maximizedPane()` | The maximized pane index, or `null`. |
+| `chart.removePane(index)` | Remove a pane with its series and indicators. |
+
+<Callout type="info">
+**Pane 0 is pinned.** It owns the primary price series and the shared price context, so
+`removePane(0)` and any `movePane` that would displace it return `false` rather than
+silently doing something surprising. Removing a pane re-indexes the panes below it, and the
+indicators living there move with them.
+</Callout>
+
+<Callout type="info">
+**Maximizing hides the other panes, it does not shrink them.** They lay out at zero
+height and are hidden outright, so no separator hairline and no strip of squeezed
+candles survives above the pane you asked to see on its own. The bottom *visible* pane
+owns the time axis, so maximizing the price pane with indicators beneath it still gets
+a date axis.
+
+Stored weights are never touched while maximized, so restoring is exact and `getState`
+captures the real stack rather than a placeholder. The maximized index is not part of
+the saved state: `restoreState` brings back the layout unmaximized.
+</Callout>
+
+Events: `paneResized`, `paneMoved`, `paneMaximized`, `paneRemoved`.
+
+## Pane legends
+
+Every indicator gets a legend row at the top-left of its pane: a colour swatch, the name,
+its parameters, and one reading per plot in that plot's own colour, tracking the crosshair.
+Hovering the row reveals inline controls; the chart handles the presses itself, so you get
+show/hide, move, maximize, and delete without wiring anything.
+
+| Control | Effect |
+|---|---|
+| Eye | Show / hide the source's plots (it stays on the chart). |
+| Gear | Emits `indicatorSettings` (see below). |
+| Up / Down | Move this pane one slot. |
+| Maximize | Expand this pane; press again to restore. |
+| Trash | Remove the source, and its pane if that empties it. |
+
+The first legend on a non-price pane also carries the pane-level controls (move, maximize),
+so extra rows on the same pane stay uncluttered.
+
+The engine ships no DOM, so the gear has no built-in dialog: it emits and you render one.
+Everything needed to *generate* a settings form already lives on the descriptor's `inputs`:
+
+```ts
+chart.on('indicatorSettings', ({ instanceId }) => {
+  const inst = chart.indicators().find((i) => i.id === instanceId);
+  const descriptor = getIndicator(inst.indicatorId);
+  for (const input of descriptor.inputs) {
+    // input.type is 'number' | 'boolean' | 'color' | 'text' | 'select' | 'source'
+    // build a field, then: inst.setSettings({ [input.key]: value })
+  }
+});
+```
+
+The chart's own settings dialog is described the same way, with the same widget types plus
+one it adds (`colorPair`, a bullish and a bearish colour on one row), so a single form
+renderer serves both. See [Settings & Menus](/docs/settings-and-menus#the-settings-schema).
+
+### Your own legend rows
+
+`PaneLegend` is a public primitive, so a host can add its own rows: a symbol / OHLC header,
+a volume readout. Rows added to the same pane stack automatically in insertion order, and
+removing one closes the gap.
+
+```ts
+import { PaneLegend } from 'openalgo-charts';
+
+const symbol = new PaneLegend({ id: 'symbol', title: 'AAPL', params: '1D · NSE', actions: [] });
+chart.addPrimitive(symbol, 0);
+
+symbol.setValues([
+  { label: 'O', text: '322.04', color: '#26a69a' },
+  { label: 'H', text: '334.37', color: '#26a69a' },
+  { text: '+11.36 (+3.53%)', color: '#26a69a' },
+]);
+```
+
+`actions: []` gives a read-only row. Pass any of `'hide' | 'settings' | 'up' | 'down' |
+'maximize' | 'close'` to show controls; they hit-test as `${id}::<action>` and route through
+`chart.subscribeClick`.
+
+### Status line options
+
+A symbol row is a terminal's status line, and every part of it switches off independently.
+`chart.setStatusLineOptions(patch)` merges field by field and pushes the result onto every
+legend on the chart, host-added rows included, so one switch means the same thing
+everywhere.
+
+```ts
+chart.setStatusLineOptions({ volume: false, barChange: false, background: true });
+chart.statusLineOptions();   // read them back
+```
+
+| Switch | Hides | Default |
+|---|---|---|
+| `logo` | the symbol logo, when `status` supplies one | on |
+| `title` | the bold name (also the name label on an indicator row) | on |
+| `titleMode` | which name the title shows: `'symbol'`, `'description'`, `'ticker'` | `'symbol'` |
+| `marketStatus` | the session state from `status.marketStatus` | on |
+| `chartValues` | readings tagged `field: 'ohlc'` | on |
+| `barChange` | readings tagged `field: 'change'` | on |
+| `volume` | readings tagged `field: 'volume'` | on |
+| `lastDayChange` | the change since the previous close, from `status.lastDayChange` | on |
+| `lastValueLabel` | the source's own reading, the untagged values | on |
+| `background` | a plate behind the row's text, for legibility over candles | **off** |
+| `backgroundColor` / `backgroundOpacity` | the plate's colour and 0..1 opacity | theme background, `0.8` |
+
+Every switch defaults to the behaviour that predates it, so a caller passing no options
+gets a byte-identical row.
+
+**The legend invents no data.** A reading you push through `setValues` carries an optional
+`field` tag, and that tag is what one switch hides:
+
+```ts
+symbol.setValues([
+  { label: 'O', text: '322.04', field: 'ohlc' },
+  { label: 'C', text: '333.40', field: 'ohlc' },
+  { text: '+11.36 (+3.53%)', color: '#26a69a', field: 'change' },
+  { label: 'Vol', text: '1.42M', field: 'volume' },
+]);
+```
+
+The three things a legend cannot work out for itself, the logo bitmap, the market state and
+the day change, arrive through `status`, which takes either a snapshot or a getter the
+legend calls each frame so live fields can move without you patching options at tick speed.
+Anything missing simply is not drawn.
+
+```ts
+symbol.setOptions({
+  status: () => ({
+    logo: logoImage,                                   // an <img>, ImageBitmap or canvas
+    description: 'Apple Inc.',
+    ticker: 'NASDAQ:AAPL',
+    marketStatus: { text: 'Market open', color: '#26a69a' },
+    lastDayChange: { text: '+1.20 (+0.75%)', color: '#26a69a' },
+  }),
+});
+```
+
+The button block, its geometry and every hit-test id are unaffected by any of these
+switches.
+
+<Callout type="info">
+Legends draw on the **canvas**, not in the DOM, like `BuySellButtons` and the DOM ladder.
+They composite into `takeScreenshot()`, cost no DOM per pane, and their icons are vector
+strokes rather than text glyphs (`⛶` and `🗑` render as emoji on some platforms).
+</Callout>
+
+## Left, right & overlay price scales
+
+Assign a series to a price axis with `priceScaleId`:
+
+- **`'right'`** (default) and **`'left'`** each draw their own axis and autoscale
+  independently: spot price on one side, a premium or spread on the other.
+- **`''`** (empty string) is a hidden overlay scale with no axis, autoscaled on its own:
+  the standard way to pin a volume histogram inside the price pane.
+
+Reach a series' scale with `series.priceScale()` and tune it via `.setOptions(...)`.
+
+### Dual left / right axes
+
+<RunnableExample height={380} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+
+// spot price on the RIGHT axis
+chart.addSeries('line', { priceScaleId: 'right', style: { color: '#2962ff' } })
+     .setData(bars.map(b => ({ time: b.time, value: b.close, close: b.close })));
+
+// a premium series (different magnitude) on the LEFT axis, drawn dashed
+chart.addSeries('line', {
+  priceScaleId: 'left',
+  style: { color: '#e0473e', lineStyle: 'dashed' },
+}).setData(bars.map(b => ({ time: b.time, value: b.close * 0.02 + 40, close: b.close * 0.02 + 40 })));
+
+chart.fitContent();
+return chart;`} />
+
+### Volume overlay on a hidden scale
+
+<RunnableExample height={380} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+// volume on a hidden '' overlay scale, pinned to the bottom ~20%
+const vol = chart.addSeries('histogram', {
+  priceScaleId: '',
+  priceFormat: { type: 'volume' },   // compact 1.2K / 3.4M / 5.6B on its own axis
+});
+vol.setData(bars.map(b => ({ time: b.time, value: b.volume, close: b.volume })));
+vol.priceScale().setOptions({ marginTop: 0.8, marginBottom: 0 });
+
+chart.fitContent();
+return chart;`} />
+
+### Per-series price format
+
+`priceFormat` sets a series' axis and crosshair-tag formatting without affecting other
+series (each has its own scale):
+
+```ts
+// currency
+chart.addSeries('area', { priceFormat: { type: 'custom', formatter: (v) => 'Rs ' + v.toFixed(2) } });
+// compact volume: 1.2K / 3.4M / 5.6B
+chart.addSeries('histogram', { priceScaleId: '', priceFormat: { type: 'volume' } });
+// fixed precision derived from the tick size
+chart.addSeries('line', { priceFormat: { type: 'price', minMove: 0.05 } });
+```
+
+## PriceScaleOptions
+
+Each pane has an independent `PriceScale`. The options that control it are typed as
+`PriceScaleOptions` and exported from the package. All fields are optional at
+construction; missing keys fall back to `DEFAULT_PRICE_SCALE_OPTIONS`:
+
+```ts
+import { DEFAULT_PRICE_SCALE_OPTIONS } from 'openalgo-charts';
+// { marginTop: 0.1, marginBottom: 0.1, minMove: 0, mode: 'linear', inverted: false }
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `marginTop` | `number` | `0.1` | Fraction of the pane height kept empty above the highest visible value. `0.1` keeps a 10 % gap at the top. |
+| `marginBottom` | `number` | `0.1` | Fraction of the pane height kept empty below the lowest visible value. |
+| `minMove` | `number` | `0` | Instrument tick size, for example `0.05` for a 5-paise step. `0` means precision is inferred from the visible range automatically. |
+| `mode` | `PriceScaleMode` | `'linear'` | Price-to-pixel coordinate transform: `'linear'`, `'logarithmic'`, `'percentage'`, or `'indexed-to-100'`. See below. |
+| `inverted` | `boolean` | `false` | Flips the Y axis so prices increase downward, useful for spread or inverted-chart views. |
+
+## Scale modes
+
+All four modes are one transform pair, so switching between them is a relabel, not a
+different code path.
+
+| Mode | The axis reads | Use it for |
+|---|---|---|
+| `'linear'` | the price | the default |
+| `'logarithmic'` | the price, on a `log10` map | long histories, where equal percentage moves should occupy equal screen space |
+| `'percentage'` | `+3.42%`, change from the baseline | reading a session as a move rather than a level |
+| `'indexed-to-100'` | `103.42`, the baseline rebased to 100 | comparing instruments, and performance charts |
+
+```ts
+chart.setPriceScaleOptions({ mode: 'percentage' });   // every pane's price axis
+chart.panes()[0].priceScale.setOptions({ mode: 'logarithmic' });   // just this one
+```
+
+### Percent and indexed to 100
+
+The two rebasing modes share one ladder: percent change is the index minus the 100 it
+rebases to. Both quote every price against a **baseline**.
+
+**The baseline is data, not geometry**, so the scale cannot find it alone. The pane's
+autoscale pass supplies it every frame: the close of the **first visible bar** on that
+scale. That is what makes panning re-base. Scroll left and the axis re-reads as change
+measured from the new left edge of the window, which is what a trader means by "up 2%
+today" changing when they look at a different window.
+
+`chart.setPriceScaleOptions({ mode })` is the ordinary way to switch a chart, but the
+baseline is reachable directly when you drive a scale yourself:
+
+```ts
+const ps = chart.panes()[0].priceScale;
+ps.setBaseline(prevClose);   // quote against yesterday's close instead
+ps.baseline;                 // the value in force, or null
+```
+
+<Callout type="info">
+**A rebase relabels the pane, it does not reshape it.** The transform is affine over a
+range held in price units, so one series on a percentage scale draws exactly as it does on
+a linear one, by definition: percent change is a straight-line function of price. Two
+instruments become comparable when each sits on its **own** scale with its own baseline.
+That is what [symbol comparison](/docs/symbol-comparison) does, and it is a scale
+arrangement rather than a second transform.
+</Callout>
+
+A few behaviours worth knowing before you switch a chart into one of these modes:
+
+- **No baseline means linear.** With no series or no visible bars there is nothing to
+  measure, so the transform falls back to the identity and the scale behaves exactly like
+  `linear`, rather than answering confidently with nonsense before the first frame.
+- **Zero and negative baselines are rejected** the same way. Percent change from zero is
+  undefined, and a negative baseline flips the sign of the transform, so a rising price
+  would draw *downward* on an axis that still labelled itself normally. Spreads and
+  oscillators that legitimately cross zero have no percent-of-baseline reading to want.
+- **Labels switch domain.** Two decimals is the floor (`+3.42%`, `103.42`), with more only
+  when the visible band is tighter than that. The sign is explicit on a percentage, so the
+  axis reads as change rather than as a level.
+- **A rebased label outranks a custom `priceFormatter`.** A currency prefix on a percent
+  change would read as money that is not there. Your formatter takes over again the moment
+  the mode does.
+- **Ticks are chosen in label space.** A nice price is an ugly percentage, and a ladder of
+  `+3.47%, +6.94%` is not a ladder. `priceScale.ticks(maxTicks)` picks the nice values over
+  the transformed range and maps them back to the prices the axis positions with, so the
+  axis reads `+5.00%`.
+
+<RunnableExample height={360} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.setPriceScaleOptions({ mode: 'percentage' });
+chart.fitContent();
+
+// Click to cycle the mode. The candles do not move: only the ladder changes.
+const modes = ['percentage', 'indexed-to-100', 'linear', 'logarithmic'];
+let i = 0;
+el.onclick = () => { i = (i + 1) % modes.length; chart.setPriceScaleOptions({ mode: modes[i] }); };
+return chart;`} caption="Click to cycle percentage, indexed to 100, linear and logarithmic. Pan the chart in either rebasing mode and the axis re-bases to the first bar on screen." />
+
+## TimeScaleOptions
+
+`TimeScaleOptions` configures the shared time axis. The library maps a logical bar index
+to pixel x-coordinates (not timestamps), so non-trading gaps such as weekends and
+holidays collapse automatically. Initial options fall back to `DEFAULT_TIME_SCALE_OPTIONS`:
+
+```ts
+import { DEFAULT_TIME_SCALE_OPTIONS } from 'openalgo-charts';
+// { barSpacing: 8, minBarSpacing: 1, maxBarSpacing: 80, rightOffset: 4 }
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `barSpacing` | `number` | `8` | Pixels per bar at initialisation. Clamped to `[minBarSpacing, maxBarSpacing]` at all times. |
+| `minBarSpacing` | `number` | `1` | Hard floor on bar spacing, reached at maximum zoom-in. |
+| `maxBarSpacing` | `number` | `80` | Hard ceiling on bar spacing, reached at maximum zoom-out. |
+| `rightOffset` | `number` | `4` | Empty bar slots kept to the right of the latest bar, leaving a small look-ahead margin. |
+
+`TimeScaleOptions` is an init-time snapshot. To change values at runtime use the
+setter methods on the live `TimeScale` instance:
+
+```ts
+chart.timeScale.setBarSpacing(12);   // change zoom level
+chart.timeScale.setRightOffset(8);   // widen the right margin
+```
+
+## Custom price formatting
+
+A `priceFormatter` function overrides the default tick-size-aware `toFixed` that the
+library uses for axis tick labels, the last-price tag, and price-line labels. Supply it
+at construction via `ChartOptions`:
+
+```ts
+const chart = createChart(el, {
+  priceFormatter: (p) => '$' + p.toFixed(2),
+});
+```
+
+To swap the formatter at runtime, call `chart.setPriceFormatter`. Pass `null` to
+restore the default:
+
+```ts
+chart.setPriceFormatter((p) => p.toFixed(4));  // switch to 4 decimal places
+chart.setPriceFormatter(null);                  // revert to default
+```
+
+The formatter is applied to every existing and future pane automatically. A scale in
+`percentage` or `indexed-to-100` mode is the one exception: it labels in its own domain and
+picks its formatting up again when the mode is switched back. A per-series `precision`
+override rides the same formatter, so it also covers the axis ticks, the last-value tag,
+the crosshair label and the drawing-tool labels at once.
+
+See [Types](/docs/types) for the `ChartOptions` type definition and
+[Series and styling](/docs/series-and-styling#price-options) for `precision`.
+
+## Exported scale classes
+
+`PriceScale` and `TimeScale` are exported classes with their own methods, including
+coordinate transforms, autoscale control, snap-to-tick, and formatter override. The
+supporting option types `PriceScaleOptions`, `PriceScaleMode`, `TimeScaleOptions`,
+and `LogicalRange` are also exported. See [Types](/docs/types) for the full list.
+
+Access the live instances at runtime:
+
+```ts
+// Time scale is shared across all panes
+const ts = chart.timeScale;              // TimeScale instance
+ts.setBarSpacing(12);
+ts.setRightOffset(8);
+
+// Price scale is per-pane; pane 0 is the main price pane
+const ps = chart.panes()[0].priceScale; // PriceScale instance
+ps.setPriceFormatter((p) => p.toFixed(3));
+ps.setAutoScale(true);                   // re-enable autoscale after a manual axis drag
+ps.setBaseline(prevClose);               // what percentage / indexed-to-100 quote against
+ps.ticks(6);                             // the tick ladder, in prices, at most 6 of them
+```

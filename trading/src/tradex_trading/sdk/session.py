@@ -59,6 +59,7 @@ _SERVICE_CACHED_PROPS: tuple[str, ...] = (
     "portfolio",
     "stream",
     "orderflow",
+    "amt",
     "scanner",
     "extension",
 )
@@ -129,6 +130,8 @@ class TradingSession:
         #: Optional depth-tape recorder (P1a) capturing this session's Depth
         #: snapshots; closed during ``stop()``. Bound via ``bind_depth_tape``.
         self._depth_tape: Any | None = None
+        #: Optional cross-process bus endpoint owned by this session.
+        self._process_bus: Any | None = None
 
     def start(self) -> None:
         """Transition to READY state. Idempotent: no-op if already READY."""
@@ -159,6 +162,12 @@ class TradingSession:
                 self._market_feed.stop()
             except Exception:  # pragma: no cover – defensive teardown
                 log.warning("market feed stop failed", exc_info=True)
+        if self._process_bus is not None:
+            try:
+                self._process_bus.close()
+            except Exception:  # pragma: no cover - defensive teardown
+                log.warning("process bus close failed", exc_info=True)
+            self._process_bus = None
         self._bus.dispose()
         if self._fill_bridge is not None:
             try:
@@ -282,6 +291,21 @@ class TradingSession:
 
         service = OrderflowService()
         service.attach(self)
+        return service
+
+    @cached_property
+    def amt(self) -> Any:
+        """AMTService — read-side AMT projection over the session bus.
+
+        Lazily constructed and attached to the session bus on first access.
+        Projects one pure ``AMTKernel`` per instrument from the live
+        candle/quote/depth stream for dashboards and the UI; never trades.
+        """
+        self._check_ready()
+        from tradex_trading.sdk.services.amt import AMTService
+
+        service = AMTService()
+        service.attach(self._bus)
         return service
 
     @cached_property
@@ -493,6 +517,10 @@ class TradingSession:
         (durable flush + release) without a private-field poke.
         """
         self._journal = journal
+
+    def bind_process_bus(self, endpoint: object) -> None:
+        """Bind an opt-in cross-process bus endpoint to session teardown."""
+        self._process_bus = endpoint
 
     def bind_depth_tape(self, recorder: object) -> None:
         """Declaratively bind the session's depth-tape recorder (P1a).

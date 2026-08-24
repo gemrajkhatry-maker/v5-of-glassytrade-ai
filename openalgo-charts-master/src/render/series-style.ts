@@ -1,0 +1,85 @@
+/**
+ * Unified style bag for all Family-A series types (ARCHITECTURE.md §6A). Each
+ * renderer reads the fields it needs; per-type defaults are filled by the
+ * chart-type registry. Keeping one optional-field interface avoids a sprawling
+ * discriminated union at the rendering boundary.
+ */
+export interface SeriesStyle {
+  // candle / bar family
+  upColor?: string;
+  downColor?: string;
+  borderUpColor?: string;
+  borderDownColor?: string;
+  wickUpColor?: string;
+  wickDownColor?: string;
+  borderVisible?: boolean;
+  wickVisible?: boolean;
+  /** Paint candle bodies. Off leaves outline and wick. Default true. */
+  bodyVisible?: boolean;
+  hollow?: boolean;
+  /**
+   * Color bars by close-versus-previous-close instead of close-versus-own-open,
+   * which is how most terminals paint a bar. Body, border and wick switch
+   * together. Default false.
+   */
+  colorByPreviousClose?: boolean;
+
+  /** Whether the series is drawn and counted in autoscale. Default true. */
+  visible?: boolean;
+  /** Optional label carried with the series (for host-drawn legends). */
+  title?: string;
+  /** Show the dashed horizontal last-price line across the plot. Default true. */
+  priceLineVisible?: boolean;
+  /** Show the last-value tag on the price axis. Default true. */
+  lastValueVisible?: boolean;
+  /**
+   * Decimal places for every price the scale this series maps to formats: the
+   * axis ticks, the last-value tag, the crosshair label and the drawing-tool
+   * labels. It overrides the precision the price scale infers from the tick
+   * size or the visible range. Undefined is the "Default" entry of the
+   * Precision dropdown: keep inferring. Valid range 0 to 8.
+   *
+   * It does not reach a legend row: a `PaneLegend` is handed finished strings,
+   * so whoever builds those readings owns their formatting.
+   */
+  precision?: number;
+
+  // line / area / baseline / hlc-area family
+  color?: string;
+  lineWidth?: number;
+  /** Line dash style for line/step/area/HLC series. Default 'solid'. */
+  lineStyle?: 'solid' | 'dashed' | 'dotted';
+  step?: boolean;
+  markers?: boolean;
+  /** Draw only the markers, with no connecting line (Parabolic SAR, scatter). */
+  markersOnly?: boolean;
+  markerRadius?: number;
+  areaTopColor?: string;
+  areaBottomColor?: string;
+  baseValue?: number;
+  topColor?: string;
+  bottomColor?: string;
+  /**
+   * Stroke for the top edge of an HLC area's band. Undefined leaves the edge
+   * unstroked, which is how the band has always drawn.
+   */
+  highColor?: string;
+  /** Stroke for the bottom edge of an HLC area's band. See `highColor`. */
+  lowColor?: string;
+  closeColor?: string;
+
+  // histogram / column family
+  base?: number;
+
+  // point & figure / kagi family
+  /**
+   * Fallback box size for stacking P&F X/O glyphs. Columns from
+   * `PointFigureTransform` carry their own `boxSize`, which wins, so set this
+   * only for hand-built column data.
+   */
+  boxSize?: number;
+  /** Kagi thick (yang) line color. */
+  thickColor?: string;
+  /** Kagi thin (yin) line color. */
+  thinColor?: string;
+}

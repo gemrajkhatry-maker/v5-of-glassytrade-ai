@@ -22,9 +22,9 @@ from tradex_domain.market import Depth
 from tradex_domain.protocols import BrokerAdapter
 
 from tradex_trading.config.schema import AppConfig
+from tradex_trading.execution.book_fill_source import BookFillSource
 from tradex_trading.execution.engine import ExecutionEngine, RiskManager
 from tradex_trading.execution.fees import FeeCalculator
-from tradex_trading.execution.book_fill_source import BookFillSource
 from tradex_trading.execution.fill_sources import (
     BrokerFillSource,
     PaperFillSource,
@@ -32,8 +32,8 @@ from tradex_trading.execution.fill_sources import (
 )
 from tradex_trading.execution.slippage import PercentageSlippageModel
 from tradex_trading.reactive.bus import ReactiveBus
-from tradex_trading.runtime.compose import compose
 from tradex_trading.reactive.thread_safe_bus import ThreadSafeReactiveBus
+from tradex_trading.runtime.compose import compose
 from tradex_trading.runtime.metrics import MetricsRegistry
 from tradex_trading.sdk.session import TradingSession
 from tradex_trading.strategy.core.engine import ReactiveStrategyEngine
@@ -341,6 +341,32 @@ def boot(config: AppConfig | None = None) -> TradingSession:
         from tradex_trading.replay.depth_tape import DepthTapeRecorder
         tape = DepthTapeRecorder(cfg.depth_tape_path, bus=session.bus)
         session.bind_depth_tape(tape)
+
+    # 9c. Optional process bus — explicitly configured local IPC only. The
+    # endpoint is session-owned so stopping the session closes sockets before
+    # the local bus is disposed.
+    if cfg.process_bus.enabled:
+        from tradex_trading.reactive.process_bus import ProcessBusClient, ProcessBusServer
+
+        address = cfg.process_bus.address
+        authkey_value = cfg.process_bus.authkey
+        assert address is not None
+        assert authkey_value is not None
+        authkey = authkey_value.encode("utf-8")
+        endpoint: Any
+        if cfg.process_bus.role == "server":
+            endpoint = ProcessBusServer(
+                session.bus,
+                address,
+                authkey=authkey,
+            ).start()
+        else:
+            endpoint = ProcessBusClient(
+                session.bus,
+                address,
+                authkey=authkey,
+            ).connect()
+        session.bind_process_bus(endpoint)
 
     log.info("Runtime context ready")
     return session

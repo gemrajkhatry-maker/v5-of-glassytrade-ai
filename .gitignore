@@ -23,6 +23,11 @@ env/
 # Broker runtime state under trading/ (instrument caches, token/totp state).
 trading/runtime/
 
+# Frontend (greenfield AMT terminal)
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

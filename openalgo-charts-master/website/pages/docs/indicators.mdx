@@ -1,0 +1,779 @@
+---
+title: Indicators
+description: 91 built-in indicators via chart.addIndicator, plus the registry for your own.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Indicators
+
+There are two ways to put an indicator on a chart, and they suit different jobs.
+
+**`chart.addIndicator(id)`** is the managed path: the chart creates the series, picks the
+pane, draws reference levels, recomputes on every data change, and cleans up on removal.
+The 91 built-ins live in the lazy `openalgo-charts/indicators` tier, about 25 KB Brotli.
+
+```ts
+import { createChart } from 'openalgo-charts';
+import 'openalgo-charts/indicators';   // registers all 91 built-ins
+
+const chart = createChart(el);
+chart.addSeries('candlestick').setData(bars);
+
+chart.addIndicator('bollinger');                       // overlays the price pane
+const macd = chart.addIndicator('macd', { fastPeriod: 8 });  // gets its own pane
+macd.setSettings({ fastPeriod: 12 });
+macd.remove();
+```
+
+**The raw functions** (`ema`, `rsi`, `atr`, `supertrend`) stay in the base bundle for when
+you want to compute a value and plot it yourself. They use Wilder semantics to match
+`openalgo.ta`; the `*Series` helpers return `Bar[]` with `NaN` in warmup slots, which the
+line renderer skips as whitespace.
+
+```ts
+import {
+  ema, emaSeries,            // EMA: raw values, and a plottable line series
+  rsi, rsiSeries,            // RSI
+  supertrend, supertrendSeries,
+  atr, trueRange,            // ATR (raw values) + true range
+} from 'openalgo-charts';
+```
+
+## The built-in catalog
+
+<RunnableExample height={420} tiers={['indicators']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 220, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.addIndicator('bollinger');
+chart.addIndicator('macd');
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+
+91 descriptors ship in the tier, split across the four categories a picker reads off
+`descriptor.category`: Trend (31), Momentum (29), Volatility (17), and Volume (14).
+
+`onchart` indicators overlay the price pane; `pane` indicators create their own. Override
+with `chart.addIndicator('rsi', {}, { paneIndex: 2 })`.
+
+**Key settings** below are the tunable inputs with their defaults. Every descriptor also
+carries per-plot style inputs (colour, width, line style, opacity) that are not listed
+here; read them off `indicatorStyleInputs(descriptor)` rather than hardcoding them. Ids
+are exact: `addIndicator` throws on one it does not know, so guard a user-supplied id
+with `hasIndicator(id)`.
+
+### Trend (31)
+
+| Indicator | `id` | Placement | Key settings |
+|---|---|---|---|
+| ADX / DMI | `adx` | pane | `period=14`, `adxPeriod=14` |
+| AlphaTrend | `alphatrend` | onchart | `coeff=1`, `AP=14`, `source=close`, `showsignalsk=true`, `novolumedata=false` |
+| Arnaud Legoux Moving Average | `alma` | onchart | `length=9`, `offset=0.85`, `sigma=6` |
+| Aroon | `aroon` | pane | `length=14` |
+| Aroon Oscillator | `aroon-oscillator` | pane | `length=14` |
+| Chande Kroll Stop | `chande-kroll-stop` | onchart | `p=10`, `x=1`, `q=9` |
+| Chandelier Exit | `chandelier-exit` | onchart | `length=22`, `atrLength=22`, `atrMultiplier=3` |
+| Double EMA | `dema` | onchart | `length=9`, `source=close` |
+| EMA | `ema` | onchart | `length=20`, `source=close` |
+| HalfTrend | `halftrend` | onchart | `amplitude=2`, `channelDeviation=2`, `atrPeriod=100`, `showChannels=true`, `showSignals=true`, `showLabels=true` |
+| Hull Moving Average | `hma` | onchart | `length=9`, `source=close` |
+| Ichimoku Cloud | `ichimoku` | onchart | `conversionPeriod=9`, `basePeriod=26`, `laggingSpanPeriod=52`, `displacement=26` |
+| Kaufman's Adaptive Moving Average | `kama` | onchart | `erLength=10`, `fastLength=2`, `slowLength=30`, `source=close` |
+| Least Squares Moving Average | `lsma` | onchart | `length=25`, `offset=0`, `source=close` |
+| MA Cross | `ma-cross` | onchart | `shortLength=9`, `longLength=21` |
+| CPR with Floor Pivot | `cpr` | onchart | `pivotMode=auto`, `showDaily=true`, `showWeekly=false`, `showMonthly=false`, `displaypivots=true`, `displaysupport=true`, `displayresistance=true`, `displaycpr=true`, `displayS1R1=false` |
+| McGinley Dynamic | `mcginley-dynamic` | onchart | `length=14` |
+| Median | `median` | onchart | `source=hl2`, `length=3`, `atrLength=14`, `atrMult=2` |
+| Moving Average Ribbon | `ma-ribbon` | onchart | four groups `showMaN=true`, `maNType=SMA`, `maNSource=close`, `maNLength` (20 / 50 / 100 / 200) for `N` = 1..4 |
+| Parabolic SAR | `parabolic-sar` | onchart | `start=0.02`, `increment=0.02`, `maximum=0.2` |
+| Seasonality | `seasonality` | pane | `startYear=2015`, `cutoffPercent=10`, `tablePosition=Center`, `tableWidth=100`, `tableHeight=95`, `showAvg=true`, `showStDev=true`, `showPos=true`, `ignoredMonths='YYYY-MM, YYYY-MM'` |
+| SMA | `sma` | onchart | `length=20`, `source=close` |
+| Supertrend | `supertrend` | onchart | `period=10`, `multiplier=3` |
+| Time Weighted Average Price | `twap` | onchart | `anchor=session`, `source=ohlc4`, `offset=0` |
+| Trend Strength Index | `trend-strength-index` | pane | `length=14` |
+| Triple EMA | `tema` | onchart | `length=9` |
+| Volatility Stop | `volatility-stop` | onchart | `length=20`, `source=close`, `factor=2` |
+| Vortex Indicator | `vortex` | pane | `length=14` |
+| Williams Alligator | `alligator` | onchart | `jawLength=13`, `teethLength=8`, `lipsLength=5`, `jawOffset=8`, `teethOffset=5`, `lipsOffset=3` |
+| Williams Fractals | `williams-fractals` | onchart | `periods=2`, `showUp=true`, `showDown=true` |
+| WMA | `wma` | onchart | `length=20`, `source=close` |
+
+### Momentum (29)
+
+| Indicator | `id` | Placement | Key settings |
+|---|---|---|---|
+| Awesome Oscillator | `awesome-oscillator` | pane | colours only (5 and 34 are the definition, not a preference) |
+| Balance of Power | `balance-of-power` | pane | colours only |
+| CCI | `cci` | pane | `period=20`, `constant=0.015`, `maType=SMA`, `maLength=14`, `bbMult=2` |
+| Chande Momentum Oscillator | `chande-momentum` | pane | `length=9`, `source=close` |
+| Connors RSI | `connors-rsi` | pane | `lenrsi=3`, `lenupdown=2`, `lenroc=100` |
+| Coppock Curve | `coppock-curve` | pane | `wmaLength=10`, `longRoCLength=14`, `shortRoCLength=11` |
+| Detrended Price Oscillator | `dpo` | pane | `period=21`, `isCentered=false` |
+| Fisher Transform | `fisher-transform` | pane | `length=9` |
+| Know Sure Thing | `know-sure-thing` | pane | `roclen1=10`, `roclen2=15`, `roclen3=20`, `roclen4=30`, `smalen1=10`, `smalen2=10`, `smalen3=10`, `smalen4=15`, `siglen=9` |
+| MACD | `macd` | pane | `fastPeriod=12`, `slowPeriod=26`, `signalPeriod=9`, `source=close` |
+| Momentum | `momentum` | pane | `len=10`, `source=close` |
+| Money Flow Index | `mfi` | pane | `period=14` |
+| Percentage Price Oscillator | `ppo` | pane | `source=close`, `fastLength=12`, `slowLength=26`, `signalLength=9`, `oscType=EMA`, `sigType=EMA` |
+| Pring's Special K | `special-k` | pane | `source=close`, `length1=100`, `length2=100` |
+| Rate Of Change | `roc` | pane | `length=9`, `source=close` |
+| Relative Vigor Index | `relative-vigor-index` | pane | `length=10`, `offset=0` |
+| RSI | `rsi` | pane | `length=14`, `source=close`, `overbought=70`, `oversold=30` |
+| RSI Divergence Indicator | `rsi-divergence` | pane | `length=14`, `source=close`, `lbR=5`, `lbL=5`, `rangeUpper=60`, `rangeLower=5`, `plotBull=true`, `plotHiddenBull=false`, `plotBear=true`, `plotHiddenBear=false` |
+| SMI Ergodic Indicator | `smi-ergodic-indicator` | pane | `longlen=20`, `shortlen=5`, `siglen=5` |
+| SMI Ergodic Oscillator | `smi-ergodic-oscillator` | pane | `longlen=20`, `shortlen=5`, `siglen=5` |
+| Stochastic | `stochastic` | pane | `kPeriod=14`, `kSmoothing=3`, `dPeriod=3` |
+| Stochastic Momentum Index | `smi` | pane | `lengthK=10`, `lengthD=3`, `lengthEMA=3` |
+| Stochastic RSI | `stochastic-rsi` | pane | `smoothK=3`, `smoothD=3`, `lengthRSI=14`, `lengthStoch=14`, `source=close` |
+| TRIX | `trix` | pane | `length=18` |
+| True Strength Index | `tsi` | pane | `long=25`, `short=13`, `signal=13` |
+| Ultimate Oscillator | `ultimate-oscillator` | pane | `length1=7`, `length2=14`, `length3=28` |
+| WaveTrend Pro | `wavetrend` | pane | `source=hlc3`, `n1=10`, `n2=21`, `sigLen=4`, `obLevel1=60`, `obLevel2=53`, `osLevel1=-60`, `osLevel2=-53`, `filterZone=true`, `useInner=true`, `showMom=true`, `showRegDiv=true`, `showHidDiv=false`, `lbL=3`, `lbR=3`, `rangeUpper=60`, `rangeLower=5` |
+| Williams Percent Range | `williams-percent-r` | pane | `length=14`, `source=close` |
+| Woodies CCI | `woodies-cci` | pane | `cciTurboLength=6`, `cci14Length=14` |
+
+### Volatility (17)
+
+| Indicator | `id` | Placement | Key settings |
+|---|---|---|---|
+| ATR | `atr` | pane | `period=14` |
+| Average Daily Range | `average-daily-range` | pane | `length=14` |
+| BBTrend | `bb-trend` | pane | `shortLength=20`, `longLength=50`, `stdDevMult=2` |
+| Bollinger Bands | `bollinger` | onchart | `length=20`, `stdDev=2`, `source=close` |
+| Bollinger Bands %b | `bollinger-percent-b` | pane | `length=20`, `source=close`, `mult=2` |
+| Bollinger BandWidth | `bollinger-bandwidth` | pane | `length=20`, `source=close`, `mult=2`, `expansionLength=125`, `contractionLength=125` |
+| Chop Zone | `chop-zone` | pane | colours only (nine zone colours) |
+| Choppiness Index | `choppiness-index` | pane | `length=14`, `offset=0` |
+| Donchian Channels | `donchian` | onchart | `length=20`, `offset=0` |
+| Envelope | `envelope` | onchart | `length=20`, `percent=10`, `source=close`, `exponential=false` |
+| Historical Volatility | `historical-volatility` | pane | `length=10`, `per=1` |
+| Keltner Channels | `keltner-channel` | onchart | `length=20`, `mult=2`, `source=close`, `exp=true`, `bandsStyle=Average True Range`, `atrlength=10` |
+| Mass Index | `mass-index` | pane | `length=10` |
+| Range Analysis | `range-analysis` | pane | `showAverage=false`, `avgLength=3` |
+| Relative Volatility Index | `relative-volatility-index` | pane | `length=10`, `offset=0`, `maType=SMA`, `maLength=14`, `bbMult=2` |
+| Ulcer Index | `ulcer-index` | pane | `source=close`, `length=14` |
+| William VIX FIX | `williams-vix-fix` | pane | `pd=22`, `bbl=20`, `mult=2`, `lb=50`, `ph=0.85`, `pl=1.01`, `hp=false`, `sd=false` |
+
+### Volume (14)
+
+| Indicator | `id` | Placement | Key settings |
+|---|---|---|---|
+| Accumulation/Distribution | `adl` | pane | colours only |
+| Chaikin Money Flow | `chaikin-money-flow` | pane | `length=20` |
+| Chaikin Oscillator | `chaikin-oscillator` | pane | `short=3`, `long=10` |
+| Ease of Movement | `ease-of-movement` | pane | `length=14`, `divisor=10000` |
+| Elder Force Index | `elder-force-index` | pane | `length=13` |
+| Klinger Oscillator | `klinger-oscillator` | pane | colours only |
+| Negative Volume Index | `nvi` | pane | `maLength=255` |
+| On-Balance Volume | `obv` | pane | `maType=None`, `maLength=14`, `bbMult=2` |
+| Percentage Volume Oscillator | `pvo` | pane | `fastLength=12`, `slowLength=26`, `signalLength=9`, `oscType=EMA`, `sigType=EMA` |
+| Positive Volume Index | `pvi` | pane | `maLength=255` |
+| Price Volume Trend | `pvt` | pane | colours only |
+| Volume | `volume` | pane | colours only |
+| Volume Weighted Moving Average | `vwma` | onchart | `length=20`, `source=close`, `offset=0` |
+| VWAP | `vwap` | onchart | `anchor=session`, `source=hlc3`, `offset=0`, `calcMode=stdev`, `showBand1=true`, `bandMult1=1`, `showBand2=false`, `bandMult2=2`, `showBand3=false`, `bandMult3=3` |
+
+Adding the **same indicator more than once** gives each instance its own colours:
+three EMAs in one default blue are indistinguishable on the chart and in the
+legend alike. Only colour keys you leave unset are filled, so
+`chart.addIndicator('ema', { color: '#123456' })` always wins, and the first
+instance keeps whatever the descriptor chose.
+
+## VWAP
+
+`vwap` is a volume-weighted average with a resettable anchor and three optional
+standard-deviation band pairs. Seven plots in all: the average plus an upper and lower
+band for each of three multipliers, of which only the first pair is on by default.
+
+| Setting | Default | Notes |
+|---|---|---|
+| `anchor` | `session` | `session`, `week`, `month`, `quarter`, `year`, or `continuous`. |
+| `source` | `hlc3` | Any `IndicatorSource`. |
+| `offset` | `0` | Shift the whole study left or right, in bars (-500..500). |
+| `calcMode` | `stdev` | `stdev` for standard-deviation bands, `percent` for a fixed percentage of the average. |
+| `showBand1` / `bandMult1` | `true` / `1` | Band pair 1, drawn by default. |
+| `showBand2` / `bandMult2` | `false` / `2` | Band pair 2. |
+| `showBand3` / `bandMult3` | `false` / `3` | Band pair 3. |
+
+A hidden band still declares its plot and returns a `null` column, so turning one on is a
+`setSettings` call. Each pair also declares a fill, giving three nested shaded envelopes
+when all three are on. The average draws in `#2962ff`; each pair has its own colour key
+(`band1Color`, `band2Color`, `band3Color`) shared by its upper line, lower line, and fill.
+
+<RunnableExample height={400} tiers={['indicators']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 220, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+chart.addIndicator('vwap', { anchor: 'continuous', showBand2: true });
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} caption="VWAP with two standard-deviation band pairs, each shading the region it encloses." />
+
+<Callout type="info">
+**Every anchor resets on the chart's calendar**, which is `Asia/Kolkata` until you set
+[`timezone`](/docs/timezones) to something else, so a period test never straddles the UTC
+midnight seam and a US symbol can be anchored on New York's days rather than India's.
+`chart.setTimezone(...)` recomputes the study, so the bands move with the axis. `week` is
+Monday-based; `continuous` never resets, giving a running VWAP over all loaded data.
+</Callout>
+
+## HalfTrend
+
+A trend level that deliberately does not move with price. Two state machines run at once:
+`trend` is what is drawn, and a flip is *armed* before it fires. While a down-flip is armed
+the indicator tracks the running maximum of the `amplitude`-bar low, and the flip only
+happens when the mean high drops under that maximum **and** the bar closes below the
+previous bar's low. Needing both a mean crossing and a close beyond the prior extreme is
+what keeps the line flat through noise. On a flip the new level starts from where the other
+side ended, which is why it steps instead of jumping to price.
+
+Every visual layer is independently toggleable: `showChannels` for the half-ATR bands,
+`showSignals` for the flip dots, `showLabels` for the Buy/Sell plates.
+
+<RunnableExample height={380} tiers={['indicators']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+chart.addIndicator('halftrend', { amplitude: 2, channelDeviation: 2 });
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} caption="HalfTrend: stepped level, half-ATR channel, trend-tinted ribbon, and Buy/Sell labels." />
+
+## Signal markers
+
+A descriptor can return bar-anchored markers as well as plots. A plot is a column of
+prices drawn as a line or a histogram; a signal is a discrete event with a name, and no
+plot expresses that. `markers` runs after every `calc`, so it reads the values it just
+produced:
+
+```ts
+registerIndicator({
+  id: 'my-cross',
+  name: 'My Cross',
+  placement: 'onchart',
+  inputs: [{ key: 'showLabels', type: 'boolean', label: 'Show Labels', default: true }],
+  plots: [{ key: 'signal', type: 'line', title: 'Signal', colorKey: 'color' }],
+  calc: (bars, s) => ({ signal: /* ... */ [] }),
+  markers: ({ bars, values, settings }) => {
+    if (settings.showLabels === false) return [];   // returning [] clears the layer
+    return values.signal.flatMap((v, i) =>
+      v === null ? [] : [{
+        time: bars[i].time, position: 'atPrice' as const, price: v,
+        shape: 'labelUp' as const, size: 'small' as const,
+        color: '#2962ff', text: 'Buy',
+      }]);
+  },
+});
+```
+
+The runtime creates the marker layer lazily on the first plot's series, so an indicator
+without the hook costs nothing. Marker `time` values must match a real bar time or
+`SeriesMarkers` drops them silently. Hiding the indicator clears its markers too.
+
+Five built-ins use the hook:
+
+| Indicator | What it marks |
+|---|---|
+| `halftrend` | A Buy or Sell plate at each trend flip, suppressed by `showLabels: false`. |
+| `williams-fractals` | An up or down triangle at each confirmed fractal, filtered by `showUp` / `showDown`. |
+| `rsi-divergence` | `Bull`, `Bear`, `H Bull`, and `H Bear` labels on the RSI line, one per enabled `plot*` input. |
+| `alphatrend` | A Buy or Sell plate where the level crosses its own two-bar lag. |
+| `wavetrend` | A tinted dot at each signal-line cross, plus `R` and `H` plates for regular and hidden divergences, filtered by `showRegDiv` / `showHidDiv`. |
+
+See [markers](/docs/primitives-and-plugins#markers--event-badges) for the shape catalogue.
+
+## Tables
+
+An indicator whose output is a matrix rather than a column of prices has nowhere to put
+it: a plot is one price per bar, and a monthly return heatmap is neither. `table` is an
+optional hook beside `markers`, returning rows of cells and the options to draw them
+with. Like `markers`, it runs after every `calc`, so it reads the values it just
+produced:
+
+```ts
+registerIndicator({
+  id: 'my-scoreboard',
+  name: 'My Scoreboard',
+  placement: 'pane',
+  inputs: [],
+  // A pane needs at least one plot to exist. An all-null column draws nothing
+  // and contributes nothing to autoscale, which is what a table-only indicator
+  // wants: the pane gets no price axis at all.
+  plots: [{ key: 'placeholder', type: 'line', title: 'Scoreboard' }],
+  calc: (bars) => ({ placeholder: new Array(bars.length).fill(null) }),
+  table: ({ bars, values, settings }) => ({
+    rows: [
+      [{ text: 'Metric', bold: true }, { text: 'Value', bold: true }],
+      [{ text: 'Bars' }, { text: String(bars.length) }],
+      [{ text: 'Last' }, { text: bars.at(-1).close.toFixed(2), bgColor: '#089981' }],
+    ],
+    options: { position: 'top-right', cellWidth: [80, 60], cellHeight: 18 },
+  }),
+});
+```
+
+Returning `null` draws nothing, which is how an indicator says it has too little data to
+tabulate. A header row on its own reads as a broken table rather than an empty one.
+
+**`TableCell`**
+
+| Field | Type | Description |
+|---|---|---|
+| `text` | `string` | Cell contents. An empty string draws the fill without any label. |
+| `bgColor` | `string?` | Cell fill. Transparent when omitted, so the pane shows through. |
+| `textColor` | `string?` | Derived from `bgColor` for contrast when omitted. |
+| `align` | `'left' \| 'center' \| 'right'` | Default `center`. |
+| `fontSize` | `number?` | Overrides the table's `fontSize` for this cell, for a heading row. |
+| `bold` | `boolean?` | |
+
+**`ChartTableOptions`**
+
+| Option | Default | Description |
+|---|---|---|
+| `position` | `'bottom-right'` | One of nine keywords: `top`/`middle`/`bottom` crossed with `left`/`center`/`right`. |
+| `margin` | `8` | Gap from the pane edge, media px. |
+| `cellWidth` | `64` | Column width in media px. A per-column array sizes each one separately. |
+| `cellHeight` | `18` | Row height in media px. |
+| `widthPercent` | unset | Total width as a percentage of the plot. Column proportions are preserved, so a per-column array still controls the relative widths. `0` or unset sizes from `cellWidth`. |
+| `heightPercent` | unset | Total height as a percentage of the plot. `0` or unset sizes from `cellHeight`. |
+| `rowWeights` | unset | Relative row heights, one per row, defaulting to `1`. A separator row wants something like `0.3`, or a stretched table makes the rule between two sections as tall as the sections. |
+| `fontSize` | `11` | Shrinks automatically when a stretched row is shorter than this. |
+| `borderColor` | unset | Grid line colour. Omit to draw no grid. |
+| `borderWidth` | `1` | |
+| `background` | unset | Backdrop behind the whole grid, drawn before the cells. |
+| `id` | unset | Hit-test id, so a host can route clicks the way it does for other primitives. |
+
+The table is a screen-space primitive: it is pinned to the pane, not to bars, so it stays
+put while the chart pans underneath and survives a zoom untouched. It takes no part in
+autoscale.
+
+One built-in uses the hook: `seasonality`, whose entire output is the grid. Its
+`tableWidth` and `tableHeight` inputs default to 100% and 95%, so it fills the pane.
+
+`ChartTable` is also usable directly as a primitive without an indicator. See
+[primitives](/docs/primitives-and-plugins).
+
+## Trading sessions
+
+An indicator that accumulates within a trading day (VWAP, TWAP, daily pivots) has to know
+where one day ends. A calendar midnight is the wrong answer for every exchange but the
+one whose timezone you picked: 00:00 IST is 18:30 UTC, which is the middle of a New York
+session. Anchoring there restarts a VWAP every afternoon, and builds a "daily" range out
+of one session's tail plus the next session's head across the overnight gap.
+
+Setting the chart's [`timezone`](/docs/timezones) fixes which calendar is consulted, and on
+a US symbol you should. It does not remove the need to read the session, though: a calendar
+day is still not a trading day, and the bars know better than either.
+
+The session is visible in the bars themselves, as the widest recurring gap, so read it
+back rather than assuming:
+
+```ts
+import { sessionStartFlags, calendarPeriodFlags, DEFAULT_TIMEZONE } from 'openalgo-charts';
+
+calc: (bars, settings) => {
+  // The chart puts its zone on the settings blob under the reserved `timezone`
+  // key, so the calendar fallback follows the axis without threading a global.
+  const zone = typeof settings.timezone === 'string' ? settings.timezone : DEFAULT_TIMEZONE;
+  const times = bars.map((b) => b.time);
+  const newSession = sessionStartFlags(times, zone); // first bar of each trading day
+  let sum = 0;
+  const out = bars.map((b, i) => {
+    if (newSession[i]) sum = 0;
+    sum += b.close;
+    return sum;
+  });
+  return { running: out };
+}
+```
+
+| Export | Returns | Use |
+|---|---|---|
+| `sessionStartIndices(times)` | `number[] \| null` | The bar indices that open a session, or `null` when the series shows no readable break. |
+| `sessionStartFlags(times, zone?)` | `boolean[]` | One flag per bar. Falls back to calendar days in `zone` (default `Asia/Kolkata`) when sessions are unreadable. |
+| `calendarPeriodFlags(times, isNew)` | `boolean[]` | A week, month or year boundary, tested on session opens so a session is never cut in half. |
+
+`sessionStartIndices` returns `null`, and the flag helpers fall back to a calendar day,
+in exactly the cases where there is nothing to read: bars already a day or coarser, a
+market that never closes, or a feed whose only gaps are weekends. An intraday lunch break
+is shorter than the four-hour floor, so it is not mistaken for a close.
+
+## The IndicatorApi handle
+
+`addIndicator` returns a handle:
+
+| Member | Type | Description |
+|---|---|---|
+| `id` | `string` | Unique instance id (several instances of one indicator can coexist). |
+| `indicatorId` | `string` | The descriptor id, e.g. `'macd'`. |
+| `name` | `string` | Display name. |
+| `paneIndex` | `number` | Pane the indicator drew into. |
+| `settings()` | `IndicatorSettings` | Current settings, as a copy. |
+| `setSettings(patch)` | `void` | Merge a patch, recompute, and restyle. |
+| `series(plotKey)` | `SeriesApi \| undefined` | The series behind one plot, for direct styling. |
+| `values()` | `IndicatorValues` | Latest computed columns. |
+| `remove()` | `void` | Remove every series and level it created. |
+
+`chart.indicators()` lists the live instances; `chart.removeIndicator(id)` removes one by id.
+Removing an indicator also prunes the pane it emptied, so a host UI cannot strand a blank
+pane under the chart.
+
+## Inspecting the registry
+
+The registry is readable, so a host can build its indicator UI from what is actually
+registered rather than a hardcoded list, including anything you registered yourself. The
+yfinance example builds its whole picker this way, grouped by `category`.
+
+Every export below comes from the package root, `openalgo-charts`, not from the indicator
+tier: the registry is part of the base engine, and the tier only fills it.
+
+| Export | Signature | Use |
+|---|---|---|
+| `registeredIndicators()` | `-> IndicatorDescriptor[]` | Everything registered, in registration order. Read `id`, `name`, `category`, `inputs`, `plots`. |
+| `hasIndicator(id)` | `(string) -> boolean` | Guard before `addIndicator` when the id is user-supplied, because `addIndicator` throws on an unknown one. |
+| `indicatorDefaults(descriptor)` | `(IndicatorDescriptor) -> IndicatorSettings` | Default settings built from the descriptor's `inputs`, for pre-filling a form. Takes the **descriptor**, not an id. |
+| `indicatorStyleInputs(descriptor)` | `(IndicatorDescriptor) -> IndicatorInput[]` | Per-plot style inputs (colour, width, line style, opacity), so a settings dialog can be generated instead of written per indicator. |
+| `plotStyleKeys(plot)` | `(IndicatorPlot) -> { color, width, lineStyle, opacity, type }` | The settings keys belonging to one plot, for reading or patching its style. `type` overrides the chart type it draws as. |
+| `INDICATOR_LINE_STYLES` | `readonly { label, value }[]` | The line-style choices a generated form should offer. |
+| `INDICATOR_PLOT_STYLES` | `readonly { label, value }[]` | Chart types a plot can be re-rendered as (line, line with markers, step, area, histogram, columns). |
+| `INDICATOR_SOURCES` | `readonly { label, value }[]` | The price-source choices for a `type: 'source'` input. |
+
+The same plot-style list also arrives on the generated `<plotKey>:type` input, so a form
+built from `indicatorStyleInputs(descriptor)` already has it without a second import:
+
+```ts
+const typeInput = indicatorStyleInputs(getIndicator('rsi'))
+  .find((i) => i.key === 'rsi:type');
+typeInput.options;   // same list as INDICATOR_PLOT_STYLES
+```
+
+```ts
+import {
+  registeredIndicators, hasIndicator, indicatorDefaults,
+} from 'openalgo-charts';
+import 'openalgo-charts/indicators';   // registers the 91 built-ins
+
+// Group the catalog for a menu, with no per-indicator code.
+const byCategory = new Map<string, string[]>();
+for (const d of registeredIndicators()) {
+  const list = byCategory.get(d.category) ?? [];
+  list.push(d.name);
+  byCategory.set(d.category, list);
+}
+
+// Settings are the second argument, and the defaults come off the descriptor.
+const descriptor = registeredIndicators().find((d) => d.id === wanted);
+if (descriptor !== undefined) {
+  chart.addIndicator(descriptor.id, indicatorDefaults(descriptor));
+}
+```
+
+Generating a settings form is the same shape: walk `descriptor.inputs` for the values and
+`indicatorStyleInputs(descriptor)` for the per-plot styling, and render each by its `type`:
+
+```ts
+for (const input of [...descriptor.inputs, ...indicatorStyleInputs(descriptor)]) {
+  // input.type: 'number' | 'source' | 'color' | 'select' | 'boolean' | 'text'
+  renderField(input.key, input.type, input.label, instance.settings()[input.key]);
+}
+```
+
+<Callout type="info">
+The catalog is empty until the tier is imported. `registeredIndicators()` reflects what has
+been registered *so far*, so read it after your `import 'openalgo-charts/indicators'`.
+</Callout>
+
+## Writing your own
+
+An indicator is **data, not code in the core**: the chart never switches on an id. Each
+plot names a registered *chart type*, so your indicator draws through the same renderers as
+any other series and adds no drawing code.
+
+```ts
+import { registerIndicator, sourceValues } from 'openalgo-charts';
+
+registerIndicator({
+  id: 'momentum',
+  name: 'Momentum',
+  category: 'Momentum',
+  placement: 'pane',
+  inputs: [
+    { key: 'length', type: 'number', label: 'Length', default: 10, min: 1, max: 500 },
+    { key: 'source', type: 'source', label: 'Source', default: 'close' },
+    { key: 'color',  type: 'color',  label: 'Color',  default: '#4f8cff' },
+  ],
+  plots: [{ key: 'mom', type: 'line', title: 'Momentum', colorKey: 'color' }],
+  calc: (bars, s) => {
+    const v = sourceValues(bars, s.source);
+    const n = s.length;
+    return { mom: v.map((x, i) => (i >= n ? x - v[i - n] : null)) };
+  },
+  levels: () => [{ price: 0, color: '#5a6b8c', dashed: true }],
+});
+
+chart.addIndicator('momentum', { length: 14 });
+```
+
+### Shaded bands between plots
+
+A pair of lines is not the same picture as a filled region, so a descriptor can
+declare `fills`: the Ichimoku cloud, a Bollinger channel. 25 of the 91 built-ins
+declare one or more, 28 fills in total.
+
+```ts
+plots: [
+  { key: 'spanA', type: 'line', title: 'Senkou Span A', colorKey: 'spanAColor' },
+  { key: 'spanB', type: 'line', title: 'Senkou Span B', colorKey: 'spanBColor' },
+],
+fills: [{
+  between: ['spanA', 'spanB'],
+  colorUpKey: 'cloudUpColor',     // settings keys, so the band is restyleable
+  colorDownKey: 'cloudDownColor',
+  opacity: 0.14,
+}],
+```
+
+Two colours, because *which* side leads is itself the signal. The band draws
+behind the plots, contributes nothing to autoscale, splits at the exact crossing
+rather than the nearest bar, and breaks across a gap in either plot instead of
+bridging it. Pass `colorUp` / `colorDown` literals instead of the `*Key` forms
+for a fixed band.
+
+#### Filling against a column that is never plotted
+
+`between` names **`calc` output columns, not declared plots**, and that is the part
+worth internalising: `calc` may return more columns than there are plots, and a fill
+can use any of them. An edge that exists only to bound a shaded region does not have
+to be a line on the chart.
+
+Three built-ins lean on this:
+
+- **`rsi`** returns `upperLevel` and `lowerLevel` alongside `rsi`, both constant at the
+  `overbought` / `oversold` settings, and fills between them. The overbought/oversold
+  background is therefore a fill between two columns that are never drawn, so changing
+  `overbought` moves the shading with no extra plot to restyle. `stochastic` shades the
+  same way.
+- **`aroon-oscillator`** returns a `zero` column and fills `['osc', 'zero']`, so the
+  band flips colour with the sign of the oscillator. The line renderer has no per-bar
+  colour, so the sign is carried by the band, which is what actually reads on a chart.
+- **`supertrend`** returns a hidden `bodyMid` column, `(open + close) / 2` per bar, and
+  declares one fill from it to `up` and another to `down`. That shades the whole distance
+  between price and the trailing stop instead of drawing a second line through the
+  candles. Only one side is live at a time, so the other fill resolves to nothing and the
+  shading recolours at the flip along with the stop.
+
+```ts
+calc: (bars, s) => {
+  const osc = /* ... */ [];
+  return {
+    osc,
+    // No plot names this column. Match the warmup nulls or the band runs back
+    // past where the line starts.
+    zero: osc.map((v) => (v === null ? null : 0)),
+  };
+},
+fills: [{ between: ['osc', 'zero'], colorUpKey: 'upColor', colorDownKey: 'downColor' }],
+```
+
+A column with no plot costs one array and nothing on screen, so this is the cheap way
+to draw a region rather than a pair of lines.
+
+### Colouring a plot per bar
+
+One colour for a whole series cannot express a study whose meaning changes bar
+to bar, so a plot can name a `colorBy`:
+
+```ts
+{
+  key: 'histogram', type: 'histogram', title: 'Histogram',
+  colorBy: ({ value, index, values, settings }) =>
+    value >= 0 ? '#26a69a' : '#ef5350',
+}
+```
+
+Return `undefined` to fall back to the plot's own colour. Histogram and column
+renderers honour it. `values` is the full `calc` result, so a rule can read
+columns no plot draws: MACD compares against the previous bar, and William VIX
+FIX reads its band even when the band is hidden.
+
+`calc` must return an array for every plot key, the same length as `bars`, plus any extra
+columns a `fill` or a `colorBy` needs. Use `null` for warmup slots: the line renderer
+breaks across them and autoscale skips them, so a gap draws as nothing rather than a spike
+to zero.
+
+### Descriptor reference
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `string` | Registry key. |
+| `name` | `string` | Display name. |
+| `category` | `string?` | Grouping for a picker UI. |
+| `placement` | `'onchart' \| 'pane'` | Overlay the price pane, or take a new one. |
+| `inputs` | `IndicatorInput[]` | Tunable settings; `type` is what a settings UI renders. |
+| `plots` | `IndicatorPlot[]` | One per drawn series. `type` is any registered chart type. |
+| `fills` | `IndicatorFillSpec[]?` | Optional shaded bands. `between` names two `calc` columns, which need not be plots. |
+| `calc` | `(bars, settings, store) => IndicatorValues` | Full recompute. |
+| `calcTail` | `(bars, settings, fromIndex, previous, store) => IndicatorValues \| null` | Optional incremental path. |
+| `markers` | `({ bars, values, settings }) => SeriesMarker[]` | Optional bar-anchored signal markers, run after every `calc`. |
+| `levels` | `(settings) => IndicatorLevel[]` | Optional horizontal reference lines. |
+| `range` | `(settings) => \{ min, max \} \| null` | Optional fixed pane range (RSI 0..100). |
+| `attach` | `(ctx) => (() => void) \| void` | Optional lifecycle for external data (Tier 2). |
+
+Input types are `number`, `boolean`, `color`, `text`, `select`, and `source`. A `source`
+input picks a price series; `INDICATOR_SOURCES` is the canonical option list for a UI.
+
+<Callout type="warning">
+**`calcTail` matters for live charts.** Without it every incoming tick costs a full
+recompute, a few hundred microseconds for one indicator over 50k bars, but O(n) per tick
+*per indicator*. Implement it for anything meant to run in a busy live pane: return values
+for `[fromIndex, bars.length)` and the runtime splices them onto the previous result, or
+return `null` to fall back to a full `calc`.
+</Callout>
+
+## Tier 2: indicators with their own data
+
+Some series aren't derived from the chart's OHLCV at all: open interest, cumulative volume
+delta, PCR, an external analytics feed. `createTier2Indicator` wraps a fetch / subscribe
+lifecycle into an ordinary descriptor, so the runtime, settings, panes, and removal all work
+identically. There is no second runtime.
+
+```ts
+import { registerIndicator } from 'openalgo-charts';
+import { createTier2Indicator } from 'openalgo-charts/indicators';
+
+registerIndicator(createTier2Indicator({
+  id: 'open-interest',
+  name: 'Open Interest',
+  placement: 'pane',
+  inputs: [{ key: 'symbol', type: 'text', label: 'Symbol', default: 'NIFTY' }],
+  plots: [{ key: 'oi', type: 'line', title: 'OI' }],
+  refetchOn: ['symbol'],                       // these settings invalidate the data
+  fetch: async ({ settings, from, to }) => {
+    const rows = await loadOpenInterest(settings.symbol, from, to);
+    return rows.map((r) => ({ time: r.time, values: { oi: r.oi } }));
+  },
+  subscribe: (ctx, push) => streamOi(ctx.settings.symbol, (r) =>
+    push({ time: r.time, values: { oi: r.oi } })),
+}));
+```
+
+**Alignment rule.** External points carry their own timestamps, which rarely match bar
+times. Each bar takes the most recent point **at or before** it, last-known-value, never
+interpolated and never forward-looking. Bars before the first point are `null`. A failed
+fetch leaves the previous points on screen rather than blanking the pane.
+
+## Supertrend
+
+`supertrendSeries(bars, period, multiplier)` returns `{ up, down }` so you can color the
+uptrend and downtrend legs differently (direction `-1` = up, `+1` = down).
+
+This is the raw function. The managed `chart.addIndicator('supertrend')` draws the same
+two legs and additionally shades the gap between the active stop and the candle bodies,
+using the hidden `bodyMid` column described under
+[filling against a column that is never plotted](#filling-against-a-column-that-is-never-plotted).
+
+<RunnableExample height={340} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 220, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+const st = lib.supertrendSeries(bars, 10, 3);
+chart.addSeries('line', { style: { color: '#26a69a', lineWidth: 2 } }).setData(st.up);
+chart.addSeries('line', { style: { color: '#ef5350', lineWidth: 2 } }).setData(st.down);
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+
+### Return type: SupertrendPoint
+
+`supertrend(bars, period?, multiplier?)` returns `SupertrendPoint[]`. Each element carries:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `value` | `number` | The band price level. `NaN` during ATR warmup (first `period - 1` bars). |
+| `direction` | `-1` or `1` | `-1` = uptrend: band is support below price (bullish). `1` = downtrend: band is resistance above price (bearish). |
+
+`supertrendSeries` converts that array into `{ up: Bar[], down: Bar[] }`. The `up` series
+carries `value` only while `direction === -1`; the `down` series only while `direction === 1`.
+Non-active slots hold `NaN` so the renderer breaks the line at each trend flip, producing two
+separately colored segments. `SupertrendPoint` is a named export; see [Types](/docs/types)
+for the full type catalogue.
+
+## RSI
+
+Plot RSI in its own pane with 70/30 guide lines:
+
+<RunnableExample height={360} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 220, 3600);
+chart.addSeries('candlestick').setData(bars);
+
+chart.addSeries('line', { paneIndex: 1, style: { color: '#e0b020', lineWidth: 2 } })
+     .setData(lib.rsiSeries(bars, 14));
+chart.addPriceLine({ price: 70, color: '#ef5350', lineWidth: 1, dashed: true, id: 'r70' }, 1);
+chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id: 'r30' }, 1);
+
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+
+## EMA
+
+`emaSeries(bars, period)` returns a line you overlay on price (see
+[Series & Styling](/docs/series-and-styling)). Stack several periods for a ribbon.
+
+<Callout type="info">
+Need an indicator that is not built in? Compute it however you like - these helpers just
+return `Bar[]` (set close to the indicator value). Plot the result as a `line` series. For
+an entirely new on-chart drawing, write a [primitive](/docs/primitives-and-plugins).
+</Callout>
+
+## ATR
+
+The ATR family consists of two functions that build on each other. Both accept flat
+`readonly number[]` arrays rather than `Bar` objects, so they work on any OHLC source.
+
+### trueRange
+
+```ts
+trueRange(
+  high: readonly number[],
+  low: readonly number[],
+  close: readonly number[],
+): number[]
+```
+
+Returns the **raw true range per bar** with no smoothing. The first bar is `high[0] - low[0]`
+because there is no previous close. Every subsequent bar is the maximum of:
+
+- `high[i] - low[i]`
+- `Math.abs(high[i] - close[i - 1])`
+- `Math.abs(low[i] - close[i - 1])`
+
+Every output slot is finite; there is no warmup period.
+
+### atr
+
+```ts
+atr(
+  high: readonly number[],
+  low: readonly number[],
+  close: readonly number[],
+  period?: number,   // default 14
+): number[]
+```
+
+Smooths `trueRange` output using Wilder's formula. The first output lands at index
+`period - 1` (a plain average of the first `period` true ranges); from there each value is
+`(prev * (period - 1) + tr[i]) / period`. Slots before `period - 1` are `NaN`, which the
+line renderer skips as whitespace.
+
+```ts
+import { atr, trueRange } from 'openalgo-charts';
+
+const rawTR   = trueRange(highs, lows, closes);   // finite for every bar, no warmup
+const atrVals = atr(highs, lows, closes, 14);     // NaN for bars 0-12, then Wilder ATR
+```
+
+<Callout type="info">
+`atr` is consumed internally by `supertrend`. Call it directly when you need a volatility
+measure for position sizing or stop distances, without computing the full band.
+</Callout>

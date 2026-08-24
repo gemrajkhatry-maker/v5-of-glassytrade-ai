@@ -1,0 +1,311 @@
+---
+title: Examples
+description: Live, in-page chart demos powered by the real OpenAlgo Charts library.
+---
+
+import RunnableExample from '../components/RunnableExample'
+import { RangeSwitcherCard, LegendCard, SeriesCompareCard, IndicatorsCard, ChartTypeCard, ThemeCard, DataTooltipCard, EventMarkersCard, PriceScaleCard, CustomTypesCard, ScalesFormatCard, ScalesConfigCard, DataCard, CustomPluginsCard, PositionsCard, TradeMarkersCard } from '../components/gallery'
+
+# Live examples
+
+Every chart on this page is the real library running in your browser - the code shown
+is the code that ran. Try it, copy it, ship it.
+
+## Interactive
+
+Switch tabs to reconfigure each chart live.
+
+<div className="oac-cardgrid">
+<ChartTypeCard />
+<ThemeCard />
+<DataTooltipCard />
+<EventMarkersCard />
+<RangeSwitcherCard />
+<LegendCard />
+<SeriesCompareCard />
+<IndicatorsCard />
+<PriceScaleCard />
+<CustomTypesCard />
+<ScalesFormatCard />
+<ScalesConfigCard />
+<DataCard />
+<CustomPluginsCard />
+</div>
+
+## Trading
+
+Data-driven positions, orders, TP/SL brackets, and fill markers via
+[`chart.trading`](/docs/trading-api). Drag the order lines; the pill ✕ fires cancel/close.
+
+<div className="oac-cardgrid">
+<PositionsCard />
+<TradeMarkersCard />
+</div>
+
+## Copy-paste snippets
+
+<div className="oac-gallery">
+
+<div>
+### Candlesticks + EMA
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.addSeries('line', { style: { color: '#f5a623', lineWidth: 2 } }).setData(lib.emaSeries(bars, 21));
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+</div>
+
+<div>
+### Area + baseline
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('area', { style: { areaTopColor: 'rgba(47,109,246,0.5)', areaBottomColor: 'rgba(47,109,246,0)', color: '#2f6df6' } }).setData(bars);
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+</div>
+
+<div>
+### Symbol comparison
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el);
+const spot = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(spot);
+
+// A second instrument, two orders of magnitude away in price.
+const other = spot.map((b, i) => {
+  const c = 46000 * (1 + Math.sin(i / 13) * 0.018 + i * 0.0004);
+  return { time: b.time, open: c, high: c, low: c, close: c };
+});
+lib.addComparison(chart, { symbol: 'BANKNIFTY', bars: other, color: '#f0b90b' });
+chart.fitContent();
+return chart;`} />
+</div>
+
+<div>
+### Linked charts
+<RunnableExample hideCode height={280} code={`el.style.display = 'flex';
+el.style.gap = '8px';
+const box = function () {
+  const d = document.createElement('div');
+  d.style.cssText = 'flex:1 1 0;min-width:0;height:100%';
+  el.appendChild(d);
+  return d;
+};
+const leftEl = box(), rightEl = box();
+
+// Hourly on the left, daily on the right, two sessions missing: the same
+// instant, never the same bar index.
+const left = lib.createChart(leftEl);
+left.addSeries('candlestick').setData(lib.generateBars(1700438400, 720, 3600));
+left.fitContent();
+const right = lib.createChart(rightEl);
+right.addSeries('candlestick').setData(
+  lib.generateBars(1700438400, 30, 86400).filter(function (b, i) { return i !== 11 && i !== 12; }));
+right.fitContent();
+
+const group = lib.createLinkGroup({ crosshair: true, viewport: true });
+group.add(left);
+group.add(right);
+
+const destroy = left.destroy.bind(left);
+left.destroy = function () { group.destroy(); right.destroy(); destroy(); };
+return left;`} />
+</div>
+
+<div>
+### Market replay
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 320, 3600);
+const series = chart.addSeries('candlestick');
+series.setData(bars);
+chart.timeScale.setBarSpacing(7);
+
+const replay = new lib.ReplayController(chart, { series, bars, startIndex: 200, barMs: 220 });
+replay.play();
+chart.on('replay:end', () => { replay.seek(200); replay.play(); });   // loop the demo
+
+const destroy = chart.destroy.bind(chart);
+chart.destroy = () => { replay.stop(); destroy(); };
+return chart;`} />
+</div>
+
+<div>
+### Supertrend overlay
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+const st = lib.supertrendSeries(bars, 10, 3);
+chart.addSeries('line', { style: { color: '#26a69a', lineWidth: 2 } }).setData(st.up);
+chart.addSeries('line', { style: { color: '#ef5350', lineWidth: 2 } }).setData(st.down);
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+</div>
+
+<div>
+### RSI in its own pane
+<RunnableExample hideCode height={300} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 200, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.addSeries('line', { paneIndex: 1, style: { color: '#e0b020' } }).setData(lib.rsiSeries(bars, 14));
+chart.addPriceLine({ price: 70, color: '#ef5350', lineWidth: 1, dashed: true, id: 'r70' }, 1);
+chart.addPriceLine({ price: 30, color: '#26a69a', lineWidth: 1, dashed: true, id: 'r30' }, 1);
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+</div>
+
+<div>
+### Drawing tools (draw tier)
+<RunnableExample hideCode height={300} tiers={['draw']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.timeScale.fitContent(bars.length);
+
+const draw = new lib.DrawingController(chart);
+const at = (i) => bars[i].time;
+draw.add({ tool: 'trend-line', paneIndex: 0, points: [
+  { time: at(20), price: bars[20].low }, { time: at(90), price: bars[90].high },
+], style: { color: '#4f8cff', lineWidth: 2 } });
+draw.add({ tool: 'rectangle', paneIndex: 0, points: [
+  { time: at(100), price: bars[100].high }, { time: at(140), price: bars[140].low },
+], style: { color: '#26a69a', fill: true, fillOpacity: 0.14 } });
+draw.add({ tool: 'horizontal-line', paneIndex: 0,
+  points: [{ time: at(0), price: bars[bars.length - 1].close }],
+  style: { color: '#f5a623', lineStyle: 'dashed' } });
+return chart;`} />
+</div>
+
+<div>
+### Fibonacci retracement
+<RunnableExample hideCode height={300} tiers={['draw']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 140, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.timeScale.fitContent(bars.length);
+
+// Anchor the leg on the swing low and swing high of the loaded range.
+let lo = 0, hi = 0;
+bars.forEach((b, i) => { if (b.low < bars[lo].low) lo = i; if (b.high > bars[hi].high) hi = i; });
+new lib.DrawingController(chart).add({
+  tool: 'fib-retracement', paneIndex: 0,
+  points: [{ time: bars[lo].time, price: bars[lo].low }, { time: bars[hi].time, price: bars[hi].high }],
+  style: { color: '#ab47bc', showLabels: true, fill: true, extendRight: true },
+});
+return chart;`} />
+</div>
+
+<div>
+### Position tool with R:R
+<RunnableExample hideCode height={300} tiers={['draw']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 120, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.timeScale.fitContent(bars.length);
+
+const last = bars[bars.length - 1].close;
+// Risk-based sizing: qty = (accountSize x risk%) / stop distance.
+new lib.DrawingController(chart).add({
+  tool: 'long-position', paneIndex: 0,
+  points: [
+    { time: bars[70].time, price: last },
+    { time: bars[110].time, price: last * 1.04 },
+    { time: bars[110].time, price: last * 0.98 },
+  ],
+  style: { color: '#8892a6', accountSize: 100000, risk: 1, showLabels: true },
+});
+return chart;`} />
+</div>
+
+<div>
+### Draw it yourself
+<RunnableExample hideCode height={320} tiers={['draw']} caption="Click the buttons, then click the chart to place anchors. Drag a shape or its handles; press Delete to remove the selection." code={`const wrap = document.createElement('div');
+wrap.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap';
+el.appendChild(wrap);
+const host = document.createElement('div');
+host.style.cssText = 'height:270px';
+el.appendChild(host);
+
+const chart = lib.createChart(host);
+const bars = lib.generateBars(1700000000, 160, 3600);
+chart.addSeries('candlestick').setData(bars);
+chart.timeScale.fitContent(bars.length);
+
+const draw = new lib.DrawingController(chart, { magnet: true, stayInDrawingMode: false });
+for (const id of ['trend-line', 'ray', 'rectangle', 'fib-retracement', 'measure', 'text']) {
+  const b = document.createElement('button');
+  b.textContent = lib.getDrawingTool(id).name;
+  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #2a3046;background:#1c2030;color:#c7ccd8;cursor:pointer';
+  b.onclick = () => draw.setTool(id);
+  wrap.appendChild(b);
+}
+const undo = document.createElement('button');
+undo.textContent = 'Undo';
+undo.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #2a3046;background:#1c2030;color:#c7ccd8;cursor:pointer';
+undo.onclick = () => draw.undo();
+wrap.appendChild(undo);
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Delete' || e.key === 'Backspace') { const id = draw.selected(); if (id) draw.remove(id); }
+  if (e.key === 'Escape') draw.setTool(null);
+});
+return chart;`} />
+</div>
+
+<div>
+### Renko (transform tier)
+<RunnableExample hideCode height={280} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 400, 3600);
+const bricks = lib.runTransform(new lib.RenkoTransform({ boxSize: 2 }), bars);
+chart.addSeries('candlestick').setData(bricks);
+chart.timeScale.fitContent(bricks.length);
+return chart;`} />
+</div>
+
+<div>
+### Tick chart (250-tick bars)
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el);
+const series = chart.addSeries('candlestick');
+const agg = new lib.TickBarAggregator({ mode: 'ticks', count: 250 });
+const bars = [];
+let t = 1700000000, p = 100, seed = 7;
+for (let i = 0; i < 12000; i++) {
+  seed = (seed * 1103515245 + 12345) & 2147483647;
+  p = Math.max(1, p + (seed / 2147483647 - 0.5) * 0.6);
+  t += 1;
+  const u = agg.onTick({ time: t, price: p, qty: 1 });
+  if (u.isNew) bars.push(u.bar); else bars[bars.length - 1] = u.bar;
+}
+series.setData(bars);
+chart.timeScale.fitContent(bars.length);
+return chart;`} />
+</div>
+
+<div>
+### Timezone switcher
+<RunnableExample hideCode height={280} code={`const chart = lib.createChart(el, { timezone: 'Asia/Kolkata' });
+const bars = lib.generateBars(1717594200, 180, 900);
+chart.addSeries('candlestick').setData(bars);
+chart.timeScale.fitContent(bars.length);
+
+el.style.position = 'relative';
+const wrap = document.createElement('div');
+wrap.style.cssText = 'position:absolute;left:10px;top:8px;z-index:5;display:flex;gap:6px;flex-wrap:wrap';
+el.appendChild(wrap);
+
+['Asia/Kolkata', 'America/New_York', 'Europe/London', 'Asia/Tokyo', 'UTC'].forEach(function (zone, i) {
+  const b = document.createElement('button');
+  b.textContent = zone;
+  b.style.cssText = 'padding:4px 10px;border-radius:6px;border:1px solid #2a3046;background:#1c2030;color:#c7ccd8;cursor:pointer;font-size:11px';
+  b.onclick = function () {
+    chart.setTimezone(zone);
+    Array.prototype.forEach.call(wrap.children, function (c) {
+      c.style.background = c === b ? '#2962ff' : '#1c2030';
+      c.style.color = c === b ? '#fff' : '#c7ccd8';
+    });
+  };
+  if (i === 0) { b.style.background = '#2962ff'; b.style.color = '#fff'; }
+  wrap.appendChild(b);
+});
+return chart;`} />
+</div>
+
+</div>
+
+Want the full walkthrough? Head to the [documentation](/docs/getting-started).

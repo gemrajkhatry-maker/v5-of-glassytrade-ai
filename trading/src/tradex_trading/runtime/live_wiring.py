@@ -13,13 +13,13 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-log = logging.getLogger(__name__)
-
 from tradex_domain.protocols import BrokerAdapter
 
 from tradex_trading.execution.engine import ExecutionEngine
 from tradex_trading.reactive.bus import ReactiveBus
 from tradex_trading.reactive.thread_safe_bus import ThreadSafeReactiveBus
+
+log = logging.getLogger(__name__)
 
 
 def build_live_streaming(

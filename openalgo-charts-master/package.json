@@ -1,0 +1,103 @@
+{
+  "name": "openalgo-charts",
+  "version": "1.6.0",
+  "description": "From-scratch, dependency-free canvas charting engine for OpenAlgo: professional-grade interactive rendering plus advanced on-chart trading.",
+  "license": "Apache-2.0",
+  "author": "marketcalls",
+  "homepage": "https://github.com/marketcalls/openalgo-charts#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/marketcalls/openalgo-charts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/marketcalls/openalgo-charts/issues"
+  },
+  "keywords": [
+    "charts",
+    "charting",
+    "candlestick",
+    "trading",
+    "finance",
+    "canvas",
+    "openalgo",
+    "technical-analysis",
+    "footprint",
+    "renko",
+    "heikin-ashi"
+  ],
+  "type": "module",
+  "module": "dist/openalgo-charts.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/openalgo-charts.mjs"
+    },
+    "./trade": {
+      "types": "./dist/trade/index.d.ts",
+      "import": "./dist/openalgo-charts.trade.mjs"
+    },
+    "./transform": {
+      "types": "./dist/transform/index.d.ts",
+      "import": "./dist/openalgo-charts.transform.mjs"
+    },
+    "./profile": {
+      "types": "./dist/profile/index.d.ts",
+      "import": "./dist/openalgo-charts.profile.mjs"
+    },
+    "./indicators": {
+      "types": "./dist/indicators/index.d.ts",
+      "import": "./dist/openalgo-charts.indicators.mjs"
+    },
+    "./draw": {
+      "types": "./dist/draw/index.d.ts",
+      "import": "./dist/openalgo-charts.draw.mjs"
+    }
+  },
+  "files": [
+    "dist/**",
+    "!dist/openalgo-charts.all.mjs",
+    "!dist/openalgo-charts.all.mjs.map",
+    "NOTICE"
+  ],
+  "sideEffects": [
+    "**/transform/**",
+    "**/indicators/**",
+    "**/draw/**",
+    "./dist/openalgo-charts.transform.mjs",
+    "./dist/openalgo-charts.indicators.mjs",
+    "./dist/openalgo-charts.draw.mjs"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "build": "rollup -c",
+    "build:watch": "rollup -c --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "size": "size-limit",
+    "docs": "typedoc",
+    "verify": "npm run typecheck && npm run test && npm run build && npm run check:dts && npm run size && npm run shake",
+    "prepublishOnly": "npm run verify",
+    "check:dts": "node scripts/check-dts.mjs",
+    "shake": "node scripts/check-shake.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.1",
+    "@rollup/plugin-terser": "^1.0.0",
+    "@rollup/plugin-typescript": "12.1.2",
+    "@size-limit/file": "11.1.6",
+    "rimraf": "6.0.1",
+    "rollup": "^4.62.5",
+    "rollup-plugin-dts": "6.1.1",
+    "size-limit": "11.1.6",
+    "tslib": "2.8.1",
+    "typedoc": "0.27.6",
+    "typescript": "5.7.3",
+    "vitest": "^4.1.11"
+  }
+}

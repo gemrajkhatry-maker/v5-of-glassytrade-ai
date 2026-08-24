@@ -88,6 +88,28 @@ class ExecutionConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class ProcessBusConfig:
+    """Optional local IPC bridge for splitting feed and strategy processes."""
+
+    enabled: bool = False
+    role: str = "server"
+    address: str | None = None
+    authkey: str | None = None
+
+    def __post_init__(self) -> None:
+        role = self.role.strip().lower()
+        if role not in {"server", "client"}:
+            raise ValueError(
+                f"process_bus.role must be 'server' or 'client', got {self.role!r}"
+            )
+        object.__setattr__(self, "role", role)
+        if self.enabled and not self.address:
+            raise ValueError("process_bus.address is required when process bus is enabled")
+        if self.enabled and not self.authkey:
+            raise ValueError("process_bus.authkey is required when process bus is enabled")
+
+
+@dataclass(frozen=True, slots=True)
 class AppConfig:
     """Application configuration.
 
@@ -135,6 +157,7 @@ class AppConfig:
     execution: ExecutionConfig = field(default_factory=ExecutionConfig)
     journal_path: str | None = None
     depth_tape_path: str | None = None
+    process_bus: ProcessBusConfig = field(default_factory=ProcessBusConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppConfig:
@@ -153,6 +176,7 @@ class AppConfig:
             "execution",
             "journal_path",
             "depth_tape_path",
+            "process_bus",
         }
         unknown = set(data) - allowed
         if unknown:
@@ -171,6 +195,7 @@ class AppConfig:
         risk = _build(RiskConfig, data.get("risk"))
         persistence = _build(PersistenceConfig, data.get("persistence"))
         execution = _build(ExecutionConfig, data.get("execution"))
+        process_bus = _build(ProcessBusConfig, data.get("process_bus"))
 
         return cls(
             broker_id=broker_id,
@@ -186,6 +211,7 @@ class AppConfig:
             execution=execution,
             journal_path=data.get("journal_path"),
             depth_tape_path=data.get("depth_tape_path"),
+            process_bus=process_bus,
         )
 
 
@@ -207,5 +233,6 @@ __all__ = [
     "BrokerConfig",
     "ExecutionConfig",
     "PersistenceConfig",
+    "ProcessBusConfig",
     "RiskConfig",
 ]

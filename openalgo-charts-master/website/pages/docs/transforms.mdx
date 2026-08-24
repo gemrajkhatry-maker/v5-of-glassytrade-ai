@@ -1,0 +1,228 @@
+---
+title: Transforms
+description: Heikin Ashi, Renko, Range, Line Break, Point & Figure and Kagi - movement-driven series.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+import { Callout } from 'nextra/components'
+
+# Transforms
+
+The **transform tier** (`openalgo-charts/transform`) turns time-based OHLC into
+movement-driven series. Run a transform, then plot the result. Heikin Ashi, Renko, Range,
+and Line Break render as a `candlestick` series; Point &amp; Figure and Kagi have dedicated
+renderers.
+
+```ts
+import { runTransform, RenkoTransform } from 'openalgo-charts/transform';
+const bricks = runTransform(new RenkoTransform({ boxSize: 5 }), bars);
+chart.addSeries('candlestick').setData(bricks); // Renko renders as candles
+```
+
+<Callout type="warning">
+**Every series on a chart shares one time axis.** A transformed series (Renko /
+Range / Line Break / Kagi / P&amp;F) emits fewer elements than the raw bars, so
+if another series, typically a volume pane, is fed the *raw* bars, all the
+raw timestamps come back onto the shared axis and the bricks render scattered
+with gaps between them. Re-bucket companion series onto the **transformed
+times** instead (e.g. sum the raw volume of the source bars behind each brick,
+keyed by `brick.time`), as the live example does.
+</Callout>
+
+## Heikin Ashi
+
+<RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 200, 3600);
+const ha = lib.runTransform(new lib.HeikinAshiTransform(), bars);
+chart.addSeries('candlestick').setData(ha);
+chart.timeScale.fitContent(ha.length);
+return chart;`} />
+
+## Renko
+
+Bricks form only when price moves a full box size, filtering out noise.
+
+<RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 500, 3600);
+const bricks = lib.runTransform(new lib.RenkoTransform({ boxSize: 2 }), bars);
+chart.addSeries('candlestick').setData(bricks);
+chart.timeScale.fitContent(bricks.length);
+return chart;`} />
+
+## Range bars
+
+Each bar spans a fixed price range, regardless of time.
+
+<RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 500, 3600);
+const rb = lib.runTransform(new lib.RangeBarsTransform({ range: 2 }), bars);
+chart.addSeries('candlestick').setData(rb);
+chart.timeScale.fitContent(rb.length);
+return chart;`} />
+
+## Point & Figure
+
+Columns of Xs (up) and Os (down); a new column starts only after a reversal of N boxes. Plot
+the result as a `point-figure` series.
+
+<RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 600, 3600);
+const cols = lib.runTransform(new lib.PointFigureTransform({ boxSize: 1, reversal: 3 }), bars);
+chart.addSeries('point-figure').setData(cols);
+chart.timeScale.fitContent(cols.length);
+return chart;`} />
+
+```ts
+import { runTransform, PointFigureTransform } from 'openalgo-charts/transform';
+const cols = runTransform(new PointFigureTransform({ boxSize: 1, reversal: 3 }), bars);
+chart.addSeries('point-figure').setData(cols);
+```
+
+Each emitted column carries the `boxSize` it was built with, so the renderer sizes its glyph
+stack from the data. You no longer pass `style: { boxSize }` - and can no longer desync it from
+the transform. (`style.boxSize` still works as a fallback for hand-built column data.)
+
+### Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `boxSize` | `number` | - | Box height for `mode: 'fixed'`. Required in that mode. |
+| `reversal` | `number` | `3` | Boxes of counter-move needed to start a new column. |
+| `method` | `'hl' \| 'close'` | `'hl'` | `'hl'` extends columns from each bar's high/low - the standard construction. `'close'` uses only the close. |
+| `mode` | `'fixed' \| 'percent' \| 'atr'` | `'fixed'` | How the box size is resolved. |
+| `percent` | `number` | - | Box as a percentage of price, for `mode: 'percent'` (`0.5` = 0.5%). |
+| `atrPeriod` | `number` | `14` | ATR lookback for `mode: 'atr'` (Wilder). |
+| `atrMultiplier` | `number` | `1` | ATR multiplier for `mode: 'atr'`. |
+
+`percent` and `atr` re-resolve the box size each time a column opens, so the grid adapts to
+price level and volatility:
+
+```ts
+// 0.5%-of-price boxes - keeps the grid meaningful across a wide price range
+runTransform(new PointFigureTransform({ mode: 'percent', percent: 0.5, reversal: 3 }), bars);
+
+// volatility-scaled boxes
+runTransform(new PointFigureTransform({ mode: 'atr', atrPeriod: 14, reversal: 3 }), bars);
+```
+
+### Column shape
+
+`PointFigureColumn` extends `Bar` with two fields:
+
+| Field | Description |
+|---|---|
+| `boxSize` | Price height of one box - one X or O glyph - in this column. |
+| `boxes` | Number of glyphs stacked in the column. |
+
+`low` is the bottom edge of the lowest box and `high` is the **exclusive top edge** of the
+highest box, so `[low, high)` is exactly the span the glyph stack occupies and
+`boxes === (high - low) / boxSize`.
+
+<Callout type="info">
+`method: 'hl'` is the default because it is what P&F means on every desk: a bar that swings
+through several boxes intrabar builds those boxes even if it closes flat. `method: 'close'`
+reproduces the older close-only variant, which ignores intrabar range entirely.
+</Callout>
+
+## Kagi
+
+A continuous line that reverses (and switches thick/thin) only after a move of at least the
+reversal amount. Plot it as a `kagi` series.
+
+<RunnableExample height={320} tiers={['transform']} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 600, 3600);
+const kagi = lib.runTransform(new lib.KagiTransform({ reversal: 3 }), bars);
+chart.addSeries('kagi').setData(kagi);
+chart.timeScale.fitContent(kagi.length);
+return chart;`} />
+
+```ts
+import { runTransform, KagiTransform } from 'openalgo-charts/transform';
+const kagi = runTransform(new KagiTransform({ reversal: 4 }), bars);
+chart.addSeries('kagi').setData(kagi);
+```
+
+<Callout type="info">
+All transforms are incremental, so they update efficiently on live data - feed each new bar
+through `runTransform` (or the transform's streaming API) and the series keeps building.
+</Callout>
+
+---
+
+## API reference
+
+### `registerTransformChartTypes`
+
+```ts
+function registerTransformChartTypes(): void
+```
+
+Registers the custom renderers for `'point-figure'` and `'kagi'` into the chart-type registry.
+This happens automatically as a side effect when you import the tier:
+
+```ts
+import 'openalgo-charts/transform'; // side effect registers the renderers
+```
+
+Bundlers that aggressively tree-shake a bare side-effect import may skip the call. In that case,
+call `registerTransformChartTypes()` explicitly before adding either series type. The function is
+idempotent and safe to call more than once.
+
+```ts
+import { registerTransformChartTypes } from 'openalgo-charts/transform';
+
+registerTransformChartTypes(); // no-op if already registered
+chart.addSeries('point-figure').setData(cols);
+```
+
+(Heikin Ashi, Renko, Range, and Line Break plot as the built-in `'candlestick'` type and need no
+new renderer registration.)
+
+### `ISeriesTransform`
+
+```ts
+interface ISeriesTransform {
+  reset(): void;
+  push(bar: Bar): Bar[];
+  flush?(): Bar[];
+}
+```
+
+The contract every transform class implements. `reset` returns the transform to its initial state
+at the start of a fresh history batch. `push` feeds one source bar and returns zero or more newly
+completed derived elements as `Bar[]`. The optional `flush` emits any in-progress element at the
+end of the data stream (for example, the current partial Renko brick). `runTransform` calls all
+three in sequence.
+
+```ts
+import type { ISeriesTransform } from 'openalgo-charts/transform';
+import type { Bar } from 'openalgo-charts';
+
+class MyTransform implements ISeriesTransform {
+  reset(): void { /* ... */ }
+  push(bar: Bar): Bar[] { return []; }
+  flush(): Bar[] { return []; }
+}
+```
+
+### `ensureIncreasingTimes`
+
+```ts
+function ensureIncreasingTimes(bars: readonly Bar[]): Bar[]
+```
+
+Makes times strictly increasing across a `Bar[]` by bumping any collision by `+1` second.
+Multiple derived elements can form within the same source bar and therefore share a timestamp;
+this function gives each a distinct logical index in the DataLayer. Labels stay within a few
+seconds of the real formation time.
+
+`runTransform` calls `ensureIncreasingTimes` automatically on its output. You only need to call
+it directly when assembling batches without `runTransform`:
+
+```ts
+import { ensureIncreasingTimes } from 'openalgo-charts/transform';
+
+const raw: Bar[] = myTransform.flush();
+const adjusted = ensureIncreasingTimes(raw);
+series.setData(adjusted);
+```

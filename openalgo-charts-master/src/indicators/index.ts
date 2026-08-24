@@ -1,0 +1,103 @@
+/**
+ * Indicator tier (opt-in: "openalgo-charts/indicators").
+ *
+ * 20 Tier-1 built-ins — computed from the chart's own OHLCV, no extra data —
+ * plus the Tier-2 contract for indicators that own an external fetch/subscribe
+ * lifecycle. Importing this module registers every built-in as a side effect.
+ *
+ * ```ts
+ * import { createChart } from 'openalgo-charts';
+ * import 'openalgo-charts/indicators';
+ *
+ * const chart = createChart(el);
+ * chart.addSeries('candlestick').setData(bars);
+ * chart.addIndicator('macd');
+ * chart.addIndicator('bollinger', { length: 20, stdDev: 2.5 });
+ * ```
+ *
+ * `registerIndicator` is imported from `../index` (the base entry), never a
+ * deep path: each tier is its own bundle, so a deep import would inline a
+ * second copy of the registry and `chart.addIndicator` would never find what
+ * this tier registers. `../index` is external for tier builds.
+ */
+import { registerIndicator } from 'openalgo-charts';
+import type { IndicatorDescriptor } from 'openalgo-charts';
+import { SMA, EMA, WMA, VWAP, BOLLINGER, SUPERTREND, PARABOLIC_SAR, ICHIMOKU, HALFTREND } from './trend';
+import { RSI, MACD, STOCHASTIC, ADX, CCI, MFI, ATR, WILLIAMS_VIX_FIX } from './momentum';
+import { VOLUME, OBV, ADL } from './volume';
+// The ported built-in indicators. Grouped by family in their own modules so the
+// tier index stays a manifest rather than a wall of descriptors.
+import { OVERLAY_INDICATORS } from './overlay';
+import { OSCILLATOR_INDICATORS } from './oscillators';
+import { VOLATILITY_INDICATORS } from './volatility';
+import { FLOW_INDICATORS } from './flow';
+import { ADAPTIVE_INDICATORS } from './adaptive';
+import { AVERAGE_INDICATORS } from './averages';
+import { STRENGTH_INDICATORS } from './strength';
+import { INDEX_INDICATORS } from './indices';
+import { RANGE_INDICATORS } from './ranges';
+import { SIGNAL_INDICATORS } from './signals';
+import { STUDY_INDICATORS } from './studies';
+import { WAVETREND_INDICATORS } from './wavetrend';
+import { SEASONALITY_INDICATORS } from './seasonality';
+
+export const INDICATORS_TIER = 'indicators' as const;
+
+/** Every built-in descriptor, in picker order. */
+export const BUILTIN_INDICATORS: readonly IndicatorDescriptor[] = [
+  SMA, EMA, WMA, VWAP, BOLLINGER, SUPERTREND, HALFTREND, PARABOLIC_SAR, ICHIMOKU,
+  RSI, MACD, STOCHASTIC, ADX, CCI, MFI, ATR, WILLIAMS_VIX_FIX,
+  VOLUME, OBV, ADL,
+  ...OVERLAY_INDICATORS,
+  ...OSCILLATOR_INDICATORS,
+  ...VOLATILITY_INDICATORS,
+  ...FLOW_INDICATORS,
+  ...ADAPTIVE_INDICATORS,
+  ...AVERAGE_INDICATORS,
+  ...STRENGTH_INDICATORS,
+  ...INDEX_INDICATORS,
+  ...RANGE_INDICATORS,
+  ...SIGNAL_INDICATORS,
+  ...STUDY_INDICATORS,
+  ...WAVETREND_INDICATORS,
+  ...SEASONALITY_INDICATORS,
+];
+
+let _registered = false;
+
+/**
+ * Register every built-in indicator. Called as a side effect on import, and
+ * exported so bundlers that aggressively tree-shake a bare side-effect import
+ * can call it explicitly. Idempotent.
+ */
+export function registerBuiltinIndicators(): void {
+  if (_registered) return;
+  _registered = true;
+  for (const descriptor of BUILTIN_INDICATORS) registerIndicator(descriptor);
+}
+
+registerBuiltinIndicators(); // side effect on tier import
+
+export { SMA, EMA, WMA, VWAP, BOLLINGER, SUPERTREND, HALFTREND, PARABOLIC_SAR, ICHIMOKU } from './trend';
+export { RSI, MACD, STOCHASTIC, ADX, CCI, MFI, ATR, WILLIAMS_VIX_FIX } from './momentum';
+export { VOLUME, OBV, ADL } from './volume';
+export * from './overlay';
+export * from './oscillators';
+export * from './volatility';
+export * from './flow';
+export * from './adaptive';
+export * from './averages';
+export * from './strength';
+export * from './indices';
+export * from './ranges';
+export * from './signals';
+export * from './studies';
+export * from './wavetrend';
+export * from './seasonality';
+export { sma, wma, rma, stdev, highest, lowest, nulls } from './calc';
+export {
+  createTier2Indicator,
+  type Tier2Descriptor,
+  type Tier2Context,
+  type Tier2Point,
+} from './external';

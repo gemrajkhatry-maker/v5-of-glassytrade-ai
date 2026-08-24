@@ -163,6 +163,16 @@ def create_app(
             app.state.orderflow = session.orderflow
         except SessionStateError:
             pass  # not READY — standalone service stays empty until it is
+    # AMT read-side projection — the session's own service when bound, else a
+    # standalone instance fed directly by the API test hooks.
+    from tradex_trading.sdk.services.amt import AMTService
+
+    app.state.amt: Any = AMTService()
+    if session is not None:
+        try:
+            app.state.amt = session.amt
+        except SessionStateError:
+            pass  # not READY — standalone service stays empty until it is
     # Single source of truth for depth-mode normalization (shared with
     # MarketFeed/FeedRegistry) — imported once, not per WebSocket connection.
     from tradex_trading.runtime.market_feed import normalize_depth
@@ -585,6 +595,89 @@ def create_app(
             }
             for s in app.state.orderflow.recent_signals(instrument_id)
         ]
+
+    # --- AMT (read-side projection) -------------------------------------------
+
+    @app.get("/amt/snapshot/{instrument_id}")
+    async def amt_snapshot(instrument_id: str) -> dict[str, Any]:
+        from tradex_trading.sdk.services.amt import snapshot_to_dict
+
+        snapshot = app.state.amt.snapshot(instrument_id)
+        if snapshot is None:
+            raise HTTPException(status_code=404, detail="no AMT snapshot")
+        return snapshot_to_dict(snapshot)
+
+    @app.get("/amt/history/{instrument_id}")
+    async def amt_history(
+        instrument_id: str,
+        limit: int = Query(default=100, ge=1, le=1000),
+    ) -> list[dict[str, Any]]:
+        from tradex_trading.sdk.services.amt import snapshot_to_dict
+
+        return [
+            snapshot_to_dict(s)
+            for s in app.state.amt.history(instrument_id, limit)
+        ]
+
+    @app.get("/amt/decisions/{instrument_id}")
+    async def amt_decisions(
+        instrument_id: str,
+        limit: int = Query(default=100, ge=1, le=1000),
+    ) -> list[dict[str, Any]]:
+        from tradex_trading.sdk.services.amt import decision_to_dict
+
+        return [
+            decision_to_dict(decision, timestamp=ts)
+            for ts, decision in app.state.amt.decisions(instrument_id, limit)
+        ]
+
+    @app.get("/amt/scanner")
+    async def amt_scanner(
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "instrument": str(r.instrument.instrument_id),
+                "phase": r.phase,
+                "direction": r.direction,
+                "setup": r.setup,
+                "score": r.score,
+                "absorption_side": r.absorption_side,
+                "absorption_strength": str(r.absorption_strength),
+                "timestamp": r.timestamp.isoformat() if r.timestamp else None,
+            }
+            for r in app.state.amt.scan(limit=limit)
+        ]
+
+    @app.websocket("/ws/amt")
+    async def ws_amt(websocket: WebSocket) -> None:
+        """Stream AMT snapshot projections for every tracked instrument."""
+        from tradex_trading.sdk.services.amt import snapshot_to_dict
+        from tradex_trading.strategy.extensions.amt.model import AMTSnapshot
+
+        await websocket.accept()
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=outbound_max)
+        loop = asyncio.get_running_loop()
+
+        def _on_snapshot(snapshot: AMTSnapshot) -> None:
+            try:
+                loop.call_soon_threadsafe(
+                    _enqueue_drop_oldest, queue, snapshot_to_dict(snapshot)
+                )
+            except RuntimeError:
+                pass  # event loop already closed
+
+        dispose = app.state.amt.subscribe(_on_snapshot)
+        try:
+            for snapshot in app.state.amt.snapshots_all().values():
+                _enqueue_drop_oldest(queue, snapshot_to_dict(snapshot))
+            while True:
+                payload = await queue.get()
+                await websocket.send_json(payload)
+        except WebSocketDisconnect:
+            pass
+        finally:
+            dispose()
 
     # --- WebSocket (ReactiveBus bridge) ----------------------------------------
 

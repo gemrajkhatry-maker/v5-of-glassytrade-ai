@@ -1,0 +1,6 @@
+# Optional Apple Silicon inference stack.
+# Install this file only on macOS/Apple Silicon hosts that use local MLX inference.
+-r requirements.txt
+mlx>=0.8.0
+mlx-lm>=0.8.0
+mlx-vlm>=0.1.0

@@ -8,8 +8,37 @@ import pytest
 from tradex_domain import BrokerId
 from tradex_domain.capabilities import dhan_capabilities
 
-from tradex_trading.config.schema import AppConfig
+from tradex_trading.config.schema import AppConfig, ProcessBusConfig
 from tradex_trading.runtime.startup import boot
+
+
+class TestProcessBusConfig:
+    def test_disabled_process_bus_needs_no_endpoint(self) -> None:
+        cfg = ProcessBusConfig()
+        assert cfg.enabled is False
+
+    def test_enabled_process_bus_requires_address_and_authkey(self) -> None:
+        with pytest.raises(ValueError, match="address"):
+            ProcessBusConfig(enabled=True, authkey="secret")
+        with pytest.raises(ValueError, match="authkey"):
+            ProcessBusConfig(enabled=True, address="/tmp/tradex.sock")
+
+    def test_process_bus_role_is_normalized_and_validated(self) -> None:
+        assert ProcessBusConfig(role=" CLIENT ").role == "client"
+        with pytest.raises(ValueError, match="role"):
+            ProcessBusConfig(role="worker")
+
+    def test_process_bus_from_dict_is_strict(self) -> None:
+        cfg = AppConfig.from_dict({
+            "process_bus": {
+                "enabled": True,
+                "role": "server",
+                "address": "/tmp/tradex.sock",
+                "authkey": "secret",
+            }
+        })
+        assert cfg.process_bus.enabled is True
+        assert cfg.process_bus.role == "server"
 
 
 class TestBootModeValidation:
@@ -130,6 +159,7 @@ class TestBootLiveGates:
         unset → False) must NOT place orders — the config flag is honored, not
         silently overridden to True."""
         from tradex_domain.errors import OrderRejectedError
+
         from tradex_trading.runtime import live as live_mod
 
         broker = _fake_broker()
@@ -150,6 +180,7 @@ class TestBootLiveGates:
     ) -> None:
         """Explicit opt-in (live_orders_enabled=True) opens the order gate."""
         from tradex_domain.enums import OrderStatus
+
         from tradex_trading.runtime import live as live_mod
 
         broker = _fake_broker()
@@ -239,6 +270,25 @@ class TestBootLiveGates:
         # The tape is closed and loadable after stop.
         from tradex_trading.replay.depth_tape import load_depth_tape
         assert len(load_depth_tape(tape_file)) == 1
+
+    def test_paper_boot_with_process_bus_server_owns_socket(self, tmp_path) -> None:
+        socket_path = str(tmp_path / "process.sock")
+        cfg = AppConfig(
+            mode="paper",
+            process_bus=ProcessBusConfig(
+                enabled=True,
+                role="server",
+                address=socket_path,
+                authkey="test-secret",
+            ),
+        )
+        session = boot(cfg)
+        try:
+            assert session._process_bus is not None  # noqa: SLF001
+            assert session.bus is not None
+        finally:
+            session.stop()
+        assert not (tmp_path / "process.sock").exists()
 
     def test_boot_without_depth_tape_records_nothing(self, tmp_path) -> None:
         cfg = AppConfig(mode="paper")
