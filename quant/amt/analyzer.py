@@ -764,6 +764,61 @@ class AMTAnalyzer:
             cvd_slope=float(cvd_state.slope),
         )
 
+        return self._build_result(
+            current=current, data=data, symbol=symbol,
+            profile=profile, poc=poc, vah=vah, val=val,
+            lvns=lvns, hvns=hvns, aggression_score=aggression_score,
+            signal=signal, _setup=_setup, agg_prints=agg_prints,
+            effective_profile_shape=effective_profile_shape,
+            cvd_state=cvd_state, cvd_div=cvd_div,
+            recent_vwap=recent_vwap, session_vwap=session_vwap,
+            vwap_upper_1=vwap_upper_1, vwap_lower_1=vwap_lower_1,
+            vwap_upper_2=vwap_upper_2, vwap_lower_2=vwap_lower_2,
+            vwap_deviation_sigmas=vwap_deviation_sigmas,
+            balance_ratio=balance_ratio, leg_data=leg_data,
+            ib_complete=ib_complete, ib_high=ib_high, ib_low=ib_low,
+            ib_state=ib_state, prior_poc=prior_poc, prior_vah=prior_vah,
+            prior_val=prior_val, session_open_price=session_open_price,
+            ar_state=ar_state, poc_migration=poc_migration,
+            lvn_play=lvn_play, break_state=break_state,
+            ofi_result=ofi_result, obi=obi,
+            dev_poc=dev_poc, dev_vah=dev_vah, dev_val=dev_val,
+            cushion_tier=cushion_tier, session_pnl=session_pnl,
+            bubble_retests=bubble_retests, npoc_above=npoc_above,
+            npoc_below=npoc_below, opening_result=opening_result,
+            mtf_result=mtf_result, structure=structure,
+            day_type=day_type, absorption_side=absorption_side,
+            absorption_range_ratio=absorption_range_ratio,
+            absorption_vol_ratio=absorption_vol_ratio,
+            delta_normalized_option=delta_normalized_option,
+            _drive_number=_drive_number, _drive_entry_valid=_drive_entry_valid,
+            cvd_source=cvd_source, _bimodal_active_pole=_bimodal_active_pole,
+            state_result=state_result, value_migration=value_migration,
+            _footprints=_footprints, _contested_zone=_contested_zone,
+            _triple=_triple, _effective_market_state=_effective_market_state,
+        )
+
+    def _build_result(self, *, current, data, symbol, profile, poc, vah, val,
+                      lvns, hvns, aggression_score, signal, _setup, agg_prints,
+                      effective_profile_shape, cvd_state, cvd_div,
+                      recent_vwap, session_vwap, vwap_upper_1, vwap_lower_1,
+                      vwap_upper_2, vwap_lower_2, vwap_deviation_sigmas,
+                      balance_ratio, leg_data, ib_complete, ib_high, ib_low,
+                      ib_state, prior_poc, prior_vah, prior_val,
+                      session_open_price, ar_state, poc_migration, lvn_play,
+                      break_state, ofi_result, obi, dev_poc, dev_vah, dev_val,
+                      cushion_tier, session_pnl, bubble_retests, npoc_above,
+                      npoc_below, opening_result, mtf_result, structure,
+                      day_type, absorption_side, absorption_range_ratio,
+                      absorption_vol_ratio, delta_normalized_option,
+                      _drive_number, _drive_entry_valid, cvd_source,
+                      _bimodal_active_pole, state_result, value_migration,
+                      _footprints, _contested_zone, _triple,
+                      _effective_market_state) -> AMTResult:
+        """Assemble AMTResult from computed pipeline outputs.
+
+        Pure data mapping — extracted from analyze() for readability.
+        """
         return AMTResult(
             market_state=_effective_market_state,
             poc=poc,
@@ -844,9 +899,6 @@ class AMTAnalyzer:
             break_type=break_state["break_type"],
             break_level=break_state["break_level"],
             ofi=ofi_result.ofi,
-            # Depth reaches the decision path: the live order-book imbalance
-            # (bid-heavy +1 .. ask-heavy -1) from the depth snapshot. Gate 3
-            # consumes it as the order-flow aggression (A3) confirmation.
             obi=obi,
             dev_poc=dev_poc,
             dev_vah=dev_vah,

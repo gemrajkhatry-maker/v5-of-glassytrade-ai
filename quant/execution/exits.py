@@ -16,9 +16,12 @@ from quant.execution.order import Position
 @dataclass(frozen=True)
 class ExitDecision:
     should_exit: bool
-    reason: str          # "" | "SL" | "TP" | "TRAIL" | "TIME" | "CVD_KILL" | "SPREAD_BLOWOUT" | "BREAKEVEN"
+    reason: str          # "" | "SL" | "TP1" | "TP2" | "TRAIL" | "TIME" | "CVD_KILL" | "SPREAD_BLOWOUT" | "BREAKEVEN"
     close_price: float
     trail_stop: float | None = None
+    # Fraction of the CURRENT position size to close. None (or 1.0) means a
+    # full close. < 1.0 means a tiered take-profit partial (spec §13.3).
+    partial_fraction: float | None = None
 
 
 @dataclass
@@ -46,20 +49,32 @@ class ExitEngine:
         trail_giveback_pct: float = 0.20,
         spread_max_pct: float = 0.03,
         cvd_be_threshold: float = 2.0,
+        vwap_adverse_drift_pct: float = 0.03,
     ) -> None:
         self.time_stop_bars = time_stop_bars
         self.cvd_kill_threshold = cvd_kill_threshold
         self.trail_giveback_pct = trail_giveback_pct
         self.spread_max_pct = spread_max_pct
         self.cvd_be_threshold = cvd_be_threshold
+        # VWAP adverse drift threshold: when a LONG position trades this
+        # fraction below session VWAP (or SHORT above), tighten trailing
+        # aggressively.  3% is the default — Fabio's rule: if price drifts
+        # more than 1 VA-width from VWAP without a structural reason, the
+        # thesis is weakened.
+        self.vwap_adverse_drift_pct = vwap_adverse_drift_pct
         # Trailing state is keyed by position._id (UUID) to prevent GC-recycling hazards.
         self._trail: dict[str, _Trail] = {}
         self._breakeven: dict[str, float | None] = {}  # position._id -> BE floor price
+        # TP tier reached so far: 0=none, 1=TP1 fired, 2=TP2 fired (runner active).
+        # close_partial() preserves position._id across partial fills, so this
+        # survives the TP1 -> TP2 transition on the same underlying trade.
+        self._tp_tier: dict[str, int] = {}
 
     def pop_trail(self, position: Position) -> None:
-        """Drop trailing state for a closed position."""
+        """Drop trailing/tier state for a closed position."""
         self._trail.pop(position._id, None)
         self._breakeven.pop(position._id, None)
+        self._tp_tier.pop(position._id, None)
 
     def is_risk_free(self, position: Position) -> bool:
         """Return True when this position has reached the 0.8R breakeven floor.
@@ -89,6 +104,7 @@ class ExitEngine:
         entry_time_epoch: float = 0.0,
         now_epoch: float = 0.0,
         bar_close: float | None = None,
+        session_vwap: float = 0.0,
     ) -> ExitDecision:
         if bar_close is not None:
             close = float(bar_close)
@@ -99,6 +115,8 @@ class ExitEngine:
             close = 0.0
 
         dto = amt_dto or (state if isinstance(state, dict) else {})
+        if market_state == MarketState.DEAD:
+            return ExitDecision(True, "DEAD_MARKET", close)
         long = position.size > 0
         sl = float(position.order.signal.sl)
         tp = float(position.order.signal.tp)
@@ -116,11 +134,11 @@ class ExitEngine:
         ):
             return ExitDecision(True, "SPREAD_BLOWOUT", (best_bid + best_ask) / 2)
 
-        # 2. Hard stop-loss
+        # 2. Hard stop-loss (fills at SL or worse if gapped)
         if long and low <= sl:
-            return ExitDecision(True, "SL", close)
+            return ExitDecision(True, "SL", sl)
         if not long and high >= sl:
-            return ExitDecision(True, "SL", close)
+            return ExitDecision(True, "SL", sl)
 
         # 3. Auction thesis invalidation (CVD kill)
         slope = float(dto.get("cvdSlope") or 0.0)
@@ -129,15 +147,31 @@ class ExitEngine:
         if not long and slope > self.cvd_kill_threshold:
             return ExitDecision(True, "CVD_KILL", close)
 
-        # 4. Structural target (Take Profit)
-        if long and high >= tp:
-            return ExitDecision(True, "TP", close)
-        if not long and low <= tp:
-            return ExitDecision(True, "TP", close)
+        # 4. Structural target (Take Profit) — tiered per spec §13.3:
+        #    TP1 = 50% of position at the structural target (`tp`); arms
+        #         breakeven immediately (SL -> entry) on the runner.
+        #    TP2 = 25% at 2x the TP1 R-multiple, leaving a 25% runner that
+        #         the trailing-stop logic below manages.
+        #    ponytail: spec's TP2 trigger is "macro VA extreme / CVD
+        #    divergence" — approximated here as 2x the TP1 distance since
+        #    that detector isn't wired into ExitEngine. Upgrade path: pass
+        #    macro VA extreme through `amt_dto` and trigger on that instead.
+        entry = float(position.order.signal.entry)
+        tier = self._tp_tier.get(position._id, 0)
+        if tier == 0:
+            if (long and high >= tp) or (not long and low <= tp):
+                self._tp_tier[position._id] = 1
+                self._breakeven[position._id] = entry
+                return ExitDecision(True, "TP1", tp, partial_fraction=0.5)
+        elif tier == 1:
+            r = abs(tp - entry)
+            tp2 = entry + 2.0 * r if long else entry - 2.0 * r
+            if (long and high >= tp2) or (not long and low <= tp2):
+                self._tp_tier[position._id] = 2
+                return ExitDecision(True, "TP2", tp2, partial_fraction=0.5)
 
         # 3b. Breakeven logic — Fabio: move SL to entry at 1R or on CVD confirmation.
         # The breakeven floor ensures the trail can never drop below entry once armed.
-        entry = float(position.order.signal.entry)
         risk = abs(entry - sl)
         be_floor = self._breakeven.get(position._id)
 
@@ -164,6 +198,10 @@ class ExitEngine:
                 self._breakeven[position._id] = be_floor
 
         # 4. Trailing stop — only once the trade has reached 1R profit.
+        #    VWAP-adverse-drift: when price drifts beyond the threshold
+        #    fraction from session VWAP against the position direction,
+        #    tighten trailing to 50% of the normal giveback (Fabio: if
+        #    price can't hold above/below VWAP, the thesis is weakened).
         tr = self._trail.get(position._id)
         if risk > 0:
             # Ratchet ONLY at/above 1R; once armed, enforce on every bar so a
@@ -173,10 +211,24 @@ class ExitEngine:
                     tr = _Trail()
                     self._trail[position._id] = tr
                 tr.active = True
+
+                # VWAP-adverse drift detection: tighten trailing when price
+                # drifts against position direction beyond the threshold.
+                effective_giveback = self.trail_giveback_pct
+                if session_vwap > 0 and entry > 0:
+                    vwap_drift = abs(close - session_vwap) / entry
+                    adverse = (
+                        (long and close < session_vwap)
+                        or (not long and close > session_vwap)
+                    )
+                    if adverse and vwap_drift > self.vwap_adverse_drift_pct:
+                        # Tighten: 50% of normal giveback — lock profit faster
+                        effective_giveback = self.trail_giveback_pct * 0.5
+
                 candidate = (
-                    close - self.trail_giveback_pct * profit
+                    close - effective_giveback * profit
                     if long
-                    else close + self.trail_giveback_pct * profit
+                    else close + effective_giveback * profit
                 )
                 # Never loosen below the original stop-loss.
                 candidate = max(candidate, sl) if long else min(candidate, sl)
@@ -190,6 +242,20 @@ class ExitEngine:
                 else:
                     # Monotonicity: long trails only rise, short only fall.
                     tr.stop = max(tr.stop, candidate) if long else min(tr.stop, candidate)
+
+            # 4b. VWAP adverse-drift early exit: when price has drifted
+            #     more than 2× the threshold from VWAP against the
+            #     position direction AND profit is positive but < 1R,
+            #     exit immediately — the thesis is invalidated before
+            #     the trailing stop would normally arm.
+            if 0 < profit < risk and session_vwap > 0 and entry > 0:
+                vwap_drift = abs(close - session_vwap) / entry
+                adverse = (
+                    (long and close < session_vwap)
+                    or (not long and close > session_vwap)
+                )
+                if adverse and vwap_drift > 2.0 * self.vwap_adverse_drift_pct:
+                    return ExitDecision(True, "VWAP_DRIFT", close)
             
             # Check breakeven stop (armed by CVD before 1R)
             if be_floor is not None and tr is None:

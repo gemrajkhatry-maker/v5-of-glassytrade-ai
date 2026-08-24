@@ -244,7 +244,7 @@ class QuantCoordinator:
                 if getattr(eng, "_crashed", False)
             )
 
-    def emergency_halt(self, reason: str = "emergency halt") -> int:
+    def emergency_halt(self, reason: str = "emergency halt", *, force_close: bool = False) -> int:
         """Externally halt every engine's SessionRisk (SIGTERM flatten path).
 
         Audit D-RISK-03: main.py's SIGTERM handler used to set
@@ -254,12 +254,14 @@ class QuantCoordinator:
         entries at Guard 0 of _decide() on every subsequent bar and persists
         across restarts (SessionRisk.halt saves to kv).
 
-        Open positions are NOT force-closed here: exits keep evaluating on
-        their own bars, and a market order blast during shutdown can be
-        worse than letting SL/session-close finish the job. Returns the
-        number of engines halted so callers can log/verify.
+        When ``force_close=True``, each engine's open position is closed at
+        the last traded price via PaperOMS before halting risk.  This is
+        appropriate for SIGTERM / panic-shutdown where leaving positions
+        open until session-close is unacceptable risk.  Returns the number
+        of engines halted so callers can log/verify.
         """
         halted = 0
+        closed = 0
         with self._lock:
             engines = list(self._engines.values())
         for eng in engines:
@@ -270,6 +272,34 @@ class QuantCoordinator:
                     halted += 1
                 except Exception:
                     logger.exception("emergency_halt failed for %s", eng.symbol)
+
+            # Force-close open positions when requested (SIGTERM / panic).
+            if force_close:
+                pos = getattr(eng, "_position", None)
+                oms = getattr(eng, "_oms", None)
+                if pos is not None and oms is not None:
+                    try:
+                        # Use last known price from the aggregator's current bar.
+                        agg = getattr(eng, "_aggregator", None)
+                        bar = getattr(agg, "current_bar", None) if agg else None
+                        close_price = float(bar.close) if bar and bar.close else float(pos.open_price)
+                        from datetime import datetime as _dt
+                        from quant.contracts.timezones import IST as _IST
+                        ts = _dt.now(tz=_IST).isoformat()
+                        fill = oms.close(pos, close_price, ts, f"EMERGENCY_HALT: {reason}")
+                        eng._position = None
+                        # Emit the fill so the projector + journal record the close.
+                        eng._emit(fill)  # type: ignore[attr-defined]
+                        closed += 1
+                        logger.warning(
+                            "emergency_halt: force-closed %s @ %.2f (pnl=%.2f)",
+                            eng.symbol, close_price, float(fill.pnl),
+                        )
+                    except Exception:
+                        logger.exception("emergency_halt force_close failed for %s", eng.symbol)
+
+        if closed:
+            logger.warning("emergency_halt: force-closed %d position(s) across %d engine(s)", closed, halted)
         return halted
 
     def journal_consecutive_failures(self) -> int:
