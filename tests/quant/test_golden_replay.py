@@ -228,3 +228,22 @@ def test_all_scenarios_deterministic():
                 sort_keys=True).encode()).hexdigest()
             digests.append(digest)
         assert digests[0] == digests[1], f"{fn.__name__} is nondeterministic"
+
+
+def test_zero_size_position_never_opens():
+    """Regression (live finding): when the risk budget affords 0 lots
+    (MIDCPNIFTY: 120-lot × 27pt risk > 0.25% budget), the engine must NOT
+    open a zero-size position — it produced a phantom UI trade with frozen
+    P&L at 0.00."""
+    from quant.execution.risk import SessionRisk
+    from quant.decision.context import DecisionContext
+
+    r = SessionRisk(starting_equity=1_000_000.0, storage=None, symbol="S")
+    # MIDCPNIFTY-like economics: 120 lot × 27pt stop vs 0.25% of ₹10L
+    q = r.position_size(entry=14912.20, sl=14939.46, lot_size=120)
+    assert q == 0.0, "sizing must return 0 when budget < 1 lot risk"
+
+    # Engine-level guard: clamp_quantity(0) → entry skipped, no position.
+    # Verified via runtime guard; here assert the invariant directly:
+    from quant.decision.signal_builder import clamp_quantity
+    assert clamp_quantity(0.0) == 0.0

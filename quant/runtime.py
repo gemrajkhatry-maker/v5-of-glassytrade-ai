@@ -600,6 +600,17 @@ class QuantEngine:
             quantity = clamp_quantity(
                 self._risk.position_size(signal.entry, signal.sl, lot_size=self._oms.lot_size)
             )
+            # Risk-budget guard: when the per-trade budget can't afford even
+            # ONE lot (budget < lot_size * risk distance), sizing correctly
+            # returns 0 — opening a zero-size position would put a phantom
+            # trade on the UI with frozen P&L. Skip the entry entirely.
+            if quantity <= 0:
+                logger.info(
+                    "⏭️ [SIZING] %s: skipping entry — risk budget affords 0 lots "
+                    "(entry=%.2f sl=%.2f lot=%d)",
+                    self.symbol, signal.entry, signal.sl, self._oms.lot_size,
+                )
+                return
             # Portfolio-level ceiling: aggregate open risk across ALL engines.
             # Per-engine SessionRisk stays authoritative for its own halts;
             # this is the cross-engine backstop (8 engines x 0.5% each would
