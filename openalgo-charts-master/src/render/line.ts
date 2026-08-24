@@ -1,0 +1,208 @@
+/**
+ * Line-family renderers (ARCHITECTURE.md §6, §6A): line, line+markers, step,
+ * area, baseline, HLC-area. Pure point geometry is split out for unit testing.
+ */
+import type { Bar } from '../model/bar';
+import type { SeriesStyle } from './series-style';
+import { verticalGradient } from './gradient';
+
+export interface LineDrawItem {
+  x: number; // bar center, media px
+  bar: Bar;
+}
+
+export interface Pt {
+  x: number;
+  y: number;
+}
+
+/** Pure: project items to screen points using a value accessor (default close). */
+export function valuePoints(
+  items: readonly LineDrawItem[],
+  toY: (value: number) => number,
+  value: (b: Bar) => number = (b) => b.close,
+): Pt[] {
+  return items.map((it) => ({ x: it.x, y: toY(value(it.bar)) }));
+}
+
+/** Pure: expand a value polyline into a step (HV) polyline. */
+export function stepPoints(pts: readonly Pt[]): Pt[] {
+  if (pts.length === 0) return [];
+  const out: Pt[] = [{ ...pts[0] }];
+  for (let i = 1; i < pts.length; i++) {
+    out.push({ x: pts[i].x, y: pts[i - 1].y }); // horizontal
+    out.push({ x: pts[i].x, y: pts[i].y }); // vertical
+  }
+  return out;
+}
+
+function strokePolyline(ctx: CanvasRenderingContext2D, pts: readonly Pt[], dpr: number): void {
+  if (pts.length === 0) return;
+  // Break the line across non-finite points (whitespace gaps) so indicators with
+  // holes — RSI warmup, the Supertrend up/down split — render as separate segments.
+  ctx.beginPath();
+  let drawing = false;
+  for (const p of pts) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) { drawing = false; continue; }
+    if (drawing) ctx.lineTo(p.x * dpr, p.y * dpr);
+    else { ctx.moveTo(p.x * dpr, p.y * dpr); drawing = true; }
+  }
+  ctx.stroke();
+}
+
+export function drawLine(
+  ctx: CanvasRenderingContext2D,
+  items: readonly LineDrawItem[],
+  toY: (v: number) => number,
+  dpr: number,
+  style: SeriesStyle,
+): void {
+  const base = valuePoints(items, toY);
+  const pts = style.step ? stepPoints(base) : base;
+  ctx.save();
+  ctx.strokeStyle = style.color ?? '#4f8cff';
+  // Not rounded to whole device px: snapping a 1.5px stroke up to 2px reads
+  // heavier and blockier than the width the caller asked for. Rounding only
+  // helps axis-aligned rules, and a polyline is rarely one. Round caps + joins
+  // keep reversals and segment ends smooth rather than chiselled.
+  ctx.lineWidth = Math.max(1, (style.lineWidth ?? 1.5) * dpr);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  const dash = style.lineStyle === 'dashed' ? [6 * dpr, 4 * dpr]
+    : style.lineStyle === 'dotted' ? [1 * dpr, 3 * dpr]
+    : [];
+  ctx.setLineDash(dash);
+  // markersOnly: dots with no connecting stroke (Parabolic SAR, scatter plots).
+  if (!style.markersOnly) strokePolyline(ctx, pts, dpr);
+  ctx.setLineDash([]);
+  if (style.markers || style.markersOnly) {
+    const r = (style.markerRadius ?? 2) * dpr;
+    ctx.fillStyle = style.color ?? '#4f8cff';
+    for (const p of base) {
+      if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+      ctx.beginPath();
+      ctx.arc(p.x * dpr, p.y * dpr, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+export function drawArea(
+  ctx: CanvasRenderingContext2D,
+  items: readonly LineDrawItem[],
+  toY: (v: number) => number,
+  dpr: number,
+  plotHeight: number,
+  style: SeriesStyle,
+): void {
+  const pts = valuePoints(items, toY);
+  if (pts.length === 0) return;
+  const baseY = plotHeight * dpr;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x * dpr, baseY);
+  for (const p of pts) ctx.lineTo(p.x * dpr, p.y * dpr);
+  ctx.lineTo(pts[pts.length - 1].x * dpr, baseY);
+  ctx.closePath();
+  // vertical gradient: solid-ish near the line fading toward the baseline
+  ctx.fillStyle = verticalGradient(
+    ctx, baseY,
+    style.areaTopColor ?? 'rgba(79,140,255,0.40)',
+    style.areaBottomColor ?? 'rgba(79,140,255,0.00)',
+  );
+  ctx.fill();
+  ctx.restore();
+  drawLine(ctx, items, toY, dpr, { color: style.color ?? '#4f8cff', lineWidth: style.lineWidth ?? 1.5 });
+}
+
+export function drawBaseline(
+  ctx: CanvasRenderingContext2D,
+  items: readonly LineDrawItem[],
+  toY: (v: number) => number,
+  dpr: number,
+  style: SeriesStyle,
+): void {
+  const baseValue = style.baseValue ?? 0;
+  const baseY = toY(baseValue) * dpr;
+  const pts = valuePoints(items, toY);
+  if (pts.length === 0) return;
+
+  // Gradient fills: above-base region fades down from topFill, below-base fades up
+  // from bottomFill. Built as one area polygon to the base line, clipped at baseY.
+  const minX = pts[0].x * dpr;
+  const maxX = pts[pts.length - 1].x * dpr;
+  const buildArea = (): void => {
+    ctx.beginPath();
+    ctx.moveTo(minX, baseY);
+    for (const p of pts) ctx.lineTo(p.x * dpr, p.y * dpr);
+    ctx.lineTo(maxX, baseY);
+    ctx.closePath();
+  };
+  const topFill = style.areaTopColor ?? 'rgba(38,166,154,0.20)';
+  const botFill = style.areaBottomColor ?? 'rgba(239,83,80,0.20)';
+  const BIG = 1e5;
+  // above base
+  ctx.save();
+  ctx.beginPath(); ctx.rect(minX, baseY - BIG, maxX - minX, BIG); ctx.clip();
+  buildArea();
+  ctx.fillStyle = verticalGradient(ctx, baseY, topFill, 'rgba(0,0,0,0)');
+  ctx.fill();
+  ctx.restore();
+  // below base
+  ctx.save();
+  ctx.beginPath(); ctx.rect(minX, baseY, maxX - minX, BIG); ctx.clip();
+  buildArea();
+  ctx.fillStyle = botFill;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  // split stroke: above-base in topColor, below-base in bottomColor
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    const above = (a.y + b.y) / 2 <= baseY / dpr; // smaller y = higher price = above base
+    ctx.strokeStyle = above ? (style.topColor ?? '#26a69a') : (style.bottomColor ?? '#ef5350');
+    ctx.lineWidth = Math.max(1, Math.round((style.lineWidth ?? 1.5) * dpr));
+    ctx.beginPath();
+    ctx.moveTo(a.x * dpr, a.y * dpr);
+    ctx.lineTo(b.x * dpr, b.y * dpr);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+export function drawHlcArea(
+  ctx: CanvasRenderingContext2D,
+  items: readonly LineDrawItem[],
+  toY: (v: number) => number,
+  dpr: number,
+  style: SeriesStyle,
+): void {
+  if (items.length === 0) return;
+  const highs = valuePoints(items, toY, (b) => b.high);
+  const lows = valuePoints(items, toY, (b) => b.low);
+  // fill between high and low
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(highs[0].x * dpr, highs[0].y * dpr);
+  for (const p of highs) ctx.lineTo(p.x * dpr, p.y * dpr);
+  for (let i = lows.length - 1; i >= 0; i--) ctx.lineTo(lows[i].x * dpr, lows[i].y * dpr);
+  ctx.closePath();
+  ctx.fillStyle = style.areaTopColor ?? 'rgba(79,140,255,0.15)';
+  ctx.fill();
+  ctx.restore();
+  // The two edges of the band, each drawn only when the caller named a colour
+  // for it. They have no default: an HLC area is a filled band plus a close
+  // line, so a caller who never set these gets exactly the frame it always got.
+  for (const [color, pts] of [[style.highColor, highs], [style.lowColor, lows]] as const) {
+    if (color === undefined) continue;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1, Math.round((style.lineWidth ?? 1.5) * dpr));
+    strokePolyline(ctx, pts, dpr);
+    ctx.restore();
+  }
+  drawLine(ctx, items, toY, dpr, { color: style.closeColor ?? '#4f8cff', lineWidth: style.lineWidth ?? 1.5 });
+}

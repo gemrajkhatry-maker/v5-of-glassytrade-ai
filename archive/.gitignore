@@ -1,0 +1,118 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.bak
+venv/
+.env
+
+# ML models - exclude all model files
+poc*/models/
+poc*/checkpoint-*/
+poc*/*.safetensors
+poc*/*.bin
+poc*/*.gguf
+poc*/*.pth
+poc*/*.pt
+poc*/*.h5
+poc*/*.pb
+poc*/*.onnx
+**/*.safetensors
+**/*.bin
+**/*.gguf
+**/*.pth
+**/*.pt
+**/*.h5
+**/*.pb
+**/*.onnx
+**/tokenizer.json
+
+# OS
+.DS_Store
+*.db
+*.db-shm
+*.db-wal
+
+# Large data directories and backups
+poc*/
+brokers_backup/
+archive/
+backend/live_trading_logs/
+backend/models/
+backend/.vite/
+**/*.jsonl
+**/*.csv
+!backend/tests/**/*.csv
+# WS-replay golden fixtures are small and versioned so a fresh clone can
+# re-run the drift gate without regenerating them
+!tests/fixtures/replay/*.jsonl
+# AMT training datasets are small and versioned so a fresh clone can retrain
+!amt_dataset/**/*.jsonl
+
+# Environment and large logs
+backend/rl_logs/
+*.tfevents.*
+node_modules/
+dist/
+
+# Test coverage
+.coverage*
+coverage.json
+htmlcov/
+
+# AI IDE files
+.poolside/
+
+# AI tool skills directories
+.agents/
+.augment/
+.claude/
+.continue/
+.crush/
+.goose/
+.kilocode/
+.kiro/
+.pi/
+.qwen/
+.qoder/
+.trae/
+.vibe/
+.windsurf/
+.zencoder/
+
+# Skills lock file
+skills-lock.json
+
+# Agent/test caches (not project code)
+.hypothesis/
+.superpowers/
+
+# Stale tooling caches and runtime spool artifacts
+graphify-out/
+MagicMock/
+*.fallback.jsonl.lock

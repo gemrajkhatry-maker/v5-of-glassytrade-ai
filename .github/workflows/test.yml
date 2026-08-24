@@ -2,16 +2,16 @@ name: Tests
 
 on:
   push:
-    branches: [main, stable_3]
+    branches: [main, dev, stable_3]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v4
@@ -24,26 +24,56 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-cov pytest-asyncio pytest-timeout
-          pip install -e backendv2/ 2>/dev/null || true
-          pip install ruff
+          pip install -e domain/ -e brokers/ -e "trading/[full]"
+          # pandas/pyarrow back the datalake (ParquetStorage); declared outside
+          # pyproject extras so they are installed explicitly here.
+          pip install pandas pyarrow pytest pytest-cov pytest-timeout ruff mypy
 
-      - name: Lint with ruff
+      - name: Compile packages
+        run: python -m compileall -q domain/src brokers/src trading/src
+
+      - name: Lint (ruff)
+        run: ruff check domain/src brokers/src trading/src
+
+      - name: Type check (mypy)
         run: |
-          cd backendv2 && ruff check app/ tests/
+          cd domain && mypy src
+          cd ../brokers && mypy src
+          cd ../trading && mypy src
 
-      - name: Run unit tests with coverage
+      - name: Domain tests
+        run: cd domain && pytest -q
+
+      - name: Brokers tests
+        run: cd brokers && pytest -q
+
+      - name: Trading tests (unit + integration + parity)
         run: |
-          cd backendv2 && PYTHONPATH=. python -m pytest tests/unit/ -v --cov=app --cov-report=xml --tb=line
+          cd trading && pytest -q \
+            --cov=tradex_trading --cov=tradex_domain --cov=tradex_brokers \
+            --cov-report=term-missing --cov-report=xml
 
-      - name: Run integration tests
-        run: |
-          cd backendv2 && PYTHONPATH=. python -m pytest tests/integration/ -v --tb=line --timeout=300
-
-      - name: Upload coverage to Codecov
+      - name: Upload coverage
+        if: always()
         uses: codecov/codecov-action@v4
         with:
-          file: backendv2/coverage.xml
+          files: trading/coverage.xml
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: false
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      - name: Build (tsc strict + vite)
+        run: cd frontend && npm run build

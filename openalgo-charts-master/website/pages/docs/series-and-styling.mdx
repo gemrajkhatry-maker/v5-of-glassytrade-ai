@@ -1,0 +1,166 @@
+---
+title: Series & Styling
+description: Adding series, the series API, and per-series style overrides.
+---
+
+import RunnableExample from '../../components/RunnableExample'
+
+# Series & styling
+
+## The series API
+
+`addSeries` returns a handle you keep for the life of the series:
+
+```ts
+const series = chart.addSeries('candlestick', { paneIndex: 0, style: { /* ... */ } });
+
+series.setData(bars);          // replace all data
+series.prependData(older);     // merge older bars (history paging), viewport kept
+series.update(bar);            // mutate the last bar or append a new one
+const bars = series.getData(); // current bars, sorted old -> new
+const markers = series.createMarkers();  // a markers layer bound to this series
+
+// mutate a live series (no re-create needed):
+series.applyOptions({ color: '#f00' });   // merge a partial style + repaint
+series.applyOptions({ visible: false });  // hide it (also excluded from autoscale)
+const scale = series.priceScale();         // the PriceScale this series maps to
+series.remove();                           // detach from the pane + free its data
+```
+
+`addSeries` also accepts `priceScaleId` (`'right'` / `'left'` / `''` overlay) and
+`priceFormat`. See [Scales & panes](/docs/scales-and-panes#left-right--overlay-price-scales).
+`applyOptions` / `remove` make dynamic charts (add, restyle, hide, and remove series at
+runtime) straightforward without recreating the chart.
+
+`setData`, `prependData`, and `update` accept three item shapes (normalized to
+bars internally, so `getData` always returns `Bar[]`):
+
+```ts
+{ time, open, high, low, close, volume? }  // an OHLC bar
+{ time, value }                            // a value point (line / area / baseline)
+{ time }                                   // a whitespace gap: breaks the line, draws nothing
+```
+
+Use `isWhitespace(item)` to test for a gap, or `toBar(item)` to normalize one
+yourself. A value point sets open=high=low=close=value; a whitespace item becomes
+a NaN bar that the line renderer skips.
+
+## Per-series style
+
+Every chart type has a typed `style`. Per-series style always wins over the theme, so you
+can mix a themed chart with a custom-colored overlay:
+
+<RunnableExample height={320} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 140, 3600);
+
+chart.addSeries('candlestick', {
+  style: { upColor: '#16a34a', downColor: '#dc2626', wickUpColor: '#16a34a', wickDownColor: '#dc2626' }
+}).setData(bars);
+
+// a second overlay series in the same pane, custom-colored
+chart.addSeries('line', { style: { color: '#a855f7', lineWidth: 2 } })
+     .setData(lib.emaSeries(bars, 9));
+
+chart.timeScale.fitContent(140);
+return chart;`} />
+
+## Dynamic series & dashed lines
+
+Series are mutable at runtime: restyle, hide, or remove without recreating the chart.
+`lineStyle: 'dashed'` renders a reference line dashed:
+
+<RunnableExample height={340} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 140, 3600);
+chart.addSeries('line', { style: { color: '#2962ff' } })
+     .setData(bars.map(b => ({ time: b.time, value: b.close, close: b.close })));
+
+// a dashed EMA(20) reference overlay
+const ema = chart.addSeries('line', { style: { color: '#e0b020', lineStyle: 'dashed', lineWidth: 2 } });
+ema.setData(lib.emaSeries(bars, 20));
+
+// recolor it live via applyOptions (no re-create)
+ema.applyOptions({ color: '#16a34a' });
+
+chart.fitContent();
+return chart;`} />
+
+## Common style fields
+
+| Field | Applies to | Notes |
+|---|---|---|
+| `upColor` / `downColor` | candle, bar, volume-candle | bullish / bearish body |
+| `wickUpColor` / `wickDownColor` | candle | wick color |
+| `color` | line, area, baseline, column | primary stroke |
+| `lineWidth` | line, area, baseline | pixels |
+| `lineStyle` | line, step, area, HLC | `'solid'` (default), `'dashed'`, `'dotted'` |
+| `visible` | all | `false` hides the series and drops it from autoscale |
+| `priceLineVisible` | price series | `false` hides the dashed last-price line (default on) |
+| `lastValueVisible` | price series | `false` hides the last-value tag on the axis (default on) |
+| `title` | all | label carried with the series for host-drawn legends |
+| `areaTopColor` / `areaBottomColor` | area | vertical gradient stops |
+| `baseValue` | baseline | the reference level |
+| `priceLineVisible` | all price series | the dashed last-price line |
+
+## Price options
+
+The primary series' style is what a settings dialog's Price tab writes, and every control
+on that tab maps to a field the renderer actually reads. Body, borders and wick each get
+**one row** carrying their switch and both colours, because a bullish and a bearish colour
+are one property (see the
+[paired colour control](/docs/settings-and-menus#a-control-is-a-row-not-a-value)). For
+candles that is six colours and three switches:
+
+| Field | Effect |
+|---|---|
+| `upColor` / `downColor` | Body fill. |
+| `borderVisible` | `false` drops the body outline. |
+| `borderUpColor` / `borderDownColor` | Body outline, independent of the fill. In hollow mode the up candle *is* its outline, so it stays drawn with `borderVisible: false` and falls back to the body colour rather than erasing the candle. |
+| `bodyVisible` | `false` drops the body fill, leaving the outline and the wick. Distinct from `hollow`, which empties only the up candles. With `borderVisible: false` as well a candle is reduced to its wick, which is two deliberate switches rather than an accident, so it is honoured. |
+| `wickVisible` | `false` drops the wicks. |
+| `wickUpColor` / `wickDownColor` | Wick colour. |
+| `hollow` | Up candles drawn as outlines, down candles filled. |
+| `colorByPreviousClose` | See below. |
+| `precision` | Decimal places for this series' price labels. |
+
+The border is dropped below 3 px of body width whatever the switch says, since a 1 px inset
+stroke would swallow the body at that size.
+
+### Colour by previous close
+
+`colorByPreviousClose: true` paints a bar by close-versus-**previous close** instead of
+close-versus-its-own-open, which is how most terminals paint one. The verdict is computed
+once per bar and feeds body, border, wick and the hollow decision together, so a candle
+cannot disagree with itself.
+
+The leftmost drawn bar has no predecessor on screen, so it uses the bar to the left of the
+visible range when the chart can supply one, which is what stops it flipping colour as you
+scroll. Where there genuinely is no reference, the first bar of history or the bar after a
+[whitespace gap](#whitespace-gaps), it falls back to open-versus-close: comparing against a
+NaN would send every bar after a gap down.
+
+<RunnableExample height={340} code={`const chart = lib.createChart(el);
+const bars = lib.generateBars(1700000000, 140, 3600);
+chart.addSeries('candlestick', { style: { colorByPreviousClose: true } }).setData(bars);
+chart.timeScale.fitContent(bars.length);
+return chart;`} caption="Every candle is coloured against the previous close, so a gap-down bar that closes above its own open still reads as red." />
+
+### Precision
+
+`precision` overrides the decimal places the price scale would infer from the tick size or
+the visible range. `undefined` is the "Default" entry of a Precision dropdown: keep
+inferring. The valid range is 0 to 8.
+
+```ts
+series.applyOptions({ precision: 0 });    // whole numbers on the axis and the tags
+```
+
+It rides the price scale's **formatter** rather than `minMove`, which matters: `minMove`
+also drives `snapToTick`, so a precision of 0 would start snapping every price to whole
+numbers, not merely displaying them that way. Going through the formatter covers the axis
+ticks, the last-value tag, the crosshair label and the drawing-tool labels in one place.
+
+## Whitespace (gaps)
+
+To break a line without interpolating, emit a whitespace item - a point with a `time` but no
+value. The renderer leaves a gap and skips markers there. This is how indicator warmup
+periods render (they emit `NaN`, which is treated as whitespace).

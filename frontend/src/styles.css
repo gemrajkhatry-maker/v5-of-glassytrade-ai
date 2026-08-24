@@ -1,0 +1,354 @@
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --panel-border: #21262d;
+  --text: #c9d1d9;
+  --muted: #8b949e;
+  --accent: #f5c542;
+  --buy: #26a69a;
+  --sell: #ef5350;
+  --blue: #4fc3f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.accent {
+  color: var(--accent);
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.ws-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.ws-connecting {
+  background: var(--accent);
+}
+
+.ws-open {
+  background: var(--buy);
+}
+
+.ws-closed {
+  background: var(--sell);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  flex: 1;
+  min-height: 0;
+}
+
+.chart-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 12px;
+  gap: 12px;
+  overflow-y: auto;
+}
+
+.side-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-left: 1px solid var(--panel-border);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.panel h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* --- chart --------------------------------------------------------------- */
+
+.chart-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 420px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.chart-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.chart-title {
+  font-weight: 600;
+}
+
+.chart-canvas {
+  flex: 1;
+  min-height: 0;
+}
+
+.phase-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 12px;
+  letter-spacing: 0.06em;
+}
+
+.phase-waiting {
+  background: #21262d;
+  color: var(--muted);
+}
+
+.phase-absorbing {
+  background: #4a3f12;
+  color: var(--accent);
+}
+
+.phase-accumulating {
+  background: #123f4a;
+  color: var(--blue);
+}
+
+.phase-aggression {
+  background: #124a2c;
+  color: var(--buy);
+}
+
+/* --- scanner -------------------------------------------------------------- */
+
+.scan-table,
+.pos-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.scan-table th,
+.pos-table th {
+  text-align: left;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--panel-border);
+}
+
+.scan-table td,
+.pos-table td {
+  padding: 5px 6px;
+  border-bottom: 1px solid rgba(110, 118, 129, 0.15);
+}
+
+.scan-table tbody tr {
+  cursor: pointer;
+}
+
+.scan-table tbody tr:hover {
+  background: #1c2128;
+}
+
+.scan-selected {
+  background: #1c2a38;
+}
+
+.setup-chip {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 8px;
+  background: #21262d;
+  color: var(--muted);
+}
+
+.setup-triplea {
+  background: #124a2c;
+  color: var(--buy);
+}
+
+.setup-accum {
+  background: #123f4a;
+  color: var(--blue);
+}
+
+.setup-absorb {
+  background: #4a3f12;
+  color: var(--accent);
+}
+
+/* --- snapshot -------------------------------------------------------------- */
+
+.snap-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  border-bottom: 1px solid rgba(110, 118, 129, 0.08);
+  font-size: 12px;
+}
+
+.snap-label {
+  color: var(--muted);
+}
+
+.snap-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.snap-strong {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* --- decision timeline ------------------------------------------------------- */
+
+.decisions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dec-timeline {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.dec-entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--panel-border);
+  background: #1c2128;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.dec-triplea {
+  border-color: #7c4dff;
+}
+
+.dec-pyramid {
+  border-color: #ffb300;
+}
+
+.dec-vafade {
+  border-color: #29b6f6;
+}
+
+.dec-time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.dec-setup {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.dec-dir {
+  font-weight: 700;
+}
+
+.dec-entry {
+  color: var(--text);
+}
+
+.dec-rr {
+  color: var(--muted);
+}
+
+/* --- positions -------------------------------------------------------------- */
+
+.positions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.orders-block {
+  margin-top: 12px;
+}
+
+.orders-block h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.buy-text {
+  color: var(--buy);
+}
+
+.sell-text {
+  color: var(--sell);
+}

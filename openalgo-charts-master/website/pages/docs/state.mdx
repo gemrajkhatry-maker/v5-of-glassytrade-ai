@@ -1,0 +1,130 @@
+---
+title: Chart State
+description: Serialise and restore a chart - viewport, panes, price scales, indicators, drawings.
+---
+
+import { Callout } from 'nextra/components'
+
+# Chart State
+
+`chart.getState()` returns a JSON-safe snapshot of everything the chart owns;
+`chart.restoreState(state)` puts it back. Saved layouts, chart templates, an objects panel,
+and drawing persistence all ride on this one pair.
+
+```ts
+localStorage.setItem('layout', JSON.stringify(chart.getState()));
+
+// later, after your data has loaded
+const report = chart.restoreState(JSON.parse(localStorage.getItem('layout')));
+```
+
+## What is captured - and what is not
+
+The rule: **the chart serialises what the chart owns.**
+
+| Captured | Restored | Notes |
+|---|---|---|
+| Visible logical range, bar spacing | Yes | Applied only when the chart has data - see below. |
+| Grid (visibility, colours, styles, width, spacing) | Yes | |
+| Canvas options (crosshair, scale text and lines, plot margins) | Yes | The Appearance tab's block. See [Theming and chart options](/docs/themes#canvas-options). |
+| Status-line switches | Yes | Applied to every pane legend. |
+| Trading colours | Yes | Held on the chart, so reading them never instantiates the trade layer. |
+| Event-type visibility | Yes | Which of earnings / dividends / splits / news the strip draws. |
+| Crosshair mode | Yes | |
+| [Timezone](/docs/timezones) | Yes | A saved zone the runtime no longer recognises is skipped, not thrown: one stale name must not cost the whole layout. |
+| Pane weights | Yes | Panes are created as needed. |
+| Price scales (margins, `minMove`, mode, inverted, auto-scale, pinned range) | Yes | Per pane. |
+| Indicator instances (id, settings, pane) | Yes | Fully derivable from the source data, so they can be rebuilt. |
+| Drawings | Round-tripped | An opaque slot the drawing tier owns; the base engine only carries it. |
+| Series descriptors (type, style, pane, price scale) | **No** | Reported back to you - see below. |
+| Series **data** | **No** | Yours. The chart does not know your symbol, timeframe, or feed. |
+
+The settings blocks are restored before the panes, deliberately: the chart-wide plot
+margins land first so a pane's own saved `marginTop` / `marginBottom` is the more specific
+answer and wins. A layout saved by a host that built its dialog from the
+[settings schema](/docs/themes#the-settings-schema) therefore brings the dialog's settings
+back with it, with no second store.
+
+<Callout type="warning">
+**`restoreState` never recreates series.** The chart has no way to know what data belongs in
+them. It restores everything else and hands you the series descriptors it saw, so *you*
+rebuild them from your own feed and re-apply the saved styling.
+</Callout>
+
+```ts
+const report = chart.restoreState(saved);
+
+for (const s of report.series) {
+  const series = chart.addSeries(s.type, { paneIndex: s.paneIndex, style: s.style, priceScaleId: s.priceScaleId });
+  series.setData(await loadBars(mySymbol, myInterval));   // your data
+}
+
+// Logical ranges index bars, so re-apply the viewport once the data has landed.
+chart.restoreState(saved);
+```
+
+### RestoreReport
+
+| Field | Type | Description |
+|---|---|---|
+| `applied` | `boolean` | False when the payload was not a usable state object. |
+| `series` | `SeriesState[]` | Series descriptors found in the state - rebuild these yourself. |
+| `indicators` | `number` | Indicator instances recreated. |
+| `reason` | `string?` | Why the payload was rejected. |
+
+## Ordering
+
+Logical ranges index bars, so a viewport restored onto an empty chart means nothing.
+The reliable sequence is:
+
+1. `restoreState(saved)` - grid, panes, price scales, indicators.
+2. Rebuild your series from `report.series` and feed them.
+3. `restoreState(saved)` again (or `setVisibleLogicalRange(saved.viewport)`) for the viewport.
+
+Calling `restoreState` twice is safe: indicators are **replaced**, not appended, so restore
+is idempotent.
+
+## Versioning and forward compatibility
+
+Every snapshot carries a `version` (`CHART_STATE_VERSION`). A state from a *newer* version
+is rejected rather than half-applied - `applied: false` with a `reason` - so an older build
+reading a newer layout degrades visibly instead of silently dropping settings.
+
+An indicator whose tier is not loaded is **skipped, not thrown**: restoring a layout that
+uses `openalgo-charts/indicators` in an app that has not imported the tier leaves that
+indicator out and restores the rest.
+
+## The drawings slot
+
+`ChartState.drawings` is an opaque passthrough. The base engine stores and returns it
+untouched; the drawing tier reads and writes it. That means an app which already persists
+chart state keeps drawings for free once the tier is loaded, with no new storage plumbing.
+
+```ts
+chart.setDrawingState(payload);   // what the drawing tier does
+chart.drawingState();             // read it back
+```
+
+## Coordinate helpers
+
+State restore and drawing anchors both need to convert between time and screen x. Because
+the time axis is **gapless** - weekends, holidays, and session breaks collapse - many x
+positions have no bar behind them, so the whole-index helpers are not enough.
+
+| Method | Description |
+|---|---|
+| `chart.timeToCoordinate(time)` | UTC seconds → container-relative x (media px). |
+| `chart.coordinateToTime(x)` | x → UTC seconds, interpolated between bars and **extrapolated past the right edge**. |
+| `chart.priceToCoordinate(price, paneIndex?)` | Price → y. |
+| `chart.coordinateToPrice(y, paneIndex?)` | y → price. |
+
+`coordinateToTime` is what makes a two-axis drag work: `chart.subscribeDrag` passes the
+time under the cursor as a third argument alongside the price, so a trendline endpoint or a
+forward projection has a usable time even where no bar exists.
+
+```ts
+chart.subscribeDrag(
+  (id, price, time) => moveAnchor(id, { time, price }),
+  (id, price, time) => commitAnchor(id, { time, price }),
+);
+```

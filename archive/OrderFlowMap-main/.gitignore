@@ -1,0 +1,31 @@
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# IDE / Editor
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Node (shouldn't exist, but just in case)
+node_modules/
+package-lock.json
+
+# Build artifacts
+dist/
+build/
+
+# Reference / internal files
+reference/

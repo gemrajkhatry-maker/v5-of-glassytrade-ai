@@ -1,0 +1,400 @@
+---
+title: Drawing Tools
+description: 43 drawing tools, a headless controller, undo/redo, and persistence.
+---
+
+import { Callout } from 'nextra/components'
+
+# Drawing Tools
+
+`openalgo-charts/draw` is a lazy tier (**13.1 KB** Brotli) with 43 tools and a headless
+controller. It ships **no UI**: no toolbar, no dialogs. It owns the model and the
+interactions; your app supplies the buttons.
+
+```ts
+import { createChart } from 'openalgo-charts';
+import { DrawingController } from 'openalgo-charts/draw';
+
+const chart = createChart(el);
+chart.addSeries('candlestick').setData(bars);
+
+const draw = new DrawingController(chart, { magnet: true });
+draw.setTool('trend-line');   // the next two clicks place it
+```
+
+## The tools
+
+**43 built-in tools**, all registered when the tier is imported.
+
+| Group | `id` | Anchors |
+|---|---|---|
+| Lines | `trend-line`, `ray`, `extended-line`, `arrow` | 2 |
+| Horizontal / vertical | `horizontal-line`, `horizontal-ray`, `vertical-line`, `cross-line` | 1 |
+| Shapes | `rectangle`, `ellipse`, `circle`, `triangle`, `rotated-rectangle` | 2 / 2 / 2 / 3 / 3 |
+| Paths | `path`, `polyline` (both free-form), `arc`, `curve`, `double-curve` | n / n / 3 / 3 / 3 |
+| Channels | `parallel-channel`, `fib-channel` | 3 |
+| Fibonacci | `fib-retracement` (2), `fib-extension` (3), `fib-time-zone` (2), `fib-fan` (2) | 2-3 |
+| Gann | `gann-fan`, `gann-box` | 2 |
+| Forecasting | `long-position`, `short-position` (3), `forecast` (2) | 2-3 |
+| Measurers | `price-range`, `date-range`, `measure` | 2 |
+| Arrows | `arrow-up`, `arrow-down` | 1 |
+| Cycles | `cyclic-lines`, `time-cycles`, `sine-line` | 2 |
+| Text and notes | `text`, `price-label`, `flag-mark` (1), `callout` (2) | 1-2 |
+| Brushes | `brush`, `highlighter` (both freehand) | n |
+
+`long-position` and `short-position` place a complete **1:1** box from a single click,
+sized to about 8% of the visible range, with all three anchors draggable. They report the
+target and stop moves with percentages and cash amounts, plus **risk/reward** and a
+risk-based position size from `accountSize` and `risk` in their style bag.
+
+Anchor counts of `n` mean the tool collects anchors until you end it. **Freehand** tools
+(`brush`, `highlighter`) sample the cursor while the pointer is held and finish on release:
+one press-drag-release is one stroke, and only the two ends get grab handles. The other
+`n` tools (`path`, `polyline`) take one anchor per click and finish on **double-click**, or
+on `controller.finish()` if you want to bind a key to it.
+
+`measure` draws price and time arrows across its box and a chip carrying the
+change, percentage, bar count, calendar span, and the volume traded over the
+span (that last one via `rc.bars()`, so it appears only when the pane has a
+price series with volume).
+
+The three measurers differ only in what they report. `measure` gives price change, percent
+*and* bar count; `price-range` drops the time axis; `date-range` drops the price axis, which
+is what you want when the other axis is noise. All three take their **bar count from logical
+indices**, so it matches what the gapless axis shows rather than raw elapsed time.
+
+`circle` measures its radius in **pixels**, so it stays round on screen instead of becoming
+the ellipse that differing axis scales would otherwise produce. `arc` passes *through* its
+middle anchor; `curve` treats that anchor as a control handle, so the path only leans toward
+it. `highlighter` is `path` with a fat translucent stroke, and is grabbable anywhere across
+its width.
+
+## Anchors live in data space
+
+A drawing's points are `{ time, price }`, never pixels. The time axis is gapless (weekends,
+holidays, and session breaks collapse), so a pixel anchor would slide the moment the viewport
+changed. Anchors map through `DataLayer.timeToIndexFloat`, which also resolves positions
+*between* bars (inside a collapsed gap) and *past the last bar*, where trend projections and
+forecasts live.
+
+## Using it from TypeScript
+
+`DrawingController` takes a `DrawingChartHost`, a structural interface covering
+the members it uses, which the chart from `createChart()` satisfies directly:
+
+```ts
+import { createChart } from 'openalgo-charts';
+import { DrawingController } from 'openalgo-charts/draw';
+
+const chart = createChart(el);
+const draw = new DrawingController(chart);   // no cast needed
+```
+
+<Callout type="info">
+Before 1.0.14 this failed with *"Types have separate declarations of a private
+property"*: each tier inlined its own copy of `Chart`, and private members make a
+class nominal, so the two copies were different types. If you are pinned below
+1.0.14 and see that error, upgrade. There is no workaround from outside the
+package.
+</Callout>
+
+The host contract, if you are wrapping the chart rather than passing it directly:
+
+```ts
+interface DrawingChartHost {
+  on(event: string, handler: (payload: unknown) => void): () => void;
+  emit(event: string, payload: unknown): void;
+  addPrimitive(primitive: IPrimitive, paneIndex?: number): void;
+  removePrimitive(primitive: IPrimitive): void;
+  readonly dataLayer: DataLayer;
+  getVisibleLogicalRange(): { from: number; to: number } | null;
+  drawingState(): unknown;
+  setDrawingState(state: unknown): void;
+  setPlacementMode?(active: boolean): void;
+  // Optional, and used only by paste: the first two make its vertical nudge a screen
+  // translation that survives a log scale, the third keeps a drawing copied out of an
+  // indicator pane from conjuring an empty pane in a chart that has fewer.
+  priceToCoordinate?(price: number, paneIndex?: number): number | null;
+  coordinateToPrice?(y: number, paneIndex?: number): number | null;
+  panes?(): readonly unknown[];
+}
+```
+
+### Surviving a chart rebuild
+
+A host that recreates the chart (on a timeframe switch, a chart-type change, a
+theme change) must carry the drawings across, because the controller and its
+layers belong to the chart that is going away:
+
+```ts
+// before chart.destroy()
+const saved = draw.toJSON();
+draw.destroy();
+
+// after the new chart exists
+const next = new DrawingController(newChart);
+next.fromJSON(saved);
+```
+
+Anchors are `{ time, price }`, so they land on the same bars even if the new
+chart has a different interval loaded.
+
+## Controller API
+
+| Member | Description |
+|---|---|
+| `setTool(id \| null)` | Arm a tool for placement, or return to the cursor. |
+| `activeTool()` | The armed tool id, or null. |
+| `drawings()` / `get(id)` | The model. |
+| `add(drawing)` | Add one directly (import, or host-authored). |
+| `update(id, patch)` | Patch `points`, `style`, `locked`, or `visible`. |
+| `remove(id)` / `clear()` | Delete one, or all. |
+| `finish()` | End a variable-anchor shape (`path`, `polyline`) at the anchors placed so far. Returns whether it committed. Double-click already calls it. |
+| `select(id \| null)` / `selected()` | Selection. |
+| `copy(target?)` / `cut(target?)` / `paste()` | Clipboard, all async. See [Drawing Clipboard](/docs/drawing-clipboard). |
+| `clipboard()` | The `DrawingClipboard` behind those three, for reporting why a copy did not reach the OS clipboard. |
+| `undo()` / `redo()` / `canUndo()` / `canRedo()` | History. A paste of several drawings is one step. |
+| `toJSON()` / `fromJSON(data)` | Explicit serialisation. |
+| `setOptions(patch)` | `magnet`, `stayInDrawingMode`, `historyLimit`, `defaultStyle`, `pasteOffsetBars`, `pasteOffsetPixels`, `clipboard`. |
+| `destroy()` | Detach layers and listeners. |
+
+### Events
+
+`draw:tool`, `draw:add`, `draw:update`, `draw:remove`, `draw:select`, `draw:copy`,
+`draw:cut` and `draw:paste` all fire on `chart.on(...)`.
+
+<Callout type="info">
+The controller listens on the **event bus** (`click`, `crosshair:move`, `drag`, `drag:end`),
+not the single-slot `subscribeClick` / `subscribeDrag` callbacks, so your app keeps using
+those for its own order lines without the two fighting over one channel.
+</Callout>
+
+## Interaction
+
+- **Place**: click once per anchor, or **press-drag-release** to lay down a two-point shape
+  in one gesture. A live preview follows the cursor between clicks.
+- **Select**: click a drawing; click empty space to deselect.
+- **Move**: drag the body to translate every anchor, or drag a handle to move one.
+- **Magnet**: `{ magnet: true }` snaps new anchors to the nearest O/H/L/C of the hovered bar.
+- **Undo**: a whole drag is **one** undo step, not one per frame.
+- **Lock**: a locked drawing renders but cannot be selected or dragged.
+
+<Callout>
+While a tool is armed the controller puts the chart in **placement mode**
+(`chart.setPlacementMode(true)`), so a press starts a shape instead of panning. The chart
+reports the gesture as two `click` events: the press point, then the release point tagged
+`viaDrag`. `DrawingController` manages this for you; you only need it if you are placing
+things (alerts, annotations) without the draw tier.
+</Callout>
+
+## Keyboard shortcuts
+
+Each tool can declare a `shortcut`. The built-in line tools ship the standard chords:
+
+| Shortcut | Tool |
+|---|---|
+| `Alt+T` | Trend line |
+| `Alt+H` | Horizontal line |
+| `Alt+J` | Horizontal ray |
+| `Alt+V` | Vertical line |
+| `Alt+C` | Cross line |
+
+`drawingShortcuts()` returns the `id -> shortcut` map, which is what a palette renders beside
+each tool's name. `matchDrawingShortcut(event)` resolves a key event to a tool id:
+
+```ts
+import { matchDrawingShortcut } from 'openalgo-charts/draw';
+
+window.addEventListener('keydown', (e) => {
+  // Your call, not the library's: skip while typing or with a dialog open.
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  const id = matchDrawingShortcut(e);
+  if (id) {
+    e.preventDefault();
+    controller.setTool(id);
+  }
+});
+```
+
+<Callout type="info">
+The library installs **no** key listener. Only the host knows whether the chart has focus, a
+dialog is open, or the user is typing, so binding is left to you.
+
+Modifiers must match **exactly**: `Alt+T` does not fire for `Ctrl+Alt+T`, so a tool cannot
+shadow a browser or host chord, and `metaKey` (Cmd) counts as Ctrl. A bare letter never
+matches, so ordinary typing is never swallowed.
+</Callout>
+
+Give a custom tool a chord the same way:
+
+```ts
+registerDrawingTool({ id: 'my-band', name: 'My band', points: 2, shortcut: 'Alt+B', draw, distance });
+```
+
+## Copy, cut and paste
+
+The controller has a clipboard, and like the shortcuts above it is an API your binding
+calls. All three are async, because `navigator.clipboard` is:
+
+```ts
+window.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const key = e.key.toLowerCase();
+  if (key === 'c') { e.preventDefault(); void draw.copy(); }
+  if (key === 'x') { e.preventDefault(); void draw.cut(); }
+  if (key === 'v') { e.preventDefault(); void draw.paste(); }
+});
+```
+
+A paste inserts fresh objects with fresh ids in a single undo step, offset from the
+original, and a cut deletes only once the clipboard write has succeeded. Foreign text pastes
+nothing rather than throwing. See [Drawing Clipboard](/docs/drawing-clipboard) for the
+payload format, the validation rules and the failure modes.
+
+## Text and labels
+
+The `text` tool draws a standalone text box, but **shapes carry labels too**: set
+`style.text` on a rectangle, ellipse, or parallel channel and it renders inside the outline.
+That is one shape with two colours: `color` strokes the outline, `fontColor` paints the label.
+
+| Style key | Applies to | Notes |
+| --- | --- | --- |
+| `text` | text tool, shapes | `\n` starts a new line |
+| `fontSize` | both | media px |
+| `fontFamily` | both | defaults to the UI sans stack |
+| `fontWeight` | both | `'normal'` \| `'bold'` |
+| `fontStyle` | both | `'normal'` \| `'italic'` |
+| `fontColor` | both | falls back to `color` |
+| `textAlign` | both | `'left'` \| `'center'` \| `'right'` |
+| `textVAlign` | both | `'top'` \| `'middle'` \| `'bottom'` |
+| `textPosition` | shapes only | `'inside'` the outline or `'outside'` just above it |
+| `background`, `backgroundColor`, `backgroundOpacity` | text tool | filled plate behind the text |
+| `border`, `borderColor` | text tool | stroked plate border |
+| `wrap`, `wrapWidth` | both | soft-wrap instead of running off the pane |
+
+```ts
+// `add` takes a single drawing object (id is generated when omitted).
+draw.add({
+  tool: 'rectangle',
+  points: [a, b],
+  paneIndex: 0,
+  style: {
+    color: '#8b5cf6',
+    text: 'Supply zone',
+    fontColor: '#ffffff',
+    fontSize: 13,
+    fontWeight: 'bold',
+    textPosition: 'inside',
+    textVAlign: 'top',
+    textAlign: 'center',
+  },
+});
+```
+
+<Callout>
+With `textPosition: 'inside'`, `textVAlign` x `textAlign` give the nine placements a
+shape-text properties panel exposes. `'outside'` parks the block above the shape and ignores
+`textVAlign`. `examples/yfinance/index.html` wires all of it to a properties bar.
+</Callout>
+
+## Persistence
+
+Drawings round-trip through the chart state with no extra plumbing:
+
+```ts
+localStorage.setItem('layout', JSON.stringify(chart.getState()));   // includes drawings
+
+// later
+chart.restoreState(JSON.parse(localStorage.getItem('layout')));
+const draw = new DrawingController(chart);   // picks them up from the state
+```
+
+See [Chart State](/docs/state) for the rest of the payload.
+
+## Building your own tool
+
+A tool is a descriptor, like a chart type or an indicator. `draw` receives anchors already
+in **device** px; `distance` receives them in **media** px, the same space as the cursor.
+
+```ts
+import { registerDrawingTool, distToSegment } from 'openalgo-charts/draw';
+
+registerDrawingTool({
+  id: 'zigzag',
+  name: 'Zig Zag',
+  points: 3,
+  defaultStyle: { color: '#f5a623', lineWidth: 2 },
+  draw: ({ ctx, pts, style, rc }) => {
+    ctx.strokeStyle = style.color;
+    ctx.lineWidth = style.lineWidth * rc.dpr;
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (const p of pts.slice(1)) ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+  },
+  // Return a distance in media px, or null for a miss. 0 means "inside".
+  distance: (x, y, { pts }) => Math.min(
+    distToSegment(x, y, pts[0], pts[1]),
+    distToSegment(x, y, pts[1], pts[2]),
+  ),
+});
+
+draw.setTool('zigzag');
+```
+
+Geometry helpers are exported: `distToSegment`, `distToLine`, `distToPolyline`,
+`distToRect`, `distToEllipse`, `rectOf`, `extendSegment`.
+
+Two optional fields change how a tool is *placed*:
+
+| Field | Effect |
+|---|---|
+| `freehand: true` | Sample the cursor while the pointer is held and commit on release: one press-drag-release is one stroke. Only the first and last anchors get grab handles. Requires `points: 0`. |
+| `expand(clicked, ctx)` | Turn the anchors actually clicked into the tool's full anchor set, so it can place a complete, editable default from fewer clicks. `ctx` carries `barSeconds` and `visibleBars`. |
+
+`expand` is how the position tools drop a ready 1:1 box from one click:
+
+```ts
+registerDrawingTool({
+  id: 'my-box',
+  name: 'My Box',
+  points: 1,                     // one click places it...
+  expand: (clicked, { barSeconds, visibleBars }) => {
+    const p = clicked[0];
+    const span = barSeconds * Math.max(5, Math.round(visibleBars * 0.08));
+    // ...but the drawing has three anchors, each a draggable handle.
+    return [p, { time: p.time + span, price: p.price * 1.01 },
+               { time: p.time + span, price: p.price * 0.99 }];
+  },
+  draw: (c) => { /* c.drawing.points has all three */ },
+  distance: () => null,
+});
+```
+
+Size the default against `visibleBars`, not a fixed bar count: a fixed count is a hairline
+when zoomed out and fills the pane when zoomed in.
+
+## Building a toolbar
+
+The controller is deliberately headless, so a host toolbar is a handful of buttons. The
+[yfinance example](https://github.com/marketcalls/openalgo-charts/tree/master/examples/yfinance)
+ships a full one: a vertical tool rail, a floating properties bar that appears on selection
+(colour grid, opacity, thickness, line style, lock, duplicate, delete) and can be dragged
+anywhere, plus Delete / Esc / Ctrl-Z key handling.
+
+```ts
+// tool rail
+for (const tool of registeredDrawingTools()) {
+  button(tool.name).onclick = () => draw.setTool(tool.id);
+}
+
+// properties bar on selection
+chart.on('draw:select', ({ id }) => showPropertiesBar(id));
+
+// keyboard
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Delete') { const id = draw.selected(); if (id) draw.remove(id); }
+  if (e.key === 'Escape') draw.setTool(null);
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') e.shiftKey ? draw.redo() : draw.undo();
+});
+```

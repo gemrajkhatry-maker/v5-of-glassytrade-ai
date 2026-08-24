@@ -1,0 +1,29 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/index.ts",
+    "src/trade/index.ts",
+    "src/transform/index.ts",
+    "src/profile/index.ts"
+  ],
+  "out": "website/public/api",
+  "tsconfig": "tsconfig.json",
+  "excludeInternal": true,
+  "readme": "none",
+  "name": "OpenAlgo Charts API",
+  "intentionallyNotExported": [
+    "CanvasLayer",
+    "CrosshairMode",
+    "DataLayer",
+    "IstParts",
+    "SeriesRecord",
+    "KeyLike",
+    "HistoryResponse",
+    "RawOrder",
+    "RawPosition",
+    "PaneRenderContext",
+    "RafCanceller",
+    "RafScheduler",
+    "InvalidateMask"
+  ]
+}

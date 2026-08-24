@@ -1,0 +1,108 @@
+---
+title: Custom Data Feeds
+description: The DataFeed and TradeFeed interfaces, and writing an adapter for any broker.
+---
+
+# Custom data feeds
+
+The engine never imports a broker SDK. It depends on two small interfaces, so wiring a new
+source is a focused adapter - not a fork.
+
+## DataFeed
+
+```ts
+interface DataFeed {
+  getBars(req: BarsRequest): Promise<Bar[]>;
+  // optional: live emission for sources that push interval bars directly
+  subscribeBars?(req: BarsRequest, onBar: (bar: Bar) => void): () => void;
+}
+
+interface BarsRequest {
+  symbol: string;
+  exchange: string;
+  interval: string;       // '5s' | '1m' | '1h' | 'D' | ...
+  from?: number;          // UTC seconds
+  to?: number;            // UTC seconds
+}
+```
+
+`interval` is a **code your feed and the engine both have to agree on**. The built-in tokens
+(`5s`, `1m`, `1h`, `D`, `W`) resolve on their own; anything else, including a monthly bar or
+a 500-tick bar, is registered by the host. See [Custom Intervals](/docs/custom-intervals),
+and note that an unrecognised code now throws rather than quietly meaning one minute.
+
+A minimal adapter just maps your API's rows to `Bar` (UTC seconds + OHLCV):
+
+```ts
+class MyFeed implements DataFeed {
+  async getBars(req: BarsRequest): Promise<Bar[]> {
+    const rows = await fetchFromMyApi(req);
+    return rows.map((r) => ({
+      time: Math.floor(r.epochMs / 1000),
+      open: r.o, high: r.h, low: r.l, close: r.c, volume: r.v,
+    })).sort((a, b) => a.time - b.time);
+  }
+}
+```
+
+## Warm loads for any feed
+
+`withBarCache` is a `DataFeed` in and a `DataFeed` out, so an adapter of your own gets the
+same warm-load caching the bundled one does, with nothing to implement:
+
+```ts
+import { withBarCache } from 'openalgo-charts';
+
+const feed = withBarCache(new MyFeed(), { ttlMs: 60_000 });
+```
+
+Entries are keyed `symbol | exchange | interval` with the range deliberately left out, and
+**the forming bar is never stored**, because a chart that paints a frozen candle from cache
+is confidently wrong with no spinner to warn anyone. See [Bar Cache](/docs/bar-cache) for
+the freshness rules, the memory bounds, and how to plug in your own persistent store.
+
+## TradeFeed
+
+There are **two** interfaces here and they are not interchangeable. `OrderEngine` takes the
+smaller `OrderFeed`; `TradeFeed` is the higher-level broker abstraction with its own
+subscriptions.
+
+`OrderFeed` (from `openalgo-charts/trade`) is what the engine's write path needs, and the
+only one you must implement to place orders. Note that `place` receives the engine's
+`mode`, so an adapter can route analyzer traffic differently from live:
+
+```ts
+interface OrderFeed {
+  place(req: PlaceRequest & { mode: 'live' | 'analyzer' }): Promise<{ orderId: string }>;
+  modify(orderId: string, patch: { price?: number; triggerPrice?: number; qty?: number }): Promise<void>;
+  cancel(orderId: string): Promise<void>;
+}
+```
+
+`TradeFeed` (from the base package) is the broader broker surface, with push subscriptions
+rather than snapshot getters:
+
+```ts
+interface TradeFeed {
+  placeOrder(o: PlaceOrder): Promise<{ orderId: string }>;
+  modifyOrder(orderId: string, patch: Partial<PlaceOrder>): Promise<void>;
+  cancelOrder(orderId: string): Promise<void>;
+  subscribeOrders(cb: (orders: unknown[]) => void): UnsubscribeFn;
+  subscribePositions(cb: (positions: unknown[]) => void): UnsubscribeFn;
+}
+```
+
+Implement against your broker and the entire on-chart trading layer works unchanged. The
+bundled `OpenAlgoTradeFeed` implements `OrderFeed` and is the reference implementation;
+`FakeBroker` is an in-memory `OrderFeed` for tests and demos.
+
+## Time conversion helpers
+
+The library exports the conversions it uses internally, so your adapter can reuse them:
+
+```ts
+import {
+  epochMsToUtcSeconds, istStringToUtcSeconds, utcSecondsToIstDateString,
+  formatIstTime, formatIstTimeSeconds, IST_OFFSET_SECONDS,
+} from 'openalgo-charts';
+```
