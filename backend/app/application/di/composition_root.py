@@ -121,9 +121,11 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
     from quant.multi_engine import QuantCoordinator
     from quant.contracts.ports.market_data import IMarketData
     from quant.contracts.ports.broker import IBroker
+    from quant.contracts.ports.storage import IStorage
 
     market_data = container.resolve(IMarketData)
     broker = container.resolve(IBroker)
+    storage = container.resolve(IStorage)
 
     candle_minutes = int(getattr(config, "candle_timeframe_minutes", 5) or 5)
     scanner_cfg = getattr(config, "scanner", None)
@@ -139,6 +141,8 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         "interval_seconds": candle_minutes * 60,
         "include_futures": include_futures,
         "underlying_priority": _settings.SCANNER_UNDERLYING_PRIORITY,
+        "live_oms_unwired": is_live_mode(),
+        "max_trades_per_session": int(getattr(config.risk, "max_trades_per_session", 6)),
     }
     logger.info(
         "QuantCoordinator config: underlyings=%s n=%d exchange=%s expiry_index=%d "
@@ -156,6 +160,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         market_data=market_data,
         broker=broker,
         config=coord_config,
+        storage=storage,
     )
 
 

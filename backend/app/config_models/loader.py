@@ -140,7 +140,7 @@ def _parse_exchange(name: str, data: dict) -> ExchangeConfig:
         enabled=data.get("enabled", True),
         segment=data.get("segment", ""),
         session_open=data.get("session_open", "09:15"),
-        session_close=data.get("session_close", "15:15"),
+        session_close=data.get("session_close", "15:30"),
         warmup_minutes=data.get("warmup_minutes", 15),
         timezone=data.get("timezone", "Asia/Kolkata"),
         eia_suppression_minutes=data.get("eia_suppression_minutes", 15),
@@ -201,15 +201,12 @@ def load_config(
     flags_data = _load_yaml(config_path / "feature_flags.yaml")
     flags_raw = flags_data.get("features", flags_data)
     flags = FeatureFlags(
-        true_delta_lee_ready=flags_raw.get("true_delta_lee_ready", False),
         realistic_cost_model=flags_raw.get("realistic_cost_model", False),
-        parallel_symbol_sessions=flags_raw.get("parallel_symbol_sessions", False),
         short_signals_enabled=flags_raw.get("short_signals_enabled", False),
         risk_tier_engine=flags_raw.get("risk_tier_engine", False),
         walk_forward_validation=flags_raw.get("walk_forward_validation", False),
         scalp_engine_enabled=flags_raw.get("scalp_engine_enabled", False),
         ib_breakout_scalp=flags_raw.get("ib_breakout_scalp", False),
-        print_level_trigger=flags_raw.get("print_level_trigger", False),
     )
 
     # STEP 5: Parse into typed objects
@@ -235,7 +232,7 @@ def load_config(
             risk_per_trade_pct=risk_data.get("risk_per_trade_pct", 0.005),
             max_daily_loss_pct=risk_data.get("max_daily_loss_pct", 0.02),
             max_consecutive_losses=risk_data.get("max_consecutive_losses", 3),
-            max_trades_per_session=risk_data.get("max_trades_per_session", 50),
+            max_trades_per_session=risk_data.get("max_trades_per_session", 6),
             max_drawdown_pct=risk_data.get("max_drawdown_pct", 0.03),
             absolute_ceiling_pct=risk_data.get("absolute_ceiling_pct", 0.01),
             max_concurrent_positions=risk_data.get("max_concurrent_positions", 5),
@@ -280,9 +277,7 @@ def _log_startup_summary(config: SystemConfig) -> None:
     )
     logger.info("  Feature flags:")
     for fname in (
-        "true_delta_lee_ready",
         "realistic_cost_model",
-        "parallel_symbol_sessions",
         "short_signals_enabled",
         "risk_tier_engine",
         "walk_forward_validation",

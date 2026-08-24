@@ -35,9 +35,7 @@ class SessionRisk:
                  base_risk_pct: float = 0.005,          # 0.5% risk per trade (was 1%)
                  max_daily_loss_pct: float = 0.02,       # 2% max daily loss (was 3%)
                  max_consecutive_losses: int = 3,
-                 # TODO: Testing Mode — Raised to 50 for active paper testing & validation.
-                 # Change back to 6 in production per Fabio Valentini selective trading rule.
-                 max_trades_per_session: int = 50,
+                 max_trades_per_session: int = 6,
                  *,
                  storage: Any | None = None,
                  symbol: str = "",
@@ -82,8 +80,16 @@ class SessionRisk:
             self._trades_today = int(data.get("trades_today", 0))
             self._halted = bool(data["halted"])
             self._halt_reason = str(data["halt_reason"])
-            # If previous halt was purely due to lower max_trades limit and we are now under the new limit, unhalt
-            if self._halted and "max trades/session reached" in self._halt_reason and self._trades_today < self._max_trades_per_session:
+            # If previous halt was purely due to lower max_trades limit and we are now under the new limit, unhalt.
+            # An external/emergency halt (SIGTERM flatten) must NEVER auto-clear:
+            # a restart after an operator stop silently resuming trading would be worse than the bug it fixes.
+            if (
+                self._halted
+                and "max trades/session reached" in self._halt_reason
+                and self._trades_today < self._max_trades_per_session
+                and not self._halt_reason.startswith("external")
+                and "emergency" not in self._halt_reason.lower()
+            ):
                 self._halted = False
                 self._halt_reason = ""
             # Restore equity: starting capital adjusted by daily P&L
@@ -110,12 +116,21 @@ class SessionRisk:
                 self._save()
             self._equity = self._starting_equity + self._daily_pnl
         except Exception:
-            pass  # corrupt/absent store must not inherit a phantom halt
+            logger.warning(
+                "SessionRisk %s: failed to load persisted state — starting fresh",
+                self._symbol or "?",
+            )
 
-    def _save(self) -> None:
+    def _save(self) -> bool:
+        """Persist risk state. Returns whether the write reached disk.
+
+        ``kv_set`` implementations that don't report success (or when no
+        storage is wired) are treated as success — callers with money-safety
+        requirements (``halt()``) check the return explicitly instead.
+        """
         if self._storage is None:
-            return
-        self._storage.kv_set(self._key(), {
+            return True
+        ok = self._storage.kv_set(self._key(), {
             "daily_pnl": self._daily_pnl,
             "consecutive_losses": self._consecutive_losses,
             "consecutive_wins": self._consecutive_wins,
@@ -124,11 +139,10 @@ class SessionRisk:
             "halt_reason": self._halt_reason,
             "equity": self._equity,
         })
+        return True if ok is None else bool(ok)
 
     def record_trade(self, pnl: float) -> RiskState:
         with self._lock:
-            if self._halted:
-                return self.state()
             self._daily_pnl += pnl
             self._trades_today += 1
             # Update equity after each trade so next sizing uses real capital
@@ -141,6 +155,10 @@ class SessionRisk:
                 self._consecutive_losses += 1
                 self._consecutive_wins = 0
 
+            if self._halted:
+                self._save()
+                return self.state()
+
             # Halt checks
             if self._daily_pnl <= -self._max_daily_loss_pct * self._starting_equity:
                 self._halted = True
@@ -152,7 +170,13 @@ class SessionRisk:
                 self._halted = True
                 self._halt_reason = f"max trades/session reached ({self._max_trades_per_session})"
 
-            self._save()
+            saved = self._save()
+            if not saved:
+                logger.warning(
+                    "SessionRisk %s: failed to persist after trade (pnl=%.2f, halted=%s) "
+                    "— state is in-memory only",
+                    self._symbol or "?", pnl, self._halted,
+                )
             return self.state()
 
     def can_trade(self) -> tuple[bool, str]:
@@ -163,6 +187,38 @@ class SessionRisk:
             if self._trades_today >= self._max_trades_per_session:
                 return False, f"max trades/session reached ({self._max_trades_per_session})"
             return True, ""
+
+    def halt(self, reason: str) -> None:
+        """External halt — operator or shutdown handler (SIGTERM flatten).
+
+        Persists via _save() so a restart cannot silently resume trading
+        past an emergency stop. Distinct from record_trade's computed halts
+        only in provenance; can_trade() treats them identically.
+
+        The in-memory halt always takes effect immediately regardless of
+        disk state (can_trade() is checked in this process). But if the
+        write to disk fails, a process restart during the outage would
+        silently resume trading past an emergency stop — that must never
+        be silent, so a failed persist is raised loudly here instead of
+        swallowed (previously: quant/session_levels.py caught and logged
+        the OSError, and _save()'s return value was discarded).
+        """
+        with self._lock:
+            self._halted = True
+            self._halt_reason = reason or "external halt"
+            persisted = self._save()
+        if not persisted:
+            logger.critical(
+                "SessionRisk %s: emergency halt %r is ACTIVE in-memory but "
+                "FAILED to persist to disk — a restart during this outage "
+                "will silently resume trading past this stop",
+                self._symbol or "?", self._halt_reason,
+            )
+            raise RuntimeError(
+                f"SessionRisk halt persistence failed for symbol={self._symbol!r} "
+                f"reason={self._halt_reason!r}; halt is in-memory only and will "
+                "not survive a restart"
+            )
 
     def position_size(
         self,

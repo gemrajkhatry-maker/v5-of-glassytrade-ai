@@ -49,6 +49,7 @@ from quant.events import (
     Event,
     EventBus,
     PositionClosed,
+    PositionReduced,
     PositionOpened,
     RiskUpdated,
     SignalApproved,
@@ -96,6 +97,8 @@ class QuantEngine:
         underlying_gateway=None,
         strategy: TradingStrategy | None = None,
         portfolio_risk=None,
+        oms=None,
+        max_trades_per_session: int = 6,
     ) -> None:
         self._gateway = gateway
         self._underlying_gateway = underlying_gateway
@@ -140,6 +143,7 @@ class QuantEngine:
         self._option_amt_engine = None
         self._option_amt_dto: dict | None = None
         self._underlying_amt_dto: dict | None = None
+        self._last_underlying_bar = None
         # Last seen option-premium close — the ONLY valid price scale for
         # signals/positions on this (option) engine. Futures-scale prices on
         # an option instrument produce crore-scale phantom P&L.
@@ -187,7 +191,10 @@ class QuantEngine:
         # Lot-aware paper OMS: the position size is snapped to lot multiples
         # (units per lot from the broker) so paper rupee P&L matches live
         # fills exactly — see PaperOMS docstring.
-        self._oms = PaperOMS(lot_size=lot_size)
+        # The engine owns orchestration, not venue selection.  Paper remains
+        # the safe default for direct replay/test construction; live startup
+        # must inject a complete OMS explicitly.
+        self._oms = oms if oms is not None else PaperOMS(lot_size=lot_size)
         self._exits = ExitEngine(time_stop_bars=time_stop_bars)
         # Strategy — pluggable entry/exit logic. Defaults to the AMT scalping
         # playbook (Fabio Valentini). Swap for momentum, mean-reversion, etc.
@@ -207,7 +214,8 @@ class QuantEngine:
         # _session_date is always None at __init__ time (set on first bar), so
         # we pass None here and SessionRisk._today() fills it correctly.
         self._risk = SessionRisk(storage=self._session_levels, symbol=self.symbol,
-                                 portfolio_risk=self._portfolio_risk)
+                                 portfolio_risk=self._portfolio_risk,
+                                 max_trades_per_session=max_trades_per_session)
         self._bus = EventBus()
         self._projector = StateProjector()
         self._journal_subscribed = False
@@ -227,12 +235,13 @@ class QuantEngine:
 
             for evt_type in (BarClosed, DecisionProduced,
                             SignalApproved, PositionOpened, PositionClosed,
+                            PositionReduced,
                             RiskUpdated, DepthUpdated, AmtUpdated):
                 self._bus.subscribe(evt_type, _journal_subscriber,
                                     priority=-100)
         else:
             self._pending_journal_path = None
-        self._journal_subscribed = False
+            self._journal_subscribed = False
         # ponytail: bounded ring for the whole-session trace. 10k bars @ ~10 events
         # per bar covers a 6.5-hour NSE session; older events fall out of memory.
         # Full history still lands in the tick journal (quant/persistence.Journal).
@@ -311,8 +320,20 @@ class QuantEngine:
 
         for evt_type in (BarClosed, DecisionProduced,
                         SignalApproved, PositionOpened, PositionClosed,
+                        PositionReduced,
                         RiskUpdated, DepthUpdated, AmtUpdated):
             self._bus.subscribe(evt_type, _journal_subscriber, priority=-100)
+
+    def attach_storage(self, storage) -> None:
+        """Project PositionOpened/Closed onto IStorage (restart book)."""
+        from quant.persistence_bridge import PositionStorageBridge
+        PositionStorageBridge(storage).attach(self._bus)
+
+    def restore_position(self, position) -> None:
+        """Rehydrate the in-memory book after a process restart."""
+        self._position = position
+        self._entry_bar_index = self._bar_index
+        self._entry_time_epoch = 0.0
 
     def _cert_trace(self, bar=None, stage: str = "", **fields) -> None:
         """S1 decision traceability: append a certification record for this
@@ -351,6 +372,13 @@ class QuantEngine:
         self._amt_engine.seed()
         if self._option_amt_engine is not None:
             self._option_amt_engine.seed()
+            if self._option_amt_engine.last_amt_dto:
+                self._option_amt_dto = self._option_amt_engine.last_amt_dto
+                if self._amt_engine.last_amt_dto:
+                    self._underlying_amt_dto = self._amt_engine.last_amt_dto
+                self._emit_merged_amt(self._option_amt_dto, self._option_amt_dto.get("time", ""))
+        elif self._amt_engine.last_amt_dto:
+            self._emit(AmtUpdated(symbol=self.symbol, time=self._amt_engine.last_amt_dto.get("time", ""), amt=self._amt_engine.last_amt_dto))
         steps = 0
         while True:
             if max_steps is not None and steps >= max_steps:
@@ -377,7 +405,14 @@ class QuantEngine:
                         # premium SL/TP against futures prices produced
                         # crore-scale phantom P&L.
                         if self._position is None:
-                            self._decide(self._option_amt_dto, option_bar)
+                            # Auction evidence from the underlying. Execution
+                            # prices from the option bar, translated below.
+                            if self._underlying_amt_dto and self._last_underlying_bar is not None:
+                                self._decide(
+                                    self._underlying_amt_dto,
+                                    self._last_underlying_bar,
+                                    execution_bar=option_bar,
+                                )
                         else:
                             self._manage_exit(self._option_amt_dto, option_bar)
 
@@ -396,6 +431,7 @@ class QuantEngine:
                             # Futures bars only update the auction-structure DTO
                             # (decision evidence). They NEVER drive entries or
                             # exits on an option engine — different price scale.
+                            self._last_underlying_bar = ubar
                             self._underlying_amt_dto = self._amt_engine.analyze(ubar)
                             self._emit_merged_amt(self._underlying_amt_dto, ubar.time)
                         utick = self._underlying_gateway.try_next_tick()
@@ -454,7 +490,7 @@ class QuantEngine:
         else:
             self._manage_exit(amt_dto, bar)
 
-    def _decide(self, amt_dto: dict, bar) -> None:
+    def _decide(self, amt_dto: dict, bar, execution_bar=None) -> None:
         # --- Guard 0: trade-count / risk halt check BEFORE building any context ---
         can_trade, no_trade_reason = self._risk.can_trade()
         if not can_trade:
@@ -494,7 +530,18 @@ class QuantEngine:
                 "⏳ [COOLDOWN] %s: %d bars remaining before next entry",
                 self.symbol, cooldown_bars_remaining,
             )
-            return  # Skip decision entirely during cooldown
+            from quant.decision.decision_service import QuantDecision
+            cooldown_decision = QuantDecision(
+                approved=False,
+                signal=None,
+                reason="COOLDOWN",
+                phase="",
+                gate_results=(),
+                block_reasons=(f"Cooldown: {cooldown_bars_remaining} bars remaining",),
+                model_label="",
+            )
+            self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=cooldown_decision))
+            return
 
         # Event purity (F5): the decision uses the DTO that arrived WITH this
         # bar — re-reading mutable last_amt_dto here could pick up evidence
@@ -567,13 +614,11 @@ class QuantEngine:
             # If running on an option contract with underlying futures feed, translate signal to option premium
             if self._underlying_gateway is not None:
                 from quant.amt.session.selector import OptionSelector
-                cur_bar = self._aggregator.current_bar
-                opt_ltp = float(cur_bar.close) if (cur_bar and cur_bar.close > 0) else (float(bar.close) if bar else 0.0)
-                if opt_ltp > 0 and abs(opt_ltp - signal.entry) > 1.0:
+                exec_bar = execution_bar or self._aggregator.current_bar or bar
+                opt_ltp = float(exec_bar.close) if exec_bar and exec_bar.close > 0 else 0.0
+                if opt_ltp > 0:
                     delta = float(getattr(ctx, "option_delta", 0.50) or 0.50)
                     selector = OptionSelector()
-                    # The selector owns the scale policy: returns None on
-                    # cross-scale contamination instead of mistranslating.
                     signal = selector.translate_underlying_signal_to_option(
                         signal=signal,
                         option_symbol=self.symbol,
@@ -660,8 +705,10 @@ class QuantEngine:
 
     def _manage_exit(self, amt_dto: dict, bar) -> None:
         pm = self._get_position_manager()
-        # Sync pyramid state from the position manager
-        closed = pm.manage_exit(
+        # manage_exit returns the surviving position (unchanged, or reduced by
+        # a tiered TP partial fill per spec §13.3), or None once fully closed.
+        was_open = self._position is not None
+        remaining = pm.manage_exit(
             amt_dto=amt_dto,
             bar=bar,
             position=self._position,
@@ -669,15 +716,15 @@ class QuantEngine:
             entry_bar_index=self._entry_bar_index,
             entry_time_epoch=getattr(self, '_entry_time_epoch', 0.0),
         )
-        if closed:
-            self._position = None
-            self._pyramid_positions = pm.pyramid_positions
-            self._pyramid_count = pm.pyramid_count
+        self._position = remaining
+        self._pyramid_positions = pm.pyramid_positions
+        self._pyramid_count = pm.pyramid_count
+        if was_open and remaining is None:
             self._last_close_bar_index = self._bar_index
             if self._portfolio_risk is not None:
                 self._portfolio_risk.record_close(
                     getattr(self, "_open_trade_risk", 0.0),
-                    float(getattr(closed, "pnl", 0.0) or 0.0),
+                    float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
                 )
                 self._open_trade_risk = 0.0
 
@@ -705,7 +752,13 @@ class QuantEngine:
 
     def _underlying(self) -> str:
         from quant.contracts.exchange_config import ExchangeConfig
-        return ExchangeConfig.for_exchange(self._market).extract_underlying(self.symbol) or "NIFTY"
+        underlying = ExchangeConfig.for_exchange(self._market).extract_underlying(self.symbol)
+        if not underlying:
+            raise ValueError(
+                f"Cannot resolve underlying for instrument {self.symbol!r} "
+                f"on market {self._market!r}"
+            )
+        return underlying
 
     @staticmethod
     def _depth_to_book(depth: dict) -> OrderBook | None:

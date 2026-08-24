@@ -11,6 +11,8 @@ Pure quant: imports ``quant.*`` + stdlib only.
 
 from __future__ import annotations
 
+import queue
+
 from quant.brokers.gateway import Tick
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 
@@ -34,7 +36,7 @@ class LiveGateway:
         if self._reader_queue is not None:
             try:
                 return self._reader_queue.get_nowait()
-            except Exception:
+            except queue.Empty:
                 return None
         return self._feed.try_next_tick(self._symbol)
 

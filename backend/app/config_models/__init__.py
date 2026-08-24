@@ -90,7 +90,7 @@ class ExchangeConfig:
     enabled: bool = True
     segment: str = ""
     session_open: str = "09:15"
-    session_close: str = "15:15"
+    session_close: str = "15:30"
     warmup_minutes: int = 15
     timezone: str = "Asia/Kolkata"
     eia_suppression_minutes: int = 15
@@ -105,7 +105,7 @@ class RiskConfig:
     max_daily_loss_pct: float = 0.02
     max_consecutive_losses: int = 3
     # TODO: Testing Mode — Raised to 50 for testing & validation. Revert to 6 in production.
-    max_trades_per_session: int = 50
+    max_trades_per_session: int = 6
     max_drawdown_pct: float = 0.03
     absolute_ceiling_pct: float = 0.01
     max_concurrent_positions: int = 5
@@ -122,11 +122,7 @@ class FeatureFlags:
     """All feature flags with defaults. Matches spec Phase -1, Component 3."""
 
     # Phase 0 flags
-    true_delta_lee_ready: bool = False
     realistic_cost_model: bool = False
-
-    # Phase 1 flags
-    parallel_symbol_sessions: bool = False
 
     # Phase 2 flags
     short_signals_enabled: bool = False
@@ -138,7 +134,6 @@ class FeatureFlags:
     # Phase 4 flags
     scalp_engine_enabled: bool = False
     ib_breakout_scalp: bool = False
-    print_level_trigger: bool = False
 
 
 @dataclass(frozen=True)

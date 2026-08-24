@@ -17,7 +17,8 @@ from quant.amt.session.scanner import OptionScannerService
 from quant.brokers.live_gateway import LiveGateway
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 from quant.contracts.aggregates import INITIAL_CAPITAL
-from quant.contracts.exchange_config import ExchangeConfig
+from quant.contracts.instrument_registry import DEFAULT_REGISTRY, is_futures_contract, root_token
+from quant.contracts.market_calendar import is_trading_day
 from quant.contracts.timezones import IST
 from quant.events import BarClosed
 from quant.runtime import QuantEngine
@@ -28,8 +29,13 @@ logger = logging.getLogger(__name__)
 
 
 def _is_futures_symbol(symbol: str) -> bool:
-    """Whether *symbol* uses one of the broker's futures contract formats."""
-    return symbol.strip().upper().endswith("FUT")
+    """Broker futures formats — never 'ends with FUT' alone."""
+    return is_futures_contract(symbol)
+
+
+def _canonical_root(symbol: str) -> str:
+    spec = DEFAULT_REGISTRY.try_resolve(symbol)
+    return spec.root if spec is not None else root_token(symbol)
 
 
 # Persist the coordinator's active contracts (JSON, stdlib-only) so a backend
@@ -119,11 +125,12 @@ class QuantCoordinator:
     connection for every symbol (Dhan allows up to 1000 instruments per
     connection)."""
 
-    def __init__(self, market_data, broker=None, config=None, strategy=None) -> None:
+    def __init__(self, market_data, broker=None, config=None, strategy=None, storage=None) -> None:
         self.market_data = market_data
         self.broker = broker
         self.config = {**_DEFAULT_CONFIG, **(config or {})}
         self._strategy = strategy  # TradingStrategy — None means engine uses default
+        self._storage = storage
         self._contracts_file = self.config.get("contracts_file") or _DEFAULT_CONTRACTS_FILE
         # Shared across all engines (one file, one lock) so prior levels are
         # consistent and NPOC records dedupe per session.
@@ -157,6 +164,25 @@ class QuantCoordinator:
 
     def start(self) -> None:
         with self._lifecycle_lock:
+            if self.config.get("live_oms_unwired"):
+                # A paper OMS behind a live process name is more dangerous
+                # than refusing to start: it creates UI state with no venue
+                # position and makes restart reconciliation meaningless.
+                raise RuntimeError(
+                    "Live execution is disabled: no complete live OMS is wired "
+                    "(submit, reduce, close, and broker reconciliation required)"
+                )
+            # Phase 2: zero holiday awareness previously existed anywhere in
+            # the coordinator — it would happily scan and spawn engines on
+            # NSE/MCX holidays. A calendar-closed day means no contracts to
+            # trade at all, not merely a scan with stale/empty results.
+            if not is_trading_day():
+                logger.info(
+                    "QuantCoordinator: today is not an NSE/MCX trading day — "
+                    "skipping scan/spawn"
+                )
+                self.started = True
+                return
             symbols = self._scan()
             self._feed.set_symbols(symbols)
             for symbol in symbols:
@@ -165,6 +191,13 @@ class QuantCoordinator:
 
     def rescan(self) -> list[str]:
         with self._lifecycle_lock:
+            if not is_trading_day():
+                logger.info(
+                    "QuantCoordinator: rescan skipped — not an NSE/MCX trading day"
+                )
+                self._stop_engines()
+                self._feed.set_symbols([])
+                return []
             self._stop_engines()
             symbols = self._scan(force=True)
             self._feed.set_symbols(symbols)
@@ -211,10 +244,48 @@ class QuantCoordinator:
                 if getattr(eng, "_crashed", False)
             )
 
+    def emergency_halt(self, reason: str = "emergency halt") -> int:
+        """Externally halt every engine's SessionRisk (SIGTERM flatten path).
+
+        Audit D-RISK-03: main.py's SIGTERM handler used to set
+        ``eng._risk_halted`` — an attribute QuantEngine never had — behind a
+        hasattr() guard, so the emergency stop was a silent no-op. The real
+        authority is each engine's SessionRisk; halting there blocks new
+        entries at Guard 0 of _decide() on every subsequent bar and persists
+        across restarts (SessionRisk.halt saves to kv).
+
+        Open positions are NOT force-closed here: exits keep evaluating on
+        their own bars, and a market order blast during shutdown can be
+        worse than letting SL/session-close finish the job. Returns the
+        number of engines halted so callers can log/verify.
+        """
+        halted = 0
+        with self._lock:
+            engines = list(self._engines.values())
+        for eng in engines:
+            risk = getattr(eng, "_risk", None)
+            if risk is not None and hasattr(risk, "halt"):
+                try:
+                    risk.halt(f"external/emergency: {reason}")
+                    halted += 1
+                except Exception:
+                    logger.exception("emergency_halt failed for %s", eng.symbol)
+        return halted
+
+    def journal_consecutive_failures(self) -> int:
+        """Max consecutive journal append failures across engines (for /health)."""
+        with self._lock:
+            engines = list(self._engines.values())
+        n = 0
+        for eng in engines:
+            journal = getattr(eng, "_journal", None)
+            n = max(n, int(getattr(journal, "consecutive_failures", 0) or 0))
+        return n
+
     def check_spot_drift(self, underlying: str, spot_price: float) -> bool:
         """Detect when price moves > 1.5 strike intervals away from active option strikes."""
-        from quant.amt.session.scanner import OptionScannerService
-        step = OptionScannerService._STRIKE_INTERVALS.get(underlying.upper(), 50)
+        spec = DEFAULT_REGISTRY.try_resolve(underlying)
+        step = spec.strike_interval if spec is not None else 50
         strikes = []
         with self._lock:
             active_symbols = list(self._engines.keys())
@@ -235,9 +306,10 @@ class QuantCoordinator:
         """Resolve active front-month futures for the configured underlyings."""
         symbols = []
         underlyings = self.config.get("futures_underlyings") or self.config.get("underlyings", [])
-        exchange = self.config.get("exchange", "NSE")
         for u in underlyings:
             fut_sym = None
+            spec = DEFAULT_REGISTRY.try_resolve(u)
+            exchange = spec.dhan_exchange if spec is not None else self.config.get("exchange", "NSE")
             if hasattr(self.market_data, "get_nearest_futures"):
                 fut_sym = self.market_data.get_nearest_futures(u, exchange=exchange)
             if not fut_sym:
@@ -258,10 +330,9 @@ class QuantCoordinator:
         futures = [s for s in persisted if _is_futures_symbol(s)]
         if set(futures) != set(futures_symbols):
             return False
-        config = ExchangeConfig.for_exchange(self.config.get("exchange", "NSE"))
-        roots = {config.extract_underlying(symbol) for symbol in futures_symbols}
+        roots = {_canonical_root(symbol) for symbol in futures_symbols}
         return all(
-            config.extract_underlying(symbol) in roots
+            _canonical_root(symbol) in roots
             for symbol in persisted
             if not _is_futures_symbol(symbol)
         )
@@ -328,27 +399,16 @@ class QuantCoordinator:
             logger.info("QuantCoordinator: persisted active contracts: %s", symbols)
         return symbols
 
-    def _resolve_tick_size(self, symbol: str) -> float:
-        """Exchange-authoritative tick size for *symbol* (REF-3).
+    def _session_profile_for(self, symbol: str) -> str:
+        """NSE/MCX session clock for *symbol* — never the coordinator's mode flag."""
+        return DEFAULT_REGISTRY.resolve(symbol).session_profile
 
-        The AMT/decision layers previously hardcoded 0.05 (NSE-option scale),
-        which is wrong for MCX futures (GOLDM=1.0) and corrupted SL placement
-        and profile bucketing. ExchangeConfig is the single authority.
-        """
-        try:
-            return ExchangeConfig.for_exchange(
-                self.config.get("exchange", "NSE")
-            ).get_tick_size(symbol)
-        except Exception:
-            return 0.05
+    def _resolve_tick_size(self, symbol: str) -> float:
+        """InstrumentRegistry tick. Unknown roots raise — never 0.05."""
+        return DEFAULT_REGISTRY.resolve(symbol).tick_size
 
     def _resolve_lot_size(self, symbol: str) -> float:
-        """Exchange lot size for *symbol* (units per lot) for paper OMS parity.
-
-        Routes through the market-data adapter's option-aware ``get_lot_size``
-        (resolves an actual NFO/MCX option contract of the underlying).
-        Falls back to ExchangeConfig metadata if lookup fails.
-        """
+        """Broker lot if present, else InstrumentRegistry. Unknown roots raise."""
         try:
             raw = self.market_data.get_lot_size(symbol)
             lot_size = float(raw or 0)
@@ -356,33 +416,15 @@ class QuantCoordinator:
                 return lot_size
         except Exception:
             pass
-
-        # Fallback to ExchangeConfig metadata
-        from quant.contracts.exchange_config import ExchangeConfig
-        ex = str(self.config.get("exchange", "MCX")).upper()
-        for market in (ex, "MCX", "NSE"):
-            try:
-                cfg = ExchangeConfig.for_exchange(market)
-                lot_size = float(cfg.get_lot_size(symbol))
-                if lot_size > 0:
-                    return lot_size
-            except Exception:
-                pass
-
-        logger.warning(
-            "lot size lookup failed for %s — paper sizing falls back to 1.0",
-            symbol,
-        )
-        return 1.0
+        return float(DEFAULT_REGISTRY.resolve(symbol).lot_size)
 
     def _spawn_engine(self, symbol: str) -> None:
         gateway = LiveGateway(self._feed, symbol)
         underlying_gateway = None
         if not _is_futures_symbol(symbol):
-            config = ExchangeConfig.for_exchange(self.config.get("exchange", "NSE"))
-            root = config.extract_underlying(symbol)
+            root = _canonical_root(symbol)
             futures = {
-                config.extract_underlying(future): future
+                _canonical_root(future): future
                 for future in self._engines
                 if _is_futures_symbol(future)
             }
@@ -403,12 +445,28 @@ class QuantCoordinator:
             history_source=self.market_data,
             lot_size=self._resolve_lot_size(symbol),
             tick_size=self._resolve_tick_size(symbol),
-            market=self.config.get("exchange") or "NSE",
+            market=self._session_profile_for(symbol),
             session_levels=self._session_levels,
             underlying_gateway=underlying_gateway,
             strategy=self._strategy,
             portfolio_risk=self._portfolio_risk,
+            max_trades_per_session=int(self.config.get("max_trades_per_session", 6)),
         )
+        if self.config.get("live_oms_unwired"):
+            engine._risk.halt("LIVE_OMS_UNWIRED")
+        if self._storage is not None:
+            engine.attach_storage(self._storage)
+            if not self.config.get("live_oms_unwired"):
+                try:
+                    rows = self._storage.load_open_positions() or []
+                except Exception:
+                    logger.exception("load_open_positions failed for %s", symbol)
+                    rows = []
+                from quant.execution.order import row_to_position
+                for row in rows:
+                    if row.get("symbol") == symbol:
+                        engine.restore_position(row_to_position(row))
+                        break
         if _journal_dir:
             from quant.persistence import Journal
 
@@ -421,13 +479,16 @@ class QuantCoordinator:
         thread = threading.Thread(
             target=engine.run, daemon=True, name=f"quant-{symbol}"
         )
-        thread.start()
+        # Publish ownership before starting the thread.  Otherwise shutdown,
+        # health, and option-underlying lookup can observe a running engine
+        # that is absent from the coordinator maps.
         with self._lock:
             self._engines[symbol] = engine
             self._gateways[symbol] = gateway
             if underlying_gateway is not None:
                 self._underlying_gateways[symbol] = underlying_gateway
             self._threads[symbol] = thread
+        thread.start()
         return engine
 
     def _stop_engine(self, symbol: str) -> None:

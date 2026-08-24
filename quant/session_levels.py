@@ -52,17 +52,21 @@ class SessionLevelStore:
     # KV store port (SessionRisk persistence — daily-loss budget)
     # ------------------------------------------------------------------
 
-    def kv_set(self, key: str, value: str) -> None:
+    def kv_set(self, key: str, value: str) -> bool:
         """Crash-safe key/value write, persisted alongside session levels.
 
         Mirrors ``Database.kv_set``'s contract: dict/list values are
         JSON-encoded so a later ``json.loads`` round-trips them.
+
+        Returns whether the write actually reached disk. Callers that persist
+        safety-critical state (e.g. ``SessionRisk.halt()``) must check this —
+        a halt that only lives in memory does not survive a restart.
         """
         if isinstance(value, (dict, list, tuple)):
             value = json.dumps(value)
         with self._lock:
             self._kv[str(key)] = str(value)
-            self._flush()
+            return self._flush()
 
     def kv_get(self, key: str) -> str | None:
         with self._lock:
@@ -157,19 +161,31 @@ class SessionLevelStore:
         self._npocs = data.get("npocs") or {}
         self._kv = data.get("kv") or {}
 
-    def _flush(self) -> None:
+    def _flush(self) -> bool:
+        """Write the in-memory store to disk. Returns True on success.
+
+        ``path=None`` (memory-only mode, e.g. tests/replay) reports success
+        since there is nothing to persist by design. A disk write failure is
+        reported (not raised) so most callers (levels/NPOC bookkeeping) keep
+        degrading gracefully; safety-critical callers like ``SessionRisk``
+        must check the return value themselves.
+        """
         if not self._path:
-            return
+            return True
         payload = {"levels": self._levels, "npocs": self._npocs, "kv": self._kv}
         dir_name = os.path.dirname(self._path) or "."
         fd, tmp = tempfile.mkstemp(dir=dir_name, prefix=".session-levels-", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, self._path)
+            return True
         except OSError:
             logger.warning("Failed to persist session levels to %s", self._path, exc_info=True)
             try:
                 os.unlink(tmp)
             except OSError:
                 pass
+            return False

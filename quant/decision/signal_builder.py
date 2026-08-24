@@ -2,11 +2,12 @@ from dataclasses import dataclass
 
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
+from quant.decision.stops import DEFAULT_TICK, structural_anchor, structural_stop
 
 MIN_STOP_DISTANCE_PCT = 0.1
 MAX_POSITION_QUANTITY = 1000
 # ponytail: NSE options tick size; promote to config when we trade a second instrument class
-TICK_SIZE_NSE_OPTIONS = 0.05
+TICK_SIZE_NSE_OPTIONS = DEFAULT_TICK
 
 
 def is_stop_too_thin(
@@ -85,68 +86,17 @@ class SignalBuilder:
             return None
 
         entry = float(ctx.bar.close)
-
-        # Canonical value area — the AMT analyzer's session-scoped, clamped VA
-        # the UI renders, matching gate 4 exactly (DecisionContext.poc/vah/val).
-        amt_val = ctx.val if ctx.val and ctx.val > 0 else None
-        amt_vah = ctx.vah if ctx.vah and ctx.vah > 0 else None
-
+        tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else TICK_SIZE_NSE_OPTIONS
+        anchor = structural_anchor(ctx, direction)
+        sl = structural_stop(direction, entry, anchor, tick)
         if direction == "LONG":
-            val = amt_val
-            vah = amt_vah
-            step = ctx.tick_size
-            if val is not None and vah is not None and val > vah:
-                # Corrupt / inverted profile -> triggers inverted SL rejection
-                anchor = val
-            elif (getattr(ctx, "nearest_buy_print_below", 0.0) or 0.0) > 0 \
-                    and entry > ctx.nearest_buy_print_below:
-                # A big BUY print below = institutional support. Anchor there
-                # (Fabio Gap #10): prints create structural levels.
-                anchor = ctx.nearest_buy_print_below
-            elif ctx.leg_lvn and ctx.leg_lvn > 0 and entry > ctx.leg_lvn:
-                anchor = ctx.leg_lvn
-            elif val is not None and entry > val:
-                anchor = val
-            elif hasattr(ctx.bar, "low") and float(ctx.bar.low) < entry:
-                anchor = float(ctx.bar.low)
-            else:
-                anchor = val or ctx.poc or (entry - 5 * (ctx.tick_size or TICK_SIZE_NSE_OPTIONS))
-            # Fabio: SL sits 1-2 ticks INSIDE the value-area/LVN edge, not a full
-            # profile bucket outside it.
-            sl = anchor - 2 * (ctx.tick_size or TICK_SIZE_NSE_OPTIONS)
-            if sl >= anchor:  # degenerate profile safety net
-                sl = anchor - step if step > 0 else anchor
-            if (val is None or vah is None or val <= vah) and sl >= entry:
-                sl = entry - max(step * 2, abs(entry) * (self.min_stop_distance_pct / 100.0))
-            # Fabio: target structural levels (prior POC / naked POC / opposite VA) when available.
-            # Fall back to fixed R:R multiplier when no structure qualifies.
+            if sl >= entry:
+                sl = entry - max(tick * 2, abs(entry) * (self.min_stop_distance_pct / 100.0))
             fixed_tp = entry + (entry - sl) * self.tp_multiplier
             tp = self._structural_tp(ctx, entry, sl, "LONG", fixed_tp)
         else:
-            val = amt_val
-            vah = amt_vah
-            step = ctx.tick_size
-            if val is not None and vah is not None and val > vah:
-                # Corrupt / inverted profile -> triggers inverted SL rejection
-                anchor = vah
-            elif (getattr(ctx, "nearest_sell_print_above", 0.0) or 0.0) > 0 \
-                    and entry < ctx.nearest_sell_print_above:
-                anchor = ctx.nearest_sell_print_above
-            elif ctx.leg_lvn and ctx.leg_lvn > 0 and entry < ctx.leg_lvn:
-                anchor = ctx.leg_lvn
-            elif vah is not None and entry < vah:
-                anchor = vah
-            elif hasattr(ctx.bar, "high") and float(ctx.bar.high) > entry:
-                anchor = float(ctx.bar.high)
-            else:
-                anchor = vah or ctx.poc or (entry + 5 * (ctx.tick_size or TICK_SIZE_NSE_OPTIONS))
-            # Fabio: SL sits 1-2 ticks INSIDE the value-area/LVN edge, not a full
-            # profile bucket outside it.
-            sl = anchor + 2 * (ctx.tick_size or TICK_SIZE_NSE_OPTIONS)
-            if sl <= anchor:  # degenerate profile safety net
-                sl = anchor + step if step > 0 else anchor
-            if (val is None or vah is None or val <= vah) and sl <= entry:
-                sl = entry + max(step * 2, abs(entry) * (self.min_stop_distance_pct / 100.0))
+            if sl <= entry:
+                sl = entry + max(tick * 2, abs(entry) * (self.min_stop_distance_pct / 100.0))
             fixed_tp = entry - (sl - entry) * self.tp_multiplier
             tp = self._structural_tp(ctx, entry, sl, "SHORT", fixed_tp)
 
@@ -157,6 +107,11 @@ class SignalBuilder:
         try:
             assert monotonic, f"inverted signal: direction={direction} entry={entry} sl={sl} tp={tp}"
         except AssertionError:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "SignalBuilder: inverted signal dropped — %s entry=%.2f sl=%.2f tp=%.2f",
+                direction, entry, sl, tp,
+            )
             return None
 
         risk = abs(entry - sl)
