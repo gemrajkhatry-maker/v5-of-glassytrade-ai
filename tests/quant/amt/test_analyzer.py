@@ -356,7 +356,8 @@ class TestAMTAnalyzer:
         """detect_displacement_leg should return LVN list (possibly empty)."""
         analyzer = AMTAnalyzer()
         data = generate_market_data(50, 100, "bullish")
-        result = analyzer.detect_displacement_leg(data)
+        from quant.amt.profile.displacement import detect_displacement_leg
+        result = detect_displacement_leg(data, analyzer.config)
         assert isinstance(result, dict)
         assert isinstance(result["has_displacement"], bool)
         assert isinstance(result["lvns"], list)
@@ -505,7 +506,6 @@ class TestAnalyzeIntegration:
 
 
 class TestIncrementalProfile:
-    pytestmark = pytest.mark.skip(reason="Pre-existing incremental profile assertion failure")
     """Tests for incremental profile updates matching full rebuilds."""
 
     def test_incremental_matches_full_rebuild(self):
@@ -573,12 +573,16 @@ class TestIncrementalProfile:
         profile_max = max(p.price for p in result.profile)
         assert profile_max >= 119  # profile covers the outlier region
 
-    def test_resolution_increaesed_to_200(self):
-        """Profile should have 200 buckets by default after Phase 4 fix."""
+    def test_resolution_auto_scales_with_price_range(self):
+        """Profile resolution is now auto-computed from price range/tick
+        size (quant/amt/profile/volume_profile.py::_auto_bucket_count),
+        not a fixed 200 — that was the Phase 4 fix's initial value, since
+        superseded by dynamic bucketing clamped to [100, 1000]. Pin the
+        clamp bounds instead of the stale fixed value."""
         analyzer = AMTAnalyzer()
         data = generate_market_data(50, 100, "sideways")
         result = analyzer.analyze(data)
-        assert len(result.profile) == 200
+        assert 100 <= len(result.profile) <= 1000
 
     def test_lookback_exceeds_old_limit(self):
         """Analyzer should use >200 candles if provided (no more hard capping)."""
@@ -618,7 +622,8 @@ class TestIncrementalProfile:
         # 12 is closer to 15 than 18 is.
         # But 18 is closer to SESSION VWAP (200).
         # If it uses local tie-break, POC should be 12.
-        result = analyzer.detect_displacement_leg(leg_data)
+        from quant.amt.profile.displacement import detect_displacement_leg
+        result = detect_displacement_leg(leg_data, analyzer.config)
         assert result["poc"] == pytest.approx(12, abs=1.0)
 
 
@@ -650,8 +655,8 @@ class TestVWAPDoubleAccumulationRegression:
 
         # Single pass: c5 and c6 each accumulated exactly once.
         # _make_candle_timed gives typical_price == close (h/l symmetric).
-        assert analyzer._vwap_cum_vol == pytest.approx(200.0)
-        assert analyzer._vwap_cum_quote_vol == pytest.approx(100 * 100 + 120 * 100)
+        assert analyzer._vwap._cum_vol == pytest.approx(200.0)
+        assert analyzer._vwap._cum_quote_vol == pytest.approx(100 * 100 + 120 * 100)
         # session_vwap is the same-window VWAP (all 6 candles are inside the
         # 60-bar recent regime window) — the accumulator counters above are
         # the B-20 single-accumulation regression check.
@@ -678,17 +683,17 @@ class TestVWAPDoubleAccumulationRegression:
         analyzer.analyze(base + [c5])
         # Re-feed the same trailing candle (sub-candle update): nothing new.
         analyzer.analyze(base + [c5])
-        assert analyzer._vwap_cum_vol == pytest.approx(100.0)
-        assert analyzer._vwap_cum_quote_vol == pytest.approx(100 * 100)
+        assert analyzer._vwap._cum_vol == pytest.approx(100.0)
+        assert analyzer._vwap._cum_quote_vol == pytest.approx(100 * 100)
         # Shifted-variance accumulator is gated identically — a re-feed must
         # not widen the σ bands (both numerator and denominator stay exact).
-        sq_after_refeed = analyzer._vwap_cum_sq_vol
+        sq_after_refeed = analyzer._vwap._cum_sq_vol
 
         # New candle arrives — accumulated exactly once.
         result =        analyzer.analyze(base + [c5, c6])
-        assert analyzer._vwap_cum_vol == pytest.approx(200.0)
-        assert analyzer._vwap_cum_quote_vol == pytest.approx(100 * 100 + 120 * 100)
-        assert analyzer._vwap_cum_sq_vol > sq_after_refeed  # c6 adds variance
+        assert analyzer._vwap._cum_vol == pytest.approx(200.0)
+        assert analyzer._vwap._cum_quote_vol == pytest.approx(100 * 100 + 120 * 100)
+        assert analyzer._vwap._cum_sq_vol > sq_after_refeed  # c6 adds variance
         # Same-window VWAP (all candles inside the 60-bar regime window).
         assert result.session_vwap == pytest.approx((100 * 100 * 5 + 120 * 100) / 600.0)
 
@@ -705,12 +710,12 @@ class TestVWAPDoubleAccumulationRegression:
         first_new = _make_candle_timed(110.0, "2026-01-02T09:00:00Z", volume=200)
 
         analyzer.analyze(base + [last_old])
-        assert analyzer._vwap_cum_vol == pytest.approx(100.0)
+        assert analyzer._vwap._cum_vol == pytest.approx(100.0)
 
         # New session: accumulators reset, then first candle counted once.
         result = analyzer.analyze(base + [last_old, first_new])
-        assert analyzer._vwap_cum_vol == pytest.approx(200.0)
-        assert analyzer._vwap_cum_quote_vol == pytest.approx(110 * 200)
+        assert analyzer._vwap._cum_vol == pytest.approx(200.0)
+        assert analyzer._vwap._cum_quote_vol == pytest.approx(110 * 200)
         # Same-window VWAP over all 6 passed candles (5 @100 vol100 + 1 @110 vol200).
         assert result.session_vwap == pytest.approx((100 * 100 * 5 + 110 * 200) / 700.0)
 

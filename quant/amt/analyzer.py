@@ -30,6 +30,7 @@ from quant.contracts.value_objects import (
     AMTResult,
 )
 from quant.amt.models.observation import AMTObservation
+from quant.amt.triple_a import TripleAMachine
 from quant.contracts.entities import Signal
 from quant.contracts.constants import (
     LVN_MIN_PERSISTENCE_BARS,
@@ -264,15 +265,9 @@ class AMTAnalyzer:
         self._prev_agg_prints: list[AggressivePrint] = []
         self._prev_agg_data_len: int = 0
         self._bubble_registry = AggressivePrintRegistry()
-        # Session VWAP accumulator
-        self._vwap_cum_vol: float = 0.0
-        self._vwap_cum_quote_vol: float = 0.0
-        self._vwap_last_time: str = ""
-        # VWAP variance accumulator for σ bands
-        self._vwap_cum_sq_vol: float = 0.0  # Σ((TP - shift)² × volume)
-        self._vwap_shift: float = 0.0  # Reference price for numerically stable variance
-        # Session bar history (OHLC) for True Range ATR in absorption checks
-        self._session_data: list[OHLC] = []
+        # Session VWAP accumulator (extracted from inline state — audit decomposition step 1)
+        from quant.amt.profile.vwap import SessionVWAP
+        self._vwap = SessionVWAP()
         # Initial Balance tracker
         self._ib_tracker = InitialBalanceEngine(ib_minutes=IB_MINUTES)
         # Sticky IB break state (survives price re-entry into IB)
@@ -300,6 +295,9 @@ class AMTAnalyzer:
         self._ofi_calculator = OFICalculator()
         self._absorption_detector = AbsorptionDetector()
         self._persistent_agg_scorer = PersistentAggressionScorer()
+        self._triple_a = TripleAMachine()
+        self._session_market = "NSE"
+        self._last_resolve_key = ""
 
     @staticmethod
     def _detect_option_type(symbol: str) -> str:
@@ -319,616 +317,38 @@ class AMTAnalyzer:
             return "PUT"
         return "UNKNOWN"
 
-    def detect_displacement_leg(self, data: list[OHLC]) -> dict:
-        """Detect displacement and return leg profile data.
-
-        Always builds a leg profile from the most recent directional move
-        (consecutive same-direction candles from the end). The strict displacement
-        flag is set when the move also meets range expansion criteria.
-        """
-        def _leg_result(*, has_displacement: bool, profile: list,
-                        lvns: list, poc: float, vah: float, val: float,
-                        swing_delta: float) -> dict:
-            """Single constructor for the leg-result shape — the former
-            inline literals had divergent key sets (audit SMELL-9)."""
-            return {
-                "has_displacement": has_displacement,
-                "profile": profile,
-                "lvns": lvns,
-                "poc": poc,
-                "vah": vah,
-                "val": val,
-                "swing_delta": swing_delta,
-            }
-
-        empty = _leg_result(has_displacement=False, profile=[], lvns=[],
-                            poc=0.0, vah=0.0, val=0.0, swing_delta=0.0)
-        if len(data) < 5:
-            return empty
-
-        # Find the most recent directional leg: consecutive candles from end
-        # that share the same direction (bull or bear)
-        last = data[-1]
-        is_bull = last.close >= last.open
-        leg_candles = [last]
-        opposite_tolerance = 1  # allow 1 reversal candle within leg
-        opposite_count = 0
-        for i in range(len(data) - 2, max(len(data) - DISPLACEMENT_LOOKBACK, -1), -1):
-            c = data[i]
-            if (c.close >= c.open) == is_bull:
-                leg_candles.insert(0, c)
-                opposite_count = 0
-            else:
-                opposite_count += 1
-                if opposite_count > opposite_tolerance:
-                    break
-                leg_candles.insert(0, c)  # include the reversal candle
-
-        if len(leg_candles) < 2:
-            return empty
-
-        is_disp = detect_displacement(data, self.config.DISPLACEMENT_MULTIPLIER)
-        leg_profile = create_profile(leg_candles, buckets=DELTA_PROFILE_BUCKETS)
-        if len(leg_profile) < 3:
-            return _leg_result(
-                has_displacement=is_disp, profile=leg_profile, lvns=[],
-                poc=0.0, vah=0.0, val=0.0,
-                swing_delta=sum(c.delta for c in leg_candles),
-            )
-        leg_lvns = find_lvns(leg_profile, self.config)
-
-        # POC — VWAP tie-break (matches session logic)
-        max_vol = max(p.volume for p in leg_profile)
-        poc_candidates = [i for i, p in enumerate(leg_profile) if p.volume == max_vol]
-
-        # Local Leg VWAP for tie-break
-        leg_vol = sum(c.volume for c in leg_candles)
-        leg_vwap = (
-            sum(c.close * c.volume for c in leg_candles) / leg_vol
-            if leg_vol > 0
-            else leg_candles[-1].close
-        )
-
-        poc_idx = min(
-            poc_candidates, key=lambda i: abs(leg_profile[i].price - leg_vwap)
-        )
-        leg_poc = leg_profile[poc_idx].price
-
-        # Value Area (70%) — CME two-row pairs method (matches session logic)
-        total_volume = sum(p.volume for p in leg_profile)
-        target_volume = total_volume * VALUE_AREA_PCT
-        current_volume = max_vol
-        up_idx, down_idx = poc_idx, poc_idx
-        while current_volume < target_volume:
-            up_pair = 0.0
-            up_count = 0
-            for k in range(1, 3):
-                if up_idx + k < len(leg_profile):
-                    up_pair += leg_profile[up_idx + k].volume
-                    up_count += 1
-            down_pair = 0.0
-            down_count = 0
-            for k in range(1, 3):
-                if down_idx - k >= 0:
-                    down_pair += leg_profile[down_idx - k].volume
-                    down_count += 1
-            if not up_count and not down_count:
-                break
-            if up_count and (not down_count or up_pair >= down_pair):
-                for k in range(1, up_count + 1):
-                    if up_idx + 1 < len(leg_profile):
-                        up_idx += 1
-                        current_volume += leg_profile[up_idx].volume
-            elif down_count:
-                for k in range(1, down_count + 1):
-                    if down_idx - 1 >= 0:
-                        down_idx -= 1
-                        current_volume += leg_profile[down_idx].volume
-
-        step = (
-            leg_profile[1].price - leg_profile[0].price if len(leg_profile) > 1 else 0
-        )
-        half_step = step / 2
-        leg_vah = leg_profile[up_idx].price + half_step
-        leg_val = leg_profile[down_idx].price - half_step
-        return _leg_result(
-            has_displacement=is_disp,
-            profile=leg_profile,
-            lvns=leg_lvns,
-            poc=leg_poc,
-            vah=leg_vah,
-            val=leg_val,
-            swing_delta=sum(c.delta for c in leg_candles),
-        )
-
     def _update_session_vwap(self, current, typical_price) -> float:
         """Update session VWAP with session boundary detection and accumulation.
 
+        Delegates accumulation to SessionVWAP; handles session-boundary
+        resets of non-VWAP trackers (IB, CVD, drives, etc.).
+
         Returns the current session VWAP value.
         """
-        quote_vol = typical_price * current.volume if current.volume > 0 else 0.0
         _reset_session = False
-        if self._vwap_last_time:
-            try:
-                if current.time[:10] != self._vwap_last_time[:10]:
-                    _reset_session = True
-            except (TypeError, IndexError):
-                pass
-            if not _reset_session and current.time < self._vwap_last_time:
+        if self._vwap._last_time:
+            from quant.state import session_date_key
+            prev_date = session_date_key(self._vwap._last_time)
+            curr_date = session_date_key(current.time)
+            if prev_date and curr_date and curr_date != prev_date:
                 _reset_session = True
         if _reset_session:
-            self._vwap_cum_vol = 0.0
-            self._vwap_cum_quote_vol = 0.0
-            self._vwap_cum_sq_vol = 0.0
-            self._vwap_shift = 0.0
-            self._session_data = []  # Reset bar history on new session
+            # Reset non-VWAP trackers (VWAP reset is handled by SessionVWAP.update)
             self._ib_tracker.reset()
             self._ib_break_direction = ""
             self._ar_engine.reset()
             self._persistent_agg_scorer.reset()
             self._lvn_tracker.reset()
             self._value_migration.reset()
-        _is_new_candle = current.time != self._vwap_last_time
-        self._vwap_last_time = current.time
-        
-        # Accumulate volume and quote volume (typical_price * volume) ONLY for
-        # a NEW candle. Sub-candle re-feeds pass the same candle as data[-1]
-        # again; accumulating its volume unconditionally would double-count it
-        # and inflate the session VWAP (audit B-20). The bar-history dedup
-        # below already follows this rule — the accumulators must too.
-        if _is_new_candle:
-            self._vwap_cum_vol += float(current.volume)
-            self._vwap_cum_quote_vol += float(quote_vol)
-            
-            # Shifted variance calculation for better numerical stability
-            if self._vwap_shift == 0.0:
-                self._vwap_shift = typical_price  # anchor to first tick
-            
-            shifted = typical_price - self._vwap_shift
-            self._vwap_cum_sq_vol += float(shifted * shifted * current.volume)
-        
-        # Accumulate bar history for True Range ATR (dedup: analyze() re-feeds
-        # the same candle on sub-candle ticks)
-        if not self._session_data or self._session_data[-1].time != current.time:
-            self._session_data.append(current)
-            if len(self._session_data) > 500:
-                self._session_data = self._session_data[-500:]
-        
-        return float(
-            self._vwap_cum_quote_vol / self._vwap_cum_vol
-            if self._vwap_cum_vol > 0
-            else current.close
-        )
+            self._drive_tracker.reset()
+            self._cvd_tracker.reset()
+            self._triple_a.reset()
+            self._vwap.reset()
+        return self._vwap.update(current, typical_price)
 
-    def _compute_atr(self, period: int = 14, data: list[OHLC] | None = None) -> float:
-        """Average True Range over the last `period` bars.
-
-        True Range per bar: TR = max(high - low, |high - prev_close|,
-        |low - prev_close|).  Defaults to the accumulated session bar history;
-        an explicit bar list can be supplied for callers holding recent data.
-        """
-        bars = data if data is not None else self._session_data
-        if len(bars) < 2:
-            return 0.0
-        trs: list[float] = []
-        for i in range(1, len(bars)):
-            h = float(bars[i].high)
-            l = float(bars[i].low)
-            pc = float(bars[i - 1].close)
-            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
-        window = trs[-period:]
-        return sum(window) / max(len(window), 1)
-
-    def _compute_order_flow_metrics(
-        self,
-        recent_data,
-        order_book,
-        current,
-        agg_prints,
-        market_state,
-        lvns,
-        vah,
-        val,
-        poc,
-        tick_size,
-    ) -> dict:
-        """Compute order flow detectors and aggression score. Extracted from analyze()."""
-        result = {}
-
-        # Average volume
-        result["avg_candle_vol"] = (
-            sum(float(d.volume) for d in recent_data) / len(recent_data)
-            if recent_data
-            else 0.0
-        )
-
-        # OBI from order book
-        result["obi"] = 0.0
-        result["toxicity"] = 0.0
-        if order_book:
-            bids_q = sum(b.quantity for b in order_book.bids)
-            asks_q = sum(a.quantity for a in order_book.asks)
-            total = bids_q + asks_q
-            if total > 0:
-                result["obi"] = (bids_q - asks_q) / total
-            if len(order_book.bids) >= 3 and len(order_book.asks) >= 3:
-                top_bids_q = sum(b.quantity for b in order_book.bids[:3])
-                top_asks_q = sum(a.quantity for a in order_book.asks[:3])
-                top_total = top_bids_q + top_asks_q
-                if top_total > 0:
-                    top_obi = (top_bids_q - top_asks_q) / top_total
-                    if abs(top_obi) > 0.7:
-                        result["toxicity"] = top_obi
-
-        result["norm_delta"] = (
-            current.delta / current.volume if current.volume > 0 else 0
-        )
-
-        # FR-06-01: Footprint imbalance
-        has_agg_prints = len(agg_prints) >= 2
-        has_strong_delta = abs(result["norm_delta"]) > 0.30
-        result["footprint_confirmed"] = has_agg_prints and has_strong_delta
-
-        # FR-06-02: CVD
-        cvd_state = self._cvd_tracker.state()
-        result["cvd_state"] = cvd_state
-        result["cvd_confirmed"] = False
-        if market_state == MarketState.IMBALANCED and cvd_state.slope > 0:
-            result["cvd_confirmed"] = True
-        elif market_state == MarketState.IMBALANCED and cvd_state.slope < 0:
-            result["cvd_confirmed"] = True
-        elif cvd_state.has_divergence:
-            result["cvd_confirmed"] = True
-
-        # FR-06-03: Big trade
-        big_trade = self._big_trade_detector.detect(current, result["avg_candle_vol"])
-        result["big_trade_confirmed"] = big_trade is not None
-
-        # FR-06-04: Absorption
-        atr = self._compute_atr(period=14, data=recent_data)
-        absorption = self._absorption_detector.detect(
-            current, atr, result["avg_candle_vol"]
-        )
-        result["absorption_detected"] = absorption.detected
-        result["absorption_side"] = absorption.side if absorption.detected else ""
-        result["absorption_range_ratio"] = absorption.range_ratio
-        result["absorption_vol_ratio"] = absorption.vol_ratio
-
-        # FR-06-05: OFI
-        ofi_result = self._ofi_calculator.update(current)
-        result["ofi_result"] = ofi_result
-        result["ofi_aligned"] = (ofi_result.ofi > 0.10) or (ofi_result.ofi < -0.10)
-
-        # FR-06-06: Confluence
-        result["confluence_bonus"] = False
-        for lvn in lvns:
-            for level in [vah, val, poc]:
-                if level > 0 and abs(lvn - level) < tick_size * 3:
-                    result["confluence_bonus"] = True
-                    break
-
-        # FR-06-07: Volume bubble
-        bubble = self._bubble_detector.detect(current)
-        result["volume_bubble_near"] = bubble.detected
-
-        # Aggression scorer
-        self._persistent_agg_scorer.set_persistence_for_state(market_state)
-        agg_result = self._persistent_agg_scorer.score(
-            footprint_confirmed=result["footprint_confirmed"],
-            cvd_confirmed=result["cvd_confirmed"],
-            big_trade_confirmed=result["big_trade_confirmed"],
-            absorption_detected=result["absorption_detected"],
-            ofi_aligned=result["ofi_aligned"],
-            confluence_bonus=result["confluence_bonus"],
-            volume_bubble_near=result["volume_bubble_near"],
-        )
-        result["agg_result"] = agg_result
-        result["aggression_score"] = agg_result.score
-        result["has_aggression"] = agg_result.confirmed
-
-        return result
-
-    @staticmethod
-    def _compute_developing_va(developing_profile):
-        """Compute developing Value Area from incremental profile."""
-        dev_poc, dev_vah, dev_val = 0.0, 0.0, 0.0
-        if developing_profile is not None:
-            dev_profile_data = developing_profile.get_profile()
-            if dev_profile_data and len(dev_profile_data) >= 3:
-                dev_max_vol = max(p.volume for p in dev_profile_data)
-                if dev_max_vol > 0:
-                    dev_poc_idx = next(
-                        i
-                        for i, p in enumerate(dev_profile_data)
-                        if p.volume == dev_max_vol
-                    )
-                    dev_poc = dev_profile_data[dev_poc_idx].price
-                    dev_total = sum(p.volume for p in dev_profile_data)
-                    dev_target = dev_total * 0.7
-                    dev_acc = dev_max_vol
-                    dev_up, dev_down = dev_poc_idx, dev_poc_idx
-                    while dev_acc < dev_target:
-                        can_up = dev_up + 1 < len(dev_profile_data)
-                        can_down = dev_down - 1 >= 0
-                        if not can_up and not can_down:
-                            break
-                        up_vol = dev_profile_data[dev_up + 1].volume if can_up else -1
-                        dn_vol = (
-                            dev_profile_data[dev_down - 1].volume if can_down else -1
-                        )
-                        if up_vol >= dn_vol:
-                            dev_up += 1
-                            dev_acc += dev_profile_data[dev_up].volume
-                        else:
-                            dev_down -= 1
-                            dev_acc += dev_profile_data[dev_down].volume
-                    dev_step = (
-                        (dev_profile_data[1].price - dev_profile_data[0].price)
-                        if len(dev_profile_data) > 1
-                        else 0
-                    )
-                    dev_vah = dev_profile_data[dev_up].price + dev_step / 2
-                    dev_val = dev_profile_data[dev_down].price - dev_step / 2
-        return dev_poc, dev_vah, dev_val
-
-    @staticmethod
-    def _extract_session_open(data, current):
-        """Extract session open price from first candle of current date."""
-        current_date_prefix = current.time[:10] if len(current.time) >= 10 else ""
-        if current_date_prefix:
-            for d in data:
-                if d.time.startswith(current_date_prefix):
-                    return d.open
-        return data[0].open if data else 0.0
-
-    @staticmethod
-    def _classify_day_type(data, ib_complete, ib_high, ib_low):
-        """Classify day type: NORMAL, NEUTRAL, TREND, NORMAL_VARIATION."""
-        if not ib_complete or ib_high <= 0 or ib_low <= 0:
-            return "UNKNOWN"
-        session_high = max(d.high for d in data)
-        session_low = min(d.low for d in data)
-        ib_range = ib_high - ib_low
-        if ib_range <= 0:
-            return "UNKNOWN"
-        dist_above = max(0.0, session_high - ib_high)
-        dist_below = max(0.0, ib_low - session_low)
-        if dist_above == 0 and dist_below == 0:
-            return "NORMAL"
-        elif dist_above > 0 and dist_below > 0:
-            return "NEUTRAL"
-        elif dist_above > ib_range or dist_below > ib_range:
-            return "TREND"
-        return "NORMAL_VARIATION"
-
-    def _recent_vwap_stats(self, recent_data) -> tuple[float, float]:
-        """Volume-weighted VWAP + std over an explicit candle window.
-
-        Same shifted-variance math and proportional clamps as the whole-session
-        path, but over the given window. Used so the VWAP bands, the deviation
-        sigma and the displayed session VWAP are computed on the SAME window as
-        the VA clamp (RECENT_VA_LOOKBACK).  Otherwise a regime collapse (e.g.
-        option premium 195 -> 102) leaves the whole-session accumulator far
-        above the current auction — "LTP +2.4σ EXTREME DEVIATION" while the
-        recent-clamped VA reads "Balance: 100% in VA".
-        """
-        tot_vol = 0.0
-        tot_quote = 0.0
-        tot_sq = 0.0
-        shift = 0.0
-        for d in recent_data:
-            tp = (float(d.high) + float(d.low) + float(d.close)) / 3.0
-            v = float(d.volume)
-            if v <= 0:
-                continue
-            if shift == 0.0:
-                shift = tp
-            tot_vol += v
-            tot_quote += tp * v
-            s = tp - shift
-            tot_sq += s * s * v
-        if tot_vol <= 0:
-            return 0.0, 0.0
-        vwap = tot_quote / tot_vol
-        variance = max(0.0, tot_sq / tot_vol - (vwap - shift) ** 2)
-        vwap_std = math.sqrt(variance)
-        # Proportional clamp bounds (0.1% floor, 3% cap) — same as session path
-        min_std = max(1.0, vwap * 0.001)
-        if vwap_std < min_std:
-            vwap_std = min_std
-        max_std = vwap * 0.03
-        if vwap_std > max_std:
-            vwap_std = max_std
-        return vwap, vwap_std
-
-    def _build_vwap_bands(self, session_vwap: float, current, recent_data=None) -> tuple[float, float, float, float, float, float | None]:
-        """Compute VWAP standard deviation bands (±1σ, ±2σ).
-
-        When `recent_data` is provided the VWAP and std are recomputed
-        volume-weighted over that window (the same basis as the VA clamp) —
-        this is what analyze() uses, so the deviation sigma and the displayed
-        VWAP describe the current auction instead of a stale whole-session mix.
-        Otherwise the whole-session accumulators are used (backward compatible
-        for direct callers).
-        """
-        if recent_data:
-            session_vwap, vwap_std = self._recent_vwap_stats(recent_data)
-        else:
-            vwap_std = 0.0
-            if self._vwap_cum_vol > 0:
-                # Volume-weighted std from the shifted-variance accumulator:
-                # σ² = E[(TP - VWAP)²] = E[(TP - shift)²] - (VWAP - shift)²
-                variance = (
-                    self._vwap_cum_sq_vol / self._vwap_cum_vol
-                    - (session_vwap - self._vwap_shift) ** 2
-                )
-                vwap_std = math.sqrt(max(0.0, variance))
-
-                # Proportional clamp bounds (0.1% floor, 3% cap of session VWAP)
-                MIN_VWAP_STD = max(1.0, session_vwap * 0.001)
-                if vwap_std < MIN_VWAP_STD:
-                    vwap_std = MIN_VWAP_STD
-
-                # Enforce maximum std (4σ is extreme, anything higher is calculation error)
-                MAX_VWAP_STD = session_vwap * 0.03  # Max 3% of VWAP
-                if vwap_std > MAX_VWAP_STD:
-                    logger.warning(
-                        "VWAP std clamped from %.2f to %.2f (max 3%% of VWAP=%.2f)",
-                        vwap_std, MAX_VWAP_STD, session_vwap
-                    )
-                    vwap_std = MAX_VWAP_STD
-
-        vwap_upper_1 = session_vwap + vwap_std
-        vwap_lower_1 = session_vwap - vwap_std
-        vwap_upper_2 = session_vwap + 2 * vwap_std
-        vwap_lower_2 = session_vwap - 2 * vwap_std
-
-        live_price = float(current.close)
-        vwap_deviation_sigmas: float | None = (
-            (live_price - session_vwap) / vwap_std if vwap_std > 0 else None
-        )
-        
-        # Sanity check: sigma should never exceed ±4 in normal markets (Task 2.1)
-        if vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) > 4.0:
-            logger.warning(
-                "VWAP deviation clamped: %.2fσ → ±4.0σ (vwap=%.2f, live=%.2f, std=%.2f)",
-                vwap_deviation_sigmas, session_vwap, live_price, vwap_std
-            )
-            vwap_deviation_sigmas = 4.0 if vwap_deviation_sigmas > 0 else -4.0
-        elif vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) > 10:
-            logger.warning(
-                "VWAP deviation extreme: %.2fσ — possible data source mismatch "
-                "(vwap=%.2f, live=%.2f, std=%.2f)",
-                vwap_deviation_sigmas,
-                session_vwap,
-                live_price,
-                vwap_std,
-            )
-        return vwap_upper_1, vwap_lower_1, vwap_upper_2, vwap_lower_2, vwap_std, vwap_deviation_sigmas
-
-    def _classify_market_structure(self, data, session_vwap, market_state) -> tuple:
-        """Classify market structure and cross-validate against market state."""
-        if self._structure_classifier is None:
-            self._structure_classifier = MarketStructureClassifier()
-        if session_vwap > 0:
-            self._vwap_history.append(session_vwap)
-            if len(self._vwap_history) > 30:
-                self._vwap_history = self._vwap_history[-30:]
-        structure = self._structure_classifier.classify(
-            data,
-            self._poc_tracker._poc_history,
-            self._vwap_history,
-        )
-
-        # Cross-validation: skip if market_state is BALANCED or IMBALANCED (no PROBING in 2-state model)
-        if market_state == MarketState.IMBALANCED and structure.state in ("BALANCE", "CHOP"):
-            structure = type(structure)(
-                state="TRANSITION",
-                confidence_score=max(structure.confidence_score, 60),
-                features=structure.features,
-            )
-        return structure
-
-    def _detect_breaks(self, recent_data, vah, val, ib_high, ib_low, baseline_vol,
-                       live_price, ib_complete, current_break_direction) -> dict:
-        """Detect initiative/responsive breaks and IB breaks."""
-        break_state = detect_break(recent_data, vah, val, ib_high, ib_low, baseline_vol)
-        if break_state is None:
-            break_state = {
-                "break_direction": "",
-                "break_type": "",
-                "break_level": 0.0,
-                "volume_ratio": 0.0,
-            }
-
-        ib_tick_break = check_ib_break_tick(
-            live_price=live_price,
-            ib_high=ib_high,
-            ib_low=ib_low,
-            ib_complete=ib_complete,
-            current_break_direction=current_break_direction,
-        )
-        if ib_tick_break["break_direction"]:
-            self._ib_break_direction = ib_tick_break["break_direction"]
-            break_state = {
-                "break_direction": ib_tick_break["break_direction"],
-                "break_type": ib_tick_break["break_type"],
-                "break_level": ib_tick_break["break_level"],
-                "volume_ratio": 1.0,
-            }
-        return break_state
-
-    def _compute_noc_targets(self, npoc_tracker, underlying, current, tick_size) -> tuple[float, float]:
-        """Check NPOC fills and return nearest targets above/below."""
-        npoc_above = 0.0
-        npoc_below = 0.0
-        if npoc_tracker is not None:
-            npoc_tracker.check_and_fill(
-                underlying=underlying,
-                current_price=float(current.close),
-                tick_size=tick_size,
-            )
-            npoc_result = npoc_tracker.get_active_npocs(
-                underlying=underlying,
-                current_price=float(current.close),
-            )
-            if npoc_result.nearest_above:
-                npoc_above = npoc_result.nearest_above.price
-            if npoc_result.nearest_below:
-                npoc_below = npoc_result.nearest_below.price
-        return npoc_above, npoc_below
-
-    def _compute_effective_market_state(
-        self, market_state, recent_data, current, cvd_source: str = ""
-    ) -> str:
-        """Override market state to DEAD when volume is dead."""
-        _effective_market_state: str = market_state.value
-        # Option-premium candles are the wrong scale for futures volume EMA — never
-        # force DEAD from this gate when AMT is still on option ticks only.
-        if cvd_source == "option":
-            return _effective_market_state
-        if len(recent_data) >= 20:
-            _alpha = 2.0 / 21
-            _ema_vol = float(recent_data[-20].volume)
-            for _d in recent_data[-19:]:
-                _ema_vol = _alpha * float(_d.volume) + (1 - _alpha) * _ema_vol
-            _latest_vol = float(recent_data[-1].volume)
-            _vol_ratio = _latest_vol / _ema_vol if _ema_vol > 0 else 0.0
-            if float(current.close) <= 0 or _vol_ratio < 0.01:
-                _effective_market_state = MarketState.DEAD.value
-        return _effective_market_state
-
-    def _compute_per_symbol_delta(self, option_tick, current_candle: OHLC | None = None) -> float:
-        """Compute per-symbol normalized delta (-1.0 to +1.0) from option tick or current candle."""
-        if option_tick is not None and getattr(option_tick, "volume", 0) > 0:
-            return max(-1.0, min(1.0, float(option_tick.delta) / float(option_tick.volume)))
-        if current_candle is not None and getattr(current_candle, "volume", 0) > 0:
-            return max(-1.0, min(1.0, float(current_candle.delta) / float(current_candle.volume)))
-        return 0.0
-
-    def _track_drives(self, live_price, poc, lvns, hvns, vah, val, tick_size, current) -> tuple[int, bool]:
-        """Classify current price against nearest key level for drive tracking."""
-        _drive_number: int = 0
-        _drive_entry_valid: bool = False
-        _all_levels: list[float] = [poc] + list(lvns) + ([vah, val] if vah > 0 and val > 0 else [])
-        if _all_levels and live_price > 0:
-            _nearest = min(_all_levels, key=lambda _l: abs(_l - live_price))
-            _proximity_ticks = abs(live_price - _nearest) / max(tick_size, 0.001)
-            if _proximity_ticks <= 5:
-                _drive_dir = "LONG" if live_price >= _nearest else "SHORT"
-                try:
-                    _drive_result = self._drive_tracker.classify_touch(
-                        price=live_price,
-                        level=_nearest,
-                        candle=current,
-                        direction=_drive_dir,
-                        tick_size=tick_size,
-                    )
-                    _drive_number = _drive_result.drive_number
-                    _drive_entry_valid = _drive_result.entry_valid
-                except Exception:
-                    logger.debug("Drive detection failed — drive number will be unset", exc_info=True)
-        return _drive_number, _drive_entry_valid
+    # ponytail: dead methods below deleted — all callers migrated to
+    # quant.amt.orderflow.compute, quant.amt.session.structure,
+    # quant.amt.profile.displacement, quant.amt.profile.vwap.
 
     def analyze(
         self,
@@ -987,6 +407,14 @@ class AMTAnalyzer:
         lookback = len(data)
         recent_data = data[-lookback:]
         current = data[-1]
+        self._last_resolve_key = symbol or underlying or self._last_resolve_key
+        try:
+            from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+            spec = DEFAULT_REGISTRY.try_resolve(self._last_resolve_key)
+            if spec is not None:
+                self._session_market = spec.session_profile
+        except Exception:
+            pass
 
         # 1. Volume Profile — use incremental if available, else full rebuild
         if incremental_profile is not None:
@@ -1007,11 +435,7 @@ class AMTAnalyzer:
         # POC — tie-break: closest to VWAP when multiple bins share max volume
         max_vol = max(p.volume for p in profile)
         poc_candidates = [i for i, p in enumerate(profile) if p.volume == max_vol]
-        vwap_ref = float(
-            self._vwap_cum_quote_vol / self._vwap_cum_vol
-            if self._vwap_cum_vol > 0
-            else current.close
-        )
+        vwap_ref = self._vwap.vwap(bar_close=current.close)
         poc_index = min(poc_candidates, key=lambda i: abs(profile[i].price - vwap_ref))
         poc = profile[poc_index].price
 
@@ -1080,7 +504,8 @@ class AMTAnalyzer:
         ar_state = self._ar_engine.update(current, vah, val, baseline_vol)
 
         # 2. Market State (4-state model)
-        leg_data = self.detect_displacement_leg(recent_data)
+        from quant.amt.profile.displacement import detect_displacement_leg as _detect_disp_leg
+        leg_data = _detect_disp_leg(recent_data, self.config)
         has_displacement = leg_data["has_displacement"]
         has_acceptance = detect_acceptance(recent_data, vah, val)
 
@@ -1125,7 +550,7 @@ class AMTAnalyzer:
         # Update session VWAP and compute bands before market state detection
         typical_price = (current.high + current.low + current.close) / 3.0
         session_vwap = self._update_session_vwap(current, typical_price)
-        _, _, _, _, _, vwap_deviation_sigmas = self._build_vwap_bands(session_vwap, current)
+        _, _, _, _, _, vwap_deviation_sigmas = self._vwap.bands(session_vwap, current)
 
         state_result = detect_market_state(
             price=float(current.close),
@@ -1148,17 +573,17 @@ class AMTAnalyzer:
         self._previous_state = market_state
 
         # 3. Order Flow Detectors + Aggression Scoring
-        flow = self._compute_order_flow_metrics(
-            recent_data,
-            order_book,
-            current,
-            agg_prints,
-            market_state,
-            lvns,
-            vah,
-            val,
-            poc,
-            tick_size,
+        from quant.amt.orderflow.compute import compute_order_flow_metrics as _compute_ofm
+        flow = _compute_ofm(
+            recent_data, order_book, current, agg_prints, market_state,
+            lvns, vah, val, poc, tick_size,
+            cvd_state=self._cvd_tracker.state(),
+            big_trade_detector=self._big_trade_detector,
+            absorption_detector=self._absorption_detector,
+            ofi_calculator=self._ofi_calculator,
+            bubble_detector=self._bubble_detector,
+            persistent_agg_scorer=self._persistent_agg_scorer,
+            session_bars=self._vwap.session_bars,
         )
         avg_candle_vol = flow["avg_candle_vol"]
         obi = flow["obi"]
@@ -1193,9 +618,10 @@ class AMTAnalyzer:
         # sigma, the bands and the displayed session VWAP describe the CURRENT
         # auction (fixes the "LTP +2.4σ EXTREME DEVIATION" vs "Balance: 100%
         # in VA" contradiction after a regime collapse).
-        recent_vwap, _ = self._recent_vwap_stats(recent_window)
+        from quant.amt.profile.vwap import SessionVWAP as _SVWAP
+        recent_vwap, _ = _SVWAP.recent_stats(recent_window)
         vwap_upper_1, vwap_lower_1, vwap_upper_2, vwap_lower_2, vwap_std, vwap_deviation_sigmas = \
-            self._build_vwap_bands(recent_vwap, current, recent_data=recent_window)
+            self._vwap.bands(recent_vwap, current, recent_data=recent_window)
 
         # CVD
         cvd_state = self._cvd_tracker.update(current)
@@ -1204,7 +630,14 @@ class AMTAnalyzer:
             cvd_div = cvd_state.divergence_type or ""
 
         # Market structure classification
-        structure = self._classify_market_structure(data, session_vwap, market_state)
+        from quant.amt.session.structure import classify_market_structure as _classify_ms
+        structure = _classify_ms(
+            data, session_vwap, market_state,
+            self._structure_classifier or MarketStructureClassifier(),
+            self._vwap_history, self._poc_tracker._poc_history,
+        )
+        if self._structure_classifier is None:
+            self._structure_classifier = MarketStructureClassifier()
 
         # Initial Balance tracking — pinned to the session's first candle so
         # the 60-minute build window measures from the actual session open
@@ -1239,7 +672,8 @@ class AMTAnalyzer:
         self._prev_cvd_slope = cvd_state.slope
 
         # Break detection
-        break_state = self._detect_breaks(
+        from quant.amt.session.structure import detect_breaks as _detect_breaks_fn
+        break_state, self._ib_break_direction = _detect_breaks_fn(
             recent_data, vah, val, ib_high, ib_low, baseline_vol,
             float(current.close), ib_complete, self._ib_break_direction,
         )
@@ -1265,30 +699,37 @@ class AMTAnalyzer:
         ar_state = self._ar_engine.update(current, vah, val, baseline_vol)
 
         # Developing VA, session open, day type
-        dev_poc, dev_vah, dev_val = self._compute_developing_va(developing_profile)
-        session_open_price = self._extract_session_open(data, current)
-        day_type = self._classify_day_type(data, ib_complete, ib_high, ib_low)
+        from quant.amt.session.structure import _compute_developing_va
+        dev_poc, dev_vah, dev_val = _compute_developing_va(developing_profile)
+        from quant.amt.session.structure import (
+            extract_session_open as _extract_open,
+            classify_day_type as _classify_dt,
+            compute_noc_targets as _compute_noc,
+            compute_effective_market_state as _compute_eff,
+            compute_per_symbol_delta as _compute_delta,
+        )
+        from quant.amt.orderflow.compute import track_drives as _track_dr
+
+        session_open_price = _extract_open(data, current)
+        day_type = _classify_dt(data, ib_complete, ib_high, ib_low)
 
         # NPOC targets
-        npoc_above, npoc_below = self._compute_noc_targets(
-            npoc_tracker, underlying, current, tick_size,
-        )
+        npoc_above, npoc_below = _compute_noc(npoc_tracker, underlying, current, tick_size)
 
         # Signal Generation — DEPRECATED (backward compat)
         signal = None
 
         # Dead-volume override
-        _effective_market_state = self._compute_effective_market_state(
-            market_state, recent_data, current, cvd_source=cvd_source,
-        )
+        _effective_market_state = _compute_eff(market_state, recent_data, current, cvd_source=cvd_source)
 
         # Per-symbol delta
-        delta_normalized_option = self._compute_per_symbol_delta(option_tick, current)
+        delta_normalized_option = _compute_delta(option_tick, current)
 
         # Drive Tracking
         _live_price = float(current.close)
-        _drive_number, _drive_entry_valid = self._track_drives(
+        _drive_number, _drive_entry_valid = _track_dr(
             _live_price, poc, lvns, hvns, vah, val, tick_size, current,
+            drive_tracker=self._drive_tracker,
         )
 
         # ── SETUP IDENTIFICATION (3 PM Fix) ──────────────────────────
@@ -1313,6 +754,15 @@ class AMTAnalyzer:
                 )
             except Exception:
                 logger.debug("contested-zone detection failed", exc_info=True)
+
+        _triple = self._triple_a.update(
+            close=float(current.close),
+            high=float(current.high),
+            low=float(current.low),
+            absorption_side=absorption_side,
+            vwap=float(recent_vwap if recent_vwap > 0 else session_vwap),
+            cvd_slope=float(cvd_state.slope),
+        )
 
         return AMTResult(
             market_state=_effective_market_state,
@@ -1431,6 +881,10 @@ class AMTAnalyzer:
             option_type=self._detect_option_type(symbol),
             footprints=_footprints,
             contested_zone=_contested_zone,
+            triple_a_phase=_triple.phase,
+            triple_a_signal=_triple.signal,
+            absorption_cluster_high=_triple.cluster_high,
+            absorption_cluster_low=_triple.cluster_low,
         )
 
     # -------------------------------------------------------------------
@@ -1469,11 +923,20 @@ class AMTAnalyzer:
         open_price = data[0].open if data else 0.0
         use_prior_vah = prior_vah if prior_vah > 0 else result.value_area_high
         use_prior_val = prior_val if prior_val > 0 else result.value_area_low
+        try:
+            from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+            spec = DEFAULT_REGISTRY.try_resolve(self._last_resolve_key)
+            if spec is not None:
+                self._session_market = spec.session_profile
+        except Exception:
+            pass
+
         session_info = get_session_info(
             timestamp=current.time,
             open_price=open_price,
             prior_vah=use_prior_vah,
             prior_val=use_prior_val,
+            market=self._session_market,
         )
 
         # --- Distance to POC (normalised by VA range) ---
