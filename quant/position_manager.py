@@ -11,12 +11,13 @@ import logging
 from typing import Callable
 
 from quant.contracts.enums import MarketState
+from quant.decision.stops import structural_stop
 from quant.execution.exits import ExitDecision, ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.risk import SessionRisk
-from quant.events import Event, PositionClosed, PositionOpened, RiskUpdated
+from quant.events import Event, PositionClosed, PositionOpened, PositionReduced, RiskUpdated
 from quant.session_gates import session_allow_entry, session_force_exit, ist_dt as _ist_dt
-from quant.amt.session.context import get_session_info, is_expiry_day, seconds_to_close
+from quant.amt.session.context import get_session_info, seconds_to_close
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,10 @@ class PositionManager:
         # Pyramid state
         self.pyramid_count: int = 0
         self.pyramid_positions: list = []
+        # Fill for the most recent FULL close (None otherwise) — callers that
+        # need the closing pnl (e.g. releasing a risk-authority reservation)
+        # read this right after manage_exit() returns.
+        self.last_fill = None
 
     def manage_exit(
         self,
@@ -73,11 +78,14 @@ class PositionManager:
         bar_index: int,
         entry_bar_index: int,
         entry_time_epoch: float,
-    ) -> bool:
+    ):
         """Evaluate exit conditions for an open position.
-        
-        Returns True if the position was closed, False if it survived.
+
+        Returns the position that survives this bar — unchanged, reduced by a
+        tiered take-profit partial (spec §13.3), or None if it was closed
+        entirely.
         """
+        self.last_fill = None
         held_bars = bar_index - entry_bar_index
         if session_force_exit(
             bar.time, market=self._market, contract_expiry=self._contract_expiry
@@ -93,14 +101,22 @@ class PositionManager:
             raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
             if raw_ms == "IMBALANCED":
                 market_state = MarketState.IMBALANCED
+            elif raw_ms == "DEAD":
+                market_state = MarketState.DEAD
             else:
                 market_state = MarketState.BALANCED
             if ist_dt is not None:
                 info = get_session_info(bar.time, market=self._market)
                 session_phase = str(info.session)
+                # Phase 2: the Tuesday-weekday heuristic this used to OR in
+                # (`is_expiry_day`) is wrong for monthly-only underlyings
+                # (BANKNIFTY/FINNIFTY/MIDCPNIFTY) and for Thursday-expiry
+                # SENSEX/BANKEX — it would flag every Tuesday as an expiry
+                # day regardless of the actual contract held. The real,
+                # already-correct signal is the traded contract's own
+                # expiry date (mirrors context_builder.py's entry-side
+                # `is_expiry` — same computation, same source of truth).
                 is_expiry = (
-                    self._market == "NSE" and is_expiry_day(ist_dt.date())
-                ) or (
                     self._contract_expiry is not None
                     and ist_dt.date() == self._contract_expiry
                 )
@@ -108,6 +124,7 @@ class PositionManager:
                 now_epoch = ist_dt.timestamp()
             else:
                 session_phase, is_expiry, time_to_close, now_epoch = "", False, 0.0, 0.0
+            session_vwap = float(amt_dto.get("sessionVwap") or 0.0)
             exit_dec = self._exits.evaluate(
                 position, amt_dto, bar_index=held_bars,
                 bar_high=bar.high, bar_low=bar.low,
@@ -117,10 +134,32 @@ class PositionManager:
                 entry_time_epoch=entry_time_epoch,
                 now_epoch=now_epoch,
                 bar_close=bar.close,
+                session_vwap=session_vwap,
             )
         if exit_dec.should_exit:
+            if exit_dec.partial_fraction is not None and exit_dec.partial_fraction < 1.0:
+                partial_fill, remaining = self._oms.close_partial(
+                    position, exit_dec.partial_fraction, exit_dec.close_price,
+                    bar.time, exit_dec.reason,
+                )
+                self._emit(PositionReduced(
+                    symbol=self.symbol,
+                    time=bar.time,
+                    fill=partial_fill,
+                    remaining=remaining,
+                ))
+                risk = self._risk.record_trade(partial_fill.pnl)
+                logger.info(
+                    "🎯 [TIERED TP] %s reason=%s closed=%.0f remaining=%.0f pnl=₹%.2f",
+                    self.symbol, exit_dec.reason, abs(partial_fill.position.size),
+                    abs(remaining.size), partial_fill.pnl,
+                )
+                self._emit(RiskUpdated(symbol=self.symbol, time=bar.time, risk=risk))
+                return remaining
+
             fill = self._oms.close(position, exit_dec.close_price, bar.time,
                                    exit_dec.reason)
+            self.last_fill = fill
             self._exits.pop_trail(position)
             # Reset pyramid state: close all pyramid add-ons at the same price
             for pyr_pos in self.pyramid_positions:
@@ -145,12 +184,12 @@ class PositionManager:
                 risk.equity, risk.halted,
             )
             self._emit(RiskUpdated(symbol=self.symbol, time=bar.time, risk=risk))
-            return True
+            return None
         else:
             # Position survived this bar. Check if we can add a pyramid.
             if position is not None and self._exits.is_risk_free(position):
                 self.check_pyramid(amt_dto, bar, position, bar_index)
-            return False
+            return position
 
     def check_pyramid(self, amt_dto: dict, bar, position, bar_index: int) -> None:
         """Spec §13.2 pyramid engine: add-on positions at Impulse Leg LVN retest.
@@ -232,7 +271,7 @@ class PositionManager:
         pyramid_size = base_size * fraction
 
         # New SL behind the LVN shelf
-        new_sl = (leg_lvn - 2.0 * tick) if long else (leg_lvn + 2.0 * tick)
+        new_sl = structural_stop("LONG" if long else "SHORT", price, leg_lvn, tick)
 
         try:
             pyramid_pos = self._oms.add_pyramid(
