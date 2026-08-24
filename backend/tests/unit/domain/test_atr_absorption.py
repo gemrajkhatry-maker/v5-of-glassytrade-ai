@@ -8,6 +8,8 @@ _compute_order_flow_metrics must feed that real ATR into AbsorptionDetector.
 import pytest
 
 from quant.amt.analyzer import AMTAnalyzer
+from quant.amt.profile.vwap import SessionVWAP
+from quant.amt.orderflow.compute import compute_order_flow_metrics
 from quant.contracts.enums import MarketState
 from quant.contracts.value_objects import OHLC
 
@@ -42,7 +44,7 @@ def test_compute_atr_constant_range():
     for i in range(20):
         c = _candle(100.0 + i, i=i)
         a._update_session_vwap(c, _tp(c))
-    atr = a._compute_atr()
+    atr = SessionVWAP.compute_atr(a._vwap.session_bars)
     assert atr == pytest.approx(10.0, abs=1e-6)
 
 
@@ -57,17 +59,18 @@ def test_compute_atr_includes_gap_true_range():
     # TR1 = max(12-8, |12-10|, |8-10|)        = 4
     # TR2 = max(25-18, |25-10|, |18-10|)      = 15 (gap: high - prev_close)
     # TR3 = max(26-20, |26-22|, |20-22|)      = 6
-    assert a._compute_atr(period=2) == pytest.approx((15 + 6) / 2, abs=1e-6)
-    assert a._compute_atr(period=1) == pytest.approx(6.0, abs=1e-6)
-    assert a._compute_atr(period=2) > 5.0
+    bars = a._vwap.session_bars
+    assert SessionVWAP.compute_atr(bars, period=2) == pytest.approx((15 + 6) / 2, abs=1e-6)
+    assert SessionVWAP.compute_atr(bars, period=1) == pytest.approx(6.0, abs=1e-6)
+    assert SessionVWAP.compute_atr(bars, period=2) > 5.0
 
 
 def test_compute_atr_needs_two_candles():
     """With fewer than 2 candles there is no True Range -> 0.0."""
     a = AMTAnalyzer()
-    assert a._compute_atr() == 0.0
+    assert SessionVWAP.compute_atr(a._vwap.session_bars) == 0.0
     a._update_session_vwap(_candle(100.0, i=0), 100.0)
-    assert a._compute_atr() == 0.0
+    assert SessionVWAP.compute_atr(a._vwap.session_bars) == 0.0
 
 
 def test_absorption_range_ratio_uses_real_atr():
@@ -75,7 +78,7 @@ def test_absorption_range_ratio_uses_real_atr():
     a = AMTAnalyzer()
     data = [_candle(100.0 + i, i=i) for i in range(20)]
     current = _candle(110.0, i=19, high=111, low=109)  # 2-point range
-    flow = a._compute_order_flow_metrics(
+    flow = compute_order_flow_metrics(
         recent_data=data,
         order_book=None,
         current=current,
@@ -86,6 +89,8 @@ def test_absorption_range_ratio_uses_real_atr():
         val=95.0,
         poc=105.0,
         tick_size=0.05,
+        session_bars=data,
+        absorption_detector=a._absorption_detector,
     )
     # real ATR = 10 -> ratio = 0.2; fake (max-min)/n = 23/14 = 1.64 -> ratio = 1.2
     assert 0.0 < flow["absorption_range_ratio"] < 0.5
