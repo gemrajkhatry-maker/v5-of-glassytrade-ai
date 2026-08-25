@@ -101,6 +101,14 @@ Rationale:
 - WS4 after WS2 because pipeline tests provide the behavioral oracle for port collapse
 - WS9 stays spike-gated: largest payoff, largest blast radius
 
+## Current Baseline (measured 2026-08-25)
+
+- Backend suite: 1,169 collected · `not e2e and not live`: **1,162 passed / 2 failed / 4 skipped** (3m47s)
+  - `tests/integration/test_fabio_india_scenarios.py::test_scenario_midday_blocks_trend_continuation` — **deterministic failure (reproduces 4/4)**. Scenario expects trend continuation blocked at midday; current code approves (`approved=True`, "All 4 gates passed"). Pre-existing behavioral gap, unrelated to any refactor. ⚠️ Must be triaged BEFORE WS2: golden-trace replay must not enshrine wrong behavior as "expected"
+  - `tests/quant/test_property_based.py::test_vah_always_geq_val` — hypothesis deadline flake under full-suite load only; passes 5/5 in isolation
+- Frontend runner: vitest (`npm run test`), suite exists under frontend/tests/
+- Gate for every refactor commit: same command green at ≤ these 2 known failures
+
 ## Per-Workstream Safety Protocol (backend)
 
 1. Capture golden decision traces from the current build: a recording wrapper around `QuantEngine._decide` and `ExitEngine.evaluate` run against recorded paper-replay sessions writes JSONL of `(inputs_hash, symbol, bar_index) -> action`
