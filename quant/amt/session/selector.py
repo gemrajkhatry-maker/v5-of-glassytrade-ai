@@ -334,9 +334,9 @@ class OptionSelector:
 
         Scalping-optimized strategy:
         - ALWAYS prefer current-week expiry for maximum gamma.
-        - Only skip to next week if today IS expiry day AND after 14:30
-          (gamma trap zone in last 45 min).
-        - Minimum DTE=1 (allow 1-day expiry for gamma scalping).
+        - Only skip to next week if today IS expiry day AND after 15:00 IST
+          (gamma trap zone — last 30 min before NSE close).
+        - min_days_to_expiry gates the first pass (default 0 allows 0-DTE).
 
         Returns ``None`` when no suitable expiry is available.
         """
@@ -350,11 +350,11 @@ class OptionSelector:
         if not parsed:
             return None
 
-        min_dte = self.cfg.min_days_to_expiry  # default 1
+        min_dte = self.cfg.min_days_to_expiry  # default 0 — 0-DTE allowed pre-trap
 
-        # Check if today is expiry day and we're in gamma-trap zone (after 14:30 IST)
+        # Gamma-trap zone: expiry day after 15:00 IST (last 30 min before close)
         is_expiry_day = parsed[0] == today
-        in_gamma_trap = is_expiry_day and current_hour >= 15  # 3 PM IST — last 15 min
+        in_gamma_trap = is_expiry_day and current_hour >= 15
 
         if is_expiry_day and in_gamma_trap:
             # Skip today's expiry, use next available
@@ -368,11 +368,9 @@ class OptionSelector:
             if dte >= min_dte:
                 return exp.isoformat()
 
-        # Even DTE=0 is acceptable for intraday scalping (before gamma trap)
-        if parsed:
-            return parsed[0].isoformat()
-
-        return None
+        # Even DTE=0 is acceptable for intraday scalping (before gamma trap).
+        # ponytail: parsed is guaranteed non-empty by the early return above.
+        return parsed[0].isoformat()
 
     def translate_underlying_signal_to_option(
         self,
