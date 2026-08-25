@@ -151,9 +151,11 @@ class SessionRisk:
             if pnl > 0.0:
                 self._consecutive_losses = 0
                 self._consecutive_wins += 1
-            else:
+            elif pnl < 0.0:
                 self._consecutive_losses += 1
                 self._consecutive_wins = 0
+            # ponytail: pnl == 0.0 (scratch/breakeven exit) is neutral —
+            # it is not a loss and must not trip the consecutive-loss halt.
 
             if self._halted:
                 self._save()

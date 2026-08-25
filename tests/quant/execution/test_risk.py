@@ -67,3 +67,14 @@ def test_partial_fills_do_not_inflate_trades_today():
     st = r.state()
     assert st.trades_today == 1
     assert st.daily_pnl == 22.0
+
+def test_scratch_exit_does_not_count_as_consecutive_loss():
+    from quant.execution.risk import SessionRisk
+
+    r = SessionRisk(storage=None, symbol="SCRATCH_TEST")
+    r.record_trade(0.0)
+    r.record_trade(0.0)
+    r.record_trade(0.0)
+    st = r.state()
+    assert st.consecutive_losses == 0
+    assert not st.halted
