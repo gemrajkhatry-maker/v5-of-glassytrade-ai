@@ -260,6 +260,11 @@ class OptionScannerService:
 
         atm = chain.atm_strike
         interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
+        listed = sorted(chain.calls.keys())
+        if listed:
+            # ponytail: snap to nearest listed strike — broker atm prints
+            # (e.g. 23437) off the grid make every candidate lookup miss.
+            atm = min(listed, key=lambda s: abs(s - atm))
 
         if big_move_mode:
             dte = (expiry_date - today_ist()).days

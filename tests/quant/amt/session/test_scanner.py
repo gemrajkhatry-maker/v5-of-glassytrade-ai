@@ -154,6 +154,26 @@ class TestOptionScannerService:
         for i in range(len(results) - 1):
             assert results[i].score >= results[i + 1].score
 
+    def test_unaligned_atm_snaps_to_listed_strike(self):
+        """Broker-reported atm_strike off the strike grid (e.g. 23437) must be
+        snapped to the nearest listed strike, else all candidate lookups miss
+        and the scan silently returns nothing."""
+        calls = self._full_calls(atm=23400.0, interval=50)
+        chain = _make_chain(
+            atm=23437.0,  # off-grid spot print
+            expiry_iso=_next_tuesday_iso(),
+            calls=calls,
+        )
+        broker = MagicMock()
+        broker.get_option_chain.return_value = chain
+
+        scanner = self._make_scanner(broker)
+        results = scanner.scan_top_n(underlyings=["NIFTY"], n=3)
+
+        assert results, "off-grid ATM must still produce contracts"
+        # Nearest listed strike to 23437 is 23450.
+        assert results[0].strike == 23450
+
     def test_scan_top_n_uses_nearest_weekly_expiry_for_nifty(self):
         """NIFTY's primary series is the weekly (Tuesday). The scanner must
         request the nearest expiry (expiry_index=0) and operate on that series
