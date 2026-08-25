@@ -104,7 +104,8 @@ Rationale:
 ## Current Baseline (measured 2026-08-25)
 
 - Backend suite: 1,169 collected · `not e2e and not live`: **1,162 passed / 2 failed / 4 skipped** (3m47s)
-  - `tests/integration/test_fabio_india_scenarios.py::test_scenario_midday_blocks_trend_continuation` — **deterministic failure (reproduces 4/4)**. Scenario expects trend continuation blocked at midday; current code approves (`approved=True`, "All 4 gates passed"). Pre-existing behavioral gap, unrelated to any refactor. ⚠️ Must be triaged BEFORE WS2: golden-trace replay must not enshrine wrong behavior as "expected"
+  - `tests/integration/test_fabio_india_scenarios.py::test_scenario_midday_blocks_trend_continuation` — **FIXED 18:16 IST** (commit 7e7ee97): root cause was commit ae0d832 dropping every consumer of SessionInfo.allow_trend/allow_reversion while the phase table kept computing them. Gate 1 now enforces phase setup permissions; unit guard added at tests/quant/decision/test_gate1_phase_permissions.py. No longer a known failure.
+  - ⚠️ RESOLVED precondition for WS2: golden-trace replay may now proceed; the midday approval behavior was the bug, and traces captured before this fix that show midday trend approvals are INVALID as golden expectations.
   - `tests/quant/test_property_based.py::test_vah_always_geq_val` — hypothesis deadline flake under full-suite load only; passes 5/5 in isolation
   - `tests/quant/runtime/test_seed_backoff.py::test_seed_starts_staggered_across_engines` — timing flake under full-suite load (reproduced 17:49 IST full run); passes 4/4 in isolation. Same class as the hypothesis flake. Known-failure allowance is now these 2 (+ the VAH one when it appears under load).
 - Frontend runner: vitest (`npm run test`), suite exists under frontend/tests/
