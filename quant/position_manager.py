@@ -148,7 +148,7 @@ class PositionManager:
                     fill=partial_fill,
                     remaining=remaining,
                 ))
-                risk = self._risk.record_trade(partial_fill.pnl)
+                risk = self._risk.record_trade(partial_fill.pnl, count_as_trade=False)
                 logger.info(
                     "🎯 [TIERED TP] %s reason=%s closed=%.0f remaining=%.0f pnl=₹%.2f",
                     self.symbol, exit_dec.reason, abs(partial_fill.position.size),
@@ -166,7 +166,7 @@ class PositionManager:
                 pyr_fill = self._oms.close(pyr_pos, exit_dec.close_price, bar.time,
                                            exit_dec.reason + "_PYRAMID")
                 self._exits.pop_trail(pyr_pos)
-                self._risk.record_trade(pyr_fill.pnl)
+                self._risk.record_trade(pyr_fill.pnl, count_as_trade=False)
                 logger.info(
                     "🔒 [PYRAMID CLOSED] %s level=%d reason=%s pnl=₹%.2f",
                     self.symbol, pyr_pos.pyramid_level, exit_dec.reason, pyr_fill.pnl,

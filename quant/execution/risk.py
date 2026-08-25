@@ -2,8 +2,7 @@ import json
 import logging
 import threading
 from dataclasses import dataclass
-from datetime import date as _date_type
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any
 
 from quant.contracts.aggregates import INITIAL_CAPITAL
@@ -141,10 +140,11 @@ class SessionRisk:
         })
         return True if ok is None else bool(ok)
 
-    def record_trade(self, pnl: float) -> RiskState:
+    def record_trade(self, pnl: float, count_as_trade: bool = True) -> RiskState:
         with self._lock:
             self._daily_pnl += pnl
-            self._trades_today += 1
+            if count_as_trade:
+                self._trades_today += 1
             # Update equity after each trade so next sizing uses real capital
             self._equity = self._starting_equity + self._daily_pnl
 

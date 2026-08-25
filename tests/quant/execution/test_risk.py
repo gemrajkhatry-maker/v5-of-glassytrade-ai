@@ -56,3 +56,14 @@ def test_cushion_tier_progression():
     # Trade 4: loss → 2 consecutive losses → CONSERVATIVE
     r.record_trade(-200.0)
     assert r.state().cushion_tier == "CONSERVATIVE"
+
+def test_partial_fills_do_not_inflate_trades_today():
+    from quant.execution.risk import SessionRisk
+
+    r = SessionRisk(storage=None, symbol="COUNT_TEST")
+    r.record_trade(10.0, count_as_trade=False)  # TP1 partial
+    r.record_trade(5.0, count_as_trade=False)   # TP2 partial
+    r.record_trade(7.0)                          # runner close = the trade
+    st = r.state()
+    assert st.trades_today == 1
+    assert st.daily_pnl == 22.0
