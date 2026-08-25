@@ -31,7 +31,7 @@ class TestSystemConfig:
         config = SystemConfig()
         assert config.name == "GlassyTrade AI"
         assert config.version == "2.0.0"
-        assert config.candle_timeframe_minutes == 1
+        assert config.candle_timeframe_minutes == 5  # 5m canonical bar (1m legacy)
         assert config.capital == 5000000.0
         assert config.environment == "development"
         assert config.broker_mode == "paper"
