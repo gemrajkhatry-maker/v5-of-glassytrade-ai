@@ -669,7 +669,13 @@ class QuantEngine:
                         self.symbol, why,
                     )
                     return
-                self._portfolio_risk.register_open(trade_risk)
+                if not self._portfolio_risk.register_open(trade_risk):
+                    logger.warning(
+                        "🛑 [PORTFOLIO RISK] %s: entry rejected at register — "
+                        "cap breached between can_accept and register",
+                        self.symbol,
+                    )
+                    return
                 self._open_trade_risk = trade_risk
             position = self._oms.submit(signal, quantity)
             self._entry_bar_index = self._bar_index
