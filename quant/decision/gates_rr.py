@@ -3,6 +3,7 @@
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import TICK_SIZE_NSE_OPTIONS
+from quant.decision.stops import structural_anchor, structural_stop
 
 DEFAULT_TP_MULTIPLIER = 2.0
 MIN_RR = 1.5
@@ -12,9 +13,9 @@ MAX_STOP_DISTANCE_TICKS = 20.0
 def gate_risk_reward(
     ctx: DecisionContext,
     min_rr: float = MIN_RR,
-    max_distance_ticks: float = 999999.0,
+    max_distance_ticks: float = MAX_STOP_DISTANCE_TICKS,
 ) -> GateResult:
-    """Gate 4 — risk-reward check (Fabio: R:R >= 1.5)."""
+    """Gate 4 — risk-reward check (Fabio: R:R >= 1.5) + structural stop cap."""
     if ctx is None or ctx.bar is None:
         return GateResult(4, False, "RR fail", "no bar")
     direction = ctx.agent_direction
@@ -22,33 +23,21 @@ def gate_risk_reward(
         return GateResult(4, False, "RR fail", "No direction")
     entry = float(ctx.bar.close)
     tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else TICK_SIZE_NSE_OPTIONS
-    val = ctx.val if ctx.val and ctx.val > 0 else None
-    vah = ctx.vah if ctx.vah and ctx.vah > 0 else None
+    anchor = structural_anchor(ctx, direction)
+    sl = structural_stop(direction, entry, anchor, tick)
     if direction == "LONG":
-        if ctx.leg_lvn and ctx.leg_lvn > 0 and entry > ctx.leg_lvn:
-            anchor = ctx.leg_lvn
-        elif val is not None and entry > val:
-            anchor = val
-        else:
-            anchor = val or ctx.poc or (entry - 5 * tick)
-        sl = anchor - 2 * tick if anchor is not None else (entry - 2 * tick)
-        if sl is not None and sl >= entry:
-            sl = entry - 2 * tick
-        tp = entry + (entry - sl) * DEFAULT_TP_MULTIPLIER if sl is not None else (entry + 4 * tick)
+        tp = entry + (entry - sl) * DEFAULT_TP_MULTIPLIER
     else:
-        if ctx.leg_lvn and ctx.leg_lvn > 0 and entry < ctx.leg_lvn:
-            anchor = ctx.leg_lvn
-        elif vah is not None and entry < vah:
-            anchor = vah
-        else:
-            anchor = vah or ctx.poc or (entry + 5 * tick)
-        sl = anchor + 2 * tick if anchor is not None else (entry + 2 * tick)
-        if sl is not None and sl <= entry:
-            sl = entry + 2 * tick
-        tp = entry - (sl - entry) * DEFAULT_TP_MULTIPLIER if sl is not None else (entry - 4 * tick)
+        tp = entry - (sl - entry) * DEFAULT_TP_MULTIPLIER
     sl = float(sl)
     tp = float(tp)
     risk = abs(entry - sl)
+    if risk > max_distance_ticks * tick:
+        return GateResult(
+            4, False,
+            f"Stop too wide ({risk / tick:.0f} > {max_distance_ticks:.0f} ticks)",
+            f"SL={sl:.2f} entry={entry:.2f}",
+        )
     reward = abs(tp - entry)
     rr = reward / risk if risk > 0 else 0.0
     detail = f"RR={rr:.2f} SL={sl:.2f} TP={tp:.2f}"
