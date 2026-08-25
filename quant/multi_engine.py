@@ -483,6 +483,11 @@ class QuantCoordinator:
         from pathlib import Path as _Path
 
         _journal_dir = self.config.get("journal_dir")
+        # F4: only the LIVE wiring path reads MLX_* env vars and builds the
+        # LLMAdvisor (with its worker thread). Backtest/replay constructors
+        # pass no advisor — the deterministic engine stays env-free.
+        from quant.wiring_advisor import build_live_advisor
+        advisor = build_live_advisor(None)
         engine = QuantEngine(
             gateway,
             symbol,
@@ -496,7 +501,12 @@ class QuantCoordinator:
             strategy=self._strategy,
             portfolio_risk=self._portfolio_risk,
             max_trades_per_session=int(self.config.get("max_trades_per_session", 6)),
+            advisor=advisor,
         )
+        if advisor is not None:
+            # Route advisor emissions through the engine's own bus exactly as
+            # the previous in-constructor wiring did.
+            advisor.set_emit_fn(engine._emit)
         if self.config.get("live_oms_unwired"):
             engine._risk.halt("LIVE_OMS_UNWIRED")
         if self._storage is not None:

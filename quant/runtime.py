@@ -103,6 +103,7 @@ class QuantEngine:
         portfolio_risk=None,
         oms=None,
         max_trades_per_session: int = 6,
+        advisor=None,
     ) -> None:
         self._gateway = gateway
         self._underlying_gateway = underlying_gateway
@@ -283,8 +284,12 @@ class QuantEngine:
             )
         self._cooldown_bars: int = cooldown_bars
         self._last_close_bar_index: int = -1  # bar index of most recent fill
-        from quant.llm.advisor import LLMAdvisor
-        self._advisor = LLMAdvisor(emit_fn=self._emit)
+        # F4: NO environment sniffing inside the deterministic engine. The
+        # advisor is injected explicitly (default None -> no advisor, no
+        # threads). Only the live wiring path reads MLX_* env vars — see
+        # quant.wiring_advisor.build_live_advisor — so backtest/replay
+        # constructions stay thread-free and reproducible.
+        self._advisor = advisor
 
 
     def run(self, max_steps: int | None = None) -> list[Event]:
