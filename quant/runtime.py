@@ -90,7 +90,10 @@ class QuantEngine:
         journal_path: str | None = None,
         min_rr: float = 1.5,
         tick_size: float = 0.05,
-        time_stop_bars: int = 60,
+        time_stop_bars: int | None = None,
+        time_stop_minutes: int = 60,
+        cooldown_bars: int | None = None,
+        cooldown_minutes: int = 5,
         history_source=None,
         lot_size: float = 1.0,
         market: str = "NSE",
@@ -196,6 +199,14 @@ class QuantEngine:
         # the safe default for direct replay/test construction; live startup
         # must inject a complete OMS explicitly.
         self._oms = oms if oms is not None else PaperOMS(lot_size=lot_size)
+        # Bar-count knobs are wall-clock MINUTES by default; bar counts are
+        # derived from the ACTUAL bar interval so moving 1m -> 5m bars cannot
+        # silently multiply durations x5 (a literal 60-bar stop meant 1h on
+        # 1m bars but 5h on 5m bars). An explicit ``time_stop_bars`` (legacy
+        # callers/tests) overrides the minute-based derivation unchanged.
+        _interval_sec = max(1, int(interval_seconds))
+        if time_stop_bars is None:
+            time_stop_bars = max(1, int(time_stop_minutes) * 60 // _interval_sec)
         self._exits = ExitEngine(time_stop_bars=time_stop_bars)
         # Strategy — pluggable entry/exit logic. Defaults to the AMT scalping
         # playbook (Fabio Valentini). Swap for momentum, mean-reversion, etc.
@@ -262,8 +273,15 @@ class QuantEngine:
         self._emit_lock = threading.Lock()
         # Post-trade cooldown: after a fill, the engine waits this many bars
         # before evaluating a new entry. Prevents chasing consecutive signals.
-        # Default 5 bars = 5 minutes on a 1m timeframe (configurable).
-        self._cooldown_bars: int = 5
+        # Derived from wall-clock minutes so the wait stays ~5 minutes on ANY
+        # bar interval (5 bars @ 1m, 1 bar @ 5m) instead of silently scaling
+        # with the timeframe. An explicit ``cooldown_bars`` (legacy
+        # callers/tests) overrides the minute-based derivation unchanged.
+        if cooldown_bars is None:
+            cooldown_bars = max(
+                1, int(cooldown_minutes) * 60 // max(1, int(interval_seconds))
+            )
+        self._cooldown_bars: int = cooldown_bars
         self._last_close_bar_index: int = -1  # bar index of most recent fill
         from quant.llm.advisor import LLMAdvisor
         self._advisor = LLMAdvisor(emit_fn=self._emit)
