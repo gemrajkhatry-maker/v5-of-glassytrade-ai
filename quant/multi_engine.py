@@ -551,7 +551,21 @@ class QuantCoordinator:
             gateway = self._gateways.pop(symbol, None)
             underlying_gateway = self._underlying_gateways.pop(symbol, None)
             thread = self._threads.pop(symbol, None)
-            self._engines.pop(symbol, None)
+            engine = self._engines.pop(symbol, None)
+        # F3: the advisor's daemon worker spins on a 1s poll loop for as long
+        # as _running is True — and nothing ever called shutdown() on the
+        # coordinator path, so every rescan cycle leaked one thread per
+        # stopped engine. Defensive + non-fatal: an engine without an advisor
+        # (or a broken shutdown) must never abort the gateway close.
+        if engine is not None:
+            try:
+                advisor = getattr(engine, "_advisor", None)
+                if advisor is not None and callable(getattr(advisor, "shutdown", None)):
+                    advisor.shutdown()
+            except Exception:
+                logger.exception(
+                    "advisor shutdown failed during stop of %s (ignored)", symbol
+                )
         if gateway is not None:
             gateway.close()
         if underlying_gateway is not None:
