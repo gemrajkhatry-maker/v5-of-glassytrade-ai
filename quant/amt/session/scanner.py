@@ -230,29 +230,32 @@ class OptionScannerService:
             exchange=_exchange,
             expiry_index=effective_expiry_index,
         )
-        while chain is not None and effective_expiry_index < 3:
+        while chain is not None:
             expiry_date = (
                 chain.expiry.date()
                 if hasattr(chain.expiry, "date")
                 else (date.fromisoformat(chain.expiry) if isinstance(chain.expiry, str) else chain.expiry)
             )
-            if expiry_date < today_ist():
-                effective_expiry_index += 1
-                logger.info(
-                    "%s: exp %s is past — advancing to index %d",
-                    u,
-                    expiry_date,
-                    effective_expiry_index,
-                )
-                chain = ensure_sync_adapter_result(
-                    "broker.get_option_chain",
-                    self._broker.get_option_chain,
-                    underlying=u,
-                    exchange=_exchange,
-                    expiry_index=effective_expiry_index,
-                )
-            else:
+            if expiry_date >= today_ist():
                 break
+            if effective_expiry_index >= 3:
+                logger.info("%s: no live expiry up to index 3 — skipping", u)
+                chain = None
+                break
+            effective_expiry_index += 1
+            logger.info(
+                "%s: exp %s is past — advancing to index %d",
+                u,
+                expiry_date,
+                effective_expiry_index,
+            )
+            chain = ensure_sync_adapter_result(
+                "broker.get_option_chain",
+                self._broker.get_option_chain,
+                underlying=u,
+                exchange=_exchange,
+                expiry_index=effective_expiry_index,
+            )
 
         if chain is None:
             logger.info("%s: option chain returned None — skipping", u)
@@ -540,6 +543,13 @@ class OptionScannerService:
                         expiry_index=expiry_index,
                     )
                     if chain is None:
+                        continue
+                    _fb_exp = (
+                        chain.expiry.date()
+                        if hasattr(chain.expiry, "date")
+                        else None
+                    )
+                    if _fb_exp is not None and _fb_exp < today_ist():
                         continue
                     atm = chain.atm_strike
                     

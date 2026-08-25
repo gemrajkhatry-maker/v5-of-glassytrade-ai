@@ -95,7 +95,7 @@ class TestOptionScannerService:
     def test_scanner_returns_result(self):
         """Mock broker returning a chain with ATM calls should give ScanResults."""
         calls = self._full_calls()
-        chain = _make_chain(atm=23400.0, expiry_iso="2026-03-20", calls=calls)
+        chain = _make_chain(atm=23400.0, expiry_iso=_next_tuesday_iso(), calls=calls)
         broker = MagicMock()
         broker.get_option_chain.return_value = chain
 
@@ -109,7 +109,7 @@ class TestOptionScannerService:
     def test_scanner_returns_put(self):
         """preferred_option_type='PE' should scan puts chain."""
         puts = self._full_puts()
-        chain = _make_chain(atm=23400.0, expiry_iso="2026-03-20", puts=puts)
+        chain = _make_chain(atm=23400.0, expiry_iso=_next_tuesday_iso(), puts=puts)
         broker = MagicMock()
         broker.get_option_chain.return_value = chain
 
@@ -143,7 +143,7 @@ class TestOptionScannerService:
     def test_scan_top_n_picks_highest_score(self):
         """scan_top_n should return contracts sorted by score."""
         calls = self._full_calls()
-        chain = _make_chain(atm=23400.0, expiry_iso="2026-03-20", calls=calls)
+        chain = _make_chain(atm=23400.0, expiry_iso=_next_tuesday_iso(), calls=calls)
         broker = MagicMock()
         broker.get_option_chain.return_value = chain
 
@@ -210,6 +210,34 @@ class TestOptionScannerService:
         assert results
         assert all(r.expiry == weekly_iso for r in results)
         assert broker.get_option_chain.call_count == 2
+
+    def test_all_expired_series_returns_empty(self):
+        """When every series up to index cap 3 is expired, scan returns empty —
+        it must never fall through with the last expired chain."""
+        calls = self._full_calls()
+        past = _make_chain(atm=23400.0, expiry_iso="2020-01-07", calls=calls)
+        broker = MagicMock()
+        broker.get_option_chain.return_value = past
+
+        scanner = self._make_scanner(broker)
+        results = scanner.scan_top_n(underlyings=["NIFTY"], n=3)
+
+        assert results == []
+        # Advance loop exhausts indexes 0..3 (4 calls); the ATM-monitoring
+        # fallback may add one more fetch, which the expiry guard then skips.
+        assert broker.get_option_chain.call_count >= 4
+
+    def test_fallback_monitoring_skips_expired_chain(self):
+        """ATM-monitoring fallback must not monitor an expired series."""
+        calls = self._full_calls()
+        past = _make_chain(atm=23400.0, expiry_iso="2020-01-07", calls=calls)
+        broker = MagicMock()
+        broker.get_option_chain.return_value = past
+
+        scanner = self._make_scanner(broker)
+        results = scanner.scan_top_n(underlyings=["NIFTY"], n=3)
+
+        assert results == []
 
     def test_underlying_priority_fills_primary_first(self):
         """underlying_priority makes the primary root fill its slots (including

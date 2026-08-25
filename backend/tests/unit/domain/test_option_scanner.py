@@ -51,6 +51,16 @@ def _make_chain(atm=23400.0, expiry_iso="2026-03-20", calls=None, puts=None,
     return chain
 
 
+def _next_tuesday_iso() -> str:
+    """ISO date (YYYY-MM-DD) of the next Tuesday (NIFTY weekly expiry)
+    strictly after today, so expiry tests never depend on the wall clock."""
+    today = datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
+    days_ahead = (1 - today.weekday()) % 7  # Tuesday == weekday 1
+    if days_ahead == 0:
+        days_ahead = 7
+    return (today + timedelta(days=days_ahead)).isoformat()
+
+
 # ---------------------------------------------------------------------------
 # OptionSelector tests
 # ---------------------------------------------------------------------------
@@ -163,7 +173,7 @@ class TestOptionScannerService:
     def test_scanner_returns_result(self):
         """Mock broker returning a chain with ATM calls should give ScanResults."""
         calls = self._full_calls()
-        chain = _make_chain(atm=23400.0, expiry_iso="2026-03-20", calls=calls)
+        chain = _make_chain(atm=23400.0, expiry_iso=_next_tuesday_iso(), calls=calls)
         broker = MagicMock()
         broker.get_option_chain.return_value = chain
 
@@ -177,7 +187,7 @@ class TestOptionScannerService:
     def test_scanner_returns_put(self):
         """preferred_option_type='PE' should scan puts chain."""
         puts = self._full_puts()
-        chain = _make_chain(atm=23400.0, expiry_iso="2026-03-20", puts=puts)
+        chain = _make_chain(atm=23400.0, expiry_iso=_next_tuesday_iso(), puts=puts)
         broker = MagicMock()
         broker.get_option_chain.return_value = chain
 
@@ -212,7 +222,7 @@ class TestOptionScannerService:
     def test_scan_top_n_picks_highest_score(self):
         """scan_top_n should return contracts sorted by score."""
         calls = self._full_calls()
-        chain = _make_chain(atm=23400.0, expiry_iso="2026-03-20", calls=calls)
+        chain = _make_chain(atm=23400.0, expiry_iso=_next_tuesday_iso(), calls=calls)
         broker = MagicMock()
         broker.get_option_chain.return_value = chain
 
@@ -254,7 +264,7 @@ def _chain_with_calls_puts():
     atm = 23400.0
     calls = {atm: _make_option(symbol="NIFTY 20 MAR 23400 CALL", strike=atm)}
     puts = {atm: _make_option(symbol="NIFTY 20 MAR 23400 PUT", strike=atm)}
-    return _make_chain(atm=atm, expiry_iso="2026-03-20", calls=calls, puts=puts)
+    return _make_chain(atm=atm, expiry_iso=_next_tuesday_iso(), calls=calls, puts=puts)
 
 
 def test_momentum_bias_aligns_option_type():
