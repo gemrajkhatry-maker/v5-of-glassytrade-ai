@@ -1,4 +1,17 @@
-"""Broker port — abstract interface for order execution."""
+"""Broker port — abstract interface for order execution.
+
+Dual-port note (WS4, 2026-08-25): the canonical broker abstraction for this
+repo is ``brokers.broker.ports.IBrokerPort`` (8 ISP protocols + primary ABC).
+``IBroker`` here is the legacy quant-side port and remains LIVE: it is
+implemented by the backend DI adapters
+(``app.infrastructure.adapters.dhan_broker_adapter.DhanBrokerAdapter`` and
+``app.infrastructure.adapters.paper_broker.PaperBrokerAdapter``), resolved via
+``app.application.di.composition_root``, and consumed by ``backend/app/main.py``
+and the FastAPI dependencies. Its only quant-internal caller class is
+``quant.execution.live_oms.LiveOMS``, which itself is currently dead code
+(see spec open-decision #1). Do not delete either port without migrating the
+DI composition root first.
+"""
 
 from __future__ import annotations
 
