@@ -926,7 +926,7 @@ class DhanExchangeConfig:
             contracts = [
                 i
                 for i in mapper.instruments.values()
-                if (i.exchange_segment in (ExchangeSegment.NSE_FNO, ExchangeSegment.MCX_COMM))
+                if (i.exchange_segment in (ExchangeSegment.NSE_FNO, ExchangeSegment.MCX))
                 and i.lot_size > 0
                 and "NXT" not in str(i.trading_symbol)
                 and DEFAULT_REGISTRY.try_resolve(str(i.trading_symbol)) is not None

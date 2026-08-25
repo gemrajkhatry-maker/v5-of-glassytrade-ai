@@ -15,8 +15,8 @@ Example:
     >>> quote = DhanConverter.to_quote(dhan_quote)
 """
 
-from datetime import datetime, date
-from typing import Dict, Any, Optional, List
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from brokers.broker.entities import (
     Instrument,
@@ -41,17 +41,91 @@ from brokers.broker.dhan.domain import (
     DhanTick,
     DhanOrder,
     DhanPosition,
-    DhanOption,
     DhanOptionChain,
     ExchangeSegment,
-    InstrumentTypeEnum,
     OptionType as DhanOptionType,
 )
+
+if TYPE_CHECKING:
+    from brokers.broker.entities import MarketDepth
 from brokers.broker.dhan.domain.segment_mapping import SEGMENT_TO_EXCHANGE
 from brokers.broker.dhan.domain.segment_mapping import (
     exchange_to_segment_name,
     segment_name_to_exchange,
 )
+
+
+# =============================================================================
+# String Mapping Tables (module-level, frozen by convention - treat as read-only)
+#
+# Single source of truth for Dhan API string <-> internal enum conversions.
+# Each table preserves the exact default/fallthrough semantics of the
+# if/elif chains it replaced; the defaults are documented inline.
+# =============================================================================
+
+# User-friendly exchange name -> internal segment code.
+# Unknown keys fall through unchanged (see to_segment). Includes both
+# user-friendly names and internal codes (identity-mapped).
+DHAN_STRING_TO_SEGMENT: Dict[str, str] = {
+    "NSE": "NSE_EQ",
+    "BSE": "BSE_EQ",
+    "NFO": "NSE_FNO",
+    "BFO": "BSE_FNO",
+    "MCX": "MCX_COMM",
+    "INDEX": "IDX_I",
+    "CDS": "NSE_CURRENCY",
+    # Also support internal codes directly
+    "NSE_EQ": "NSE_EQ",
+    "BSE_EQ": "BSE_EQ",
+    "NSE_FNO": "NSE_FNO",
+    "BSE_FNO": "BSE_FNO",
+    "MCX_COMM": "MCX_COMM",
+    "IDX_I": "IDX_I",
+    "NSE_CURRENCY": "NSE_CURRENCY",
+}
+
+# Broker-agnostic OrderType -> Dhan API orderType string.
+# Unknown values default to "MARKET".
+ORDER_TYPE_TO_DHAN: Dict[OrderType, str] = {
+    OrderType.MARKET: "MARKET",
+    OrderType.LIMIT: "LIMIT",
+    OrderType.SL: "STOP_LOSS",
+    OrderType.SLM: "STOP_LOSS_MARKET",
+}
+
+# Dhan orderType string -> broker-agnostic OrderType.
+# Unknown/empty strings default to OrderType.MARKET.
+DHAN_ORDER_TYPE_MAP: Dict[str, OrderType] = {
+    "MARKET": OrderType.MARKET,
+    "LIMIT": OrderType.LIMIT,
+    "STOP_LOSS": OrderType.SL,
+    "STOP_LOSS_MARKET": OrderType.SLM,
+    "SL": OrderType.SL,
+    "SL-M": OrderType.SLM,
+}
+
+# Dhan orderStatus string -> broker-agnostic OrderStatus.
+# Unknown strings default to OrderStatus.PENDING.
+DHAN_ORDER_STATUS_MAP: Dict[str, OrderStatus] = {
+    "PENDING": OrderStatus.PENDING,
+    "TRANSIT": OrderStatus.PENDING,
+    "OPEN": OrderStatus.OPEN,
+    "PARTIALLY_FILLED": OrderStatus.OPEN,
+    "PART_TRADED": OrderStatus.OPEN,
+    "TRADED": OrderStatus.FILLED,
+    "FILLED": OrderStatus.FILLED,
+    "CANCELLED": OrderStatus.CANCELLED,
+    "CANCELED": OrderStatus.CANCELLED,
+    "REJECTED": OrderStatus.REJECTED,
+    "EXPIRED": OrderStatus.CANCELLED,
+}
+
+# Dhan option type -> broker-agnostic OptionType.
+# Unknown values default to OptionType.CALL (previous explicit fallback).
+DHAN_OPTION_TYPE_MAP: Dict[DhanOptionType, OptionType] = {
+    DhanOptionType.CALL: OptionType.CALL,
+    DhanOptionType.PUT: OptionType.PUT,
+}
 
 
 # =============================================================================
@@ -87,28 +161,10 @@ def to_segment(exchange: Optional[str]) -> Optional[str]:
     if isinstance(exchange, Exchange):
         return exchange_to_segment_name(exchange)
 
-    # Handle string
+    # Handle string: direct lookup; unknown names pass through unchanged
+    # (preserves the original .get(exchange_upper, exchange_upper) behavior).
     exchange_upper = str(exchange).upper().strip()
-
-    # Direct mapping for user-friendly names
-    string_to_segment = {
-        "NSE": "NSE_EQ",
-        "BSE": "BSE_EQ",
-        "NFO": "NSE_FNO",
-        "BFO": "BSE_FNO",
-        "MCX": "MCX_COMM",
-        "INDEX": "IDX_I",
-        "CDS": "NSE_CURRENCY",
-        # Also support internal codes directly
-        "NSE_EQ": "NSE_EQ",
-        "BSE_EQ": "BSE_EQ",
-        "NSE_FNO": "NSE_FNO",
-        "BSE_FNO": "BSE_FNO",
-        "MCX_COMM": "MCX_COMM",
-        "IDX_I": "IDX_I",
-        "NSE_CURRENCY": "NSE_CURRENCY",
-    }
-    return string_to_segment.get(exchange_upper, exchange_upper)
+    return DHAN_STRING_TO_SEGMENT.get(exchange_upper, exchange_upper)
 
 
 # =============================================================================
@@ -437,13 +493,7 @@ class DhanConverter:
         """
         transaction_type = "BUY" if order.side == OrderSide.BUY else "SELL"
 
-        order_type_map = {
-            OrderType.MARKET: "MARKET",
-            OrderType.LIMIT: "LIMIT",
-            OrderType.SL: "STOP_LOSS",
-            OrderType.SLM: "STOP_LOSS_MARKET",
-        }
-        dhan_order_type = order_type_map.get(order.order_type, "MARKET")
+        dhan_order_type = ORDER_TYPE_TO_DHAN.get(order.order_type, "MARKET")
 
         payload = {
             "dhanClientId": client_id,
@@ -782,39 +832,14 @@ class DhanConverter:
     @staticmethod
     def _map_option_type(dhan_option_type: DhanOptionType) -> OptionType:
         """Map Dhan option type to broker-agnostic OptionType."""
-        if dhan_option_type == DhanOptionType.CALL:
-            return OptionType.CALL
-        elif dhan_option_type == DhanOptionType.PUT:
-            return OptionType.PUT
-        return OptionType.CALL  # Default
+        return DHAN_OPTION_TYPE_MAP.get(dhan_option_type, OptionType.CALL)  # Default: CALL
 
     @staticmethod
     def _map_order_type_from_dhan(dhan_order_type: str) -> OrderType:
         """Map Dhan order type string to OrderType enum."""
-        type_map = {
-            "MARKET": OrderType.MARKET,
-            "LIMIT": OrderType.LIMIT,
-            "STOP_LOSS": OrderType.SL,
-            "STOP_LOSS_MARKET": OrderType.SLM,
-            "SL": OrderType.SL,
-            "SL-M": OrderType.SLM,
-        }
-        return type_map.get(dhan_order_type.upper(), OrderType.MARKET)
+        return DHAN_ORDER_TYPE_MAP.get(dhan_order_type.upper(), OrderType.MARKET)
 
     @staticmethod
     def _map_order_status_from_dhan(dhan_status: str) -> OrderStatus:
         """Map Dhan order status string to OrderStatus enum."""
-        status_map = {
-            "PENDING": OrderStatus.PENDING,
-            "TRANSIT": OrderStatus.PENDING,
-            "OPEN": OrderStatus.OPEN,
-            "PARTIALLY_FILLED": OrderStatus.OPEN,
-            "PART_TRADED": OrderStatus.OPEN,
-            "TRADED": OrderStatus.FILLED,
-            "FILLED": OrderStatus.FILLED,
-            "CANCELLED": OrderStatus.CANCELLED,
-            "CANCELED": OrderStatus.CANCELLED,
-            "REJECTED": OrderStatus.REJECTED,
-            "EXPIRED": OrderStatus.CANCELLED,
-        }
-        return status_map.get(dhan_status.upper(), OrderStatus.PENDING)
+        return DHAN_ORDER_STATUS_MAP.get(dhan_status.upper(), OrderStatus.PENDING)

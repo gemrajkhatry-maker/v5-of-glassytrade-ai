@@ -113,7 +113,11 @@ def test_exchange_config_resolves_underlying_root_via_option():
 
 
 def test_exchange_config_raises_for_unknown_underlying():
+    # NOTE: "GOLDM" was originally used here as an "unknown" underlying.
+    # Since ae0d832 the step-3 fallback resolves GOLDM via quant
+    # ExchangeConfig (MCX lot=100), so it no longer raises. The raise path
+    # is pinned with a genuinely unknown underlying instead.
     broker = _broker([_nifty_option()])
     cfg = DhanExchangeConfig(broker)
     with pytest.raises(DhanSymbolNotFoundError):
-        cfg.get_lot_size("GOLDM")
+        cfg.get_lot_size("ZZNOTREAL")
