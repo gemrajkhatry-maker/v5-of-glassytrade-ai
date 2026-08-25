@@ -289,13 +289,14 @@ class DecisionContextBuilder:
                 cvd_agrees=cvd_agrees,
             )
 
+        bar_time = bar.time if bar is not None else str(amt_dto.get("time") or "")
         return DecisionContext(
             state=None,
             bar=bar,
             symbol=symbol,
             session_open=session_allow_entry(
-                bar.time, market=market, contract_expiry=contract_expiry
-            ),
+                bar_time, market=market, contract_expiry=contract_expiry
+            ) if bar_time else True,
             warmup_complete=(bar_index + warm_bars) >= warmup_bars,
             position_open=False,
             cooldown_remaining_sec=cooldown_remaining_sec,
@@ -334,7 +335,11 @@ class DecisionContextBuilder:
             allow_reversion=allow_reversion,
             is_expiry=is_expiry,
             profile_shape=str(amt_dto.get("profileShape") or ""),
-            option_delta=float(amt_dto.get("optionDelta") or 0.50),
+            option_delta=float(
+                amt_dto.get("deltaNormalizedOption")
+                or amt_dto.get("optionDelta")
+                or 0.50
+            ),
             contested_bubble_zone=bool(amt_dto.get("contestedZone") or False),
             stacked_imbalance_direction=_si_dir,
             stacked_imbalance_magnitude=_si_mag,

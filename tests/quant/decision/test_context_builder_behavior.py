@@ -181,3 +181,12 @@ def test_gate1_rejects_wide_spread():
     result = gate_session_phase(ctx)
     assert not result.passed
     assert "spread" in result.reason.lower()
+
+
+def test_option_delta_reads_delta_normalized_option_key():
+    ctx = DecisionContextBuilder().build(
+        bar=_dummy_bar(close=100.0), symbol="S", market="NSE", contract_expiry=None,
+        tick_size=0.05, bar_index=20, warm_bars=15, cooldown_remaining_sec=0,
+        risk_state=DummyRisk(), amt_dto={"deltaNormalizedOption": 0.15},
+    )
+    assert ctx.option_delta == 0.15
