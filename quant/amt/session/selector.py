@@ -56,6 +56,11 @@ class ThetaCheck:
     viable: bool             # theta_ratio < max_theta_ratio
 
 
+# One floor for mapping underlying stops to option stops via delta.
+# 0.30 per the Fabio Cushion System — shared by lot sizing and stop translation.
+MIN_EFFECTIVE_DELTA = 0.30
+
+
 @dataclass
 class OptionSelectorConfig:
     """Tuneable knobs for the option selection pipeline."""
@@ -293,8 +298,8 @@ class OptionSelector:
 
         Enforces Fabio Cushion System:
         - Base risk: account_equity * risk_pct (e.g. 0.25% - 0.50%)
-        - If session_profit > 0: add up to 20% of session profit (capped at 30% total profit)
-        - Option stop points = underlying_stop_points * max(0.30, min(1.0, abs(option_delta)))
+        - If session_profit > 0: add 20% of session profit to the risk budget
+        - Option stop points = underlying_stop_points * max(MIN_EFFECTIVE_DELTA, min(1.0, abs(option_delta)))
         - On expiry day: max lots capped at 50% of standard ceiling
         """
         if underlying_stop_points <= 0 or lot_size <= 0:
@@ -302,12 +307,13 @@ class OptionSelector:
         
         # 1. Calculate allowed rupee risk with intraday cushion
         base_risk = account_equity * risk_pct
+        # ponytail: cushion is exactly 20% of session profit — the old
+        # min(..., 30% profit) cap could never bind.
         cushion = max(0.0, session_profit * 0.20) if session_profit > 0 else 0.0
-        # Cap cushion at 30% of total session profit
-        total_risk_rupees = base_risk + min(cushion, session_profit * 0.30 if session_profit > 0 else 0.0)
+        total_risk_rupees = base_risk + cushion
 
         # 2. Map underlying stop to option premium stop via observed delta
-        effective_delta = max(0.30, min(1.0, abs(option_delta)))
+        effective_delta = max(MIN_EFFECTIVE_DELTA, min(1.0, abs(option_delta)))
         option_stop_points = underlying_stop_points * effective_delta
 
         # 3. Size lots
@@ -381,8 +387,8 @@ class OptionSelector:
         - Underlying LONG -> Buys Call Option at option_ltp
         - Underlying SHORT -> Buys Put Option at option_ltp
         - Delta-adjusted stop & target:
-            opt_risk_pts = max(tick_size, abs(signal.entry - signal.sl) * max(0.20, min(1.0, abs(delta))))
-            opt_reward_pts = max(tick_size * 2, abs(signal.tp - signal.entry) * max(0.20, min(1.0, abs(delta))))
+            opt_risk_pts = max(tick_size, abs(signal.entry - signal.sl) * max(MIN_EFFECTIVE_DELTA, min(1.0, abs(delta))))
+            opt_reward_pts = max(tick_size * 2, abs(signal.tp - signal.entry) * max(MIN_EFFECTIVE_DELTA, min(1.0, abs(delta))))
             opt_entry = float(option_ltp)
             opt_sl = max(tick_size, opt_entry - opt_risk)
             opt_tp = opt_entry + opt_reward
@@ -432,7 +438,7 @@ class OptionSelector:
             )
             return None
 
-        eff_delta = max(0.20, min(1.0, abs(delta)))
+        eff_delta = max(MIN_EFFECTIVE_DELTA, min(1.0, abs(delta)))
         underlying_risk = abs(signal.entry - signal.sl)
         underlying_reward = abs(signal.tp - signal.entry)
         

@@ -250,3 +250,27 @@ def test_midcpnifty_exchange_resolution():
     assert reg.exchange_for("MIDCPNIFTY 24 AUG 12000 CALL") == "NSE"
     assert reg.is_nse("MIDCPNIFTY 24 AUG 12000 CALL") is True
     assert reg.is_mcx("MIDCPNIFTY 24 AUG 12000 CALL") is False
+
+
+def test_effective_delta_floor_is_unified():
+    """Stop translation and lot sizing must share one delta floor."""
+    from quant.amt.session.selector import MIN_EFFECTIVE_DELTA
+
+    assert MIN_EFFECTIVE_DELTA == 0.30
+
+
+def test_translate_uses_shared_delta_floor():
+    """A delta below the floor must clamp to the shared floor,
+    not the old translation-only 0.20 floor."""
+    from quant.amt.session.selector import MIN_EFFECTIVE_DELTA, OptionSelector
+    from quant.decision.signal_builder import Signal
+
+    sig = Signal(
+        type="LONG", reason="t", entry=100.0, sl=98.0, tp=104.0, rr=2.0,
+        model_label="m", symbol="NIFTY", timestamp="t",
+    )
+    out = OptionSelector().translate_underlying_signal_to_option(
+        sig, "NIFTY 20 MAR 23400 CE", option_ltp=100.0, delta=0.05,
+    )
+    # eff_delta clamps to MIN_EFFECTIVE_DELTA: opt risk = 2.0 * 0.30 = 0.60
+    assert out.sl == out.entry - abs(sig.entry - sig.sl) * MIN_EFFECTIVE_DELTA
