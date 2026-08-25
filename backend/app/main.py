@@ -230,6 +230,13 @@ def create_application() -> FastAPI:
             logger.error("Option scanner failed: %s — using default underlyings", e, exc_info=True)
             end_phase("option_scanner", "failed", str(e))
             mark_startup_failed("config", str(e))
+            if os.getenv("GLASSYTRADE_ENV", "paper").lower() == "live":
+                # In live mode, falling back to configured underlyings can
+                # spawn instruments that were never validated by the scanner.
+                # Refuse startup instead of silently changing the traded book.
+                raise RuntimeError(
+                    f"Live startup refused: option scanner failed: {e}"
+                ) from e
 
         # Boot the greenfield QuantCoordinator — the single decision brain.
         # The legacy engine path (TradingEngine + TradingSessionService) was
@@ -259,20 +266,33 @@ def create_application() -> FastAPI:
 
         import signal as _signal
 
+        _prev_sigterm = _signal.getsignal(_signal.SIGTERM)
+
         def _emergency_flatten(signum, frame):
             import logging
             _log = logging.getLogger('emergency.shutdown')
             _log.critical('SIGTERM received — initiating emergency risk halt', extra={'event': 'EMERGENCY_SHUTDOWN'})
             try:
-                # Set risk_halted on all active engines
+                # Audit D-RISK-03: the old handler set eng._risk_halted — an
+                # attribute QuantEngine never had — so this was a silent no-op.
+                # Route through the coordinator into each engine's SessionRisk,
+                # which is what the decision loop actually consults.
                 if hasattr(app.state, 'coordinator'):
                     coord = app.state.coordinator
-                    if hasattr(coord, '_engines'):
-                        for eng in coord._engines.values():
-                            if hasattr(eng, '_risk_halted'):
-                                eng._risk_halted = True
+                    if hasattr(coord, 'emergency_halt'):
+                        halted = coord.emergency_halt("SIGTERM shutdown", force_close=True)
+                        _log.critical(
+                            'Emergency halt applied to %d engine(s)', halted,
+                            extra={'event': 'EMERGENCY_SHUTDOWN_APPLIED'},
+                        )
             except Exception as exc:
                 _log.error('Emergency flatten error: %s', exc)
+            # Chain to the previously installed handler (uvicorn's): without
+            # this the server ignores SIGTERM forever, operators escalate to
+            # SIGKILL, and lifespan teardown (coordinator.stop + storage
+            # flush) never runs.
+            if callable(_prev_sigterm):
+                _prev_sigterm(signum, frame)
 
         _signal.signal(_signal.SIGTERM, _emergency_flatten)
 
