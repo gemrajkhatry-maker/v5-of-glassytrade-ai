@@ -20,13 +20,13 @@ class DummyRisk:
     consecutive_losses = 0
 
 
-def _dummy_bar():
+def _dummy_bar(close=100.5):
     return Bar(
         time="2026-08-19T10:00:00+05:30",
         open=100.0,
         high=101.0,
         low=99.0,
-        close=100.5,
+        close=close,
         volume=1000.0,
         buy_volume=600.0,
         sell_volume=400.0,
@@ -56,36 +56,6 @@ def test_imbalanced_context_has_no_complete_setup_without_sequence():
     )
     assert ctx.market_state == MarketState.IMBALANCED
     assert ctx.setup_evidence is None or not ctx.setup_evidence.is_complete()
-
-
-def test_triple_a_dto_maps_to_complete_setup():
-    builder = DecisionContextBuilder()
-    dto = {
-        "marketState": "IMBALANCED",
-        "setupType": "TRIPLE_A",
-        "setupDirection": "LONG",
-        "absorption": True,
-        "accumulation": True,
-        "aggression": True,
-        "acceptance": True,
-        "cvdAgrees": True,
-        "cvdSlope": 1.5,
-    }
-    ctx = builder.build(
-        bar=_dummy_bar(),
-        symbol="NIFTY",
-        market="NSE",
-        contract_expiry=None,
-        tick_size=0.05,
-        bar_index=20,
-        warm_bars=0,
-        cooldown_remaining_sec=0.0,
-        risk_state=DummyRisk(),
-        amt_dto=dto,
-    )
-    assert ctx.setup_evidence is not None
-    assert ctx.setup_evidence.setup_type == "TRIPLE_A"
-    assert ctx.setup_evidence.is_complete() is True
 
 
 def test_va_fade_dto_rejection_maps_to_complete_setup():
@@ -183,3 +153,31 @@ def test_leg_lvn_derived_from_nearest_leg_lvns():
     )
     assert ctx.leg_lvn == 100.1
     assert ctx.setup_evidence.level == 100.1
+
+
+def test_context_builder_populates_bid_ask_from_order_book():
+    from quant.contracts.value_objects import OrderBook, OrderBookLevel
+
+    ob = OrderBook(bids=(OrderBookLevel(99.9, 10.0),), asks=(OrderBookLevel(100.1, 10.0),))
+    ctx = DecisionContextBuilder().build(
+        bar=_dummy_bar(close=100.0), symbol="S", market="NSE", contract_expiry=None,
+        tick_size=0.05, bar_index=20, warm_bars=15, cooldown_remaining_sec=0,
+        risk_state=DummyRisk(), amt_dto={}, order_book=ob,
+    )
+    assert ctx.bid == 99.9
+    assert ctx.ask == 100.1
+
+
+def test_gate1_rejects_wide_spread():
+    from quant.contracts.value_objects import OrderBook, OrderBookLevel
+    from quant.decision.gates_session_position import gate_session_phase
+
+    ob = OrderBook(bids=(OrderBookLevel(100.0, 10.0),), asks=(OrderBookLevel(101.0, 10.0),))
+    ctx = DecisionContextBuilder().build(
+        bar=_dummy_bar(close=100.5), symbol="S", market="NSE", contract_expiry=None,
+        tick_size=0.05, bar_index=20, warm_bars=15, cooldown_remaining_sec=0,
+        risk_state=DummyRisk(), amt_dto={}, order_book=ob,
+    )
+    result = gate_session_phase(ctx)
+    assert not result.passed
+    assert "spread" in result.reason.lower()

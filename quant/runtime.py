@@ -581,6 +581,7 @@ class QuantEngine:
             cooldown_remaining_sec=cooldown_remaining_sec,
             risk_state=risk_st,
             amt_dto=amt_dto,
+            order_book=self._last_depth,
         )
         decision = self._strategy.should_enter(ctx)
         # S1: record the decision itself — gates with pass/fail and reasons.

@@ -107,6 +107,7 @@ class DecisionContextBuilder:
         cooldown_remaining_sec: float,
         risk_state,
         amt_dto: dict,
+        order_book=None,
         interval_seconds: int = DEFAULT_INTERVAL_SEC,
     ) -> DecisionContext:
         """Build a DecisionContext from the given inputs.
@@ -129,6 +130,16 @@ class DecisionContextBuilder:
         """
         warmup_bars = 15  # _WARMUP_BARS constant
         obi = float(amt_dto.get("obi") or 0.0)
+
+        best_bid = 0.0
+        best_ask = 0.0
+        if order_book is not None:
+            bids = getattr(order_book, "bids", ()) or ()
+            asks = getattr(order_book, "asks", ()) or ()
+            if bids:
+                best_bid = float(bids[0].price)
+            if asks:
+                best_ask = float(asks[0].price)
 
         raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
         break_dir = str(amt_dto.get("breakDirection") or "").upper()
@@ -230,17 +241,19 @@ class DecisionContextBuilder:
         drive_number = int(amt_dto.get("driveNumber") or 0)
 
         setup_evidence = None
-        if setup_type == "TRIPLE_A":
+        triple_phase = str(amt_dto.get("tripleAPhase") or "")
+        triple_signal = str(amt_dto.get("tripleASignal") or "")
+        if triple_phase == "AGGRESSION" and (triple_signal in ("LONG", "SHORT") or agent_direction in ("LONG", "SHORT")):
             setup_evidence = SetupEvidence(
                 setup_type="TRIPLE_A",
-                direction=setup_dir or ("LONG" if cvd_val >= 0 else "SHORT"),
-                absorption=bool(amt_dto.get("absorption")),
-                accumulation=bool(amt_dto.get("accumulation")),
-                aggression=bool(amt_dto.get("aggression")),
-                acceptance=bool(amt_dto.get("acceptance")),
+                direction=triple_signal or agent_direction,
+                absorption=True,
+                accumulation=True,
+                aggression=True,
+                acceptance=True,
                 cvd_agrees=cvd_agrees,
             )
-        elif is_second_drive or drive_number == 2 or setup_type == "SECOND_DRIVE":
+        elif is_second_drive:
             setup_evidence = SetupEvidence(
                 setup_type="SECOND_DRIVE",
                 direction=setup_dir or ("SHORT" if rejection_at_high else ("LONG" if rejection_at_low else "LONG")),
@@ -313,8 +326,8 @@ class DecisionContextBuilder:
             equity=risk_state.equity,
             risk_per_trade_pct=risk_state.risk_per_trade_pct,
             leg_lvn=nearest_leg_lvn,
-            bid=float(amt_dto.get("bid") or getattr(bar, "bid", 0.0) or 0.0),
-            ask=float(amt_dto.get("ask") or getattr(bar, "ask", 0.0) or 0.0),
+            bid=float(amt_dto.get("bid") or best_bid or 0.0),
+            ask=float(amt_dto.get("ask") or best_ask or 0.0),
             time_str=str(bar.time if bar else ""),
             session_phase=session_phase,
             allow_trend=allow_trend,
@@ -329,4 +342,8 @@ class DecisionContextBuilder:
             stacked_imbalance_price_high=_si_high,
             nearest_buy_print_below=_buy_wall_below,
             nearest_sell_print_above=_sell_wall_above,
+            triple_a_phase=str(amt_dto.get("tripleAPhase") or ""),
+            triple_a_signal=str(amt_dto.get("tripleASignal") or ""),
+            absorption_cluster_high=float(amt_dto.get("absorptionClusterHigh") or 0.0),
+            absorption_cluster_low=float(amt_dto.get("absorptionClusterLow") or 0.0),
         )
