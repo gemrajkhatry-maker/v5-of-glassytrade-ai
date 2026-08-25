@@ -310,12 +310,12 @@ class MultiplexedMarketFeed:
                 self._resync_async.set()
             self._resync.clear()
             
-            stream_full = self._md.stream_full(symbols)
+            stream_full = None
             stream_depth = None
-            if hasattr(self._md, "stream_depth_20"):
-                stream_depth = self._md.stream_depth_20(symbols)
-                
             try:
+                stream_full = self._md.stream_full(symbols)
+                if hasattr(self._md, "stream_depth_20"):
+                    stream_depth = self._md.stream_depth_20(symbols)
                 anext_full = None
                 anext_depth = None
                 while True:
@@ -375,7 +375,8 @@ class MultiplexedMarketFeed:
                     await asyncio.sleep(backoff)
             finally:
                 self._resync_async = None
-                await self._aclose_quietly(stream_full)
+                if stream_full is not None:
+                    await self._aclose_quietly(stream_full)
                 if stream_depth:
                     await self._aclose_quietly(stream_depth)
 
@@ -445,11 +446,32 @@ class MultiplexedMarketFeed:
             "delta_volume": delta_vol,
             "bid_qty": delta_buy,
             "ask_qty": delta_sell,
-            "timestamp": pkt.get("timestamp") or pkt.get("LTP_time") or pkt.get("last_trade_time") or 0,
+            "timestamp": (
+                # Audit D-TIME-06: exchange event time (LTT epoch) is the truth
+                # for bar windows. WSMessage.timestamp is datetime.now() on the
+                # deployment machine — naive LOCAL wall clock — and preferring
+                # it made bars follow the box's timezone and let the monotonic
+                # guard discard ticks after NTP corrections. The real packet
+                # shape carries this under "last_trade_time" (raw WS dict,
+                # websocket_client.py) OR "ltt" (FullPacket field name after
+                # streaming_service.py's rename / dhan_adapter's asdict()) —
+                # both must be checked, or this silently degrades back to
+                # wall-clock on every real production packet (re-audit finding:
+                # the original fix only checked "last_trade_time", which never
+                # survives the FullPacket rename). Fall back to the arrival
+                # stamp only when the exchange sent neither.
+                pkt.get("last_trade_time")
+                or pkt.get("ltt")
+                or pkt.get("LTP_time")
+                or pkt.get("timestamp")
+                or 0
+            ),
             "oi": float(pkt.get("oi") or 0),
             "depth_bids": pkt.get("depth_bids") or [],
             "depth_asks": pkt.get("depth_asks") or [],
-            "_raw_timestamp": pkt.get("timestamp"),
+            "_raw_timestamp": (
+                pkt.get("last_trade_time") or pkt.get("ltt") or pkt.get("timestamp")
+            ),
         }
 
     def _convert(self, pkt: dict, symbol: str) -> Tick | None:

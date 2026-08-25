@@ -387,3 +387,38 @@ def test_close_wakes_blocked_dedicated_reader():
         feed.remove_reader("FUT", reader)
         t.join(timeout=1.0)
         feed.close()
+
+
+def test_producer_survives_stream_factory_failure():
+    """A raising stream_full must trigger retry, not kill the producer thread."""
+    import time as _time
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    class _FlakyMD:
+        def __init__(self):
+            self.calls = 0
+
+        def stream_full(self, symbols):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("broker down")
+
+            async def _gen():
+                yield {"symbol": symbols[0], "last_trade_price": 100.0,
+                       "volume": 5, "ltt": 1786095001}
+
+            return _gen()
+
+    md = _FlakyMD()
+    feed = MultiplexedMarketFeed(md)
+    feed.set_symbols(["TEST FUT"])
+    tick = None
+    deadline = _time.time() + 15
+    while _time.time() < deadline:
+        tick = feed.try_next_tick("TEST FUT")
+        if tick is not None:
+            break
+        _time.sleep(0.05)
+    feed.close()
+    assert md.calls >= 2, "producer died instead of retrying"
+    assert tick is not None and tick.price == 100.0
