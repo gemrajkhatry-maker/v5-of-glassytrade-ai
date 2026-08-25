@@ -80,6 +80,20 @@ async def health_check(
         logger.warning("Health check: database failed: %s", e)
         checks["database"] = f"error: {e}"
 
+    from app.shared.mode import is_live_mode
+
+    if is_live_mode():
+        checks["live_oms"] = "unwired"
+
+    coordinator = getattr(request.app.state, "coordinator", None)
+    journal_fails = 0
+    if coordinator is not None and hasattr(coordinator, "journal_consecutive_failures"):
+        try:
+            journal_fails = int(coordinator.journal_consecutive_failures() or 0)
+        except Exception:
+            logger.exception("Health check: journal_consecutive_failures failed")
+    checks["journal"] = "ok" if journal_fails == 0 else f"degraded({journal_fails})"
+
     # Probability engine check (non-critical)
     try:
         checks["probability"] = "ok"
@@ -87,7 +101,6 @@ async def health_check(
         checks["probability"] = f"error: {e}"
 
     # Greenfield QuantCoordinator check (additive — does not gate overall health)
-    coordinator = getattr(request.app.state, "coordinator", None)
     if coordinator is not None:
         try:
             started = bool(getattr(coordinator, "started", False))
@@ -124,7 +137,11 @@ async def health_check(
         for k, v in checks.items()
         if k not in {"coordinator"}
     ):
-        overall = "ok"
+        coord_check = checks.get("coordinator")
+        if isinstance(coord_check, dict) and coord_check.get("crashedEngines"):
+            overall = "degraded"
+        else:
+            overall = "ok"
     else:
         overall = "degraded"
 
@@ -166,7 +183,13 @@ async def readiness_check(request: Request):
     try:
         coordinator = getattr(request.app.state, "coordinator", None)
         running = bool(coordinator) and bool(getattr(coordinator, "started", False))
-        checks["engine"] = "ok" if running else "not_started"
+        if running and hasattr(coordinator, "crashed_engines"):
+            crashed = coordinator.crashed_engines() or []
+            checks["engine"] = (
+                f"crashed: {len(crashed)} engine(s) dead" if crashed else "ok"
+            )
+        else:
+            checks["engine"] = "ok" if running else "not_started"
     except Exception as e:
         checks["engine"] = f"error: {e}"
 
