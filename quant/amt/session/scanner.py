@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import date
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY, UnknownInstrumentError
 from quant.contracts.sync_boundary import ensure_sync_adapter_result
+from quant.contracts.timezones import today_ist
 
 logger = logging.getLogger(__name__)
 
@@ -235,7 +236,7 @@ class OptionScannerService:
                 if hasattr(chain.expiry, "date")
                 else (date.fromisoformat(chain.expiry) if isinstance(chain.expiry, str) else chain.expiry)
             )
-            if expiry_date < date.today():
+            if expiry_date < today_ist():
                 effective_expiry_index += 1
                 logger.info(
                     "%s: exp %s is past — advancing to index %d",
@@ -261,7 +262,7 @@ class OptionScannerService:
         interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
 
         if big_move_mode:
-            dte = (expiry_date - date.today()).days
+            dte = (expiry_date - today_ist()).days
             if dte < self.big_move_min_dte:
                 logger.info(
                     "%s: big-move skipped — DTE %d < %d",

@@ -17,6 +17,7 @@ from datetime import date, datetime, timedelta
 import logging
 
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+from quant.contracts.timezones import today_ist
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +210,7 @@ class OptionSelector:
 
         # Days to expiry check
         expiry_date = date.fromisoformat(option.expiry)
-        today = date.today()
+        today = today_ist()
         dte = (expiry_date - today).days
         if dte < self.cfg.min_days_to_expiry:
             return (

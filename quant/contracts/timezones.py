@@ -9,7 +9,7 @@ for different market hours if the system is ever deployed to other regions.
 
 from __future__ import annotations
 
-from datetime import time, timezone, timedelta
+from datetime import date, datetime, time, timezone, timedelta
 
 IST: timezone = timezone(timedelta(hours=5, minutes=30))
 """Indian Standard Time — used by all NSE/MCX/IST timestamps."""
@@ -26,3 +26,8 @@ MCX_MORNING_END = time(14, 0)
 MCX_AFTERNOON_END = time(18, 0)
 MCX_EVENING_END = time(23, 0)       # close-protection start
 MCX_SESSION_CLOSE = time(23, 30)
+
+
+def today_ist() -> date:
+    """Current calendar date in IST — the exchange's date."""
+    return datetime.now(tz=IST).date()
