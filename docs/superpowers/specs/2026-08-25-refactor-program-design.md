@@ -106,6 +106,7 @@ Rationale:
 - Backend suite: 1,169 collected · `not e2e and not live`: **1,162 passed / 2 failed / 4 skipped** (3m47s)
   - `tests/integration/test_fabio_india_scenarios.py::test_scenario_midday_blocks_trend_continuation` — **deterministic failure (reproduces 4/4)**. Scenario expects trend continuation blocked at midday; current code approves (`approved=True`, "All 4 gates passed"). Pre-existing behavioral gap, unrelated to any refactor. ⚠️ Must be triaged BEFORE WS2: golden-trace replay must not enshrine wrong behavior as "expected"
   - `tests/quant/test_property_based.py::test_vah_always_geq_val` — hypothesis deadline flake under full-suite load only; passes 5/5 in isolation
+  - `tests/quant/runtime/test_seed_backoff.py::test_seed_starts_staggered_across_engines` — timing flake under full-suite load (reproduced 17:49 IST full run); passes 4/4 in isolation. Same class as the hypothesis flake. Known-failure allowance is now these 2 (+ the VAH one when it appears under load).
 - Frontend runner: vitest (`npm run test`), suite exists under frontend/tests/
 - Gate for every refactor commit: same command green at ≤ these 2 known failures
 
