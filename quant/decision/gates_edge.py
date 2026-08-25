@@ -71,17 +71,6 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
     if ms_val in (MarketState.DEAD.value, "DEAD_MARKET"):
         return GateResult(3, False, "Dead market — no edge")
 
-    # ── 0. SetupEvidence Evaluation (if explicit evidence provided) ─────────
-    if getattr(ctx, "setup_evidence", None) is not None:
-        ev = ctx.setup_evidence
-        if not ev.is_complete():
-            return GateResult(3, False, ev.rejection_reason())
-        if ev.setup_type in ("TRIPLE_A", "NONE") and not getattr(ctx, "allow_trend", True):
-            return GateResult(3, False, "SESSION_PHASE: Trend continuation blocked in this session phase")
-        if ev.setup_type == "VA_FADE" and not getattr(ctx, "allow_reversion", True):
-            return GateResult(3, False, "SESSION_PHASE: Mean reversion blocked in this session phase")
-        return GateResult(3, True, f"{ev.setup_type} confirmed")
-
     # ── 1. Anti-Climax / Overextension Guard ─────────────────────────────────
     # Price beyond ±2.0σ is a statistical exhaustion zone. Never enter new breakouts there.
     close_px = float(ctx.bar.close) if ctx.bar else 0.0
@@ -90,22 +79,39 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
     if ctx.agent_direction == "SHORT" and ctx.vwap_lower_2 > 0 and close_px < ctx.vwap_lower_2:
         return GateResult(3, False, f"Anti-Climax: SHORT rejected at -{ctx.vwap_std:.1f}σ extension")
 
-    # ── 2. Contested Zone Guard ──────────────────────────────────────────────
-    if getattr(ctx, "contested_bubble_zone", False):
-        return GateResult(3, False, "Contested buy/sell bubble cluster — flat until resolution")
-
-    # ── 3. Drive Exhaustion Guard ────────────────────────────────────────────
+    # ── 2. Drive Exhaustion Guard ────────────────────────────────────────────
     # 3+ drives into a level indicates exhaustion (Fabio Valentini rule)
     if getattr(ctx, "drive_number", 0) >= 3 and not getattr(ctx, "drive_entry_valid", False):
         return GateResult(3, False, f"Drive count exhausted ({ctx.drive_number})")
 
+    # ── 3. SetupEvidence Evaluation (if explicit evidence provided) ─────────
+    if getattr(ctx, "setup_evidence", None) is not None:
+        ev = ctx.setup_evidence
+        if ev.is_complete():
+            if ev.direction and ev.direction != ctx.agent_direction:
+                return GateResult(
+                    3, False,
+                    f"Evidence direction {ev.direction} conflicts with trade direction {ctx.agent_direction}",
+                )
+            if ev.setup_type in ("TRIPLE_A", "NONE") and not getattr(ctx, "allow_trend", True):
+                return GateResult(3, False, "SESSION_PHASE: Trend continuation blocked in this session phase")
+            if ev.setup_type == "VA_FADE" and not getattr(ctx, "allow_reversion", True):
+                return GateResult(3, False, "SESSION_PHASE: Mean reversion blocked in this session phase")
+            return GateResult(3, True, f"{ev.setup_type} confirmed")
+        # Incomplete evidence is not a veto. Fall through to Triple-A / named paths.
+
     # ── 4. CVD Order Flow Direction Guard ────────────────────────────────────
-    # Order flow pressure must not aggressively oppose the trade direction.
     cvd_slope = ctx.cvd_slope
     if ctx.agent_direction == "LONG" and cvd_slope < -0.5:
         return GateResult(3, False, f"CVD slope aggressively negative ({cvd_slope:.2f}) conflicts with LONG")
     if ctx.agent_direction == "SHORT" and cvd_slope > 0.5:
         return GateResult(3, False, f"CVD slope aggressively positive ({cvd_slope:.2f}) conflicts with SHORT")
+
+    # ── Playbook A: Triple-A AGGRESSION (cluster close, never imbalance-alone)
+    phase = getattr(ctx, "triple_a_phase", "") or ""
+    tsignal = getattr(ctx, "triple_a_signal", "") or ""
+    if phase == "AGGRESSION" and tsignal == ctx.agent_direction:
+        return GateResult(3, True, f"Triple-A AGGRESSION {tsignal}")
 
     # ── Setup B: Second-Drive Rejection (D1 rejected → D2 weaker re-approach) ─
     if ctx.drive_entry_valid:
@@ -122,14 +128,7 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
             if ctx.absorption_side == "BUY_ABSORBED" and ctx.agent_direction == "SHORT" and cvd_slope <= 0.2:
                 return GateResult(3, True, f"LVN Sniper SHORT @ {leg_lvn:.2f}")
 
-    # ── Setup A.1: Fresh Absorption + OB Imbalance (Microstructure Confirmation)
-    if ctx.agent_direction == "LONG" and ctx.absorption_side == "SELL_ABSORBED" and ctx.obi >= 0.15 and cvd_slope > -0.3:
-        return GateResult(3, True, "Absorption cluster confirmed by order flow imbalance")
-    if ctx.agent_direction == "SHORT" and ctx.absorption_side == "BUY_ABSORBED" and ctx.obi <= -0.15 and cvd_slope < 0.3:
-        return GateResult(3, True, "Absorption cluster confirmed by order flow imbalance")
-
-    # ── Setup A.2: Initiative Breakout (Model 1: IB / VA Breakout) ───────────
-    # In Midday session (allow_trend=False), blind breakouts are blocked.
+    # ── Initiative Breakout (named playbook, still requires CVD agreement) ──
     allow_trend = getattr(ctx, "allow_trend", True)
     break_dir = getattr(ctx, "break_direction", "") or ""
     break_type = getattr(ctx, "break_type", "") or ""
@@ -140,13 +139,5 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
             return GateResult(3, True, "Initiative upside breakout confirmed")
         if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
             return GateResult(3, True, "Initiative downside breakdown confirmed")
-
-    # ── Setup A.3: Triple-A Continuation (Model 2 Continuation) ──────────────
-    # Continuation requires directional breakout beyond VA or confirmed imbalance with CVD agreement.
-    if allow_trend and (ms_val in (MarketState.IMBALANCED, "IMBALANCED") or (ctx.vah > 0 and close_px > ctx.vah) or (ctx.val > 0 and close_px < ctx.val)):
-        if ctx.agent_direction == "LONG" and cvd_slope > -0.2:
-            return GateResult(3, True, "Triple-A Continuation LONG confirmed")
-        elif ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
-            return GateResult(3, True, "Triple-A Continuation SHORT confirmed")
 
     return GateResult(3, False, "No Triple-A edge: no valid setup")

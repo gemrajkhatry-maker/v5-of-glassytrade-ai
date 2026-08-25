@@ -24,6 +24,8 @@ def _ctx(**kw):
     vwap_lower_2 = kw.pop("lower_2", 97.0)
     cvd_slope = kw.pop("cvd_slope", 0.0)
     absorption_side = kw.pop("absorption_side", "")
+    triple_a_phase = kw.pop("triple_a_phase", "")
+    triple_a_signal = kw.pop("triple_a_signal", "")
     return DecisionContext(
         state=None, bar=bar, symbol="SYM", time_str="t",
         agent_direction=agent_direction,
@@ -39,6 +41,8 @@ def _ctx(**kw):
         cvd_slope=cvd_slope,
         absorption_side=absorption_side,
         tick_size=0.05,
+        triple_a_phase=triple_a_phase,
+        triple_a_signal=triple_a_signal,
     )
 
 
@@ -147,3 +151,30 @@ def test_passes_on_initiative_breakdown_short():
 def test_fails_no_edge():
     r = gate_triple_a_edge(_ctx(market_state="BALANCED", agent_direction=None))
     assert not r.passed and r.gate == 3
+
+
+def test_gate3_rejects_when_triple_a_signal_conflicts_with_agent_direction():
+    from quant.decision.context_builder import DecisionContextBuilder
+    from quant.decision.gates_edge import gate_triple_a_edge
+    from quant.bars import Bar
+    from quant.execution.risk import SessionRisk
+
+    dto = {
+        "absorptionSide": "BUY_ABSORBED",   # hierarchy -> agent_direction SHORT
+        "tripleAPhase": "AGGRESSION",
+        "tripleASignal": "LONG",            # evidence direction LONG
+        "cvdSlope": 0.0,
+        "marketState": "BALANCED",
+    }
+    ctx = DecisionContextBuilder().build(
+        bar=Bar(time="t300", open=99.0, high=101.0, low=98.5, close=100.0, volume=10.0),
+        symbol="S", market="NSE", contract_expiry=None, tick_size=0.05,
+        bar_index=20, warm_bars=15, cooldown_remaining_sec=0,
+        risk_state=SessionRisk(storage=None, symbol="S").state(),
+        amt_dto=dto,
+    )
+    assert ctx.agent_direction == "SHORT"
+    assert ctx.setup_evidence is not None and ctx.setup_evidence.direction == "LONG"
+    result = gate_triple_a_edge(ctx)
+    assert not result.passed
+    assert "conflicts" in result.reason
