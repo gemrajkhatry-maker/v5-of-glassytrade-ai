@@ -8,7 +8,6 @@ documents the intended behavior; these unit tests pin it at the gate
 level so WS2 refactors cannot silently re-sever the wire.
 """
 
-from datetime import datetime
 
 import pytest
 
