@@ -26,8 +26,8 @@ def test_build_returns_long_signal():
     sb = SignalBuilder()
     s = sb.build(_ctx(), _pass_results())
     assert s is not None and s.type == "LONG"
-    # SL anchored two ticks (0.10) below VAL: val=98 -> 97.9 (Task 4 placement).
-    assert s.sl == pytest.approx(98.0 - 0.10)
+    # SL two ticks INSIDE VAL: val=98 -> 98.10
+    assert s.sl == pytest.approx(98.0 + 0.10)
     assert s.sl < s.entry < s.tp
     assert s.rr >= 1.0
 
@@ -52,11 +52,10 @@ def test_build_returns_none_when_sl_on_wrong_side_of_entry():
 
 def test_build_emits_short_with_sl_above_entry():
     sb = SignalBuilder()
-    # SHORT: entry 100 < vah 102 -> SL = vah + 2 ticks = 102.10 (above entry),
-    # TP below entry. The correct invariant is sl > entry > tp.
+    # SHORT: entry 100 < vah 102 -> SL = vah - 2 ticks = 101.90 (inside, above entry)
     ctx = _ctx(direction="SHORT", close=100.0, poc=98, vah=102, val=99)
     results = _pass_results()
     s = sb.build(ctx, results)
     assert s is not None and s.type == "SHORT"
     assert s.sl > s.entry > s.tp
-    assert s.sl == pytest.approx(102.0 + 0.10)
+    assert s.sl == pytest.approx(102.0 - 0.10)

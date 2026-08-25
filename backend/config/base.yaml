@@ -111,7 +111,7 @@ exchanges:
     enabled: true
     segment: "NFO"
     session_open: "09:15"
-    session_close: "15:15"
+    session_close: "15:30"
     warmup_minutes: 15
     timezone: "Asia/Kolkata"
     symbols:

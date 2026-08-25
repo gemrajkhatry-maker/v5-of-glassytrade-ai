@@ -49,7 +49,6 @@ class StartupReconciliation:
         """
         discrepancies = []
 
-        # Load DB positions
         db_positions = []
         if self._storage:
             try:
@@ -64,6 +63,18 @@ class StartupReconciliation:
                     "Startup reconciliation: failed to load DB positions: %s", e
                 )
                 discrepancies.append(f"DB load failed: {e}")
+
+        from app.shared.mode import is_live_mode
+
+        if not is_live_mode():
+            return ReconciliationResult(
+                db_positions=len(db_positions),
+                broker_positions=0,
+                restored=len(db_positions),
+                stale_removed=0,
+                orphaned_registered=0,
+                discrepancies=discrepancies,
+            )
 
         # Query broker API for actual open positions
         broker_positions = []

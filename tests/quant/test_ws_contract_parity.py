@@ -54,7 +54,8 @@ def _projector_with_everything() -> StateProjector:
                         phase="AGGRESSION", gate_results=(), block_reasons=(),
                         model_label="Triple-A")
     proj.on_event(DecisionProduced(symbol="S", time=bar.time, decision=dec))
-    pos = Position(order=Order(sig, 10), open_price=100.5, open_time=bar.time, size=10)
+    pos = Position(order=Order(sig, 10), open_price=100.5, open_time=bar.time, size=10,
+                   _id="2026-08-21T09:15:00+05:30")
     proj.on_event(PositionOpened(symbol="S", time=bar.time, position=pos))
     proj.on_event(RiskUpdated(symbol="S", time=bar.time,
                               risk=RiskState(daily_pnl=0.0,

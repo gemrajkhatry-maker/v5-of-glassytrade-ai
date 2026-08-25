@@ -71,6 +71,13 @@ class PositionClosed(Event):
 
 
 @dataclass(frozen=True)
+class PositionReduced(Event):
+    """A partial fill reduced an open position but did not close it."""
+    fill: "Fill"
+    remaining: "Position"
+
+
+@dataclass(frozen=True)
 class RiskUpdated(Event):
     risk: "RiskState"
 
@@ -83,6 +90,12 @@ class DepthUpdated(Event):
 @dataclass(frozen=True)
 class AmtUpdated(Event):
     amt: dict | None = None
+
+
+@dataclass(frozen=True)
+class AgentDecisionProduced(Event):
+    decision: dict
+
 
 
 Handler = Callable[[Event], None]

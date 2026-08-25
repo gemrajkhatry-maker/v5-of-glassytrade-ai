@@ -21,7 +21,6 @@ const createMockInstrument = (symbol?: string, overrides: Partial<InstrumentStat
     leverage: 10,
   },
   aiAnalysis: null,
-  genAIAnalysis: null,
   amtAnalysis: null,
   auctionAnalysis: null,
   quantDecisionAnalysis: null,

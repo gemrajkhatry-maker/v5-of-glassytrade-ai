@@ -42,7 +42,9 @@ def _ticks_with_open_position():
 
 def _capture_exit_trace(ticks):
     """Run the engine and capture all position events."""
+    from tests.quant.runtime.test_runtime import _FixedStrategy, _healthy_stop_signal
     eng = QuantEngine(SyntheticGateway(ticks), "SYM", interval_seconds=1)
+    eng._strategy = _FixedStrategy(_healthy_stop_signal())
     trace = eng.run()
     opens = [e for e in trace if isinstance(e, PositionOpened)]
     closes = [e for e in trace if isinstance(e, PositionClosed)]

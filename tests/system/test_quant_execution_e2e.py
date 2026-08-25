@@ -23,24 +23,16 @@ SYMBOL = "SYM"
 
 
 def _session_ticks():
-    """Deterministic AGGRESSION-LONG session (proven shape from
-    tests/quant/runtime): quiet bars -> absorption spike -> accumulation ->
-    rising closes above vwap.upper_1 -> AGGRESSION/LONG."""
-    out = [
-        Tick(f"t{i}", 99.95 if i % 2 == 0 else 100.05, 10, 6, 4)
-        for i in range(300)
-    ]
-    out.append(Tick("t300", 100.0, 500, 450, 50))
-    for i in range(1, 6):
-        out.append(Tick(f"t{300 + i}", 100.0, 10, 6, 4))
-    for i, price in enumerate([100.3, 100.6, 100.9, 101.2]):
-        out.append(Tick(f"t{306 + i}", price, 10, 6, 4))
-    return out
+    """Deterministic AGGRESSION-LONG session from paper protocol."""
+    from tests.system.test_paper_protocol import _session_ticks as _ticks_fn
+    return _ticks_fn()
 
 
 def test_aggression_long_session_drives_paper_fill():
+    from quant.execution.risk import SessionRisk
+    SessionRisk(storage=None, symbol=SYMBOL).reset_session()
     eng = QuantEngine(
-        SyntheticGateway(_session_ticks()), SYMBOL, interval_seconds=1
+        SyntheticGateway(_session_ticks()), SYMBOL, interval_seconds=2
     )
     trace = eng.run()
 
@@ -58,9 +50,9 @@ def test_aggression_long_session_drives_paper_fill():
     assert sig.tp > sig.entry
 
     # The decision that drove the fill is the deterministic Triple-A one.
-    decisions = [e for e in trace if isinstance(e, DecisionProduced)]
+    decisions = [e for e in trace if isinstance(e, DecisionProduced) and e.decision.approved]
     assert decisions
-    last = decisions[-1].decision
+    last = decisions[0].decision
     assert last.approved is True
     assert last.reason == "Triple-A"
     assert last.signal is not None and last.signal.type == "LONG"

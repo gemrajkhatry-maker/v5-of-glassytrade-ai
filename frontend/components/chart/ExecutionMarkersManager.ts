@@ -41,7 +41,7 @@ const IST_OFFSET = IST_OFFSET_SECONDS;
  */
 export function generateEntryMarkers(positions: TradePosition[]): ChartMarker[] {
   return positions.map(pos => ({
-    time: new Date(pos.entryTime).getTime() / 1000 + IST_OFFSET,
+    time: Math.floor(new Date(pos.entryTime).getTime() / 1000),
     position: pos.side === 'LONG' ? 'belowBar' : 'aboveBar',
     color: pos.side === 'LONG' ? '#10b981' : '#ef4444',
     shape: pos.side === 'LONG' ? 'arrowUp' : 'arrowDown',
@@ -62,7 +62,7 @@ export function generateClosedTradeMarkers(closedTrades: TradePosition[]): Chart
   closedTrades.forEach(trade => {
     // Entry marker (smaller size to differentiate from open positions)
     markers.push({
-      time: new Date(trade.entryTime).getTime() / 1000 + IST_OFFSET,
+      time: Math.floor(new Date(trade.entryTime).getTime() / 1000),
       position: trade.side === 'LONG' ? 'belowBar' : 'aboveBar',
       color: trade.side === 'LONG' ? '#10b981' : '#ef4444',
       shape: trade.side === 'LONG' ? 'arrowUp' : 'arrowDown',

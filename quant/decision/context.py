@@ -100,3 +100,9 @@ class DecisionContext:
     stacked_imbalance_magnitude: int = 0
     stacked_imbalance_price_low: float = 0.0
     stacked_imbalance_price_high: float = 0.0
+    # Sequential Triple-A machine (per-symbol). Playbook A enters only at
+    # AGGRESSION with matching signal. Empty phase = machine not running.
+    triple_a_phase: str = ""
+    triple_a_signal: str = ""
+    absorption_cluster_high: float = 0.0
+    absorption_cluster_low: float = 0.0

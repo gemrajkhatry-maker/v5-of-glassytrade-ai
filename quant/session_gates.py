@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
+import re
 
 from quant.amt.session.context import get_session_info
 from quant.contracts.timezones import IST
@@ -59,32 +60,36 @@ def ist_dt(bar_time) -> datetime | None:
 def parse_contract_expiry(symbol: str) -> date | None:
     """Parse the option contract's expiry date from its symbol.
 
-    MCX/NSE option symbols embed the expiry day+month, e.g.
-    "CRUDEOIL 17 AUG 7450 CALL" -> 17 Aug, "GOLDM 28 AUG 150500 CALL" ->
-    28 Aug. The year is inferred from the current IST date (a parsed date
-    already past is next year's contract). Returns None when the symbol has no
-    month token (synthetic test symbols, futures, etc.).
+    Handles spaced ``CRUDEOIL 17 AUG 7450 CALL``, compact ``NIFTY23FEB18000CE``,
+    and hyphenated ``NIFTY-27FEB-25500-CE``. Returns None when no day+month
+    is embedded (bare underlyings, month-only futures).
     """
     months = {
         "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
         "JUL": 7, "AUG": 8, "SEP": 9, "OCT": 10, "NOV": 11, "DEC": 12,
     }
-    tokens = str(symbol or "").split()
-    if len(tokens) < 3:
+    text = str(symbol or "").upper()
+    tokens = text.split()
+    day = month = None
+    if len(tokens) >= 3 and tokens[1].isdigit():
+        month = months.get(tokens[2])
+        if month is not None:
+            day = int(tokens[1])
+    if day is None:
+        compact = re.search(
+            r"(\d{1,2})(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2,4})?",
+            text,
+        )
+        if compact:
+            day = int(compact.group(1))
+            month = months[compact.group(2)]
+    if day is None or month is None:
         return None
-    day_tok, month_tok = tokens[1], tokens[2]
-    if not day_tok.isdigit():
-        return None
-    month = months.get(month_tok.upper())
-    if month is None:
-        return None
-    day = int(day_tok)
     today = datetime.now(tz=_IST).date()
     try:
         parsed = date(today.year, month, day)
     except ValueError:
         return None
-    # A parsed date before today can only be next year's contract.
     if parsed < today:
         parsed = date(today.year + 1, month, day)
     return parsed
@@ -124,8 +129,12 @@ def session_allow_entry(
     try:
         allowed = bool(get_session_info(bar_time, market=market).allow_entry)
     except Exception:
-        logger.warning("session phase lookup failed for %r — defaulting to open", bar_time, exc_info=True)
-        return True
+        logger.error(
+            "session phase lookup failed for %r — refusing entry",
+            bar_time,
+            exc_info=True,
+        )
+        return False
     if not allowed:
         return False
     if contract_expiry is not None:
@@ -145,19 +154,14 @@ def session_allow_entry(
 def session_force_exit(
     bar_time, market: str = "NSE", contract_expiry: date | None = None
 ) -> bool:
-    """True once entries are blocked (Phase 5 close-protection, post-market).
+    """True only when the session table says flatten (Phase 5, post-market).
 
-    Exchange-aware like ``session_allow_entry``. The NSE phase table marks
-    POST_MARKET with ``force_exit=False``, but a position still open after
-    15:30 must be squared off — so any window in which new entries are
-    disallowed triggers the exit (pre-market and the opening-noise window
-    are unreachable with an open position anyway).
+    Opening-noise (allow_entry=False, force_exit=False) must not flatten a
+    position that was already open. PRE/POST_MARKET set force_exit=True.
 
     ``contract_expiry`` (MCX only): on the contract's own expiry day, an
     open position is force-squared from 21:30 IST — an ITM option left
-    open at expiry devolves into a futures position with margin (MCX
-    physical settlement via futures), so it must never ride into the
-    devolvement window.
+    open at expiry devolves into a futures position with margin.
     """
     if not bar_time:
         return False
@@ -173,9 +177,13 @@ def session_force_exit(
     try:
         info = get_session_info(bar_time, market=market)
     except Exception:
-        logger.warning("session force-exit lookup failed for %r — defaulting to hold", bar_time, exc_info=True)
-        return False
-    force = bool(info.force_exit or not info.allow_entry)
+        logger.error(
+            "session force-exit lookup failed for %r — forcing exit",
+            bar_time,
+            exc_info=True,
+        )
+        return True
+    force = bool(info.force_exit)
     if not force and str(market).upper() == "MCX" and contract_expiry is not None:
         ist = ist_dt(bar_time)
         if (

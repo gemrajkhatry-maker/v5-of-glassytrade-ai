@@ -8,6 +8,7 @@ The engine receives dependencies via constructor injection.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import random
 import threading
@@ -23,7 +24,7 @@ from quant.amt.session.npoc import NPOCTracker
 from quant.bars import Bar
 from quant.contracts.value_objects import FloatOHLC
 from quant.session_levels import SessionLevelStore
-from quant.state import _epoch_to_iso
+from quant.state import _epoch_to_iso, session_date_key
 
 logger = logging.getLogger(__name__)
 
@@ -66,46 +67,54 @@ def _reserve_seed_slot() -> None:
         time.sleep(delay)
 
 
-def session_scope(candles) -> list:
-    """Keep only candles from the most recent session (the calendar date
-    of the newest candle) so POC/VA/VWAP reflect today's auction instead
-    of multi-day history.
+def _get_val(c, key, default=0.0):
+    if isinstance(c, dict):
+        return c.get(key, default)
+    return getattr(c, key, default)
 
-    Today's candles are kept even when thin (< 5): the AMT analyzer's
-    ``len(data) >= 5`` guard then returns an empty result early, which is
-    the correct behaviour for a session that has barely started — never
-    mix prior-day levels into the session profile.
-    """
+
+def session_scope(candles: list) -> list:
+    """Keep only candles from the most recent session (the calendar date of the newest candle)."""
     if not candles:
-        return candles
+        return []
     newest = candles[-1]
-    date = str(newest.time)[:10]
-    return [c for c in candles if str(c.time)[:10] == date]
+    newest_time = str(_get_val(newest, "time", ""))
+    date = session_date_key(newest_time)
+    if not date:
+        return list(candles)
+    return [c for c in candles if session_date_key(str(_get_val(c, "time", ""))) == date]
 
 
 def to_float_ohlc(c) -> FloatOHLC:
-    """Convert any OHLC-like object to FloatOHLC."""
+    """Convert any OHLC-like object or dict to FloatOHLC."""
     return FloatOHLC(
-        time=str(c.time),
-        open=float(c.open), high=float(c.high), low=float(c.low),
-        close=float(c.close), volume=float(c.volume),
-        vwap=float(getattr(c, "vwap", 0.0) or 0.0),
-        taker_buy_volume=float(getattr(c, "taker_buy_volume", 0.0) or 0.0),
-        delta=float(getattr(c, "delta", 0.0) or 0.0),
+        time=str(_get_val(c, "time", "")),
+        open=float(_get_val(c, "open", 0.0)),
+        high=float(_get_val(c, "high", 0.0)),
+        low=float(_get_val(c, "low", 0.0)),
+        close=float(_get_val(c, "close", 0.0)),
+        volume=float(_get_val(c, "volume", 0.0)),
+        vwap=float(_get_val(c, "vwap", 0.0) or 0.0),
+        taker_buy_volume=float(_get_val(c, "taker_buy_volume", _get_val(c, "takerBuyVolume", 0.0)) or 0.0),
+        delta=float(_get_val(c, "delta", 0.0) or 0.0),
     )
 
 
 def to_bar(c) -> Bar:
     """History OHLC -> decision-path Bar (buy_volume from taker_buy_volume)."""
-    vol = float(getattr(c, "volume", 0.0) or 0.0)
-    buy = float(getattr(c, "taker_buy_volume", 0.0) or 0.0)
+    vol = float(_get_val(c, "volume", 0.0) or 0.0)
+    buy = float(_get_val(c, "taker_buy_volume", _get_val(c, "takerBuyVolume", 0.0)) or 0.0)
     return Bar(
-        time=str(c.time),
-        open=float(c.open), high=float(c.high), low=float(c.low),
-        close=float(c.close), volume=vol,
-        buy_volume=buy, sell_volume=max(0.0, vol - buy),
-        delta=float(getattr(c, "delta", 0.0) or 0.0),
-        vwap=float(getattr(c, "vwap", 0.0) or 0.0),
+        time=str(_get_val(c, "time", "")),
+        open=float(_get_val(c, "open", 0.0)),
+        high=float(_get_val(c, "high", 0.0)),
+        low=float(_get_val(c, "low", 0.0)),
+        close=float(_get_val(c, "close", 0.0)),
+        volume=vol,
+        buy_volume=buy,
+        sell_volume=max(0.0, vol - buy),
+        delta=float(_get_val(c, "delta", 0.0) or 0.0),
+        vwap=float(_get_val(c, "vwap", 0.0) or 0.0),
     )
 
 
@@ -193,69 +202,88 @@ class AMTEngine:
             )
 
     def seed(self) -> None:
-        """Best-effort: seed the AMT candle ring AND the decision profile from
-        REST history so POC/VA/VWAP/IB are meaningful from the first bar close.
+        """Best-effort: seed the AMT candle ring from REST history.
 
-        The fetched history is session-scoped (today's candles only) so the
-        "session" profile is genuinely today's auction. Runs on its own daemon
-        thread; ``fetch_history`` is internally sync-safe to run under
-        ``asyncio.run`` on a worker thread (the Dhan adapter calls the sync
-        ``broker.get_historical``).
+        Synchronous so spawn cannot start live bars before today's session
+        profile exists. Sequential coordinator spawn is the rate-limit stagger
+        (``_reserve_seed_slot`` remains for a future parallel seed).
         """
         if self._history_source is None:
             return
 
-        def run() -> None:
-            _reserve_seed_slot()
-
-            candles: list = []
-            seed_interval = self._seed_interval_str()
-            for attempt in range(1, _SEED_FETCH_RETRIES + 1):
+        candles: list = []
+        seed_interval = self._seed_interval_str()
+        for attempt in range(1, _SEED_FETCH_RETRIES + 1):
+            try:
+                result = self._history_source.fetch_history(
+                    self.symbol, seed_interval, 500
+                )
+                awaitable = inspect.isawaitable(result)
+                candles = asyncio.run(result) if awaitable else (result or [])
+            except Exception as e:
+                awaitable = True
+                if not isinstance(e, (TimeoutError, ConnectionError, OSError, asyncio.CancelledError)):
+                    logger.critical("Unexpected error", exc_info=True)
+                logger.warning(
+                    "AMT history seed failed for %s (attempt %d/%d)",
+                    self.symbol, attempt, _SEED_FETCH_RETRIES, exc_info=True,
+                )
+                candles = []
+            if candles:
+                break
+            # ponytail: sync [] means no history source, not DH-3001. Only async
+            # empty responses (Dhan swallowed rate-limit) are retried.
+            if not awaitable:
+                break
+            if attempt < _SEED_FETCH_RETRIES:
+                delay = _SEED_FETCH_BASE_DELAY * (
+                    2 ** (attempt - 1)
+                ) + random.uniform(0.0, 1.0)
+                logger.info(
+                    "AMT history seed retry %d/%d for %s in %.1fs",
+                    attempt + 1, _SEED_FETCH_RETRIES, self.symbol, delay,
+                )
+                time.sleep(delay)
+        if not candles:
+            return
+        scoped = session_scope(candles)
+        with self._amt_lock:
+            if self._amt_candles:
+                return  # live bars already flowing — keep them
+            ohlcs = [to_float_ohlc(c) for c in scoped]
+            self._amt_candles = ohlcs
+            inc = IncrementalVolumeProfile()
+            for c in ohlcs:
+                inc.update(c)
+            self._amt_incremental = inc
+            self._warm_bars = len(scoped)
+            if ohlcs:
+                last_ohlc = ohlcs[-1]
+                iso_date = session_date_key(last_ohlc.time)
+                if iso_date:
+                    self._session_date = iso_date
                 try:
-                    candles = asyncio.run(
-                        self._history_source.fetch_history(
-                            self.symbol, seed_interval, 500
-                        )
+                    result = self._amt_analyzer.analyze(
+                        ohlcs,
+                        order_book=self._get_depth(),
+                        incremental_profile=inc,
+                        cushion_tier="Conservative",
+                        session_pnl=self._get_risk_pnl(),
+                        underlying=self._underlying(),
+                        symbol=self.symbol,
+                        prior_poc=self._prior["poc"],
+                        prior_vah=self._prior["vah"],
+                        prior_val=self._prior["val"],
+                        npoc_tracker=self._npoc,
+                        option_tick=last_ohlc,
+                        footprint_accumulator=self._footprint,
                     )
-                except Exception as e:
-                    if not isinstance(e, (TimeoutError, ConnectionError, OSError, asyncio.CancelledError)):
-                        logger.critical("Unexpected error", exc_info=True)
-                    logger.warning(
-                        "AMT history seed failed for %s (attempt %d/%d)",
-                        self.symbol, attempt, _SEED_FETCH_RETRIES, exc_info=True,
-                    )
-                    candles = []
-                if candles:
-                    break
-                if attempt < _SEED_FETCH_RETRIES:
-                    delay = _SEED_FETCH_BASE_DELAY * (
-                        2 ** (attempt - 1)
-                    ) + random.uniform(0.0, 1.0)
-                    logger.info(
-                        "AMT history seed retry %d/%d for %s in %.1fs",
-                        attempt + 1, _SEED_FETCH_RETRIES, self.symbol, delay,
-                    )
-                    time.sleep(delay)
-            if not candles:
-                return
-            scoped = session_scope(candles)
-            with self._amt_lock:
-                if self._amt_candles:
-                    return  # live bars already flowing — keep them
-                ohlcs = [to_float_ohlc(c) for c in scoped]
-                self._amt_candles = ohlcs
-                inc = IncrementalVolumeProfile()
-                for c in ohlcs:
-                    inc.update(c)
-                self._amt_incremental = inc
-                self._warm_bars = len(scoped)
-            logger.info(
-                "AMT seeded %d session candles for %s", len(scoped), self.symbol
-            )
-
-        threading.Thread(
-            target=run, daemon=True, name=f"amt-seed-{self.symbol}"
-        ).start()
+                    self._last_amt_dto = amt_result_to_dto(result)
+                except Exception:
+                    logger.warning("Initial AMT analyze after seed failed for %s", self.symbol, exc_info=True)
+        logger.info(
+            "AMT seeded %d session candles for %s (initial DTO: %s)", len(scoped), self.symbol, bool(self._last_amt_dto)
+        )
 
     def _seed_interval_str(self) -> str:
         """Dhan history interval string matching the engine's bar aggregation."""
@@ -278,7 +306,7 @@ class AMTEngine:
         # Session rollover: when the bar's date changes, the previous session
         # is complete. Persist its levels and reload the prior levels.
         iso_now = _epoch_to_iso(bar.time)
-        iso_date = iso_now[:10] if len(iso_now) >= 10 and iso_now[4] == "-" else ""
+        iso_date = session_date_key(iso_now)
         if iso_date and self._session_date and iso_date != self._session_date:
             prev = self._last_amt_dto or {}
             prev_poc = float(prev.get("poc") or 0.0)
@@ -356,5 +384,13 @@ class AMTEngine:
     def last_amt_dto(self) -> dict | None:
         with self._amt_lock:
             return self._last_amt_dto
+
+    @property
+    def last_bar(self) -> Bar | None:
+        with self._amt_lock:
+            if not self._amt_candles:
+                return None
+            return to_bar(self._amt_candles[-1])
+
 
 

@@ -84,3 +84,31 @@ async def test_scanner_rescan_timeout_returns_504(monkeypatch):
 
     assert err.value.status_code == 504
     assert "timed out" in err.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_health_reports_live_oms_unwired(monkeypatch):
+    monkeypatch.setenv("GLASSYTRADE_ENV", "live")
+    monkeypatch.delenv("TRADING_MODE", raising=False)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(coordinator=None))
+    )
+    storage = SimpleNamespace(kv_set=lambda *a, **k: None)
+    payload = await health.health_check(
+        request, broker=object(), storage=storage, config=object()
+    )
+    assert payload["checks"]["live_oms"] == "unwired"
+
+
+@pytest.mark.asyncio
+async def test_health_reports_journal_ok_without_coordinator(monkeypatch):
+    monkeypatch.setenv("GLASSYTRADE_ENV", "paper")
+    monkeypatch.delenv("TRADING_MODE", raising=False)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(coordinator=None))
+    )
+    storage = SimpleNamespace(kv_set=lambda *a, **k: None)
+    payload = await health.health_check(
+        request, broker=object(), storage=storage, config=object()
+    )
+    assert payload["checks"]["journal"] == "ok"

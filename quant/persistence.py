@@ -19,12 +19,18 @@ class Journal:
         self._path = path
         self._fsync = fsync
         self._file = open(path, "a", encoding="utf-8")
+        self.consecutive_failures = 0
 
     def append(self, record: dict) -> None:
-        self._file.write(json.dumps(record) + "\n")
-        self._file.flush()
-        if self._fsync:
-            os.fsync(self._file.fileno())
+        try:
+            self._file.write(json.dumps(record) + "\n")
+            self._file.flush()
+            if self._fsync:
+                os.fsync(self._file.fileno())
+            self.consecutive_failures = 0
+        except Exception:
+            self.consecutive_failures += 1
+            raise
 
     def replay(self) -> list[dict]:
         rows = []

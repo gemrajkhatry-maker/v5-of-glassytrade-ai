@@ -499,6 +499,10 @@ class MultiplexedMarketFeed:
                 # rejects; ts=0 freezes bar windows so no bar closes and open
                 # positions lose exit management. Arrival time keeps bars moving.
                 ts = time.time()
+            elif ts > time.time() + 10000:
+                # Dhan binary protocol sends LTT pre-shifted by +19,800s (IST epoch).
+                # Subtract 19,800s so ts is standard UTC epoch.
+                ts -= 19800.0
 
             # Monotonic timestamp guard — discard out-of-order/late ticks silently
             prev_ts = self._prev_ts.get(symbol, 0.0)

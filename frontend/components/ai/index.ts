@@ -1,5 +1,4 @@
 export { default as EquityPanel } from './EquityPanel';
-export { default as DecisionHistoryPanel } from './DecisionHistoryPanel';
 export { default as RiskStateDisplay } from './RiskStateDisplay';
 export { default as QuantDecisionCard } from './QuantDecisionCard';
 export { default as MarketStateCard } from './MarketStateCard';
@@ -15,6 +14,7 @@ export { default as OverseerCard } from './OverseerCard';
 export { default as TradePlanCard } from './TradePlanCard';
 export { default as RecentExitsCard } from './RecentExitsCard';
 export { default as DiagnosticsPanel } from './DiagnosticsPanel';
-export { default as ModelIoFooter } from './ModelIoFooter';
 export { default as VaFreezeCard } from './VaFreezeCard';
 export { default as ThreeAIndicator } from './ThreeAIndicator';
+export { default as AIAdvisorCard } from './AIAdvisorCard';
+

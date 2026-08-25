@@ -42,6 +42,7 @@ from quant.session_gates import (
 from quant.session_levels import SessionLevelStore
 from quant.strategy import TradingStrategy
 from quant.events import (
+    AgentDecisionProduced,
     AmtUpdated,
     BarClosed,
     DecisionProduced,
@@ -264,6 +265,9 @@ class QuantEngine:
         # Default 5 bars = 5 minutes on a 1m timeframe (configurable).
         self._cooldown_bars: int = 5
         self._last_close_bar_index: int = -1  # bar index of most recent fill
+        from quant.llm.advisor import LLMAdvisor
+        self._advisor = LLMAdvisor(emit_fn=self._emit)
+
 
     def run(self, max_steps: int | None = None) -> list[Event]:
         """Consume ticks from the gateway, drive the full pipeline, and return
@@ -379,6 +383,24 @@ class QuantEngine:
                 self._emit_merged_amt(self._option_amt_dto, self._option_amt_dto.get("time", ""))
         elif self._amt_engine.last_amt_dto:
             self._emit(AmtUpdated(symbol=self.symbol, time=self._amt_engine.last_amt_dto.get("time", ""), amt=self._amt_engine.last_amt_dto))
+
+        initial_amt = self._option_amt_dto or self._amt_engine.last_amt_dto
+        if initial_amt and hasattr(self, "_advisor") and self._advisor is not None:
+            ctx = DecisionContextBuilder().build(
+                bar=self._amt_engine.last_bar,
+                symbol=self.symbol,
+                market=self._market,
+                contract_expiry=self._contract_expiry,
+                tick_size=self._tick_size,
+                bar_index=0,
+                warm_bars=self._amt_engine.warm_bars,
+                cooldown_remaining_sec=0,
+                risk_state=self._risk.state(),
+                amt_dto=initial_amt,
+                order_book=self._last_depth,
+            )
+            self._advisor.on_context(ctx)
+
         steps = 0
         while True:
             if max_steps is not None and steps >= max_steps:
@@ -608,6 +630,9 @@ class QuantEngine:
         except Exception:
             pass
         self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
+        if hasattr(self, "_advisor") and self._advisor is not None:
+            self._advisor.on_context(ctx)
+
 
         if decision.approved and decision.signal is not None:
             signal = decision.signal

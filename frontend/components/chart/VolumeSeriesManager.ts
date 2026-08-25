@@ -65,7 +65,7 @@ export function transformToVolumeData(
   return sortedData.map(d => {
     const isBullish = d.close >= d.open;
     return {
-      time: new Date(d.time as string).getTime() / 1000 + IST_OFFSET,
+      time: Math.floor(new Date(d.time as string).getTime() / 1000),
       value: d.volume,
       color: isBullish ? colors.bullColor : colors.bearColor,
     };

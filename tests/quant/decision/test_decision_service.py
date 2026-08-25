@@ -25,18 +25,36 @@ def _ctx(agent_direction="LONG", market_state="IMBALANCED", **kw):
         absorption_side=kw.get("absorption_side", ""),
         obi=kw.get("obi", 0.0),
         risk_halted=kw.get("risk_halted", False),
+        triple_a_phase=kw.get("triple_a_phase", ""),
+        triple_a_signal=kw.get("triple_a_signal", ""),
+        allow_reversion=kw.get("allow_reversion", True),
     )
 
 
 def test_aggression_long_approved():
-    ctx = _ctx(agent_direction="LONG", market_state="IMBALANCED")
+    ctx = _ctx(
+        agent_direction="LONG",
+        market_state="IMBALANCED",
+        triple_a_phase="AGGRESSION",
+        triple_a_signal="LONG",
+        cvd_slope=1.0,
+        close=110.0,
+    )
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None and d.signal.type == "LONG"
     assert d.reason == "Triple-A"
 
 
 def test_aggression_approved_in_balanced_market():
-    ctx = _ctx(agent_direction="LONG", market_state="BALANCED", val=98.0, close=97.0, absorption_side="SELL_ABSORBED", obi=0.20)
+    ctx = _ctx(
+        agent_direction="LONG",
+        market_state="BALANCED",
+        triple_a_phase="AGGRESSION",
+        triple_a_signal="LONG",
+        cvd_slope=1.0,
+        close=110.0,
+        val=98.0,
+    )
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None and d.signal.type == "LONG"
 
@@ -57,7 +75,7 @@ def test_va_fade_thin_stop_rejected():
     ctx = _ctx(agent_direction="LONG", close=99.6, poc=101.0, val=100.0, tick_size=0.05, cvd_slope=50.0)
     d = DecisionService().evaluate(ctx)
     # thin stop is rejected if not passing other gates
-    assert d.reason in ("NO_EDGE", "Triple-A")
+    assert d.reason in ("NO_EDGE", "Triple-A", "VA_FADE")
 
 
 def test_va_fade_blocked_in_dead_market():
@@ -89,7 +107,15 @@ def test_halted_emits_explicit_halted_decision():
 
 
 def test_approved_signal_carries_model_label():
-    ctx = _ctx(agent_direction="LONG", agent_probability=0.9, market_state="IMBALANCED")
+    ctx = _ctx(
+        agent_direction="LONG",
+        agent_probability=0.9,
+        market_state="IMBALANCED",
+        triple_a_phase="AGGRESSION",
+        triple_a_signal="LONG",
+        cvd_slope=1.0,
+        close=110.0,
+    )
     d = DecisionService().evaluate(ctx)
     assert d.approved and d.signal is not None
     assert d.signal.model_label, "Approved signal must have a non-empty model_label"

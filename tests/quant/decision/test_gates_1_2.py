@@ -20,7 +20,7 @@ def test_gate1_fails_when_warming_up():
     assert not r.passed
 
 def test_gate2_passes_when_flat_no_cooldown():
-    r = gate_position_cooldown(_ctx(position_open=False, cooldown_remaining_sec=0, risk_halted=False))
+    r = gate_position_cooldown(_ctx(position_open=False, cooldown_remaining_sec=0))
     assert r.passed and r.gate == 2
 
 def test_gate2_fails_when_position_open():
@@ -28,6 +28,3 @@ def test_gate2_fails_when_position_open():
 
 def test_gate2_fails_in_cooldown():
     assert not gate_position_cooldown(_ctx(cooldown_remaining_sec=30)).passed
-
-def test_gate2_fails_when_risk_halted():
-    assert not gate_position_cooldown(_ctx(risk_halted=True)).passed

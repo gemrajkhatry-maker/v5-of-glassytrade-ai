@@ -51,38 +51,6 @@ def _make_signal(
 class TestCommissionModel:
     """Validates that round-trip commissions are deducted from P&L."""
 
-    def test_commission_deducted_on_sl_close(self):
-        """When SL triggers, commission must be subtracted from gross P&L."""
-        p = Portfolio.create_default()
-        sig = _make_signal(price=100, sl=95, tp=120, lot_size=50)
-        pos = p.open_position(sig, "NIFTY_CE")
-        assert pos is not None
-
-        initial_balance = p.balance
-        tick = _make_tick(close=94)  # triggers SL
-        closed = p.process_tick(tick)
-        assert len(closed) == 1
-
-        # Gross P&L is negative, commision makes it worse
-        gross_pnl = (closed[0].exit_price - pos.entry_price) * pos.size
-        assert closed[0].pnl < gross_pnl  # commission was subtracted
-
-    def test_commission_deducted_on_tp_close(self):
-        """TP close should also include commission, reducing net profit."""
-        p = Portfolio.create_default()
-        sig = _make_signal(price=100, sl=90, tp=110, lot_size=25)
-        pos = p.open_position(sig, "NIFTY_CE")
-        assert pos is not None
-
-        tick = _make_tick(close=111)  # triggers TP
-        closed = p.process_tick(tick)
-        assert len(closed) == 1
-
-        # Net P&L should be less than gross due to commission
-        exit_price = closed[0].exit_price
-        gross = (exit_price - pos.entry_price) * pos.size
-        assert closed[0].pnl < gross
-
     def test_commission_calculation_lot_based(self):
         """Commission uses lot-based calculation when option_lot_size is set."""
         p = Portfolio.create_default()
@@ -138,19 +106,6 @@ class TestSlippageModel:
         pos = p.open_position(sig, "SYM")
         assert pos is not None
         assert pos.entry_price < 100.0  # slipped down for SHORT
-
-    def test_long_exit_slippage_adverse(self):
-        """LONG exit should fill slightly lower (adverse)."""
-        p = Portfolio.create_default()
-        sig = _make_signal(price=100, sl=90, tp=120)
-        pos = p.open_position(sig, "SYM")
-        assert pos is not None
-
-        tick = _make_tick(close=121)  # triggers TP
-        closed = p.process_tick(tick)
-        assert len(closed) == 1
-        # Exit price should be slightly below market (slippage)
-        assert closed[0].exit_price < 121.0
 
     def test_slippage_amount_is_percentage(self):
         """Slippage should be exactly SLIPPAGE_PCT of the price."""

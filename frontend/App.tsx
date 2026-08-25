@@ -5,7 +5,7 @@ import MarketSidebar from './components/MarketSidebar';
 import ErrorBoundary from './components/ErrorBoundary';
 import { DEFAULT_CONFIG } from './constants';
 import { ChartConfig } from './types';
-import { X, Activity, Loader2, PanelsTopLeft, Sparkles, Brain, BarChart2, BookOpen, Eye } from 'lucide-react';
+import { X, Activity, Loader2, PanelsTopLeft, Brain, BarChart2, BookOpen, Eye } from 'lucide-react';
 import { useServerTradingSystem as useTradingSystem } from './hooks/useServerTradingSystem';
 import JournalPage from './components/JournalPage';
 import ModelStateBanner from './components/ModelStateBanner';
@@ -19,8 +19,6 @@ function App() {
     const [config, setConfig] = useState<ChartConfig>(DEFAULT_CONFIG);
     const chartMode = useUIStore(selectChartMode);
     const setChartMode = useUIStore(s => s.setChartMode);
-    const showControls = useUIStore(s => s.showControls);
-    const setShowControls = useUIStore(s => s.setShowControls);
     const sidebarOpen = useUIStore(selectSidebarOpen);
     const setSidebarOpen = useUIStore(s => s.setSidebarOpen);
     const rightSidebarOpen = useUIStore(selectRightSidebarOpen);
@@ -40,6 +38,8 @@ function App() {
         connected,
         connectionStatus,
         tickBus,
+        isHalted,
+        haltReason,
     } = useTradingSystem(config);
 
     // Symbols for Tab/Shift+Tab navigation, derived from the live WS instrument
@@ -59,10 +59,6 @@ function App() {
         setActiveSymbol(allSymbols[currentSymbolIndex.current]);
     }, [allSymbols, setActiveSymbol]);
 
-    const handleClosePanels = useCallback(() => {
-        setShowControls(false);
-    }, [setShowControls]);
-
     const handleSaveWorkspace = useCallback(() => {
         // Workspace auto-saves via Zustand persist middleware
         console.log('[Keyboard] Workspace saved to localStorage');
@@ -78,12 +74,10 @@ function App() {
         onVpModeChange: setVpMode,
         onToggleSidebar: () => useUIStore.getState().toggleSidebar(),
         onToggleRightSidebar: () => useUIStore.getState().toggleRightSidebar(),
-        onToggleControls: () => useUIStore.getState().toggleControls(),
         onNextSymbol: handleNextSymbol,
         onPrevSymbol: handlePrevSymbol,
         onSaveWorkspace: handleSaveWorkspace,
         onOpenJournal: handleOpenJournal,
-        onClosePanels: handleClosePanels,
     }));
 
     // --- Handlers ---
@@ -141,6 +135,8 @@ function App() {
                         instruments={instruments}
                         activeSymbol={activeSymbol}
                         onSelect={handleSymbolSelect}
+                        isHalted={isHalted}
+                        haltReason={haltReason}
                     />
                 </ErrorBoundary>
             </div>
@@ -173,10 +169,9 @@ function App() {
                 {/* Overlay UI Layer */}
                 <div className="absolute inset-0 z-10 flex flex-col pointer-events-none">
 
-                    {/* Primary model state — full width of chart area */}
-                    <div className="shrink-0 px-3 pt-3 pointer-events-auto">
+                    {/* Primary model state — compact status strip */}
+                    <div className="shrink-0 px-3 pt-3 pointer-events-auto flex justify-start">
                         <ModelStateBanner
-                            genAI={activeInstrument.genAIAnalysis}
                             amtResult={activeInstrument.amtAnalysis}
                             agentDecision={activeInstrument.agentDecision}
                             auction={activeInstrument.auctionAnalysis}
@@ -244,9 +239,6 @@ function App() {
 
                         {/* Right Toggle (Analysis) + Chat Toggle */}
                         <div className="flex items-start gap-1.5">
-                            <button onClick={() => setShowControls(!showControls)} className="h-10 w-10 bg-glassy-bg-elevated/50 backdrop-blur-xl border border-glassy-border-default rounded-sm text-glassy-text-primary hover:bg-glassy-bg-hover transition-colors">
-                                {showControls ? <X size={18} /> : <Sparkles size={18} className="text-glassy-ai-primary" />}
-                            </button>
                             {!rightSidebarOpen && (
                                 <button onClick={() => setRightSidebarOpen(true)} className="p-2 bg-glassy-bg-elevated/50 backdrop-blur rounded-sm text-glassy-text-primary hover:bg-glassy-bg-hover transition-colors">
                                     <PanelsTopLeft size={20} className="rotate-180" />
@@ -293,7 +285,6 @@ function App() {
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                     <ErrorBoundary name="Analysis">
                         <AIAnalysisPanel
-                            analysis={activeInstrument.genAIAnalysis}
                             amtResult={activeInstrument.amtAnalysis}
                             portfolio={activeInstrument.portfolio}
                             riskState={activeInstrument.riskState}

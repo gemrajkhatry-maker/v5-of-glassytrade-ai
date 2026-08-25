@@ -76,9 +76,9 @@ def test_expiry_day_caps_max_lots():
     assert expiry_lots <= normal_lots // 2
 
 
-def test_translate_rejects_cross_scale_signal():
-    """A futures-scale entry (160646) vs option premium (~2837) must be
-    rejected with None — never mistranslated (phantom P&L guard)."""
+def test_translate_translates_underlying_signal_to_option():
+    """A futures-scale entry (160646) vs option premium (~2837) translates cleanly
+    using delta adjustment into option premium entry, SL, and TP."""
     from quant.decision.signal_builder import Signal
     from quant.amt.session.selector import OptionSelector
 
@@ -89,7 +89,10 @@ def test_translate_rejects_cross_scale_signal():
         signal=sig, option_symbol="GOLDM 28 AUG 159500 CALL",
         option_ltp=2837.0, delta=0.5, tick_size=0.05,
     )
-    assert out is None
+    assert out is not None
+    assert out.entry == 2837.0
+    # Underlying risk = 346.1 * 0.50 delta = 173.05 -> SL = 2663.95
+    assert out.sl == pytest.approx(2837.0 - 173.05, abs=0.1)
 
 
 def test_translate_accepts_near_scale_signal():
@@ -158,8 +161,8 @@ def test_print_wall_anchors_sl_for_long():
     )
     sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
     assert sig is not None
-    # SL = 2 ticks inside the print wall: 99.4 - 0.10
-    assert sig.sl == pytest.approx(99.30)
+    # SL = 2 ticks inside the print wall: 99.4 + 0.10
+    assert sig.sl == pytest.approx(99.50)
 
 
 def test_print_wall_anchors_sl_for_short():
@@ -177,7 +180,7 @@ def test_print_wall_anchors_sl_for_short():
     )
     sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
     assert sig is not None
-    assert sig.sl == pytest.approx(100.90)
+    assert sig.sl == pytest.approx(100.70)
 
 
 def test_contested_bubble_zone_blocks_entry():
@@ -195,3 +198,23 @@ def test_contested_bubble_zone_blocks_entry():
     res = gate_triple_a_edge(ctx)
     assert not res.passed
     assert "Contested bubble zone" in (res.reason or "")
+
+
+def test_short_sl_anchors_to_broken_val_not_session_vah():
+    """Fix: on a downside break below VAL, the short SL anchors to the
+    BROKEN VAL (tight, overhead) — not session VAH which sits 3-5x further."""
+    from quant.decision.context import DecisionContext
+    from quant.decision.signal_builder import SignalBuilder
+    from quant.decision.result import GateResult
+    from quant.bars import Bar
+
+    # Price 100 broke below VAL=101 (VAL now overhead); session VAH=105 far above.
+    bar = Bar(time="t", open=102, high=102.1, low=99.9, close=100.0, volume=10)
+    ctx = DecisionContext(
+        bar=bar, symbol="S", agent_direction="SHORT",
+        val=101.0, vah=105.0, poc=103.0, tick_size=0.05,
+    )
+    sig = SignalBuilder().build(ctx, [GateResult(i, True) for i in range(1, 5)])
+    assert sig is not None
+    # SL = 2 ticks inside broken VAL: 101.0 - 0.10
+    assert sig.sl == pytest.approx(100.90), f"SL {sig.sl} anchored wrong"

@@ -25,6 +25,8 @@ GOLDEN_DIR = Path(__file__).parent / "golden"
 
 def _capture_decide_trace(ticks, symbol="SYM"):
     """Run the engine and capture all DecisionProduced events."""
+    from quant.execution.risk import SessionRisk
+    SessionRisk(storage=None, symbol=symbol).reset_session()
     eng = QuantEngine(SyntheticGateway(ticks), symbol, interval_seconds=1)
     trace = eng.run()
     decisions = [e for e in trace if isinstance(e, DecisionProduced)]
@@ -73,46 +75,56 @@ def test_decide_golden_short_trace_is_deterministic():
     assert t1 == t2, "Decision trace is not deterministic"
 
 
-def test_decide_golden_long_produces_signal():
-    """The LONG tick sequence must produce an approved signal."""
+def test_decide_golden_long_does_not_enter_without_triple_a():
+    """Imbalance continuation is not an entry. This tape used to be a
+    false-confidence golden that passed via Gate 3 Path A.3."""
     result = _capture_decide_trace(_ticks())
-    assert len(result["signals"]) >= 1, "Expected at least one approved signal"
-    sig = result["signals"][0]
-    assert sig["type"] == "LONG"
-    assert sig["entry"] > 0
-    assert sig["sl"] > 0
-    assert sig["tp"] > 0
-    assert sig["rr"] >= 1.5  # min_rr default
+    assert result["signals"] == []
+    assert not any(d["approved"] for d in result["decisions"])
 
 
-def test_decide_golden_short_produces_signal():
-    """The SHORT tick sequence must produce an approved signal."""
+def test_decide_golden_short_does_not_enter_without_triple_a():
     result = _capture_decide_trace(_short_ticks())
-    assert len(result["signals"]) >= 1, "Expected at least one approved signal"
-    sig = result["signals"][0]
-    assert sig["type"] == "SHORT"
+    assert result["signals"] == []
+    assert not any(d["approved"] for d in result["decisions"])
 
 
 def test_decide_golden_long_has_expected_gate_results():
-    """The LONG decision must pass all 4 gates."""
+    """Decisions fire, but Gate 3 does not pass without AGGRESSION."""
     result = _capture_decide_trace(_ticks())
-    # Find the approved decision
-    approved = [d for d in result["decisions"] if d["approved"]]
-    assert len(approved) >= 1
-    dec = approved[0]
-    assert dec["reason"] in ("Triple-A", "LVN_Sniper", "VA_FADE")
-    assert dec["block_reasons"] == []  # No blocked gates
+    assert result["decisions"], "engine must still evaluate gates"
+    assert not any(d["approved"] for d in result["decisions"])
 
 
-def test_decide_golden_records_snapshot(tmp_path):
-    """Record the golden snapshot to file for manual inspection.
-    
-    Run with: pytest -s tests/quant/runtime/test_decide_golden.py::test_decide_golden_records_snapshot
+def test_decide_golden_matches_committed_snapshot():
+    """Re-audit: the file-writing test above only ever overwrote
+    golden/decide_long.json and asserted the write succeeded — nothing ever
+    read the file back, so a real behavior regression in the decision
+    pipeline could silently drift the recorded trace with no test catching
+    it (false confidence: the "golden" file was write-only). This test
+    diffs a fresh trace against the committed snapshot and fails loudly on
+    any drift. Update the snapshot deliberately (rerun the recorder script
+    below) when a change is an intentional behavior change."""
+    snapshot_path = GOLDEN_DIR / "decide_long.json"
+    with open(snapshot_path) as f:
+        expected = json.load(f)
+
+    actual = _capture_decide_trace(_ticks())
+
+    assert actual == expected, (
+        "decide_long.json golden trace drifted from actual QuantEngine "
+        "behavior. If this is an intentional change, regenerate the "
+        "snapshot with _record_golden_snapshot() and review the diff."
+    )
+
+
+def _record_golden_snapshot():
+    """Regenerate golden/decide_long.json after a deliberate behavior
+    change. Not collected by pytest (no test_ prefix) — run manually:
+    python -c "from tests.quant.runtime.test_decide_golden import _record_golden_snapshot as f; f()"
     """
     result = _capture_decide_trace(_ticks())
     snapshot_path = GOLDEN_DIR / "decide_long.json"
     GOLDEN_DIR.mkdir(parents=True, exist_ok=True)
     with open(snapshot_path, "w") as f:
         json.dump(result, f, indent=2)
-    # Verify the file was written
-    assert snapshot_path.exists()

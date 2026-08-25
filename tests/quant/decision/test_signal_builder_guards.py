@@ -50,12 +50,12 @@ def test_thin_stop_pure_function():
 
 
 def test_healthy_setup_still_builds():
-    # SL 2.1% away (100 -> 97.9) -> builds normally.
+    # SL 1.9% away (100 -> 98.10) -> builds normally.
     sb = SignalBuilder()
     ctx = _ctx(close=100.0, val=98.0, step=1.0, nearest=98.0)
     s = sb.build(ctx, _pass_results())
     assert s is not None and s.type == "LONG"
-    assert s.sl == pytest.approx(97.9)
+    assert s.sl == pytest.approx(98.10)
 
 
 def test_override_min_stop_allows_thin_stop():

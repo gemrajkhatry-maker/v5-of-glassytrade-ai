@@ -180,7 +180,13 @@ def get_lot_size(symbol: str) -> int:
     Returns:
         Lot size. Returns 1 if not found.
     """
-    return LOT_SIZES.get(normalize_symbol(symbol), 1)
+    from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+
+    canon = normalize_symbol(symbol)
+    spec = DEFAULT_REGISTRY.try_resolve(canon)
+    if spec is not None:
+        return spec.lot_size
+    return LOT_SIZES.get(canon, 1)
 
 
 def get_step_size(symbol: str) -> float:
@@ -193,7 +199,13 @@ def get_step_size(symbol: str) -> float:
     Returns:
         Step size. Returns 5.0 as default for stocks.
     """
-    return STEP_SIZES.get(normalize_symbol(symbol), 5.0)
+    from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+
+    canon = normalize_symbol(symbol)
+    spec = DEFAULT_REGISTRY.try_resolve(canon)
+    if spec is not None:
+        return spec.strike_interval
+    return STEP_SIZES.get(canon, 5.0)
 
 
 def get_expiry_weekday(symbol: str) -> int:

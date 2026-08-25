@@ -94,12 +94,10 @@ export function getDefaultTradingHotkeys(options: {
     onVpModeChange?: (mode: 'session' | 'leg' | 'combined' | 'off') => void;
     onToggleSidebar?: () => void;
     onToggleRightSidebar?: () => void;
-    onToggleControls?: () => void;
     onNextSymbol?: () => void;
     onPrevSymbol?: () => void;
     onSaveWorkspace?: () => void;
     onOpenJournal?: () => void;
-    onClosePanels?: () => void;
 }): HotkeyConfig[] {
     return [
         // Chart Modes (1)
@@ -154,17 +152,6 @@ export function getDefaultTradingHotkeys(options: {
             description: 'Toggle right panel',
             handler: () => options.onToggleRightSidebar?.(),
         },
-        {
-            key: 'Alt+C',
-            description: 'Toggle controls',
-            handler: () => options.onToggleControls?.(),
-        },
-        {
-            key: 'Esc',
-            description: 'Close panels',
-            handler: () => options.onClosePanels?.(),
-        },
-        
         // Workspace
         {
             key: 'Ctrl+S',

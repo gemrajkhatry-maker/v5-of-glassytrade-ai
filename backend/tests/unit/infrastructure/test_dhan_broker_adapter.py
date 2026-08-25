@@ -281,6 +281,73 @@ def test_place_order_network_error_returns_none():
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Exchange routing (D-EXCH-07 sibling: BSE/BFO instruments must not fall
+# through the old binary MCX/NFO branch in _make_instrument).
+# ---------------------------------------------------------------------------
+
+
+def test_make_instrument_routes_sensex_option_to_bfo():
+    """A SENSEX option must resolve to Exchange.BFO, not the old binary
+    "MCX if is_mcx else NFO" default that had no BSE/BFO branch at all."""
+    from brokers.broker.types import Exchange
+
+    adapter = DhanBrokerAdapter.__new__(DhanBrokerAdapter)
+    signal = _make_signal(metadata={"option_type": "CE"})
+
+    instrument = adapter._make_instrument(signal, "SENSEX 17 AUG 82000 CALL")
+
+    assert instrument.exchange == Exchange.BFO
+
+
+def test_make_instrument_routes_bankex_option_to_bfo():
+    from brokers.broker.types import Exchange
+
+    adapter = DhanBrokerAdapter.__new__(DhanBrokerAdapter)
+    signal = _make_signal(metadata={"option_type": "PE"}, is_buy=False)
+
+    instrument = adapter._make_instrument(signal, "BANKEX 17 AUG 55000 PUT")
+
+    assert instrument.exchange == Exchange.BFO
+
+
+def test_make_instrument_routes_nifty_option_to_nfo():
+    """NSE index options must still route to NFO (no regression)."""
+    from brokers.broker.types import Exchange
+
+    adapter = DhanBrokerAdapter.__new__(DhanBrokerAdapter)
+    signal = _make_signal(metadata={"option_type": "CE"})
+
+    instrument = adapter._make_instrument(signal, "NIFTY 17 AUG 24500 CALL")
+
+    assert instrument.exchange == Exchange.NFO
+
+
+def test_make_instrument_routes_crudeoil_option_to_mcx():
+    """MCX commodity options must still route to MCX (no regression)."""
+    from brokers.broker.types import Exchange
+
+    adapter = DhanBrokerAdapter.__new__(DhanBrokerAdapter)
+    signal = _make_signal(metadata={"option_type": "CE"})
+
+    instrument = adapter._make_instrument(signal, "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert instrument.exchange == Exchange.MCX
+
+
+def test_make_instrument_explicit_exchange_hint_wins():
+    """An explicit exchange hint on signal.metadata must still override the
+    auto-resolved exchange."""
+    from brokers.broker.types import Exchange
+
+    adapter = DhanBrokerAdapter.__new__(DhanBrokerAdapter)
+    signal = _make_signal(metadata={"option_type": "CE", "exchange": "NFO"})
+
+    instrument = adapter._make_instrument(signal, "SENSEX 17 AUG 82000 CALL")
+
+    assert instrument.exchange == Exchange.NFO
+
+
 def test_execute_order_scale_in_records_full_size_and_deployed_fraction():
     """Regression: a scale_in entry deploys 40% of target — the adapter must
     record full_size and deployed_fraction so add_to_position can size the

@@ -58,7 +58,7 @@ def view_state_to_ws(vs) -> dict:
         },
         "amt": vs.amt,
         "quantDecision": vs.quant_decision,
-        "agentDecision": _agent_decision_from_quant(vs.quant_decision),
+        "agentDecision": vs.agent_decision or _agent_decision_from_quant(vs.quant_decision),
         "riskState": vs.risk_state,
         "tick": vs.tick,
         "ltp": vs.ltp,

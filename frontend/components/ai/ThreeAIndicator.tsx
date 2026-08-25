@@ -2,11 +2,15 @@ import React from 'react';
 import { AMTAnalysis } from '../../types';
 import { computeThreeA, ThreeAScore } from '../../utils/threeA';
 
+type Verdict = 'ENTER' | 'MONITOR' | 'SKIP';
+
 interface ThreeAIndicatorProps {
     amt: AMTAnalysis | null;
+    /** quantDecision.approved from the backend — the single source of truth for ENTER. */
+    approved: boolean;
 }
 
-const VERDICT_STYLE: Record<ThreeAScore['verdict'], string> = {
+const VERDICT_STYLE: Record<Verdict, string> = {
     ENTER: 'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
     MONITOR: 'text-amber-300 border-amber-500/40 bg-amber-500/10',
     SKIP: 'text-rose-400 border-rose-500/40 bg-rose-500/10',
@@ -17,11 +21,14 @@ const VERDICT_STYLE: Record<ThreeAScore['verdict'], string> = {
  * Action (order-flow aggression). One glance at the scanner row tells which
  * of the three Valentini rules blocks a trade.
  *
- * IMPORTANT: verdict is derived EXCLUSIVELY from computeThreeA() score.
- * ENTER is only shown when score === 3. No quantDecision override is applied
- * here — 1/3 or 2/3 must never display as ENTER regardless of backend state.
+ * IMPORTANT: the three lights and score are informational only (computeThreeA
+ * is a pure re-derivation from streamed AMT fields, not a trading decision).
+ * The ENTER/MONITOR/SKIP verdict is derived from `approved`
+ * (quantDecision.approved, the engine's real decision) — never from the 3A
+ * score alone. A 3/3 score with `approved=false` must render MONITOR, not
+ * ENTER, or the UI would show a trade signal the engine never produced.
  */
-export const ThreeAIndicator: React.FC<ThreeAIndicatorProps> = React.memo(({ amt }) => {
+export const ThreeAIndicator: React.FC<ThreeAIndicatorProps> = React.memo(({ amt, approved }) => {
     const s = computeThreeA(amt);
     const lights = [
         { label: 'Auction', on: s.auction },
@@ -29,7 +36,8 @@ export const ThreeAIndicator: React.FC<ThreeAIndicatorProps> = React.memo(({ amt
         { label: 'Action', on: s.action },
     ];
 
-    const verdictStyle = VERDICT_STYLE[s.verdict];
+    const verdict: Verdict = approved ? 'ENTER' : s.score >= 2 ? 'MONITOR' : 'SKIP';
+    const verdictStyle = VERDICT_STYLE[verdict];
 
     return (
         <span className="inline-flex items-center gap-1.5 p-1 rounded-md bg-black/25 border border-white/5" title={`3A: Auction ${s.auction ? '✓' : '✗'} · Area ${s.area ? '✓' : '✗'} · Action ${s.action ? '✓' : '✗'}`}>
@@ -52,7 +60,7 @@ export const ThreeAIndicator: React.FC<ThreeAIndicatorProps> = React.memo(({ amt
                 data-3a-score
                 className={`px-1.5 py-0.5 rounded text-[8px] font-black font-mono leading-none border uppercase tracking-wider ${verdictStyle}`}
             >
-                {s.score}/3 {s.verdict}
+                {s.score}/3 {verdict}
             </span>
         </span>
     );

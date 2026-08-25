@@ -91,15 +91,20 @@ def detect_break(
                         "volume_ratio": round(vol_ratio, 2),
                     }
 
-    # Check ABSORPTION: flat candle + high absolute delta at key level
+    # Check ABSORPTION: flat candle + high absolute delta AT key level.
+    # Proximity guard is mandatory: without it any flat high-delta candle
+    # anywhere on the tape gets labeled absorption at whichever level is
+    # first in the list (audit D-ABS-01: price@100 reported "ABSORPTION @200").
     threshold = current.close * 0.003
     if candle_range > 0 and body_size < candle_range * 0.30:
         delta_ratio = abs(current.delta) / current.volume if current.volume > 0 else 0
         if delta_ratio > 0.25:
             for _label, level in levels_up + levels_down:
                 if level > 0 and abs(current.close - level) < threshold:
+                    # For absorption: negative delta (buyers absorb sellers) -> bullish UP
+                    # positive delta (sellers absorb buyers) -> bearish DOWN
                     return {
-                        "break_direction": "UP" if current.delta > 0 else "DOWN",
+                        "break_direction": "UP" if current.delta < 0 else "DOWN",
                         "break_type": "ABSORPTION",
                         "break_level": level,
                         "volume_ratio": round(vol_ratio, 2),
@@ -139,11 +144,10 @@ def check_ib_break_tick(
     ib_complete: bool,
     current_break_direction: str = "",
 ) -> dict:
-    """Check IB break using live tick price (not candle close).
+    """Check IB break using live tick price.
 
-    This is the PRIMARY IB break detection path — fires on every tick,
-    not just on candle close. Once broken, the break is STICKY: it
-    remains BREAK_UP/BREAK_DOWN even if price re-enters IB.
+    Detects initiative breaks outside Initial Balance. When price re-enters
+    the IB, the break state clears (failed auction / balance rotation).
 
     Args:
         live_price: Current LTP (live tick price).
@@ -155,7 +159,7 @@ def check_ib_break_tick(
     Returns:
         dict with break_direction, break_type, break_level, break_price.
     """
-    if not ib_complete or ib_high <= 0 or ib_low <= 0:
+    if not ib_complete or ib_high <= 0 or ib_low <= 0 or live_price <= 0:
         return {
             "break_direction": "",
             "break_type": "",
@@ -163,23 +167,7 @@ def check_ib_break_tick(
             "break_price": 0.0,
         }
 
-    # STICKY: once broken, stay broken
-    if current_break_direction == "UP":
-        return {
-            "break_direction": "UP",
-            "break_type": "INITIATIVE",
-            "break_level": ib_high,
-            "break_price": live_price,
-        }
-    if current_break_direction == "DOWN":
-        return {
-            "break_direction": "DOWN",
-            "break_type": "INITIATIVE",
-            "break_level": ib_low,
-            "break_price": live_price,
-        }
-
-    # Check for new break using live price
+    # Active break above IB High
     if live_price > ib_high:
         return {
             "break_direction": "UP",
@@ -187,6 +175,8 @@ def check_ib_break_tick(
             "break_level": ib_high,
             "break_price": live_price,
         }
+
+    # Active break below IB Low
     if live_price < ib_low:
         return {
             "break_direction": "DOWN",
@@ -195,6 +185,7 @@ def check_ib_break_tick(
             "break_price": live_price,
         }
 
+    # Price has returned inside the Initial Balance -> clear break state
     return {
         "break_direction": "",
         "break_type": "",

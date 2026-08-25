@@ -292,23 +292,28 @@ class DriveTracker:
         if candle_range <= 0:
             return False
 
+        open_p = float(candle.open)
+        close_p = float(candle.close)
+        low_p = float(candle.low)
+        high_p = float(candle.high)
+
         if direction == "LONG":
-            # For LONG: we're testing from below. Wick below level, close above.
-            wick_below = float(candle.low) < level
-            wick_size = level - float(candle.low)
-            close_above = float(candle.close) > level
+            # For LONG (bounce off support): pierced below level, closed above level with lower wick rejection
+            wick_below = low_p < level
+            lower_wick = min(open_p, close_p) - low_p
+            close_above = close_p > level
             return (
                 wick_below
                 and close_above
-                and (wick_size / candle_range) > self.REJECTION_WICK_RATIO
+                and (lower_wick / candle_range) > self.REJECTION_WICK_RATIO
             )
         else:
-            # For SHORT: we're testing from above. Wick above level, close below.
-            wick_above = float(candle.high) > level
-            wick_size = float(candle.high) - level
-            close_below = float(candle.close) < level
+            # For SHORT (rejection off resistance): pierced above level, closed below level with upper wick rejection
+            wick_above = high_p > level
+            upper_wick = high_p - max(open_p, close_p)
+            close_below = close_p < level
             return (
                 wick_above
                 and close_below
-                and (wick_size / candle_range) > self.REJECTION_WICK_RATIO
+                and (upper_wick / candle_range) > self.REJECTION_WICK_RATIO
             )

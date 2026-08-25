@@ -7,7 +7,7 @@ from quant.decision.stops import structural_anchor, structural_stop
 
 DEFAULT_TP_MULTIPLIER = 2.0
 MIN_RR = 1.5
-MAX_STOP_DISTANCE_TICKS = 20.0
+MAX_STOP_DISTANCE_TICKS = 200.0
 
 
 def gate_risk_reward(
@@ -32,10 +32,11 @@ def gate_risk_reward(
     sl = float(sl)
     tp = float(tp)
     risk = abs(entry - sl)
-    if risk > max_distance_ticks * tick:
+    scaled_cap_ticks = max(max_distance_ticks, (entry * 0.0075) / tick)
+    if risk > scaled_cap_ticks * tick:
         return GateResult(
             4, False,
-            f"Stop too wide ({risk / tick:.0f} > {max_distance_ticks:.0f} ticks)",
+            f"Stop too wide ({risk / tick:.0f} > {scaled_cap_ticks:.0f} ticks)",
             f"SL={sl:.2f} entry={entry:.2f}",
         )
     reward = abs(tp - entry)

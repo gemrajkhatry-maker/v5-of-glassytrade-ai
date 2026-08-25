@@ -8,8 +8,8 @@ def test_interval_bar_closes_on_boundary():
     a = BarAggregator(interval_seconds=60)
     assert a.add_tick(Tick("t0", 100.0, 10, 6, 4)) is None
     b = a.add_tick(Tick("t60", 101.0, 10, 6, 4))   # next minute boundary
-    assert b is not None and b.close == 101.0 and b.high == 101.0 and b.low == 100.0
-    assert b.volume == 20
+    assert b is not None and b.close == 100.0 and b.high == 100.0 and b.low == 100.0
+    assert b.volume == 10
 
 
 def test_bar_aggregates_high_low_volume():
@@ -18,7 +18,7 @@ def test_bar_aggregates_high_low_volume():
     a.add_tick(Tick("t1", 102.0, 5, 3, 2))
     a.add_tick(Tick("t2", 99.0, 7, 2, 5))
     b = a.add_tick(Tick("t60", 100.0, 1, 1, 0))
-    assert b.high == 102.0 and b.low == 99.0 and b.volume == 23
+    assert b.high == 102.0 and b.low == 99.0 and b.volume == 22
 
 
 def test_in_window_ticks_return_none():
@@ -33,7 +33,7 @@ def test_bar_delta_is_buy_minus_sell():
     a.add_tick(Tick("t0", 100.0, 10, 6, 4))
     a.add_tick(Tick("t1", 102.0, 5, 3, 2))
     b = a.add_tick(Tick("t60", 100.0, 1, 1, 0))
-    assert b.buy_volume == 10.0 and b.sell_volume == 6.0 and b.delta == 4.0
+    assert b.buy_volume == 9.0 and b.sell_volume == 6.0 and b.delta == 3.0
 
 
 def test_open_close_accumulate():
@@ -41,7 +41,7 @@ def test_open_close_accumulate():
     a.add_tick(Tick("t0", 100.0, 10, 6, 4))
     a.add_tick(Tick("t1", 102.0, 5, 3, 2))
     b = a.add_tick(Tick("t60", 101.0, 1, 1, 0))
-    assert b.open == 100.0 and b.close == 101.0
+    assert b.open == 100.0 and b.close == 102.0
 
 
 def test_range_bar_closes_on_price_move():

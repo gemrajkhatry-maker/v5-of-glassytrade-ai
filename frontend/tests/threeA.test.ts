@@ -25,7 +25,7 @@ describe('computeThreeA', () => {
   it('returns a full-zeros score for null input', () => {
     const s = computeThreeA(null);
     expect(s).toEqual({
-      auction: false, area: false, action: false, score: 0, verdict: 'SKIP',
+      auction: false, area: false, action: false, score: 0,
     });
   });
 
@@ -83,30 +83,26 @@ describe('computeThreeA', () => {
     });
   });
 
-  describe('Score and verdict', () => {
-    it('gives score 3 and ENTER when all pass', () => {
+  describe('Score', () => {
+    it('gives score 3 when all pass', () => {
       const s = computeThreeA(baseAmt({ aggression: 2.5 }));
       expect(s.score).toBe(3);
-      expect(s.verdict).toBe('ENTER');
     });
-    it('gives score 2 and MONITOR when two pass', () => {
+    it('gives score 2 when two pass', () => {
       const s = computeThreeA(baseAmt({ aggression: 0.5 }));
       expect(s.score).toBe(2);
-      expect(s.verdict).toBe('MONITOR');
     });
-    it('gives score 1 and SKIP when only one passes', () => {
+    it('gives score 1 when only one passes', () => {
       // DEAD auction + no action evidence; only the Area (POC/LVN) passes.
       const s = computeThreeA(baseAmt({ marketState: 'DEAD', aggression: 0 }));
       expect(s.auction).toBe(false);
       expect(s.area).toBe(true);
       expect(s.action).toBe(false);
       expect(s.score).toBe(1);
-      expect(s.verdict).toBe('SKIP');
     });
-    it('gives score 0 and SKIP when none pass', () => {
+    it('gives score 0 when none pass', () => {
       const s = computeThreeA(baseAmt({ marketState: 'DEAD', poc: 0, lvns: [], aggression: 0 }));
       expect(s.score).toBe(0);
-      expect(s.verdict).toBe('SKIP');
     });
   });
 });

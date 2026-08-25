@@ -115,6 +115,12 @@ def amt_result_to_dto(r) -> dict:
         "pocVsPrice": r.poc_vs_price,
         "lvnPlay": r.lvn_play,
         "isSecondDrive": r.drive_entry_valid,
+        # Phase 4: context_builder.py's drive-exhaustion guard reads
+        # "driveNumber" but this key was never emitted here, so
+        # gates_edge.py's "3+ drives -> exhausted" guard could never fire —
+        # AMTResult.drive_number is real, already-tracked state (analyzer.py
+        # _track_drives), it just never reached the wire.
+        "driveNumber": r.drive_number,
         # Higher Timeframe Levels
         "dailyVah": r.daily_vah,
         "dailyVal": r.daily_val,
@@ -124,6 +130,10 @@ def amt_result_to_dto(r) -> dict:
         "absorptionSide": r.absorption_side,
         "absorptionRangeRatio": r.absorption_range_ratio,
         "absorptionVolRatio": r.absorption_vol_ratio,
+        "tripleAPhase": getattr(r, "triple_a_phase", "WAITING"),
+        "tripleASignal": getattr(r, "triple_a_signal", ""),
+        "absorptionClusterHigh": getattr(r, "absorption_cluster_high", 0.0),
+        "absorptionClusterLow": getattr(r, "absorption_cluster_low", 0.0),
         # Displacement
         "swingDelta": r.swing_delta,
         # Per-symbol delta (isolated per option contract)

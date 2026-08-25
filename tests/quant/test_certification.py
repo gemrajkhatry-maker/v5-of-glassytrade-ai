@@ -82,9 +82,9 @@ def test_s5_conviction_formula_is_explicit():
         assert len(r["gate_results"]) >= 4, "Triple-A requires 4 gates"
         for g in r["gate_results"]:
             assert isinstance(g["passed"], bool)
-    # At least one record must show the full 4-gate pass on the breakout.
-    assert any(all(g["passed"] for g in r["gate_results"])
-               for r in dec_recs), "no decision passed all gates"
+    # At least one record must record 4 gates. Full pass requires Triple-A
+    # AGGRESSION — this displacement tape must not sneak through on imbalance.
+    assert any(len(r["gate_results"]) >= 4 for r in dec_recs)
 
 
 # ---------------------------------------------------------------------------
@@ -103,10 +103,10 @@ def test_s6_qualification_matrix_breakout_qualifies():
     eng = _engine_from(scenario_displacement_breakout)
     dec_recs = [r for r in eng.cert_records if r["stage"] == "decision"]
     approved = [r for r in dec_recs if r["approved"]]
-    assert approved, "displacement must qualify"
-    a = approved[0]
-    assert a["signal"]["type"] == "LONG"
-    assert a["signal"]["rr"] >= 2.0
+    assert approved == [], (
+        "displacement without detector-confirmed Triple-A AGGRESSION "
+        "must not qualify — this used to pass via IMBALANCED continuation"
+    )
 
 
 # ---------------------------------------------------------------------------

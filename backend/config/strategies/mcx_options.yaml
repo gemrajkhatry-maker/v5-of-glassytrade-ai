@@ -36,7 +36,7 @@ exchanges:
         exchange: "MCX"
         segment: "MCX_COMM"
         instrument_type: "OPT"
-        lot_size: 500
+        lot_size: 5
         tick_size: 1.0
         vp_bucket_size: 25.0
         strike_interval: 500

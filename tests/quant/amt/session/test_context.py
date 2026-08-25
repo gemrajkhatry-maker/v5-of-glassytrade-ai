@@ -49,15 +49,19 @@ def test_last_tuesday_of_month_is_expiry():
 # ---- seconds_to_close ----
 
 def test_nse_seconds_to_close_morning():
+    # Phase 2: seconds_to_close now measures to the real exchange close
+    # (15:30), not the last-entry cutoff (15:15) — 10:00 -> 15:30 = 5.5h.
     dt = datetime(2026, 2, 25, 10, 0, 0, tzinfo=_IST)
     result = seconds_to_close(dt, "NSE")
-    assert result == 18900.0
+    assert result == 19800.0
 
 
 def test_nse_seconds_to_close_near_end():
+    # 15:00 -> 15:30 close = 1800s (was measured to 15:15 last-entry before
+    # Phase 2 unified the NSE close constants).
     dt = datetime(2026, 2, 25, 15, 0, 0, tzinfo=_IST)
     result = seconds_to_close(dt, "NSE")
-    assert result == 900.0
+    assert result == 1800.0
 
 
 def test_nse_seconds_to_close_after_close():

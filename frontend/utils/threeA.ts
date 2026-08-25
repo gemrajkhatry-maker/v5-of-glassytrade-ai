@@ -2,8 +2,9 @@ import { AMTAnalysis } from '../types';
 import { THREE_A_CONFIG } from '../config';
 
 /**
- * Three-A (Valentini AMT) rule scoring, computed deterministically from the
- * AMT analysis fields the backend already streams. Pure function — no UI.
+ * Three-A (Valentini AMT) rule SCORING ONLY — informational traffic lights,
+ * computed deterministically from the AMT analysis fields the backend already
+ * streams. Pure function — no UI, and NOT a trading verdict.
  *
  *   1. Auction  — market state: BALANCED / IMBALANCED are tradable; DEAD or
  *                 missing blocks (no initiative entries in dead auctions).
@@ -12,19 +13,22 @@ import { THREE_A_CONFIG } from '../config';
  *   3. Action   — order-flow aggression: aggression score >= 2.0, an absorption
  *                 side, strong CVD slope, or aggressive prints.
  *
- * Verdict: 3/3 -> ENTER, 2/3 -> MONITOR, <=1 -> SKIP.
+ * There is no ENTER verdict here on purpose: a 3/3 score describes gate
+ * alignment, not engine approval. The UI must derive ENTER/MONITOR/SKIP from
+ * the streamed `quantDecision.approved` (see ThreeAIndicator) — never from
+ * this score alone. A prior version computed its own ENTER verdict from the
+ * score, which let the scanner show ENTER while the engine was flat.
  */
 export interface ThreeAScore {
   auction: boolean;
   area: boolean;
   action: boolean;
   score: number;
-  verdict: 'ENTER' | 'MONITOR' | 'SKIP';
 }
 
 export function computeThreeA(amt: AMTAnalysis | null): ThreeAScore {
   if (!amt) {
-    return { auction: false, area: false, action: false, score: 0, verdict: 'SKIP' };
+    return { auction: false, area: false, action: false, score: 0 };
   }
 
   const state = (amt.marketState || '').toUpperCase();
@@ -42,6 +46,5 @@ export function computeThreeA(amt: AMTAnalysis | null): ThreeAScore {
   const action = aggression || absorption || cvd || prints;
 
   const score = Number(auction) + Number(area) + Number(action);
-  const verdict: ThreeAScore['verdict'] = score === 3 ? 'ENTER' : score === 2 ? 'MONITOR' : 'SKIP';
-  return { auction, area, action, score, verdict };
+  return { auction, area, action, score };
 }

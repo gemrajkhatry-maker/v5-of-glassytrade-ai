@@ -302,8 +302,8 @@ class AbsorptionDetector:
                 self._clear_pending()
                 return res
             
-            # Expire if no displacement within 2 candles or broke the wrong way
-            if self._candles_since_pending >= 2 or (self._pending_side == "SELL_ABSORBED" and displaced_bearish) or (self._pending_side == "BUY_ABSORBED" and displaced_bullish):
+            # Expire if no displacement within 3 candles or broke the wrong way
+            if self._candles_since_pending >= 3 or (self._pending_side == "SELL_ABSORBED" and displaced_bearish) or (self._pending_side == "BUY_ABSORBED" and displaced_bullish):
                 self._clear_pending()
                 
         # 2. Detect NEW absorption signatures
@@ -318,12 +318,14 @@ class AbsorptionDetector:
 
         # Dual condition check
         if range_ratio < ABSORPTION_RANGE_ATR and vol_ratio >= ABSORPTION_VOL_MULT:
-            # Classify direction from delta
             delta = float(candle.delta)
-            if delta > 0:
-                self._pending_side = "SELL_ABSORBED"  # Buyers absorbing sellers → bullish
-            elif delta < 0:
-                self._pending_side = "BUY_ABSORBED"  # Sellers absorbing buyers → bearish
+            # Classify direction from delta:
+            # delta < 0: Aggressive sellers hitting the bid are absorbed by passive buyers (support floor) -> SELL_ABSORBED (bullish)
+            # delta > 0: Aggressive buyers hitting the ask are absorbed by passive sellers (resistance ceiling) -> BUY_ABSORBED (bearish)
+            if delta < 0:
+                self._pending_side = "SELL_ABSORBED"  # Buyers absorbing sellers → bullish support
+            elif delta > 0:
+                self._pending_side = "BUY_ABSORBED"  # Sellers absorbing buyers → bearish resistance
             else:
                 return AbsorptionResult(False, "", range_ratio, vol_ratio)
 

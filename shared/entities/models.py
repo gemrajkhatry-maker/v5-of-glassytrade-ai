@@ -50,13 +50,6 @@ class OptionType(str, Enum):
     CALL = "CE"
     PUT = "PE"
 
-class MarketState(str, Enum):
-    BALANCED = "BALANCED"
-    IMBALANCED = "IMBALANCED"
-    INITIATIVE = "INITIATIVE" # Used by Fabio logic
-    BALANCE = "BALANCE"       # Used by Fabio logic
-    UNKNOWN = "UNKNOWN"
-
 class SessionPhase(str, Enum):
     OPENING = "Phase 1: Opening Noise (High Risk)"
     PRIMARY = "Phase 2: Primary Setup Window (AAA)"

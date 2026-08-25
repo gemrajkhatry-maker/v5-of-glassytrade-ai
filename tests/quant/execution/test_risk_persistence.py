@@ -36,9 +36,12 @@ def test_halted_state_persists_and_refuses_new_trades():
     r2 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10",
                      max_daily_loss_pct=0.005, starting_equity=1_000_000.0)
     assert r2.state().halted is True
-    # After restart, a further loss is NOT counted (trading must be halted).
-    r2.record_trade(-50000.0)
-    assert r2.state().daily_pnl == -6000.0
+    # Halted session refuses new trades
+    assert r2.can_trade()[0] is False
+    # But closing fills still update P&L accounting accurately
+    r2.record_trade(-1000.0)
+    assert r2.state().daily_pnl == -7000.0
+    assert r2.can_trade()[0] is False
 
 
 def test_new_session_date_resets_state():

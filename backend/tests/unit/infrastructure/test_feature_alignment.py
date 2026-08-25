@@ -96,17 +96,19 @@ def test_is_market_open_weekend():
 
 def test_is_market_open_after_close():
     from quant.amt.session.symbol_registry import is_market_open
-    # Wednesday 16:00 IST (10:30 UTC) — after NSE close at 15:15
+    # Wednesday 16:00 IST (10:30 UTC) — after the real NSE close at 15:30
     assert is_market_open("2026-02-25T10:30:00Z", exchange="NSE") is False
 
 
-def test_nse_close_at_1515():
+def test_nse_close_at_1530():
+    """Phase 2: unified on the real exchange close (15:30), not the 15:15
+    last-entry cutoff this test previously (incorrectly) pinned."""
     from quant.amt.session.symbol_registry import is_market_open
-    # NSE closes at 15:15 IST (09:45 UTC)
-    # 15:14 IST = 09:44 UTC → open
-    assert is_market_open("2026-02-25T09:44:00Z", exchange="NSE") is True
-    # 15:16 IST = 09:46 UTC → closed
-    assert is_market_open("2026-02-25T09:46:00Z", exchange="NSE") is False
+    # NSE closes at 15:30 IST (10:00 UTC)
+    # 15:29 IST = 09:59 UTC → open
+    assert is_market_open("2026-02-25T09:59:00Z", exchange="NSE") is True
+    # 15:31 IST = 10:01 UTC → closed
+    assert is_market_open("2026-02-25T10:01:00Z", exchange="NSE") is False
 
 
 def test_mcx_hours():

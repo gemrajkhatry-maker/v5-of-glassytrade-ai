@@ -281,6 +281,10 @@ class AMTResult:
     # Live tick-based footprints (candle time -> FootprintCandle)
     footprints: dict[str, FootprintCandle] = field(default_factory=dict)
     contested_zone: bool = False
+    triple_a_phase: str = "WAITING"
+    triple_a_signal: str = ""
+    absorption_cluster_high: float = 0.0
+    absorption_cluster_low: float = 0.0
 
 
 # ---------------------------------------------------------------------------

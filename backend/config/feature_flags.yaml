@@ -11,11 +11,7 @@ features:
   quant_execution_mode: "off"  # quoted: bare `off` is YAML 1.1 boolean False
 
   # ── Phase 0 flags ──
-  true_delta_lee_ready: false          # true activates Lee-Ready, false = Gaussian proxy
   realistic_cost_model: true           # true activates full NSE cost model in PaperBroker
-
-  # ── Phase 1 flags ──
-  parallel_symbol_sessions: false      # Multi-symbol concurrent execution
 
   # ── Phase 2 flags ──
   short_signals_enabled: true          # enables PE / SHORT gate logic
@@ -28,6 +24,5 @@ features:
   # ── Phase 4 flags ──
   scalp_engine_enabled: true           # enables 1-min/15-sec MTF stack
   ib_breakout_scalp: true             # enables Initial Balance breakout setups
-  print_level_trigger: false           # enables 15-sec tick-level aggression trigger
 
   # ── Infrastructure flags ──

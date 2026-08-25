@@ -15,6 +15,7 @@ from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.timezones import IST
 from quant.decision.decision_service import QuantDecision
 from quant.events import (
+    AgentDecisionProduced,
     AmtUpdated,
     BarClosed,
     DecisionProduced,
@@ -22,6 +23,7 @@ from quant.events import (
     Event,
     PositionClosed,
     PositionOpened,
+    PositionReduced,
     RiskUpdated,
 )
 from quant.execution.order import Fill, Position
@@ -39,27 +41,53 @@ class ViewState:
     portfolio: dict | None = None
     depth: dict | None = None
     amt: dict | None = None
+    agent_decision: dict | None = None
 
 
 
+
+
+
+_EPOCH_2000 = 946684800
 
 
 def _epoch_to_iso(time_str: str) -> str:
     """Normalize a quant tick/bar time to the WS ISO-8601 IST contract.
 
-    The live gateway emits unix-epoch strings (e.g. ``"1786095001"``); the
-    frontend parses every ``time`` with ``new Date()``, which returns NaN for
-    bare epoch strings — silently dropping live ticks from the chart. The REST
-    history endpoint (``ohlc_to_dto``) already emits ISO ``+05:30`` times, so
-    ticks are normalized to the same format here at the serialization
-    boundary. Values that are already ISO (or not epoch-parseable) pass
-    through unchanged.
+    Live ticks are unix-epoch strings (``"1786095001"`` or ``"1786095001.0"``).
+    ``int()`` rejects the float form Dhan history still emits — that used to
+    pass through unchanged, after which ``time[:10]`` was treated as a calendar
+    date and VWAP/CVD/Triple-A reset every bar.
     """
+    text = str(time_str or "").strip()
+    if not text:
+        return time_str
     try:
-        epoch = int(str(time_str).strip())
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=IST)
+        return dt.astimezone(IST).isoformat()
+    except (TypeError, ValueError):
+        pass
+    try:
+        epoch = float(text)
     except (TypeError, ValueError):
         return time_str
+    if epoch < _EPOCH_2000:
+        return time_str
     return datetime.fromtimestamp(epoch, tz=IST).isoformat()
+
+
+def session_date_key(time_str: str) -> str:
+    """IST calendar date ``YYYY-MM-DD``, or ``''`` for synthetic ids.
+
+    Unparseable stamps (``t300``) share one session so detectors can accumulate.
+    Never use ``time[:10]`` — that is not a date for epoch strings.
+    """
+    iso = _epoch_to_iso(str(time_str or ""))
+    if len(iso) >= 10 and iso[4] == "-" and iso[7] == "-":
+        return iso[:10]
+    return ""
 
 
 def _bar_to_tick(bar) -> dict:
@@ -129,7 +157,7 @@ def _risk_to_view(risk: RiskState) -> dict:
 def _position_to_view(position: Position, fill: Fill | None = None) -> dict:
     sig = position.order.signal
     dto = {
-        "id": position.open_time,
+        "id": position._id,
         "symbol": sig.symbol,
         "side": sig.type,
         "source": "AMT",
@@ -193,12 +221,22 @@ class StateProjector:
             elif isinstance(event, PositionClosed):
                 s["portfolio"] = self._portfolio(s["portfolio"])
                 fill = event.fill
-                self._remove_open(fill.position.open_time, s["portfolio"])
+                self._remove_open(fill.position._id, s["portfolio"])
                 s["portfolio"]["closedTrades"].append(_position_to_view(fill.position, fill))
+            elif isinstance(event, PositionReduced):
+                s["portfolio"] = self._portfolio(s["portfolio"])
+                reduced = event.remaining
+                for p in s["portfolio"]["positions"]:
+                    if p.get("id") == reduced._id:
+                        p["size"] = float(reduced.size)
+                        p["pnl"] = float(event.fill.pnl)
+                        break
             elif isinstance(event, DepthUpdated):
                 s["depth"] = event.depth
             elif isinstance(event, AmtUpdated):
                 s["amt"] = event.amt
+            elif isinstance(event, AgentDecisionProduced):
+                s["agent_decision"] = event.decision
 
     def snapshot(self, symbol: str) -> ViewState:
         with self._lock:
@@ -213,6 +251,7 @@ class StateProjector:
                 portfolio=self._portfolio(s["portfolio"], ltp=s["ltp"]),
                 depth=s["depth"],
                 amt=s["amt"],
+                agent_decision=s.get("agent_decision"),
             )
 
     def _symbol_state(self, symbol: str) -> dict:
@@ -226,6 +265,7 @@ class StateProjector:
                 "portfolio": None,
                 "depth": None,
                 "amt": None,
+                "agent_decision": None,
             }
         return self._state[symbol]
 
@@ -281,12 +321,9 @@ class StateProjector:
         }
 
     @staticmethod
-    def _remove_open(open_time: str, portfolio: dict) -> None:
-        # entryTime is stored ISO-normalized (see _position_to_view) — normalize
-        # the lookup key the same way so open positions match their closes.
-        key = _epoch_to_iso(open_time)
+    def _remove_open(position_id: str, portfolio: dict) -> None:
         positions = portfolio["positions"]
         for i, p in enumerate(positions):
-            if p["entryTime"] == key:
+            if p.get("id") == position_id:
                 del positions[i]
                 break

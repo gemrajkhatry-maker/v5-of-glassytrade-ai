@@ -14,7 +14,7 @@ HYPHEN_FUTURE = "NIFTY-WED-FUT"
 
 class _MarketData:
     def get_nearest_futures(self, underlying, *, exchange):
-        assert exchange == "NSE"
+        assert exchange in ("NSE", "NFO", "BFO", "MCX")
         return {"NIFTY": FUTURE}[underlying]
 
 

@@ -304,6 +304,19 @@ class QuantCoordinator:
             logger.warning("emergency_halt: force-closed %d position(s) across %d engine(s)", closed, halted)
         return halted
 
+    def unhalt_all(self) -> int:
+        """Clear external halt state on all running engines."""
+        unhalted = 0
+        with self._lock:
+            for eng in self._engines.values():
+                risk = getattr(eng, "_risk", None)
+                if risk is not None and hasattr(risk, "unhalt"):
+                    risk.unhalt()
+                    unhalted += 1
+        logger.info("unhalt_all: cleared risk halts across %d engine(s)", unhalted)
+        return unhalted
+
+
     def journal_consecutive_failures(self) -> int:
         """Max consecutive journal append failures across engines (for /health)."""
         with self._lock:

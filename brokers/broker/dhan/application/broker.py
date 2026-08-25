@@ -889,6 +889,7 @@ class DhanExchangeConfig:
         contract of the underlying must be used.
         """
         from brokers.broker.utils.symbol import extract_underlying
+        from quant.contracts.instrument_registry import DEFAULT_REGISTRY
 
         clean = (
             str(symbol_or_underlying)
@@ -899,7 +900,10 @@ class DhanExchangeConfig:
             .replace("BSE:", "")
             .strip()
         )
-        underlying = extract_underlying(clean) or clean.split("-")[0].split(" ")[0]
+        spec = DEFAULT_REGISTRY.try_resolve(clean)
+        underlying = spec.root if spec is not None else (
+            extract_underlying(clean) or clean.split("-")[0].split(" ")[0]
+        )
 
         try:
             # 1) If given a full symbol (futures or options), resolve it directly.
@@ -923,9 +927,10 @@ class DhanExchangeConfig:
                 i
                 for i in mapper.instruments.values()
                 if (i.exchange_segment in (ExchangeSegment.NSE_FNO, ExchangeSegment.MCX_COMM))
-                and str(i.trading_symbol).startswith(underlying)
                 and i.lot_size > 0
                 and "NXT" not in str(i.trading_symbol)
+                and DEFAULT_REGISTRY.try_resolve(str(i.trading_symbol)) is not None
+                and DEFAULT_REGISTRY.resolve(str(i.trading_symbol)).root == underlying
             ]
             # Prefer the nearest expiry
             if contracts:

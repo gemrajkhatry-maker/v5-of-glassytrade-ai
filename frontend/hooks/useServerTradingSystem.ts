@@ -58,7 +58,6 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
         closedTrades: [],
     },
     aiAnalysis: null,
-    genAIAnalysis: null,
     amtAnalysis: null,
     auctionAnalysis: null,
     quantDecisionAnalysis: null,
@@ -522,7 +521,9 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 const newQuantDecisionAnalysis = 'quantDecision' in state
                     ? (state.quantDecision ?? null)
                     : inst.quantDecisionAnalysis;
-                const newRiskState = state.riskState ?? inst.riskState;
+                const newRiskState = 'riskState' in state
+                    ? (state.riskState ?? null)
+                    : inst.riskState;
                 const newAgentDecision = state.agentDecision ?? inst.agentDecision;
 
                 return {
@@ -538,6 +539,8 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         riskState: newRiskState,
                         agentDecision: newAgentDecision,
                         orderBook: state.depth ?? inst.orderBook,
+                        ltp: state.ltp ?? inst.ltp,
+                        oi: state.oi ?? inst.oi,
                         lastUpdate: Date.now(),
                     },
                 };
@@ -677,6 +680,21 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     // ----------------------------------------------------------------
     const activeInstrument = instruments[activeSymbol] || (activeSymbol ? createInstrumentState(activeSymbol) : null);
 
+    // Global halt: true when ALL instruments with riskState are halted.
+    // A symbol with no riskState (e.g. not yet initialized) is ignored.
+    const haltedSymbols = Object.values(instruments)
+        .filter(inst => inst.riskState !== null)
+        .map(inst => inst.riskState!.halted);
+    const isHalted = haltedSymbols.length > 0 && haltedSymbols.every(Boolean);
+    const haltReason = isHalted
+        ? (() => {
+            for (const inst of Object.values(instruments)) {
+                if (inst.riskState?.halted && inst.riskState.haltReason) return inst.riskState.haltReason;
+            }
+            return 'Session risk limit reached';
+        })()
+        : '';
+
     return {
         instruments,
         activeSymbol,
@@ -685,5 +703,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         connected,
         connectionStatus,
         tickBus: tickBusRef.current,
+        isHalted,
+        haltReason,
     };
 };

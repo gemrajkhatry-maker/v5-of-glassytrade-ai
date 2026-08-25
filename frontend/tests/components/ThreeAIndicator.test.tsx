@@ -26,25 +26,31 @@ const baseAmt = (overrides: Partial<AMTAnalysis> = {}): AMTAnalysis => ({
 
 describe('ThreeAIndicator', () => {
   it('renders three lights reflecting the 3A score', () => {
-    const { container } = render(<ThreeAIndicator amt={baseAmt()} />);
+    const { container } = render(<ThreeAIndicator amt={baseAmt()} approved={false} />);
     // 3 dots + a score chip
     const dots = container.querySelectorAll('[data-3a-light]');
     expect(dots.length).toBe(3);
     expect(container.querySelector('[data-3a-score]')?.textContent).toContain('2');
   });
 
-  it('shows ENTER for a full 3A pass', () => {
-    render(<ThreeAIndicator amt={baseAmt({ aggression: 2.5 })} />);
+  it('shows ENTER only when quantDecision.approved is true, even at a full 3A pass', () => {
+    render(<ThreeAIndicator amt={baseAmt({ aggression: 2.5 })} approved={true} />);
     expect(screen.getByText(/ENTER/i)).toBeTruthy();
   });
 
+  it('never shows ENTER when quantDecision has not approved, regardless of 3A score', () => {
+    render(<ThreeAIndicator amt={baseAmt({ aggression: 2.5 })} approved={false} />);
+    expect(screen.queryByText(/ENTER/i)).toBeNull();
+    expect(screen.getByText(/MONITOR/i)).toBeTruthy();
+  });
+
   it('shows SKIP for a dead market with no evidence', () => {
-    render(<ThreeAIndicator amt={baseAmt({ marketState: 'DEAD', poc: 0, lvns: [], aggression: 0 })} />);
+    render(<ThreeAIndicator amt={baseAmt({ marketState: 'DEAD', poc: 0, lvns: [], aggression: 0 })} approved={false} />);
     expect(screen.getByText(/SKIP/i)).toBeTruthy();
   });
 
   it('renders a placeholder for null AMT', () => {
-    const { container } = render(<ThreeAIndicator amt={null} />);
+    const { container } = render(<ThreeAIndicator amt={null} approved={false} />);
     expect(container.querySelectorAll('[data-3a-light]').length).toBe(3);
     expect(screen.getByText(/SKIP/i)).toBeTruthy();
   });

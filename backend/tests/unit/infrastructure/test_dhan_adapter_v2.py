@@ -50,6 +50,45 @@ def _make_mock_broker():
 # _delta_proxy
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# _make_instrument exchange routing (D-EXCH-07 sibling: BSE/BFO must not fall
+# through the old binary MCX/NFO branch)
+# ---------------------------------------------------------------------------
+
+def test_make_instrument_sensex_option_routes_to_bfo():
+    from brokers.broker.types import Exchange
+
+    adapter = _make_adapter()
+    instrument = adapter._make_instrument("SENSEX 17 AUG 82000 CALL")
+    assert instrument.exchange == Exchange.BFO
+
+
+def test_make_instrument_sensex_future_routes_to_bfo():
+    """Futures branch had its own separate binary MCX/NFO check — must also
+    resolve SENSEX/BANKEX futures to BFO, not NFO."""
+    from brokers.broker.types import Exchange
+
+    adapter = _make_adapter()
+    instrument = adapter._make_instrument("SENSEX AUG FUT")
+    assert instrument.exchange == Exchange.BFO
+
+
+def test_make_instrument_nifty_future_still_routes_to_nfo():
+    from brokers.broker.types import Exchange
+
+    adapter = _make_adapter()
+    instrument = adapter._make_instrument("NIFTY AUG FUT")
+    assert instrument.exchange == Exchange.NFO
+
+
+def test_make_instrument_crudeoil_future_still_routes_to_mcx():
+    from brokers.broker.types import Exchange
+
+    adapter = _make_adapter()
+    instrument = adapter._make_instrument("CRUDEOIL AUG FUT")
+    assert instrument.exchange == Exchange.MCX
+
+
 def test_delta_proxy_bullish():
     d = _delta_proxy(100, 110, 90, 110, 1000)
     assert d > 0  # close at high → positive delta

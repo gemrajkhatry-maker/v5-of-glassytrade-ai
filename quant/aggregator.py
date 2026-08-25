@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from quant.bars import Bar
 from quant.brokers.gateway import Tick
+from quant.contracts.timezones import IST
 
 # Live ticks carry unix epochs (~1.78e9). Test fixtures use small synthetic
 # ids ("t0", "t1", ...) that must pass through unchanged — only floor bar
@@ -25,9 +28,20 @@ class BarAggregator:
         self._vwap_den = 0.0
 
     def _tick_epoch(self, tick: Tick) -> int:
+        text = str(getattr(tick, "time", "") or "").strip()
+        if len(text) >= 2 and text[0] in "tT" and text[1:].isdigit():
+            return int(text[1:])
         try:
-            return int(tick.time.lstrip("t"))
-        except (ValueError, AttributeError):
+            epoch = float(text)
+            return int(epoch)
+        except (TypeError, ValueError):
+            pass
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=IST)
+            return int(parsed.timestamp())
+        except (TypeError, ValueError):
             self._fallback_counter += 1
             return self._fallback_counter
 
@@ -49,12 +63,14 @@ class BarAggregator:
         if self._bar is None:
             self._start(tick, window)
             return None
-        self._accumulate(tick, window)
+        if window < self._open_key:
+            # Late data must not mutate an already-open exchange window.
+            return None
         if window != self._open_key:
             closed = self._bar
-            self._bar = None
-            self._open_key = None
+            self._start(tick, window)
             return closed
+        self._accumulate(tick, window)
         return None
 
     def _add_range(self, tick: Tick) -> Bar | None:

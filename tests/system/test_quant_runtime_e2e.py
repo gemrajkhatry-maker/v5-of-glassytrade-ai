@@ -28,9 +28,14 @@ BACKEND_SNAPSHOT_KEYS = {
 ENGINE_ADDED_KEYS = {"tick", "ltp", "oi", "depth"}
 
 
+from tests.system.test_paper_protocol import _session_ticks
+
+
 def _run_ws():
-    eng = QuantEngine(SyntheticGateway(_ticks()[:308]), "SYM",
-                      interval_seconds=1)
+    from quant.execution.risk import SessionRisk
+    SessionRisk(storage=None, symbol="SYM").reset_session()
+    eng = QuantEngine(SyntheticGateway(_session_ticks()[:170]), "SYM",
+                      interval_seconds=2)
     eng.run()
     return view_state_to_ws(eng.projector.snapshot("SYM"))
 

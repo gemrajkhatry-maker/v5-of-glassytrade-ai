@@ -3,7 +3,6 @@ Brokers - Multi-broker abstraction with clean architecture.
 
 Provides:
 - IBrokerPort: Abstract interface for broker implementations
-- PaperBroker: Simulated broker for testing
 - DhanBroker: Production Dhan broker (self-contained, no dhanhq_custom dependency)
 
 The legacy ``BrokerGateway`` facade (brokers/gateway.py) was removed; the
@@ -41,9 +40,6 @@ from brokers.broker.entities import (
 )
 from brokers.broker.ports import IBrokerPort
 
-# Infrastructure Layer
-from brokers.broker.paper import PaperBroker
-
 # DhanBroker is imported lazily to avoid circular imports during
 # partial module initialization when sub-modules import back into this package.
 def __getattr__(name):
@@ -72,6 +68,5 @@ __all__ = [
     'IBrokerPort',
     
     # Brokers
-    'PaperBroker',
     'DhanBroker',
 ]

@@ -163,21 +163,25 @@ class DhanMarketDataAdapter(IMarketData):
         from brokers.broker.entities import Instrument, OptionType
 
         sym_upper = symbol.upper()
-        is_option, is_call, is_put, is_mcx = classify_symbol(symbol)
+        is_option, is_call, is_put, dhan_exchange = classify_symbol(symbol)
+        from quant.contracts.instrument_registry import DEFAULT_REGISTRY, is_futures_contract
+
+        spec = DEFAULT_REGISTRY.try_resolve(symbol)
         if is_option:
-            exchange = _exchange_enum("MCX" if is_mcx else "NFO")
+            exchange = dhan_exchange
             option_type = OptionType.CALL if is_call else OptionType.PUT
             return Instrument(symbol=symbol, exchange=exchange, option_type=option_type)
-        elif sym_upper.endswith(" FUT"):
-            # Futures roots (e.g. "NIFTY AUG FUT", "CRUDEOIL AUG FUT") — route to
-            # the same derivative exchanges as options so Dhan resolves the security
-            # ID in NSE_FNO / MCX_COMM instead of the equity segment.
-            is_mcx = ExchangeConfig.for_exchange("MCX").is_underlying(sym_upper)
-            exchange = _exchange_enum("MCX" if is_mcx else "NFO")
+        if is_futures_contract(symbol):
+            from brokers.broker.dhan.application.exchange_resolver import (
+                DhanExchangeResolver,
+            )
+
+            exchange = DhanExchangeResolver.resolve(sym_upper).exchange
             return Instrument(symbol=symbol, exchange=exchange)
-        else:
-            exchange = _exchange_enum(self._exchange_str)
-            return Instrument(symbol=symbol, exchange=exchange)
+        if spec is not None:
+            return Instrument(symbol=symbol, exchange=_exchange_enum(spec.dhan_exchange))
+        exchange = _exchange_enum(self._exchange_str)
+        return Instrument(symbol=symbol, exchange=exchange)
 
     def get_option_chain(
         self, underlying: str, exchange: str = "NFO", expiry_index: int = 0

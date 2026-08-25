@@ -7,8 +7,11 @@ Ported from:
 
 from __future__ import annotations
 
+import pytest
+
 from quant.amt.session.symbol_registry import SymbolRegistry
 from quant.contracts.exchange_config import ExchangeConfig
+from quant.contracts.instrument_registry import UnknownInstrumentError
 from tests.quant.parity_harness import assert_parity
 
 
@@ -51,9 +54,13 @@ class TestSymbolRegistry:
         assert reg.exchange_for("MCX:CRUDEOIL") == "MCX"
         assert reg.exchange_for("NSE:NIFTY") == "NSE"
 
-    def test_unknown_defaults_to_mcx(self):
+    def test_unknown_raises_instead_of_defaulting_to_mcx(self):
+        # Phase 3: an unrecognized root must fail loudly. Silently routing
+        # to MCX was the exact defect class this rework closes (e.g. it
+        # would previously misroute a NIFTYNXT50-style unknown future).
         reg = SymbolRegistry()
-        assert reg.exchange_for("UNKNOWN_THING 99") == "MCX"
+        with pytest.raises(UnknownInstrumentError):
+            reg.exchange_for("UNKNOWN_THING 99")
 
     def test_all_underlyings(self):
         reg = SymbolRegistry()
@@ -159,6 +166,12 @@ _SYMBOLS = [
 def test_symbol_registry_parity():
     new = SymbolRegistry()
     for sym in _SYMBOLS:
+        if sym == "UNKNOWN_THING 99":
+            # Phase 3: unknown roots raise instead of silently classifying —
+            # exercise the loud-failure path rather than skipping it.
+            with pytest.raises(UnknownInstrumentError):
+                new.exchange_for(sym)
+            continue
         new.exchange_for(sym)
         new.is_mcx(sym)
         new.is_nse(sym)

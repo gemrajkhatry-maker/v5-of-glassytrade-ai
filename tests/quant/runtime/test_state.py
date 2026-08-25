@@ -210,7 +210,7 @@ def test_portfolio_open_then_close():
         "equity": 1_000_000.0,
         "leverage": 10,
         "positions": [{
-            "id": "t1", "symbol": "S", "side": "LONG", "source": "AMT",
+            "id": pos._id, "symbol": "S", "side": "LONG", "source": "AMT",
             "entryPrice": 100.0, "size": 10.0, "stopLoss": 99.0, "takeProfit": 102.0,
             "pnl": 0.0, "entryTime": "t1", "status": "OPEN",
         }],
@@ -222,7 +222,7 @@ def test_portfolio_open_then_close():
     port = p.snapshot("S").portfolio
     assert port["positions"] == []
     assert port["closedTrades"] == [{
-        "id": "t1", "symbol": "S", "side": "LONG", "source": "AMT",
+        "id": pos._id, "symbol": "S", "side": "LONG", "source": "AMT",
         "entryPrice": 100.0, "size": 10.0, "stopLoss": 99.0, "takeProfit": 102.0,
         "pnl": 20.0, "entryTime": "t1", "status": "CLOSED",
         "exitPrice": 102.0, "exitTime": "t2", "closeReason": "TP",

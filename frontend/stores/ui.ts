@@ -13,9 +13,6 @@ interface UIState {
     /** Right sidebar (intelligence panel) visibility */
     rightSidebarOpen: boolean;
     
-    /** Live opportunity card visibility */
-    showControls: boolean;
-    
     /** Volume profile display mode */
     vpMode: 'session' | 'leg' | 'combined' | 'off';
     
@@ -45,12 +42,6 @@ interface UIActions {
     /** Set right sidebar visibility */
     setRightSidebarOpen: (open: boolean) => void;
     
-    /** Toggle controls */
-    toggleControls: () => void;
-    
-    /** Set controls visibility */
-    setShowControls: (show: boolean) => void;
-    
     /** Set volume profile mode */
     setVpMode: (mode: 'session' | 'leg' | 'combined' | 'off') => void;
     
@@ -76,7 +67,6 @@ export const useUIStore = create<UIStore>()(
             chartMode: 'STANDARD',
             sidebarOpen: true,
             rightSidebarOpen: true,
-            showControls: false,
             vpMode: 'session',
             showVolumeProfile: true,
             currentPage: 'trading',
@@ -103,14 +93,6 @@ export const useUIStore = create<UIStore>()(
                 state.rightSidebarOpen = open;
             }),
             
-            toggleControls: () => set((state) => {
-                state.showControls = !state.showControls;
-            }),
-            
-            setShowControls: (show) => set((state) => {
-                state.showControls = show;
-            }),
-            
             setVpMode: (mode) => set((state) => {
                 state.vpMode = mode;
                 state.showVolumeProfile = mode !== 'off';
@@ -135,7 +117,6 @@ export const useUIStore = create<UIStore>()(
                 state.chartMode = 'STANDARD';
                 state.sidebarOpen = true;
                 state.rightSidebarOpen = true;
-                state.showControls = false;
                 state.vpMode = 'session';
                 state.showVolumeProfile = true;
                 state.currentPage = 'trading';

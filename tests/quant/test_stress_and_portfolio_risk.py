@@ -44,7 +44,12 @@ def test_stress_12_engines_interleaved_ticks_no_contamination(monkeypatch):
     """12 engines, ticks from all symbols interleaved on one feed: each
     engine must only ever see its own symbol's ticks."""
     n = 12
-    symbols = [f"SYM{i} 28 AUG 1000{i} CALL" for i in range(n)]
+    roots = (
+        "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",
+        "SENSEX", "BANKEX", "CRUDEOIL", "CRUDEOILM",
+        "NATURALGAS", "GOLD", "SILVER", "COPPER",
+    )
+    symbols = [f"{root} 28 AUG 1000{i} CALL" for i, root in enumerate(roots)]
     coord = _make_coordinator(n)
     monkeypatch.setattr(coord, "_scan", lambda force=False: list(symbols), raising=True)
     coord.start()

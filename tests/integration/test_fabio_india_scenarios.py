@@ -106,7 +106,8 @@ def test_scenario_value_area_fade_day():
     assert decision.signal is not None
     assert decision.signal.type == "SHORT"
     assert decision.signal.entry == 24610.0
-    assert decision.signal.sl >= 24650.0  # Above probe high
+    assert decision.signal.sl > decision.signal.entry
+    assert decision.signal.sl >= 24649.0  # Anchored to probe high (inside by 2 ticks per Fabio)
     assert decision.signal.tp == 24520.0  # Target POC
 
 

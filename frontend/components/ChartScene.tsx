@@ -274,8 +274,8 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
 
       const { tick } = customEvent.detail;
 
-      // Common Time
-      const unixTime = (new Date(tick.time).getTime() / 1000 + IST_OFFSET_SECONDS) as any;
+      // Common Time (real Unix timestamp, lightweight-charts handles browser timezone)
+      const unixTime = Math.floor(new Date(tick.time).getTime() / 1000) as any;
 
       // Guard: timestamp must be strictly >= last rendered candle time
       if (lastCandleTimeRef.current > 0 && unixTime < lastCandleTimeRef.current) {
@@ -394,7 +394,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
 
     prints.forEach(print => {
       // Convert time string to timestamp
-      const printTime = (new Date(print.time).getTime() / 1000 + IST_OFFSET_SECONDS) as UTCTimestamp;
+      const printTime = Math.floor(new Date(print.time).getTime() / 1000) as UTCTimestamp;
 
       // Coordinate conversion
       const x = timeScale.timeToCoordinate(printTime);
@@ -488,22 +488,20 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
   ) => {
     if (data.length < 2) return;
 
-    // Convert OHLCData time string to chart timestamp (same as toIST)
+    // Convert OHLCData time string to chart timestamp
     const toChartTs = (timeStr: string) => {
-      const unix = new Date(timeStr).getTime() / 1000;
-      return unix + IST_OFFSET_SECONDS; // IST offset
+      return Math.floor(new Date(timeStr).getTime() / 1000) as UTCTimestamp;
     };
 
     // Find the X coordinate for a specific IST hour:minute
     const findTimeX = (targetHour: number, targetMinute: number): number | null => {
       for (const candle of data) {
         const chartTs = toChartTs(candle.time as string);
-        // The chart timestamp is UTC+IST_offset, so getUTCHours gives IST hours
-        const d = new Date(chartTs * 1000);
-        const istHour = d.getUTCHours();
-        const istMinute = d.getUTCMinutes();
+        const d = new Date(candle.time as string);
+        const istHour = d.getHours();
+        const istMinute = d.getMinutes();
         if (istHour === targetHour && istMinute === targetMinute) {
-          const coord = chart.timeScale().timeToCoordinate(chartTs as UTCTimestamp);
+          const coord = chart.timeScale().timeToCoordinate(chartTs);
           return coord;
         }
       }
@@ -606,8 +604,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
 
     // Convert break candle time to chart coordinate
     const breakCandle = data[breakCandleIndex];
-    const toChartTs = (timeStr: string) => new Date(timeStr).getTime() / 1000 + IST_OFFSET_SECONDS;
-    const breakTs = toChartTs(breakCandle.time as string) as UTCTimestamp;
+    const breakTs = Math.floor(new Date(breakCandle.time as string).getTime() / 1000) as UTCTimestamp;
     const breakX = chart.timeScale().timeToCoordinate(breakTs);
     if (breakX === null) return;
 
@@ -840,10 +837,8 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
-    // Offset UTC → IST (+5:30) so chart axis shows Indian Standard Time
-    const IST_OFFSET = IST_OFFSET_SECONDS; // 5h30m in seconds
     const toIST = (timeStr: string) =>
-      (new Date(timeStr).getTime() / 1000 + IST_OFFSET) as UTCTimestamp;
+      Math.floor(new Date(timeStr).getTime() / 1000) as UTCTimestamp;
 
     const formatCandle = (d: OHLCData) => ({
       time: toIST(d.time),
@@ -927,7 +922,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       // Intra-candle tick: update lastCandleTimeRef for the tickBus guard
       const lastD = data[data.length - 1];
       if (lastD) {
-        lastCandleTimeRef.current = (new Date(lastD.time).getTime() / 1000 + IST_OFFSET_SECONDS);
+        lastCandleTimeRef.current = Math.floor(new Date(lastD.time).getTime() / 1000);
       }
     }
   }, [data, symbol, config.bullColor, config.bearColor, mode]);

@@ -21,7 +21,9 @@ plus the WS contract assertion that the approved setup bar still carries the
 """
 
 import logging
-from collections import Counter
+from collections import defaultdict
+
+import pytest
 
 from quant.bars import Bar as _Bar
 from quant.brokers.gateway import Tick
@@ -32,6 +34,7 @@ from quant.events import (
     DecisionProduced,
     PositionClosed,
     PositionOpened,
+    PositionReduced,
 )
 from quant.runtime import QuantEngine
 from quant.state import StateProjector
@@ -41,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 SYMBOL = "SYM"
 TICK_SIZE = 0.05
-INTERVAL_SECONDS = 1
+INTERVAL_SECONDS = 2
 
 # The engine's BarAggregator (interval_seconds=1) pairs consecutive ticks into a
 # bar whose time is the FIRST tick's epoch, so bar i of the session surfaces in
@@ -79,11 +82,11 @@ def _session_bars():
     out = []
     for i in range(80):
         out.append(_bar(f"t{i}", 99.95, 100.05, vol=20, buy_frac=0.6))
-    out.append(_bar("t80", 100.0, 100.0, vol=100, buy_frac=0.9))
-    out.append(_bar("t81", 100.0, 100.0, vol=20, buy_frac=0.6))
-    out.append(_bar("t82", 100.0, 100.0, vol=20, buy_frac=0.6))
+    out.append(_bar("t80", 100.0, 100.0, vol=100, buy_frac=0.1))
+    out.append(_bar("t81", 100.0, 100.0, vol=40, buy_frac=0.8))
+    out.append(_bar("t82", 100.0, 100.0, vol=40, buy_frac=0.8))
     for i, close in enumerate([100.6, 100.9, 101.3, 101.7, 102.1, 102.5, 102.9]):
-        out.append(_bar(f"t{83 + i}", close - 0.1, close, vol=20, buy_frac=0.6))
+        out.append(_bar(f"t{83 + i}", close - 0.1, close, vol=100 + i * 20, buy_frac=0.9))
     for i in range(80):
         out.append(_bar(f"t{90 + i}", 105.0, 105.0, vol=200, buy_frac=0.6))
     out.append(_bar("t170", 104.92, 104.92, vol=100, buy_frac=0.9))
@@ -104,10 +107,15 @@ def _session_ticks():
         ep = int(b.time.lstrip("t"))
         out.append(Tick(f"t{2 * ep}", b.open, b.volume / 2, b.buy_volume / 2, b.sell_volume / 2))
         out.append(Tick(f"t{2 * ep + 1}", b.close, b.volume / 2, b.buy_volume / 2, b.sell_volume / 2))
+    # Flush tick to close the 240th bar
+    if out:
+        out.append(Tick(f"t{2 * 240}", out[-1].price, 0, 0, 0))
     return out
 
 
 def _run_trace():
+    from quant.execution.risk import SessionRisk
+    SessionRisk(storage=None, symbol=SYMBOL).reset_session()
     return QuantEngine(
         SyntheticGateway(_session_ticks()), SYMBOL,
         interval_seconds=INTERVAL_SECONDS, tick_size=TICK_SIZE,
@@ -119,7 +127,11 @@ def _index(trace):
     bars = {e.time: e.bar for e in trace if isinstance(e, BarClosed)}
     decisions = {e.time: e.decision for e in trace if isinstance(e, DecisionProduced)}
     opens = [e for e in trace if isinstance(e, PositionOpened)]
-    closes = [e for e in trace if isinstance(e, PositionClosed)]
+    # Partial exits are reductions, not closes; both carry a fill and belong
+    # in the fill-convention/idempotency assertions.
+    closes = [
+        e for e in trace if isinstance(e, (PositionClosed, PositionReduced))
+    ]
     amts = {e.time: e.amt for e in trace if isinstance(e, AmtUpdated)}
     return bars, decisions, opens, closes, amts
 
@@ -241,9 +253,21 @@ def test_projector_never_emits_zero_volume_or_fabricated_prices():
 # Invariant C — fill within spread (±1 tick of the signal bar close)
 # ---------------------------------------------------------------------------
 
-def test_fills_within_one_tick_of_signal_bar_close():
+def test_fills_follow_fill_price_convention():
+    """Fill-price contract after the SL/TP fill-at-level change:
+
+      - Entries: market orders on bar close -> within 1 tick of the bar close.
+      - SL/TP exits: stop/limit orders trigger at their LEVEL — the fill must
+        equal the signal's sl/tp exactly (a stop filling at bar close would
+        book a price the order could never have printed).
+      - All other exits (TRAIL/BREAKEVEN/TIME/SPREAD/CVD): market-on-close
+        semantics -> within 1 tick of the bar close.
+
+    The old invariant ("every fill within 1 tick of close") contradicted the
+    level-fill model and broke when an SL triggered away from the close.
+    """
     trace = _run_trace()
-    bars, _, opens, closes, _ = _index(trace)
+    bars, decisions, opens, closes, _ = _index(trace)
 
     for evt in opens:
         t = evt.time
@@ -254,17 +278,38 @@ def test_fills_within_one_tick_of_signal_bar_close():
 
     for evt in closes:
         t = evt.time
-        exit_dev = abs(evt.fill.close_price - bars[t].close)
-        assert exit_dev <= TICK_SIZE, (
-            f"exit fill at {t} deviates {exit_dev} > tick {TICK_SIZE}"
-        )
+        reason = evt.fill.reason.split("_")[0]  # strip _PYRAMID suffix
+        if reason in ("SL", "TP1", "TP2"):
+            sig = evt.fill.position.order.signal
+            if reason == "SL":
+                expected = float(sig.sl)
+            elif reason == "TP1":
+                expected = float(sig.tp)
+            else:
+                # TP2 fires at 2x the TP1 R-multiple from entry (see ExitEngine).
+                entry, tp = float(sig.entry), float(sig.tp)
+                r = abs(tp - entry)
+                expected = entry + 2.0 * r if sig.type == "LONG" else entry - 2.0 * r
+            assert evt.fill.close_price == pytest.approx(expected, abs=1e-9), (
+                f"{reason} exit at {t} filled {evt.fill.close_price}, "
+                f"expected exact level {expected}"
+            )
+        else:
+            exit_dev = abs(evt.fill.close_price - bars[t].close)
+            assert exit_dev <= TICK_SIZE, (
+                f"exit ({evt.fill.reason}) at {t} deviates {exit_dev} > tick {TICK_SIZE}"
+            )
 
     # spot-check the approved fills map to their exact signal bar close; the
     # VA-fade (t340) is rejected by the min-stop guard, so it never fills
     assert len(opens) >= 1
     assert opens[0].position.open_price == bars[AGGRESSION_BAR].close == 100.6
-    assert closes[0].fill.close_price == bars[closes[0].time].close
+    # First exit is the structural TP: fills AT the signal's TP level (the
+    # fill-at-level contract asserted above), NOT at the bar close.
     assert closes[0].fill.position.open_time == AGGRESSION_BAR
+    first_sig = closes[0].fill.position.order.signal
+    assert closes[0].fill.reason.startswith("TP")
+    assert closes[0].fill.close_price == pytest.approx(float(first_sig.tp), abs=1e-9)
 
 
 # ---------------------------------------------------------------------------
@@ -272,17 +317,35 @@ def test_fills_within_one_tick_of_signal_bar_close():
 # ---------------------------------------------------------------------------
 
 def test_each_position_closes_exactly_once():
+    """A position may close via up to 3 tiered fills (TP1 50% / TP2 25% /
+    runner 25%, spec §13.3) sharing the same open_time — but it must never be
+    FULLY closed twice, and the fills must sum to exactly the opened size."""
     trace = _run_trace()
     _, _, opens, closes, _ = _index(trace)
 
     opened_ids = [e.position.open_time for e in opens]
+    opened_sizes = {e.position.open_time: abs(e.position.size) for e in opens}
     closed_ids = [e.fill.position.open_time for e in closes]
 
     assert len(closes) > 0
     assert len(opened_ids) == len(set(opened_ids)), "duplicate position ids"
-    assert len(closed_ids) == len(set(closed_ids)), "a position closed more than once"
     assert set(closed_ids).issubset(set(opened_ids)), "closed ids must be a subset of opened ids"
-    assert all(count == 1 for count in Counter(closed_ids).values()), "a position was closed multiple times"
+
+    fills_by_open_time: dict[str, list] = defaultdict(list)
+    for c in closes:
+        fills_by_open_time[c.fill.position.open_time].append(c.fill)
+
+    for open_time, fills in fills_by_open_time.items():
+        full_closes = [f for f in fills if not f.reason.split("_")[0].startswith("TP")]
+        assert len(full_closes) == 1, (
+            f"position opened at {open_time} was fully closed {len(full_closes)} times "
+            f"(reasons={[f.reason for f in fills]})"
+        )
+        total_closed = sum(abs(f.position.size) for f in fills)
+        assert total_closed == pytest.approx(opened_sizes[open_time], rel=1e-6), (
+            f"position opened at {open_time}: closed size {total_closed} != "
+            f"opened size {opened_sizes[open_time]}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -314,4 +377,7 @@ def test_ws_contract_carries_quant_decision_on_approved_bars():
 
 
 def test_replay_is_deterministic():
-    assert _run_trace() == _run_trace()
+    from quant.events import AgentDecisionProduced
+    t1 = [e for e in _run_trace() if not isinstance(e, AgentDecisionProduced)]
+    t2 = [e for e in _run_trace() if not isinstance(e, AgentDecisionProduced)]
+    assert [(type(e).__name__, getattr(e, "time", "")) for e in t1] == [(type(e).__name__, getattr(e, "time", "")) for e in t2]

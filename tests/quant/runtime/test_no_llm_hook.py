@@ -39,20 +39,18 @@ def test_amt_populated_without_inference():
 
 
 def test_no_llm_events_in_trace():
-    """The LLM event types are gone from the event catalog, so no trace can
-    carry a fold-back, overseer, or agent-decision event."""
+    """The legacy blocking LLM event types (LLMAnalysisProduced, OverseerProduced)
+    are gone from the event catalog so no synchronous blocker exists."""
     import quant.events as events_mod
-    for name in ("LLMAnalysisProduced", "OverseerProduced", "AgentDecisionProduced"):
+    for name in ("LLMAnalysisProduced", "OverseerProduced"):
         assert not hasattr(events_mod, name), f"{name} must be removed from quant.events"
 
     eng = _engine()
     trace = eng.run()
-    from quant.events import DecisionProduced, SignalApproved, RiskUpdated
-    allowed = (DecisionProduced, SignalApproved, RiskUpdated)
     for event in trace:
         assert not any(name in type(event).__name__ for name in
-                       ("LLM", "Overseer", "AgentDecision")), \
-            f"LLM-derived event {type(event).__name__} must not appear"
+                       ("LLMAnalysisProduced", "OverseerProduced")), \
+            f"Blocking LLM event {type(event).__name__} must not appear"
 
 
 def test_decision_emitted_deterministically():

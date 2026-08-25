@@ -64,37 +64,6 @@ const InitialBalanceCard = React.memo<InitialBalanceCardProps>(({ amtResult, cur
                         </div>
                     );
                 })()}
-                {/* Item 4.10: IB Extension Targets (1.5x, 2x IB Range) */}
-                {amtResult?.ibHigh && amtResult?.ibLow && amtResult.ibHigh > 0 && amtResult.ibLow > 0 && amtResult?.breakDirection && (() => {
-                    const ibRange = amtResult.ibHigh - amtResult.ibLow;
-                    const isUpBreak = amtResult.breakDirection === 'UP';
-
-                    // Extension targets based on break direction
-                    const target15x = isUpBreak
-                        ? amtResult.ibHigh + (ibRange * 0.5)  // 1.5x above IB high
-                        : amtResult.ibLow - (ibRange * 0.5);  // 1.5x below IB low
-                    const target2x = isUpBreak
-                        ? amtResult.ibHigh + ibRange  // 2x above IB high
-                        : amtResult.ibLow - ibRange;  // 2x below IB low
-
-                    return (
-                        <div className="pt-1 border-t border-white/5 space-y-1">
-                            <div className="text-[9px] text-white/40 font-bold tracking-wide">IB EXTENSION TARGETS</div>
-                            <div className="flex justify-between items-center px-1">
-                                <span className="text-[9px] text-white/50">1.5x IB</span>
-                                <span className="px-1.5 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/30 text-[9px] font-mono font-bold text-cyan-400">
-                                    {target15x.toFixed(2)}
-                                </span>
-                            </div>
-                            <div className="flex justify-between items-center px-1">
-                                <span className="text-[9px] text-white/50">2.0x IB</span>
-                                <span className="px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/30 text-[9px] font-mono font-bold text-purple-400">
-                                    {target2x.toFixed(2)}
-                                </span>
-                            </div>
-                        </div>
-                    );
-                })()}
                 {/* Proximity Warning */}
                 {(() => {
                     if (currentLtp > 0 && amtResult?.ibHigh && amtResult?.ibLow && amtResult?.ibComplete && !amtResult?.breakDirection) {

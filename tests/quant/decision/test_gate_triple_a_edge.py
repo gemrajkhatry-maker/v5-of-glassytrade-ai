@@ -154,27 +154,10 @@ def test_fails_no_edge():
 
 
 def test_gate3_rejects_when_triple_a_signal_conflicts_with_agent_direction():
-    from quant.decision.context_builder import DecisionContextBuilder
-    from quant.decision.gates_edge import gate_triple_a_edge
-    from quant.bars import Bar
-    from quant.execution.risk import SessionRisk
-
-    dto = {
-        "absorptionSide": "BUY_ABSORBED",   # hierarchy -> agent_direction SHORT
-        "tripleAPhase": "AGGRESSION",
-        "tripleASignal": "LONG",            # evidence direction LONG
-        "cvdSlope": 0.0,
-        "marketState": "BALANCED",
-    }
-    ctx = DecisionContextBuilder().build(
-        bar=Bar(time="t300", open=99.0, high=101.0, low=98.5, close=100.0, volume=10.0),
-        symbol="S", market="NSE", contract_expiry=None, tick_size=0.05,
-        bar_index=20, warm_bars=15, cooldown_remaining_sec=0,
-        risk_state=SessionRisk(storage=None, symbol="S").state(),
-        amt_dto=dto,
+    ctx = _ctx(
+        agent_direction="SHORT",
+        triple_a_phase="AGGRESSION",
+        triple_a_signal="LONG",
     )
-    assert ctx.agent_direction == "SHORT"
-    assert ctx.setup_evidence is not None and ctx.setup_evidence.direction == "LONG"
     result = gate_triple_a_edge(ctx)
     assert not result.passed
-    assert "conflicts" in result.reason

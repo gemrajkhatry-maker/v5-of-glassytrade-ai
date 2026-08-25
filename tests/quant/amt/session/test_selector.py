@@ -158,3 +158,95 @@ def test_option_selector_parity_check_theta():
     for opt in opts:
         for hold, target in [(30, 10.0), (60, 5.0), (120, 25.0)]:
             (lambda: new.check_theta(opt, hold, target))()
+
+
+def test_option_translation_direction_matching():
+    """Verify Call/Put contracts only accept aligned directional signals."""
+    from quant.decision.signal_builder import Signal
+
+    selector = OptionSelector()
+    call_symbol = "NIFTY 24 AUG 25000 CALL"
+    put_symbol = "NIFTY 24 AUG 25000 PUT"
+
+    long_signal = Signal(
+        type="LONG",
+        reason="Triple-A Long",
+        entry=150.0,
+        sl=130.0,
+        tp=190.0,
+        rr=2.0,
+        model_label="AAA",
+        symbol="NIFTY 24 AUG 25000 CALL",
+        timestamp="10:00:00",
+    )
+
+    short_signal = Signal(
+        type="SHORT",
+        reason="Triple-A Short",
+        entry=140.0,
+        sl=160.0,
+        tp=100.0,
+        rr=2.0,
+        model_label="AAA",
+        symbol="NIFTY 24 AUG 25000 PUT",
+        timestamp="10:00:00",
+    )
+
+    # 1. LONG signal on CALL -> Approved
+    call_long_result = selector.translate_underlying_signal_to_option(
+        signal=long_signal,
+        option_symbol=call_symbol,
+        option_ltp=150.0,
+        delta=0.50,
+        tick_size=0.05,
+    )
+    assert call_long_result is not None
+    assert call_long_result.type == "LONG"
+    assert call_long_result.entry == 150.0
+
+    # 2. LONG signal on PUT -> Rejected (None)
+    put_long_result = selector.translate_underlying_signal_to_option(
+        signal=long_signal,
+        option_symbol=put_symbol,
+        option_ltp=140.0,
+        delta=0.50,
+        tick_size=0.05,
+    )
+    assert put_long_result is None
+
+    # 3. SHORT signal on PUT -> Approved
+    put_short_result = selector.translate_underlying_signal_to_option(
+        signal=short_signal,
+        option_symbol=put_symbol,
+        option_ltp=140.0,
+        delta=0.50,
+        tick_size=0.05,
+    )
+    assert put_short_result is not None
+    assert put_short_result.type == "LONG"  # Option buy
+    assert put_short_result.entry == 140.0
+
+    # 4. SHORT signal on CALL -> Rejected (None)
+    call_short_result = selector.translate_underlying_signal_to_option(
+        signal=short_signal,
+        option_symbol=call_symbol,
+        option_ltp=150.0,
+        delta=0.50,
+        tick_size=0.05,
+    )
+    assert call_short_result is None
+
+
+def test_midcpnifty_exchange_resolution():
+    """Verify MIDCPNIFTY is recognized as NSE in ExchangeConfig and SymbolRegistry."""
+    from quant.contracts.exchange_config import ExchangeConfig
+    from quant.amt.session.symbol_registry import SymbolRegistry
+
+    cfg = ExchangeConfig.for_exchange("NSE")
+    assert "MIDCPNIFTY" in cfg.underlyings
+    assert cfg.extract_underlying("MIDCPNIFTY 24 AUG 12000 CALL") == "MIDCPNIFTY"
+
+    reg = SymbolRegistry()
+    assert reg.exchange_for("MIDCPNIFTY 24 AUG 12000 CALL") == "NSE"
+    assert reg.is_nse("MIDCPNIFTY 24 AUG 12000 CALL") is True
+    assert reg.is_mcx("MIDCPNIFTY 24 AUG 12000 CALL") is False

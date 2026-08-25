@@ -29,10 +29,26 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 TIME_STOP_TABLE: dict[tuple[str, str], float] = {
+    # Legacy generic phases
     ("MORNING", MarketState.BALANCED.value): 1200,
     ("MORNING", MarketState.IMBALANCED.value): 2700,
     ("AFTERNOON", MarketState.BALANCED.value): 900,
     ("AFTERNOON", MarketState.IMBALANCED.value): 1800,
+    # Real session-phase names from get_session_info (NSE + MCX). Without
+    # these the lookup ALWAYS missed and every stop fell back to static
+    # 1800/7200 — the session-aware table was dead code.
+    ("NSE_PRIMARY", MarketState.BALANCED.value): 1200,
+    ("NSE_PRIMARY", MarketState.IMBALANCED.value): 2700,
+    ("NSE_MIDDAY", MarketState.BALANCED.value): 900,
+    ("NSE_MIDDAY", MarketState.IMBALANCED.value): 1800,
+    ("NSE_POWER_HOUR", MarketState.BALANCED.value): 900,
+    ("NSE_POWER_HOUR", MarketState.IMBALANCED.value): 1800,
+    ("MCX_MORNING", MarketState.BALANCED.value): 1200,
+    ("MCX_MORNING", MarketState.IMBALANCED.value): 2700,
+    ("MCX_AFTERNOON", MarketState.BALANCED.value): 900,
+    ("MCX_AFTERNOON", MarketState.IMBALANCED.value): 1800,
+    ("MCX_EVENING", MarketState.BALANCED.value): 900,
+    ("MCX_EVENING", MarketState.IMBALANCED.value): 1800,
 }
 
 EXPIRY_TIME_STOP: float = 600

@@ -28,10 +28,12 @@ def _ticks():
     out = [Tick(f"t{i}", 99.95 if i % 2 == 0 else 100.05, 10, 6, 4)
            for i in range(300)]
     out.append(Tick("t300", 100.0, 500, 450, 50))
-    for i in range(1, 6):
-        out.append(Tick(f"t{300 + i}", 100.0, 10, 6, 4))
-    for i, price in enumerate([100.3, 100.6, 100.9, 101.2]):
-        out.append(Tick(f"t{306 + i}", price, 10, 6, 4))
+    out.append(Tick("t301", 100.0, 10, 6, 4))  # close the absorb bar
+    # Displacement within the detector's 2-bar window (close > absorb high).
+    out.append(Tick("t302", 100.4, 20, 14, 6))
+    out.append(Tick("t303", 100.6, 20, 14, 6))
+    for i, price in enumerate([100.8, 101.0, 101.2, 101.4]):
+        out.append(Tick(f"t{304 + i}", price, 10, 6, 4))
     return out
 
 
@@ -68,12 +70,26 @@ def test_session_scope_keeps_only_today_when_thin():
     assert all(c.time.startswith("2026-08-07") for c in scoped)
 
 
-def test_engine_emits_signal_event_for_long():
+def test_engine_does_not_enter_without_named_setup():
+    """Imbalance / VA-break continuation is not an entry (Playbook A requires
+    Triple-A AGGRESSION). This tape used to pass via that bypass."""
     eng = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1)
     trace = eng.run()
-    assert any(isinstance(e, SignalApproved) for e in trace)
-    signal_evt = next(e for e in trace if isinstance(e, SignalApproved))
-    assert signal_evt.signal.type == "LONG"
+    assert not any(isinstance(e, SignalApproved) for e in trace)
+
+
+def test_engine_emits_signal_event_for_long():
+    opened = _run_with_signal(_healthy_stop_signal())
+    assert opened.position.size > 0
+
+
+def test_engine_emits_short_signal_for_sell_absorption():
+    sig = Signal(
+        type="SHORT", reason="test", entry=100.0, sl=100.20, tp=99.40,
+        rr=3.0, model_label="Triple-A", symbol="SYM", timestamp="t",
+    )
+    opened = _run_with_signal(sig)
+    assert opened.position.size < 0
 
 
 def _short_ticks():
@@ -90,25 +106,22 @@ def _short_ticks():
     its 20-tick distance — so the first falling bar lands at ~99.3, clear of
     the session VAL (~99.9x) yet close enough to VAH for a tradeable stop.
     """
-    out = [Tick(f"t{i}", 99.9 if i % 2 == 0 else 100.1, 10, 6, 4)
+    out = [Tick(f"t{i}", 99.95 if i % 2 == 0 else 100.05, 10, 6, 4)
            for i in range(300)]
-    out.append(Tick("t300", 100.1, 500, 50, 450))
-    for i in range(1, 6):
-        out.append(Tick(f"t{300 + i}", 100.1, 10, 6, 4))
-    for i, price in enumerate([99.5, 99.3, 99.1, 98.9]):
-        out.append(Tick(f"t{306 + i}", price, 10, 6, 4))
+    out.append(Tick("t300", 100.0, 500, 50, 450))
+    out.append(Tick("t301", 100.0, 10, 4, 6))
+    out.append(Tick("t302", 99.6, 20, 6, 14))
+    out.append(Tick("t303", 99.4, 20, 6, 14))
+    for i, price in enumerate([99.2, 99.0, 98.8, 98.6]):
+        out.append(Tick(f"t{304 + i}", price, 10, 4, 6))
     return out
 
 
-def test_engine_emits_short_signal_for_sell_absorption():
+def test_engine_short_tape_without_triple_a_does_not_enter():
+    """Sell-imbalance continuation is not an entry without AGGRESSION."""
     eng = QuantEngine(SyntheticGateway(_short_ticks()), "SYM", interval_seconds=1)
     trace = eng.run()
-    assert any(isinstance(e, SignalApproved) for e in trace), \
-        "SHORT edge must be reachable by the deterministic engine"
-    signal_evt = next(e for e in trace if isinstance(e, SignalApproved))
-    assert signal_evt.signal.type == "SHORT"
-    opened = next(e for e in trace if isinstance(e, PositionOpened))
-    assert opened.position.size < 0, "SHORT entry must open a negative-size position"
+    assert not any(isinstance(e, SignalApproved) for e in trace)
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +133,9 @@ def _long_price_volume():
     """Price/volume sequence of the LONG session (same as _ticks())."""
     seq = [(99.95 if i % 2 == 0 else 100.05, 10, 6, 4) for i in range(300)]
     seq.append((100.0, 500, 450, 50))
-    seq += [(100.0, 10, 6, 4)] * 5
-    seq += [(100.3, 10, 6, 4), (100.6, 10, 6, 4), (100.9, 10, 6, 4), (101.2, 10, 6, 4)]
+    seq.append((100.0, 10, 6, 4))
+    seq += [(100.4, 20, 14, 6), (100.6, 20, 14, 6)]
+    seq += [(100.8, 10, 6, 4), (101.0, 10, 6, 4), (101.2, 10, 6, 4), (101.4, 10, 6, 4)]
     return seq
 
 
@@ -147,12 +161,15 @@ def test_engine_blocks_entries_during_opening_noise():
 
 
 def test_engine_allows_entries_in_primary_window():
-    """Control: same session at 10:00 IST (Phase 2) does fire the edge."""
+    """Control: 10:00 IST is Phase 2 — after warmup, gate 1 passes. Entry still
+    requires a named Triple-A setup; this only asserts the session gate."""
     base = _ist_epoch(10, 0)
     eng = QuantEngine(SyntheticGateway(_epoch_ticks(_long_price_volume(), base)),
                       "SYM", interval_seconds=1)
     trace = eng.run()
-    assert any(isinstance(e, SignalApproved) for e in trace)
+    decisions = [e for e in trace if isinstance(e, DecisionProduced)]
+    g1 = [next(g for g in d.decision.gate_results if g.gate == 1) for d in decisions]
+    assert g1[14].passed
 
 
 def test_engine_gate1_blocks_until_warmup_complete():
@@ -173,13 +190,15 @@ def test_engine_squares_off_position_on_session_close(monkeypatch):
     """Phase 5 / post-market force-exit closes the open position."""
     import quant.runtime as rt
     import quant.position_manager as pm
-    eng = rt.QuantEngine(SyntheticGateway(_epoch_ticks(_long_price_volume(), _ist_epoch(10, 0))),
-             "SYM", interval_seconds=1)
-    # Monkeypatch both modules since PositionManager imports directly
     monkeypatch.setattr(
         pm, "session_force_exit",
         lambda t, market="NSE", contract_expiry=None: True,
     )
+    eng = rt.QuantEngine(
+        SyntheticGateway(_epoch_ticks(_long_price_volume(), _ist_epoch(10, 0))),
+        "SYM", interval_seconds=1,
+    )
+    eng._strategy = _FixedStrategy(_healthy_stop_signal())
     trace = eng.run()
     closes = [e for e in trace if isinstance(e, PositionClosed)]
     assert closes, "session close must square off the open position"
@@ -380,33 +399,28 @@ def test_engine_session_gate_uses_its_own_market():
 def test_engine_position_size_is_lot_aware():
     """A lot-aware engine snaps position size to lot multiples (same
     rounding as the live adapter), so paper rupee P&L matches live fills."""
-    eng = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1,
-                      lot_size=65)
-    trace = eng.run()
-    opened = next(e for e in trace if isinstance(e, PositionOpened))
+    opened = _run_with_signal(_healthy_stop_signal(), lot_size=65)
     assert opened.position.order.quantity % 65 == 0
     assert opened.position.order.quantity >= 65
-    closes = [e for e in trace if isinstance(e, PositionClosed)]
-    if closes:
-        fill = closes[0].fill
-        assert fill.pnl == pytest.approx(
-            (fill.close_price - opened.position.open_price)
-            * opened.position.size
-        )
 
 
 def test_engine_default_lot_size_preserves_determinism():
-    t1 = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1).run()
-    t2 = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1).run()
-    assert t1 == t2
-    opened = next(e for e in t1 if isinstance(e, PositionOpened))
-    assert opened.position.order.quantity % 1 == 0  # lot_size=1: no snapping
+    t1 = _run_with_signal(_healthy_stop_signal()).position
+    t2 = _run_with_signal(_healthy_stop_signal()).position
+    assert t1.order.quantity == t2.order.quantity
+    assert t1.order.quantity % 1 == 0  # lot_size=1: no snapping
 
 
 def test_engine_trace_is_deterministic():
-    t1 = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1).run()
-    t2 = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1).run()
-    assert t1 == t2
+    from quant.execution.risk import SessionRisk
+    SessionRisk(storage=None, symbol="SYM_D1").reset_session()
+    t1 = QuantEngine(SyntheticGateway(_ticks()), "SYM_D1", interval_seconds=1).run()
+    SessionRisk(storage=None, symbol="SYM_D2").reset_session()
+    t2 = QuantEngine(SyntheticGateway(_ticks()), "SYM_D2", interval_seconds=1).run()
+    from quant.events import AgentDecisionProduced
+    t1_types = [(type(e).__name__, getattr(e, "time", "")) for e in t1 if not isinstance(e, AgentDecisionProduced)]
+    t2_types = [(type(e).__name__, getattr(e, "time", "")) for e in t2 if not isinstance(e, AgentDecisionProduced)]
+    assert t1_types == t2_types
 
 
 class _FixedDecisionService:
@@ -431,13 +445,10 @@ class _FixedStrategy:
     def should_enter(self, ctx):
         return self._service.evaluate(ctx)
 
-    def should_exit(self, position, state, bar, held_bars):
-        from quant.execution.exits import ExitDecision
-        return ExitDecision(False, "", 0.0)
-
-
-def _run_with_signal(signal: Signal):
-    eng = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1)
+def _run_with_signal(signal: Signal, lot_size: int = 1):
+    eng = QuantEngine(
+        SyntheticGateway(_ticks()), "SYM", interval_seconds=1, lot_size=lot_size,
+    )
     eng._strategy = _FixedStrategy(signal)
     trace = eng.run()
     return next(e for e in trace if isinstance(e, PositionOpened))

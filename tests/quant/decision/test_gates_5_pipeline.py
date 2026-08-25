@@ -19,11 +19,14 @@ def _ctx(**kw):
         poc=kw.get("poc", 100.0),
         vah=kw.get("ctx_vah", kw.get("vah", 101.0)),
         val=kw.get("ctx_val", kw.get("val", 99.0)),
+        triple_a_phase=kw.get("triple_a_phase", "AGGRESSION"),
+        triple_a_signal=kw.get("triple_a_signal", kw.get("agent_direction", "LONG")),
+        cvd_slope=kw.get("cvd_slope", 1.0),
     )
 
 
 def test_gate4_passes_good_rr():
-    # LONG: entry 100, SL = VAL - 2 ticks = 99.40 -> risk 0.60, TP 101.20 -> RR 2.0.
+    # LONG: entry 100, SL = VAL + 2 ticks inside = 99.60 -> risk 0.40.
     r = gate_risk_reward(_ctx(val=99.5))
     assert r.passed and r.gate == 4
 
@@ -44,19 +47,18 @@ def test_gate4_rejects_far_stop():
 
 
 def test_sl_offset_below_val():
-    # LONG: SL anchored 2 ticks INSIDE the value-area edge (val - 2*tick),
-    # matching SignalBuilder exactly so gate and builder never diverge.
+    # LONG: SL 2 ticks INSIDE VAL (toward the market), never outside.
     r = gate_risk_reward(_ctx(val=99.5, step=0.5))
     assert r.passed and r.gate == 4
-    assert "SL=99.40" in r.extra
+    assert "SL=99.60" in r.extra
 
 
 def test_sl_offset_above_vah():
-    # SHORT: SL anchored 2 ticks above VAH (vah + 2*tick).
+    # SHORT: SL 2 ticks INSIDE VAH (toward the market).
     r = gate_risk_reward(_ctx(close=100.0, vah=100.5, step=0.5,
                               agent_direction="SHORT", triple_a_signal="SHORT"))
     assert r.passed and r.gate == 4
-    assert "SL=100.60" in r.extra
+    assert "SL=100.40" in r.extra
 
 
 def test_pipeline_runs_all_gates():
@@ -86,8 +88,8 @@ def test_gate4_uses_canonical_amt_va_over_bar_based_profile():
     # bar-based profile says VAL=101 (entry 100 inside it), AMT says VAL=95.
     r = gate_risk_reward(_ctx(val=101.0, ctx_val=95.0))
     assert r.gate == 4 and r.passed
-    # SL anchored on the CANONICAL AMT VAL, not the stale bar-based one:
-    assert "SL=94.90" in r.extra
+    # SL anchored on the CANONICAL AMT VAL, 2 ticks inside:
+    assert "SL=95.10" in r.extra
 
 
 def test_gate4_falls_back_to_state_profile_when_no_amt_va():
@@ -95,4 +97,4 @@ def test_gate4_falls_back_to_state_profile_when_no_amt_va():
     volume profile so the pure gate tests keep their existing contract."""
     r = gate_risk_reward(_ctx(val=99.5))  # no ctx_val -> uses state VAL 99.5
     assert r.passed and r.gate == 4
-    assert "SL=99.40" in r.extra
+    assert "SL=99.60" in r.extra

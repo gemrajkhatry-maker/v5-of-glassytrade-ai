@@ -45,17 +45,19 @@ def test_last_tuesday_of_month_is_expiry():
 # ---- seconds_to_close ----
 
 def test_nse_seconds_to_close_morning():
-    """At 10:00 IST, 5h15m = 18900s to NSE close (15:15)."""
+    """At 10:00 IST, 5h30m = 19800s to the real NSE close (15:30) — Phase 2
+    unified seconds_to_close on the true exchange close, not the 15:15
+    last-entry cutoff it previously (incorrectly) measured against."""
     dt = datetime(2026, 2, 25, 10, 0, 0, tzinfo=_IST)
     result = seconds_to_close(dt, "NSE")
-    assert result == 18900.0
+    assert result == 19800.0
 
 
 def test_nse_seconds_to_close_near_end():
-    """At 15:00 IST, 15 min = 900s to close."""
+    """At 15:00 IST, 30 min = 1800s to the real 15:30 close."""
     dt = datetime(2026, 2, 25, 15, 0, 0, tzinfo=_IST)
     result = seconds_to_close(dt, "NSE")
-    assert result == 900.0
+    assert result == 1800.0
 
 
 def test_nse_seconds_to_close_after_close():

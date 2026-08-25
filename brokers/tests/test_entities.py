@@ -366,25 +366,5 @@ class TestTickNewFields:
         assert tick.bid == 2499.5
         assert tick.ask == 2500.5
 
-    @pytest.mark.asyncio
-    async def test_paper_broker_stream_ticker_has_bid_ask(self):
-        """PaperBroker.stream_ticker emits Tick with bid and ask populated."""
-        from brokers.broker.paper.broker import PaperBroker
-
-        broker = PaperBroker()
-        inst = Instrument(symbol="NIFTY", exchange=Exchange.NSE, security_id="")
-
-        tick = None
-        async for t in broker.stream_ticker([inst]):
-            tick = t
-            break
-
-        assert tick is not None
-        assert tick.bid is not None
-        assert tick.ask is not None
-        assert tick.bid < tick.price
-        assert tick.ask > tick.price
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

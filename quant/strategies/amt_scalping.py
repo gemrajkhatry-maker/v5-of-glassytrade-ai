@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from quant.decision.context import DecisionContext
 from quant.decision.decision_service import DecisionService, QuantDecision
-from quant.execution.exits import ExitDecision, ExitEngine
+from quant.execution.exits import ExitEngine
 
 
 class AmtScalpingStrategy:
@@ -45,19 +45,6 @@ class AmtScalpingStrategy:
     def should_enter(self, ctx: DecisionContext) -> QuantDecision:
         """Evaluate entry using the DecisionService (gates 1-4 + signal builder)."""
         return self._decision_service.evaluate(ctx)
-
-    def should_exit(self, position, state, bar, held_bars: int) -> ExitDecision:
-        """Evaluate exit using the ExitEngine.
-        
-        Note: The full exit evaluation requires additional context (depth,
-        session info, etc.) that the PositionManager provides. This method
-        is a simplified interface; the PositionManager handles the full
-        exit logic including session force-exit and pyramid management.
-        """
-        # The PositionManager handles the full exit evaluation.
-        # This method is provided for protocol compliance but the engine
-        # uses PositionManager.manage_exit() directly.
-        return ExitDecision(should_exit=False, reason="", close_price=0.0)
 
     @property
     def exit_engine(self) -> ExitEngine:

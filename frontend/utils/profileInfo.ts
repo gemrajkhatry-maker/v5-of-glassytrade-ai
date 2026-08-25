@@ -8,8 +8,8 @@ import { PROFILE_CONFIG } from '../config';
 
 // MCX underlyings (mirrors the backend's DhanMarketDataAdapter set).
 const MCX_UNDERLYINGS = new Set([
-  'CRUDEOIL', 'GOLD', 'SILVER', 'NATURALGAS', 'GOLDM', 'SILVERM',
-  'CRUDEOILM', 'COPPER', 'ZINC', 'ALUMINIUM', 'LEAD', 'NICKEL', 'COTTONCANDY',
+  'CRUDEOIL', 'CRUDEOILM', 'GOLD', 'GOLDM', 'GOLDPETAL', 'SILVER', 'SILVERM',
+  'NATURALGAS', 'COPPER', 'ZINC', 'ALUMINIUM', 'LEAD', 'NICKEL', 'COTTONCANDY',
 ]);
 
 // Session hours per exchange — MCX commodities open 09:00, NSE indices 09:15.

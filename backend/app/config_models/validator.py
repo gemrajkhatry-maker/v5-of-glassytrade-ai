@@ -147,6 +147,51 @@ def validate_config(config: SystemConfig) -> None:
                     f"WARN-6: MCX enabled — {', '.join(futures_only)} are futures-only (no option chain)."
                 )
 
+    # RULE-13: YAML lot/tick/strike/session clock must match InstrumentRegistry
+    from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+    from quant.contracts.timezones import MCX_SESSION_CLOSE, MCX_SESSION_OPEN, NSE_SESSION_CLOSE, NSE_SESSION_OPEN
+
+    for ex in config.exchanges.values():
+        if ex.name == "NSE":
+            expected_open = NSE_SESSION_OPEN.strftime("%H:%M")
+            expected_close = NSE_SESSION_CLOSE.strftime("%H:%M")
+            if ex.session_open and ex.session_open != expected_open:
+                errors.append(
+                    f"RULE-13: NSE session_open YAML={ex.session_open} registry={expected_open}."
+                )
+            if ex.session_close and ex.session_close != expected_close:
+                errors.append(
+                    f"RULE-13: NSE session_close YAML={ex.session_close} registry={expected_close}."
+                )
+        if ex.name == "MCX":
+            expected_open = MCX_SESSION_OPEN.strftime("%H:%M")
+            expected_close = MCX_SESSION_CLOSE.strftime("%H:%M")
+            if ex.session_open and ex.session_open != expected_open:
+                errors.append(
+                    f"RULE-13: MCX session_open YAML={ex.session_open} registry={expected_open}."
+                )
+            if ex.session_close and ex.session_close != expected_close:
+                errors.append(
+                    f"RULE-13: MCX session_close YAML={ex.session_close} registry={expected_close}."
+                )
+        for name, sym in ex.symbols.items():
+            spec = DEFAULT_REGISTRY.try_resolve(name)
+            if spec is None:
+                continue
+            if int(sym.lot_size) != spec.lot_size:
+                errors.append(
+                    f"RULE-13: {name} lot_size YAML={sym.lot_size} registry={spec.lot_size}."
+                )
+            if float(sym.tick_size) != spec.tick_size:
+                errors.append(
+                    f"RULE-13: {name} tick_size YAML={sym.tick_size} registry={spec.tick_size}."
+                )
+            if int(sym.strike_interval) != int(spec.strike_interval):
+                errors.append(
+                    f"RULE-13: {name} strike_interval YAML={sym.strike_interval} "
+                    f"registry={int(spec.strike_interval)}."
+                )
+
     # Log warnings
     for w in warnings:
         logger.warning(w)

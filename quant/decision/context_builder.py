@@ -184,8 +184,12 @@ class DecisionContextBuilder:
         vwap_lower_1 = float(amt_dto.get("vwapLower1") or float("-inf"))
 
         agent_direction = None
+        triple_a_sig = str(amt_dto.get("tripleASignal") or "").upper()
+        cvd_val = float(amt_dto.get("cvdSlope") or 0.0)
         if break_type == "INITIATIVE" and break_dir in ("UP", "DOWN"):
             agent_direction = "LONG" if break_dir == "UP" else "SHORT"
+        elif triple_a_sig in ("LONG", "SHORT"):
+            agent_direction = triple_a_sig
         elif amt_dto.get("absorptionSide") in ("SELL_ABSORBED", "BUY_ABSORBED"):
             # Simple assumption: fresh absorption maps directly to direction
             agent_direction = {"SELL_ABSORBED": "LONG", "BUY_ABSORBED": "SHORT"}.get(amt_dto.get("absorptionSide"))
@@ -193,15 +197,23 @@ class DecisionContextBuilder:
             agent_direction = "LONG"
         elif obi <= -0.20 and close_px < vwap_lower_1:
             agent_direction = "SHORT"
+        elif cvd_val > 0.5 and (close_px > vah or ofi > 0.10):
+            agent_direction = "LONG"
+        elif cvd_val < -0.5 and (close_px < val or ofi < -0.10):
+            agent_direction = "SHORT"
         elif raw_ms == "IMBALANCED":
             if (vah > 0 and close_px > vah) or ofi > 0.10 or (close_px > vwap_upper_1):
                 agent_direction = "LONG"
             elif (val > 0 and close_px < val) or ofi < -0.10 or (close_px < vwap_lower_1):
                 agent_direction = "SHORT"
         elif raw_ms == "BALANCED":
-            if val > 0 and close_px <= val:
+            if val > 0 and close_px <= val and cvd_val >= -0.2:
                 agent_direction = "LONG"
-            elif vah > 0 and close_px >= vah:
+            elif vah > 0 and close_px >= vah and cvd_val <= 0.2:
+                agent_direction = "SHORT"
+            elif cvd_val > 0.5:
+                agent_direction = "LONG"
+            elif cvd_val < -0.5:
                 agent_direction = "SHORT"
 
         # Market state + balance ratio from the AMT analyzer

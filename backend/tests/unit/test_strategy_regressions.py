@@ -19,46 +19,41 @@ from quant.contracts.exchange_config import ExchangeConfig
 # ---------------------------------------------------------------------------
 
 def test_nse_lot_sizes_agree_across_all_sources():
-    """market_info, dhan constants and exchange_config must all carry the
-    exchange-authoritative Aug 2026 NSE lots (65/30/60) — a stale 25/15/25
-    anywhere means risk sizing disagrees with the broker."""
-    from brokers.broker.market_info import LOT_SIZES as MI_LOTS
+    """market_info get_lot_size, dhan constants and exchange_config must all
+    carry the exchange-authoritative Aug 2026 NSE lots (65/30/60)."""
+    from brokers.broker.market_info import get_lot_size
     from brokers.broker.dhan.domain.constants import LOT_SIZES as DHAN_LOTS
+    from quant.contracts.instrument_registry import DEFAULT_REGISTRY
 
     cfg = ExchangeConfig.for_exchange("NSE")
     expected = {"NIFTY": 65, "BANKNIFTY": 30, "FINNIFTY": 60}
     for sym, lot in expected.items():
-        assert MI_LOTS[sym] == lot, f"market_info {sym} lot is {MI_LOTS[sym]}"
+        assert get_lot_size(sym) == lot, f"market_info {sym} lot is {get_lot_size(sym)}"
         assert DHAN_LOTS[sym] == lot, f"dhan constants {sym} lot is {DHAN_LOTS[sym]}"
-        assert cfg.get_lot_size(sym) == lot, (
-            f"exchange_config {sym} lot is {cfg.get_lot_size(sym)}"
-        )
-    # Aliases must follow the canonical values.
-    assert MI_LOTS["NIFTY 50"] == 65
-    assert MI_LOTS["NIFTY BANK"] == 30
-    assert MI_LOTS["NIFTY FIN SERVICE"] == 60
-
-    # Secondary/untraded series (2026 revisions: MIDCPNIFTY 120, SENSEX 20,
-    # BANKEX 30) must agree across both static tables.
-    assert MI_LOTS["MIDCPNIFTY"] == DHAN_LOTS["MIDCPNIFTY"] == 120
-    assert MI_LOTS["SENSEX"] == DHAN_LOTS["SENSEX"] == 20
-    assert MI_LOTS["BANKEX"] == DHAN_LOTS["BANKEX"] == 30
+        assert cfg.get_lot_size(sym) == lot
+        assert DEFAULT_REGISTRY.resolve(sym).lot_size == lot
+    assert get_lot_size("NIFTY 50") == 65
+    assert get_lot_size("NIFTY BANK") == 30
+    assert get_lot_size("NIFTY FIN SERVICE") == 60
+    assert get_lot_size("MIDCPNIFTY") == DHAN_LOTS["MIDCPNIFTY"] == 120
+    assert get_lot_size("SENSEX") == DHAN_LOTS["SENSEX"] == 20
+    assert get_lot_size("BANKEX") == DHAN_LOTS["BANKEX"] == 30
 
 
 def test_crudeoil_mini_lot_agrees():
     """CRUDEOILM (mini crude, 10 bbl) must agree across sources."""
-    from brokers.broker.market_info import LOT_SIZES as MI_LOTS
+    from brokers.broker.market_info import get_lot_size
 
-    assert MI_LOTS["CRUDEOILM"] == 10
+    assert get_lot_size("CRUDEOILM") == 10
     assert MCX_LOT_SIZES["CRUDEOILM"] == 10
 
 
 def test_goldm_lot_size_is_100_everywhere():
     """GOLDM (live-traded mini gold) was 10 in two static tables vs 100 in the
     authoritative config — a 10x risk-sizing error. All sources must agree."""
-    from brokers.broker.market_info import LOT_SIZES as MI_LOTS
+    from brokers.broker.market_info import get_lot_size
 
-    assert MI_LOTS["GOLDM"] == 100
+    assert get_lot_size("GOLDM") == 100
     assert MCX_LOT_SIZES["GOLDM"] == 100
     cfg = ExchangeConfig.for_exchange("MCX")
     assert cfg.get_lot_size("GOLDM") == 100

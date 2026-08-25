@@ -25,17 +25,24 @@ from tests.quant.runtime.test_runtime import _ticks
 
 def test_golden_tape_event_sequence_determinism():
     """Verify that two separate engines consuming the same tick sequence emit exact same event types and counts."""
-    eng1 = QuantEngine(SyntheticGateway(_ticks()), "NIFTY 27 FEB 25500 CALL", interval_seconds=1)
+    from quant.events import AgentDecisionProduced
+    from quant.execution.risk import SessionRisk
+
+    SessionRisk(storage=None, symbol="NIFTY_GT_1").reset_session()
+    eng1 = QuantEngine(SyntheticGateway(_ticks()), "NIFTY_GT_1", interval_seconds=1)
     trace1 = eng1.run()
+    sync_trace1 = [e for e in trace1 if not isinstance(e, AgentDecisionProduced)]
 
-    eng2 = QuantEngine(SyntheticGateway(_ticks()), "NIFTY 27 FEB 25500 CALL", interval_seconds=1)
+    SessionRisk(storage=None, symbol="NIFTY_GT_2").reset_session()
+    eng2 = QuantEngine(SyntheticGateway(_ticks()), "NIFTY_GT_2", interval_seconds=1)
     trace2 = eng2.run()
+    sync_trace2 = [e for e in trace2 if not isinstance(e, AgentDecisionProduced)]
 
-    assert len(trace1) == len(trace2)
-    assert len(trace1) > 0
+    assert len(sync_trace1) == len(sync_trace2)
+    assert len(sync_trace1) > 0
 
-    event_types1 = [e.__class__.__name__ for e in trace1]
-    event_types2 = [e.__class__.__name__ for e in trace2]
+    event_types1 = [e.__class__.__name__ for e in sync_trace1]
+    event_types2 = [e.__class__.__name__ for e in sync_trace2]
     assert event_types1 == event_types2
 
     # Verify key lifecycle events are emitted
@@ -46,7 +53,11 @@ def test_golden_tape_event_sequence_determinism():
 
 def test_golden_tape_journal_roundtrip(tmp_path):
     """Verify that journal persistence accurately records every event and matches in replay."""
+    from quant.events import AgentDecisionProduced
+    from quant.execution.risk import SessionRisk
+
     journal_file = str(tmp_path / "golden_tape.jsonl")
+    SessionRisk(storage=None, symbol="NIFTY 27 FEB 25500 CALL").reset_session()
     eng = QuantEngine(
         SyntheticGateway(_ticks()),
         "NIFTY 27 FEB 25500 CALL",
@@ -54,12 +65,13 @@ def test_golden_tape_journal_roundtrip(tmp_path):
         journal_path=journal_file,
     )
     trace = eng.run()
+    sync_trace = [e for e in trace if not isinstance(e, AgentDecisionProduced)]
 
     journal = Journal(journal_file)
     replayed = journal.replay()
 
-    assert len(replayed) == len(trace)
-    for original, recorded in zip(trace, replayed):
+    assert len(replayed) == len(sync_trace)
+    for original, recorded in zip(sync_trace, replayed):
         assert recorded["type"] == original.__class__.__name__
         assert recorded["symbol"] == "NIFTY 27 FEB 25500 CALL"
 
@@ -97,3 +109,18 @@ def test_extract_underlying_canonical_matching():
     assert mcx.extract_underlying("SILVERM24AUG") == "SILVERM"
     assert mcx.extract_underlying("NATURALGAS 25 AUG 220 PE") == "NATURALGAS"
     assert mcx.is_underlying("MCX:CRUDEOILM 19 MAR 6000 CALL") is True
+
+
+def test_extract_underlying_rejects_prefix_only_match():
+    """Audit finding: prefix-matching used to let 'NIFTYNXT50...' resolve as
+    'NIFTY' because startswith("NIFTY") is True even though NIFTYNXT50 is a
+    distinct underlying — silently misapplying NIFTY's lot size/tick/freeze
+    metadata to a different instrument. A prefix match is only valid when a
+    non-letter (digit/delimiter/end-of-string) follows the matched root."""
+    nse = ExchangeConfig.for_exchange("NSE")
+    assert nse.extract_underlying("NIFTYNXT50 24 AUG 25500 CALL") != "NIFTY"
+    assert nse.is_underlying("NIFTYNXT50-FUT") is False
+    # Sanity: genuine NIFTY contracts (digit or delimiter right after the
+    # root) must still resolve correctly.
+    assert nse.extract_underlying("NIFTY24AUG25500CE") == "NIFTY"
+    assert nse.extract_underlying("NIFTY-24AUG-CE") == "NIFTY"

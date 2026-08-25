@@ -41,7 +41,7 @@ const IST_OFFSET = IST_OFFSET_SECONDS;
  * @returns Unix timestamp in IST
  */
 export function toISTTimestamp(timeStr: string): number {
-  return new Date(timeStr).getTime() / 1000 + IST_OFFSET;
+  return Math.floor(new Date(timeStr).getTime() / 1000);
 }
 
 /**

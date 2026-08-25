@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { GenAIAnalysis, AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook, QuantDecisionAnalysis, AuctionAnalysis } from '../types';
+import { AMTAnalysis, Portfolio, RiskState, LLMHistoryEntry, AgentDecision, OrderBook, QuantDecisionAnalysis, AuctionAnalysis } from '../types';
 import { Zap } from 'lucide-react';
 import {
     EquityPanel,
@@ -20,10 +20,10 @@ import {
     DiagnosticsPanel,
     VaFreezeCard,
     ThreeAIndicator,
+    AIAdvisorCard,
 } from './ai';
 
 interface AIAnalysisPanelProps {
-    analysis?: GenAIAnalysis | null;
     amtResult: AMTAnalysis | null;
     portfolio: Portfolio;
     riskState?: RiskState | null;
@@ -39,7 +39,7 @@ interface AIAnalysisPanelProps {
 }
 
 const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
-    analysis, amtResult, portfolio, riskState, agentDecision,
+    amtResult, portfolio, riskState, agentDecision,
     orderBook, overseerAction, overseerReason, quantDecision, auction, symbol, data = []
 }) => {
     const currentLtp = React.useMemo(() => {
@@ -52,30 +52,9 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
         return amtResult?.sessionVwap && amtResult.sessionVwap > 0 ? amtResult.sessionVwap : 0;
     }, [orderBook, amtResult?.sessionVwap, data]);
 
-    const effectiveAnalysis = useMemo<GenAIAnalysis>(() => {
-        if (analysis) return analysis;
-        return {
-            direction: 'FLAT',
-            rationale: 'Monitoring market state and order flow. Waiting for Fabio Playbook setup.',
-            confidence: 'Low',
-            marketState: amtResult?.marketState || 'BALANCED',
-            aggression: `Score:${amtResult?.aggression?.toFixed(2) || '0.00'}`,
-            rawOutput: '',
-            inputPrompt: 'Deterministic Quantitative Analysis',
-        };
-    }, [analysis, amtResult?.marketState, amtResult?.aggression]);
-
-    const displayAnalysis = useMemo(() => ({
-        ...effectiveAnalysis,
-        marketState: amtResult?.marketState || effectiveAnalysis.marketState || 'BALANCED',
-        aggression: effectiveAnalysis.aggression && effectiveAnalysis.aggression !== ''
-            ? effectiveAnalysis.aggression
-            : `Score:${amtResult?.aggression?.toFixed(2) || '0.00'}`,
-    }), [effectiveAnalysis, amtResult?.marketState, amtResult?.aggression]);
-
     const openPnl = useMemo(() =>
         portfolio.positions.reduce((acc, p) => {
-            if (p.pnl !== undefined && p.pnl !== 0) return acc + p.pnl;
+            if (p.pnl !== undefined) return acc + p.pnl;
             const price = currentLtp > 0 ? currentLtp : p.entryPrice;
             const size = p.size;
             return acc + ((price - p.entryPrice) * size);
@@ -87,12 +66,12 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
         const liveAggression = amtResult?.aggression ?? 0;
         return typeof liveAggression === 'number'
             ? liveAggression
-            : parseFloat(displayAnalysis.aggression?.split(':')[1] || '0.00');
-    }, [amtResult?.aggression, displayAnalysis.aggression]);
+            : 0;
+    }, [amtResult?.aggression]);
 
     const deltaScore = useMemo(() => amtResult?.deltaNormalizedOption ?? 0, [amtResult?.deltaNormalizedOption]);
 
-    const liveMarketState = amtResult?.marketState || displayAnalysis.marketState || 'BALANCED';
+    const liveMarketState = amtResult?.marketState || 'BALANCED';
     const isImbalanced = liveMarketState === 'IMBALANCED';
     const statusColor = isImbalanced ? 'text-orange-400' : 'text-blue-300';
     const statusBg   = isImbalanced ? 'bg-orange-500/20' : 'bg-blue-500/20';
@@ -119,7 +98,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
                             </div>
                         </div>
                     </div>
-                    <ThreeAIndicator amt={amtResult} />
+                    <ThreeAIndicator amt={amtResult} approved={quantDecision?.approved ?? false} />
                 </div>
 
                 {/* Source attribution — Structure source vs Execution source */}
@@ -143,6 +122,7 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
             {/* ── Scrollable body ── */}
             <div className="flex-1 overflow-y-auto overscroll-contain px-3 py-3 space-y-3">
                 <QuantDecisionCard quantDecision={quantDecision} />
+                <AIAdvisorCard agentDecision={agentDecision} quantDecision={quantDecision} />
                 
                 {/* Market State & Location */}
                 <MarketStateCard

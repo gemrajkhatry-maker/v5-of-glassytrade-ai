@@ -31,12 +31,12 @@ interface SymbolCardProps {
 }
 
 const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect }) => {
+    const firstCandle = inst.data[0];
     const lastCandle = inst.data[inst.data.length - 1];
-    const prevCandle = inst.data[inst.data.length - 2];
 
     const price = inst.ltp ?? (lastCandle?.close || 0);
-    const prevPrice = prevCandle?.close || price;
-    const percentChange = price > 0 && prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
+    const basePrice = firstCandle?.open || (inst.data.length > 1 ? inst.data[inst.data.length - 2]?.close : price);
+    const percentChange = price > 0 && basePrice > 0 ? ((price - basePrice) / basePrice) * 100 : 0;
     const isUp = percentChange >= 0;
     const { name, tag } = shortSymbol(sym);
 
@@ -47,7 +47,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
     const posSide = firstPos?.side || (firstPos?.size && firstPos.size > 0 ? 'LONG' : 'SHORT') || 'LONG';
     const totalSize = openPositions.reduce((sum, p) => sum + Math.abs(p.size || 0), 0);
     const totalPnl = openPositions.reduce((sum, p) => {
-        if (p.pnl !== undefined && p.pnl !== 0) return sum + p.pnl;
+        if (p.pnl !== undefined) return sum + p.pnl;
         const curPrice = price > 0 ? price : p.entryPrice;
         return sum + ((curPrice - p.entryPrice) * p.size);
     }, 0);
@@ -149,7 +149,7 @@ const SymbolCard = React.memo<SymbolCardProps>(({ sym, inst, isActive, onSelect 
                         HALTED
                     </span>
                 ) : (
-                    <ThreeAIndicator amt={inst.amtAnalysis} />
+                    <ThreeAIndicator amt={inst.amtAnalysis} approved={inst.quantDecisionAnalysis?.approved ?? false} />
                 )}
             </div>
 

@@ -17,6 +17,22 @@ from dataclasses import dataclass, field
 import re
 from typing import FrozenSet, Dict, Any, Optional
 
+from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+
+
+def _tick_sizes_for(underlyings: FrozenSet[str]) -> Dict[str, float]:
+    """Derive tick sizes from InstrumentRegistry — single source of truth,
+    replacing what used to be a second hardcoded table here."""
+    return {u: DEFAULT_REGISTRY.resolve(u).tick_size for u in underlyings}
+
+
+def _lot_sizes_for(underlyings: FrozenSet[str]) -> Dict[str, int]:
+    return {u: DEFAULT_REGISTRY.resolve(u).lot_size for u in underlyings}
+
+
+def _freeze_limits_for(underlyings: FrozenSet[str]) -> Dict[str, int]:
+    return {u: DEFAULT_REGISTRY.resolve(u).freeze_limit for u in underlyings}
+
 
 @dataclass(frozen=True)
 class ExchangeConfig:
@@ -90,18 +106,19 @@ class ExchangeConfig:
             .replace("BSE:", "")
             .strip()
         )
+        spec = DEFAULT_REGISTRY.try_resolve(clean)
+        if spec is not None:
+            return spec.root
         if clean in self.underlyings:
             return clean
 
-        # Match known underlyings sorted by descending length so compound roots match first
         for u in sorted(self.underlyings, key=len, reverse=True):
-            if clean.startswith(u):
+            if clean.startswith(u) and (len(clean) == len(u) or not clean[len(u)].isalpha()):
                 return u
 
-        # Fallback to delimiter tokenization
         token = re.split(r"[-_\s]+", clean)[0]
         for u in sorted(self.underlyings, key=len, reverse=True):
-            if token.startswith(u):
+            if token.startswith(u) and (len(token) == len(u) or not token[len(u)].isalpha()):
                 return u
         return token
 
@@ -219,12 +236,24 @@ class ExchangeConfig:
     @classmethod
     def _nse_defaults(cls) -> ExchangeConfig:
         """NSE Index Options defaults."""
+        # SENSEX/BANKEX are BSE index options — they trade on BSE/F&O
+        # sessions, but Dhan routes their chains through the same NFO-like
+        # API surface this system uses for NSE index options, and their
+        # session clock matches NSE (09:15–15:30 IST). Registering them
+        # here keeps SymbolRegistry from falling through to the MCX
+        # "safe default" (audit D-EXCH-07: the same class of bug as the
+        # original MIDCPNIFTY misclassification).
+        underlyings = DEFAULT_REGISTRY.nse_session_roots()
         return cls(
             exchange="NSE",
-            underlyings=frozenset({"NIFTY", "BANKNIFTY", "FINNIFTY"}),
+            underlyings=underlyings,
             default_symbol="NIFTY 27 FEB 25500 CALL",
             scanner_underlying="NIFTY",
-            scanner_underlyings=frozenset({"NIFTY", "BANKNIFTY", "FINNIFTY"}),
+            # Must track `underlyings` exactly — from_dict({}) derives
+            # scanner_underlyings from the (possibly overridden) underlyings
+            # set, so any classification-registered root left out here is
+            # silently unscannable even though exchange_for() resolves it.
+            scanner_underlyings=underlyings,
             aggression_sigma=2.5,
             displacement_multiplier=1.5,
             balance_ratio_threshold=0.70,
@@ -236,56 +265,21 @@ class ExchangeConfig:
             max_distance_to_level_ticks=500.0,
             eia_symbols=frozenset(),
             eia_suppression_minutes=0,
-            tick_sizes={
-                "NIFTY": 0.05,
-                "BANKNIFTY": 0.05,
-                "FINNIFTY": 0.05,
-                "MIDCPNIFTY": 0.05,
-            },
-            lot_sizes={
-                # Current NSE series (exchange-authoritative, Aug 2026):
-                # NIFTY=65, BANKNIFTY=30, FINNIFTY=60, MIDCPNIFTY=120.
-                "NIFTY": 65,
-                "BANKNIFTY": 30,
-                "FINNIFTY": 60,
-                "MIDCPNIFTY": 120,
-            },
-            point_values={
-                "NIFTY": 1.0,
-                "BANKNIFTY": 1.0,
-                "FINNIFTY": 1.0,
-                "MIDCPNIFTY": 1.0,
-            },
-            freeze_limits={
-                "NIFTY": 1800,
-                "BANKNIFTY": 900,
-                "FINNIFTY": 1800,
-                "MIDCPNIFTY": 4200,
-            },
+            # tick/lot/freeze come from InstrumentRegistry (single source of
+            # truth) instead of a second hardcoded table.
+            tick_sizes=_tick_sizes_for(underlyings),
+            lot_sizes=_lot_sizes_for(underlyings),
+            point_values={u: 1.0 for u in underlyings},
+            freeze_limits=_freeze_limits_for(underlyings),
         )
 
     @classmethod
     def _mcx_defaults(cls) -> ExchangeConfig:
         """MCX Commodity defaults."""
+        underlyings = DEFAULT_REGISTRY.mcx_roots()
         return cls(
             exchange="MCX",
-            underlyings=frozenset(
-                {
-                    "CRUDEOIL",
-                    "GOLD",
-                    "SILVER",
-                    "NATURALGAS",
-                    "COPPER",
-                    "GOLDM",
-                    "SILVERM",
-                    "CRUDEOILM",
-                    "ZINC",
-                    "ALUMINIUM",
-                    "LEAD",
-                    "NICKEL",
-                    "COTTONCANDY",
-                }
-            ),
+            underlyings=underlyings,
             default_symbol="CRUDEOIL 19 MAR 6000 CALL",
             scanner_underlying="CRUDEOIL",
             scanner_underlyings=frozenset(
@@ -302,53 +296,16 @@ class ExchangeConfig:
             max_distance_to_level_ticks=5.0,
             eia_symbols=frozenset({"NATURALGAS", "CRUDEOIL"}),
             eia_suppression_minutes=15,
-            tick_sizes={
-                "CRUDEOIL": 1.0,
-                "NATURALGAS": 0.1,
-                "GOLD": 1.0,
-                "GOLDM": 1.0,
-                "SILVER": 1.0,
-                "SILVERM": 1.0,
-                "COPPER": 0.05,
-                "ZINC": 0.05,
-                "ALUMINIUM": 0.05,
-                "LEAD": 0.05,
-                "NICKEL": 1.0,
-            },
-            lot_sizes={
-                "CRUDEOIL": 100,
-                "NATURALGAS": 1250,
-                "GOLD": 100,
-                "GOLDM": 100,
-                "SILVER": 30,
-                "SILVERM": 5,
-                "COPPER": 2500,
-                "ZINC": 5000,
-                "ALUMINIUM": 5000,
-                "LEAD": 5000,
-                "NICKEL": 1500,
-            },
+            # tick/lot come from InstrumentRegistry (single source of truth)
+            # instead of a second hardcoded table.
+            tick_sizes=_tick_sizes_for(underlyings),
+            lot_sizes=_lot_sizes_for(underlyings),
             point_values={
-                "CRUDEOIL": 100.0,
-                "NATURALGAS": 1250.0,
-                "GOLD": 100.0,
-                "GOLDM": 100.0,
-                "SILVER": 30.0,
-                "SILVERM": 5.0,
-                "COPPER": 2500.0,
-                "ZINC": 5000.0,
-                "ALUMINIUM": 5000.0,
-                "LEAD": 5000.0,
-                "NICKEL": 1500.0,
+                s.root: float(s.lot_size)
+                for s in DEFAULT_REGISTRY.specs()
+                if s.root in underlyings
             },
-            freeze_limits={
-                "CRUDEOIL": 10000,
-                "NATURALGAS": 100000,
-                "GOLD": 10000,
-                "SILVER": 10000,
-                "GOLDM": 10000,
-                "SILVERM": 10000,
-            },
+            freeze_limits=_freeze_limits_for(underlyings),
         )
 
     def is_mcx(self) -> bool:

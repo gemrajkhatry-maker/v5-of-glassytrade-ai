@@ -85,44 +85,34 @@ def _engine_with_history(history):
     return eng
 
 
-def test_seed_retries_rate_limited_fetch():
+def test_seed_retries_rate_limited_fetch(monkeypatch):
     """A rate-limited (empty) first fetch must be retried with backoff until
     the data lands — never given up on after a single attempt."""
     _reset_seed_gate()
+    monkeypatch.setattr(amt_eng.time, "sleep", lambda s: None)
     history = _FlakyHistory(fail_times=2)
     eng = _engine_with_history(history)
-
-    deadline = time.time() + 15
-    while time.time() < deadline and eng._amt_engine.warm_bars == 0:
-        time.sleep(0.2)
 
     assert history.calls == 3, f"expected 3 attempts, got {history.calls}"
     assert eng._amt_engine.warm_bars == 1
     assert len(eng._amt_engine._amt_candles) == 1
 
 
-def test_seed_succeeds_on_first_attempt():
+def test_seed_succeeds_on_first_attempt(monkeypatch):
     _reset_seed_gate()
+    monkeypatch.setattr(amt_eng.time, "sleep", lambda s: None)
     history = _FlakyHistory(fail_times=0)
     eng = _engine_with_history(history)
-
-    deadline = time.time() + 10
-    while time.time() < deadline and eng._amt_engine.warm_bars == 0:
-        time.sleep(0.2)
 
     assert history.calls == 1
     assert eng._amt_engine.warm_bars == 1
 
 
-def test_seed_gives_up_after_max_retries():
+def test_seed_gives_up_after_max_retries(monkeypatch):
     _reset_seed_gate()
+    monkeypatch.setattr(amt_eng.time, "sleep", lambda s: None)
     history = _FlakyHistory(fail_times=999)
     eng = _engine_with_history(history)
-
-    # Max attempts = 1 + 2 backoff retries; give the retries time to finish.
-    deadline = time.time() + 15
-    while time.time() < deadline and history.calls < amt_eng._SEED_FETCH_RETRIES:
-        time.sleep(0.2)
 
     assert history.calls == amt_eng._SEED_FETCH_RETRIES
     assert eng._amt_engine.warm_bars == 0

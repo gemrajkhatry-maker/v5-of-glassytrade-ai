@@ -16,8 +16,7 @@ from decimal import Decimal
 
 from quant.contracts.enums import Side, Source, PositionStatus
 from quant.contracts.entities import Position, Signal
-from quant.contracts.value_objects import OHLC, StrategyStats
-from quant.execution.exit_rules import classify_exit, ExitReason
+from quant.contracts.value_objects import StrategyStats
 
 logger = logging.getLogger(__name__)
 
@@ -257,65 +256,6 @@ class Portfolio:
                 if side == Side.LONG
                 else price * (Decimal("1") + slippage_pct)
             )
-
-    def process_tick(self, tick: OHLC) -> list[Position]:
-        """Update all open positions with a new tick.
-
-        Returns a list of positions that were closed during this tick.
-        """
-        current_price = tick.close
-        current_time = tick.time
-        unrealized_pnl = Decimal("0")
-
-        active: list[Position] = []
-        newly_closed: list[Position] = []
-
-        # Use tick extremes for SL/TP checks — wicks breach stops even on recovery
-        # FIX P0-B: ALL positions (including LLM) must have SL checked on every tick
-        for pos in self.positions:
-            # SL uses tick.low for LONG, tick.high for SHORT (wicks breach before recovery)
-            # TP uses tick.high for LONG, tick.low for SHORT (favorable extreme)
-            should_close = False
-            reason = ""
-
-            sl_close, sl_reason = pos.should_close(
-                tick.low if pos.side == Side.LONG else tick.high
-            )
-            tp_close, tp_reason = pos.should_close(
-                tick.high if pos.side == Side.LONG else tick.low
-            )
-
-            if sl_close:
-                should_close, reason = sl_close, sl_reason
-            elif tp_close:
-                should_close, reason = tp_close, tp_reason
-            if should_close:
-                # Apply slippage to exit fill
-                fill_price = self._apply_slippage(
-                    current_price, pos.side, is_entry=False
-                )
-                pos.close(fill_price, current_time, reason)
-                # Deduct commission from P&L
-                commission = self._compute_commission(pos.size, pos.metadata)
-                pos.pnl -= commission
-                newly_closed.append(pos)
-                self.balance += pos.pnl
-            else:
-                pos.update_pnl(current_price)
-                active.append(pos)
-                unrealized_pnl += pos.pnl
-
-        self.positions = active
-        self.closed_trades.extend(newly_closed)
-        # Trim to prevent unbounded growth throughout the day
-        if len(self.closed_trades) > 200:
-            self.closed_trades = self.closed_trades[-200:]
-        self.equity = self.balance + unrealized_pnl
-
-        # Equity history (throttled to one per minute)
-        self._append_history(current_time, unrealized_pnl)
-
-        return newly_closed
 
     def open_position(
         self,

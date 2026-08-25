@@ -437,8 +437,9 @@ class StreamingService(BaseDhanService):
         new_sids = [sid for sid in security_ids if sid not in ws.subscriptions]
         if new_sids:
             logger.info("Subscribing %d new instrument(s) on persistent WS", len(new_sids))
+            new_segments = self._exchange_segments_for(new_sids, instrument_map)
             await ws.subscribe(new_sids, feed_type=feed_type,
-                               exchange_segments=exchange_segments)
+                               exchange_segments=new_segments)
 
         # Yield packets until WS disconnects (expired symbols, network error)
         try:

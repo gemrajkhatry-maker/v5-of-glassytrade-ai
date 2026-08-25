@@ -129,6 +129,24 @@ class TestDhanExchangeResolver:
         underlying = DhanExchangeResolver._extract_underlying("NIFTY23FEBFUT")
         assert underlying == "NIFTY"
 
+    def test_nifty_bank_is_banknifty_not_nifty(self):
+        assert DhanExchangeResolver._extract_underlying(
+            "NIFTY BANK 27 AUG 55000 CALL"
+        ) == "BANKNIFTY"
+        result = DhanExchangeResolver.resolve("NIFTY BANK 27 AUG 55000 CALL")
+        assert result.exchange == Exchange.NFO
+        assert result.segment == ExchangeSegment.NSE_FNO
+
+    def test_cash_hint_does_not_route_index_option_to_equity(self):
+        result = DhanExchangeResolver.resolve("NIFTY 27 AUG 25500 CALL", Exchange.NSE)
+        assert result.exchange == Exchange.NFO
+        assert result.segment == ExchangeSegment.NSE_FNO
+
+    def test_crudeoil_continuous_future_is_mcx(self):
+        result = DhanExchangeResolver.resolve("CRUDEOIL-I")
+        assert result.exchange == Exchange.MCX
+        assert result.symbol_type == "future"
+
 
 # =============================================================================
 # ResolvedExchange Tests

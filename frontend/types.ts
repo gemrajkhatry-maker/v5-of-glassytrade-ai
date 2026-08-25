@@ -36,16 +36,6 @@ export interface AIAnalysis {
   factorBreakdown: FactorBreakdown;
 }
 
-export interface GenAIAnalysis {
-  direction: 'LONG' | 'SHORT' | 'FLAT';
-  rationale: string;
-  confidence: 'High' | 'Medium' | 'Low';
-  inputPrompt?: string;
-  rawOutput?: string;
-  marketState?: string;
-  aggression?: string;
-}
-
 export interface AgentDecision {
   direction: 'LONG' | 'SHORT' | 'FLAT';
   modelLabel: string;  // replaces probability — "Triple-A" | "LVN_Sniper" | "VA_Fade" | ""
@@ -131,7 +121,6 @@ export interface InstrumentState {
   orderBook: OrderBook | null;
   portfolio: Portfolio;
   aiAnalysis: AIAnalysis | null;
-  genAIAnalysis: GenAIAnalysis | null;
   amtAnalysis: AMTAnalysis | null;
   auctionAnalysis: AuctionAnalysis | null;
   quantDecisionAnalysis: QuantDecisionAnalysis | null;

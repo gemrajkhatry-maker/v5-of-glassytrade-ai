@@ -18,12 +18,17 @@ from quant.decision.gates_edge import gate_triple_a_edge
 from quant.bars import Bar
 
 
-# Test 1: MarketState should be the Fabio 2-state model only
+# Test 1: MarketState is the Fabio 2-state model (BALANCED/IMBALANCED) plus
+# exactly one volume-collapse veto (DEAD) that gates treat as "no edge".
+# Fabio's auction model has two states; DEAD is not a third auction state —
+# it is a data-quality veto emitted by analyzer._compute_effective_market_state
+# when volume collapses, and both the Triple-A gate and the VA-fade fallback
+# refuse to trade it. The legacy NO_TRADE/PROBING states must stay gone.
 def test_market_state_is_two_state():
     states = list(MarketState)
-    assert len(states) == 2, f"Expected 2 states, got {len(states)}: {states}"
-    assert MarketState.BALANCED in states
-    assert MarketState.IMBALANCED in states
+    assert set(states) == {MarketState.BALANCED, MarketState.IMBALANCED, MarketState.DEAD}, (
+        f"Unexpected state set: {states}"
+    )
 
     with pytest.raises((AttributeError, ValueError)):
         MarketState.NO_TRADE
@@ -64,6 +69,9 @@ def _ctx(**kw):
         poc=100.0, vah=101.0, val=99.0, tick_size=0.05,
         absorption_side=kw.get("absorption_side", "SELL_ABSORBED"),
         obi=kw.get("obi", 0.20),
+        triple_a_phase=kw.get("triple_a_phase", "AGGRESSION"),
+        triple_a_signal=kw.get("triple_a_signal", kw.get("agent_direction", "LONG")),
+        cvd_slope=kw.get("cvd_slope", 1.0),
     )
 
 

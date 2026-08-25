@@ -27,12 +27,13 @@ def _pass_results():
     return [GateResult(i, True) for i in range(1, 6)]
 
 
-def test_long_sl_sits_two_ticks_inside_val():
+def test_long_sl_sits_two_ticks_inside_vah_on_breakout():
     sb = SignalBuilder()
+    # Upside breakout (close=110.0 above VAH=102.0): SL anchors tight behind broken VAH
     ctx = _ctx(close=110.0, poc=100.0, vah=102.0, val=98.0)
     s = sb.build(ctx, _pass_results())
     assert s is not None
-    assert s.sl == pytest.approx(98.0 - 0.10, abs=1e-9)
+    assert s.sl == pytest.approx(102.10, abs=1e-9)
 
 
 def test_long_sl_falls_back_to_step_when_tick_math_fails():
@@ -45,19 +46,24 @@ def test_long_sl_falls_back_to_step_when_tick_math_fails():
     with patch.object(sb_mod, "TICK_SIZE_NSE_OPTIONS", 0.0):
         s = sb.build(ctx, _pass_results())
     assert s is not None
-    # Unified tick source (REF-3): zero tick size means the step fallback
-    # is also zero, so SL falls back to the anchor itself. The old 97.95
-    # expectation depended on the anchor math and step reading tick size
-    # from two different sources.
-    assert s.sl == pytest.approx(98.0, abs=1e-9)
+    # Zero tick still uses the default 0.05 instrument tick so the stop
+    # stays 2 ticks inside VAH, never on the level itself.
+    assert s.sl == pytest.approx(102.10, abs=1e-9)
 
 
-def test_short_sl_sits_two_ticks_above_vah():
+def test_short_sl_sits_two_ticks_above_vah_or_val():
     sb = SignalBuilder()
-    ctx = _ctx(direction="SHORT", close=90.0, poc=95.0, vah=102.0, val=98.0)
-    s = sb.build(ctx, _pass_results())
-    assert s is not None
-    assert s.sl == pytest.approx(102.0 + 0.10, abs=1e-9)
+    # Inside VA (fade short near VAH): SL anchors to VAH
+    ctx_inside = _ctx(direction="SHORT", close=100.0, poc=95.0, vah=102.0, val=98.0)
+    s_inside = sb.build(ctx_inside, _pass_results())
+    assert s_inside is not None
+    assert s_inside.sl == pytest.approx(102.0 - 0.10, abs=1e-9)
+
+    # Downside breakdown (below VAL): SL anchors to broken VAL (tight structural stop)
+    ctx_break = _ctx(direction="SHORT", close=90.0, poc=95.0, vah=102.0, val=98.0)
+    s_break = sb.build(ctx_break, _pass_results())
+    assert s_break is not None
+    assert s_break.sl == pytest.approx(98.0 - 0.10, abs=1e-9)
 
 
 def test_sl_still_monotonic_with_signal_direction():

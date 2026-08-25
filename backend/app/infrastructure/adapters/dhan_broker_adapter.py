@@ -316,7 +316,7 @@ class DhanBrokerAdapter(IBroker):
                 exchange_hint = _prefix.strip()
             clean_symbol = _symbol.strip()
 
-        is_option, _is_call, _is_put, is_mcx = classify_symbol(clean_symbol)
+        is_option, _is_call, _is_put, dhan_exchange = classify_symbol(clean_symbol)
         option_type = meta.get("option_type")
         if option_type is not None and not isinstance(option_type, str):
             option_type = str(option_type)
@@ -330,7 +330,13 @@ class DhanBrokerAdapter(IBroker):
             )
 
         if is_option:
-            exchange = _exchange_enum("MCX" if is_mcx else "NFO")
+            from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+            hint = (exchange_hint or "").upper()
+            if hint in ("", "NSE", "INDEX"):
+                spec = DEFAULT_REGISTRY.try_resolve(clean_symbol)
+                exchange = _exchange_enum(spec.dhan_exchange) if spec else dhan_exchange
+            else:
+                exchange = _exchange_enum(exchange_hint)
             return Instrument(
                 symbol=clean_symbol,
                 exchange=exchange,

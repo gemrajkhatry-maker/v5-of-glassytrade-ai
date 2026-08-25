@@ -1,9 +1,8 @@
 import React, { useMemo } from 'react';
 import { Brain } from 'lucide-react';
-import type { GenAIAnalysis, AMTAnalysis, AgentDecision, AuctionAnalysis, QuantDecisionAnalysis } from '../types';
+import type { AMTAnalysis, AgentDecision, AuctionAnalysis, QuantDecisionAnalysis } from '../types';
 
 export interface ModelStateBannerProps {
-    genAI: GenAIAnalysis | null | undefined;
     amtResult: AMTAnalysis | null | undefined;
     agentDecision: AgentDecision | null | undefined;
     auction: AuctionAnalysis | null | undefined;
@@ -14,16 +13,13 @@ export interface ModelStateBannerProps {
 /**
  * Single primary status strip for the active symbol: monitoring, dead, advisory entry, or armed (ENTER_NOW).
  */
-const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, agentDecision, auction, quantDecision, symbol }) => {
+const ModelStateBanner = React.memo<ModelStateBannerProps>(({ amtResult, agentDecision, auction, quantDecision, symbol }) => {
     const { title, subtitle, barClass, accentClass } = useMemo(() => {
-        const isDead =
-            genAI?.rationale?.includes('DEAD') ||
-            genAI?.rawOutput?.includes('QUANT_DEAD_MARKET') ||
-            amtResult?.marketState === 'DEAD';
+        const isDead = amtResult?.marketState === 'DEAD';
         const volLow = amtResult?.aggression != null && amtResult.aggression < 0.2;
         const volMsg = volLow ? 'Low aggression — edge may be thin' : 'Aggression healthy';
         const armed = agentDecision?.timing === 'ENTER_NOW';
-        const dir = genAI?.direction;
+        const dir = agentDecision?.direction;
         const hasEntry = dir && dir !== 'FLAT';
 
         // IB break state — setup in progress
@@ -74,21 +70,21 @@ const ModelStateBanner = React.memo<ModelStateBannerProps>(({ genAI, amtResult, 
             barClass: 'bg-slate-900/95 border-white/15',
             accentClass: 'text-slate-100',
         };
-    }, [genAI, amtResult, agentDecision, symbol]);
+    }, [amtResult, agentDecision, symbol]);
 
     return (
         <div
-            className={`w-full rounded-lg border px-4 py-2.5 shadow-lg backdrop-blur-md ${barClass}`}
+            className={`w-fit max-w-xl rounded-lg border px-3 py-1.5 shadow-lg backdrop-blur-md ${barClass}`}
             role="status"
             aria-live="polite"
         >
-            <div className="flex flex-wrap items-center gap-2 min-w-0">
-                <Brain className={`w-4 h-4 shrink-0 ${accentClass} opacity-90`} />
-                <div className="min-w-0 flex-1">
-                    <div className={`text-sm font-bold tracking-wide uppercase ${accentClass}`}>{title}</div>
-                    <div className="text-[10px] text-white/55 font-mono truncate mt-0.5">{subtitle}</div>
+            <div className="flex items-center gap-2.5 min-w-0">
+                <Brain className={`w-3.5 h-3.5 shrink-0 ${accentClass} opacity-90`} />
+                <div className="min-w-0">
+                    <div className={`text-xs font-bold tracking-wide uppercase leading-tight ${accentClass}`}>{title}</div>
+                    <div className="text-[9.5px] text-white/60 font-mono truncate mt-0.5">{subtitle}</div>
                 </div>
-                <div className="hidden sm:flex items-center gap-2 shrink-0 text-[9px] font-mono text-white/40 uppercase">
+                <div className="hidden sm:flex items-center gap-2 shrink-0 text-[8.5px] font-mono text-white/40 uppercase pl-2 border-l border-white/10">
                     {auction?.tripleASignal && (
                         <span className={`px-1.5 py-0.5 rounded-sm border ${auction.tripleASignal === 'LONG' ? 'border-emerald-500/40 text-emerald-300' : 'border-rose-500/40 text-rose-300'}`}>
                             TRIPLE-A {auction.tripleASignal} ({auction.tripleAPhase})

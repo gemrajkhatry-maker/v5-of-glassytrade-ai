@@ -23,14 +23,21 @@ logger = logging.getLogger(__name__)
 
 
 def _exchange_enum(exchange_str: str | None):
-    """Convert exchange string to brokers Exchange enum."""
+    """Convert exchange string to brokers Exchange enum.
+
+    Re-audit (D-EXCH-07 sibling): BSE used to silently fall back to
+    Exchange.NSE and BFO was not mapped at all — a SENSEX/BANKEX *cash*
+    exchange hint would route as plain NSE and a BFO hint would hit the
+    "unknown exchange" warning path. Both are now first-class.
+    """
     from brokers.broker.types import Exchange
 
     mapping = {
         "NSE": Exchange.NSE,
         "NFO": Exchange.NFO,
         "MCX": Exchange.MCX,
-        "BSE": Exchange.NSE,  # fallback
+        "BSE": Exchange.BSE,
+        "BFO": Exchange.BFO,
         "INDEX": Exchange.NSE,
     }
     result = mapping.get((exchange_str or "NSE").upper())
@@ -40,18 +47,37 @@ def _exchange_enum(exchange_str: str | None):
     return result
 
 
-def classify_symbol(symbol: str) -> tuple[bool, bool, bool, bool]:
-    """Classify a symbol into ``(is_option, is_call, is_put, is_mcx)``.
+def classify_symbol(symbol: str):
+    """Classify a symbol into ``(is_option, is_call, is_put, dhan_exchange)``.
 
     Uses ANCHORED detection — a trailing CALL/PUT word, or a digit-suffixed
     CE/PE — so an underlying name containing CALL/PUT/CE/PE as a substring
     can never mislabel the contract or misroute the exchange segment.
-    """
-    from quant.contracts.exchange_config import ExchangeConfig
 
-    sym_upper = symbol.upper()
-    is_call = sym_upper.endswith("CALL") or bool(re.search(r"\d+\s*CE$", sym_upper))
-    is_put = sym_upper.endswith("PUT") or bool(re.search(r"\d+\s*PE$", sym_upper))
-    is_option = is_call or is_put
-    is_mcx = ExchangeConfig.for_exchange("MCX").is_underlying(sym_upper)
-    return is_option, is_call, is_put, is_mcx
+    ``dhan_exchange`` (re-audit, D-EXCH-07 sibling) used to be a binary
+    ``is_mcx`` bool, forcing every non-MCX option onto NFO — structurally
+    unable to route a SENSEX/BANKEX order to BFO. Delegates to
+    ``DhanExchangeResolver`` (already BSE/BFO-aware) instead of
+    re-implementing a narrower binary classifier here.
+    """
+    from quant.contracts.instrument_registry import DEFAULT_REGISTRY, is_option_contract
+    from brokers.broker.dhan.application.exchange_resolver import DhanExchangeResolver
+
+    is_option = is_option_contract(symbol)
+    is_call = is_option and (
+        symbol.upper().endswith(("CALL", "CE")) or bool(re.search(r"(?:CALL|CE)$", symbol.upper()))
+    )
+    is_put = is_option and not is_call
+    dhan_exchange = DhanExchangeResolver.resolve(symbol.upper()).exchange
+    spec = DEFAULT_REGISTRY.try_resolve(symbol)
+    if spec is not None:
+        from brokers.broker.types import Exchange
+        mapped = {
+            "NFO": Exchange.NFO,
+            "BFO": Exchange.BFO,
+            "MCX": Exchange.MCX,
+            "NSE": Exchange.NSE,
+        }.get(spec.dhan_exchange)
+        if mapped is not None:
+            dhan_exchange = mapped
+    return is_option, is_call, is_put, dhan_exchange

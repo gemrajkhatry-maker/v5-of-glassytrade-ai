@@ -217,7 +217,6 @@ class TestFeatureFlags:
 
     def test_defaults(self):
         flags = FeatureFlags()
-        assert flags.true_delta_lee_ready is False
         assert flags.realistic_cost_model is False
 
     def test_immutable(self):

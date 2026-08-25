@@ -78,60 +78,6 @@ class TestPortfolioOpenPosition:
         assert pos.size == pytest.approx(700, rel=0.01)
 
 
-class TestPortfolioProcessTick:
-    def test_updates_pnl(self):
-        p = Portfolio.create_default()
-        sig = _make_signal(price=100, sl=90, tp=120)
-        p.open_position(sig, "BTCUSDT")
-
-        tick = _make_tick(close=105)
-        closed = p.process_tick(tick)
-        assert closed == []
-        assert p.positions[0].pnl > 0
-
-    def test_closes_on_stop_loss(self):
-        p = Portfolio.create_default()
-        sig = _make_signal(price=100, sl=95, tp=120)
-        p.open_position(sig, "BTCUSDT")
-
-        tick = _make_tick(close=94)
-        closed = p.process_tick(tick)
-        assert len(closed) == 1
-        assert closed[0].close_reason == "STOP_LOSS"
-        assert len(p.positions) == 0
-
-    def test_closes_on_take_profit(self):
-        p = Portfolio.create_default()
-        sig = _make_signal(price=100, sl=90, tp=110)
-        p.open_position(sig, "BTCUSDT")
-
-        tick = _make_tick(close=110)
-        closed = p.process_tick(tick)
-        assert len(closed) == 1
-        assert "TAKE_PROFIT" in closed[0].close_reason
-
-    def test_balance_updates_on_close(self):
-        p = Portfolio.create_default()
-        initial_balance = p.balance
-        sig = _make_signal(price=100, sl=90, tp=110)
-        p.open_position(sig, "BTCUSDT")
-
-        tick = _make_tick(close=110)
-        p.process_tick(tick)
-        assert p.balance > initial_balance
-
-    def test_portfolio_does_not_move_breakeven(self):
-        """Break-even logic is centralized in TradeManager, not Portfolio."""
-        p = Portfolio.create_default()
-        sig = _make_signal(price=100, sl=90, tp=120)
-        p.open_position(sig, "BTCUSDT")
-
-        # Strong positive delta — Portfolio should NOT move SL
-        tick = _make_tick(close=105, delta=600, volume=1000)
-        p.process_tick(tick)
-        assert p.positions[0].stop_loss == 90  # unchanged, TradeManager handles BE
-
-
 class TestPortfolioStats:
     def test_stats_no_trades(self):
         p = Portfolio.create_default()
@@ -370,36 +316,6 @@ class TestStraddlePrevention:
         # Test without lot size (flat fee)
         commission_no_lot = p._compute_commission(100, None)
         assert commission_no_lot > 0
-
-    def test_history_trim(self):
-        """Test that closed_trades list is trimmed at 200."""
-        from quant.contracts.entities import Position
-        
-        p = Portfolio.create_default()
-        
-        # Create 250 closed positions
-        for i in range(250):
-            pos = Position(
-                id=f"test-{i}",
-                symbol="TEST",
-                side=Side.LONG,
-                source=Source.AMT,
-                entry_price=100,
-                size=1,
-                stop_loss=95,
-                take_profit=110,
-                pnl=10,
-                entry_time="t",
-                status=PositionStatus.CLOSED,
-            )
-            p.closed_trades.append(pos)
-        
-        # Process a tick to trigger trimming logic
-        tick = _make_tick(close=100)
-        p.process_tick(tick)
-        
-        # Should be trimmed to 200
-        assert len(p.closed_trades) <= 200
 
     def test_long_position_small_loss_at_time_stop(self):
         """Test TIME_STOP behavior with R-multiple logic for small loss trades."""

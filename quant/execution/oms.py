@@ -152,7 +152,7 @@ class PaperOMS:
             reason=reason,
             pnl=partial_pnl,
         )
-        # Remaining open position with reduced size
+        # Remaining open position with reduced size — preserve _id so ExitEngine trail/breakeven persists
         remaining = Position(
             order=position.order,
             open_price=position.open_price,
@@ -160,5 +160,6 @@ class PaperOMS:
             size=remaining_size,
             pyramid_level=position.pyramid_level,
             is_pyramid=position.is_pyramid,
+            _id=position._id,
         )
         return fill, remaining

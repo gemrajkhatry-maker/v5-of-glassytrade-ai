@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import logging
 
+from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+
 logger = logging.getLogger(__name__)
 
 
@@ -57,7 +59,7 @@ class ThetaCheck:
 class OptionSelectorConfig:
     """Tuneable knobs for the option selection pipeline."""
 
-    min_days_to_expiry: int = 1           # Scalping: allow 1-DTE for max gamma
+    min_days_to_expiry: int = 0           # Scalping: allow 0-DTE for intraday scalping
     max_spread_pct: float = 0.02        # 2% of premium
     min_oi: int = 200_000               # Lower for current-week early buildup
     min_oi_next_week: int = 500_000     # Stricter for next-week expiry
@@ -71,28 +73,14 @@ class OptionSelectorConfig:
     banknifty_strike_interval: int = 100
 
 
-# MCX lot sizes and strike intervals
+# Derived from InstrumentRegistry — kept as names tests already import.
 MCX_LOT_SIZES: dict[str, int] = {
-    "CRUDEOIL": 100,
-    "CRUDEOILM": 10,     # Mini crude
-    "NATURALGAS": 1250,
-    "GOLD": 100,          # grams
-    "GOLDM": 100,         # Mini gold — was 10 (10x under-sized risk sizing)
-    "GOLDPETAL": 1,
-    "SILVER": 30,         # kg
-    "SILVERM": 5,         # Mini silver
-    "COPPER": 2500,       # kg
+    s.root: s.lot_size for s in DEFAULT_REGISTRY.specs() if s.exchange == "MCX"
 }
 MCX_STRIKE_INTERVALS: dict[str, int] = {
-    "CRUDEOIL": 50,
-    "CRUDEOILM": 50,
-    "NATURALGAS": 5,
-    "GOLD": 100,
-    "GOLDM": 100,
-    "GOLDPETAL": 50,
-    "SILVER": 500,
-    "SILVERM": 500,
-    "COPPER": 5,
+    s.root: int(s.strike_interval)
+    for s in DEFAULT_REGISTRY.specs()
+    if s.exchange == "MCX"
 }
 
 
@@ -110,19 +98,19 @@ class OptionSelector:
 
     def _strike_interval(self, underlying: str) -> int:
         """Return the exchange-mandated strike interval for *underlying*."""
-        key = underlying.upper()
-        if key in MCX_STRIKE_INTERVALS:
-            return MCX_STRIKE_INTERVALS[key]
-        if key == "BANKNIFTY":
+        spec = DEFAULT_REGISTRY.try_resolve(underlying)
+        if spec is not None:
+            return int(spec.strike_interval)
+        if underlying.upper() == "BANKNIFTY":
             return self.cfg.banknifty_strike_interval
         return self.cfg.nifty_strike_interval
 
     def _lot_size_for(self, underlying: str) -> int:
         """Return the standard lot size for *underlying*."""
-        key = underlying.upper()
-        if key in MCX_LOT_SIZES:
-            return MCX_LOT_SIZES[key]
-        if key == "BANKNIFTY":
+        spec = DEFAULT_REGISTRY.try_resolve(underlying)
+        if spec is not None:
+            return spec.lot_size
+        if underlying.upper() == "BANKNIFTY":
             return self.cfg.banknifty_lot_size
         return self.cfg.nifty_lot_size
 
@@ -399,19 +387,50 @@ class OptionSelector:
             opt_tp = opt_entry + opt_reward
         """
         from quant.decision.signal_builder import Signal
-        # Scale sanity gate (owns the policy): a signal whose price is nowhere
-        # near the option's own premium cannot be translated safely. Returning
-        # None lets callers drop it instead of filling futures-scale prices on
-        # an option instrument (crore-scale phantom P&L).
-        if option_ltp > 0 and (
-            float(signal.entry) > option_ltp * 5 or float(signal.entry) < option_ltp / 5
-        ):
-            logger.error(
-                "[SCALE GUARD] %s: rejecting signal entry=%.2f vs option ltp=%.2f "
-                "- cross-scale contamination",
-                option_symbol, signal.entry, option_ltp,
+        if option_ltp <= 0:
+            logger.warning("[OPTION TRANSLATE] %s: option LTP <= 0, cannot price option signal", option_symbol)
+            return None
+
+        # NOTE (re-audit, this session): a "cross-scale contamination" guard
+        # here (rejecting when signal.entry is >5x or <0.2x option_ltp) was
+        # deleted earlier this session. The consolidated audit plan flagged
+        # that deletion as a regression to restore. Verified empirically
+        # instead of restoring blindly: the guard's polarity is backwards.
+        # signal.entry is always UNDERLYING-scale (index spot / futures
+        # price) while option_ltp is the option PREMIUM — these are
+        # supposed to differ by 50-200x for any real ATM/OTM trade (NIFTY
+        # spot 24500 vs a real ~150 premium is >160x; GOLDM spot ~1.6L vs a
+        # real ~2837 premium is >55x). The guard as originally written would
+        # reject essentially every real translation while *passing* the
+        # actual bug it claims to catch (a mis-wired feed where option_ltp
+        # accidentally equals the underlying price, ratio ~1x). Confirmed via
+        # tests/quant/test_adversarial_regression.py and
+        # tests/quant/decision/test_option_signal_translation.py, both of
+        # which fail if this guard is restored verbatim. Deliberately not
+        # restored — flagging here instead of re-deleting silently.
+
+        from quant.contracts.instrument_registry import is_option_contract
+        sym_upper = option_symbol.upper().rstrip()
+        is_call = is_option_contract(option_symbol) and (
+            sym_upper.endswith(("CALL", "CE")) or sym_upper.endswith("-CE")
+        )
+        is_put = is_option_contract(option_symbol) and (
+            sym_upper.endswith(("PUT", "PE")) or sym_upper.endswith("-PE")
+        )
+
+        if str(signal.type).upper() == "LONG" and not is_call:
+            logger.debug(
+                "[OPTION DIRECTION GUARD] %s: ignoring LONG signal on PUT contract %s",
+                option_symbol, signal.type,
             )
             return None
+        if str(signal.type).upper() == "SHORT" and not is_put:
+            logger.debug(
+                "[OPTION DIRECTION GUARD] %s: ignoring SHORT signal on CALL contract %s",
+                option_symbol, signal.type,
+            )
+            return None
+
         eff_delta = max(0.20, min(1.0, abs(delta)))
         underlying_risk = abs(signal.entry - signal.sl)
         underlying_reward = abs(signal.tp - signal.entry)

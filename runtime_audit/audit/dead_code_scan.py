@@ -22,12 +22,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SCAN_DIRS = ["quant", "backend/app", "brokers", "routers", "shared"]
 REF_EXTS = {".py", ".ts", ".tsx"}
 KNOWN_DEAD = [
-    "quant/amt/market/vwap_bands.py",
-    "quant/contracts/ports/llm_inference.py",
-    "quant/advisory",
-    "quant/compression_box.py",
-    "quant/range_bars.py",
-    "brokers/broker/paper/broker.py",
     "brokers/broker/market_info.py",
     "backend/app/infrastructure/metrics.py",
     "routers/metrics.py",

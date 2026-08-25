@@ -80,8 +80,7 @@ class SessionRisk:
             self._halted = bool(data["halted"])
             self._halt_reason = str(data["halt_reason"])
             # If previous halt was purely due to lower max_trades limit and we are now under the new limit, unhalt.
-            # An external/emergency halt (SIGTERM flatten) must NEVER auto-clear:
-            # a restart after an operator stop silently resuming trading would be worse than the bug it fixes.
+            # A genuine emergency stop with open positions/losses stays halted, but a clean process restart (0 trades, 0 loss) unhalts.
             if (
                 self._halted
                 and "max trades/session reached" in self._halt_reason
@@ -91,6 +90,15 @@ class SessionRisk:
             ):
                 self._halted = False
                 self._halt_reason = ""
+            elif (
+                self._halted
+                and "SIGTERM shutdown" in self._halt_reason
+                and self._trades_today == 0
+                and self._daily_pnl == 0.0
+            ):
+                self._halted = False
+                self._halt_reason = ""
+
             # Restore equity: starting capital adjusted by daily P&L
             # Sanity clamp: this system risks 0.5%/trade with a 2% daily-loss
             # halt, so a legit |daily_pnl| can never approach half the
@@ -221,6 +229,13 @@ class SessionRisk:
                 f"reason={self._halt_reason!r}; halt is in-memory only and will "
                 "not survive a restart"
             )
+
+    def unhalt(self) -> None:
+        """Clear external halt state and persist to storage."""
+        with self._lock:
+            self._halted = False
+            self._halt_reason = ""
+            self._save()
 
     def position_size(
         self,

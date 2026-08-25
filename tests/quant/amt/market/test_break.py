@@ -38,15 +38,17 @@ class TestCheckIbBreakTick:
         result = check_ib_break_tick(100.0, 102.0, 98.0, True)
         assert result["break_direction"] == ""
 
-    def test_sticky_up(self):
+    def test_reentry_clears_break_up(self):
+        # Price back inside IB (100.0 between 98.0 and 102.0) clears break state
         result = check_ib_break_tick(100.0, 102.0, 98.0, True, current_break_direction="UP")
-        assert result["break_direction"] == "UP"
-        assert result["break_level"] == 102.0
+        assert result["break_direction"] == ""
+        assert result["break_type"] == ""
 
-    def test_sticky_down(self):
+    def test_reentry_clears_break_down(self):
+        # Price back inside IB (100.0 between 98.0 and 102.0) clears break state
         result = check_ib_break_tick(100.0, 102.0, 98.0, True, current_break_direction="DOWN")
-        assert result["break_direction"] == "DOWN"
-        assert result["break_level"] == 98.0
+        assert result["break_direction"] == ""
+        assert result["break_type"] == ""
 
 
 class TestDetectBreak:

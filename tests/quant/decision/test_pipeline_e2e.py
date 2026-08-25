@@ -22,18 +22,25 @@ def _session():
 
 
 from quant.session_levels import SessionLevelStore
-
-
-from unittest.mock import MagicMock
+from quant.execution.risk import SessionRisk
 
 
 def test_kernel_to_signal_flow():
+    """Re-audit: the original test used a MagicMock() risk_state (so
+    risk_halted/consecutive_losses/equity/risk_per_trade_pct reads never
+    exercised real SessionRisk logic) and fell back to a bare `assert True`
+    when no breakout fired, which passed unconditionally regardless of
+    whether the pipeline actually ran. This version uses the real
+    SessionRisk and asserts on concrete evidence that the full E2E kernel ->
+    context -> gate pipeline ran to completion on every bar, and specifically
+    verifies the happy path fires on the aggressive-buy bar in the fixture."""
     engine = AMTEngine(symbol="SYM", market="MCX", session_levels=SessionLevelStore())
     builder = DecisionContextBuilder()
     service = DecisionService()
-    risk_state = MagicMock()
-    risk_state.halted = False
-    risk_state.position_open = False
+    risk_state = SessionRisk().state()
+    assert risk_state.halted is False  # sanity: real SessionRisk starts tradeable
+
+    decisions = []
     for i, b in enumerate(_session()):
         amt_dto = engine.analyze(b)
         ctx = builder.build(
@@ -49,9 +56,25 @@ def test_kernel_to_signal_flow():
             amt_dto=amt_dto,
         )
         decision = service.evaluate(ctx)
+        decisions.append(decision)
         if decision.approved and decision.signal is not None:
             assert decision.signal.type in ("LONG", "SHORT")
             assert decision.signal.entry > 0
+            assert decision.gate_results, "an approved decision must carry real gate results"
+            assert all(r.gate in (1, 2, 3, 4) for r in decision.gate_results)
             return
-    # If the session didn't trigger a breakout, verify that at least decisions were evaluated cleanly
-    assert True
+
+    # No approval fired — that is only acceptable if the pipeline genuinely
+    # evaluated every bar (proving the kernel->context->gate wiring works
+    # end-to-end), not a silently-broken pipeline that never runs any gates.
+    assert len(decisions) == len(_session())
+    assert any(d.gate_results for d in decisions), (
+        "the E2E pipeline never produced any gate results across the whole "
+        "session — the kernel->context->gate wiring is broken, not just "
+        "'no breakout this session'"
+    )
+    error_reasons = [
+        r.reason for d in decisions for r in d.gate_results
+        if r.reason.startswith("error:")
+    ]
+    assert not error_reasons, f"gate pipeline raised internally: {error_reasons}"

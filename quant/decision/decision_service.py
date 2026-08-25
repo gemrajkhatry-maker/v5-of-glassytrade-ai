@@ -85,6 +85,17 @@ class DecisionService:
             return QuantDecision(
                 False, None, "GATE_REJECTED", "", results, blocked,
             )
+        # If Gate 1 (session/spread) or Gate 2 (position/cooldown) failed, hard reject —
+        # no trades or fades allowed. Identified by gate NUMBER, never list position:
+        # positional indexing silently coupled fade eligibility to pipeline order
+        # (audit D-GATE-05) — a reorder or inserted gate would let fades fire while
+        # session-closed or position-open.
+        hard_gate_failed = any(
+            (r.gate in (1, 2)) and not r.passed for r in results
+        )
+        if hard_gate_failed:
+            return QuantDecision(False, None, "GATE_REJECTED", "", results, blocked)
+
         # VA-fade fallback — the balance-returning reversion trade. It targets
         # the POC and requires price OUTSIDE the value area, so it never fires
         # in balanced rotation; a dead market refuses even the reversion.

@@ -28,6 +28,21 @@ from functools import lru_cache
 from typing import Literal
 
 from quant.contracts.sync_boundary import ensure_sync_adapter_result
+from quant.contracts.timezones import (
+    IST,
+    MCX_AFTERNOON_END,
+    MCX_EVENING_END,
+    MCX_MORNING_END,
+    MCX_PRE_OPEN_END,
+    MCX_SESSION_CLOSE,
+    MCX_SESSION_OPEN,
+    NSE_LAST_ENTRY,
+    NSE_MIDDAY_END,
+    NSE_OPENING_END,
+    NSE_PRIMARY_END,
+    NSE_SESSION_CLOSE,
+    NSE_SESSION_OPEN,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -51,8 +66,6 @@ class SessionInfo:
     force_exit: bool  # Whether all positions should be closed (Phase 5)
     market: str  # "NSE" | "MCX" | "GLOBAL"
 
-
-from quant.contracts.timezones import IST
 
 # ---------------------------------------------------------------------------
 # IST timezone offset
@@ -86,7 +99,7 @@ def _to_ist(timestamp: str | datetime | int | float | None) -> datetime:
         dt = timestamp
 
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=IST)
     return dt.astimezone(IST)
 
 
@@ -105,32 +118,40 @@ def _get_nse_phase(
     """
     t = ist_hour * 60 + ist_minute  # minutes since midnight IST
 
+    def _m(clock) -> int:
+        return clock.hour * 60 + clock.minute
+
+    open_m = _m(NSE_SESSION_OPEN)
+
     # Before market open
-    if t < 555:  # before 09:15
-        return ("PRE_MARKET", 0, False, False, False, False, "NEUTRAL")
+    if t < open_m:
+        return ("PRE_MARKET", 0, False, False, False, True, "NEUTRAL")
 
     # Phase 1: Opening Noise (09:15–09:30)
-    if t < 570:  # before 09:30
+    if t < _m(NSE_OPENING_END):
         return ("NSE_OPENING", 1, False, False, False, False, "NEUTRAL")
 
     # Phase 2: Primary Setup Window (09:30–11:30)
-    if t < 690:  # before 11:30
+    if t < _m(NSE_PRIMARY_END):
         return ("NSE_PRIMARY", 2, True, True, True, False, "TREND_CONTINUATION")
 
     # Phase 3: Midday Consolidation (11:30–14:00)
-    if t < 840:  # before 14:00
+    if t < _m(NSE_MIDDAY_END):
         return ("NSE_MIDDAY", 3, True, False, True, False, "MEAN_REVERSION")
 
-    # Phase 4: Power Hour (14:00–15:15)
-    if t < 915:  # before 15:15
+    last_entry_m = _m(NSE_LAST_ENTRY)
+    close_m = _m(NSE_SESSION_CLOSE)
+
+    # Phase 4: Power Hour (14:00–last entry)
+    if t < last_entry_m:
         return ("NSE_POWER_HOUR", 4, True, True, True, False, "TREND_CONTINUATION")
 
-    # Phase 5: Close Protection (15:15–15:30)
-    if t < 930:  # before 15:30
+    # Phase 5: Close Protection (last entry–real close)
+    if t < close_m:
         return ("NSE_CLOSE", 5, False, False, False, True, "NEUTRAL")
 
     # After market close
-    return ("POST_MARKET", 0, False, False, False, False, "NEUTRAL")
+    return ("POST_MARKET", 0, False, False, False, True, "NEUTRAL")
 
 
 # ---------------------------------------------------------------------------
@@ -148,26 +169,28 @@ def _get_mcx_phase(
     """
     t = ist_hour * 60 + ist_minute
 
-    if t < 540:  # before 09:00
-        return ("MCX_PRE_MARKET", 0, False, False, False, False, "NEUTRAL")
+    def _m(clock) -> int:
+        return clock.hour * 60 + clock.minute
 
-    if t < 555:  # 09:00–09:15 pre-open
+    if t < _m(MCX_SESSION_OPEN):
+        return ("MCX_PRE_MARKET", 0, False, False, False, True, "NEUTRAL")
+
+    if t < _m(MCX_PRE_OPEN_END):
         return ("MCX_PRE_OPEN", 0, False, False, False, False, "NEUTRAL")
 
-    if t < 840:  # 09:15–14:00 morning
+    if t < _m(MCX_MORNING_END):
         return ("MCX_MORNING", 1, True, True, True, False, "TREND_CONTINUATION")
 
-    if t < 1080:  # 14:00–18:00 afternoon
+    if t < _m(MCX_AFTERNOON_END):
         return ("MCX_AFTERNOON", 2, True, True, True, False, "TREND_CONTINUATION")
 
-    if t < 1380:  # 18:00–23:00 evening — US/COMEX/NYMEX overlap, HIGH liquidity
+    if t < _m(MCX_EVENING_END):
         return ("MCX_EVENING", 3, True, True, True, False, "TREND_CONTINUATION")
 
-    if t < 1410:  # 23:00–23:30 close protection (real MCX close 23:30 IST;
-        #            23:55 during US daylight saving — keep the conservative 23:30)
+    if t < _m(MCX_SESSION_CLOSE):
         return ("MCX_CLOSE", 4, False, False, False, True, "NEUTRAL")
 
-    return ("MCX_POST_MARKET", 0, False, False, False, False, "NEUTRAL")
+    return ("MCX_POST_MARKET", 0, False, False, False, True, "NEUTRAL")
 
 
 # ---------------------------------------------------------------------------
@@ -249,7 +272,7 @@ def get_session_info(
         market: "NSE" | "MCX" | "GLOBAL" (default: "NSE")
     """
     market = market.upper()
-    if market in ("NSE", "NFO", "NSE_FNO", "NSE_INDEX", "NSE_OPTIONS"):
+    if market in ("NSE", "NFO", "NSE_FNO", "NSE_INDEX", "NSE_OPTIONS", "BSE", "BFO"):
         market = "NSE"
     elif market in ("MCX", "MCX_COMM", "MCX_COMMODITY", "MCX_OPTIONS"):
         market = "MCX"
@@ -437,33 +460,49 @@ def load_prior_profile(storage, symbol: str) -> dict[str, float]:
 # ---------------------------------------------------------------------------
 
 
-def is_expiry_day(trade_date: date) -> bool:
-    """Check if the given date is an NSE options expiry day.
+def is_expiry_day(trade_date: date, symbol: str | None = None) -> bool:
+    """Expiry for *this* contract, not a global Tuesday heuristic.
 
-    Current NSE schedule (weeklies for all indices except NIFTY were
-    discontinued in Nov 2024):
-      - NIFTY weekly: every Tuesday.
-      - BANKNIFTY/FINNIFTY/MIDCPNIFTY monthly: last Tuesday of the month.
-    Every Tuesday is therefore an expiry day (weekly or monthly), so any
-    Tuesday is an expiry day.
+    No symbol: NIFTY weekly Tuesday (the only remaining NSE weekly).
+    BANKNIFTY/FINNIFTY/MIDCPNIFTY: last Tuesday of the month.
+    Parsed contract date wins when the symbol embeds expiry.
     """
-    return trade_date.weekday() == 1  # Tuesday = 1
+    if symbol:
+        from quant.session_gates import parse_contract_expiry
+        parsed = parse_contract_expiry(symbol)
+        if parsed is not None:
+            return trade_date == parsed
+        root = ""
+        try:
+            from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+            spec = DEFAULT_REGISTRY.try_resolve(symbol)
+            root = spec.root if spec else str(symbol).split()[0].upper()
+        except Exception:
+            root = str(symbol).split()[0].upper()
+        if root in ("SENSEX", "BANKEX"):
+            return trade_date.weekday() == 4
+        if root in ("BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"):
+            if trade_date.weekday() != 1:
+                return False
+            nxt = trade_date + timedelta(days=7)
+            return nxt.month != trade_date.month
+    return trade_date.weekday() == 1
 
 
 def seconds_to_close(current_time: datetime, exchange: str = "NSE") -> float:
     """Return seconds remaining until market close.
 
-    NSE close: 15:15 IST
+    NSE close: 15:30 IST (real exchange close; last entry is 15:15)
     MCX close: 23:30 IST
     Returns 0.0 if market is already closed or exchange is unknown.
     """
     ist_dt = _to_ist(current_time)
 
     ex = exchange.upper()
-    if ex in ("NSE", "NFO", "NSE_FNO", "NSE_INDEX", "NSE_OPTIONS"):
-        close_hour, close_minute = 15, 15
+    if ex in ("NSE", "NFO", "NSE_FNO", "NSE_INDEX", "NSE_OPTIONS", "BSE", "BFO"):
+        close_hour, close_minute = NSE_SESSION_CLOSE.hour, NSE_SESSION_CLOSE.minute
     elif ex in ("MCX", "MCX_COMM", "MCX_COMMODITY", "MCX_OPTIONS"):
-        close_hour, close_minute = 23, 30
+        close_hour, close_minute = MCX_SESSION_CLOSE.hour, MCX_SESSION_CLOSE.minute
     else:
         return 0.0
 

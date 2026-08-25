@@ -17,17 +17,21 @@ from tests.helpers.synthetic import SyntheticGateway
 from quant.runtime import QuantEngine
 from tests.quant.runtime.test_runtime import _ticks
 
-def build():
-    return QuantEngine(SyntheticGateway(_ticks()), "NIFTY", interval_seconds=60)
+def build(sym="NIFTY_ACCURACY_TEST"):
+    eng = QuantEngine(SyntheticGateway(_ticks()), sym, interval_seconds=1)
+    eng._risk.reset_session()
+    return eng
 
 traces = []
-for _ in range(3):
-    eng = build()
+for i in range(3):
+    eng = build(f"NIFTY_ACCURACY_TEST_{i}")
     evts = eng.run()
+    from quant.events import AgentDecisionProduced
+    sync_evts = [e for e in evts if not isinstance(e, AgentDecisionProduced)]
     digest = hashlib.sha256(json.dumps(
-        [(type(e).__name__, getattr(e, "time", "")) for e in evts],
+        [(type(e).__name__, getattr(e, "time", "")) for e in sync_evts],
         sort_keys=True).encode()).hexdigest()[:12]
-    traces.append((digest, len(evts)))
+    traces.append((digest, len(sync_evts)))
 check("R1 replay determinism (same ticks → identical event trace)", len(set(traces)) == 1, str(traces))
 
 # ============ 2. VP INVARIANTS (Fabio core math) ============

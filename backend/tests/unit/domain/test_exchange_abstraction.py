@@ -3,7 +3,6 @@
 Tests:
   - ExchangeConfig value object (immutability, factory methods, YAML parsing)
   - SymbolRegistry (exchange detection, deduplication)
-  - SessionContextFactory (DIP-compliant construction)
   - Canonical ExchangeConfig bridge (quant.contracts.exchange_config)
 """
 
@@ -15,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 
 from quant.contracts.exchange_config import ExchangeConfig
 from quant.amt.session.symbol_registry import SymbolRegistry
-from quant.amt.session.context_factory import SessionContextFactory
+from quant.contracts.instrument_registry import UnknownInstrumentError
 
 _IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -145,9 +144,12 @@ class TestSymbolRegistry:
         assert reg.exchange_for("MCX:CRUDEOIL") == "MCX"
         assert reg.exchange_for("NSE:NIFTY") == "NSE"
 
-    def test_unknown_defaults_to_mcx(self):
+    def test_unknown_raises_instead_of_defaulting_to_mcx(self):
+        # Phase 3: an unrecognized root must fail loudly, not silently
+        # route to MCX.
         reg = SymbolRegistry()
-        assert reg.exchange_for("UNKNOWN_THING 99") == "MCX"
+        with pytest.raises(UnknownInstrumentError):
+            reg.exchange_for("UNKNOWN_THING 99")
 
     def test_all_underlyings(self):
         reg = SymbolRegistry()
@@ -182,49 +184,6 @@ class TestSymbolRegistry:
             "COTTONCANDY",
         }
         assert dhan_mcx.issubset(reg.mcx_underlyings)
-
-
-# ======================================================================
-# SessionContextFactory Tests
-# ======================================================================
-
-
-class TestSessionContextFactory:
-    """SessionContextFactory — DIP-compliant construction."""
-
-    def test_constructed_with_config(self):
-        cfg = ExchangeConfig.for_exchange("MCX")
-        reg = SymbolRegistry()
-        factory = SessionContextFactory(exchange_config=cfg, symbol_registry=reg)
-        assert factory._config is cfg
-        assert factory._registry is reg
-
-    def test_exchange_for_symbol_uses_registry(self):
-        cfg = ExchangeConfig.for_exchange("MCX")
-        reg = SymbolRegistry()
-        factory = SessionContextFactory(exchange_config=cfg, symbol_registry=reg)
-        assert factory.get_exchange_for_symbol("NIFTY 27 FEB 25500 CALL") == "NSE"
-        assert factory.get_exchange_for_symbol("CRUDEOIL 19 MAR 6000 CALL") == "MCX"
-
-    def test_from_tick_uses_injected_config(self):
-        """Instance method should use injected exchange config."""
-        from quant.contracts.value_objects import OHLC
-
-        cfg = ExchangeConfig.for_exchange("MCX")
-        reg = SymbolRegistry()
-        factory = SessionContextFactory(exchange_config=cfg, symbol_registry=reg)
-
-        ohlc = OHLC.create(
-            time="2024-01-03T10:00:00",
-            open=100.0,
-            high=105.0,
-            low=95.0,
-            close=102.0,
-            volume=1000,
-        )
-        # Should use MCX from injected config
-        info = factory.from_tick(ohlc)
-        assert info.market == "MCX"
 
 
 # ======================================================================
@@ -296,34 +255,3 @@ class TestAbstractionLayerConsistency:
         # The dead exchange-strategy port was deleted in Phase C3 — container
         # composition is the assertion now.
         assert container is not None
-
-    def test_no_domain_imports_config(self):
-        """Verify the main session context factory path no longer imports app.config at module level.
-
-        Legacy static methods still import inside function bodies (acceptable for backward compat).
-        The key requirement: no module-level `from app.config import` in the refactored factory.
-        """
-        import inspect
-
-        from quant.amt.session import context_factory as session_context_factory
-
-        source = inspect.getsource(session_context_factory)
-        lines = source.split("\n")
-
-        # Find module-level imports (lines that start at column 0 with import/from)
-        # Exclude lines inside class/function bodies (indented)
-        module_level_config_imports = []
-        in_class_body = False
-        for line in lines:
-            stripped = line.strip()
-            # Detect class definition at module level
-            if stripped.startswith("class "):
-                in_class_body = True
-            # Lines at column 0 that are imports from app.config
-            if not line.startswith(" ") and not line.startswith("\t"):
-                if "from app.config" in stripped or "import app.config" in stripped:
-                    module_level_config_imports.append(stripped)
-
-        assert len(module_level_config_imports) == 0, (
-            f"session_context_factory.py has module-level app.config import: {module_level_config_imports}"
-        )

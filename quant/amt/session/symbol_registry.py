@@ -2,7 +2,6 @@
 
 Eliminates the duplicated _MCX_UNDERLYINGS frozenset that appeared in:
   - app/infrastructure/adapters/dhan_adapter.py
-  - app/domain/fabio_ai/services/session_context_factory.py
   - app/domain/fabio_ai/services/option_scanner.py
 
 All exchange-detection logic now lives here.
@@ -20,7 +19,11 @@ from datetime import date, datetime, time as dtime
 from typing import FrozenSet
 from zoneinfo import ZoneInfo
 
-from quant.contracts.exchange_config import ExchangeConfig
+from quant.contracts.instrument_registry import (
+    DEFAULT_REGISTRY,
+    UnknownInstrumentError,
+    root_token,
+)
 
 IST_ZONE = ZoneInfo("Asia/Kolkata")
 
@@ -32,11 +35,16 @@ class SymbolRegistry:
     Thread-safe, immutable, injectable via constructor.
     """
 
+    # Defaults sourced from the unified InstrumentRegistry (Phase 3) rather
+    # than a duplicated exchange table — exchange_for() below tries the
+    # registry first anyway; these frozensets only back the legacy
+    # _extract_underlying prefix-match fallback used by from_exchange_configs
+    # callers that inject their own sets.
     mcx_underlyings: FrozenSet[str] = field(
-        default_factory=lambda: ExchangeConfig.for_exchange("MCX").underlyings
+        default_factory=lambda: DEFAULT_REGISTRY.mcx_roots()
     )
     nse_underlyings: FrozenSet[str] = field(
-        default_factory=lambda: ExchangeConfig.for_exchange("NSE").underlyings
+        default_factory=lambda: DEFAULT_REGISTRY.nse_session_roots()
     )
 
     def exchange_for(self, symbol: str) -> str:
@@ -48,12 +56,19 @@ class SymbolRegistry:
         Returns:
             "MCX" or "NSE"
         """
+        spec = DEFAULT_REGISTRY.try_resolve(symbol)
+        if spec is not None:
+            if spec.exchange == "MCX":
+                return "MCX"
+            return "NSE"
         underlying = self._extract_underlying(symbol)
         if underlying in self.mcx_underlyings:
             return "MCX"
         if underlying in self.nse_underlyings:
             return "NSE"
-        return "MCX"  # safe default
+        raise UnknownInstrumentError(
+            f"Unknown instrument root from {symbol!r} — refusing silent MCX default"
+        )
 
     def is_mcx(self, symbol: str) -> bool:
         return self.exchange_for(symbol) == "MCX"
@@ -62,8 +77,8 @@ class SymbolRegistry:
         return self.exchange_for(symbol) == "NSE"
 
     def is_option(self, symbol: str) -> bool:
-        upper = symbol.upper()
-        return "CALL" in upper or "PUT" in upper
+        from quant.contracts.instrument_registry import is_option_contract
+        return is_option_contract(symbol)
 
     def all_underlyings(self) -> FrozenSet[str]:
         return self.mcx_underlyings | self.nse_underlyings
@@ -173,13 +188,15 @@ def parse_symbol_metadata(symbol: str, spot: float = 0.0) -> dict:
 # Market hours gate
 # ---------------------------------------------------------------------------
 
-# NSE equity + options: Mon-Fri 09:15-15:15 IST
-_NSE_OPENIST  = dtime(9, 15)
-_NSE_CLOSEIST = dtime(15, 15)
+# NSE equity + options: Mon-Fri 09:15-15:30 IST
+from quant.contracts.timezones import NSE_SESSION_OPEN, NSE_SESSION_CLOSE, MCX_SESSION_OPEN, MCX_SESSION_CLOSE
+
+_NSE_OPENIST  = NSE_SESSION_OPEN
+_NSE_CLOSEIST = NSE_SESSION_CLOSE
 
 # MCX commodity derivatives: Mon-Fri 09:00-23:30 IST (23:55 in US DST)
-_MCX_OPENIST  = dtime(9, 0)
-_MCX_CLOSEIST = dtime(23, 30)
+_MCX_OPENIST  = MCX_SESSION_OPEN
+_MCX_CLOSEIST = MCX_SESSION_CLOSE
 
 # Exchanges whose hours span midnight (none currently, but structure supports it)
 _EXCHANGE_HOURS: dict[str, tuple[dtime, dtime]] = {
@@ -195,7 +212,7 @@ def is_market_open(ts: str | None = None, exchange: str | None = None) -> bool:
     """True during live trading hours for the given exchange (IST, Mon-Fri).
 
     Exchange-specific hours:
-      NSE / NSE_EQ / BSE / NFO : 09:15 – 15:15 IST
+      NSE / NSE_EQ / BSE / NFO : 09:15 – 15:30 IST
       MCX                       : 09:00 – 23:30 IST
 
     Falls back to NSE hours when exchange is unknown.

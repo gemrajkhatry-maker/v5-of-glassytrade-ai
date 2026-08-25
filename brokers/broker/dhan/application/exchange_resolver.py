@@ -176,6 +176,33 @@ class DhanExchangeResolver:
     @classmethod
     def _auto_detect_exchange(cls, symbol: str) -> ResolvedExchange:
         """Auto-detect exchange from symbol characteristics."""
+        from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+
+        spec = DEFAULT_REGISTRY.try_resolve(symbol)
+        if spec is not None:
+            seg_map = {
+                "NSE_FNO": ExchangeSegment.NSE_FNO,
+                "BSE_FNO": ExchangeSegment.BSE_FNO,
+                "MCX_COMM": ExchangeSegment.MCX,
+                "NSE": ExchangeSegment.NSE_EQ,
+            }
+            is_fut = cls._is_futures_symbol(symbol)
+            is_opt = cls._is_option_symbol(symbol)
+            if is_fut:
+                stype = "future"
+            elif spec.exchange == "MCX":
+                stype = "commodity_option" if is_opt else "commodity"
+            elif spec.exchange == "BSE":
+                stype = "index_option" if is_opt else "index"
+            else:
+                stype = "index_option" if is_opt else "index"
+            return ResolvedExchange(
+                exchange=Exchange(spec.dhan_exchange),
+                segment=seg_map.get(spec.segment, ExchangeSegment.NSE_FNO),
+                symbol_type=stype,
+                step_size=spec.strike_interval,
+            )
+
         # Check for index symbols first
         if symbol in INDEX_EXCHANGE_MAP:
             base_exchange = INDEX_EXCHANGE_MAP[symbol]
@@ -199,30 +226,8 @@ class DhanExchangeResolver:
 
         # Check for derivative patterns in symbol name
         # e.g. "NIFTY 13 JAN 25750 CALL", "RELIANCE 25 JAN 2500 PUT", "NIFTY JAN FUT"
-        is_fno = any(x in symbol for x in [" CALL", " PUT", " CE", " PE", " FUT"])
-        if is_fno:
+        if cls._is_option_symbol(symbol) or cls._is_futures_symbol(symbol):
             return cls._resolve_derivative_symbol(symbol)
-
-        # Check for compact option patterns (e.g., "NIFTY23FEB18000CE")
-        if cls._is_option_symbol(symbol):
-            return cls._resolve_option_symbol(symbol)
-
-        # Check for compact futures patterns (e.g., "NIFTY23FEBFUT")
-        if cls._is_futures_symbol(symbol):
-            underlying = cls._extract_underlying(symbol)
-            if underlying in BSE_INDEX_SYMBOLS:
-                return ResolvedExchange(
-                    exchange=Exchange.BFO,
-                    segment=ExchangeSegment.BSE_FNO,
-                    symbol_type="future",
-                    step_size=INDEX_STEP_SIZES.get(underlying),
-                )
-            return ResolvedExchange(
-                exchange=Exchange.NFO,
-                segment=ExchangeSegment.NSE_FNO,
-                symbol_type="future",
-                step_size=cls.get_step_size(underlying),
-            )
 
         # Check for known equity symbols
         if symbol in NSE_EQUITY_SYMBOLS:
@@ -244,10 +249,25 @@ class DhanExchangeResolver:
         """
         Resolve segment from explicit exchange.
 
-        CRITICAL: Detects index/commodity by SYMBOL NAME first, then applies
-        exchange context. This ensures NIFTY+NFO returns symbol_type='index',
-        not 'derivative', which is essential for correct security ID resolution.
+        Cash-market hints (NSE/BSE/INDEX) on a registered F&O root or a
+        derivative contract are YAML session labels, not Dhan segments —
+        auto-detect instead of routing NIFTY options to NSE_EQ.
         """
+        from brokers.broker.types import Exchange as Ex
+        from quant.contracts.instrument_registry import (
+            DEFAULT_REGISTRY,
+            is_futures_contract,
+            is_option_contract,
+        )
+
+        cash_hint = exchange in (Ex.NSE, Ex.BSE, Ex.INDEX)
+        if cash_hint and (
+            is_option_contract(symbol)
+            or is_futures_contract(symbol)
+            or DEFAULT_REGISTRY.try_resolve(symbol) is not None
+        ):
+            return cls._auto_detect_exchange(symbol)
+
         # When explicit exchange is provided, respect it fully for segment mapping.
         # Still detect symbol type by name for the symbol_type + step_size fields.
         exchange_map = {
@@ -266,27 +286,22 @@ class DhanExchangeResolver:
 
     @classmethod
     def _resolve_derivative_symbol(cls, symbol: str) -> ResolvedExchange:
-        """Resolve exchange for derivative symbol containing CALL/PUT/FUT keywords."""
-        # Determine if BSE F&O (SENSEX, BANKEX)
-        if any(bse_sym in symbol for bse_sym in BSE_INDEX_SYMBOLS):
+        """Resolve exchange for a derivative using the canonical root, not substrings."""
+        underlying = cls._extract_underlying(symbol)
+        if underlying in BSE_INDEX_SYMBOLS:
             return ResolvedExchange(
                 exchange=Exchange.BFO,
                 segment=ExchangeSegment.BSE_FNO,
                 symbol_type="derivative",
                 step_size=cls.get_step_size(symbol),
             )
-
-        # Check for MCX commodities in the symbol
-        for commodity in MCX_COMMODITY_SYMBOLS:
-            if commodity in symbol:
-                return ResolvedExchange(
-                    exchange=Exchange.MCX,
-                    segment=ExchangeSegment.MCX,
-                    symbol_type="derivative",
-                    step_size=MCX_COMMODITY_STEP_SIZES.get(commodity),
-                )
-
-        # Default to NSE F&O
+        if underlying in MCX_COMMODITY_SYMBOLS:
+            return ResolvedExchange(
+                exchange=Exchange.MCX,
+                segment=ExchangeSegment.MCX,
+                symbol_type="derivative",
+                step_size=MCX_COMMODITY_STEP_SIZES.get(underlying),
+            )
         return ResolvedExchange(
             exchange=Exchange.NFO,
             segment=ExchangeSegment.NSE_FNO,
@@ -296,20 +311,13 @@ class DhanExchangeResolver:
 
     @classmethod
     def _is_option_symbol(cls, symbol: str) -> bool:
-        """Check if symbol matches compact option pattern (e.g., NIFTY23FEB18000CE).
-
-        Must have digits before CE/PE suffix to distinguish from symbols like RELIANCE.
-        """
-        if not (symbol.endswith("CE") or symbol.endswith("PE")):
-            return False
-        # Require at least one digit before the CE/PE suffix to be an option symbol
-        prefix = symbol[:-2]
-        return bool(prefix) and any(c.isdigit() for c in prefix)
+        from quant.contracts.instrument_registry import is_option_contract
+        return is_option_contract(symbol)
 
     @classmethod
     def _is_futures_symbol(cls, symbol: str) -> bool:
-        """Check if symbol matches compact futures pattern (e.g., NIFTY23FEBFUT)."""
-        return "FUT" in symbol
+        from quant.contracts.instrument_registry import is_futures_contract
+        return is_futures_contract(symbol)
 
     @classmethod
     def _resolve_option_symbol(cls, symbol: str) -> ResolvedExchange:
@@ -352,21 +360,8 @@ class DhanExchangeResolver:
 
     @classmethod
     def _extract_underlying(cls, symbol: str) -> str:
-        """Extract underlying symbol from option/futures symbol."""
-        # Remove option suffix (CE/PE)
-        if symbol.endswith("CE") or symbol.endswith("PE"):
-            symbol = symbol[:-2]
-
-        # Remove futures suffix
-        if "FUT" in symbol:
-            symbol = symbol.replace("FUT", "")
-
-        # Try to extract letters only (underlying)
-        match = re.match(r"^([A-Z&]+)", symbol)
-        if match:
-            return match.group(1)
-
-        return symbol
+        from quant.contracts.instrument_registry import root_token
+        return root_token(symbol)
 
     @classmethod
     def get_step_size(cls, symbol: str) -> Optional[float]:
@@ -393,6 +388,10 @@ class DhanExchangeResolver:
                 if match:
                     symbol = match.group(1)
                 break
+        from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+        spec = DEFAULT_REGISTRY.try_resolve(symbol)
+        if spec is not None:
+            return spec.strike_interval
         return INDEX_STEP_SIZES.get(symbol) or MCX_COMMODITY_STEP_SIZES.get(symbol)
 
     @classmethod

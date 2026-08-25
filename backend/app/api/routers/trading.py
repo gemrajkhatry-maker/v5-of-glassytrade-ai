@@ -85,3 +85,14 @@ async def get_position_lifecycle(
     if not events:
         raise HTTPException(status_code=404, detail="Position lifecycle not found")
     return _trading_query_service.build_lifecycle_summary(events)
+
+
+@router.post("/risk/unhalt")
+async def unhalt_trading():
+    """Operator endpoint to unhalt all trading engines after emergency or restart halt."""
+    from app.main import app
+    if hasattr(app.state, "coordinator") and hasattr(app.state.coordinator, "unhalt_all"):
+        count = app.state.coordinator.unhalt_all()
+        return {"status": "ok", "unhalted_engines": count, "message": f"Cleared risk halts across {count} engines"}
+    return {"status": "ok", "unhalted_engines": 0, "message": "Coordinator not active"}
+

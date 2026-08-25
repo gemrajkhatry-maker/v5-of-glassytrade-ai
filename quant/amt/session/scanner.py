@@ -15,6 +15,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
+from quant.contracts.instrument_registry import DEFAULT_REGISTRY, UnknownInstrumentError
 from quant.contracts.sync_boundary import ensure_sync_adapter_result
 
 logger = logging.getLogger(__name__)
@@ -41,47 +42,17 @@ class ScanResult:
 class OptionScannerService:
     """Simple momentum-based contract selection for MCX/NSE."""
 
-    _SCAN_NSE_UNDERLYINGS = frozenset({"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY"})
-    _SCAN_MCX_UNDERLYINGS = frozenset(
-        {
-            "CRUDEOIL",
-            "NATURALGAS",
-            "GOLD",
-            "SILVER",
-            # MCX mini / alternate roots (Dhan chain is per root; SILVER ≠ SILVERM)
-            "GOLDM",
-            "SILVERM",
-            "CRUDEOILM",
-        }
-    )
-
+    _SCAN_NSE_UNDERLYINGS = DEFAULT_REGISTRY.nse_session_roots()
+    _SCAN_MCX_UNDERLYINGS = DEFAULT_REGISTRY.mcx_roots()
     _STRIKE_INTERVALS = {
-        "NIFTY": 50,
-        "BANKNIFTY": 100,
-        "FINNIFTY": 50,
-        "MIDCPNIFTY": 25,
-        "CRUDEOIL": 50,
-        "NATURALGAS": 5,
-        "GOLD": 100,
-        "GOLDM": 100,
-        "SILVER": 500,
-        "SILVERM": 500,
-        "CRUDEOILM": 50,
+        s.root: int(s.strike_interval) for s in DEFAULT_REGISTRY.specs()
     }
+    _MIN_OI = {s.root: s.min_oi for s in DEFAULT_REGISTRY.specs()}
 
-    _MIN_OI = {
-        "NIFTY": 50_000,
-        "BANKNIFTY": 150_000,
-        "FINNIFTY": 30_000,
-        "MIDCPNIFTY": 20_000,
-        "CRUDEOIL": 10,
-        "NATURALGAS": 500,
-        "GOLD": 0,
-        "GOLDM": 0,
-        "SILVER": 0,
-        "SILVERM": 0,
-        "CRUDEOILM": 10,
-    }
+    @staticmethod
+    def dhan_exchange_for(underlying: str) -> str:
+        """Dhan API exchange code (NFO/BFO/MCX). Unknown roots raise."""
+        return DEFAULT_REGISTRY.resolve(underlying).dhan_exchange
 
     def __init__(self, broker, default_underlyings: list[str] | None = None) -> None:
         self._broker = broker
@@ -244,12 +215,11 @@ class OptionScannerService:
         """Fetch chain for one underlying and return scored contracts (CE+PE near ATM)."""
         out: list[ScanResult] = []
         u_upper = u.upper()
-        if u_upper in self._SCAN_MCX_UNDERLYINGS:
-            _exchange = "MCX"
-        elif u_upper in self._SCAN_NSE_UNDERLYINGS:
-            _exchange = "NFO"
-        else:
-            _exchange = exchange or "MCX"
+        try:
+            _exchange = self.dhan_exchange_for(u_upper)
+        except UnknownInstrumentError:
+            logger.error("%s: unknown instrument root — refusing silent MCX default", u)
+            return out
 
         effective_expiry_index = expiry_index
         chain = ensure_sync_adapter_result(
@@ -335,16 +305,7 @@ class OptionScannerService:
             atm + i * interval
             for i in range(-strikes_around_atm, strikes_around_atm + 1)
         ]
-        is_mcx = u.upper() in (
-            "CRUDEOIL",
-            "CRUDEOILM",
-            "GOLD",
-            "GOLDM",
-            "SILVER",
-            "SILVERM",
-            "NATURALGAS",
-            "COPPER",
-        )
+        is_mcx = u.upper() in DEFAULT_REGISTRY.mcx_roots()
 
         # ponytail: relative liquidity — normalize vol against chain median so
         # BANKNIFTY's naturally larger volumes don't outrank FINNIFTY. Compute
@@ -487,7 +448,19 @@ class OptionScannerService:
         # Per-underlying shortlists (best contracts first within each root).
         per_u: dict[str, list[ScanResult]] = {}
         for u_name, u_results in grouped.items():
-            ranked = sorted(u_results, key=lambda r: -r.score)
+            if preferred_option_type:
+                ranked = sorted(u_results, key=lambda r: -r.score)
+            else:
+                # Pair CE and PE so the engine has actionable contracts in BOTH directions
+                ce_list = sorted([r for r in u_results if r.option_type == "CE"], key=lambda r: -r.score)
+                pe_list = sorted([r for r in u_results if r.option_type == "PE"], key=lambda r: -r.score)
+                paired = []
+                for i in range(max(len(ce_list), len(pe_list))):
+                    if i < len(ce_list):
+                        paired.append(ce_list[i])
+                    if i < len(pe_list):
+                        paired.append(pe_list[i])
+                ranked = paired if paired else sorted(u_results, key=lambda r: -r.score)
             cap = max(1, int(top_per_underlying))
             per_u[u_name] = ranked[:cap]
 
@@ -539,35 +512,19 @@ class OptionScannerService:
         # not "show me ATM monitors anyway" — those would get traded.
         if not final and not big_move_mode:
             logger.info("No momentum setups — selecting ATM contracts for monitoring")
-            
-            # Determine exchange for fallback
-            _fb_exchange = exchange or ("MCX" if "MCX" in str(self._broker) else "NFO")
-            
-            # Use provided underlyings or detect from exchange
+
             if not underlyings:
-                if _fb_exchange == "MCX":
-                    _fb_underlyings = [
-                        "CRUDEOIL",
-                        "NATURALGAS",
-                        "GOLD",
-                        "GOLDM",
-                        "SILVER",
-                        "SILVERM",
-                    ]
-                else:
-                    _fb_underlyings = ["NIFTY", "BANKNIFTY", "FINNIFTY"]
-            else:
-                _fb_underlyings = underlyings
+                logger.error("scanner fallback has no underlyings — refusing hardcoded NSE/MCX lists")
+                return final
+            _fb_underlyings = underlyings
 
             for u in _fb_underlyings:
                 try:
-                    # Auto-detect exchange for this underlying
                     u_upper = u.upper()
-                    _u_exchange = _fb_exchange
-                    if u_upper in self._SCAN_MCX_UNDERLYINGS:
-                        _u_exchange = "MCX"
-                    elif u_upper in self._SCAN_NSE_UNDERLYINGS:
-                        _u_exchange = "NFO"
+                    try:
+                        _u_exchange = self.dhan_exchange_for(u_upper)
+                    except UnknownInstrumentError:
+                        continue
 
                     chain = ensure_sync_adapter_result(
                         "broker.get_option_chain",
@@ -664,8 +621,8 @@ class ContractSwitchGuard:
             return False
         if current_time - self._last_score_time < 300:  # 5 min cooldown
             return False
-        # Switch only if score delta > 15 pts
-        if abs(new_score - self._current_score) > 15:
+        # Switch only if new contract is superior by > 15 pts
+        if (new_score - self._current_score) > 15:
             self._current_contract = new_contract
             self._current_score = new_score
             self._last_score_time = current_time

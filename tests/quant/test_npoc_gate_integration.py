@@ -1,13 +1,17 @@
-"""Test NPOC proximity integration into triple-A gate decisions.
+"""Test NPOC integration into the decision pipeline.
 
-Ponytail: NPOC fields already exist in DecisionContext but are not used by gates.
-This test verifies the minimal fix: gate considers NPOC proximity without
-changing existing gate logic.
+Re-audit finding: this file's original assertions only checked
+``decision.signal is not None`` — true regardless of whether NPOC data was
+consulted anywhere, so it proved nothing about NPOC wiring (false
+confidence). Verified where NPOC fields actually flow: ``gates_edge.py``
+never references ``npoc_above``/``npoc_below`` at all (confirmed by direct
+search) — NPOC is not, and was never meant to be, an entry gate. The real
+integration point is ``SignalBuilder._structural_tp``, which uses NPOC as
+the highest-priority take-profit target (Fabio: target the nearest unfilled
+naked POC). These tests now assert on that real behavior instead.
 """
-import pytest
 from quant.decision.context import DecisionContext
-from quant.decision.decision_service import DecisionService
-from quant.contracts.enums import MarketState
+from quant.decision.signal_builder import SignalBuilder
 
 
 def _make_bar(time_str: str, o: float, h: float, l: float, c: float, vol: float = 1000.0, delta: float = 200.0) -> object:
@@ -25,75 +29,53 @@ def _make_bar(time_str: str, o: float, h: float, l: float, c: float, vol: float 
     )
 
 
-def test_gate_triple_a_edge_npoc_above_long():
-    """When price is near a prior-session NPOC above, the triple-A gate 
-    should not reject solely because of NPOC proximity.
-
-    Ponytail: NPOC above is a prior-session POC that price hasn't revisited.
-    It acts as a price magnet. The gate should allow entries near NPOC.
-    """
-    # Price 24590 is 10 ticks from NPOC 24600 (within 2-tick proximity)
-    bar = _make_bar("2026-08-19T10:00:00+05:30", o=24590.0, h=24600.0, l=24580.0, c=24590.0, vol=5000.0, delta=1500.0)
-
+def test_structural_tp_targets_npoc_above_for_long():
+    """LONG: with a qualifying NPOC above entry, it must win as the TP —
+    NPOC is the highest-priority structural target (ahead of prior POC and
+    the opposite VA edge)."""
+    entry, sl = 24500.0, 24450.0  # risk = 50
     ctx = DecisionContext(
-        bar=bar,
-        symbol="NIFTY",
-        session_open=True,
-        warmup_complete=True,
-        position_open=False,
-        agent_direction="LONG",
-        agent_probability=0.80,
-        market_state=MarketState.IMBALANCED,
-        setup_evidence=None,
-        vah=24480.0,
-        val=24400.0,
-        poc=24450.0,
-        vwap_upper_2=24600.0,
-        vwap_lower_2=24350.0,
-        cvd_slope=2.5,
-        allow_trend=True,
-        allow_reversion=True,
-        # Price 24590 is 10 ticks from NPOC 24600 - within 2-tick proximity for entry
-        npoc_above=24600.0,
-        npoc_below=0.0,
+        npoc_above=24650.0,   # rr = 150/50 = 3.0 >= min_rr
+        prior_poc=24700.0,    # farther than NPOC — must lose priority
+        vah=24800.0,
     )
-
-    decision = DecisionService().evaluate(ctx)
-    # Gate should approve (Triple-A edge is valid) or at minimum not fail
-    # specifically because of NPOC proximity
-    assert decision.signal is not None, "Signal should be produced"
-    # The signal reason should not mention NPOC as a rejection reason
-    # (it may mention it as a factor, but shouldn't be the cause of rejection)
+    tp = SignalBuilder._structural_tp(ctx, entry, sl, "LONG", fallback_tp=24575.0)
+    assert tp == 24650.0, "NPOC above must be selected over prior_poc/vah for LONG"
 
 
-def test_gate_triple_a_edge_npoc_below_short():
-    """When price is near a prior-session NPOC below, the triple-A gate 
-    should allow SHORT entries."""
-    # Price 24490 is 10 ticks from NPOC below 24500 (within 2-tick proximity)
-    bar = _make_bar("2026-08-19T10:00:00+05:30", o=24490.0, h=24500.0, l=24480.0, c=24490.0, vol=5000.0, delta=-1500.0)
-
+def test_structural_tp_targets_npoc_below_for_short():
+    """SHORT: symmetric case — NPOC below entry wins as the TP."""
+    entry, sl = 24500.0, 24550.0  # risk = 50
     ctx = DecisionContext(
-        bar=bar,
-        symbol="NIFTY",
-        session_open=True,
-        warmup_complete=True,
-        position_open=False,
-        agent_direction="SHORT",
-        agent_probability=0.80,
-        market_state=MarketState.IMBALANCED,
-        setup_evidence=None,
-        vah=24620.0,
-        val=24500.0,
-        poc=24550.0,
-        vwap_upper_2=24700.0,
-        vwap_lower_2=24450.0,
-        cvd_slope=-2.5,
-        allow_trend=True,
-        allow_reversion=True,
-        # Price 24490 is 10 ticks from NPOC below 24500 - within 2-tick proximity for entry
-        npoc_above=0.0,
-        npoc_below=24500.0,
+        npoc_below=24350.0,   # rr = 150/50 = 3.0 >= min_rr
+        prior_poc=24300.0,    # farther than NPOC — must lose priority
+        val=24200.0,
     )
+    tp = SignalBuilder._structural_tp(ctx, entry, sl, "SHORT", fallback_tp=24425.0)
+    assert tp == 24350.0, "NPOC below must be selected over prior_poc/val for SHORT"
 
-    decision = DecisionService().evaluate(ctx)
-    assert decision.signal is not None, "Signal should be produced for SHORT entry"
+
+def test_structural_tp_skips_npoc_that_fails_min_rr():
+    """A too-close NPOC that can't meet min_rr must be skipped in favor of
+    the next qualifying structural target (prior POC here) — NPOC is a
+    priority preference, not an unconditional override."""
+    entry, sl = 24500.0, 24450.0  # risk = 50, min_rr default 1.5 -> needs reward >= 75
+    ctx = DecisionContext(
+        npoc_above=24510.0,   # reward=10, rr=0.2 -> fails min_rr
+        prior_poc=24700.0,    # reward=200, rr=4.0 -> qualifies
+    )
+    tp = SignalBuilder._structural_tp(ctx, entry, sl, "LONG", fallback_tp=24575.0)
+    assert tp == 24700.0
+
+
+def test_gates_edge_never_references_npoc():
+    """NPOC is intentionally NOT an entry gate (Fabio's Triple-A edge is
+    absorption -> accumulation -> aggression only). This pins that design
+    decision so a future change can't silently start gating entries on
+    NPOC proximity without a deliberate, reviewed change to gates_edge.py."""
+    import inspect
+
+    from quant.decision import gates_edge
+
+    source = inspect.getsource(gates_edge)
+    assert "npoc" not in source.lower()
