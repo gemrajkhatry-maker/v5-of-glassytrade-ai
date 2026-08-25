@@ -126,3 +126,6 @@ backend/.active_contracts.json
 # runtime audit generated artifacts
 runtime_audit/out/
 runtime_audit/fixtures/
+
+# Local MLX model weights (never stage)
+models/
