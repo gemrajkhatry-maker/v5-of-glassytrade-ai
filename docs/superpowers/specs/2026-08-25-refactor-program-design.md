@@ -1,8 +1,75 @@
 # Refactoring Design — GlassyTrade AI (stable_7)
 
+<!-- Target architecture -->
+```mermaid
+flowchart LR
+    subgraph Frontend["frontend (React)"]
+        Cards["AI cards + SignedBar/StatRow"]
+        Overlay["overlays: classifier/renderer split"]
+        Store["zustand ui store"]
+    end
+    subgraph Backend["backend/app (thin shell)"]
+        Routers[routers]
+        GL["gameloop WS: per-message handlers"]
+        Wiring["wiring.py plain factories"]
+    end
+    subgraph Quant["quant domain core"]
+        Cfg["TradingConfig flat frozen dataclass"]
+        Pipe["Decision Pipeline: Inputs to Stages to Action"]
+        AMT["amt/: market=session=profile canonical homes"]
+    end
+    subgraph Brokers["brokers (collapsed port)"]
+        Port["IBrokerPort x1"]
+        Dhan["dhan adapter: IO/parse/retry"]
+    end
+    Cards --> Store
+    Store --> Routers
+    Overlay --> Cards
+    GL --> Pipe
+    Wiring --> Routers
+    Wiring --> Pipe
+    Wiring --> Dhan
+    Cfg --> Pipe
+    Pipe --> Dhan
+```
+
+<!-- Decision pipeline (WS2) -->
+```mermaid
+classDiagram
+    class DecisionInputs {
+        bar · symbol · market · expiry
+        tick_size · bar_index · cooldown
+        risk_state · amt_dto · order_book
+    }
+    class DecisionStage {
+        <<protocol>>
+        +apply(d: DecisionData) StageResult
+    }
+    class ContextStage
+    class GateStage {
+        warmup · session · expiry · risk · cooldown
+    }
+    class SizingStage
+    class EmitStage {
+        Action or Hold(reason)
+    }
+    DecisionStage <|.. ContextStage
+    DecisionStage <|.. GateStage
+    DecisionStage <|.. SizingStage
+    DecisionStage <|.. EmitStage
+    class PositionBook {
+        single source of position truth
+        replaces _position/_pyramid_count/_pyramid_positions
+    }
+    class ExitRule {
+        name · predicate · priority
+    }
+```
+
 **Date:** 2026-08-25 · **Status:** PROPOSED — awaiting user approval
 **Basis:** `docs/audit/COMPLEXITY_OVERENGINEERING_AUDIT_2026-08-25.md` (both passes, all claims source-verified)
 **Approach:** Strangler refactor (Option B). Behavior-preserving extractions, each gated by golden-output tests. No big-bang rewrite of a real-money system. Infrastructure flattens toward the single-strategy, single-broker reality.
+**Plan granularity:** this document is the program design. Each workstream gets its own implementation plan (writing-plans) before any code changes.
 
 ---
 
@@ -36,9 +103,9 @@ Rationale:
 
 ## Per-Workstream Safety Protocol (backend)
 
-1. Capture golden decision traces (inputs hash → action) per symbol/session from current build
+1. Capture golden decision traces from the current build: a recording wrapper around `QuantEngine._decide` and `ExitEngine.evaluate` run against recorded paper-replay sessions writes JSONL of `(inputs_hash, symbol, bar_index) -> action`
 2. Extract/refactor
-3. Replay traces; any diff blocks the commit
+3. Replay traces through the refactored code; any diff blocks the commit
 4. Full test suite green
 5. Commit as one atomic step
 
