@@ -288,8 +288,10 @@ class QuantCoordinator:
                         ts = _dt.now(tz=_IST).isoformat()
                         fill = oms.close(pos, close_price, ts, f"EMERGENCY_HALT: {reason}")
                         eng._position = None
-                        # Emit the fill so the projector + journal record the close.
-                        eng._emit(fill)  # type: ignore[attr-defined]
+                        from quant.events import PositionClosed
+                        eng._emit(PositionClosed(symbol=eng.symbol, time=ts, fill=fill))
+                        if risk is not None and hasattr(risk, "record_trade"):
+                            risk.record_trade(float(fill.pnl))
                         closed += 1
                         logger.warning(
                             "emergency_halt: force-closed %s @ %.2f (pnl=%.2f)",
