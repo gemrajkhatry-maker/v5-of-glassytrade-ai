@@ -42,6 +42,7 @@ import asyncio
 import logging
 import queue
 import threading
+import time
 
 from quant.brokers.gateway import Tick
 
@@ -492,6 +493,12 @@ class MultiplexedMarketFeed:
                     ts = float(raw_ts or 0)
                 except (ValueError, TypeError):
                     ts = 0.0
+
+            if ts <= 0:
+                # ponytail: poll-fallback packets carry ISO strings float()
+                # rejects; ts=0 freezes bar windows so no bar closes and open
+                # positions lose exit management. Arrival time keeps bars moving.
+                ts = time.time()
 
             # Monotonic timestamp guard — discard out-of-order/late ticks silently
             prev_ts = self._prev_ts.get(symbol, 0.0)

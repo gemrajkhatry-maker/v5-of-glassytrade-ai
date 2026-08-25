@@ -422,3 +422,18 @@ def test_producer_survives_stream_factory_failure():
     feed.close()
     assert md.calls >= 2, "producer died instead of retrying"
     assert tick is not None and tick.price == 100.0
+
+
+def test_convert_iso_timestamp_does_not_produce_zero_time():
+    """Poll-fallback packets carry ISO strings; ts must not collapse to '0'
+    (a zero epoch freezes bar windows and disables exits)."""
+    from unittest.mock import MagicMock
+    from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
+
+    feed = MultiplexedMarketFeed(MagicMock())
+    pkt = {"symbol": "TEST FUT", "last_trade_price": 100.0, "volume": 5,
+           "timestamp": "2026-08-25T10:00:00"}
+    tick = feed._convert(pkt, "TEST FUT")
+    assert tick is not None
+    assert tick.time != "0"
+    assert float(tick.time) > 946684800  # post-2000 epoch
