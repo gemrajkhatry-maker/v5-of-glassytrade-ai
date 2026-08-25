@@ -27,6 +27,7 @@ import {
 import {
   transformToCandleData,
   validateCandleData,
+  toISTTimestamp,
 } from './chart/CandleSeriesManager';
 import {
   transformToVolumeData,
@@ -274,8 +275,8 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
 
       const { tick } = customEvent.detail;
 
-      // Common Time (real Unix timestamp, lightweight-charts handles browser timezone)
-      const unixTime = Math.floor(new Date(tick.time).getTime() / 1000) as any;
+      // Common Time in IST (consistently aligned with historical candles)
+      const unixTime = toISTTimestamp(tick.time) as any;
 
       // Guard: timestamp must be strictly >= last rendered candle time
       if (lastCandleTimeRef.current > 0 && unixTime < lastCandleTimeRef.current) {
@@ -393,8 +394,8 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     if (!visibleRange) return;
 
     prints.forEach(print => {
-      // Convert time string to timestamp
-      const printTime = Math.floor(new Date(print.time).getTime() / 1000) as UTCTimestamp;
+      // Convert time string to chart timestamp (IST-aligned, same as candles)
+      const printTime = toISTTimestamp(print.time) as UTCTimestamp;
 
       // Coordinate conversion
       const x = timeScale.timeToCoordinate(printTime);
@@ -488,9 +489,9 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
   ) => {
     if (data.length < 2) return;
 
-    // Convert OHLCData time string to chart timestamp
+    // Convert OHLCData time string to chart timestamp (IST-aligned)
     const toChartTs = (timeStr: string) => {
-      return Math.floor(new Date(timeStr).getTime() / 1000) as UTCTimestamp;
+      return toISTTimestamp(timeStr) as UTCTimestamp;
     };
 
     // Find the X coordinate for a specific IST hour:minute
@@ -602,9 +603,9 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
 
     if (breakCandleIndex < 0) return;
 
-    // Convert break candle time to chart coordinate
+    // Convert break candle time to chart coordinate (IST-aligned)
     const breakCandle = data[breakCandleIndex];
-    const breakTs = Math.floor(new Date(breakCandle.time as string).getTime() / 1000) as UTCTimestamp;
+    const breakTs = toISTTimestamp(breakCandle.time as string) as UTCTimestamp;
     const breakX = chart.timeScale().timeToCoordinate(breakTs);
     if (breakX === null) return;
 
@@ -837,11 +838,8 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
 
-    const toIST = (timeStr: string) =>
-      Math.floor(new Date(timeStr).getTime() / 1000) as UTCTimestamp;
-
     const formatCandle = (d: OHLCData) => ({
-      time: toIST(d.time),
+      time: toISTTimestamp(d.time) as UTCTimestamp,
       open: d.open,
       high: d.high,
       low: d.low,
@@ -849,7 +847,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     });
 
     const formatVolume = (d: OHLCData) => ({
-      time: toIST(d.time),
+      time: toISTTimestamp(d.time) as UTCTimestamp,
       value: d.volume,
       // P2: Colour volume bars by delta sign (who won the candle), not candle direction
       // Green delta = buyers won, Red delta = sellers won, Grey = neutral
@@ -922,7 +920,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       // Intra-candle tick: update lastCandleTimeRef for the tickBus guard
       const lastD = data[data.length - 1];
       if (lastD) {
-        lastCandleTimeRef.current = Math.floor(new Date(lastD.time).getTime() / 1000);
+        lastCandleTimeRef.current = toISTTimestamp(lastD.time);
       }
     }
   }, [data, symbol, config.bullColor, config.bearColor, mode]);
