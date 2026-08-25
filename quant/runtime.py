@@ -725,6 +725,19 @@ class QuantEngine:
         self._position = remaining
         self._pyramid_positions = pm.pyramid_positions
         self._pyramid_count = pm.pyramid_count
+        if self._portfolio_risk is not None:
+            if pm.last_partial_fill is not None:
+                closed_sz = abs(pm.last_partial_fill.position.size)
+                remaining_sz = abs(remaining.size) if remaining is not None else 0.0
+                total_sz = closed_sz + remaining_sz
+                fraction = closed_sz / total_sz if total_sz > 0 else 0.0
+                release = getattr(self, "_open_trade_risk", 0.0) * fraction
+                self._portfolio_risk.record_close(release, float(pm.last_partial_fill.pnl))
+                self._open_trade_risk = getattr(self, "_open_trade_risk", 0.0) - release
+            if pm.last_pyramid_pnl:
+                # ponytail: pyramid add-ons never register open risk (they only
+                # fire on a risk-free base); book their pnl, release nothing.
+                self._portfolio_risk.record_close(0.0, float(pm.last_pyramid_pnl))
         if was_open and remaining is None:
             self._last_close_bar_index = self._bar_index
             if self._portfolio_risk is not None:

@@ -69,6 +69,8 @@ class PositionManager:
         # need the closing pnl (e.g. releasing a risk-authority reservation)
         # read this right after manage_exit() returns.
         self.last_fill = None
+        self.last_partial_fill = None
+        self.last_pyramid_pnl = 0.0
 
     def manage_exit(
         self,
@@ -86,6 +88,8 @@ class PositionManager:
         entirely.
         """
         self.last_fill = None
+        self.last_partial_fill = None
+        self.last_pyramid_pnl = 0.0
         held_bars = bar_index - entry_bar_index
         if session_force_exit(
             bar.time, market=self._market, contract_expiry=self._contract_expiry
@@ -155,6 +159,7 @@ class PositionManager:
                     abs(remaining.size), partial_fill.pnl,
                 )
                 self._emit(RiskUpdated(symbol=self.symbol, time=bar.time, risk=risk))
+                self.last_partial_fill = partial_fill
                 return remaining
 
             fill = self._oms.close(position, exit_dec.close_price, bar.time,
@@ -167,6 +172,8 @@ class PositionManager:
                                            exit_dec.reason + "_PYRAMID")
                 self._exits.pop_trail(pyr_pos)
                 self._risk.record_trade(pyr_fill.pnl, count_as_trade=False)
+                self._emit(PositionClosed(symbol=self.symbol, time=bar.time, fill=pyr_fill))
+                self.last_pyramid_pnl += float(pyr_fill.pnl)
                 logger.info(
                     "🔒 [PYRAMID CLOSED] %s level=%d reason=%s pnl=₹%.2f",
                     self.symbol, pyr_pos.pyramid_level, exit_dec.reason, pyr_fill.pnl,
