@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from quant.amt.session.scanner import OptionScannerService, ScanResult
+from quant.amt.session.scanner import OptionScannerService
 
 
 # ---------------------------------------------------------------------------
@@ -54,6 +54,16 @@ def _next_tuesday_iso() -> str:
     strictly after today, so expiry tests never depend on the wall clock."""
     today = datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
     days_ahead = (1 - today.weekday()) % 7  # Tuesday == weekday 1
+    if days_ahead == 0:
+        days_ahead = 7
+    return (today + timedelta(days=days_ahead)).isoformat()
+
+
+def _next_thursday_iso() -> str:
+    """ISO date of the next Thursday (BANKNIFTY monthly expiry), strictly
+    after today — same wall-clock independence as _next_tuesday_iso."""
+    today = datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
+    days_ahead = (3 - today.weekday()) % 7  # Thursday == weekday 3
     if days_ahead == 0:
         days_ahead = 7
     return (today + timedelta(days=days_ahead)).isoformat()
@@ -258,7 +268,9 @@ class TestOptionScannerService:
         for o in bn_calls.values():
             o.symbol = f"BANKNIFTY 25 AUG {int(o.strike)} CALL"
         nifty_chain = _make_chain(atm=23400.0, expiry_iso=_next_tuesday_iso(), calls=nifty_calls)
-        bn_chain = _make_chain(atm=48000.0, expiry_iso="2026-08-25", calls=bn_calls)
+        # Future-dated so the live-expiry filter (70d1c27) never excludes it;
+        # computed, not hardcoded, so the test cannot rot with the wall clock.
+        bn_chain = _make_chain(atm=48000.0, expiry_iso=_next_thursday_iso(), calls=bn_calls)
         broker = MagicMock()
 
         def _chain(underlying=None, exchange=None, expiry_index=0):
