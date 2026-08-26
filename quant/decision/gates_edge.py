@@ -16,109 +16,53 @@ _ABSORPTION_MAX_AGE_BARS = 5
 _OBI_AGGRESSION_THRESHOLD = 0.20
 
 
-def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
-    """Gate 3: Triple-A edge — the institutional entry trigger (Fabio Valentini).
-
-    Three valid canonical paths per Fabio AMT playbook (spec §9, §10):
-
-    Path A — Full Triple-A AGGRESSION (primary): the state machine has
-      progressed WAITING → ABSORBING → ACCUMULATING → AGGRESSION, confirming
-      2+ bars of consolidation near POC AND a full candle close beyond the
-      absorption cluster. Never bypassed on raw volume spikes.
-
-    Path B — IB Second Drive reclaim: after the Initial Balance high/low was
-      tested and rejected (D1_REJECTED), the market attempts a second drive
-      (D2). Valid standalone entry per Fabio's "failed auction" rule.
-
-    Path C — Impulse Leg LVN Sniper (Playbook C): price pulls back to the
-      primary LVN of the most recent impulse leg (Layer 3 profile) with fresh
-      absorption confirming the level is holding.
-
-    GUARDS APPLIED:
-    - Climax Guard: Price must NOT exceed VWAP ±2.0σ (overextension).
-    - CVD Momentum: CVD slope must agree with entry direction (positive for LONG, negative for SHORT).
-
-    NOTE: No session-phase time blocks here. Fabio's rule is market_state-driven:
-    BALANCED market → VA Fade model. IMBALANCED market → Triple-A/Breakout model.
-    Time-of-day is context for the LLM narrative, not a hard gate veto.
-    """
+def _check_guards(ctx: DecisionContext) -> GateResult | None:
+    """Pre-check guards that veto entry before setup evaluation."""
     if ctx.bar is None:
         return GateResult(3, False, "No bar")
-
-    # Volume bubble guard (Fabio Gap #2): stacked footprint imbalance is the
-    # highest-conviction institutional signal. A stacked run OPPOSING the
-    # intended direction means real size is fighting our entry — stand down.
     si_dir = getattr(ctx, "stacked_imbalance_direction", "")
     if si_dir and ctx.agent_direction:
-        opposing = (
-            (ctx.agent_direction == "LONG" and si_dir == "SELL")
-            or (ctx.agent_direction == "SHORT" and si_dir == "BUY")
-        )
-        if opposing:
+        if (ctx.agent_direction == "LONG" and si_dir == "SELL") or (ctx.agent_direction == "SHORT" and si_dir == "BUY"):
             mag = getattr(ctx, "stacked_imbalance_magnitude", 0)
             lo = getattr(ctx, "stacked_imbalance_price_low", 0.0)
             hi = getattr(ctx, "stacked_imbalance_price_high", 0.0)
-            return GateResult(
-                3, False,
-                f"Opposing stacked {si_dir} imbalance x{mag} at {lo:.2f}-{hi:.2f}",
-            )
-
-    # Contested zone (Fabio): both BUY and SELL stacked imbalances in the
-    # recent window — neither side has control. FLAT is the only trade.
+            return GateResult(3, False, f"Opposing stacked {si_dir} imbalance x{mag} at {lo:.2f}-{hi:.2f}")
     if getattr(ctx, "contested_bubble_zone", False):
         return GateResult(3, False, "Contested bubble zone — both sides stacked, stay flat")
-
     if ctx.agent_direction not in ("LONG", "SHORT"):
         return GateResult(3, False, "No direction")
-    market_state = ctx.market_state
-    ms_val = getattr(market_state, "value", market_state)
+    ms_val = getattr(ctx.market_state, "value", ctx.market_state)
     if ms_val in (MarketState.DEAD.value, "DEAD", "DEAD_MARKET"):
         return GateResult(3, False, "Dead market — no edge")
-
-    # ── 1. Anti-Climax / Overextension Guard ─────────────────────────────────
-    # Price beyond ±2.0σ is a statistical exhaustion zone. Never enter new breakouts there.
     close_px = float(ctx.bar.close) if ctx.bar else 0.0
     if ctx.agent_direction == "LONG" and ctx.vwap_upper_2 > 0 and close_px > ctx.vwap_upper_2:
         return GateResult(3, False, f"Anti-Climax: LONG rejected at +{ctx.vwap_std:.1f}σ extension")
     if ctx.agent_direction == "SHORT" and ctx.vwap_lower_2 > 0 and close_px < ctx.vwap_lower_2:
         return GateResult(3, False, f"Anti-Climax: SHORT rejected at -{ctx.vwap_std:.1f}σ extension")
-
-    # ── 2. Drive Exhaustion Guard ────────────────────────────────────────────
-    # 3+ drives into a level indicates exhaustion (Fabio Valentini rule)
     if getattr(ctx, "drive_number", 0) >= 3 and not getattr(ctx, "drive_entry_valid", False):
         return GateResult(3, False, f"Drive count exhausted ({ctx.drive_number})")
-
-    # ── 3. SetupEvidence Evaluation (if explicit evidence provided) ─────────
-    if getattr(ctx, "setup_evidence", None) is not None:
-        ev = ctx.setup_evidence
-        if ev.is_complete():
-            if ev.direction and ev.direction != ctx.agent_direction:
-                return GateResult(
-                    3, False,
-                    f"Evidence direction {ev.direction} conflicts with trade direction {ctx.agent_direction}",
-                )
-            # No session-phase veto here — market state selects the model, not time-of-day.
-            return GateResult(3, True, f"{ev.setup_type} confirmed")
-        # Incomplete evidence is not a veto. Fall through to Triple-A / named paths.
-
-    # ── 4. CVD Order Flow Direction Guard ────────────────────────────────────
     cvd_slope = ctx.cvd_slope
     if ctx.agent_direction == "LONG" and cvd_slope < -0.5:
         return GateResult(3, False, f"CVD slope aggressively negative ({cvd_slope:.2f}) conflicts with LONG")
     if ctx.agent_direction == "SHORT" and cvd_slope > 0.5:
         return GateResult(3, False, f"CVD slope aggressively positive ({cvd_slope:.2f}) conflicts with SHORT")
+    return None
 
-    # ── Playbook A: Triple-A AGGRESSION (cluster close, never imbalance-alone)
+
+def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | None:
+    """Check each setup path (evidence, Triple-A, drive, LVN, initiative)."""
+    if getattr(ctx, "setup_evidence", None) is not None:
+        ev = ctx.setup_evidence
+        if ev.is_complete():
+            if ev.direction and ev.direction != ctx.agent_direction:
+                return GateResult(3, False, f"Evidence direction {ev.direction} conflicts with trade direction {ctx.agent_direction}")
+            return GateResult(3, True, f"{ev.setup_type} confirmed")
     phase = getattr(ctx, "triple_a_phase", "") or ""
     tsignal = getattr(ctx, "triple_a_signal", "") or ""
     if phase == "AGGRESSION" and tsignal == ctx.agent_direction:
         return GateResult(3, True, f"Triple-A AGGRESSION {tsignal}")
-
-    # ── Setup B: Second-Drive Rejection (D1 rejected → D2 weaker re-approach) ─
     if ctx.drive_entry_valid:
         return GateResult(3, True, "Second Drive reclaim confirmed")
-
-    # ── Setup C: Impulse Leg LVN Sniper (Playbook C) ─────────────────────────
     leg_lvn = getattr(ctx, "leg_lvn", 0.0) or 0.0
     if leg_lvn > 0 and ctx.bar:
         tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05
@@ -128,8 +72,6 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
                 return GateResult(3, True, f"LVN Sniper LONG @ {leg_lvn:.2f}")
             if ctx.absorption_side == "BUY_ABSORBED" and ctx.agent_direction == "SHORT" and cvd_slope <= 0.2:
                 return GateResult(3, True, f"LVN Sniper SHORT @ {leg_lvn:.2f}")
-
-    # ── Initiative Breakout (requires CVD agreement, no time-of-day block) ──
     break_dir = getattr(ctx, "break_direction", "") or ""
     break_type = getattr(ctx, "break_type", "") or ""
     if break_type == "INITIATIVE":
@@ -137,5 +79,17 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
             return GateResult(3, True, "Initiative upside breakout confirmed")
         if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
             return GateResult(3, True, "Initiative downside breakdown confirmed")
+    return None
 
+
+def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
+    """Gate 3: Triple-A edge — the institutional entry trigger (Fabio Valentini).
+
+    Three valid canonical paths: Triple-A AGGRESSION, IB Second Drive, LVN Sniper.
+    Guards: volume bubble, contested zone, anti-climax, drive exhaustion, CVD direction.
+    """
+    r = _check_guards(ctx)
+    if r: return r
+    r = _check_setup_paths(ctx, ctx.cvd_slope)
+    if r: return r
     return GateResult(3, False, "No Triple-A edge: no valid setup")
