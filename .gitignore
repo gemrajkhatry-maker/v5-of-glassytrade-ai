@@ -129,3 +129,6 @@ runtime_audit/fixtures/
 
 # Local MLX model weights (never stage)
 models/
+
+# Graphify knowledge graph artifacts
+graphify-out/

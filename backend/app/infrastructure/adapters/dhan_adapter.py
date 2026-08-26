@@ -312,17 +312,8 @@ class DhanMarketDataAdapter(IMarketData):
                 else:
                     ts = row.get("timestamp") or row.get("date") or idx
 
-                if hasattr(ts, "isoformat"):
-                    # Convert to IST if needed
-                    if hasattr(ts, "tzinfo") and ts.tzinfo is None:
-                        ts = ts.replace(tzinfo=IST)
-                    time_str = ts.astimezone(IST).isoformat()
-                elif isinstance(ts, (int, float)):
-                    from datetime import datetime as _dt
-
-                    time_str = _dt.fromtimestamp(float(ts), tz=IST).isoformat()
-                else:
-                    time_str = str(ts)
+                from quant.state import _epoch_to_iso
+                time_str = _epoch_to_iso(ts)
 
                 o = float(row["open"])
                 h = float(row["high"])

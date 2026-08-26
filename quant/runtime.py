@@ -284,6 +284,7 @@ class QuantEngine:
             )
         self._cooldown_bars: int = cooldown_bars
         self._last_close_bar_index: int = -1  # bar index of most recent fill
+        self._recent_decisions: deque[dict[str, Any]] = deque(maxlen=5)
         # F4: NO environment sniffing inside the deterministic engine. The
         # advisor is injected explicitly (default None -> no advisor, no
         # threads). Only the live wiring path reads MLX_* env vars — see
@@ -421,6 +422,7 @@ class QuantEngine:
                 risk_state=self._risk.state(),
                 amt_dto=initial_amt,
                 order_book=self._last_depth,
+                recent_decisions=list(self._recent_decisions),
             )
             self._advisor.on_context(ctx)
 
@@ -627,6 +629,9 @@ class QuantEngine:
             risk_state=risk_st,
             amt_dto=amt_dto,
             order_book=self._last_depth,
+            position=self._position,
+            entry_bar_index=self._entry_bar_index,
+            recent_decisions=list(self._recent_decisions),
         )
         decision = self._strategy.should_enter(ctx)
         # S1: record the decision itself — gates with pass/fail and reasons.
@@ -654,7 +659,26 @@ class QuantEngine:
             pass
         self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
         if hasattr(self, "_advisor") and self._advisor is not None:
-            self._advisor.on_context(ctx)
+            if self._option_amt_dto is not None and execution_bar is not None:
+                advisor_ctx = DecisionContextBuilder().build(
+                    bar=execution_bar,
+                    symbol=self.symbol,
+                    market=self._market,
+                    contract_expiry=self._contract_expiry,
+                    tick_size=self._tick_size,
+                    bar_index=self._bar_index,
+                    warm_bars=self._option_amt_engine.warm_bars if self._option_amt_engine else self._amt_engine.warm_bars,
+                    cooldown_remaining_sec=cooldown_remaining_sec,
+                    risk_state=risk_st,
+                    amt_dto=self._option_amt_dto,
+                    order_book=self._last_depth,
+                    position=self._position,
+                    entry_bar_index=self._entry_bar_index,
+                    recent_decisions=list(self._recent_decisions),
+                )
+                self._advisor.on_context(advisor_ctx)
+            else:
+                self._advisor.on_context(ctx)
 
 
         if decision.approved and decision.signal is not None:
@@ -796,6 +820,49 @@ class QuantEngine:
                 )
                 self._open_trade_risk = 0.0
 
+        # Run advisor on position management state so model reasons about open trade
+        if hasattr(self, "_advisor") and self._advisor is not None:
+            try:
+                risk_st = self._risk.state()
+                if self._option_amt_dto is not None and self._last_underlying_bar is not None:
+                    advisor_ctx = DecisionContextBuilder().build(
+                        bar=bar,
+                        symbol=self.symbol,
+                        market=self._market,
+                        contract_expiry=self._contract_expiry,
+                        tick_size=self._tick_size,
+                        bar_index=self._bar_index,
+                        warm_bars=self._option_amt_engine.warm_bars if self._option_amt_engine else self._amt_engine.warm_bars,
+                        cooldown_remaining_sec=0.0,
+                        risk_state=risk_st,
+                        amt_dto=self._option_amt_dto if self._option_amt_dto else amt_dto,
+                        order_book=self._last_depth,
+                        position=self._position,
+                        entry_bar_index=self._entry_bar_index,
+                        recent_decisions=list(self._recent_decisions),
+                    )
+                    self._advisor.on_context(advisor_ctx)
+                else:
+                    advisor_ctx = DecisionContextBuilder().build(
+                        bar=bar,
+                        symbol=self.symbol,
+                        market=self._market,
+                        contract_expiry=self._contract_expiry,
+                        tick_size=self._tick_size,
+                        bar_index=self._bar_index,
+                        warm_bars=self._amt_engine.warm_bars,
+                        cooldown_remaining_sec=0.0,
+                        risk_state=risk_st,
+                        amt_dto=amt_dto,
+                        order_book=self._last_depth,
+                        position=self._position,
+                        entry_bar_index=self._entry_bar_index,
+                        recent_decisions=list(self._recent_decisions),
+                    )
+                    self._advisor.on_context(advisor_ctx)
+            except Exception:
+                pass
+
     def _check_pyramid(self, amt_dto: dict, bar) -> None:
         pm = self._get_position_manager()
         pm.check_pyramid(amt_dto, bar, self._position, self._bar_index)
@@ -813,6 +880,20 @@ class QuantEngine:
         the engine thread's own emits.
         """
         with self._emit_lock:
+            if isinstance(event, AgentDecisionProduced) and isinstance(event.decision, dict):
+                dec = event.decision
+                entry = {
+                    "time": event.time,
+                    "action": dec.get("action", "FLAT"),
+                    "direction": dec.get("direction", "FLAT"),
+                    "setup": dec.get("setup", "NO_EDGE"),
+                    "confidence": dec.get("confidence", "Medium"),
+                    "rationale": dec.get("rationale", ""),
+                }
+                if not self._recent_decisions or self._recent_decisions[-1].get("time") != event.time:
+                    self._recent_decisions.append(entry)
+                else:
+                    self._recent_decisions[-1] = entry
             self._bus.publish(event)
             self._trace.append(event)
             self._projector.on_event(event)

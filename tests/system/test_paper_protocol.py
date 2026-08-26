@@ -116,9 +116,15 @@ def _session_ticks():
 def _run_trace():
     from quant.execution.risk import SessionRisk
     SessionRisk(storage=None, symbol=SYMBOL).reset_session()
+    # F2 migration: this characterization session was authored when
+    # time_stop/cooldown were literal BAR counts on interval_seconds=1 bars.
+    # Bar-count knobs are now derived from wall-clock minutes, which would
+    # stretch these synthetic sessions to real hour-scale holds. Pin the
+    # original explicit bar counts so the scenario is unchanged.
     return QuantEngine(
         SyntheticGateway(_session_ticks()), SYMBOL,
         interval_seconds=INTERVAL_SECONDS, tick_size=TICK_SIZE,
+        time_stop_bars=60, cooldown_bars=5,
     ).run()
 
 

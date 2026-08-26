@@ -1,14 +1,6 @@
 {
  "_symbol": "S",
- "agentDecision": {
-  "direction": "LONG",
-  "latencyUs": 0,
-  "modelLabel": "Triple-A",
-  "rationale": "Triple-A",
-  "regime": "AGGRESSION",
-  "sizeFraction": 0.0,
-  "timing": ""
- },
+ "agentDecision": null,
  "amt": {
   "poc": 100.2
  },

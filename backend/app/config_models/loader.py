@@ -220,7 +220,7 @@ def load_config(
     config = SystemConfig(
         name=sys_data.get("name", "GlassyTrade AI"),
         version=sys_data.get("version", "2.0.0"),
-        candle_timeframe_minutes=sys_data.get("candle_timeframe_minutes", 5),
+        candle_timeframe_minutes=int(os.getenv("CANDLE_TIMEFRAME_MINUTES", sys_data.get("candle_timeframe_minutes", 5))),
         tick_history_depth=sys_data.get("tick_history_depth", 500),
         db_path=sys_data.get("db_path", "glassytrade.db"),
         log_level=env_data.get("log_level", sys_data.get("log_level", "INFO")),

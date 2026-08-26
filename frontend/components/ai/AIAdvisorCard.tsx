@@ -20,7 +20,6 @@ export const AIAdvisorCard: React.FC<AIAdvisorCardProps> = React.memo(({ agentDe
     const latencyMs = rawDecision.latencyMs;
 
     // Check agreement with deterministic quant decision
-    const quantApproved = quantDecision?.approved && !!quantDecision?.signal;
     const quantDir = quantDecision?.signal?.type || 'FLAT';
     const isAligned = direction === quantDir;
 
@@ -80,16 +79,20 @@ export const AIAdvisorCard: React.FC<AIAdvisorCardProps> = React.memo(({ agentDe
             {/* Alignment status with Quantitative Gate Engine */}
             <div className="flex items-center justify-between text-[8.5px] font-mono pt-1 border-t border-white/5 text-slate-400">
                 <span className="text-slate-500 uppercase tracking-wider">Quant Engine Alignment:</span>
-                <span className={`font-semibold flex items-center gap-1 ${isAligned ? 'text-emerald-400' : 'text-amber-300'}`}>
+                <span className={`font-semibold flex items-center gap-1 ${
+                    isAligned
+                        ? (direction === 'FLAT' ? 'text-slate-400' : 'text-emerald-400')
+                        : 'text-amber-300'
+                }`}>
                     {isAligned ? (
                         <>
                             <ShieldCheck className="w-2.5 h-2.5" />
-                            Aligned ({direction})
+                            {direction === 'FLAT' ? 'Aligned — No Setup' : `Aligned (${direction})`}
                         </>
                     ) : (
                         <>
                             <HelpCircle className="w-2.5 h-2.5" />
-                            {quantApproved ? `Quant: ${quantDir}` : 'Quant: Standing By'}
+                            {`Quant: ${quantDir}`}
                         </>
                     )}
                 </span>

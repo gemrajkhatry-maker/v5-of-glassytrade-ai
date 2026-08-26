@@ -8,7 +8,7 @@ def test_gate4_rejects_stop_beyond_20_ticks(monkeypatch):
     from quant.bars import Bar
     from quant.execution.risk import SessionRisk
 
-    monkeypatch.setattr(gates_rr, "structural_anchor", lambda ctx, direction: 90.0)
+    monkeypatch.setattr(gates_rr, "structural_anchor", lambda ctx, direction: 80.0)
 
     ctx = DecisionContextBuilder().build(
         bar=Bar(time="t300", open=99.0, high=101.0, low=98.5, close=100.0, volume=10.0),

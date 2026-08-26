@@ -18,7 +18,7 @@ describe('CandleSeriesManager', () => {
     it('converts UTC to IST correctly', () => {
       const timestamp = toISTTimestamp('2024-01-01T00:00:00Z');
       const utcTime = new Date('2024-01-01T00:00:00Z').getTime() / 1000;
-      expect(timestamp).toBe(utcTime);
+      expect(timestamp).toBe(utcTime + IST_OFFSET_SECONDS);
     });
   });
 

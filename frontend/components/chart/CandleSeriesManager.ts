@@ -40,8 +40,13 @@ const IST_OFFSET = IST_OFFSET_SECONDS;
  * @param timeStr - ISO timestamp string
  * @returns Unix timestamp in IST
  */
-export function toISTTimestamp(timeStr: string): number {
-  return Math.floor(new Date(timeStr).getTime() / 1000);
+export function toISTTimestamp(timeStr: string | number): number {
+  if (typeof timeStr === 'number') {
+    return timeStr + IST_OFFSET;
+  }
+  const parsed = new Date(timeStr).getTime();
+  if (isNaN(parsed)) return 0;
+  return Math.floor(parsed / 1000) + IST_OFFSET;
 }
 
 /**

@@ -23,8 +23,11 @@ from pathlib import Path
 import re
 import sys
 
-project_root = Path(sys.argv[1]).resolve().parent.parent
+project_root = Path(sys.argv[1]).resolve().parent
 backend_root = Path(sys.argv[1]).resolve()
+for p in [str(backend_root), str(project_root)]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 errors = []
 warnings = []
 

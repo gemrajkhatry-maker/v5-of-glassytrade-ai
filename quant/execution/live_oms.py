@@ -1,5 +1,9 @@
 """LiveOMS — routes engine Signals to a real IBroker.
 
+DEAD CODE — not constructed by any coordinator as of 2026-08-25; see spec
+docs/superpowers/specs/2026-08-25-refactor-program-design.md, open-decision #1.
+Kept (not deleted) pending that user decision.
+
 Built and tested ahead of activation. NOT constructed by QuantCoordinator yet:
 ``QuantEngine`` still always uses ``PaperOMS`` (see runtime.py). Wiring this in
 means picking an ``IOMS``-shaped seam and a Signal-mapper contract test on the

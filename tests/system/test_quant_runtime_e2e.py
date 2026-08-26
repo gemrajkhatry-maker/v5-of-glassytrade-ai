@@ -20,7 +20,7 @@ WS_CONTRACT_KEYS = (
 
 # The keys emitted by the WS adapter (quant/ws_adapter.py). The LLM-derived
 # keys (genAIAnalysis, overseerAction, overseerReason) were removed with the
-# LLM layer; agentDecision is projected from the deterministic quantDecision.
+# agentDecision is the AMT_RULE / LLMAdvisor narrative (None until advisor fires).
 BACKEND_SNAPSHOT_KEYS = {
     "_symbol", "portfolio", "amt", "quantDecision",
     "agentDecision", "riskState",

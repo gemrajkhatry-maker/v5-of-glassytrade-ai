@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from quant.bars import Bar
 from quant.contracts.aggregates import INITIAL_CAPITAL
@@ -17,6 +17,13 @@ class DecisionContext:
     session_open: bool = True
     warmup_complete: bool = True      # enough bars (> 15) for analysis
     position_open: bool = False
+    position_side: str = ""                # "LONG" | "SHORT" | ""
+    position_entry_price: float = 0.0      # entry fill price
+    position_size: float = 0.0             # signed position quantity
+    position_unrealized_pnl: float = 0.0   # current unrealized P&L in currency units
+    position_sl: float = 0.0               # current stop loss price
+    position_tp: float = 0.0               # target take profit price
+    position_bars_held: int = 0            # number of bars held since entry
     cooldown_remaining_sec: int = 0
     risk_halted: bool = False
     consecutive_losses: int = 0
@@ -106,3 +113,5 @@ class DecisionContext:
     triple_a_signal: str = ""
     absorption_cluster_high: float = 0.0
     absorption_cluster_low: float = 0.0
+    # Rolling history of recent decisions and rationales (last 3-5 bars)
+    recent_decisions: Tuple[Dict[str, Any], ...] = ()

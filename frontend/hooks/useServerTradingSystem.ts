@@ -283,7 +283,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             if (inFlightHistoryRef.current.has(sym)) continue;
             inFlightHistoryRef.current.add(sym);
             const path = `/api/market/history/${encodeURIComponent(sym)}`;
-            const url = `${backendUrl(path)}?interval=${encodeURIComponent(interval || '1m')}&limit=500`;
+            const url = `${backendUrl(path)}?interval=${encodeURIComponent(interval || '5m')}&limit=500`;
             fetch(url)
                 .then(res => (res.ok ? res.json() : null))
                 .then(body => {

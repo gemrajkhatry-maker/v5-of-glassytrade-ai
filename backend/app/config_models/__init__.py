@@ -156,7 +156,7 @@ class SystemConfig:
 
     name: str = "GlassyTrade AI"
     version: str = "2.0.0"
-    candle_timeframe_minutes: int = 1
+    candle_timeframe_minutes: int = 5
     tick_history_depth: int = 500
     db_path: str = "glassytrade.db"
     log_level: str = "INFO"

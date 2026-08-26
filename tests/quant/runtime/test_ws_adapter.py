@@ -46,14 +46,30 @@ def test_ws_snapshot_has_all_frontend_keys():
     assert len(ws) == 10
 
 
-def test_agent_decision_projected_from_quant_decision():
-    """agentDecision is now derived from the deterministic quantDecision —
-    direction/modelLabel/rationale mirror the signal, no LLM involved."""
+def test_agent_decision_passthrough_only():
+    """agentDecision comes from AgentDecisionProduced only — never invented
+    from quantDecision gate reasons (that lied on the AI thesis card)."""
     ws = view_state_to_ws(_projector().snapshot("S"))
+    assert ws["agentDecision"] is None
+
+
+def test_agent_decision_from_advisor_event():
+    from quant.events import AgentDecisionProduced
+
+    p = _projector()
+    p.on_event(AgentDecisionProduced(
+        symbol="S", time="t1",
+        decision={
+            "direction": "FLAT", "action": "FLAT", "setup": "NO_EDGE",
+            "confidence": "Medium", "rationale": "mid-value near POC",
+            "source": "AMT_RULE",
+        },
+    ))
+    ws = view_state_to_ws(p.snapshot("S"))
     ad = ws["agentDecision"]
-    assert ad["direction"] == "LONG"
-    assert ad["modelLabel"] == "Triple-A"  # replaces the removed confidence/probability field
-    assert ad["rationale"] == "Triple-A"
+    assert ad["direction"] == "FLAT"
+    assert ad["source"] == "AMT_RULE"
+    assert "POC" in ad["rationale"]
 
 
 def test_ws_snapshot_fields():

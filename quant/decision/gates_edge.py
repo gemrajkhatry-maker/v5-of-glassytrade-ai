@@ -37,6 +37,10 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
     GUARDS APPLIED:
     - Climax Guard: Price must NOT exceed VWAP ±2.0σ (overextension).
     - CVD Momentum: CVD slope must agree with entry direction (positive for LONG, negative for SHORT).
+
+    NOTE: No session-phase time blocks here. Fabio's rule is market_state-driven:
+    BALANCED market → VA Fade model. IMBALANCED market → Triple-A/Breakout model.
+    Time-of-day is context for the LLM narrative, not a hard gate veto.
     """
     if ctx.bar is None:
         return GateResult(3, False, "No bar")
@@ -68,7 +72,7 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
         return GateResult(3, False, "No direction")
     market_state = ctx.market_state
     ms_val = getattr(market_state, "value", market_state)
-    if ms_val in (MarketState.DEAD.value, "DEAD_MARKET"):
+    if ms_val in (MarketState.DEAD.value, "DEAD", "DEAD_MARKET"):
         return GateResult(3, False, "Dead market — no edge")
 
     # ── 1. Anti-Climax / Overextension Guard ─────────────────────────────────
@@ -93,10 +97,7 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
                     3, False,
                     f"Evidence direction {ev.direction} conflicts with trade direction {ctx.agent_direction}",
                 )
-            if ev.setup_type in ("TRIPLE_A", "NONE") and not getattr(ctx, "allow_trend", True):
-                return GateResult(3, False, "SESSION_PHASE: Trend continuation blocked in this session phase")
-            if ev.setup_type == "VA_FADE" and not getattr(ctx, "allow_reversion", True):
-                return GateResult(3, False, "SESSION_PHASE: Mean reversion blocked in this session phase")
+            # No session-phase veto here — market state selects the model, not time-of-day.
             return GateResult(3, True, f"{ev.setup_type} confirmed")
         # Incomplete evidence is not a veto. Fall through to Triple-A / named paths.
 
@@ -128,13 +129,10 @@ def gate_triple_a_edge(ctx: DecisionContext) -> GateResult:
             if ctx.absorption_side == "BUY_ABSORBED" and ctx.agent_direction == "SHORT" and cvd_slope <= 0.2:
                 return GateResult(3, True, f"LVN Sniper SHORT @ {leg_lvn:.2f}")
 
-    # ── Initiative Breakout (named playbook, still requires CVD agreement) ──
-    allow_trend = getattr(ctx, "allow_trend", True)
+    # ── Initiative Breakout (requires CVD agreement, no time-of-day block) ──
     break_dir = getattr(ctx, "break_direction", "") or ""
     break_type = getattr(ctx, "break_type", "") or ""
     if break_type == "INITIATIVE":
-        if not allow_trend:
-            return GateResult(3, False, "SESSION_PHASE: Trend continuation blocked in this session phase")
         if break_dir == "UP" and ctx.agent_direction == "LONG" and cvd_slope > -0.2:
             return GateResult(3, True, "Initiative upside breakout confirmed")
         if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:

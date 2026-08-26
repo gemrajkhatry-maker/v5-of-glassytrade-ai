@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-DEFAULT_INTERVAL_SEC = 60  # canonical default bar interval (1 minute)
+DEFAULT_INTERVAL_SEC = 300  # canonical default bar interval (5 minutes)
 
 
 @dataclass(frozen=True)

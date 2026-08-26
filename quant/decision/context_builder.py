@@ -109,6 +109,9 @@ class DecisionContextBuilder:
         amt_dto: dict,
         order_book=None,
         interval_seconds: int = DEFAULT_INTERVAL_SEC,
+        position=None,
+        entry_bar_index: int = 0,
+        recent_decisions: list | None = None,
     ) -> DecisionContext:
         """Build a DecisionContext from the given inputs.
         
@@ -302,6 +305,30 @@ class DecisionContextBuilder:
             )
 
         bar_time = bar.time if bar is not None else str(amt_dto.get("time") or "")
+        pos_open = position is not None
+        pos_side = ""
+        pos_entry = 0.0
+        pos_size = 0.0
+        pos_sl = 0.0
+        pos_tp = 0.0
+        pos_pnl = 0.0
+        pos_bars_held = 0
+
+        if pos_open:
+            raw_sz = getattr(position, "size", 0.0)
+            pos_size = float(raw_sz)
+            pos_side = "LONG" if pos_size > 0 else ("SHORT" if pos_size < 0 else str(getattr(position, "side", "") or ""))
+            pos_entry = float(getattr(position, "open_price", 0.0) or getattr(position, "entry_price", 0.0) or 0.0)
+            if hasattr(position, "order") and hasattr(position.order, "signal") and position.order.signal is not None:
+                pos_sl = float(position.order.signal.sl or 0.0)
+                pos_tp = float(position.order.signal.tp or 0.0)
+            else:
+                pos_sl = float(getattr(position, "stop_loss", 0.0) or 0.0)
+                pos_tp = float(getattr(position, "take_profit", 0.0) or 0.0)
+            if close_px > 0 and pos_entry > 0 and pos_size != 0:
+                pos_pnl = (close_px - pos_entry) * pos_size
+            pos_bars_held = max(0, bar_index - entry_bar_index) if entry_bar_index > 0 else 0
+
         return DecisionContext(
             state=None,
             bar=bar,
@@ -310,7 +337,14 @@ class DecisionContextBuilder:
                 bar_time, market=market, contract_expiry=contract_expiry
             ) if bar_time else True,
             warmup_complete=(bar_index + warm_bars) >= warmup_bars,
-            position_open=False,
+            position_open=pos_open,
+            position_side=pos_side,
+            position_entry_price=pos_entry,
+            position_size=pos_size,
+            position_unrealized_pnl=pos_pnl,
+            position_sl=pos_sl,
+            position_tp=pos_tp,
+            position_bars_held=pos_bars_held,
             cooldown_remaining_sec=cooldown_remaining_sec,
             risk_halted=risk_state.halted,
             consecutive_losses=risk_state.consecutive_losses,
@@ -363,4 +397,5 @@ class DecisionContextBuilder:
             triple_a_signal=str(amt_dto.get("tripleASignal") or ""),
             absorption_cluster_high=float(amt_dto.get("absorptionClusterHigh") or 0.0),
             absorption_cluster_low=float(amt_dto.get("absorptionClusterLow") or 0.0),
+            recent_decisions=tuple(recent_decisions or ()),
         )
