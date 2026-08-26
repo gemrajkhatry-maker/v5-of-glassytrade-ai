@@ -89,11 +89,136 @@ def _latest_stacked_imbalance(amt_dto: dict) -> tuple[str, int, float, float]:
 
 class DecisionContextBuilder:
     """Builds a DecisionContext from engine state and AMT analysis.
-    
+
     The builder encapsulates the direction resolution logic (auction-state
     edge, absorption side, OBI imbalance, VA location) and the VWAP bias
     filter, producing a fully-populated DecisionContext ready for evaluation.
     """
+
+    def _resolve_direction(self, amt_dto: dict, close_px: float, vah: float,
+                           val: float, obi: float, ofi: float,
+                           vwap_upper_1: float, vwap_lower_1: float) -> str | None:
+        """Determine agent direction from AMT state (hierarchy of intent)."""
+        raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
+        break_dir = str(amt_dto.get("breakDirection") or "").upper()
+        break_type = str(amt_dto.get("breakType") or "").upper()
+        triple_a_sig = str(amt_dto.get("tripleASignal") or "").upper()
+        cvd_val = float(amt_dto.get("cvdSlope") or 0.0)
+
+        if break_type == "INITIATIVE" and break_dir in ("UP", "DOWN"):
+            return "LONG" if break_dir == "UP" else "SHORT"
+        if triple_a_sig in ("LONG", "SHORT"):
+            return triple_a_sig
+        if amt_dto.get("absorptionSide") in ("SELL_ABSORBED", "BUY_ABSORBED"):
+            return {"SELL_ABSORBED": "LONG", "BUY_ABSORBED": "SHORT"}.get(amt_dto.get("absorptionSide"))
+        if obi >= 0.20 and close_px > vwap_upper_1:
+            return "LONG"
+        if obi <= -0.20 and close_px < vwap_lower_1:
+            return "SHORT"
+        if cvd_val > 0.5 and (close_px > vah or ofi > 0.10):
+            return "LONG"
+        if cvd_val < -0.5 and (close_px < val or ofi < -0.10):
+            return "SHORT"
+        if raw_ms == "IMBALANCED":
+            if (vah > 0 and close_px > vah) or ofi > 0.10 or (close_px > vwap_upper_1):
+                return "LONG"
+            if (val > 0 and close_px < val) or ofi < -0.10 or (close_px < vwap_lower_1):
+                return "SHORT"
+        if raw_ms == "BALANCED":
+            if val > 0 and close_px <= val and cvd_val >= -0.2:
+                return "LONG"
+            if vah > 0 and close_px >= vah and cvd_val <= 0.2:
+                return "SHORT"
+            if cvd_val > 0.5:
+                return "LONG"
+            if cvd_val < -0.5:
+                return "SHORT"
+        return None
+
+    @staticmethod
+    def _nearest_leg_lvn(amt_dto: dict, close_px: float) -> float:
+        """Derive nearest leg LVN from legLvns list or legLvn float."""
+        leg_lvns_raw = amt_dto.get("legLvns")
+        if isinstance(leg_lvns_raw, (list, tuple)) and leg_lvns_raw:
+            valid_lvns = [float(x) for x in leg_lvns_raw if float(x) > 0]
+            if valid_lvns:
+                return min(valid_lvns, key=lambda x: abs(x - close_px))
+        if amt_dto.get("legLvn"):
+            return float(amt_dto.get("legLvn"))
+        return 0.0
+
+    def _build_setup_evidence(self, amt_dto: dict, agent_direction: str | None,
+                              nearest_leg_lvn: float) -> object | None:
+        """Construct SetupEvidence from AMT state."""
+        from quant.decision.setup_state import SetupEvidence
+        setup_type = str(amt_dto.get("setupType") or "").upper()
+        setup_dir = str(amt_dto.get("setupDirection") or agent_direction or "").upper()
+        cvd_val = float(amt_dto.get("cvdSlope") or 0.0)
+        cvd_agrees = bool(
+            amt_dto.get("cvdAgrees")
+            or (setup_dir == "LONG" and cvd_val >= -0.2)
+            or (setup_dir == "SHORT" and cvd_val <= 0.2)
+        )
+        rejection_at_high = bool(amt_dto.get("rejectionAtHigh"))
+        rejection_at_low = bool(amt_dto.get("rejectionAtLow"))
+        is_second_drive = bool(amt_dto.get("isSecondDrive"))
+        drive_number = int(amt_dto.get("driveNumber") or 0)
+        triple_phase = str(amt_dto.get("tripleAPhase") or "")
+        triple_signal = str(amt_dto.get("tripleASignal") or "")
+
+        if triple_phase == "AGGRESSION" and (triple_signal in ("LONG", "SHORT") or agent_direction in ("LONG", "SHORT")):
+            return SetupEvidence(
+                setup_type="TRIPLE_A", direction=triple_signal or agent_direction,
+                absorption=True, accumulation=True, aggression=True, acceptance=True,
+                cvd_agrees=cvd_agrees,
+            )
+        if is_second_drive:
+            return SetupEvidence(
+                setup_type="SECOND_DRIVE",
+                direction=setup_dir or ("SHORT" if rejection_at_high else "LONG"),
+                drive_number=drive_number or 2, d1_rejected=True,
+                rejection=rejection_at_high or rejection_at_low or bool(amt_dto.get("rejection")),
+                cvd_agrees=cvd_agrees,
+            )
+        if rejection_at_high or rejection_at_low or setup_type == "VA_FADE":
+            direction = "SHORT" if rejection_at_high else ("LONG" if rejection_at_low else (setup_dir or "LONG"))
+            return SetupEvidence(
+                setup_type="VA_FADE", direction=direction,
+                rejection=rejection_at_high or rejection_at_low or bool(amt_dto.get("rejection")),
+                acceptance=bool(amt_dto.get("acceptanceAbove") or amt_dto.get("acceptanceBelow") or amt_dto.get("acceptance", False)),
+                cvd_agrees=cvd_agrees,
+            )
+        if nearest_leg_lvn > 0 and (amt_dto.get("absorptionSide") in ("SELL_ABSORBED", "BUY_ABSORBED") or setup_type == "LVN_SNIPER"):
+            direction = "LONG" if amt_dto.get("absorptionSide") == "SELL_ABSORBED" else ("SHORT" if amt_dto.get("absorptionSide") == "BUY_ABSORBED" else (setup_dir or "LONG"))
+            return SetupEvidence(
+                setup_type="LVN_SNIPER", direction=direction,
+                level=nearest_leg_lvn, absorption=True, cvd_agrees=cvd_agrees,
+            )
+        if setup_type and setup_type != "NONE":
+            return SetupEvidence(setup_type=setup_type, direction=setup_dir, cvd_agrees=cvd_agrees)
+        return None
+
+    def _extract_position(self, position, close_px: float, bar_index: int,
+                          entry_bar_index: int) -> dict:
+        """Extract position state into a flat dict for DecisionContext."""
+        if position is None:
+            return {"pos_open": False, "pos_side": "", "pos_entry": 0.0,
+                    "pos_size": 0.0, "pos_sl": 0.0, "pos_tp": 0.0,
+                    "pos_pnl": 0.0, "pos_bars_held": 0}
+        raw_sz = float(getattr(position, "size", 0.0))
+        pos_side = "LONG" if raw_sz > 0 else ("SHORT" if raw_sz < 0 else str(getattr(position, "side", "") or ""))
+        pos_entry = float(getattr(position, "open_price", 0.0) or getattr(position, "entry_price", 0.0) or 0.0)
+        if hasattr(position, "order") and hasattr(position.order, "signal") and position.order.signal is not None:
+            pos_sl = float(position.order.signal.sl or 0.0)
+            pos_tp = float(position.order.signal.tp or 0.0)
+        else:
+            pos_sl = float(getattr(position, "stop_loss", 0.0) or 0.0)
+            pos_tp = float(getattr(position, "take_profit", 0.0) or 0.0)
+        pos_pnl = (close_px - pos_entry) * raw_sz if close_px > 0 and pos_entry > 0 and raw_sz != 0 else 0.0
+        pos_bars_held = max(0, bar_index - entry_bar_index) if entry_bar_index > 0 else 0
+        return {"pos_open": True, "pos_side": pos_side, "pos_entry": pos_entry,
+                "pos_size": raw_sz, "pos_sl": pos_sl, "pos_tp": pos_tp,
+                "pos_pnl": pos_pnl, "pos_bars_held": pos_bars_held}
 
     def build(
         self,
@@ -131,203 +256,53 @@ class DecisionContextBuilder:
         Returns:
             A fully-populated DecisionContext
         """
-        warmup_bars = 15  # _WARMUP_BARS constant
+        warmup_bars = 15
         obi = float(amt_dto.get("obi") or 0.0)
-
-        best_bid = 0.0
-        best_ask = 0.0
-        if order_book is not None:
-            bids = getattr(order_book, "bids", ()) or ()
-            asks = getattr(order_book, "asks", ()) or ()
-            if bids:
-                best_bid = float(bids[0].price)
-            if asks:
-                best_ask = float(asks[0].price)
-
-        raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
-        break_dir = str(amt_dto.get("breakDirection") or "").upper()
-        break_type = str(amt_dto.get("breakType") or "").upper()
-
-        # Session & Expiry Context
-        session_info = None
-        bar_text = str(bar.time if bar else "").strip()
-        is_epoch = (
-            bar_text.replace(".", "", 1).lstrip("-").isdigit()
-            and len(bar_text) >= 9
-            and "T" not in bar_text
-        )
-        is_iso = "T" in bar_text or "+" in bar_text or ":" in bar_text
-        if is_epoch or is_iso:
-            try:
-                session_info = get_session_info(bar.time, market=market)
-            except Exception:
-                pass
-
-        session_phase = session_info.session if session_info else "PRIMARY"
-        _si_dir, _si_mag, _si_low, _si_high = _latest_stacked_imbalance(amt_dto)
-        _buy_wall_below, _sell_wall_above = _print_levels_from_dto(amt_dto, bar)
-        allow_trend = session_info.allow_trend if session_info else True
-        allow_reversion = session_info.allow_reversion if session_info else True
-
-        bar_dt = ist_dt(bar.time) if (bar and bar.time and (is_epoch or is_iso)) else None
-        is_expiry = (bar_dt.date() == contract_expiry) if (contract_expiry and bar_dt) else False
-
-        # Direction input to the gates follows a strict hierarchy of intent:
-        # 1. Initiative Breakouts (structural, overrides local mean-reversion)
-        # 2. Triple-A Aggression Edge (canonical state machine edge)
-        # 3. Fresh Absorption Cluster (microstructure edge)
-        # 4. Deep Book OBI Imbalance (depth edge)
-        # 5. Value Area Reversion (contextual mean-reversion)
-        # 5. Value Area Reversion (contextual mean-reversion)
         close_px = float(bar.close if bar else 0.0)
         vah = float(amt_dto.get("valueAreaHigh") or 0.0)
         val = float(amt_dto.get("valueAreaLow") or 0.0)
         ofi = float(amt_dto.get("ofi") or 0.0)
         vwap_upper_1 = float(amt_dto.get("vwapUpper1") or float("inf"))
         vwap_lower_1 = float(amt_dto.get("vwapLower1") or float("-inf"))
+        best_bid = 0.0
+        best_ask = 0.0
+        if order_book is not None:
+            bids = getattr(order_book, "bids", ()) or ()
+            asks = getattr(order_book, "asks", ()) or ()
+            if bids: best_bid = float(bids[0].price)
+            if asks: best_ask = float(asks[0].price)
 
-        agent_direction = None
-        triple_a_sig = str(amt_dto.get("tripleASignal") or "").upper()
-        cvd_val = float(amt_dto.get("cvdSlope") or 0.0)
-        if break_type == "INITIATIVE" and break_dir in ("UP", "DOWN"):
-            agent_direction = "LONG" if break_dir == "UP" else "SHORT"
-        elif triple_a_sig in ("LONG", "SHORT"):
-            agent_direction = triple_a_sig
-        elif amt_dto.get("absorptionSide") in ("SELL_ABSORBED", "BUY_ABSORBED"):
-            # Simple assumption: fresh absorption maps directly to direction
-            agent_direction = {"SELL_ABSORBED": "LONG", "BUY_ABSORBED": "SHORT"}.get(amt_dto.get("absorptionSide"))
-        elif obi >= 0.20 and close_px > vwap_upper_1:
-            agent_direction = "LONG"
-        elif obi <= -0.20 and close_px < vwap_lower_1:
-            agent_direction = "SHORT"
-        elif cvd_val > 0.5 and (close_px > vah or ofi > 0.10):
-            agent_direction = "LONG"
-        elif cvd_val < -0.5 and (close_px < val or ofi < -0.10):
-            agent_direction = "SHORT"
-        elif raw_ms == "IMBALANCED":
-            if (vah > 0 and close_px > vah) or ofi > 0.10 or (close_px > vwap_upper_1):
-                agent_direction = "LONG"
-            elif (val > 0 and close_px < val) or ofi < -0.10 or (close_px < vwap_lower_1):
-                agent_direction = "SHORT"
-        elif raw_ms == "BALANCED":
-            if val > 0 and close_px <= val and cvd_val >= -0.2:
-                agent_direction = "LONG"
-            elif vah > 0 and close_px >= vah and cvd_val <= 0.2:
-                agent_direction = "SHORT"
-            elif cvd_val > 0.5:
-                agent_direction = "LONG"
-            elif cvd_val < -0.5:
-                agent_direction = "SHORT"
+        # Session & Expiry
+        bar_text = str(bar.time if bar else "").strip()
+        is_epoch = bar_text.replace(".", "", 1).lstrip("-").isdigit() and len(bar_text) >= 9 and "T" not in bar_text
+        is_iso = "T" in bar_text or "+" in bar_text or ":" in bar_text
+        session_info = None
+        if is_epoch or is_iso:
+            try: session_info = get_session_info(bar.time, market=market)
+            except Exception: pass
+        session_phase = session_info.session if session_info else "PRIMARY"
+        bar_dt = ist_dt(bar.time) if (bar and bar.time and (is_epoch or is_iso)) else None
+        is_expiry = (bar_dt.date() == contract_expiry) if (contract_expiry and bar_dt) else False
 
-        # Market state + balance ratio from the AMT analyzer
-        if raw_ms == "DEAD":
-            amt_market_state = "DEAD"
-        elif raw_ms == "IMBALANCED":
-            amt_market_state = MarketState.IMBALANCED
-        else:
-            amt_market_state = MarketState.BALANCED
+        # Direction, Setup, Position via extracted helpers
+        agent_direction = self._resolve_direction(amt_dto, close_px, vah, val, obi, ofi, vwap_upper_1, vwap_lower_1)
+        nearest_leg_lvn = self._nearest_leg_lvn(amt_dto, close_px)
+        setup_evidence = self._build_setup_evidence(amt_dto, agent_direction, nearest_leg_lvn)
+        pos = self._extract_position(position, close_px, bar_index, entry_bar_index)
+        _si_dir, _si_mag, _si_low, _si_high = _latest_stacked_imbalance(amt_dto)
+        _buy_wall_below, _sell_wall_above = _print_levels_from_dto(amt_dto, bar)
 
-        # Derive nearest leg LVN from legLvns list or legLvn float
-        leg_lvns_raw = amt_dto.get("legLvns")
-        nearest_leg_lvn = 0.0
-        if isinstance(leg_lvns_raw, (list, tuple)) and leg_lvns_raw:
-            valid_lvns = [float(x) for x in leg_lvns_raw if float(x) > 0]
-            if valid_lvns:
-                nearest_leg_lvn = min(valid_lvns, key=lambda x: abs(x - close_px))
-        elif amt_dto.get("legLvn"):
-            nearest_leg_lvn = float(amt_dto.get("legLvn"))
-
-        # Build SetupEvidence
-        from quant.decision.setup_state import SetupEvidence
-        setup_type = str(amt_dto.get("setupType") or "").upper()
-        setup_dir = str(amt_dto.get("setupDirection") or agent_direction or "").upper()
-        cvd_val = float(amt_dto.get("cvdSlope") or 0.0)
-        cvd_agrees = bool(
-            amt_dto.get("cvdAgrees")
-            or (setup_dir == "LONG" and cvd_val >= -0.2)
-            or (setup_dir == "SHORT" and cvd_val <= 0.2)
-        )
-
-        rejection_at_high = bool(amt_dto.get("rejectionAtHigh"))
-        rejection_at_low = bool(amt_dto.get("rejectionAtLow"))
-        acceptance_above = bool(amt_dto.get("acceptanceAbove"))
-        acceptance_below = bool(amt_dto.get("acceptanceBelow"))
-        is_second_drive = bool(amt_dto.get("isSecondDrive"))
-        drive_number = int(amt_dto.get("driveNumber") or 0)
-
-        setup_evidence = None
-        triple_phase = str(amt_dto.get("tripleAPhase") or "")
-        triple_signal = str(amt_dto.get("tripleASignal") or "")
-        if triple_phase == "AGGRESSION" and (triple_signal in ("LONG", "SHORT") or agent_direction in ("LONG", "SHORT")):
-            setup_evidence = SetupEvidence(
-                setup_type="TRIPLE_A",
-                direction=triple_signal or agent_direction,
-                absorption=True,
-                accumulation=True,
-                aggression=True,
-                acceptance=True,
-                cvd_agrees=cvd_agrees,
-            )
-        elif is_second_drive:
-            setup_evidence = SetupEvidence(
-                setup_type="SECOND_DRIVE",
-                direction=setup_dir or ("SHORT" if rejection_at_high else ("LONG" if rejection_at_low else "LONG")),
-                drive_number=drive_number or 2,
-                d1_rejected=True,
-                rejection=rejection_at_high or rejection_at_low or bool(amt_dto.get("rejection")),
-                cvd_agrees=cvd_agrees,
-            )
-        elif rejection_at_high or rejection_at_low or setup_type == "VA_FADE":
-            rejection = rejection_at_high or rejection_at_low or bool(amt_dto.get("rejection"))
-            acceptance = acceptance_above or acceptance_below or bool(amt_dto.get("acceptance", False))
-            direction = "SHORT" if rejection_at_high else ("LONG" if rejection_at_low else (setup_dir or "LONG"))
-            setup_evidence = SetupEvidence(
-                setup_type="VA_FADE",
-                direction=direction,
-                rejection=rejection,
-                acceptance=acceptance,
-                cvd_agrees=cvd_agrees,
-            )
-        elif nearest_leg_lvn > 0 and (amt_dto.get("absorptionSide") in ("SELL_ABSORBED", "BUY_ABSORBED") or setup_type == "LVN_SNIPER"):
-            direction = "LONG" if amt_dto.get("absorptionSide") == "SELL_ABSORBED" else ("SHORT" if amt_dto.get("absorptionSide") == "BUY_ABSORBED" else (setup_dir or "LONG"))
-            setup_evidence = SetupEvidence(
-                setup_type="LVN_SNIPER",
-                direction=direction,
-                level=nearest_leg_lvn,
-                absorption=True,
-                cvd_agrees=cvd_agrees,
-            )
-        elif setup_type and setup_type != "NONE":
-            setup_evidence = SetupEvidence(
-                setup_type=setup_type,  # type: ignore
-                direction=setup_dir,
-                cvd_agrees=cvd_agrees,
-            )
+        # Market state + break info
+        raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
+        break_dir = str(amt_dto.get("breakDirection") or "").upper()
+        break_type = str(amt_dto.get("breakType") or "").upper()
+        if raw_ms == "DEAD": amt_market_state = "DEAD"
+        elif raw_ms == "IMBALANCED": amt_market_state = MarketState.IMBALANCED
+        else: amt_market_state = MarketState.BALANCED
 
         bar_time = bar.time if bar is not None else str(amt_dto.get("time") or "")
-        pos_open = position is not None
-        pos_side = ""
-        pos_entry = 0.0
-        pos_size = 0.0
-        pos_sl = 0.0
-        pos_tp = 0.0
-        pos_pnl = 0.0
-        pos_bars_held = 0
-
-        if pos_open:
-            raw_sz = getattr(position, "size", 0.0)
-            pos_size = float(raw_sz)
-            pos_side = "LONG" if pos_size > 0 else ("SHORT" if pos_size < 0 else str(getattr(position, "side", "") or ""))
-            pos_entry = float(getattr(position, "open_price", 0.0) or getattr(position, "entry_price", 0.0) or 0.0)
-            if hasattr(position, "order") and hasattr(position.order, "signal") and position.order.signal is not None:
-                pos_sl = float(position.order.signal.sl or 0.0)
-                pos_tp = float(position.order.signal.tp or 0.0)
-            else:
-                pos_sl = float(getattr(position, "stop_loss", 0.0) or 0.0)
-                pos_tp = float(getattr(position, "take_profit", 0.0) or 0.0)
-            if close_px > 0 and pos_entry > 0 and pos_size != 0:
-                pos_pnl = (close_px - pos_entry) * pos_size
-            pos_bars_held = max(0, bar_index - entry_bar_index) if entry_bar_index > 0 else 0
+        allow_trend = session_info.allow_trend if session_info else True
+        allow_reversion = session_info.allow_reversion if session_info else True
 
         return DecisionContext(
             state=None,
@@ -337,14 +312,14 @@ class DecisionContextBuilder:
                 bar_time, market=market, contract_expiry=contract_expiry
             ) if bar_time else True,
             warmup_complete=(bar_index + warm_bars) >= warmup_bars,
-            position_open=pos_open,
-            position_side=pos_side,
-            position_entry_price=pos_entry,
-            position_size=pos_size,
-            position_unrealized_pnl=pos_pnl,
-            position_sl=pos_sl,
-            position_tp=pos_tp,
-            position_bars_held=pos_bars_held,
+            position_open=pos["pos_open"],
+            position_side=pos["pos_side"],
+            position_entry_price=pos["pos_entry"],
+            position_size=pos["pos_size"],
+            position_unrealized_pnl=pos["pos_pnl"],
+            position_sl=pos["pos_sl"],
+            position_tp=pos["pos_tp"],
+            position_bars_held=pos["pos_bars_held"],
             cooldown_remaining_sec=cooldown_remaining_sec,
             risk_halted=risk_state.halted,
             consecutive_losses=risk_state.consecutive_losses,
