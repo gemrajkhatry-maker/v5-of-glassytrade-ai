@@ -28,14 +28,28 @@ def load_ticks(path: str, interval: int | None = None) -> tuple[list, int]:
     rows = Journal(path).replay()
     inf, bars = bars_from_journal(rows)
     iv = int(interval or inf)
-    return ticks_from_bars(bars, iv), iv
+    ticks = ticks_from_bars(bars, iv)
+    if ticks:
+        # End-of-stream flush: run() has no close-out, so the aggregator's
+        # final forming bar would never emit. One zero-volume tick from the
+        # NEXT bucket closes it — BarClosed events then match the journal.
+        from copy import copy
+        flush = copy(ticks[-1])
+        object.__setattr__(flush, "time",
+                           str(int(float(bars[-1]["time"])) + iv))
+        object.__setattr__(flush, "volume", 0.0)
+        object.__setattr__(flush, "buy_volume", 0.0)
+        object.__setattr__(flush, "sell_volume", 0.0)
+        ticks.append(flush)
+    return ticks, iv
 
 
 def replay_twice(ticks: list, symbol: str, interval: int):
     # Identical config for both engines (same symbol) — the golden-tape
-    # pattern. Isolation is guaranteed without symbol suffixes: each engine
-    # builds its own memory-only SessionLevelStore (path=None), and
-    # SessionRisk.reset_session() clears any persisted daily-risk state.
+    # pattern. Real isolation comes from each engine building its own
+    # memory-only SessionLevelStore (path=None); storage=None also
+    # short-circuits SessionRisk persistence, so reset_session() here is
+    # belt-and-braces against future storage wiring.
     SessionRisk(storage=None, symbol=symbol).reset_session()
     eng1 = QuantEngine(SyntheticGateway(list(ticks)), symbol,
                        interval_seconds=interval)

@@ -52,3 +52,29 @@ def test_ticks_reproduce_ohlc_through_aggregator():
     # Closing tick belongs to the NEXT bucket (it seeds the following bar),
     # so closed volume = 4 x (vol/4) = the journaled bar's exact volume.
     assert abs(closed.volume - 400.0) < 1e-6
+    assert abs(closed.buy_volume - 220.0) < 1e-6
+    assert abs(closed.sell_volume - 180.0) < 1e-6
+    assert closed.delta == 40.0
+
+
+def test_negative_delta_odd_volume_roundtrip():
+    from copy import copy
+    from quant.aggregator import BarAggregator
+    interval, bars = bars_from_journal(
+        [_row(BAR_TIME, 100.0, 105.0, 98.0, 103.0, 399.0, delta=-40.0),
+         _row(BAR_TIME + 60, 103.0, 106.0, 101.0, 104.0, 100.0)])
+    ticks = ticks_from_bars([bars[0]], interval)
+    flush = copy(ticks[-1])
+    object.__setattr__(flush, "time", str(int(float(ticks[-1].time)) + interval))
+    agg = BarAggregator(interval_seconds=interval)
+    closed = None
+    for t in [*ticks, flush]:
+        closed = agg.add_tick(t) or closed
+    assert closed is not None
+    assert (closed.open, closed.high, closed.low, closed.close) == \
+        (100.0, 105.0, 98.0, 103.0)
+    assert abs(closed.volume - 399.0) < 1e-6
+    # buy=(399 + -40)/2=179.5, sell=219.5 — odd volume splits on .5 exactly.
+    assert abs(closed.buy_volume - 179.5) < 1e-6
+    assert abs(closed.sell_volume - 219.5) < 1e-6
+    assert closed.delta == -40.0
