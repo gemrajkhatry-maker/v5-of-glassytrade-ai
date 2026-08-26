@@ -1,8 +1,6 @@
 """Payload-exact trace comparison for replay determinism."""
 
-from quant.events import BarClosed, PositionOpened
-from quant.execution.order import Order, Position
-from quant.decision.signal_builder import Signal
+from quant.events import BarClosed
 from tests.quant.certification.trace_compare import normalize, traces_equal
 
 
@@ -20,13 +18,13 @@ def test_normalize_strips_volatile_ids():
 
 
 def test_normalize_strips_nested_position_uuid():
-    sig = Signal(type="LONG", reason="r", entry=100.0, sl=99.0, tp=102.0,
-                 rr=2.0, model_label="T", symbol="X", timestamp="100")
-    pos = Position(order=Order(signal=sig, quantity=10), open_price=100.0,
-                   open_time="100", size=10)
-    row = {"type": "PositionOpened", "position": pos.__dict__}
+    row = {"type": "PositionOpened",
+           "position": {"_id": "pos-uuid", "size": 10,
+                        "order": {"quantity": 10,
+                                  "signal": {"entry": 100.0}}}}
     norm = normalize(row)
     assert "_id" not in norm["position"]
+    assert norm["position"]["order"]["signal"]["entry"] == 100.0
 
 
 def test_traces_equal_ignores_volatile_fields():
@@ -40,3 +38,12 @@ def test_traces_equal_detects_payload_drift():
     b_evt = _evt("9", "u")
     b = [type(b_evt)(symbol="X", time="200", bar=None)]
     assert not traces_equal(a, b)
+
+
+class TestStrictEquality:
+    def test_int_vs_float_is_divergence(self):
+        from tests.quant.certification.trace_compare import _strict_eq
+        assert not _strict_eq({"qty": 10}, {"qty": 10.0})
+        assert not _strict_eq({"halted": True}, {"halted": 1})
+        assert not _strict_eq({"v": None}, {"other": None})
+        assert _strict_eq({"a": {"b": (1, "x")}}, {"a": {"b": (1, "x")}})

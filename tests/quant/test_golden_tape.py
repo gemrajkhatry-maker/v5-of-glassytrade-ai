@@ -43,6 +43,7 @@ def test_golden_tape_event_sequence_determinism():
     assert len(sync_trace1) == len(sync_trace2)
     assert len(sync_trace1) > 0
     assert "BarClosed" in [e.__class__.__name__ for e in sync_trace1]
+    assert "AmtUpdated" in [e.__class__.__name__ for e in sync_trace1]
     assert "DecisionProduced" in [e.__class__.__name__ for e in sync_trace1]
     assert traces_equal(sync_trace1, sync_trace2), (
         "two engines diverged on payload content"

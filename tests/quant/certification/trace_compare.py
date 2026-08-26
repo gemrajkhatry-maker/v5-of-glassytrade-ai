@@ -26,6 +26,21 @@ def _as_dict(evt) -> dict:
     return {"__event__": d, **normalize(asdict(evt))}
 
 
+_MISSING = object()
+
+
+def _strict_eq(a, b) -> bool:
+    if isinstance(a, bool) != isinstance(b, bool):
+        return False
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(_strict_eq(v, b[k]) for k, v in a.items())
+    if isinstance(a, (list, tuple)):
+        return len(a) == len(b) and all(_strict_eq(x, y) for x, y in zip(a, b))
+    return a == b
+
+
 def traces_equal(a: list, b: list) -> bool:
     return first_divergence(a, b) is None
 
@@ -34,9 +49,9 @@ def first_divergence(a: list, b: list) -> str | None:
     da = [_as_dict(e) for e in a]
     db = [_as_dict(e) for e in b]
     for i, (x, y) in enumerate(zip(da, db)):
-        if x != y:
-            keys = set(x) | set(y)
-            diff = {k for k in keys if x.get(k) != y.get(k)}
+        keys = set(x) | set(y)
+        diff = {k for k in keys if not _strict_eq(x.get(k, _MISSING), y.get(k, _MISSING))}
+        if diff:
             return f"index={i} type={x.get('__event__')} differing_keys={sorted(diff)}"
     if len(da) != len(db):
         return f"length mismatch: {len(da)} vs {len(db)}"
