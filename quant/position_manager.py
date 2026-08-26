@@ -76,6 +76,29 @@ class PositionManager:
         self.last_partial_fill = None
         self.last_pyramid_pnl = 0.0
 
+    def _emit_stop_moves(self, position, bar, prev_be, prev_trail,
+                         be_floor, trail_stop) -> None:
+        """Journal protective-stop level changes detected this bar."""
+        sig_sl = float(position.order.signal.sl)
+        long = position.size > 0
+        if be_floor is not None and prev_be is None:
+            # Breakeven floor armed at entry — via the 0.8R/CVD trailing path
+            # on surviving bars, or via TP1 when the caller invokes this from
+            # the partial-exit branch.
+            self._emit(StopMoved(symbol=self.symbol, time=bar.time,
+                                 old_sl=sig_sl, new_sl=float(be_floor),
+                                 reason="BREAKEVEN_ARMED"))
+        tightened = (
+            trail_stop is not None
+            and (prev_trail is None
+                 or (trail_stop > prev_trail if long else trail_stop < prev_trail))
+        )
+        if tightened:
+            self._emit(StopMoved(symbol=self.symbol, time=bar.time,
+                                 old_sl=float(prev_trail if prev_trail is not None else sig_sl),
+                                 new_sl=float(trail_stop),
+                                 reason="TRAIL_RATCHET"))
+
     def manage_exit(
         self,
         amt_dto: dict,
@@ -152,26 +175,11 @@ class PositionManager:
             )
 
             # Emit StopMoved for any stop-level change detected this bar.
-            # Pure observation: only after a NON-exit decision — an exiting
-            # bar is journaled through its own PositionClosed chain instead.
+            # Full-close bars are excluded: no position survives, and the
+            # exit is journaled through its own PositionClosed chain instead.
             if not exit_dec.should_exit:
-                be_floor, trail_stop = self._exits.stop_state(position)
-                sig_sl = float(position.order.signal.sl)
-                long = position.size > 0
-                if be_floor is not None and prev_be is None:
-                    # Breakeven floor armed at entry (TP1 hit or manual arm).
-                    self._emit(StopMoved(symbol=self.symbol, time=bar.time,
-                                         old_sl=sig_sl, new_sl=float(be_floor),
-                                         reason="BREAKEVEN_ARMED"))
-                tightened = trail_stop is not None and (
-                    prev_trail is None
-                    or (trail_stop > prev_trail if long else trail_stop < prev_trail)
-                )
-                if tightened:
-                    self._emit(StopMoved(symbol=self.symbol, time=bar.time,
-                                         old_sl=float(prev_trail if prev_trail is not None else sig_sl),
-                                         new_sl=float(trail_stop),
-                                         reason="TRAIL_RATCHET"))
+                self._emit_stop_moves(position, bar, prev_be, prev_trail,
+                                      *self._exits.stop_state(position))
 
         if exit_dec.should_exit:
             if exit_dec.partial_fraction is not None and exit_dec.partial_fraction < 1.0:
@@ -193,6 +201,10 @@ class PositionManager:
                 )
                 self._emit(RiskUpdated(symbol=self.symbol, time=bar.time, risk=risk))
                 self.last_partial_fill = partial_fill
+                # A TP1 bar can arm the BE floor inside evaluate() — that is
+                # still a stop move; journal it for the surviving runner.
+                self._emit_stop_moves(position, bar, prev_be, prev_trail,
+                                      *self._exits.stop_state(position))
                 return remaining
 
             fill = self._oms.close(position, exit_dec.close_price, bar.time,

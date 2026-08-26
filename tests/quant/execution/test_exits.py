@@ -318,8 +318,8 @@ def test_manage_exit_emits_stop_moved_events():
 
 
 def test_no_stop_moved_when_bar_exits():
-    """StopMoved is pure observation of NON-exit decisions: an exiting bar
-    closes via its own event chain and must not also emit StopMoved."""
+    """StopMoved never fires on a FULL-close bar: no position survives, and
+    the close is journaled through its own PositionClosed chain instead."""
     from quant.events import PositionClosed, StopMoved
 
     pos = _position(entry=100.0, sl=99.0, tp=120.0)
@@ -342,3 +342,54 @@ def test_no_stop_moved_when_bar_exits():
     assert closed and closed[-1].fill.reason == "TRAIL"
     # The ratchet that fired WITH this bar's exit is not journaled as StopMoved.
     assert [e for e in events if isinstance(e, StopMoved)] == moved_before
+
+
+def test_tp1_partial_exit_bar_journals_be_arm():
+    """A TP1 bar arms the BE floor inside evaluate() AND reduces the position;
+    the arm is still a stop move and must be journaled (controller ruling)."""
+    from quant.events import PositionReduced, StopMoved
+
+    pos = _position(entry=100.0, sl=98.0, tp=102.0)  # risk = 2.0
+    events = []
+    pm = _mk_pm(events)
+
+    result = pm.manage_exit({}, _bar("2026-08-24T10:04:00+05:30", 101, 102, 100.9, 102.0),
+                            pos, bar_index=6, entry_bar_index=1, entry_time_epoch=0.0)
+    assert result is not None and abs(result.size) == 5  # runner survives
+    reduced = [e for e in events if isinstance(e, PositionReduced)]
+    assert reduced
+    moved = [e for e in events if isinstance(e, StopMoved)]
+    assert len(moved) == 1
+    assert moved[0].reason == "BREAKEVEN_ARMED"
+    assert moved[0].old_sl == 98.0 and moved[0].new_sl == 100.0
+    # Journaled on the partial-exit path: after the reduction event chain.
+    assert events.index(moved[0]) > events.index(reduced[0])
+
+
+def test_manage_exit_emits_short_trail_ratchet():
+    """SHORT mirror of the long emission test: the trail ratchets DOWNWARD,
+    so TRAIL_RATCHET carries new_sl < old_sl."""
+    from quant.events import StopMoved
+
+    pos = _short_position(entry=100.0, sl=102.0, tp=80.0)  # risk = 2.0
+    events = []
+    pm = _mk_pm(events)
+
+    # Bar 1: profit 1.8 >= 0.8R -> BE floor armed at entry.
+    r1 = pm.manage_exit({}, _bar("2026-08-24T10:01:00+05:30", 99, 98.5, 98.0, 98.2),
+                        pos, bar_index=3, entry_bar_index=1, entry_time_epoch=0.0)
+    assert r1 is pos
+    moved = [e for e in events if isinstance(e, StopMoved)]
+    assert len(moved) == 1
+    assert moved[0].reason == "BREAKEVEN_ARMED"
+    assert moved[0].old_sl == 102.0 and moved[0].new_sl == 100.0
+
+    # Bar 2: profit 2.5 >= 1R -> trail arms at 97.5 + 0.20*2.5 = 98.0.
+    r2 = pm.manage_exit({}, _bar("2026-08-24T10:02:00+05:30", 98, 97.9, 97.0, 97.5),
+                        pos, bar_index=4, entry_bar_index=1, entry_time_epoch=0.0)
+    assert r2 is pos
+    moved = [e for e in events if isinstance(e, StopMoved)]
+    assert len(moved) == 2
+    assert moved[1].reason == "TRAIL_RATCHET"
+    assert moved[1].old_sl == 102.0 and moved[1].new_sl == 98.0  # prev None -> sig sl
+    assert moved[1].new_sl < moved[1].old_sl
