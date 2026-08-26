@@ -83,7 +83,7 @@ async def health_check(
     from app.shared.mode import is_live_mode
 
     if is_live_mode():
-        checks["live_oms"] = "unwired"
+        checks["live_oms"] = "wired (LiveOMS)"
 
     coordinator = getattr(request.app.state, "coordinator", None)
     journal_fails = 0

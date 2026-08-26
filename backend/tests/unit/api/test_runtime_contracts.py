@@ -97,7 +97,7 @@ async def test_health_reports_live_oms_unwired(monkeypatch):
     payload = await health.health_check(
         request, broker=object(), storage=storage, config=object()
     )
-    assert payload["checks"]["live_oms"] == "unwired"
+    assert payload["checks"]["live_oms"] == "wired (LiveOMS)"
 
 
 @pytest.mark.asyncio

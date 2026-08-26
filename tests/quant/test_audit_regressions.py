@@ -333,12 +333,13 @@ def test_registry_does_not_default_known_bse_indices_to_mcx():
 # Safety + persistence slice
 # ---------------------------------------------------------------------------
 
-def test_live_oms_unwired_halts_spawned_engine(monkeypatch, tmp_path):
-    """Live fill path is PaperOMS: spawn must halt entries before run()."""
+def test_live_oms_enabled_with_broker_injects_live_oms(monkeypatch, tmp_path):
+    """When live_oms_enabled=True and broker is wired, engines get LiveOMS."""
     import threading
 
     import quant.multi_engine as multi_engine
     from quant.multi_engine import QuantCoordinator
+    from quant.execution.live_oms import LiveOMS
 
     monkeypatch.setattr(
         "quant.amt_engine.AMTEngine.seed", lambda self: None
@@ -360,24 +361,28 @@ def test_live_oms_unwired_halts_spawned_engine(monkeypatch, tmp_path):
         async def fetch_history(self, *a, **k):
             return []
 
+    class _FakeBroker:
+        pass
+
     coord = QuantCoordinator(
         _MD(),
+        broker=_FakeBroker(),
         config={
-            "live_oms_unwired": True,
+            "live_oms_enabled": True,
             "underlyings": ["NIFTY"],
             "n": 1,
             "contracts_file": str(tmp_path / "c.json"),
-            # Isolate from the coordinator's shared, real-disk default
-            # (backend/.session_levels.json) so this test's halt doesn't
-            # leak into other tests reusing the same symbol+date key.
             "session_levels_file": str(tmp_path / "session_levels.json"),
             "include_futures": False,
         },
     )
     eng = coord._spawn_engine("NIFTY AUG FUT")
+    assert isinstance(eng._oms, LiveOMS), (
+        f"expected LiveOMS when live_oms_enabled=True + broker wired, "
+        f"got {type(eng._oms).__name__}"
+    )
     st = eng._risk.state()
-    assert st.halted
-    assert "LIVE_OMS_UNWIRED" in st.halt_reason
+    assert not st.halted, "engine should not be halted when OMS is wired"
 
 
 def test_cooldown_emits_decision_produced():

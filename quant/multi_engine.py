@@ -21,6 +21,8 @@ from quant.contracts.instrument_registry import DEFAULT_REGISTRY, is_futures_con
 from quant.contracts.market_calendar import is_trading_day
 from quant.contracts.timezones import IST
 from quant.events import BarClosed
+from quant.execution.live_oms import LiveOMS
+from quant.execution.oms import PaperOMS
 from quant.runtime import QuantEngine
 from quant.session_levels import SessionLevelStore
 from quant.ws_adapter import view_state_to_ws
@@ -164,13 +166,12 @@ class QuantCoordinator:
 
     def start(self) -> None:
         with self._lifecycle_lock:
-            if self.config.get("live_oms_unwired"):
-                # A paper OMS behind a live process name is more dangerous
-                # than refusing to start: it creates UI state with no venue
-                # position and makes restart reconciliation meaningless.
+            if self.config.get("live_oms_enabled") and self.broker is None:
+                # live_oms_enabled but no broker adapter wired — refuse to start
+                # rather than silently paper-trade under a live process name.
                 raise RuntimeError(
-                    "Live execution is disabled: no complete live OMS is wired "
-                    "(submit, reduce, close, and broker reconciliation required)"
+                    "Live execution is enabled but no broker adapter is wired. "
+                    "Set live_oms_enabled=False or provide a broker adapter."
                 )
             # Phase 2: zero holiday awareness previously existed anywhere in
             # the coordinator — it would happily scan and spawn engines on
@@ -507,21 +508,36 @@ class QuantCoordinator:
             # Route advisor emissions through the engine's own bus exactly as
             # the previous in-constructor wiring did.
             advisor.set_emit_fn(engine._emit)
-        if self.config.get("live_oms_unwired"):
-            engine._risk.halt("LIVE_OMS_UNWIRED")
+        # OMS injection: live_oms_enabled + broker → LiveOMS, else PaperOMS.
+        # The engine default is PaperOMS (set in QuantEngine.__init__); we
+        # override only when the coordinator has a wired broker.
+        if self.config.get("live_oms_enabled") and self.broker is not None:
+            from quant.contracts.aggregates import Portfolio
+            portfolio = Portfolio()
+            lot_size = self._resolve_lot_size(symbol)
+            live_oms = LiveOMS(
+                broker=self.broker,
+                portfolio=portfolio,
+                lot_size=lot_size,
+            )
+            engine._oms = live_oms
+            logger.warning(
+                "LIVE MODE: %s using LiveOMS — orders route to Dhan exchange",
+                symbol,
+            )
+        # Always attach storage (position persistence, restart book).
         if self._storage is not None:
             engine.attach_storage(self._storage)
-            if not self.config.get("live_oms_unwired"):
-                try:
-                    rows = self._storage.load_open_positions() or []
-                except Exception:
-                    logger.exception("load_open_positions failed for %s", symbol)
-                    rows = []
-                from quant.execution.order import row_to_position
-                for row in rows:
-                    if row.get("symbol") == symbol:
-                        engine.restore_position(row_to_position(row))
-                        break
+            try:
+                rows = self._storage.load_open_positions() or []
+            except Exception:
+                logger.exception("load_open_positions failed for %s", symbol)
+                rows = []
+            from quant.execution.order import row_to_position
+            for row in rows:
+                if row.get("symbol") == symbol:
+                    engine.restore_position(row_to_position(row))
+                    break
         if _journal_dir:
             from quant.persistence import Journal
 

@@ -141,7 +141,7 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         "interval_seconds": candle_minutes * 60,
         "include_futures": include_futures,
         "underlying_priority": _settings.SCANNER_UNDERLYING_PRIORITY,
-        "live_oms_unwired": is_live_mode(),
+        "live_oms_enabled": is_live_mode(),
         "max_trades_per_session": int(getattr(config.risk, "max_trades_per_session", 6)),
     }
     logger.info(
