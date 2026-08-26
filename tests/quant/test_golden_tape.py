@@ -33,8 +33,8 @@ def test_golden_tape_event_sequence_determinism():
     trace1 = eng1.run()
     sync_trace1 = [e for e in trace1 if not isinstance(e, AgentDecisionProduced)]
 
-    SessionRisk(storage=None, symbol="NIFTY_GT_2").reset_session()
-    eng2 = QuantEngine(SyntheticGateway(_ticks()), "NIFTY_GT_2", interval_seconds=1)
+    SessionRisk(storage=None, symbol="NIFTY_GT_1").reset_session()
+    eng2 = QuantEngine(SyntheticGateway(_ticks()), "NIFTY_GT_1", interval_seconds=1)
     trace2 = eng2.run()
     sync_trace2 = [e for e in trace2 if not isinstance(e, AgentDecisionProduced)]
 
