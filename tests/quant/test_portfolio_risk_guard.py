@@ -52,6 +52,7 @@ def test_manage_exit_partial_releases_proportional_portfolio_risk():
     exits = MagicMock()
     exits.evaluate.return_value = ExitDecision(True, "TP1", 102.0, partial_fraction=0.5)
     exits.is_risk_free.return_value = False
+    exits.stop_state.return_value = (None, None)
     eng._exits = exits
 
     bar = Bar(time="t300", open=100.0, high=102.5, low=99.5, close=102.0, volume=10.0)
@@ -81,6 +82,7 @@ def test_manage_exit_full_close_books_pyramid_pnl_to_portfolio():
 
     exits = MagicMock()
     exits.evaluate.return_value = ExitDecision(True, "TRAIL", 103.0)
+    exits.stop_state.return_value = (None, None)
     eng._exits = exits
 
     pm = eng._get_position_manager()

@@ -16,7 +16,10 @@ from quant.execution.exits import ExitDecision, ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.ports import IOMS
 from quant.execution.risk import SessionRisk
-from quant.events import Event, PositionClosed, PositionOpened, PositionReduced, RiskUpdated
+from quant.events import (
+    Event, PositionClosed, PositionOpened, PositionReduced, RiskUpdated,
+    StopMoved,
+)
 from quant.session_gates import session_allow_entry, session_force_exit, ist_dt as _ist_dt
 from quant.amt.session.context import get_session_info, seconds_to_close
 
@@ -130,6 +133,12 @@ class PositionManager:
             else:
                 session_phase, is_expiry, time_to_close, now_epoch = "", False, 0.0, 0.0
             session_vwap = float(amt_dto.get("sessionVwap") or 0.0)
+
+            # Capture stop state before evaluation so any change (BE arm,
+            # trail ratchet) is audited via StopMoved — silent stop moves are
+            # a verified defect; every move must be journaled.
+            prev_be, prev_trail = self._exits.stop_state(position)
+
             exit_dec = self._exits.evaluate(
                 position, amt_dto, bar_index=held_bars,
                 bar_high=bar.high, bar_low=bar.low,
@@ -141,6 +150,29 @@ class PositionManager:
                 bar_close=bar.close,
                 session_vwap=session_vwap,
             )
+
+            # Emit StopMoved for any stop-level change detected this bar.
+            # Pure observation: only after a NON-exit decision — an exiting
+            # bar is journaled through its own PositionClosed chain instead.
+            if not exit_dec.should_exit:
+                be_floor, trail_stop = self._exits.stop_state(position)
+                sig_sl = float(position.order.signal.sl)
+                long = position.size > 0
+                if be_floor is not None and prev_be is None:
+                    # Breakeven floor armed at entry (TP1 hit or manual arm).
+                    self._emit(StopMoved(symbol=self.symbol, time=bar.time,
+                                         old_sl=sig_sl, new_sl=float(be_floor),
+                                         reason="BREAKEVEN_ARMED"))
+                tightened = trail_stop is not None and (
+                    prev_trail is None
+                    or (trail_stop > prev_trail if long else trail_stop < prev_trail)
+                )
+                if tightened:
+                    self._emit(StopMoved(symbol=self.symbol, time=bar.time,
+                                         old_sl=float(prev_trail if prev_trail is not None else sig_sl),
+                                         new_sl=float(trail_stop),
+                                         reason="TRAIL_RATCHET"))
+
         if exit_dec.should_exit:
             if exit_dec.partial_fraction is not None and exit_dec.partial_fraction < 1.0:
                 partial_fill, remaining = self._oms.close_partial(

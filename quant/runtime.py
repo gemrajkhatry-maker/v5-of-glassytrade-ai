@@ -56,6 +56,7 @@ from quant.events import (
     PositionOpened,
     RiskUpdated,
     SignalApproved,
+    StopMoved,
 )
 from quant.execution.exits import ExitDecision, ExitEngine
 from quant.execution.oms import PaperOMS
@@ -250,7 +251,7 @@ class QuantEngine:
                             SignalApproved, PositionOpened, PositionClosed,
                             PositionReduced,
                             RiskUpdated, DepthUpdated, AmtUpdated,
-                            OrderSubmitted, OrderFilled):
+                            OrderSubmitted, OrderFilled, StopMoved):
                 self._bus.subscribe(evt_type, _journal_subscriber,
                                     priority=-100)
         else:
@@ -351,7 +352,7 @@ class QuantEngine:
                         SignalApproved, PositionOpened, PositionClosed,
                         PositionReduced,
                         RiskUpdated, DepthUpdated, AmtUpdated,
-                        OrderSubmitted, OrderFilled):
+                        OrderSubmitted, OrderFilled, StopMoved):
             self._bus.subscribe(evt_type, _journal_subscriber, priority=-100)
 
     def attach_storage(self, storage) -> None:

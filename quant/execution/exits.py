@@ -76,6 +76,16 @@ class ExitEngine:
         self._breakeven.pop(position._id, None)
         self._tp_tier.pop(position._id, None)
 
+    def stop_state(self, position: Position) -> tuple[float | None, float | None]:
+        """Current (breakeven_floor, trail_stop) for a position.
+
+        Returns the BE floor price if armed (else None), and the active trailing
+        stop price if one exists (else None). Used by callers to detect stop
+        moves so every change can be audited via StopMoved events.
+        """
+        tr = self._trail.get(position._id)
+        return self._breakeven.get(position._id), (tr.stop if tr and tr.active else None)
+
     def is_risk_free(self, position: Position) -> bool:
         """Return True when this position has reached the 0.8R breakeven floor.
 

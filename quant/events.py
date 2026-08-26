@@ -112,6 +112,20 @@ class OrderFilled(Event):
 
 
 @dataclass(frozen=True)
+class StopMoved(Event):
+    """Audit trail: a position's protective stop level changed (breakeven arm,
+    trailing-stop ratchet, or pyramid ratchet). Emitted at the moment of change
+    — not just when the moved stop is hit — so every stop move is journaled and
+    replay-deterministic.
+
+    reason ∈ {BREAKEVEN_ARMED, TRAIL_RATCHET, PYRAMID_RATCHET}
+    """
+    old_sl: float = 0.0
+    new_sl: float = 0.0
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class AgentDecisionProduced(Event):
     decision: dict
 
