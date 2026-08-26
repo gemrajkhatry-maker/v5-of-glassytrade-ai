@@ -57,6 +57,7 @@ from quant.events import (
 )
 from quant.execution.exits import ExitDecision, ExitEngine
 from quant.execution.oms import PaperOMS
+from quant.execution.ports import IOMS
 from quant.execution.risk import SessionRisk
 from quant.persistence import Journal
 from quant.state import StateProjector, _epoch_to_iso
@@ -193,13 +194,10 @@ class QuantEngine:
                 interval_seconds=interval_seconds,
             )
         self._decision_service = DecisionService(min_rr=min_rr)
-        # Lot-aware paper OMS: the position size is snapped to lot multiples
-        # (units per lot from the broker) so paper rupee P&L matches live
-        # fills exactly — see PaperOMS docstring.
-        # The engine owns orchestration, not venue selection.  Paper remains
-        # the safe default for direct replay/test construction; live startup
-        # must inject a complete OMS explicitly.
-        self._oms = oms if oms is not None else PaperOMS(lot_size=lot_size)
+        # IOMS port: the engine never constructs its own OMS — the coordinator
+        # injects PaperOMS (paper/replay/backtest) or LiveOMS (live). Paper
+        # remains the safe default for direct replay/test construction.
+        self._oms: IOMS = oms if oms is not None else PaperOMS(lot_size=lot_size)
         # Bar-count knobs are wall-clock MINUTES by default; bar counts are
         # derived from the ACTUAL bar interval so moving 1m -> 5m bars cannot
         # silently multiply durations x5 (a literal 60-bar stop meant 1h on

@@ -14,6 +14,7 @@ from quant.contracts.enums import MarketState
 from quant.decision.stops import structural_stop
 from quant.execution.exits import ExitDecision, ExitEngine
 from quant.execution.oms import PaperOMS
+from quant.execution.ports import IOMS
 from quant.execution.risk import SessionRisk
 from quant.events import Event, PositionClosed, PositionOpened, PositionReduced, RiskUpdated
 from quant.session_gates import session_allow_entry, session_force_exit, ist_dt as _ist_dt
@@ -26,7 +27,7 @@ class PositionManager:
     """Manages position exits and pyramid add-ons.
     
     Dependencies are injected via constructor:
-    - oms: PaperOMS for position management
+    - oms: IOMS implementation (PaperOMS or LiveOMS)
     - exits: ExitEngine for exit evaluation
     - risk: SessionRisk for trade recording
     - emit_fn: Callable that emits events to the bus
@@ -40,7 +41,7 @@ class PositionManager:
 
     def __init__(
         self,
-        oms: PaperOMS,
+        oms: IOMS,
         exits: ExitEngine,
         risk: SessionRisk,
         emit_fn: Callable[[Event], None],
@@ -51,7 +52,7 @@ class PositionManager:
         get_depth: Callable[[], object | None] = lambda: None,
         get_amt_dto: Callable[[], dict | None] = lambda: None,
     ) -> None:
-        self._oms = oms
+        self._oms: IOMS = oms
         self._exits = exits
         self._risk = risk
         self._emit = emit_fn

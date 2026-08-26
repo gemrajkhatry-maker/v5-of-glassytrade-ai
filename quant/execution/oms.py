@@ -1,9 +1,13 @@
 from quant.decision.signal_builder import Signal
 from quant.execution.order import Fill, Order, Position
+from quant.execution.ports import IOMS
 
 
 class PaperOMS:
-    """Paper order manager — mirrors live broker fill semantics.
+    """Paper order manager — implements IOMS for simulated fills.
+
+    Used for replay / backtest / paper trading. The coordinator injects this
+    as the default OMS; ``LiveOMS`` is injected when env=live.
 
     ``lot_size`` (units per lot, from the broker) makes the paper P&L match
     live rupee P&L exactly: the position size is snapped to lot multiples the
