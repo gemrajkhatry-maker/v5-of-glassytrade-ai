@@ -237,6 +237,113 @@ class DhanBrokerAdapter(IBroker):
             logger.exception("Unexpected error executing signal %s: %s", signal.signal_id, exc)
             return None
 
+    def close_position(
+        self, symbol: str, side: str, quantity: int, portfolio: Portfolio
+    ) -> Position | None:
+        """Close (or reduce) an open position by placing an opposing order.
+
+        Args:
+            symbol: Trading symbol.
+            side: The CLOSING side — "SELL" to close a LONG, "BUY" to close a SHORT.
+            quantity: Number of units to close.
+            portfolio: Portfolio for cost model / tracking.
+
+        Returns:
+            Position with entry_price = actual fill price, or None on failure.
+        """
+        broker = self._broker
+        if broker is None:
+            logger.error("DhanBroker not initialized")
+            return None
+        if quantity <= 0:
+            logger.warning("close_position called with quantity=%d for %s", quantity, symbol)
+            return None
+
+        try:
+            # Build a closing instrument — same symbol, opposite side.
+            clean_symbol = str(symbol or "").strip()
+            is_option, _is_call, _is_put, dhan_exchange = classify_symbol(clean_symbol)
+            if is_option:
+                from quant.contracts.instrument_registry import DEFAULT_REGISTRY
+                spec = DEFAULT_REGISTRY.try_resolve(clean_symbol)
+                exchange = _exchange_enum(spec.dhan_exchange) if spec else dhan_exchange
+            else:
+                exchange = _exchange_enum(dhan_exchange)
+
+            instrument = Instrument(
+                symbol=clean_symbol,
+                exchange=exchange,
+                security_id="",  # closing order — security_id not required
+            )
+
+            order = Order(
+                instrument=instrument,
+                side=side.upper(),  # "SELL" to close LONG, "BUY" to close SHORT
+                quantity=quantity,
+                order_type=OrderType.MARKET,
+                price=0.0,  # market order
+                product_type="INTRADAY",
+            )
+
+            placed_order = broker.place_order(order)
+            placed_order_id = str(getattr(placed_order, "order_id", ""))
+            if not placed_order_id:
+                logger.error("close_position: Dhan place_order did not return order_id for %s", symbol)
+                return None
+
+            final_order = self._poll_for_terminal_status(
+                placed_order_id, timeout=self._order_poll_timeout
+            )
+            if final_order is None:
+                logger.warning("close_position: order %s did not reach terminal state", placed_order_id)
+                try:
+                    broker.cancel_order(placed_order_id)
+                except Exception:
+                    logger.debug("Failed to cancel timed-out close order %s", placed_order_id, exc_info=True)
+                return None
+
+            if not self._is_filled(final_order):
+                logger.warning(
+                    "close_position: order %s terminal status=%s",
+                    placed_order_id, getattr(final_order.status, "value", final_order.status),
+                )
+                return None
+
+            fill_price = (
+                to_float(getattr(final_order, "average_fill_price", None))
+                or to_float(getattr(final_order, "price", None), 0.0)
+                or 0.0
+            )
+            filled_quantity = to_float(final_order.filled_quantity)
+            if filled_quantity <= 0:
+                filled_quantity = float(quantity)
+
+            entry_time = self._format_time(getattr(final_order, "timestamp", None))
+
+            return Position(
+                symbol=symbol,
+                side=Side.LONG if side.upper() == "BUY" else Side.SHORT,
+                source=Source.AMT,
+                entry_price=_to_decimal(fill_price),  # fill price on close
+                size=_to_decimal(filled_quantity),
+                stop_loss=_to_decimal(0),
+                take_profit=_to_decimal(0),
+                entry_time=entry_time,
+                metadata={
+                    "broker_name": "dhan",
+                    "broker_order_id": placed_order_id,
+                    "dhan_filled_quantity": str(filled_quantity),
+                    "dhan_avg_fill_price": str(fill_price),
+                    "close_side": side,
+                },
+            )
+        except DhanError as exc:
+            logger.error("Dhan API error closing position for %s: %s", symbol, exc)
+            return None
+        except Exception as exc:
+            logger.exception("Unexpected error closing position for %s: %s", symbol, exc)
+            return None
+
     def cancel_order(self, order_id: str) -> bool:
         broker = self._broker
         if broker is None:

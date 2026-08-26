@@ -34,6 +34,23 @@ class IBroker(ABC):
         """
 
     @abstractmethod
+    def close_position(
+        self, symbol: str, side: str, quantity: int, portfolio: Portfolio
+    ) -> Position | None:
+        """Close (or reduce) an open position by placing an opposing order.
+
+        Args:
+            symbol: Trading symbol.
+            side: The CLOSING side — "SELL" to close a LONG, "BUY" to close a SHORT.
+            quantity: Number of units to close.
+            portfolio: Portfolio for cost model / tracking.
+
+        Returns:
+            Position with entry_price = actual fill price, or None on failure.
+        """
+        ...
+
+    @abstractmethod
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an open order (like a standalone Stop-Loss bracket) by its ID."""
         ...

@@ -27,6 +27,7 @@ ATM vs OTM classification (from moneyness_pct):
 from __future__ import annotations
 
 import logging
+from decimal import Decimal
 
 from quant.contracts.entities import Position, Signal
 from quant.contracts.aggregates import Portfolio
@@ -101,6 +102,32 @@ class PaperBrokerAdapter(IBroker):
             )
 
         return position
+
+    def close_position(
+        self, symbol: str, side: str, quantity: int, portfolio: Portfolio
+    ) -> Position | None:
+        """Close (or reduce) a paper position.
+
+        Simulates an opposing fill at the requested quantity.
+        """
+        if quantity <= 0:
+            return None
+
+        # Build a synthetic closing signal
+        from quant.contracts.enums import SignalType, SetupType, Source
+        close_signal = Signal(
+            type=SignalType.BUY if side.upper() == "BUY" else SignalType.SELL,
+            price=Decimal("0"),  # paper — price not used for close
+            reason="CLOSE",
+            stop_loss=Decimal("0"),
+            take_profit=Decimal("0"),
+            timestamp="",
+            setup=SetupType.TREND_MODEL,
+            source=Source.AMT,
+            metadata={"close_side": side, "close_quantity": str(quantity)},
+        )
+        # Execute as a new order (paper simulates instant fill)
+        return self.execute_order(close_signal, portfolio, symbol)
 
     def cancel_order(self, order_id: str) -> bool:
         """Cancel an order. Returns False if order_id is unknown or already cancelled."""
