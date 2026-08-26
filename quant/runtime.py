@@ -49,6 +49,8 @@ from quant.events import (
     DepthUpdated,
     Event,
     EventBus,
+    OrderFilled,
+    OrderSubmitted,
     PositionClosed,
     PositionReduced,
     PositionOpened,
@@ -247,7 +249,8 @@ class QuantEngine:
             for evt_type in (BarClosed, DecisionProduced,
                             SignalApproved, PositionOpened, PositionClosed,
                             PositionReduced,
-                            RiskUpdated, DepthUpdated, AmtUpdated):
+                            RiskUpdated, DepthUpdated, AmtUpdated,
+                            OrderSubmitted, OrderFilled):
                 self._bus.subscribe(evt_type, _journal_subscriber,
                                     priority=-100)
         else:
@@ -347,7 +350,8 @@ class QuantEngine:
         for evt_type in (BarClosed, DecisionProduced,
                         SignalApproved, PositionOpened, PositionClosed,
                         PositionReduced,
-                        RiskUpdated, DepthUpdated, AmtUpdated):
+                        RiskUpdated, DepthUpdated, AmtUpdated,
+                        OrderSubmitted, OrderFilled):
             self._bus.subscribe(evt_type, _journal_subscriber, priority=-100)
 
     def attach_storage(self, storage) -> None:

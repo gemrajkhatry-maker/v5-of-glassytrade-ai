@@ -93,6 +93,25 @@ class AmtUpdated(Event):
 
 
 @dataclass(frozen=True)
+class OrderSubmitted(Event):
+    """Audit trail: an order was submitted to the broker."""
+    order_id: str = ""
+    side: str = ""  # BUY / SELL
+    quantity: float = 0.0
+    price: float = 0.0
+    reason: str = ""  # ENTRY / CLOSE / CLOSE_PARTIAL / EMERGENCY_HALT
+
+
+@dataclass(frozen=True)
+class OrderFilled(Event):
+    """Audit trail: an order was filled by the broker."""
+    order_id: str = ""
+    fill_price: float = 0.0
+    filled_qty: float = 0.0
+    reason: str = ""
+
+
+@dataclass(frozen=True)
 class AgentDecisionProduced(Event):
     decision: dict
 

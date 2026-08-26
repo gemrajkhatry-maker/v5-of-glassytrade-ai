@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 from quant.contracts.ports.broker import IBroker
 from quant.decision.signal_builder import Signal as EngineSignal
+from quant.events import OrderFilled, OrderSubmitted
 from quant.execution.broker_mapper import to_broker_signal
 from quant.execution.order import Fill, Order, Position
 
@@ -43,6 +44,11 @@ class LiveOMS:
         self._broker = broker
         self._portfolio = portfolio
         self._lot_size = lot_size
+        self._emit_fn = None  # set by coordinator after engine construction
+
+    def set_emit_fn(self, emit_fn) -> None:
+        """Wire the event emitter so audit events are published to the bus."""
+        self._emit_fn = emit_fn
 
     @property
     def lot_size(self) -> float:
@@ -68,6 +74,21 @@ class LiveOMS:
         fill_price = float(getattr(broker_pos, "entry_price", 0))
         filled_qty = float(getattr(broker_pos, "size", 0))
         signed = filled_qty if signal.type == "LONG" else -filled_qty
+
+        # Audit trail: order was filled
+        if self._emit_fn is not None:
+            try:
+                self._emit_fn(OrderSubmitted(
+                    symbol=signal.symbol, time=signal.timestamp,
+                    side="BUY" if signal.type == "LONG" else "SELL",
+                    quantity=filled_qty, price=fill_price, reason="ENTRY",
+                ))
+                self._emit_fn(OrderFilled(
+                    symbol=signal.symbol, time=signal.timestamp,
+                    fill_price=fill_price, filled_qty=filled_qty, reason="ENTRY",
+                ))
+            except Exception:
+                pass  # audit must never break trading
 
         return Position(
             order=Order(signal=signal, quantity=abs(filled_qty)),
@@ -119,6 +140,21 @@ class LiveOMS:
         # The broker returns entry_price = actual fill price for close orders
         fill_price = float(getattr(broker_pos, "entry_price", price))
         filled_qty = float(getattr(broker_pos, "size", qty))
+
+        # Audit trail: close order was filled
+        if self._emit_fn is not None:
+            try:
+                self._emit_fn(OrderSubmitted(
+                    symbol=position.order.signal.symbol, time=time,
+                    side=close_side, quantity=float(filled_qty),
+                    price=fill_price, reason=reason,
+                ))
+                self._emit_fn(OrderFilled(
+                    symbol=position.order.signal.symbol, time=time,
+                    fill_price=fill_price, filled_qty=filled_qty, reason=reason,
+                ))
+            except Exception:
+                pass
 
         # PnL = (close_price - entry_price) * signed_size
         pnl = (fill_price - position.open_price) * position.size
