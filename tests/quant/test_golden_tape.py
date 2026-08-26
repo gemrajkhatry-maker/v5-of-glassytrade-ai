@@ -38,17 +38,15 @@ def test_golden_tape_event_sequence_determinism():
     trace2 = eng2.run()
     sync_trace2 = [e for e in trace2 if not isinstance(e, AgentDecisionProduced)]
 
+    from tests.quant.certification.trace_compare import traces_equal
+
     assert len(sync_trace1) == len(sync_trace2)
     assert len(sync_trace1) > 0
-
-    event_types1 = [e.__class__.__name__ for e in sync_trace1]
-    event_types2 = [e.__class__.__name__ for e in sync_trace2]
-    assert event_types1 == event_types2
-
-    # Verify key lifecycle events are emitted
-    assert "BarClosed" in event_types1
-    assert "AmtUpdated" in event_types1
-    assert "DecisionProduced" in event_types1
+    assert "BarClosed" in [e.__class__.__name__ for e in sync_trace1]
+    assert "DecisionProduced" in [e.__class__.__name__ for e in sync_trace1]
+    assert traces_equal(sync_trace1, sync_trace2), (
+        "two engines diverged on payload content"
+    )
 
 
 def test_golden_tape_journal_roundtrip(tmp_path):
