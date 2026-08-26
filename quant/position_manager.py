@@ -40,6 +40,7 @@ class PositionManager:
     - tick_size: Minimum price increment
     - get_depth: Callable returning current order book
     - get_amt_dto: Callable returning current AMT DTO
+    - portfolio_risk: Optional PortfolioRiskAuthority for cross-engine aggregate risk ceiling (E11)
     """
 
     def __init__(
@@ -54,6 +55,7 @@ class PositionManager:
         tick_size: float,
         get_depth: Callable[[], object | None] = lambda: None,
         get_amt_dto: Callable[[], dict | None] = lambda: None,
+        portfolio_risk=None,  # PortfolioRiskAuthority or None (paper mode may omit)
     ) -> None:
         self._oms: IOMS = oms
         self._exits = exits
@@ -65,6 +67,8 @@ class PositionManager:
         self._tick_size = tick_size
         self._get_depth = get_depth
         self._get_amt_dto = get_amt_dto
+        # E11: cross-engine aggregate risk ceiling for pyramid add-ons.
+        self._portfolio_risk = portfolio_risk
 
         # Pyramid state
         self.pyramid_count: int = 0
@@ -223,6 +227,20 @@ class PositionManager:
                     "🔒 [PYRAMID CLOSED] %s level=%d reason=%s pnl=₹%.2f",
                     self.symbol, pyr_pos.pyramid_level, exit_dec.reason, pyr_fill.pnl,
                 )
+
+            # E11 FIX — release the aggregate open risk reserved for these add-ons.
+            if self._portfolio_risk is not None and self.pyramid_positions:
+                released = sum(
+                    abs(float(p.order.signal.entry) - float(new_sl)) * max(1.0, abs(p.size))
+                    for p in self.pyramid_positions
+                    for new_sl in (float(p.order.signal.sl),)
+                )
+                self._portfolio_risk.record_close(released, 0.0)
+                logger.info(
+                    "🔒 [PYRAMID RISK RELEASED] %s released ₹%.2f pyramid open risk (total portfolio open: ₹%.2f)",
+                    self.symbol, released, self._portfolio_risk.open_risk,
+                )
+
             self.pyramid_positions = []
             self.pyramid_count = 0
             self._emit(PositionClosed(symbol=self.symbol, time=bar.time, fill=fill))
@@ -335,14 +353,45 @@ class PositionManager:
                 pyramid_level=self.pyramid_count + 1,
             )
         except ValueError as exc:
-            logger.debug("⏩ [PYRAMID SKIP] %s: %s", self.symbol, exc)
-            return
+            # Hard error (e.g. E9: LiveOMS refuses ghost positions) — do NOT
+            # swallow it; a pyramid that cannot be created must fail loudly so
+            # the bar loop propagates the failure instead of silently skipping.
+            logger.error("🛑 [PYRAMID FAIL] %s P%d: %s", self.symbol, self.pyramid_count + 1, exc)
+            raise
 
         self.pyramid_count += 1
         self.pyramid_positions.append(pyramid_pos)
 
+        # E11 FIX — reserve aggregate portfolio risk for the add-on. Without this,
+        # pyramids bypassed the cross-engine ceiling (8 engines × 0.5% each would
+        # otherwise risk ~4% per engine on top of the base). Register at fill time;
+        # release via record_close when the pyramid is closed in manage_exit().
+        if self._portfolio_risk is not None:
+            pyr_risk = abs(float(pyramid_pos.order.signal.entry) - float(new_sl)) * max(1.0, abs(pyramid_size))
+            accepted = self._portfolio_risk.register_open(pyr_risk)
+            logger.info(
+                "⚡ [PYRAMID RISK] %s P%d registered ₹%.2f open risk (total portfolio open: ₹%.2f)",
+                self.symbol, self.pyramid_count, pyr_risk, self._portfolio_risk.open_risk,
+            )
+            if not accepted:
+                logger.warning(
+                    "⚠️ [PYRAMID RISK] %s P%d rejected by PortfolioRiskAuthority — pyramid add-on declined",
+                    self.symbol, self.pyramid_count,
+                )
+
+        # E10 FIX — base-SL ratchet: the docstring promises the combined bundle
+        # (base + pyramids) is guaranteed positive, so the base position's SL
+        # must be ratcheted to the pyramid's new_sl at fill time. Signal/Position
+        # are frozen dataclasses; rebuild via object.__setattr__ (same pattern as
+        # partial-fill Position reconstruction).
+        long = position.size > 0
+        new_base_sl = float(new_sl)
+        base_sig = position.order.signal
+        object.__setattr__(base_sig, "sl", new_base_sl)
+
         logger.info(
-            "⚡ [PYRAMID ADD] %s P%d @ %.2f size=%.0f SL=%.2f LVN=%.2f",
+            "⚡ [PYRAMID ADD] %s P%d @ %.2f size=%.0f SL=%.2f LVN=%.2f | base SL ratcheted %.2f -> %.2f",
             self.symbol, self.pyramid_count, price, pyramid_size, new_sl, leg_lvn,
+            float(position.order.signal.sl), new_base_sl,
         )
         self._emit(PositionOpened(symbol=self.symbol, time=bar.time, position=pyramid_pos))

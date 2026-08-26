@@ -276,39 +276,21 @@ class LiveOMS:
     ) -> Position:
         """Create a pyramid add-on position anchored to the base trade (spec §13.2).
 
-        Pyramids are additive — the first lot goes through submit() on the
-        next bar. This method creates the in-memory Position for tracking;
-        the actual broker order happens when submit() is called with the
-        pyramid signal.
+        DISABLED UNDER LIVE OMS — E9 fix. Pyramids are additive and require an
+        end-to-end broker submission path (propose → submit → fill → linked
+        close) that does not yet exist for LiveOMS. Building in-memory positions
+        here creates GHOST orders: PositionOpened fires but no broker order is
+        ever placed, so the eventual full-close sends a broker.close_position()
+        against an unopened position — a guaranteed live failure with wrong PnL.
+
+        Until submit/linked-close is implemented for pyramids, this path refuses
+        to build ghost positions and logs why. PaperOMS remains the only place
+        pyramid add-ons are permitted (they are tracked in-memory there).
         """
-        size = self._snap_to_lot(abs(size), self._lot_size)
-        if size <= 0:
-            raise ValueError(f"Pyramid size {size} is too small (< 1 lot)")
-
-        base_signal = base.order.signal
-        long = base.size > 0
-        signed = size if long else -size
-
-        from quant.decision.signal_builder import Signal
-        pyramid_signal = Signal(
-            type=base_signal.type,
-            reason=f"Pyramid-{pyramid_level} @ LVN {entry_price:.2f}",
-            entry=entry_price,
-            sl=new_sl,
-            tp=base_signal.tp,
-            rr=abs(base_signal.tp - entry_price) / max(abs(entry_price - new_sl), 0.01),
-            model_label=getattr(base_signal, "model_label", "Triple-A"),
-            symbol=base_signal.symbol,
-            timestamp=time,
-        )
-
-        return Position(
-            order=Order(signal=pyramid_signal, quantity=size),
-            open_price=entry_price,
-            open_time=time,
-            size=signed,
-            pyramid_level=pyramid_level,
-            is_pyramid=True,
+        raise ValueError(
+            "E9: pyramids disabled under LiveOMS until broker submission is "
+            f"implemented end-to-end (propose→submit→fill→linked-close); requested "
+            f"P{pyramid_level} @ {entry_price:.2f}"
         )
 
     @staticmethod

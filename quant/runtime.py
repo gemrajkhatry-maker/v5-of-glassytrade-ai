@@ -782,6 +782,7 @@ class QuantEngine:
                 tick_size=self._tick_size,
                 get_depth=lambda: self._last_depth,
                 get_amt_dto=lambda: self._amt_engine.last_amt_dto,
+                portfolio_risk=self._portfolio_risk,  # E11: pyramid add-ons reserve aggregate risk
             )
         return self._pos_mgr
 
