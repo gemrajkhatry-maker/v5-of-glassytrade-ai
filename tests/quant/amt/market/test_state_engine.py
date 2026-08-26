@@ -14,6 +14,7 @@ class TestDetectMarketState:
 
     def test_price_at_poc_inside_va(self):
         """Price at POC inside VA with acceptance → BALANCED."""
+        from quant.contracts.constants import BALANCE_RATIO_THRESHOLD
         result = detect_market_state(
             price=100.05,
             poc=100.0,
@@ -22,7 +23,7 @@ class TestDetectMarketState:
             tick_size=0.10,
             has_displacement=False,
             has_acceptance=True,
-            balance_ratio=0.5,
+            balance_ratio=BALANCE_RATIO_THRESHOLD,  # at named threshold -> BALANCED
         )
         assert result.state == MarketState.BALANCED
 
@@ -42,7 +43,8 @@ class TestDetectMarketState:
         assert result.state == MarketState.IMBALANCED
 
     def test_balanced_inside_va(self):
-        """Price inside VAH-VAL with balance -> BALANCED."""
+        """Price inside VAH-VAL with balance >= named threshold -> BALANCED."""
+        from quant.contracts.constants import BALANCE_RATIO_THRESHOLD
         result = detect_market_state(
             price=100.0,
             poc=97.0,
@@ -51,12 +53,13 @@ class TestDetectMarketState:
             tick_size=0.10,
             has_displacement=False,
             has_acceptance=False,
-            balance_ratio=0.50,
+            balance_ratio=BALANCE_RATIO_THRESHOLD,  # at named threshold -> BALANCED
         )
         assert result.state == MarketState.BALANCED
 
     def test_balanced_at_vah(self):
-        """Price at VAH with balance -> BALANCED."""
+        """Price at VAH with balance >= named threshold (0.55) -> BALANCED."""
+        from quant.contracts.constants import BALANCE_RATIO_THRESHOLD
         result = detect_market_state(
             price=105.0,
             poc=100.0,
@@ -65,12 +68,13 @@ class TestDetectMarketState:
             tick_size=0.10,
             has_displacement=False,
             has_acceptance=False,
-            balance_ratio=0.50,
+            balance_ratio=BALANCE_RATIO_THRESHOLD,  # exactly at named threshold -> BALANCED
         )
         assert result.state == MarketState.BALANCED
 
     def test_balanced_at_val(self):
-        """Price at VAL with balance -> BALANCED."""
+        """Price at VAL with balance >= named threshold (0.55) -> BALANCED."""
+        from quant.contracts.constants import BALANCE_RATIO_THRESHOLD
         result = detect_market_state(
             price=95.0,
             poc=100.0,
@@ -79,7 +83,7 @@ class TestDetectMarketState:
             tick_size=0.10,
             has_displacement=False,
             has_acceptance=False,
-            balance_ratio=0.50,
+            balance_ratio=BALANCE_RATIO_THRESHOLD,  # exactly at named threshold -> BALANCED
         )
         assert result.state == MarketState.BALANCED
 
@@ -146,6 +150,8 @@ class TestMarketStateTrigger:
     """Verify trigger messages are descriptive."""
 
     def test_balanced_trigger(self):
+        from quant.contracts.constants import BALANCE_RATIO_THRESHOLD
+        # balance at the named threshold -> BALANCED; trigger cites VA location.
         result = detect_market_state(
             price=100.0,
             poc=97.0,
@@ -154,7 +160,7 @@ class TestMarketStateTrigger:
             tick_size=0.10,
             has_displacement=False,
             has_acceptance=False,
-            balance_ratio=0.5,
+            balance_ratio=BALANCE_RATIO_THRESHOLD,
         )
         assert result.state == MarketState.BALANCED
         assert "VA" in result.trigger

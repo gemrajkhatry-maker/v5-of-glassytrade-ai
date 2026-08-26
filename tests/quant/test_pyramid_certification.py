@@ -129,7 +129,9 @@ def test_e10_base_sl_ratcheted_at_pyramid_fill():
     pyr = pm.pyramid_positions[0]
 
     # The base SL must now equal the pyramid's new_sl (ratcheted).
-    base_sl = float(pos.order.signal.sl)
+    # dataclasses.replace produces a NEW ratcheted Position; original pos is untouched.
+    assert pm.base_override is not None, "base_override should carry the ratcheted position"
+    base_sl = float(pm.base_override.order.signal.sl)
     assert base_sl == new_sl, (
         f"E10 VIOLATION: base SL={base_sl:.2f} not ratcheted to pyramid new_sl={new_sl:.2f}; "
         "bundle is no longer guaranteed positive"

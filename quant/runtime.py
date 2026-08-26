@@ -873,6 +873,10 @@ class QuantEngine:
         # Sync pyramid state back
         self._pyramid_positions = pm.pyramid_positions
         self._pyramid_count = pm.pyramid_count
+        # Consume the ratcheted base produced by check_pyramid (E10 / Task 8).
+        if pm.base_override is not None:
+            self._position = pm.base_override
+            pm.base_override = None
 
     def _emit(self, event: Event) -> None:
         """Publish to the bus, append to the trace, fold into the projector.

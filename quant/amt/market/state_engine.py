@@ -69,13 +69,13 @@ def detect_market_state(
     is_extreme = vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) >= 3.0
 
     # If there is active displacement OR price is outside session Value Area OR low balance -> IMBALANCED
-    if has_displacement or not inside_session_va or balance_ratio < 0.5:
+    if has_displacement or not inside_session_va or balance_ratio < BALANCE_RATIO_THRESHOLD:
         trigger_parts = []
         if has_displacement:
             trigger_parts.append("active displacement leg")
         if not inside_session_va:
             trigger_parts.append(f"outside session VA [{val:.2f}, {vah:.2f}]")
-        if balance_ratio < 0.5:
+        if balance_ratio < BALANCE_RATIO_THRESHOLD:
             trigger_parts.append(f"low balance ratio ({balance_ratio:.2f})")
 
         zone = "OUTSIDE_VA" if not inside_session_va else "DISPLACEMENT"

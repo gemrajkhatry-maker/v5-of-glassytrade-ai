@@ -57,12 +57,15 @@ def ist_dt(bar_time) -> datetime | None:
     return datetime.fromtimestamp(ts_ms / 1000.0, tz=_IST)
 
 
-def parse_contract_expiry(symbol: str) -> date | None:
+def parse_contract_expiry(symbol: str, today: date | None = None) -> date | None:
     """Parse the option contract's expiry date from its symbol.
 
     Handles spaced ``CRUDEOIL 17 AUG 7450 CALL``, compact ``NIFTY23FEB18000CE``,
     and hyphenated ``NIFTY-27FEB-25500-CE``. Returns None when no day+month
     is embedded (bare underlyings, month-only futures).
+
+    ``today``: injected clock for replay/cert paths; defaults to IST now() so
+    live behavior is unchanged while deterministic runs can pin the date.
     """
     months = {
         "JAN": 1, "FEB": 2, "MAR": 3, "APR": 4, "MAY": 5, "JUN": 6,
@@ -85,7 +88,7 @@ def parse_contract_expiry(symbol: str) -> date | None:
             month = months[compact.group(2)]
     if day is None or month is None:
         return None
-    today = datetime.now(tz=_IST).date()
+    today = today or datetime.now(tz=_IST).date()
     try:
         parsed = date(today.year, month, day)
     except ValueError:

@@ -73,6 +73,12 @@ class PositionManager:
         # Pyramid state
         self.pyramid_count: int = 0
         self.pyramid_positions: list = []
+        # Ratcheted base position produced by the latest pyramid fill. Consumed
+        # (and cleared) by manage_exit's return or runtime._check_pyramid so the
+        # trail state keyed by _id stays consistent with ExitEngine.
+        self.base_override: Position | None = None
+        # Reserved rupee risk per open pyramid add-on, keyed by position _id.
+        self._pyramid_open_risk: dict[str, float] = {}
         # Fill for the most recent FULL close (None otherwise) — callers that
         # need the closing pnl (e.g. releasing a risk-authority reservation)
         # read this right after manage_exit() returns.
@@ -116,11 +122,14 @@ class PositionManager:
 
         Returns the position that survives this bar — unchanged, reduced by a
         tiered take-profit partial (spec §13.3), or None if it was closed
-        entirely.
+        entirely. If the latest pyramid fill ratcheted the base SL, returns the
+        ratcheted base Position instead of the original (base_override lifecycle).
         """
         self.last_fill = None
         self.last_partial_fill = None
         self.last_pyramid_pnl = 0.0
+        # Consume-and-clear any ratcheted base from the previous bar's pyramid fill.
+        self.base_override = None
         held_bars = bar_index - entry_bar_index
         if session_force_exit(
             bar.time, market=self._market, contract_expiry=self._contract_expiry
@@ -230,12 +239,11 @@ class PositionManager:
 
             # E11 FIX — release the aggregate open risk reserved for these add-ons.
             if self._portfolio_risk is not None and self.pyramid_positions:
-                released = sum(
-                    abs(float(p.order.signal.entry) - float(new_sl)) * max(1.0, abs(p.size))
-                    for p in self.pyramid_positions
-                    for new_sl in (float(p.order.signal.sl),)
-                )
-                self._portfolio_risk.record_close(released, 0.0)
+                released = 0.0
+                for pyr_pos in self.pyramid_positions:
+                    risk_i = self._pyramid_open_risk.pop(pyr_pos._id, 0.0)
+                    self._portfolio_risk.record_close(risk_i, float(pyr_fill.pnl))
+                    released += risk_i
                 logger.info(
                     "🔒 [PYRAMID RISK RELEASED] %s released ₹%.2f pyramid open risk (total portfolio open: ₹%.2f)",
                     self.symbol, released, self._portfolio_risk.open_risk,
@@ -259,7 +267,10 @@ class PositionManager:
             # Position survived this bar. Check if we can add a pyramid.
             if position is not None and self._exits.is_risk_free(position):
                 self.check_pyramid(amt_dto, bar, position, bar_index)
-            return position
+            # Consume-and-clear the ratcheted base produced by check_pyramid.
+            survived = self.base_override if self.base_override is not None else position
+            self.base_override = None
+            return survived
 
     def check_pyramid(self, amt_dto: dict, bar, position, bar_index: int) -> None:
         """Spec §13.2 pyramid engine: add-on positions at Impulse Leg LVN retest.
@@ -362,36 +373,47 @@ class PositionManager:
         self.pyramid_count += 1
         self.pyramid_positions.append(pyramid_pos)
 
-        # E11 FIX — reserve aggregate portfolio risk for the add-on. Without this,
-        # pyramids bypassed the cross-engine ceiling (8 engines × 0.5% each would
-        # otherwise risk ~4% per engine on top of the base). Register at fill time;
-        # release via record_close when the pyramid is closed in manage_exit().
+        # E11 FIX — reserve aggregate portfolio risk for the add-on BEFORE we
+        # commit. Without this, pyramids bypassed the cross-engine ceiling
+        # (8 engines × 0.5% each would otherwise risk ~4% per engine on top of
+        # the base). Reserve at fill time; release via record_close when the
+        # pyramid is closed in manage_exit().
+        add_risk = abs(float(pyramid_pos.order.signal.entry) - float(new_sl)) * max(1.0, abs(pyramid_size))
         if self._portfolio_risk is not None:
-            pyr_risk = abs(float(pyramid_pos.order.signal.entry) - float(new_sl)) * max(1.0, abs(pyramid_size))
-            accepted = self._portfolio_risk.register_open(pyr_risk)
+            ok, why = self._portfolio_risk.can_accept(add_risk)
+            if not ok:
+                logger.info("🛑 [PYRAMID RISK] %s refused: %s", self.symbol, why)
+                return
+            if not self._portfolio_risk.register_open(add_risk):
+                logger.info("🛑 [PYRAMID RISK] %s refused at register", self.symbol)
+                return
+            self._pyramid_open_risk[pyramid_pos._id] = add_risk
             logger.info(
                 "⚡ [PYRAMID RISK] %s P%d registered ₹%.2f open risk (total portfolio open: ₹%.2f)",
-                self.symbol, self.pyramid_count, pyr_risk, self._portfolio_risk.open_risk,
+                self.symbol, self.pyramid_count, add_risk, self._portfolio_risk.open_risk,
             )
-            if not accepted:
-                logger.warning(
-                    "⚠️ [PYRAMID RISK] %s P%d rejected by PortfolioRiskAuthority — pyramid add-on declined",
-                    self.symbol, self.pyramid_count,
-                )
 
         # E10 FIX — base-SL ratchet: the docstring promises the combined bundle
         # (base + pyramids) is guaranteed positive, so the base position's SL
-        # must be ratcheted to the pyramid's new_sl at fill time. Signal/Position
-        # are frozen dataclasses; rebuild via object.__setattr__ (same pattern as
-        # partial-fill Position reconstruction).
+        # must be ratcheted to the pyramid's new_sl at fill time. Position/Signal
+        # are frozen dataclasses; rebuild via dataclasses.replace (same pattern as
+        # partial-fill Position reconstruction). _id survives -> ExitEngine trail
+        # state keyed by _id stays consistent. Only tighten, never widen.
         long = position.size > 0
+        cur_sl = float(position.order.signal.sl)
         new_base_sl = float(new_sl)
-        base_sig = position.order.signal
-        object.__setattr__(base_sig, "sl", new_base_sl)
+        if (long and new_sl > cur_sl) or (not long and new_sl < cur_sl):
+            from dataclasses import replace as _dc_replace
+
+            ratcheted = _dc_replace(
+                position,
+                order=_dc_replace(position.order, signal=_dc_replace(position.order.signal, sl=new_base_sl)),
+            )
+            self.base_override = ratcheted
+            self._emit(StopMoved(symbol=self.symbol, time=bar.time, old_sl=cur_sl, new_sl=float(new_sl), reason="PYRAMID_RATCHET"))
 
         logger.info(
             "⚡ [PYRAMID ADD] %s P%d @ %.2f size=%.0f SL=%.2f LVN=%.2f | base SL ratcheted %.2f -> %.2f",
-            self.symbol, self.pyramid_count, price, pyramid_size, new_sl, leg_lvn,
-            float(position.order.signal.sl), new_base_sl,
+            self.symbol, self.pyramid_count, price, pyramid_size, new_sl, leg_lvn, cur_sl, float(new_sl),
         )
         self._emit(PositionOpened(symbol=self.symbol, time=bar.time, position=pyramid_pos))
