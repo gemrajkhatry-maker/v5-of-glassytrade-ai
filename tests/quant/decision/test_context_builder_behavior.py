@@ -190,3 +190,66 @@ def test_option_delta_reads_delta_normalized_option_key():
         risk_state=DummyRisk(), amt_dto={"deltaNormalizedOption": 0.15},
     )
     assert ctx.option_delta == 0.15
+
+
+def test_aggression_without_acceptance_is_not_triple_a_evidence():
+    """Certification defect E3: AGGRESSION phase alone must NOT fabricate
+    acceptance=True. Triple-A completeness requires the A/R engine's
+    acceptance flag (acceptanceAbove for LONG, acceptanceBelow for SHORT)."""
+    builder = DecisionContextBuilder()
+
+    # Long aggression without acceptanceAbove -> no TRIPLE_A evidence.
+    ev_long = builder._build_setup_evidence(
+        {"tripleAPhase": "AGGRESSION", "tripleASignal": "LONG",
+         "cvdSlope": 0.6, "acceptanceAbove": False},
+        agent_direction="LONG", nearest_leg_lvn=0.0)
+    assert not (ev_long and ev_long.setup_type == "TRIPLE_A" and ev_long.acceptance), \
+        "AGGRESSION must not claim acceptance without A/R-engine confirmation"
+
+    # Short aggression without acceptanceBelow -> no TRIPLE_A evidence.
+    ev_short = builder._build_setup_evidence(
+        {"tripleAPhase": "AGGRESSION", "tripleASignal": "SHORT",
+         "cvdSlope": -0.6, "acceptanceBelow": False},
+        agent_direction="SHORT", nearest_leg_lvn=0.0)
+    assert not (ev_short and ev_short.setup_type == "TRIPLE_A" and ev_short.acceptance), \
+        "AGGRESSION must not claim acceptance without A/R-engine confirmation"
+
+
+def test_aggression_with_real_acceptance_keeps_triple_a():
+    """Real acceptance from the A/R engine still completes Triple-A."""
+    builder = DecisionContextBuilder()
+
+    ev_long = builder._build_setup_evidence(
+        {"tripleAPhase": "AGGRESSION", "tripleASignal": "LONG",
+         "cvdSlope": 0.6, "acceptanceAbove": True},
+        agent_direction="LONG", nearest_leg_lvn=0.0)
+    assert ev_long is not None and ev_long.setup_type == "TRIPLE_A"
+    assert ev_long.acceptance and ev_long.aggression
+
+    ev_short = builder._build_setup_evidence(
+        {"tripleAPhase": "AGGRESSION", "tripleASignal": "SHORT",
+         "cvdSlope": -0.6, "acceptanceBelow": True},
+        agent_direction="SHORT", nearest_leg_lvn=0.0)
+    assert ev_short is not None and ev_short.setup_type == "TRIPLE_A"
+    assert ev_short.acceptance and ev_short.aggression
+
+
+def test_aggression_acceptance_is_direction_sensitive():
+    """acceptanceAbove must NOT satisfy a SHORT Triple-A (and vice versa)."""
+    builder = DecisionContextBuilder()
+
+    # acceptanceAbove present but direction is SHORT -> no acceptance.
+    ev = builder._build_setup_evidence(
+        {"tripleAPhase": "AGGRESSION", "tripleASignal": "SHORT",
+         "acceptanceAbove": True, "acceptanceBelow": False},
+        agent_direction="SHORT", nearest_leg_lvn=0.0)
+    assert not (ev and ev.acceptance), \
+        "LONG acceptance flag must not satisfy a SHORT Triple-A"
+
+    # acceptanceBelow present but direction is LONG -> no acceptance.
+    ev = builder._build_setup_evidence(
+        {"tripleAPhase": "AGGRESSION", "tripleASignal": "LONG",
+         "acceptanceAbove": False, "acceptanceBelow": True},
+        agent_direction="LONG", nearest_leg_lvn=0.0)
+    assert not (ev and ev.acceptance), \
+        "SHORT acceptance flag must not satisfy a LONG Triple-A"

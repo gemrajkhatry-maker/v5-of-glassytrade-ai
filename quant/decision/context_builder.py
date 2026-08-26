@@ -167,11 +167,20 @@ class DecisionContextBuilder:
         triple_signal = str(amt_dto.get("tripleASignal") or "")
 
         if triple_phase == "AGGRESSION" and (triple_signal in ("LONG", "SHORT") or agent_direction in ("LONG", "SHORT")):
-            return SetupEvidence(
-                setup_type="TRIPLE_A", direction=triple_signal or agent_direction,
-                absorption=True, accumulation=True, aggression=True, acceptance=True,
-                cvd_agrees=cvd_agrees,
+            direction = triple_signal or agent_direction
+            accepted = bool(
+                amt_dto.get("acceptanceAbove") if direction == "LONG"
+                else amt_dto.get("acceptanceBelow")
             )
+            if accepted:
+                return SetupEvidence(
+                    setup_type="TRIPLE_A", direction=direction,
+                    absorption=True, accumulation=True, aggression=True,
+                    acceptance=True, cvd_agrees=cvd_agrees,
+                )
+            # No A/R-engine acceptance for this direction: do NOT fabricate it.
+            # Fall through — a different setup may still qualify; we never
+            # claim Triple-A completeness from "machine says AGGRESSION" alone.
         if is_second_drive:
             return SetupEvidence(
                 setup_type="SECOND_DRIVE",
