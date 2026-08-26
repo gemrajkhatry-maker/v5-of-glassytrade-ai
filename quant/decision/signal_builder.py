@@ -69,21 +69,21 @@ class SignalBuilder:
         self.min_stop_distance_pct = min_stop_distance_pct
         self.max_position_quantity = max_position_quantity
 
-    def build(
+    def build_or_reason(
         self,
         ctx: DecisionContext,
         pipeline_results: list[GateResult],
         model_label: str = "Triple-A",
-    ) -> Signal | None:
+    ) -> tuple[Signal | None, str]:
         if any(not r.passed for r in pipeline_results):
-            return None
+            return None, "gates failed"
 
         direction = ctx.agent_direction
         if direction not in ("LONG", "SHORT"):
-            return None
+            return None, "no direction"
 
         if ctx.bar is None:
-            return None
+            return None, "no bar"
 
         entry = float(ctx.bar.close)
         tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else TICK_SIZE_NSE_OPTIONS
@@ -112,11 +112,11 @@ class SignalBuilder:
                 "SignalBuilder: inverted signal dropped — %s entry=%.2f sl=%.2f tp=%.2f",
                 direction, entry, sl, tp,
             )
-            return None
+            return None, f"inverted signal: direction={direction} entry={entry} sl={sl} tp={tp}"
 
         risk = abs(entry - sl)
         if is_stop_too_thin(entry, sl, self.min_stop_distance_pct):
-            return None
+            return None, "thin stop"
 
         rr = abs(tp - entry) / risk if risk > 0 else 0.0
 
@@ -130,7 +130,17 @@ class SignalBuilder:
             model_label=model_label,
             symbol=ctx.symbol,
             timestamp=ctx.time_str,
-        )
+        ), ""
+
+    def build(
+        self,
+        ctx: DecisionContext,
+        pipeline_results: list[GateResult],
+        model_label: str = "Triple-A",
+    ) -> Signal | None:
+        """Back-compat wrapper — prefer build_or_reason for auditability."""
+        sig, _why = self.build_or_reason(ctx, pipeline_results, model_label)
+        return sig
 
     @staticmethod
     def _structural_tp(

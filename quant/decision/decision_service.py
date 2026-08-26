@@ -76,14 +76,15 @@ class DecisionService:
         blocked = _block_reasons(results)
         if all(r.passed for r in results):
             label = _label_from_gate_results(results)
-            sig = SignalBuilder().build(ctx, results, model_label=label)
+            sig, drop_why = SignalBuilder().build_or_reason(ctx, results, model_label=label)
             if sig is not None:
                 return QuantDecision(
                     True, sig, label, "", results,
                     model_label=label,
                 )
             return QuantDecision(
-                False, None, "GATE_REJECTED", "", results, blocked,
+                False, None, "GATE_REJECTED", "", results,
+                blocked + (f"SIGNAL_BUILDER: {drop_why}",),
             )
         # If Gate 1 (session/spread) or Gate 2 (position/cooldown) failed, hard reject —
         # no trades or fades allowed. Identified by gate NUMBER, never list position:
