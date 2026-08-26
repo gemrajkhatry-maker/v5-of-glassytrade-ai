@@ -447,72 +447,12 @@ class OptionScannerService:
                 except Exception as e:
                     logger.error("scan_top_n failed for %s: %s", u, e)
 
-        # Group by underlying and take top N per underlying first
-        from collections import defaultdict
-
-        grouped = defaultdict(list)
-        for r in results:
-            grouped[r.underlying].append(r)
-
-        # Per-underlying shortlists (best contracts first within each root).
-        per_u: dict[str, list[ScanResult]] = {}
-        for u_name, u_results in grouped.items():
-            if preferred_option_type:
-                ranked = sorted(u_results, key=lambda r: -r.score)
-            else:
-                # Pair CE and PE so the engine has actionable contracts in BOTH directions
-                ce_list = sorted([r for r in u_results if r.option_type == "CE"], key=lambda r: -r.score)
-                pe_list = sorted([r for r in u_results if r.option_type == "PE"], key=lambda r: -r.score)
-                paired = []
-                for i in range(max(len(ce_list), len(pe_list))):
-                    if i < len(ce_list):
-                        paired.append(ce_list[i])
-                    if i < len(pe_list):
-                        paired.append(pe_list[i])
-                ranked = paired if paired else sorted(u_results, key=lambda r: -r.score)
-            cap = max(1, int(top_per_underlying))
-            per_u[u_name] = ranked[:cap]
-
-        # Round-robin across roots. Default order: *best* score on that root
-        # (a strong root can't monopolize the top-N and a weak root still gets a
-        # slot — mini metals never got picked when CRUDEOIL/NATURALGAS
-        # dominated the global sort). When an explicit underlying_priority is
-        # configured (e.g. NIFTY weekly primary, BANKNIFTY/FINNIFTY monthly
-        # secondary), that order wins: earlier-listed underlyings fill their
-        # slots first, including the extra passes beyond the first slot each.
-        if underlying_priority:
-            prio_idx = {str(u).upper(): i for i, u in enumerate(underlying_priority)}
-            u_ranked = sorted(
-                per_u.keys(),
-                key=lambda u: (
-                    prio_idx.get(str(u).upper(), len(prio_idx)),
-                    -(per_u[u][0].score if per_u[u] else 0.0),
-                ),
-            )
-        else:
-            u_ranked = sorted(
-                per_u.keys(),
-                key=lambda u: per_u[u][0].score if per_u[u] else -1.0,
-                reverse=True,
-            )
-        final: list[ScanResult] = []
-        round_idx = 0
-        while len(final) < n and per_u:
-            took_any = False
-            for u in u_ranked:
-                if len(final) >= n:
-                    break
-                lst = per_u.get(u, [])
-                if round_idx < len(lst):
-                    final.append(lst[round_idx])
-                    took_any = True
-            if not took_any:
-                break
-            round_idx += 1
+        per_u = self._rank_per_underlying(results, preferred_option_type, top_per_underlying)
+        final = self._round_robin(n, per_u, underlying_priority)
 
         logger.info(
             "scan_top_n balanced: roots_with_chain=%s picked_roots=%s",
-            sorted(grouped.keys()),
+            sorted(per_u.keys()),
             [r.underlying for r in final],
         )
 
@@ -520,67 +460,7 @@ class OptionScannerService:
         # Big-move mode is a strict filter: expensive premium means "no setup",
         # not "show me ATM monitors anyway" — those would get traded.
         if not final and not big_move_mode:
-            logger.info("No momentum setups — selecting ATM contracts for monitoring")
-
-            if not underlyings:
-                logger.error("scanner fallback has no underlyings — refusing hardcoded NSE/MCX lists")
-                return final
-            _fb_underlyings = underlyings
-
-            for u in _fb_underlyings:
-                try:
-                    u_upper = u.upper()
-                    try:
-                        _u_exchange = self.dhan_exchange_for(u_upper)
-                    except UnknownInstrumentError:
-                        continue
-
-                    chain = ensure_sync_adapter_result(
-                        "broker.get_option_chain",
-                        self._broker.get_option_chain,
-                        underlying=u,
-                        exchange=_u_exchange,
-                        expiry_index=expiry_index,
-                    )
-                    if chain is None:
-                        continue
-                    _fb_exp = (
-                        chain.expiry.date()
-                        if hasattr(chain.expiry, "date")
-                        else None
-                    )
-                    if _fb_exp is not None and _fb_exp < today_ist():
-                        continue
-                    atm = chain.atm_strike
-                    
-                    # Get BOTH CE and PE for a balanced view in neutral markets
-                    for opt_type, opt_map in [("CE", chain.calls), ("PE", chain.puts)]:
-                        atm_opt = opt_map.get(float(atm))
-                        if atm_opt and float(atm_opt.ltp or 0) > 0:
-                            final.append(
-                                ScanResult(
-                                    symbol=atm_opt.symbol,
-                                    underlying=u,
-                                    strike=int(atm),
-                                    option_type=opt_type,
-                                    expiry=chain.expiry.date().isoformat()
-                                    if hasattr(chain.expiry, "date")
-                                    else "",
-                                    ltp=float(atm_opt.ltp),
-                                    oi=int(atm_opt.oi or 0),
-                                    volume=int(atm_opt.volume or 0),
-                                    spread=float(atm_opt.ask or 0) - float(atm_opt.bid or 0),
-                                    score=50,  # Neutral score
-                                    bias="NEUTRAL",
-                                    bias_reason="Monitoring ATM (No strong momentum)",
-                                    delta=0.5 if opt_type == "CE" else 0.5,
-                                    iv=float(atm_opt.iv or 0) if hasattr(atm_opt, "iv") else 0.0,
-                                )
-                            )
-                            logger.info("Fallback: Selected %s for monitoring", atm_opt.symbol)
-                except Exception as e:
-                    logger.debug("Fallback scan failed for %s: %s", u, e)
-                    continue
+            final = self._fallback_atm(underlyings, expiry_index)
 
         logger.info(
             "scan_top_n: %d contracts found, returning %d",
@@ -611,6 +491,149 @@ class OptionScannerService:
             return "BEARISH", 3, f"PE volume {pe_vol} > CE volume {ce_vol}"
         else:
             return "NEUTRAL", 0, f"Balanced CE={ce_vol} PE={pe_vol}"
+
+    def _rank_per_underlying(
+        self,
+        results: list[ScanResult],
+        preferred_option_type: str | None,
+        top_per_underlying: int,
+    ) -> dict[str, list[ScanResult]]:
+        """Group results by underlying, rank within each, return top-per-underlying shortlists."""
+        from collections import defaultdict
+
+        grouped = defaultdict(list)
+        for r in results:
+            grouped[r.underlying].append(r)
+
+        per_u: dict[str, list[ScanResult]] = {}
+        cap = max(1, int(top_per_underlying))
+        for u_name, u_results in grouped.items():
+            if preferred_option_type:
+                ranked = sorted(u_results, key=lambda r: -r.score)
+            else:
+                ce_list = sorted(
+                    [r for r in u_results if r.option_type == "CE"],
+                    key=lambda r: -r.score,
+                )
+                pe_list = sorted(
+                    [r for r in u_results if r.option_type == "PE"],
+                    key=lambda r: -r.score,
+                )
+                paired = []
+                for i in range(max(len(ce_list), len(pe_list))):
+                    if i < len(ce_list):
+                        paired.append(ce_list[i])
+                    if i < len(pe_list):
+                        paired.append(pe_list[i])
+                ranked = paired if paired else sorted(
+                    u_results, key=lambda r: -r.score
+                )
+            per_u[u_name] = ranked[:cap]
+        return per_u
+
+    @staticmethod
+    def _round_robin(
+        n: int,
+        per_u: dict[str, list[ScanResult]],
+        underlying_priority: list[str] | None,
+    ) -> list[ScanResult]:
+        """Round-robin selection across underlyings, respecting priority order."""
+        if underlying_priority:
+            prio_idx = {str(u).upper(): i for i, u in enumerate(underlying_priority)}
+            u_ranked = sorted(
+                per_u.keys(),
+                key=lambda u: (
+                    prio_idx.get(str(u).upper(), len(prio_idx)),
+                    -(per_u[u][0].score if per_u[u] else 0.0),
+                ),
+            )
+        else:
+            u_ranked = sorted(
+                per_u.keys(),
+                key=lambda u: per_u[u][0].score if per_u[u] else -1.0,
+                reverse=True,
+            )
+        final: list[ScanResult] = []
+        round_idx = 0
+        while len(final) < n and per_u:
+            took_any = False
+            for u in u_ranked:
+                if len(final) >= n:
+                    break
+                lst = per_u.get(u, [])
+                if round_idx < len(lst):
+                    final.append(lst[round_idx])
+                    took_any = True
+            if not took_any:
+                break
+            round_idx += 1
+        return final
+
+    def _fallback_atm(
+        self,
+        underlyings: list[str],
+        expiry_index: int,
+    ) -> list[ScanResult]:
+        """Fallback: select ATM CE+PE for monitoring when no momentum setups found."""
+        final: list[ScanResult] = []
+        if not underlyings:
+            logger.error("scanner fallback has no underlyings — refusing hardcoded NSE/MCX lists")
+            return final
+
+        for u in underlyings:
+            try:
+                u_upper = u.upper()
+                try:
+                    _u_exchange = self.dhan_exchange_for(u_upper)
+                except UnknownInstrumentError:
+                    continue
+
+                chain = ensure_sync_adapter_result(
+                    "broker.get_option_chain",
+                    self._broker.get_option_chain,
+                    underlying=u,
+                    exchange=_u_exchange,
+                    expiry_index=expiry_index,
+                )
+                if chain is None:
+                    continue
+                _fb_exp = (
+                    chain.expiry.date()
+                    if hasattr(chain.expiry, "date")
+                    else None
+                )
+                if _fb_exp is not None and _fb_exp < today_ist():
+                    continue
+                atm = chain.atm_strike
+
+                for opt_type, opt_map in [("CE", chain.calls), ("PE", chain.puts)]:
+                    atm_opt = opt_map.get(float(atm))
+                    if atm_opt and float(atm_opt.ltp or 0) > 0:
+                        final.append(
+                            ScanResult(
+                                symbol=atm_opt.symbol,
+                                underlying=u,
+                                strike=int(atm),
+                                option_type=opt_type,
+                                expiry=chain.expiry.date().isoformat()
+                                if hasattr(chain.expiry, "date")
+                                else "",
+                                ltp=float(atm_opt.ltp),
+                                oi=int(atm_opt.oi or 0),
+                                volume=int(atm_opt.volume or 0),
+                                spread=float(atm_opt.ask or 0) - float(atm_opt.bid or 0),
+                                score=50,
+                                bias="NEUTRAL",
+                                bias_reason="Monitoring ATM (No strong momentum)",
+                                delta=0.5,
+                                iv=float(atm_opt.iv or 0) if hasattr(atm_opt, "iv") else 0.0,
+                            )
+                        )
+                        logger.info("Fallback: Selected %s for monitoring", atm_opt.symbol)
+            except Exception as e:
+                logger.debug("Fallback scan failed for %s: %s", u, e)
+                continue
+        return final
 
 
 class ContractSwitchGuard:
