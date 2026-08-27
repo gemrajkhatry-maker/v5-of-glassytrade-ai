@@ -36,7 +36,8 @@ class AmtScalpingStrategy:
         time_stop_bars: int = 60,
     ) -> None:
         self._decision_service = decision_service or DecisionService(min_rr=min_rr)
-        self._exit_engine = exit_engine or ExitEngine(time_stop_bars=time_stop_bars)
+        # ponytail: mirror BE constant; tune from journal replay later
+        self._exit_engine = exit_engine or ExitEngine(time_stop_bars=time_stop_bars, cvd_kill_threshold=2.0)
 
     def on_bar(self, bar, auction, amt_dto: dict) -> None:
         """No per-bar state to update — the strategy is stateless."""

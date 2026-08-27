@@ -221,7 +221,8 @@ class QuantEngine:
         _interval_sec = max(1, int(interval_seconds))
         if time_stop_bars is None:
             time_stop_bars = max(1, int(time_stop_minutes) * 60 // _interval_sec)
-        self._exits = ExitEngine(time_stop_bars=time_stop_bars)
+        # ponytail: mirror BE constant; tune from journal replay later
+        self._exits = ExitEngine(time_stop_bars=time_stop_bars, cvd_kill_threshold=2.0)
         # Strategy — pluggable entry/exit logic. Defaults to the AMT scalping
         # playbook (Fabio Valentini). Swap for momentum, mean-reversion, etc.
         if strategy is not None:
