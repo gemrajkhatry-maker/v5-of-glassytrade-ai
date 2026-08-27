@@ -41,6 +41,18 @@ def check_cvd_kill(position: Position, dto: dict, cvd_kill_threshold: float) -> 
     return None
 
 
+def tp2_level(entry: float, tp: float) -> float:
+    """Rule 4 second-tier target (tier>=1): entry ± 2×|tp−entry|.
+
+    Side follows the profit direction of the signal: tp above entry uses
+    long geometry (2R past entry, i.e. 1R past tp); tp below entry uses the
+    short mirror — exactly matching check_take_profit_tiers' branches.
+    Shared by the bar path and the tick path (position_manager).
+    """
+    r = abs(tp - entry)
+    return entry + 2.0 * r if tp > entry else entry - 2.0 * r
+
+
 def check_take_profit_tiers(
     position: Position, high: float, low: float, tp_tier: int, entry: float,
 ) -> tuple[ExitDecision | None, int]:
@@ -52,8 +64,7 @@ def check_take_profit_tiers(
         if (long and high >= tp) or (not long and low <= tp):
             return ExitDecision(True, "TP1", tp, partial_fraction=0.5), 1
     elif tp_tier == 1:
-        r = abs(tp - entry)
-        tp2 = entry + 2.0 * r if long else entry - 2.0 * r
+        tp2 = tp2_level(entry, tp)
         if (long and high >= tp2) or (not long and low <= tp2):
             return ExitDecision(True, "TP2", tp2, partial_fraction=0.5), 2
     return None, tp_tier

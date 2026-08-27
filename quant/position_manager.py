@@ -12,6 +12,7 @@ from typing import Callable
 
 from quant.contracts.enums import MarketState
 from quant.decision.stops import structural_stop
+from quant.execution.exit_checks import tp2_level
 from quant.execution.exits import ExitDecision, ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.ports import IOMS
@@ -293,19 +294,17 @@ class PositionManager:
         elif be_floor is not None:
             effective_sl = max(effective_sl, float(be_floor)) if is_long else min(effective_sl, float(be_floor))
 
-        # Tier-aware tick targets: T1 tags at sig_tp; the runner (tier>=1)
-        # waits for TP2 — same geometry as ExitEngine Rule 4
-        # (check_take_profit_tiers: entry ± 2*|tp−entry|), else ticks kill
-        # the runner instantly at sig_tp.
-        tp2_level = 0.0
+        # Tier-aware tick targets: T1 tags at sig_tp; tier==1 waits for TP2
+        # via the shared Rule-4 geometry (exit_checks.tp2_level); tier>=2 has
+        # no tick-level profit exits left at all.
+        tp2_target = 0.0
         if sig_tp > 0:
             entry_px = (
                 float(position.order.signal.entry)
                 if position.order and position.order.signal else 0.0
             )
             if entry_px > 0:
-                r = abs(sig_tp - entry_px)
-                tp2_level = entry_px + 2.0 * r if is_long else entry_px - 2.0 * r
+                tp2_target = tp2_level(entry_px, sig_tp)
 
         reason = None
         if is_long:
@@ -317,12 +316,14 @@ class PositionManager:
                 else:
                     reason = "SL"
             elif sig_tp > 0 and tick_price >= sig_tp:
-                if self._exits._tp_tier.get(position._id, 0) >= 1:
-                    if tp2_level > 0 and tick_price >= tp2_level:
-                        return self._execute_full_close(
-                            position,
-                            ExitDecision(True, "TP2", float(tick_price)),
-                            tick_time,
+                tier = self._exits._tp_tier.get(position._id, 0)
+                if tier >= 1:
+                    # Strict bar parity with Rule 4: tiers stop at 2. The
+                    # final TP2 touch books a partial (below); at tier>=2 raw
+                    # profit ticks do nothing to the runner.
+                    if tier == 1 and tp2_target > 0 and tick_price >= tp2_target:
+                        return self._book_tick_tp2_partial(
+                            position, float(tick_price), tick_time,
                         )
                     return position          # runner keeps running
                 return self._tick_tp_touch(position, float(tick_price), tick_time)
@@ -335,12 +336,12 @@ class PositionManager:
                 else:
                     reason = "SL"
             elif sig_tp > 0 and tick_price <= sig_tp:
-                if self._exits._tp_tier.get(position._id, 0) >= 1:
-                    if tp2_level > 0 and tick_price <= tp2_level:
-                        return self._execute_full_close(
-                            position,
-                            ExitDecision(True, "TP2", float(tick_price)),
-                            tick_time,
+                tier = self._exits._tp_tier.get(position._id, 0)
+                if tier >= 1:
+                    # Short mirror of the long-side TP2/tier>=2 handling above.
+                    if tier == 1 and tp2_target > 0 and tick_price <= tp2_target:
+                        return self._book_tick_tp2_partial(
+                            position, float(tick_price), tick_time,
                         )
                     return position          # runner keeps running
                 return self._tick_tp_touch(position, float(tick_price), tick_time)
@@ -351,8 +352,11 @@ class PositionManager:
         return position
 
     def _tick_tp_touch(self, position, px: float, ts: str):
-        """Bar-parity TP handling on the tick path: T1 books half + arms BE;
-        T2 (runner tagged at TP) closes. Mirrors ExitEngine Rule 4."""
+        """Bar-parity TP handling on the tick path for a fresh position
+        (tier 0): an intrabar touch of sig_tp books half + arms BE — mirrors
+        ExitEngine Rule 4. Tier>=1 touches never reach here; the runner is
+        handled by _book_tick_tp2_partial / ignored outright at tier>=2.
+        Falls through to a full close only for the size<2 degenerate case."""
         tier = self._exits._tp_tier.get(position._id, 0)
         entry = float(position.order.signal.entry)
         if tier == 0 and abs(position.size) >= 2:
@@ -381,6 +385,36 @@ class PositionManager:
             self._exits._breakeven[position._id] = entry   # same effect as exits.py:160-161
             return remaining
         return self._execute_full_close(position, ExitDecision(True, "TP", px), ts)
+
+    def _book_tick_tp2_partial(self, position, px: float, ts: str):
+        """Final tick-path tier, strict bar parity with Rule 4 (tiers stop at
+        2): book 50%-of-remainder at the TP2 touch, arm tier=2 and keep the
+        quarter runner alive. Bookkeeping mirrors _tick_tp_touch's T1 block /
+        manage_exit's partial branch; unlike TP1 this does NOT re-arm BE (the
+        bar path only arms BE at TP1, and tier==1 implies BE already armed).
+        The survivor thereafter has no tick-level profit exits at all."""
+        dec = ExitDecision(True, "TP2", px)
+        partial_fill, remaining = self._oms.close_partial(
+            position, 0.5, px, ts, dec.reason,
+        )
+        # Full partial-exit parity with the T1 block above: PositionReduced,
+        # risk-recorded (non-trade) P&L, RiskUpdated, last_partial_fill.
+        self._emit(PositionReduced(
+            symbol=self.symbol,
+            time=ts,
+            fill=partial_fill,
+            remaining=remaining,
+        ))
+        risk = self._risk.record_trade(partial_fill.pnl, count_as_trade=False)
+        logger.info(
+            "🎯 [TIERED TP] %s reason=%s closed=%.0f remaining=%.0f pnl=₹%.2f",
+            self.symbol, dec.reason, abs(partial_fill.position.size),
+            abs(remaining.size), partial_fill.pnl,
+        )
+        self._emit(RiskUpdated(symbol=self.symbol, time=ts, risk=risk))
+        self.last_partial_fill = partial_fill
+        self._exits._tp_tier[position._id] = 2
+        return remaining
 
     def check_pyramid(self, amt_dto: dict, bar, position, bar_index: int) -> None:
         """Spec §13.2 pyramid engine: add-on positions at Impulse Leg LVN retest.

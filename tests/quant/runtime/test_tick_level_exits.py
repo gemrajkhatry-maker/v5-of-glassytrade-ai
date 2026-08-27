@@ -3,6 +3,7 @@ import pytest
 from quant.brokers.gateway import Tick
 from quant.events import PositionClosed
 from quant.decision.signal_builder import Signal
+from quant.execution.exit_checks import tp2_level
 from quant.execution.exits import ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.risk import SessionRisk
@@ -103,11 +104,12 @@ def test_tick_tp_touch_books_first_partial_not_full_close():
     assert pm._exits._breakeven[open_position._id] == pytest.approx(100.0)
 
 
-def test_tick_tp_second_touch_closes_remaining_runner():
-    """After TP1 books the half, a TP2 tag closes the runner (size→0).
-
-    Runner parity with the bar path (Rule 4): tier>=1 waits for
-    TP2 = entry ± 2*(tp−entry), NOT another sig_tp tag."""
+def test_tick_tp_second_touch_books_final_partial_keeps_runner():
+    """After TP1 books the half, a TP2 tag books the FINAL half of what
+    remains (quarter runner survives) — strict bar parity with Rule 4,
+    where tiers stop at 2 and the runner dies only via trail/BE/drift/TIME.
+    (This test codified full-close-at-TP2 before wave 3 fixed the
+    divergence; it now asserts the survive-with-tier-2 contract.)"""
     pm, oms = _make_pm()
     sig = _make_signal(symbol="TEST", side="LONG", entry=100.0, sl=90.0, tp=120.0)
     open_position = oms.submit(sig, 4.0)
@@ -116,9 +118,12 @@ def test_tick_tp_second_touch_closes_remaining_runner():
     assert remaining is not None and remaining.size == 2
 
     out = pm.manage_tick_exit(remaining, tick_price=140.0, tick_time="12:00:01")
-    assert out is None                           # runner closed at TP2
-    assert pm.last_fill is not None and pm.last_fill.reason == "TP2"
-    assert pm._exits._tp_tier.get(open_position._id) is None  # state released
+    assert out is not None                       # quarter runner survives TP2
+    assert out.size == pytest.approx(1.0)        # halved again (50%-of-remainder)
+    assert pm.last_partial_fill is not None
+    assert pm.last_partial_fill.reason == "TP2"
+    assert pm.last_fill is None                  # NOT a full close
+    assert pm._exits._tp_tier[out._id] == 2      # final tier armed
 
 
 def test_tick_tp_touch_records_partial_pnl_in_risk():
@@ -163,14 +168,19 @@ def test_runner_not_killed_at_sig_tp_on_tick_path(pm, open_position_after_tp1):
     assert out is not None                  # runner STILL ALIVE at sig_tp touch
 
 
-def test_runner_closes_at_tp2_on_tick_path(pm, open_position_after_tp1):
+def test_runner_books_final_partial_at_tp2_on_tick_path(pm, open_position_after_tp1):
+    """Runner (tier==1) at a TP2 tag books the final partial, arms tier=2 and
+    survives — same lifecycle as bar-path Rule 4 (tiers stop at 2).
+    Previously this test asserted full-close-at-TP2; that codified the
+    divergence fixed in wave 3."""
     pos = open_position_after_tp1
-    entry = float(pos.order.signal.entry)
-    long = pos.size > 0
-    tp2 = entry + 2.0 * (float(pos.order.signal.tp) - entry) if long else \
-          entry - 2.0 * (entry - float(pos.order.signal.tp))
+    tp2 = tp2_level(float(pos.order.signal.entry), float(pos.order.signal.tp))
     out = pm.manage_tick_exit(pos, tick_price=tp2, tick_time="12:02:00")
-    assert out is None                      # runner closes at the real TP2
+    assert out is not None                       # quarter runner survives
+    assert out.size == pytest.approx(1.0)        # 2 -> 1 (50%-of-remainder)
+    assert pm._exits._tp_tier[pos._id] == 2      # final tier armed
+    assert pm.last_partial_fill is not None and pm.last_partial_fill.reason == "TP2"
+    assert pm.last_fill is None                  # NOT a full close
 
 
 def test_be_floor_hit_journals_breakeven_not_sl(pm, open_position_after_tp1):
@@ -212,18 +222,21 @@ def test_short_runner_not_killed_at_sig_tp_on_tick_path(pm, open_short_position_
     assert out is not None                  # runner STILL ALIVE at sig_tp touch
 
 
-def test_short_runner_closes_at_tp2_on_tick_path(pm, open_short_position_after_tp1):
+def test_short_runner_books_final_partial_at_tp2_on_tick_path(pm, open_short_position_after_tp1):
+    """Short mirror: a TP2 tag books the final partial and the runner
+    survives at tier==2 (mirror of the long Rule-4 lifecycle).
+    Previously asserted full-close-at-TP2 — that codified the divergence
+    fixed in wave 3."""
     pos = open_short_position_after_tp1
     entry = float(pos.order.signal.entry)
-    long = pos.size > 0
-    tp2 = entry + 2.0 * (float(pos.order.signal.tp) - entry) if long else \
-          entry - 2.0 * abs(float(pos.order.signal.tp) - entry)
-    assert not long                         # sanity: this is the short variant
+    tp2 = tp2_level(entry, float(pos.order.signal.tp))
     assert tp2 == pytest.approx(entry - 2.0 * abs(80.0 - 100.0))  # = 60.0
     out = pm.manage_tick_exit(pos, tick_price=tp2, tick_time="12:02:00")
-    assert out is None                      # runner closes at the real TP2
-    assert pm.last_fill is not None and pm.last_fill.reason == "TP2"
-    assert pm._exits._tp_tier.get(pos._id) is None   # state released
+    assert out is not None                       # quarter runner survives
+    assert out.size == pytest.approx(-1.0)       # -2 -> -1 (50%-of-remainder)
+    assert pm._exits._tp_tier[pos._id] == 2      # final tier armed
+    assert pm.last_partial_fill is not None and pm.last_partial_fill.reason == "TP2"
+    assert pm.last_fill is None                  # NOT a full close
 
 
 def test_short_be_floor_hit_journals_breakeven_not_sl(pm, open_short_position_after_tp1):
@@ -239,3 +252,84 @@ def test_short_be_floor_hit_journals_breakeven_not_sl(pm, open_short_position_af
     )
     assert out is None                                  # closed
     assert pm.last_fill is not None and pm.last_fill.reason == "BREAKEVEN"
+
+
+# ---------------------------------------------------------------------------
+# Wave 3 — strict bar/tick parity for the FINAL tier: a TP2 touch books the
+# last partial (tier -> 2, runner alive); thereafter no tick-level profit
+# exits exist at all (runner dies only via trail/BE/drift/TIME/session or the
+# bar path).
+# ---------------------------------------------------------------------------
+
+def _beyond(level: float, pos) -> float:
+    """First tick strictly beyond `level` in the position's profit direction."""
+    return level + (0.05 if pos.size > 0 else -0.05)
+
+
+@pytest.fixture
+def pm_after_tp2(pm, open_position_after_tp1):
+    """Long runner parked at tier==2 after the TP2 partial booked."""
+    pos = open_position_after_tp1
+    pre_size = abs(pos.size)
+    tp2 = tp2_level(float(pos.order.signal.entry), float(pos.order.signal.tp))
+    remaining = pm.manage_tick_exit(pos, tick_price=_beyond(tp2, pos), tick_time="12:02:00")
+    assert remaining is not None and abs(remaining.size) * 2 <= pre_size
+    return remaining
+
+
+@pytest.fixture
+def short_pm_after_tp2(pm, open_short_position_after_tp1):
+    """Short mirror of pm_after_tp2: runner parked at tier==2."""
+    pos = open_short_position_after_tp1
+    pre_size = abs(pos.size)
+    tp2 = tp2_level(float(pos.order.signal.entry), float(pos.order.signal.tp))
+    remaining = pm.manage_tick_exit(pos, tick_price=_beyond(tp2, pos), tick_time="12:02:00")
+    assert remaining is not None and abs(remaining.size) * 2 <= pre_size
+    return remaining
+
+
+def test_tick_tp2_books_final_partial_not_full_close(pm, open_position_after_tp1):
+    pos = open_position_after_tp1           # tier==1 runner alive (size 2)
+    pre_size = abs(pos.size)
+    tp2 = tp2_level(float(pos.order.signal.entry), float(pos.order.signal.tp))
+    out = pm.manage_tick_exit(pos, tick_price=_beyond(tp2, pos), tick_time="12:02:00")
+    assert out is not None                  # quarter runner survives
+    assert abs(out.size) * 2 <= pre_size    # halved again
+    assert pm._exits._tp_tier[pos._id] == 2
+    assert pm.last_partial_fill is not None
+    assert pm.last_partial_fill.reason == "TP2"
+    assert out._id == pos._id               # same _id → tier state stays keyed
+
+
+def test_runner_after_tp2_ignores_far_tp_ticks(pm, pm_after_tp2):
+    """tier>=2 has NO tick-level TP semantics left: a deep profit tick must
+    neither book anything nor close the runner (trail/BE/drift/TIME are the
+    only remaining exits)."""
+    pos = pm_after_tp2
+    entry = float(pos.order.signal.entry)
+    far = _beyond(tp2_level(entry, float(pos.order.signal.tp)) * 1.05, pos)
+    out = pm.manage_tick_exit(pos, tick_price=far, tick_time="12:03:00")
+    assert out is not None                  # no TP semantics left on ticks
+    assert pm.last_fill is None             # nothing was closed
+
+
+def test_short_tick_tp2_books_final_partial_not_full_close(pm, open_short_position_after_tp1):
+    pos = open_short_position_after_tp1     # tier==1 short runner alive (size -2)
+    pre_size = abs(pos.size)
+    tp2 = tp2_level(float(pos.order.signal.entry), float(pos.order.signal.tp))
+    out = pm.manage_tick_exit(pos, tick_price=_beyond(tp2, pos), tick_time="12:02:00")
+    assert out is not None                  # quarter runner survives
+    assert abs(out.size) * 2 <= pre_size    # halved again
+    assert pm._exits._tp_tier[pos._id] == 2
+    assert pm.last_partial_fill is not None
+    assert pm.last_partial_fill.reason == "TP2"
+
+
+def test_short_runner_after_tp2_ignores_far_tp_ticks(pm, short_pm_after_tp2):
+    """Short mirror: at tier>=2, a far profit tick keeps the runner alive."""
+    pos = short_pm_after_tp2
+    entry = float(pos.order.signal.entry)
+    far = _beyond(tp2_level(entry, float(pos.order.signal.tp)) * 1.05, pos)
+    out = pm.manage_tick_exit(pos, tick_price=far, tick_time="12:03:00")
+    assert out is not None                  # no TP semantics left on ticks
+    assert pm.last_fill is None             # nothing was closed
