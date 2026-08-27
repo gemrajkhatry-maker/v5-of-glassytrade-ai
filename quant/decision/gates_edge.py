@@ -72,8 +72,12 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         price = float(ctx.bar.close)
         if abs(price - leg_lvn) <= 2.0 * tick:
             if ctx.absorption_side == "SELL_ABSORBED" and ctx.agent_direction == "LONG" and cvd_slope >= -0.2:
+                if not getattr(ctx, "allow_trend", True):
+                    return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
                 return GateResult(3, True, f"LVN Sniper LONG @ {leg_lvn:.2f}")
             if ctx.absorption_side == "BUY_ABSORBED" and ctx.agent_direction == "SHORT" and cvd_slope <= 0.2:
+                if not getattr(ctx, "allow_trend", True):
+                    return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
                 return GateResult(3, True, f"LVN Sniper SHORT @ {leg_lvn:.2f}")
     break_dir = getattr(ctx, "break_direction", "") or ""
     break_type = getattr(ctx, "break_type", "") or ""

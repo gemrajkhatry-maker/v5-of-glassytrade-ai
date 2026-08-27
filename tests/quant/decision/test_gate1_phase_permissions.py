@@ -10,6 +10,7 @@ level so WS2 refactors cannot silently re-sever the wire.
 
 
 import pytest
+from dataclasses import replace
 
 from quant.amt.session.context import get_session_info
 from quant.contracts.enums import MarketState
@@ -159,6 +160,19 @@ def test_triple_a_aggression_blocked_midday_without_evidence():
     """Gate 3: raw Triple-A AGGRESSION must be vetoed midday (allow_trend=False)."""
     ctx = _midday_ctx(direction="LONG", triple_a_phase="AGGRESSION",
                       triple_a_signal="LONG")
+    r = gate_triple_a_edge(ctx)
+    assert not r.passed and "trend" in r.reason.lower()
+
+
+def test_lvn_sniper_blocked_midday_without_evidence():
+    """Gate 3: raw LVN Sniper must be vetoed midday (allow_trend=False)."""
+    ctx = _midday_ctx(direction="LONG")
+    ctx = replace(
+        ctx,
+        leg_lvn=float(ctx.bar.close),
+        absorption_side="SELL_ABSORBED",
+        cvd_slope=0.0,
+    )
     r = gate_triple_a_edge(ctx)
     assert not r.passed and "trend" in r.reason.lower()
 
