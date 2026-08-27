@@ -112,6 +112,14 @@ class TestPosition:
         p2.close(101.3, "t", "TP2")
         assert p2.close_reason == ExitReason.TAKE_PROFIT
 
+    def test_close_classifies_opposing_signal_literal(self):
+        p = self._make_position(entry_price=100, stop_loss=95, take_profit=105)
+        # Exit price happens to be a profitable scratch: geometric
+        # classification would call it SCRATCH/TAKE_PROFIT, but the journal
+        # truth is a fresh contrary approval — ADVERSE_EXIT family.
+        p.close(101.3, "t", "OPPOSING_SIGNAL")
+        assert p.close_reason == ExitReason.ADVERSE_EXIT
+
     def test_move_stop_to_breakeven(self):
         p = self._make_position(entry_price=100, stop_loss=95)
         p.move_stop_to_breakeven()

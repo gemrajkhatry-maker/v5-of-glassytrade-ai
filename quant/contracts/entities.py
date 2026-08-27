@@ -212,6 +212,7 @@ class Position:
         journal_aliases = {
             "BREAKEVEN": ExitReason.BREAK_EVEN,
             "TP2": ExitReason.TAKE_PROFIT,
+            "OPPOSING_SIGNAL": ExitReason.ADVERSE_EXIT,
         }
         if reason in journal_aliases:
             self.close_reason = journal_aliases[reason]
