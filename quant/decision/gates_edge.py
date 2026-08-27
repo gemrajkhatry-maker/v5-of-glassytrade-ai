@@ -94,8 +94,12 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
         retested = ctx.bar and trapped > 0 and abs(float(ctx.bar.close) - trapped) <= 3.0 * tick
         if retested or getattr(ctx, "pullback_confirmed", False):
             if ctx.agent_direction == "LONG" and cvd_slope >= -0.1:
+                if not getattr(ctx, "allow_trend", True):
+                    return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
                 return GateResult(3, True, f"Squeeze {sq_dir} retest @{trapped:.2f}")
             if ctx.agent_direction == "SHORT" and cvd_slope <= 0.1:
+                if not getattr(ctx, "allow_trend", True):
+                    return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
                 return GateResult(3, True, f"Squeeze {sq_dir} retest @{trapped:.2f}")
     return None
 

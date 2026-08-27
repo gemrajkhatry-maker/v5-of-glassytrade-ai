@@ -312,10 +312,27 @@ class PositionManager:
         tier = self._exits._tp_tier.get(position._id, 0)
         entry = float(position.order.signal.entry)
         if tier == 0 and abs(position.size) >= 2:
-            dec = ExitDecision(True, "TP1", px, partial_fraction=0.5)
+            dec = ExitDecision(True, "TP1", px)
             partial_fill, remaining = self._oms.close_partial(
                 position, 0.5, px, ts, dec.reason,
             )
+            # Bar-path bookkeeping parity (see manage_exit partial branch):
+            # the partial P&L feeds daily_pnl which drives the cushion/halt
+            # risk core — dropping it understates risk for tick-path scalps.
+            self._emit(PositionReduced(
+                symbol=self.symbol,
+                time=ts,
+                fill=partial_fill,
+                remaining=remaining,
+            ))
+            risk = self._risk.record_trade(partial_fill.pnl, count_as_trade=False)
+            logger.info(
+                "🎯 [TIERED TP] %s reason=%s closed=%.0f remaining=%.0f pnl=₹%.2f",
+                self.symbol, dec.reason, abs(partial_fill.position.size),
+                abs(remaining.size), partial_fill.pnl,
+            )
+            self._emit(RiskUpdated(symbol=self.symbol, time=ts, risk=risk))
+            self.last_partial_fill = partial_fill
             self._exits._tp_tier[position._id] = 1
             self._exits._breakeven[position._id] = entry   # same effect as exits.py:160-161
             return remaining

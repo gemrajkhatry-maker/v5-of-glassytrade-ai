@@ -1,11 +1,10 @@
-"""Gate 4 — risk-reward on the Triple-A edge (Fabio: R:R >= 1.5, trades 2:1)."""
+"""Gate 4 — structural stop cap on the Triple-A edge (SignalBuilder owns R:R)."""
 
 from quant.decision.context import DecisionContext
 from quant.decision.result import GateResult
 from quant.decision.signal_builder import TICK_SIZE_NSE_OPTIONS
 from quant.decision.stops import structural_anchor, structural_stop
 
-DEFAULT_TP_MULTIPLIER = 2.0
 MIN_RR = 1.5
 MAX_STOP_DISTANCE_TICKS = 200.0
 
@@ -15,7 +14,8 @@ def gate_risk_reward(
     min_rr: float = MIN_RR,
     max_distance_ticks: float = MAX_STOP_DISTANCE_TICKS,
 ) -> GateResult:
-    """Gate 4 — risk-reward check (Fabio: R:R >= 1.5) + structural stop cap."""
+    """Gate 4 — structural stop cap. SignalBuilder is the sole R:R qualifier
+    (structural targets >= 1.5 else 2R fallback); this gate reports stop truth."""
     if ctx is None or ctx.bar is None:
         return GateResult(4, False, "RR fail", "no bar")
     direction = ctx.agent_direction
@@ -37,7 +37,6 @@ def gate_risk_reward(
     # dropped — it was a fake "RR pass" by construction. SignalBuilder is the
     # sole R:R qualifier (structural targets >= 1.5 else 2R fallback). Report
     # stop truth, not a measured RR we never took.
-    reward = risk * DEFAULT_TP_MULTIPLIER     # planning assumption, NOT measured RR
     detail = (
         f"stop risk={risk / tick:.0f} ticks (cap {scaled_cap_ticks:.0f}) "
         f"| SL={sl:.2f} | RR enforced by SignalBuilder min_rr=1.5"

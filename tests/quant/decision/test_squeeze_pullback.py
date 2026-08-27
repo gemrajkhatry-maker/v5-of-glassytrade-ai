@@ -15,7 +15,7 @@ from quant.decision.gates_edge import gate_triple_a_edge
 
 
 def _base_ctx(direction="LONG", cvd_slope=0.3, close=100.0, squeeze_dir="LONG",
-              trapped=100.0, tick_size=0.05) -> DecisionContext:
+              trapped=100.0, tick_size=0.05, allow_trend=True) -> DecisionContext:
     bar = Bar(time="t", open=close, high=close + 0.2, low=close - 0.2,
               close=close, volume=100.0)
     return DecisionContext(
@@ -31,6 +31,7 @@ def _base_ctx(direction="LONG", cvd_slope=0.3, close=100.0, squeeze_dir="LONG",
         squeeze_direction=squeeze_dir or "",
         squeeze_trapped_level=trapped,
         pullback_confirmed=abs(close - trapped) <= 3.0 * tick_size,
+        allow_trend=allow_trend,
     )
 
 
@@ -64,3 +65,12 @@ def test_squeeze_without_pullback_confirmation_fails_gate3():
     r = gate_triple_a_edge(ctx)
     assert not r.passed
     assert "No Triple-A edge" in r.reason
+
+
+def test_squeeze_long_blocked_midday_without_trend():
+    """Squeeze retest is a trend-continuation play: vetoed when the session
+    is reversion-only (allow_trend=False) — mirrors the Initiative veto."""
+    ctx = _base_ctx(direction="LONG", cvd_slope=0.0, close=100.10,
+                    squeeze_dir="LONG", trapped=100.0, allow_trend=False)
+    r = gate_triple_a_edge(ctx)
+    assert not r.passed and "trend" in r.reason.lower()

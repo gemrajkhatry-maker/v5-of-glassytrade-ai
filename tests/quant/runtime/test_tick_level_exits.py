@@ -115,3 +115,18 @@ def test_tick_tp_second_touch_closes_remaining_runner():
     out = pm.manage_tick_exit(remaining, tick_price=120.0, tick_time="12:00:01")
     assert out is None                           # runner closed
     assert pm._exits._tp_tier.get(open_position._id) is None  # state released
+
+
+def test_tick_tp_touch_records_partial_pnl_in_risk():
+    """Tick-path TP1 must book the partial P&L into SessionRisk (bar-path
+    parity) — daily_pnl drives the cushion/halt risk core, so dropping it
+    understates risk for tick-path scalps."""
+    pm, oms = _make_pm()
+    sig = _make_signal(symbol="TEST", side="LONG", entry=100.0, sl=90.0, tp=120.0)
+    open_position = oms.submit(sig, 4.0)
+
+    out = pm.manage_tick_exit(open_position, tick_price=120.0, tick_time="12:00:00")
+
+    assert out is not None and out.size == 2
+    assert pm.last_partial_fill is not None      # bar-path parity: partial is journaled
+    assert pm._risk._daily_pnl == pytest.approx((120.0 - 100.0) * 2.0)
