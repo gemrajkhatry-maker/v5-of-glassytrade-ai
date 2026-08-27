@@ -171,3 +171,16 @@ def test_runner_closes_at_tp2_on_tick_path(pm, open_position_after_tp1):
           entry - 2.0 * (entry - float(pos.order.signal.tp))
     out = pm.manage_tick_exit(pos, tick_price=tp2, tick_time="12:02:00")
     assert out is None                      # runner closes at the real TP2
+
+
+def test_be_floor_hit_journals_breakeven_not_sl(pm, open_position_after_tp1):
+    """A stop touched purely via the armed BE floor must journal as
+    BREAKEVEN (scratch), not SL — bar-path parity with exit_checks Rule 4b."""
+    pos = open_position_after_tp1           # tier==1 runner, BE floor armed at entry
+    out = pm.manage_tick_exit(
+        pos,
+        tick_price=float(pos.order.signal.entry) - 0.05,
+        tick_time="12:03:00",
+    )
+    assert out is None                                  # closed
+    assert pm.last_fill is not None and pm.last_fill.reason == "BREAKEVEN"

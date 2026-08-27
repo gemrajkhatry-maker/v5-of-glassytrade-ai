@@ -310,7 +310,12 @@ class PositionManager:
         reason = None
         if is_long:
             if effective_sl > 0 and tick_price <= effective_sl:
-                reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
+                if trail_stop is not None and effective_sl == float(trail_stop):
+                    reason = "TRAIL"
+                elif be_floor is not None and effective_sl == float(be_floor):
+                    reason = "BREAKEVEN"     # journal truth: scratch, not a stop-out
+                else:
+                    reason = "SL"
             elif sig_tp > 0 and tick_price >= sig_tp:
                 if self._exits._tp_tier.get(position._id, 0) >= 1:
                     if tp2_level > 0 and tick_price >= tp2_level:
@@ -323,7 +328,12 @@ class PositionManager:
                 return self._tick_tp_touch(position, float(tick_price), tick_time)
         else:
             if effective_sl > 0 and tick_price >= effective_sl:
-                reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
+                if trail_stop is not None and effective_sl == float(trail_stop):
+                    reason = "TRAIL"
+                elif be_floor is not None and effective_sl == float(be_floor):
+                    reason = "BREAKEVEN"     # journal truth: scratch, not a stop-out
+                else:
+                    reason = "SL"
             elif sig_tp > 0 and tick_price <= sig_tp:
                 if self._exits._tp_tier.get(position._id, 0) >= 1:
                     if tp2_level > 0 and tick_price <= tp2_level:
