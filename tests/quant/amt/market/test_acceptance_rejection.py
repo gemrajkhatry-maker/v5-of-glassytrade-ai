@@ -87,3 +87,21 @@ class TestAcceptanceRejectionEngine:
         engine.reset()
         result = engine.update(_candle("2024-01-01T09:19:00+00:00", 106, 107, 105.5, 106.5, v=2000), 105.0, 95.0, 1000.0)
         assert result.acceptance_above is False
+
+
+def test_dto_price_velocity_nonzero_for_real_bar():
+    """Regression: live bars consumed the SECOND A/R update (dt=0 → velocity
+    0), so the emitted priceVelocity was always zero. The analyzer must carry
+    the FIRST pass (real bar-to-bar duration) through to the result."""
+    from quant.amt.analyzer import AMTAnalyzer
+
+    candles = []
+    for m in range(0, 45, 5):
+        t = f"2026-01-01T09:{15 + m:02d}:00Z"
+        o = 100.0 + m * 0.5
+        c = o + 2.0
+        candles.append(OHLC(time=t, open=o, high=c + 1.0, low=o - 1.0,
+                            close=c, volume=1000, vwap=(o + c) / 2,
+                            taker_buy_volume=600.0, delta=100.0))
+    result = AMTAnalyzer().analyze(candles)
+    assert result.price_velocity > 0.0

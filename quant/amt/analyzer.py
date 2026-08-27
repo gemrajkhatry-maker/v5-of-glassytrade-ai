@@ -503,8 +503,10 @@ class AMTAnalyzer:
             else 0.0
         )
 
-        # Acceptance/Rejection engine
-        ar_state = self._ar_engine.update(current, vah, val, baseline_vol)
+        # Acceptance/Rejection engine — FIRST pass (real bar-to-bar duration);
+        # its price_velocity is what we emit. The re-check below rebinds
+        # `ar_state` with dt=0 for the same bar and zero-velocity.
+        ar_state_first = self._ar_engine.update(current, vah, val, baseline_vol)
 
         # 2. Market State (4-state model)
         from quant.amt.profile.displacement import detect_displacement_leg as _detect_disp_leg
@@ -531,7 +533,7 @@ class AMTAnalyzer:
             )
             val = leg_val_temp
 
-        if ar_state["acceptance_above"] or ar_state["acceptance_below"]:
+        if ar_state_first["acceptance_above"] or ar_state_first["acceptance_below"]:
             has_acceptance = True
 
         balance_window = min(len(recent_data), 20)
@@ -783,6 +785,7 @@ class AMTAnalyzer:
             ib_state=ib_state, prior_poc=prior_poc, prior_vah=prior_vah,
             prior_val=prior_val, prior_close=prior_close,
             session_open_price=session_open_price,
+            price_velocity_first=ar_state_first["price_velocity"],
             ar_state=ar_state, poc_migration=poc_migration,
             lvn_play=lvn_play, break_state=break_state,
             ofi_result=ofi_result, obi=obi,
@@ -821,6 +824,7 @@ class AMTAnalyzer:
                       balance_ratio, leg_data, ib_complete, ib_high, ib_low,
                       ib_state, prior_poc, prior_vah, prior_val, prior_close,
                       session_open_price, ar_state, poc_migration, lvn_play,
+                  price_velocity_first,
                       break_state, ofi_result, obi, dev_poc, dev_vah, dev_val,
                       cushion_tier, session_pnl, bubble_retests, npoc_above,
                       npoc_below, opening_result, mtf_result, structure,
@@ -906,7 +910,7 @@ class AMTAnalyzer:
             rejection_at_high=ar_state["rejection_at_high"],
             rejection_at_low=ar_state["rejection_at_low"],
             liquidity_sweep=ar_state.get("liquidity_sweep", ""),
-            price_velocity=ar_state["price_velocity"],
+            price_velocity=price_velocity_first,  # first pass carries the real duration
             poc_signal=poc_migration.signal,
             poc_vs_price=poc_migration.poc_vs_price,
             lvn_play=lvn_play,
