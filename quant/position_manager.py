@@ -235,22 +235,26 @@ class PositionManager:
         fill = self._oms.close(position, exit_dec.close_price, time_str, exit_dec.reason)
         self.last_fill = fill
         self._exits.pop_trail(position)
-        # Reset pyramid state: close all pyramid add-ons at the same price
+        # Reset pyramid state: close all pyramid add-ons at the same price.
+        # Collect (pyr_pos, its_fill) pairs — the E11 release below must pair
+        # each add-on with its OWN fill pnl, not a loop-leaked leftover.
+        closed_pyrs: list[tuple[object, object]] = []
         for pyr_pos in self.pyramid_positions:
             pyr_fill = self._oms.close(pyr_pos, exit_dec.close_price, time_str, exit_dec.reason + "_PYRAMID")
             self._exits.pop_trail(pyr_pos)
             self._risk.record_trade(pyr_fill.pnl, count_as_trade=False)
             self._emit(PositionClosed(symbol=self.symbol, time=time_str, fill=pyr_fill))
             self.last_pyramid_pnl += float(pyr_fill.pnl)
+            closed_pyrs.append((pyr_pos, pyr_fill))
             logger.info(
                 "🔒 [PYRAMID CLOSED] %s level=%d reason=%s pnl=₹%.2f",
                 self.symbol, pyr_pos.pyramid_level, exit_dec.reason, pyr_fill.pnl,
             )
 
         # E11 FIX — release the aggregate open risk reserved for these add-ons.
-        if self._portfolio_risk is not None and self.pyramid_positions:
+        if self._portfolio_risk is not None and closed_pyrs:
             released = 0.0
-            for pyr_pos in self.pyramid_positions:
+            for pyr_pos, pyr_fill in closed_pyrs:
                 risk_i = self._pyramid_open_risk.pop(pyr_pos._id, 0.0)
                 self._portfolio_risk.record_close(risk_i, float(pyr_fill.pnl))
                 released += risk_i
