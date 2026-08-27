@@ -156,14 +156,16 @@ class SessionRisk:
             # Update equity after each trade so next sizing uses real capital
             self._equity = self._starting_equity + self._daily_pnl
 
-            if pnl > 0.0:
-                self._consecutive_losses = 0
-                self._consecutive_wins += 1
-            elif pnl < 0.0:
-                self._consecutive_losses += 1
-                self._consecutive_wins = 0
-            # ponytail: pnl == 0.0 (scratch/breakeven exit) is neutral —
-            # it is not a loss and must not trip the consecutive-loss halt.
+            if count_as_trade:
+                if pnl > 0.0:
+                    self._consecutive_losses = 0
+                    self._consecutive_wins += 1
+                elif pnl < 0.0:
+                    self._consecutive_losses += 1
+                    self._consecutive_wins = 0
+            # ponytail: partials/bookkeeping fills don't count as trades;
+            # letting them move streaks would blind the 3-loss halt and
+            # inflate cushion tiers off wins that were never round-trips.
 
             if self._halted:
                 self._save()

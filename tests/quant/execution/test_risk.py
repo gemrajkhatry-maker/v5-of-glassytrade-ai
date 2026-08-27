@@ -68,6 +68,16 @@ def test_partial_fills_do_not_inflate_trades_today():
     assert st.trades_today == 1
     assert st.daily_pnl == 22.0
 
+def test_partial_fills_do_not_reset_loss_streak():
+    r = SessionRisk(storage=None, symbol="PARTIAL_STREAK_TEST")
+    r.record_trade(-1000.0); r.record_trade(-1000.0)          # 2 real losses
+    r.record_trade(+500.0, count_as_trade=False)              # TP1 partial "win"
+    st = r.state()
+    assert st.consecutive_losses == 2, "partial must not reset the loss streak"
+    r.record_trade(-1000.0)                                    # 3rd real loss
+    assert r.state().halted, "3 consecutive REAL losses must trip the halt"
+    assert "consecutive" in r._halt_reason
+
 def test_scratch_exit_does_not_count_as_consecutive_loss():
     from quant.execution.risk import SessionRisk
 
