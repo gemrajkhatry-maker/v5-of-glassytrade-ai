@@ -530,17 +530,44 @@ class QuantEngine:
     def projector(self) -> StateProjector:
         return self._projector
 
+    def _release_partial_reserves(self, pm: PositionManager, remaining) -> None:
+        """Fractional portfolio-risk reserve release after a tiered partial
+        exit — shared by the bar (_manage_exit) and tick (_manage_tick_exit)
+        paths so both book the same fraction of reserved open risk."""
+        if self._portfolio_risk is None:
+            return
+        if pm.last_partial_fill is not None:
+            closed_sz = abs(pm.last_partial_fill.position.size)
+            remaining_sz = abs(remaining.size) if remaining is not None else 0.0
+            total_sz = closed_sz + remaining_sz
+            fraction = closed_sz / total_sz if total_sz > 0 else 0.0
+            release = getattr(self, "_open_trade_risk", 0.0) * fraction
+            self._portfolio_risk.record_close(release, float(pm.last_partial_fill.pnl))
+            self._open_trade_risk = getattr(self, "_open_trade_risk", 0.0) - release
+        if pm.last_pyramid_pnl:
+            # ponytail: pyramid add-ons never register open risk (they only
+            # fire on a risk-free base); book their pnl, release nothing.
+            self._portfolio_risk.record_close(0.0, float(pm.last_pyramid_pnl))
+
     def _manage_tick_exit(self, tick_price: float, tick_time: str) -> None:
         """Tick-level fast stop-loss and take-profit breach check (Fabio)."""
         if self._position is None:
             return
         pm = self._get_position_manager()
-        was_open = True
+        # manage_tick_exit does NOT reset these per call (unlike manage_exit);
+        # clear them so stale values from an earlier tick/bar can't trigger
+        # duplicate reserve releases below.
+        pm.last_partial_fill = None
+        pm.last_pyramid_pnl = 0.0
+        # Adopt the survivor: a tick-path partial returns a NEW Position with
+        # the reduced size — keeping the pre-partial object as self._position
+        # would re-book the ORIGINAL size at the eventual full close.
         remaining = pm.manage_tick_exit(self._position, tick_price, tick_time)
-        if was_open and remaining is None:
-            self._position = None
-            self._pyramid_positions = pm.pyramid_positions
-            self._pyramid_count = pm.pyramid_count
+        self._position = remaining
+        self._pyramid_positions = pm.pyramid_positions
+        self._pyramid_count = pm.pyramid_count
+        self._release_partial_reserves(pm, remaining)
+        if remaining is None:
             self._last_close_bar_index = self._bar_index
             if self._portfolio_risk is not None:
                 self._portfolio_risk.record_close(
@@ -916,19 +943,7 @@ class QuantEngine:
         self._position = remaining
         self._pyramid_positions = pm.pyramid_positions
         self._pyramid_count = pm.pyramid_count
-        if self._portfolio_risk is not None:
-            if pm.last_partial_fill is not None:
-                closed_sz = abs(pm.last_partial_fill.position.size)
-                remaining_sz = abs(remaining.size) if remaining is not None else 0.0
-                total_sz = closed_sz + remaining_sz
-                fraction = closed_sz / total_sz if total_sz > 0 else 0.0
-                release = getattr(self, "_open_trade_risk", 0.0) * fraction
-                self._portfolio_risk.record_close(release, float(pm.last_partial_fill.pnl))
-                self._open_trade_risk = getattr(self, "_open_trade_risk", 0.0) - release
-            if pm.last_pyramid_pnl:
-                # ponytail: pyramid add-ons never register open risk (they only
-                # fire on a risk-free base); book their pnl, release nothing.
-                self._portfolio_risk.record_close(0.0, float(pm.last_pyramid_pnl))
+        self._release_partial_reserves(pm, remaining)
         if was_open and remaining is None:
             self._last_close_bar_index = self._bar_index
             if self._portfolio_risk is not None:
