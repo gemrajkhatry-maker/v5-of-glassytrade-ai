@@ -50,57 +50,9 @@ class IKeyValueStorage(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Sub-ports (Interface Segregation)
-# ---------------------------------------------------------------------------
-
-class ITickStorage(ABC):
-    @abstractmethod
-    def save_tick(self, symbol: str, tick_data: dict[str, Any]) -> None: ...
-    @abstractmethod
-    def query_ticks(self, symbol: str, start: str | None = None, end: str | None = None, limit: int = 1000) -> list[dict[str, Any]]: ...
 
 
-class ITradeStorage(ABC):
-    @abstractmethod
-    def save_trade(self, trade_data: dict[str, Any]) -> None: ...
-    @abstractmethod
-    def query_trades(self, start: str | None = None, end: str | None = None) -> list[dict[str, Any]]: ...
-
-
-class IOpenPositionStorage(ABC):
-    @abstractmethod
-    def save_open_position(self, position: dict[str, Any]) -> None: ...
-    @abstractmethod
-    def delete_open_position(self, position_id: str) -> None: ...
-    @abstractmethod
-    def load_open_positions(self) -> list[dict[str, Any]]: ...
-    @abstractmethod
-    def clear_all_open_positions(self) -> int:
-        """Clear all open positions from storage.
-
-        Returns:
-            Number of positions cleared.
-        """
-        ...
-
-
-class IPositionEventStorage(ABC):
-    @abstractmethod
-    def save_position_event(self, event: dict[str, Any]) -> None: ...
-    @abstractmethod
-    def query_position_events(
-        self, position_id: str | None = None, symbol: str | None = None,
-    ) -> list[dict[str, Any]]: ...
-
-
-# ---------------------------------------------------------------------------
-
-class IStorage(
-    ITickStorage,
-    ITradeStorage,
-    IOpenPositionStorage,
-    IPositionEventStorage,
-):
+class IStorage(ABC):
     """Abstraction for persisting ticks, trades, and positions."""
 
     @abstractmethod

@@ -5,7 +5,6 @@ Extracted from amt_analyzer.py for SRP compliance.
 Detects:
   - Displacement: 3+ consecutive directional candles with range expansion
   - Acceptance: 2+ consecutive closes outside VA (above VAH or below VAL)
-  - Displacement leg: profile of the most recent directional move
 """
 
 from __future__ import annotations
@@ -14,13 +13,7 @@ import math
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from quant.contracts.value_objects import OHLC, VolumeProfileLevel
-
-from quant.contracts.constants import (
-    DELTA_PROFILE_BUCKETS,
-    DISPLACEMENT_LOOKBACK,
-    VALUE_AREA_PCT,
-)
+    from quant.contracts.value_objects import OHLC
 
 
 def detect_displacement(
@@ -97,141 +90,3 @@ def detect_acceptance(data: list[OHLC], vah: float, val: float) -> bool:
         return True
 
     return False
-
-
-def detect_displacement_leg(data: list[OHLC], displacement_multiplier: float = 1.5) -> dict:
-    """Detect displacement and return leg profile data.
-
-    Identifies the most recent directional leg (consecutive same-direction candles)
-    and builds a volume profile for that leg with POC/VA calculations.
-
-    Args:
-        data: List of OHLC candles
-        displacement_multiplier: Range expansion threshold for displacement detection
-
-    Returns:
-        Dictionary with has_displacement, profile, lvns, poc, vah, val, swing_delta
-    """
-    empty = {
-        "has_displacement": False,
-        "profile": [],
-        "lvns": [],
-        "poc": 0.0,
-        "vah": 0.0,
-        "val": 0.0,
-        "swing_delta": 0.0,
-    }
-    if len(data) < 5:
-        return empty
-
-    # Find the most recent directional leg: consecutive candles from end
-    # that share the same direction (bull or bear)
-    last = data[-1]
-    is_bull = last.close >= last.open
-    leg_candles = [last]
-    opposite_tolerance = 1  # allow 1 reversal candle within leg
-    opposite_count = 0
-    for i in range(len(data) - 2, max(len(data) - DISPLACEMENT_LOOKBACK, -1), -1):
-        c = data[i]
-        if (c.close >= c.open) == is_bull:
-            leg_candles.insert(0, c)
-            opposite_count = 0
-        else:
-            opposite_count += 1
-            if opposite_count > opposite_tolerance:
-                break
-            leg_candles.insert(0, c)  # include the reversal candle
-
-    if len(leg_candles) < 2:
-        return empty
-
-    # Import here to avoid circular dependency
-    from quant.amt.profile.volume_profile import create_profile
-    from quant.amt.profile.lvn import find_lvns as _find_lvns_extracted
-
-    is_disp = detect_displacement(data, displacement_multiplier)
-    leg_profile = create_profile(leg_candles, buckets=DELTA_PROFILE_BUCKETS)
-    if len(leg_profile) < 3:
-        return {
-            "has_displacement": is_disp,
-            "profile": leg_profile,
-            "lvns": [],
-            "poc": 0.0,
-            "vah": 0.0,
-            "val": 0.0,
-            "swing_delta": sum(c.delta for c in leg_candles),
-        }
-
-    # Find LVNs for the leg profile
-    leg_lvns = [lvn.price for lvn in _find_lvns_extracted(
-        leg_profile,
-        lvn_threshold=0.15,
-        smoothing_window=3,
-        lvn_percentile=0.25,
-        min_separation=3,
-    )]
-
-    # POC — VWAP tie-break
-    max_vol = max(p.volume for p in leg_profile)
-    poc_candidates = [i for i, p in enumerate(leg_profile) if p.volume == max_vol]
-
-    # Local Leg VWAP for tie-break
-    leg_vol = sum(c.volume for c in leg_candles)
-    leg_vwap = (
-        sum(c.close * c.volume for c in leg_candles) / leg_vol
-        if leg_vol > 0
-        else leg_candles[-1].close
-    )
-
-    poc_idx = min(
-        poc_candidates, key=lambda i: abs(leg_profile[i].price - leg_vwap)
-    )
-    leg_poc = leg_profile[poc_idx].price
-
-    # Value Area (70%) — CME two-row pairs method
-    total_volume = sum(p.volume for p in leg_profile)
-    target_volume = total_volume * VALUE_AREA_PCT
-    current_volume = max_vol
-    up_idx, down_idx = poc_idx, poc_idx
-    while current_volume < target_volume:
-        up_pair = 0.0
-        up_count = 0
-        for k in range(1, 3):
-            if up_idx + k < len(leg_profile):
-                up_pair += leg_profile[up_idx + k].volume
-                up_count += 1
-        down_pair = 0.0
-        down_count = 0
-        for k in range(1, 3):
-            if down_idx - k >= 0:
-                down_pair += leg_profile[down_idx - k].volume
-                down_count += 1
-        if not up_count and not down_count:
-            break
-        if up_count and (not down_count or up_pair >= down_pair):
-            for k in range(1, up_count + 1):
-                if up_idx + 1 < len(leg_profile):
-                    up_idx += 1
-                    current_volume += leg_profile[up_idx].volume
-        elif down_count:
-            for k in range(1, down_count + 1):
-                if down_idx - 1 >= 0:
-                    down_idx -= 1
-                    current_volume += leg_profile[down_idx].volume
-
-    step = (
-        leg_profile[1].price - leg_profile[0].price if len(leg_profile) > 1 else 0
-    )
-    half_step = step / 2
-    leg_vah = leg_profile[up_idx].price + half_step
-    leg_val = leg_profile[down_idx].price - half_step
-
-    return {
-        "has_displacement": is_disp,
-        "profile": leg_profile,
-        "lvns": leg_lvns,
-        "poc": leg_poc,
-        "vah": leg_vah,
-        "val": leg_val,
-        "swing_delta": sum(c.delta for c in leg_candles),
-    }

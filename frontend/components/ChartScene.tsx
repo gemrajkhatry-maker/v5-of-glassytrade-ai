@@ -101,6 +101,8 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     const initializedRef = useRef(false);
     const lastCandleTimeRef = useRef<number>(0);
     const prevSymbolRef = useRef<string | undefined>(undefined);
+    const prevIntervalRef = useRef<string | undefined>(undefined);
+    const prevActiveDataRef = useRef<OHLCData[] | null>(null);
     const prevDataLenRef = useRef<number>(0);
     // Shared redraw trigger so the ResizeObserver can repaint the overlay
     // without leaving a blank canvas during a sidebar slide.
@@ -140,9 +142,46 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     return amtAnalysis;
   }, [amtAnalysis]);
 
-  // Stabilize data reference — only update when array length changes (new candle boundary).
-  // Prevents canvas overlay from redrawing on every intra-candle tick update.
-  const stableData = useMemo(() => data, [data.length]);
+  // Interval-scoped data fetching (ensures 1m and 5m load their exact independent candle feeds)
+  const [scopedData, setScopedData] = useState<OHLCData[] | null>(null);
+
+  useEffect(() => {
+    if (!symbol) return;
+    const targetInterval = config.interval || '5m';
+    let cancelled = false;
+    const url = `/api/market/history/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(targetInterval)}&limit=500`;
+    fetch(url)
+      .then(res => (res.ok ? res.json() : null))
+      .then(body => {
+        if (cancelled || !body?.data || !Array.isArray(body.data) || body.data.length === 0) return;
+        const candles: OHLCData[] = body.data.map((c: any) => ({
+          time: String(c.time),
+          open: Number(c.open),
+          high: Number(c.high),
+          low: Number(c.low),
+          close: Number(c.close),
+          volume: Number(c.volume ?? 0),
+          vwap: Number(c.vwap ?? 0),
+          takerBuyVolume: Number(c.takerBuyVolume ?? 0),
+          delta: Number(c.delta ?? 0),
+        }));
+        setScopedData(candles);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, config.interval]);
+
+  const activeData = useMemo(() => {
+    if (scopedData && scopedData.length > 0) return scopedData;
+    return data;
+  }, [scopedData, data]);
+
+  // Stabilize data reference — only update when activeData reference or length changes.
+  // Prevents canvas overlay from redrawing on every intra-candle tick update while correctly switching on interval change.
+  const stableData = useMemo(() => activeData, [activeData, activeData.length]);
 
   // 1. Initialize Chart
   useEffect(() => {
@@ -239,23 +278,6 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
 
     resizeObserver.observe(chartContainerRef.current);
 
-    // Initial Data Load
-    // Use extracted CandleSeriesManager for data transformation
-    const validation = validateCandleData(data as any);
-    if (!validation.isValid) {
-      console.error('Invalid candle data:', validation.errors);
-    }
-
-    const candleData = transformToCandleData(data);
-    candleSeries.setData(candleData.map(d => ({ ...d, time: d.time as any })));
-
-    // Use extracted VolumeSeriesManager for volume data
-    const volumeData = transformToVolumeData(data);
-    const volumeValidation = validateVolumeData(volumeData);
-    if (!volumeValidation.length) {
-      volumeSeries.setData(volumeData.map(d => ({ ...d, time: d.time as any })));
-    }
-
     return () => {
       drawOverlayRef.current = null;
       cancelAnimationFrame(raf);
@@ -274,6 +296,14 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       if (customEvent.detail.symbol !== symbol) return;
 
       const { tick } = customEvent.detail;
+
+      // Interval guard: only accept ticks matching this chart's configured timeframe.
+      // Backend tags each tick with barIntervalSec (60 = 1m, 300 = 5m).
+      const myInterval = config.interval || '5m';
+      const myIntervalSec = myInterval === '1m' ? 60 : 300;
+      if (tick.barIntervalSec !== undefined && tick.barIntervalSec !== myIntervalSec) {
+        return;
+      }
 
       // Common Time in IST (consistently aligned with historical candles)
       const unixTime = toISTTimestamp(tick.time) as any;
@@ -307,7 +337,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     return () => {
       tickBus.removeEventListener('tick', handleTick);
     };
-  }, [tickBus, symbol, mode]);
+  }, [tickBus, symbol, config.interval, mode]);
 
   // Handle mode/config changes dynamically without remount
   useEffect(() => {
@@ -877,14 +907,19 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     // tickBus (effect #2) already handles intra-candle tick updates via
     // candleSeries.update(). Calling setData() on every data reference change
     // causes a full chart redraw + visible flicker with zero benefit.
-    const dataLenChanged = data.length !== prevDataLenRef.current;
-    const needsFullRebuild = isSymbolChange || !initializedRef.current || dataLenChanged;
-    prevDataLenRef.current = data.length;
+    const isIntervalChange = config.interval !== undefined && config.interval !== prevIntervalRef.current;
+    const isDataChange = activeData !== prevActiveDataRef.current;
+    const dataLenChanged = activeData.length !== prevDataLenRef.current;
+    const needsFullRebuild = isSymbolChange || isIntervalChange || isDataChange || !initializedRef.current || dataLenChanged;
 
-    if (data.length > 0 && needsFullRebuild) {
-      const formattedCandles = data.map(formatCandle);
+    prevIntervalRef.current = config.interval;
+    prevActiveDataRef.current = activeData;
+    prevDataLenRef.current = activeData.length;
+
+    if (activeData.length > 0 && needsFullRebuild) {
+      const formattedCandles = activeData.map(formatCandle);
       candleSeriesRef.current.setData(formattedCandles);
-      volumeSeriesRef.current.setData(data.map(formatVolume));
+      volumeSeriesRef.current.setData(activeData.map(formatVolume));
 
       // Redraw overlay AFTER setData so priceToCoordinate() uses the new
       // chart data — fixes volume profile blank on symbol switch.
@@ -902,7 +937,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
             autoScale: true,
             scaleMargins: { top: 0.15, bottom: 0.15 },
           });
-          if (isSymbolChange || !initializedRef.current) {
+          if (isSymbolChange || isIntervalChange || !initializedRef.current) {
             chart.timeScale().fitContent();
             chart.timeScale().scrollToPosition(0, false);
             initializedRef.current = true;
@@ -910,20 +945,20 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
           // Overlay must redraw again after fitContent shifts the visible range
           drawOverlayRef.current?.();
         };
-        if (isSymbolChange || !initializedRef.current) {
+        if (isSymbolChange || isIntervalChange || !initializedRef.current) {
           requestAnimationFrame(doFit);
         } else {
           doFit();
         }
       }
-    } else if (data.length > 0) {
+    } else if (activeData.length > 0) {
       // Intra-candle tick: update lastCandleTimeRef for the tickBus guard
-      const lastD = data[data.length - 1];
+      const lastD = activeData[activeData.length - 1];
       if (lastD) {
         lastCandleTimeRef.current = toISTTimestamp(lastD.time);
       }
     }
-  }, [data, symbol, config.bullColor, config.bearColor, mode]);
+  }, [activeData, symbol, config.interval, config.bullColor, config.bearColor, mode]);
 
   // 5. Update Markers & Lines
   useEffect(() => {
@@ -965,7 +1000,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     };
 
     const allMarkers = generateAllExecutionMarkers(
-      positions,
+      positions || [],
       closedTrades || [],
       stableData,
       stableAmtAnalysis,
@@ -985,7 +1020,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     tvMarkers.sort((a, b) => (a.time as number) - (b.time as number));
     candleSeriesRef.current.setMarkers(tvMarkers);
 
-    const currentPosIds = new Set(positions.map(p => p.id));
+    const currentPosIds = new Set((positions || []).map(p => p.id));
     activePriceLinesRef.current.forEach((lines, id) => {
       if (!currentPosIds.has(id)) {
         lines.forEach(l => candleSeriesRef.current?.removePriceLine(l));
@@ -993,7 +1028,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       }
     });
 
-    positions.forEach(pos => {
+    (positions || []).forEach(pos => {
       if (activePriceLinesRef.current.has(pos.id)) return;
 
       const lines: IPriceLine[] = [];
@@ -1042,7 +1077,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       </div>
 
       {/* Empty State / Live Stream Status Overlay */}
-      {data.length === 0 && (
+      {activeData.length === 0 && (
         <div className="absolute inset-0 flex flex-col items-center justify-center z-25 pointer-events-none p-6 text-center">
           <div className="p-6 rounded-2xl bg-black/40 backdrop-blur-xl border border-white/10 max-w-md space-y-3 shadow-2xl">
             <div className="flex items-center justify-center gap-2">

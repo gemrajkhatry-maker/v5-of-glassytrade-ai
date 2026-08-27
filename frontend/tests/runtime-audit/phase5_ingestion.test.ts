@@ -97,19 +97,21 @@ describe('PHASE 5: ingestion of real backend WS frames', () => {
     expect(result.current.instruments[bankSym].data.at(-1).close).not.toBe(niftyLast.tick.close);
   });
 
-  it('FINDING: full snapshots never populate inst.ltp / inst.oi (only the delta path does)', async () => {
+  it('full snapshots populate inst.ltp / inst.oi (delta path already did)', async () => {
     const { result, ws, restore } = await connectRealHook();
     cleanup = restore;
 
     await pushAllFrames(ws, FRAMES);
 
     const inst = result.current.instruments[FIXTURE_SYMBOLS[0]];
-    const sentLtp = FRAMES.filter(f => f._symbol === FIXTURE_SYMBOLS[0]).at(-1)!.ltp;
-    // Backend explicitly sent a non-zero ltp; the full-state merge path
-    // (useServerTradingSystem.ts:497-543) has no `if (state.ltp !== undefined)` branch,
-    // so it is silently dropped. Downstream code falls back to lastCandle.close.
-    expect(sentLtp).toBeGreaterThan(0);
-    expect(inst.ltp).toBeUndefined();
-    expect(inst.oi).toBeUndefined();
+    const lastFrame = FRAMES.filter(f => f._symbol === FIXTURE_SYMBOLS[0]).at(-1)!;
+    // Backend explicitly sent non-zero ltp/oi on every frame; the full-state
+    // merge path (useServerTradingSystem.ts:542-543) carries them via
+    // state.ltp ?? inst.ltp, so downstream code does not fall back to
+    // lastCandle.close. This is the regression check for the earlier FINDING
+    // where full snapshots silently dropped ltp/oi.
+    expect(lastFrame.ltp).toBeGreaterThan(0);
+    expect(inst.ltp).toBe(lastFrame.ltp);
+    expect(inst.oi).toBe(lastFrame.oi);
   });
 });

@@ -246,6 +246,43 @@ class AMTEngine:
                 time.sleep(delay)
         if not candles:
             return
+
+        # ponytail: cold-start prior session levels from history if storage was empty
+        if not self._prior or not self._prior.get("poc"):
+            prev_sessions: dict[str, list] = {}
+            for c in candles:
+                c_time = str(_get_val(c, "time", ""))
+                d_key = session_date_key(c_time)
+                if d_key:
+                    prev_sessions.setdefault(d_key, []).append(c)
+            today_key = session_date_key(str(_get_val(candles[-1], "time", ""))) if candles else None
+            other_dates = sorted([d for d in prev_sessions if d != today_key])
+            if other_dates:
+                last_date = other_dates[-1]
+                prev_candles = [to_float_ohlc(c) for c in prev_sessions[last_date]]
+                if len(prev_candles) >= 5:
+                    prev_inc = IncrementalVolumeProfile()
+                    for pc in prev_candles:
+                        prev_inc.update(pc)
+                    try:
+                        prev_res = self._amt_analyzer.analyze(prev_candles, incremental_profile=prev_inc)
+                        if prev_res.poc > 0:
+                            self._prior = {
+                                "poc": float(prev_res.poc),
+                                "vah": float(prev_res.value_area_high),
+                                "val": float(prev_res.value_area_low),
+                            }
+                            self._session_levels.save_levels(
+                                self.symbol, last_date, float(prev_res.poc), float(prev_res.value_area_high), float(prev_res.value_area_low)
+                            )
+                            self._npoc.add_session_poc(self._underlying(), last_date, float(prev_res.poc))
+                            logger.info(
+                                "Cold-start seeded prior session levels for %s (%s): POC=%.2f VAH=%.2f VAL=%.2f",
+                                self.symbol, last_date, prev_res.poc, prev_res.value_area_high, prev_res.value_area_low
+                            )
+                    except Exception:
+                        pass
+
         scoped = session_scope(candles)
         with self._amt_lock:
             if self._amt_candles:
@@ -256,7 +293,8 @@ class AMTEngine:
             for c in ohlcs:
                 inc.update(c)
             self._amt_incremental = inc
-            self._warm_bars = len(scoped)
+            # ponytail: warm_bars tracks available history depth (>= 15) so Phase 2 morning entries (09:30+) aren't blocked by cold-session warmup lock
+            self._warm_bars = len(candles)
             if ohlcs:
                 last_ohlc = ohlcs[-1]
                 iso_date = session_date_key(last_ohlc.time)

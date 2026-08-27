@@ -27,6 +27,7 @@ function App() {
     const setCurrentPage = useUIStore(s => s.setCurrentPage);
     const vpMode = useUIStore(selectVpMode) as 'session' | 'leg' | 'combined' | 'off';
     const setVpMode = useUIStore(s => s.setVpMode);
+    const [timeframe, setTimeframe] = useState<'1m' | '5m' | 'split'>('5m');
     const currentSymbolIndex = useRef(0);
 
     // 2. Server-driven trading system (all logic on backend)
@@ -89,10 +90,11 @@ function App() {
 
     const effectiveConfig = useMemo<ChartConfig>(() => ({
         ...config,
+        interval: timeframe === '1m' ? '1m' : '5m',
         vpMode: vpMode || config.vpMode,
         showVolumeProfile: vpMode !== 'off',
         symbol: activeInstrument?.symbol || config.symbol,
-    }), [config, vpMode, activeInstrument?.symbol]);
+    }), [config, vpMode, activeInstrument?.symbol, timeframe]);
 
     // --- Rendering ---
 
@@ -148,21 +150,62 @@ function App() {
         ${rightSidebarOpen ? 'mr-[320px]' : 'mr-0'}
       `}>
 
-                {/* Chart Layer - Single instance with mode switching */}
+                {/* Chart Layer */}
                 <div className="absolute inset-0 z-0">
                     <ErrorBoundary name="Chart">
-                        <ChartScene
-                            key={`${activeInstrument.symbol}-${effectiveConfig.interval}`}
-                            data={activeInstrument.data}
-                            tickBus={tickBus}
-                            symbol={activeInstrument.symbol}
-                            config={effectiveConfig}
-                            positions={activeInstrument.portfolio.positions}
-                            closedTrades={activeInstrument.portfolio.closedTrades}
-                            agentDecision={activeInstrument.agentDecision}
-                            amtAnalysis={activeInstrument.amtAnalysis}
-                            mode={chartMode}
-                        />
+                        {timeframe === 'split' ? (
+                            <div className="grid grid-cols-2 gap-2 w-full h-full p-2 pt-14">
+                                {/* Left: 5m Macro View */}
+                                <div className="relative w-full h-full rounded-lg overflow-hidden border border-white/10 bg-[#0c0d0f]">
+                                    <div className="absolute top-2 left-2 z-10 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded border border-white/10 text-[9px] font-mono font-bold text-slate-300 pointer-events-none">
+                                        5m MACRO · Volume Profile &amp; VWAP
+                                    </div>
+                                    <ChartScene
+                                        key={`${activeInstrument.symbol}-5m-split`}
+                                        data={activeInstrument.data}
+                                        tickBus={tickBus}
+                                        symbol={activeInstrument.symbol}
+                                        config={{ ...effectiveConfig, interval: '5m', showVolumeProfile: true }}
+                                        positions={activeInstrument.portfolio.positions}
+                                        closedTrades={activeInstrument.portfolio.closedTrades}
+                                        agentDecision={activeInstrument.agentDecision}
+                                        amtAnalysis={activeInstrument.amtAnalysis}
+                                        mode={chartMode}
+                                    />
+                                </div>
+                                {/* Right: 1m Micro View */}
+                                <div className="relative w-full h-full rounded-lg overflow-hidden border border-emerald-500/20 bg-[#0c0d0f]">
+                                    <div className="absolute top-2 left-2 z-10 bg-black/70 backdrop-blur-md px-2 py-0.5 rounded border border-emerald-500/30 text-[9px] font-mono font-bold text-emerald-400 pointer-events-none">
+                                        1m MICRO · Trigger &amp; Order Flow
+                                    </div>
+                                    <ChartScene
+                                        key={`${activeInstrument.symbol}-1m-split`}
+                                        data={activeInstrument.data}
+                                        tickBus={tickBus}
+                                        symbol={activeInstrument.symbol}
+                                        config={{ ...effectiveConfig, interval: '1m', showVolumeProfile: false }}
+                                        positions={activeInstrument.portfolio.positions}
+                                        closedTrades={activeInstrument.portfolio.closedTrades}
+                                        agentDecision={activeInstrument.agentDecision}
+                                        amtAnalysis={activeInstrument.amtAnalysis}
+                                        mode={chartMode}
+                                    />
+                                </div>
+                            </div>
+                        ) : (
+                            <ChartScene
+                                key={`${activeInstrument.symbol}-${effectiveConfig.interval}`}
+                                data={activeInstrument.data}
+                                tickBus={tickBus}
+                                symbol={activeInstrument.symbol}
+                                config={effectiveConfig}
+                                positions={activeInstrument.portfolio.positions}
+                                closedTrades={activeInstrument.portfolio.closedTrades}
+                                agentDecision={activeInstrument.agentDecision}
+                                amtAnalysis={activeInstrument.amtAnalysis}
+                                mode={chartMode}
+                            />
+                        )}
                     </ErrorBoundary>
                 </div>
 
@@ -205,6 +248,29 @@ function App() {
                                         <BarChart2 size={14} /> Candles
                                     </span>
                                 </button>
+                                </div>
+                            </div>
+
+                            {/* Timeframe view */}
+                            <div className="flex flex-col gap-1">
+                                <span className="text-[9px] font-bold uppercase tracking-widest text-glassy-text-tertiary pl-1">Timeframe</span>
+                                <div className="flex bg-glassy-bg-tertiary backdrop-blur-md rounded-sm p-1 gap-1 border border-glassy-border-default">
+                                {([
+                                    { key: '1m', label: '1m' },
+                                    { key: '5m', label: '5m' },
+                                    { key: 'split', label: '1m | 5m Split' },
+                                ] as const).map(({ key, label }) => (
+                                    <button
+                                        key={key}
+                                        onClick={() => setTimeframe(key)}
+                                        className={`px-3 py-1.5 rounded-sm text-xs font-bold transition-all ${timeframe === key
+                                            ? 'bg-glassy-ai-primary/20 text-glassy-ai-primary border border-glassy-ai-primary/40'
+                                            : 'text-glassy-text-tertiary hover:text-glassy-text-secondary hover:bg-glassy-bg-hover'
+                                            }`}
+                                    >
+                                        {label}
+                                    </button>
+                                ))}
                                 </div>
                             </div>
 

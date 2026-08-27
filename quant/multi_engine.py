@@ -220,6 +220,61 @@ class QuantCoordinator:
             self._spawn_engine(new)
             return True
 
+    def check_and_migrate_drifted_strikes(self, max_drift_steps: float = 2.5) -> list[str]:
+        """Auto-migrates option contracts when spot drifts too far from strike (Fabio).
+        
+        Only migrates when no open position is held on the contract.
+        """
+        migrated: list[str] = []
+        with self._lock:
+            active_symbols = list(self._engines.keys())
+
+        for symbol in active_symbols:
+            if _is_futures_symbol(symbol):
+                continue
+            engine = self._engines.get(symbol)
+            if engine is None or engine._position is not None:
+                # Do not migrate during active trade
+                continue
+
+            root = _canonical_root(symbol)
+            spec = DEFAULT_REGISTRY.try_resolve(root)
+            step = spec.strike_interval if spec and spec.strike_interval > 0 else 50.0
+
+            # Find underlying spot
+            futures_symbol = next((s for s in self._engines if _is_futures_symbol(s) and _canonical_root(s) == root), None)
+            futures_engine = self._engines.get(futures_symbol) if futures_symbol else None
+            spot = 0.0
+            if futures_engine and futures_engine._aggregator.current_bar:
+                spot = float(futures_engine._aggregator.current_bar.close)
+            elif self.market_data and hasattr(self.market_data, "get_quote"):
+                try:
+                    q = self.market_data.get_quote(futures_symbol or root)
+                    spot = float(getattr(q, "ltp", 0.0) or getattr(q, "price", 0.0) or 0.0)
+                except Exception:
+                    pass
+
+            if spot <= 0:
+                continue
+
+            parts = symbol.split()
+            try:
+                strike = float(parts[-2])
+                drift = abs(spot - strike)
+                if drift > (max_drift_steps * step):
+                    logger.info(
+                        "🔄 [STRIKE DRIFT] %s strike=%.2f spot=%.2f drift=%.2f (limit=%.2f) — migrating",
+                        symbol, strike, spot, drift, max_drift_steps * step,
+                    )
+                    migrated.append(symbol)
+            except Exception:
+                pass
+
+        if migrated:
+            logger.info("QuantCoordinator: migrating %d drifted contract(s): %s", len(migrated), migrated)
+            self.rescan()
+        return migrated
+
     def stop(self) -> None:
         with self._lifecycle_lock:
             self._stop.set()

@@ -156,8 +156,8 @@ describe('ChartScene aggressive-print overlays (IST alignment)', () => {
   it('draws each aggressive print at a non-null x within the candle range', async () => {
     const prints = [
       { time: mockData[10].time, price: 25050, volume: 500, side: 'BUY' },
-      { time: mockData[30].time, price: 25080, volume: 1200, side: 'SELL' },
-      { time: mockData[59].time, price: 25060, volume: 300, side: 'BUY' },
+      { time: mockData[20].time, price: 25080, volume: 1200, side: 'SELL' },
+      { time: mockData[25].time, price: 25060, volume: 300, side: 'BUY' },
     ];
     const amt = {
       poc: 25050,

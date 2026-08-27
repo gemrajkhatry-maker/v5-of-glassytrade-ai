@@ -59,6 +59,7 @@
   "tradesToday": 0
  },
  "tick": {
+  "barIntervalSec": 60,
   "close": 100.5,
   "delta": 0.0,
   "high": 101.0,

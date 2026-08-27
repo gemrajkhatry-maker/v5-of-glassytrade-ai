@@ -31,12 +31,16 @@ const [niftySym, bankSym] = FIXTURE_SYMBOLS;
 
 /** Expected displayed change% exactly as SymbolCard computes it. */
 const expectedPctText = (inst: any): string => {
+  const firstCandle = inst.data[0];
   const lastCandle = inst.data[inst.data.length - 1];
-  const prevCandle = inst.data[inst.data.length - 2];
+
+  // Mirror components/MarketSidebar.SymbolCard: price from ltp or last candle,
+  // basePrice from the FIRST candle's open (session-relative change), not the
+  // previous candle. This is the source of truth for what gets rendered.
   const price = inst.ltp ?? (lastCandle?.close || 0);
-  const prevPrice = prevCandle?.close || price;
+  const basePrice = firstCandle?.open || (inst.data.length > 1 ? inst.data[inst.data.length - 2]?.close : price);
   const percentChange =
-    price > 0 && prevPrice > 0 ? ((price - prevPrice) / prevPrice) * 100 : 0;
+    price > 0 && basePrice > 0 ? ((price - basePrice) / basePrice) * 100 : 0;
   return `${percentChange >= 0 ? '+' : ''}${percentChange.toFixed(1)}%`;
 };
 

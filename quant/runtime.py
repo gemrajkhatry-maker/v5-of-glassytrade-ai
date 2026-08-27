@@ -130,9 +130,21 @@ class QuantEngine:
         # an ITM option never devolves into a futures position at expiry.
         self._contract_expiry = parse_contract_expiry(symbol)
         self._aggregator = BarAggregator(interval_seconds=interval_seconds)
+        # ponytail: 60s micro aggregator drives 1-min entry triggers while 5-min aggregator retains macro AMT context
+        MICRO_SEC = 60
+        self._micro_aggregator = (
+            BarAggregator(interval_seconds=MICRO_SEC)
+            if interval_seconds > MICRO_SEC
+            else None
+        )
         self._underlying_aggregator = (
             BarAggregator(interval_seconds=interval_seconds)
             if self._underlying_gateway is not None
+            else None
+        )
+        self._micro_underlying_aggregator = (
+            BarAggregator(interval_seconds=MICRO_SEC)
+            if (self._underlying_gateway is not None and interval_seconds > MICRO_SEC)
             else None
         )
         self._history_source = history_source
@@ -231,7 +243,7 @@ class QuantEngine:
                                  portfolio_risk=self._portfolio_risk,
                                  max_trades_per_session=max_trades_per_session)
         self._bus = EventBus()
-        self._projector = StateProjector()
+        self._projector = StateProjector(interval_sec=interval_seconds)
         self._journal_subscribed = False
         self._journal = None
         if journal_path:
@@ -437,10 +449,25 @@ class QuantEngine:
             if tick is None:
                 break
             steps += 1
+            # 0. Tick-level fast SL/TP protection (Fabio: exit immediately on stop breach, never wait 5m)
+            if self._position is not None:
+                self._manage_tick_exit(float(tick.price), str(tick.time))
+
             # When an underlying feed is present, option ticks aggregate into option candles,
             # while underlying futures ticks feed the AMT auction structure engine.
             if self._underlying_gateway is not None:
-                # 1. Option's OWN ticks feed the option's aggregator to form real option candles
+                # 1. Micro-trigger: option's own ticks feed 1-min micro aggregator for fast entry decisions
+                if self._micro_aggregator is not None:
+                    micro_bar = self._micro_aggregator.add_tick(tick)
+                    if micro_bar is not None and self._position is None:
+                        if self._underlying_amt_dto and self._last_underlying_bar is not None:
+                            self._decide(
+                                self._underlying_amt_dto,
+                                self._last_underlying_bar,
+                                execution_bar=micro_bar,
+                            )
+
+                # Option's OWN ticks feed the option's 5m aggregator to form real option candles
                 option_bar = self._aggregator.add_tick(tick)
                 if self._option_amt_engine is not None:
                     self._option_amt_engine.on_tick(tick, self._aggregator.current_bar)
@@ -450,42 +477,36 @@ class QuantEngine:
                     if self._option_amt_engine is not None:
                         self._option_amt_dto = self._option_amt_engine.analyze(option_bar)
                         self._emit_merged_amt(self._option_amt_dto, option_bar.time)
-                        # Decisions AND exits run on the OPTION's own bars —
-                        # futures bars are a different price scale; comparing
-                        # premium SL/TP against futures prices produced
-                        # crore-scale phantom P&L.
-                        if self._position is None:
-                            # Auction evidence from the underlying. Execution
-                            # prices from the option bar, translated below.
+                        if self._position is not None:
+                            self._manage_exit(self._option_amt_dto, option_bar)
+                        elif self._micro_aggregator is None:
                             if self._underlying_amt_dto and self._last_underlying_bar is not None:
                                 self._decide(
                                     self._underlying_amt_dto,
                                     self._last_underlying_bar,
                                     execution_bar=option_bar,
                                 )
-                        else:
-                            self._manage_exit(self._option_amt_dto, option_bar)
 
                 # 2. Underlying futures ticks feed the underlying aggregator and AMT engine.
-                # Non-blocking drain: a blocking read here would strand this
-                # thread inside the futures queue whenever the futures feed is
-                # quieter than the option feed — option ticks would pile up
-                # unread and every snapshot would emit the UNDERLYING's AMT
-                # (profile/POC at futures scale) instead of the option's own.
                 if self._underlying_aggregator is not None:
                     utick = self._underlying_gateway.try_next_tick()
                     while utick is not None:
                         ubar = self._underlying_aggregator.add_tick(utick)
                         self._amt_engine.on_tick(utick, self._underlying_aggregator.current_bar)
                         if ubar is not None:
-                            # Futures bars only update the auction-structure DTO
-                            # (decision evidence). They NEVER drive entries or
-                            # exits on an option engine — different price scale.
                             self._last_underlying_bar = ubar
                             self._underlying_amt_dto = self._amt_engine.analyze(ubar)
                             self._emit_merged_amt(self._underlying_amt_dto, ubar.time)
                         utick = self._underlying_gateway.try_next_tick()
             else:
+                # Direct instrument / Futures: micro-trigger evaluation
+                if self._micro_aggregator is not None:
+                    micro_bar = self._micro_aggregator.add_tick(tick)
+                    if micro_bar is not None and self._position is None:
+                        amt_dto = self._amt_engine.last_amt_dto
+                        if amt_dto:
+                            self._decide(amt_dto, micro_bar)
+
                 bar = self._aggregator.add_tick(tick)
                 self._amt_engine.on_tick(tick, self._aggregator.current_bar)
                 if bar is not None:
@@ -508,6 +529,25 @@ class QuantEngine:
     def projector(self) -> StateProjector:
         return self._projector
 
+    def _manage_tick_exit(self, tick_price: float, tick_time: str) -> None:
+        """Tick-level fast stop-loss and take-profit breach check (Fabio)."""
+        if self._position is None:
+            return
+        pm = self._get_position_manager()
+        was_open = True
+        remaining = pm.manage_tick_exit(self._position, tick_price, tick_time)
+        if was_open and remaining is None:
+            self._position = None
+            self._pyramid_positions = pm.pyramid_positions
+            self._pyramid_count = pm.pyramid_count
+            self._last_close_bar_index = self._bar_index
+            if self._portfolio_risk is not None:
+                self._portfolio_risk.record_close(
+                    getattr(self, "_open_trade_risk", 0.0),
+                    float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
+                )
+                self._open_trade_risk = 0.0
+
     def _emit_merged_amt(self, base_dto: dict, time_str: str) -> None:
         merged = dict(self._underlying_amt_dto or base_dto)
         if self._option_amt_dto and self._option_amt_dto.get("profile"):
@@ -525,6 +565,8 @@ class QuantEngine:
                 merged["legPoc"] = self._option_amt_dto.get("legPoc")
                 merged["legVah"] = self._option_amt_dto.get("legVah")
                 merged["legVal"] = self._option_amt_dto.get("legVal")
+        merged["barInterval"] = getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC)
+        merged["microBarInterval"] = getattr(self._micro_aggregator, "interval_seconds", 60) if self._micro_aggregator is not None else None
         self._emit(AmtUpdated(symbol=self.symbol, time=time_str, amt=merged))
 
     def _on_bar_closed(self, bar) -> None:
@@ -533,12 +575,14 @@ class QuantEngine:
         # Snapshot the AMT DTO for this bar so the banner/UI sees the same
         # auction evidence the decision path used.
         amt_dto = self._amt_engine.analyze(bar)
+        amt_dto["barInterval"] = getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC)
+        amt_dto["microBarInterval"] = getattr(self._micro_aggregator, "interval_seconds", 60) if self._micro_aggregator is not None else None
         self._emit(AmtUpdated(symbol=self.symbol, time=bar.time, amt=amt_dto))
 
-        if self._position is None:
-            self._decide(amt_dto, bar)
-        else:
+        if self._position is not None:
             self._manage_exit(amt_dto, bar)
+        elif self._micro_aggregator is None:
+            self._decide(amt_dto, bar)
 
     def _decide(self, amt_dto: dict, bar, execution_bar=None) -> None:
         # --- Guard 0: trade-count / risk halt check BEFORE building any context ---

@@ -220,49 +220,7 @@ class PositionManager:
                                       *self._exits.stop_state(position))
                 return remaining
 
-            fill = self._oms.close(position, exit_dec.close_price, bar.time,
-                                   exit_dec.reason)
-            self.last_fill = fill
-            self._exits.pop_trail(position)
-            # Reset pyramid state: close all pyramid add-ons at the same price
-            for pyr_pos in self.pyramid_positions:
-                pyr_fill = self._oms.close(pyr_pos, exit_dec.close_price, bar.time,
-                                           exit_dec.reason + "_PYRAMID")
-                self._exits.pop_trail(pyr_pos)
-                self._risk.record_trade(pyr_fill.pnl, count_as_trade=False)
-                self._emit(PositionClosed(symbol=self.symbol, time=bar.time, fill=pyr_fill))
-                self.last_pyramid_pnl += float(pyr_fill.pnl)
-                logger.info(
-                    "🔒 [PYRAMID CLOSED] %s level=%d reason=%s pnl=₹%.2f",
-                    self.symbol, pyr_pos.pyramid_level, exit_dec.reason, pyr_fill.pnl,
-                )
-
-            # E11 FIX — release the aggregate open risk reserved for these add-ons.
-            if self._portfolio_risk is not None and self.pyramid_positions:
-                released = 0.0
-                for pyr_pos in self.pyramid_positions:
-                    risk_i = self._pyramid_open_risk.pop(pyr_pos._id, 0.0)
-                    self._portfolio_risk.record_close(risk_i, float(pyr_fill.pnl))
-                    released += risk_i
-                logger.info(
-                    "🔒 [PYRAMID RISK RELEASED] %s released ₹%.2f pyramid open risk (total portfolio open: ₹%.2f)",
-                    self.symbol, released, self._portfolio_risk.open_risk,
-                )
-
-            self.pyramid_positions = []
-            self.pyramid_count = 0
-            self._emit(PositionClosed(symbol=self.symbol, time=bar.time, fill=fill))
-            risk = self._risk.record_trade(fill.pnl)
-            logger.info(
-                "🔒 [POSITION CLOSED] %s reason=%s pnl=₹%.2f daily_pnl=₹%.2f "
-                "trades=%d/%d equity=₹%.0f halted=%s",
-                self.symbol, exit_dec.reason, fill.pnl,
-                risk.daily_pnl, risk.trades_today,
-                6,  # max_trades_per_session
-                risk.equity, risk.halted,
-            )
-            self._emit(RiskUpdated(symbol=self.symbol, time=bar.time, risk=risk))
-            return None
+            return self._execute_full_close(position, exit_dec, bar.time)
         else:
             # Position survived this bar. Check if we can add a pyramid.
             if position is not None and self._exits.is_risk_free(position):
@@ -271,6 +229,82 @@ class PositionManager:
             survived = self.base_override if self.base_override is not None else position
             self.base_override = None
             return survived
+
+    def _execute_full_close(self, position, exit_dec: ExitDecision, time_str: str):
+        """Execute full position close and release risk/pyramid state."""
+        fill = self._oms.close(position, exit_dec.close_price, time_str, exit_dec.reason)
+        self.last_fill = fill
+        self._exits.pop_trail(position)
+        # Reset pyramid state: close all pyramid add-ons at the same price
+        for pyr_pos in self.pyramid_positions:
+            pyr_fill = self._oms.close(pyr_pos, exit_dec.close_price, time_str, exit_dec.reason + "_PYRAMID")
+            self._exits.pop_trail(pyr_pos)
+            self._risk.record_trade(pyr_fill.pnl, count_as_trade=False)
+            self._emit(PositionClosed(symbol=self.symbol, time=time_str, fill=pyr_fill))
+            self.last_pyramid_pnl += float(pyr_fill.pnl)
+            logger.info(
+                "🔒 [PYRAMID CLOSED] %s level=%d reason=%s pnl=₹%.2f",
+                self.symbol, pyr_pos.pyramid_level, exit_dec.reason, pyr_fill.pnl,
+            )
+
+        # E11 FIX — release the aggregate open risk reserved for these add-ons.
+        if self._portfolio_risk is not None and self.pyramid_positions:
+            released = 0.0
+            for pyr_pos in self.pyramid_positions:
+                risk_i = self._pyramid_open_risk.pop(pyr_pos._id, 0.0)
+                self._portfolio_risk.record_close(risk_i, float(pyr_fill.pnl))
+                released += risk_i
+            logger.info(
+                "🔒 [PYRAMID RISK RELEASED] %s released ₹%.2f pyramid open risk (total portfolio open: ₹%.2f)",
+                self.symbol, released, self._portfolio_risk.open_risk,
+            )
+
+        self.pyramid_positions = []
+        self.pyramid_count = 0
+        self._emit(PositionClosed(symbol=self.symbol, time=time_str, fill=fill))
+        risk = self._risk.record_trade(fill.pnl)
+        logger.info(
+            "🔒 [POSITION CLOSED] %s reason=%s pnl=₹%.2f daily_pnl=₹%.2f "
+            "trades=%d/%d equity=₹%.0f halted=%s",
+            self.symbol, exit_dec.reason, fill.pnl,
+            risk.daily_pnl, risk.trades_today,
+            6,  # max_trades_per_session
+            risk.equity, risk.halted,
+        )
+        self._emit(RiskUpdated(symbol=self.symbol, time=time_str, risk=risk))
+        return None
+
+    def manage_tick_exit(self, position, tick_price: float, tick_time: str):
+        """Tick-level fast stop-loss and take-profit breach check."""
+        if position is None:
+            return None
+        be_floor, trail_stop = self._exits.stop_state(position)
+        sig_sl = float(position.order.signal.sl) if position.order and position.order.signal else 0.0
+        sig_tp = float(position.order.signal.tp) if position.order and position.order.signal and position.order.signal.tp else 0.0
+        
+        is_long = position.size > 0
+        effective_sl = sig_sl
+        if trail_stop is not None:
+            effective_sl = max(effective_sl, float(trail_stop)) if is_long else min(effective_sl, float(trail_stop))
+        elif be_floor is not None:
+            effective_sl = max(effective_sl, float(be_floor)) if is_long else min(effective_sl, float(be_floor))
+            
+        reason = None
+        if is_long:
+            if effective_sl > 0 and tick_price <= effective_sl:
+                reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
+            elif sig_tp > 0 and tick_price >= sig_tp:
+                reason = "TP"
+        else:
+            if effective_sl > 0 and tick_price >= effective_sl:
+                reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
+            elif sig_tp > 0 and tick_price <= sig_tp:
+                reason = "TP"
+                
+        if reason is not None:
+            exit_dec = ExitDecision(True, reason, float(tick_price))
+            return self._execute_full_close(position, exit_dec, tick_time)
+        return position
 
     def check_pyramid(self, amt_dto: dict, bar, position, bar_index: int) -> None:
         """Spec §13.2 pyramid engine: add-on positions at Impulse Leg LVN retest.

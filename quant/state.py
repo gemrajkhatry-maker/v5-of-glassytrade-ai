@@ -90,7 +90,7 @@ def session_date_key(time_str: str) -> str:
     return ""
 
 
-def _bar_to_tick(bar) -> dict:
+def _bar_to_tick(bar, interval_sec: int = 60) -> dict:
     """Map a closed quant Bar to the frontend OHLCData tick shape.
 
     ``vwap`` is a required schema field — BarAggregator now accumulates a real
@@ -109,6 +109,7 @@ def _bar_to_tick(bar) -> dict:
         "vwap": float(getattr(bar, "vwap", 0.0) or 0.0),
         "takerBuyVolume": float(bar.buy_volume),
         "delta": float(bar.delta),
+        "barIntervalSec": interval_sec,
     }
 
 
@@ -184,9 +185,10 @@ import threading
 class StateProjector:
     """Fold events per symbol into the latest frontend view-state."""
 
-    def __init__(self) -> None:
+    def __init__(self, interval_sec: int = 60) -> None:
         self._state: dict[str, dict] = {}
         self._lock = threading.RLock()
+        self._interval_sec = interval_sec
 
     def on_quote(self, symbol: str, tick, current_bar=None) -> None:
         """Per-tick LTP/OI/depth and live forming candle refresh.
@@ -202,7 +204,7 @@ class StateProjector:
             if tick.depth is not None:
                 s["depth"] = tick.depth
             if current_bar is not None:
-                s["tick"] = _bar_to_tick(current_bar)
+                s["tick"] = _bar_to_tick(current_bar, interval_sec=self._interval_sec)
 
     def on_event(self, event: Event) -> None:
         with self._lock:
@@ -210,7 +212,7 @@ class StateProjector:
             if isinstance(event, BarClosed):
                 s["ltp"] = float(event.bar.close)
                 s["oi"] = float(getattr(event.bar, "oi", 0.0) or 0.0)
-                s["tick"] = _bar_to_tick(event.bar)
+                s["tick"] = _bar_to_tick(event.bar, interval_sec=self._interval_sec)
             elif isinstance(event, DecisionProduced):
                 s["quant_decision"] = _decision_to_view(event.decision)
             elif isinstance(event, RiskUpdated):

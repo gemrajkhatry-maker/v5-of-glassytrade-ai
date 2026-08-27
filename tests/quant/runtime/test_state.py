@@ -80,6 +80,7 @@ def test_bar_fold_sets_ohlc_tick():
         "vwap": 0.0,
         "takerBuyVolume": 60.0,
         "delta": 20.0,
+        "barIntervalSec": 60,
     }
 
 

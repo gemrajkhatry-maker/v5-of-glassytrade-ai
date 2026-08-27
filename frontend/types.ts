@@ -8,6 +8,7 @@ export interface OHLCData {
   vwap: number;
   takerBuyVolume: number;
   delta: number;
+  barIntervalSec?: number;
 }
 
 export interface OrderBook {

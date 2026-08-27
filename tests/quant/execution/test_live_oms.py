@@ -247,36 +247,17 @@ class TestLiveOMSClosePartial:
 # ---------------------------------------------------------------------------
 
 class TestLiveOMSAddPyramid:
-    def test_pyramid_creates_position(self):
+    def test_pyramid_disabled_under_live_oms(self):
         broker = MockBroker()
         portfolio = MagicMock(spec=Portfolio)
         oms = LiveOMS(broker=broker, portfolio=portfolio, lot_size=65.0)
 
         base = _make_position(entry=100.0, size=130.0)
-        pyramid = oms.add_pyramid(
-            base=base, entry_price=102.0, new_sl=100.0,
-            size=65.0, time="t1", pyramid_level=1,
-        )
-
-        assert pyramid.is_pyramid is True
-        assert pyramid.pyramid_level == 1
-        assert pyramid.open_price == 102.0
-        assert pyramid.size == 65.0
-        assert pyramid.order.signal.sl == 100.0
-        assert pyramid.order.signal.tp == base.order.signal.tp
-
-    def test_pyramid_enforces_minimum_lot(self):
-        broker = MockBroker()
-        portfolio = MagicMock(spec=Portfolio)
-        oms = LiveOMS(broker=broker, portfolio=portfolio, lot_size=65.0)
-
-        base = _make_position(entry=100.0, size=130.0)
-        pyramid = oms.add_pyramid(
-            base=base, entry_price=102.0, new_sl=100.0,
-            size=30.0, time="t1", pyramid_level=1,  # below lot_size
-        )
-
-        assert pyramid.size == 65.0  # snapped to 1 lot
+        with pytest.raises(ValueError, match="E9: pyramids disabled under LiveOMS"):
+            oms.add_pyramid(
+                base=base, entry_price=102.0, new_sl=100.0,
+                size=65.0, time="t1", pyramid_level=1,
+            )
 
 
 # ---------------------------------------------------------------------------

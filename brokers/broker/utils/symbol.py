@@ -41,6 +41,13 @@ def canonicalize_symbol(symbol: str) -> str:
     # Step 1: Uppercase
     canonical = str(symbol).upper()
 
+    # Step 1.5: Normalize single-digit days to 2 digits (e.g. " 1 SEP " -> " 01 SEP ")
+    canonical = re.sub(
+        r'(\b|\D)(\d)\s+(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)\b',
+        r'\g<1>0\2 \3',
+        canonical,
+    )
+
     # Step 2-4: Remove spaces, dashes, underscores
     canonical = canonical.replace(" ", "").replace("-", "").replace("_", "")
 

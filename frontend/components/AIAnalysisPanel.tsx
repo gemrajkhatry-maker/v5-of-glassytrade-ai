@@ -103,12 +103,15 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
 
                 {/* Source attribution — Structure source vs Execution source */}
                 {symbol && (
-                    <div className="flex items-center gap-1.5 text-[8px] font-mono text-slate-500 truncate">
-                        <span className="text-slate-600 uppercase tracking-widest">Struct:</span>
-                        <span className="text-slate-400">{symbol.split(' ')[0]} FUT</span>
-                        <span className="text-slate-700 mx-0.5">·</span>
-                        <span className="text-slate-600 uppercase tracking-widest">Exec:</span>
-                        <span className="text-slate-400 truncate">{symbol}</span>
+                    <div className="flex items-center justify-between text-[8px] font-mono text-slate-500 pt-0.5">
+                        <div className="flex items-center gap-1">
+                            <span className="text-slate-600 uppercase tracking-widest">Context:</span>
+                            <span className="text-slate-300 font-semibold">{symbol.split(' ')[0]} FUT (5m)</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                            <span className="text-slate-600 uppercase tracking-widest">Trigger:</span>
+                            <span className="text-emerald-400 font-semibold">1m / Tick</span>
+                        </div>
                     </div>
                 )}
 
@@ -124,7 +127,13 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
                 <QuantDecisionCard quantDecision={quantDecision} />
                 <AIAdvisorCard agentDecision={agentDecision} quantDecision={quantDecision} />
                 
-                {/* Market State & Location */}
+                {/* Section 01–02: 5m Macro Context */}
+                <div className="flex items-center justify-between px-1 pt-1">
+                    <span className="text-[9px] font-mono font-bold tracking-widest uppercase text-slate-400">
+                        01–02 · 5m Macro Context
+                    </span>
+                    <span className="text-[8px] font-mono text-slate-600">VAH · VAL · POC · VWAP</span>
+                </div>
                 <MarketStateCard
                     marketState={liveMarketState}
                     isImbalanced={isImbalanced}
@@ -135,11 +144,17 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
                     legVah={amtResult?.legVah}
                     legVal={amtResult?.legVal}
                 />
-                <AggressionCard deltaScore={deltaScore} aggScore={aggScore} />
                 <LocationCard currentLtp={currentLtp} amtResult={amtResult} poc={poc} />
-                
-                {/* Auction Context */}
                 <VaFreezeCard auction={auction} />
+
+                {/* Section 03: 1m / Tick Order Flow Trigger */}
+                <div className="flex items-center justify-between px-1 pt-2">
+                    <span className="text-[9px] font-mono font-bold tracking-widest uppercase text-emerald-400">
+                        03 · 1m / Tick Execution Trigger
+                    </span>
+                    <span className="text-[8px] font-mono text-slate-600">Delta · Absorption · CVD</span>
+                </div>
+                <AggressionCard deltaScore={deltaScore} aggScore={aggScore} />
                 <AbsorptionCard amtResult={amtResult} />
                 <LvnPlayCard lvnPlay={amtResult?.lvnPlay} />
 

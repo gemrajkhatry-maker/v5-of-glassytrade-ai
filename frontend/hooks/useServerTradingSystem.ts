@@ -271,19 +271,16 @@ export const useServerTradingSystem = (config: ChartConfig) => {
     }, []);
 
     // ----------------------------------------------------------------
-    // 2a. Warm chart history from REST /api/market/history/{symbol}
-    // ----------------------------------------------------------------
-    // The greenfield backend streams live bars over the WS but keeps no OHLC
-    // ring buffer server-side. Fetch the Dhan history REST endpoint once per
-    // symbol after server_mode so the chart has a warm background of real
-    // candles instead of starting empty and filling in tick-by-tick.
+    // 1.5. REST history warm-up — fetches 500 candles per symbol on startup
     // Candles are merged with any live ticks that already streamed in.
     const warmHistoryForSymbols = useCallback((symbols: string[], interval: string) => {
+        const intv = interval || '5m';
         for (const sym of symbols) {
-            if (inFlightHistoryRef.current.has(sym)) continue;
-            inFlightHistoryRef.current.add(sym);
+            const flightKey = `${sym}:${intv}`;
+            if (inFlightHistoryRef.current.has(flightKey)) continue;
+            inFlightHistoryRef.current.add(flightKey);
             const path = `/api/market/history/${encodeURIComponent(sym)}`;
-            const url = `${backendUrl(path)}?interval=${encodeURIComponent(interval || '5m')}&limit=500`;
+            const url = `${backendUrl(path)}?interval=${encodeURIComponent(intv)}&limit=500`;
             fetch(url)
                 .then(res => (res.ok ? res.json() : null))
                 .then(body => {
@@ -321,13 +318,21 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         return { ...prev, [sym]: { ...inst, data: merged } };
                     });
                 })
-                .finally(() => inFlightHistoryRef.current.delete(sym))
+                .finally(() => inFlightHistoryRef.current.delete(flightKey))
                 .catch(() => {
-                    inFlightHistoryRef.current.delete(sym);
+                    inFlightHistoryRef.current.delete(flightKey);
                 });
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // Re-warm history when interval changes (e.g. 5m -> 1m)
+    useEffect(() => {
+        const interval = config.interval || '5m';
+        const symbols = Object.keys(instruments);
+        if (symbols.length > 0) {
+            warmHistoryForSymbols(symbols, interval);
+        }
+    }, [config.interval, warmHistoryForSymbols]);
 
     // ----------------------------------------------------------------
     // 2.  WebSocket message handler

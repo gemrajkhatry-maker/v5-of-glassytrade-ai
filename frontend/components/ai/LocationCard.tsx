@@ -115,7 +115,9 @@ const LocationCard = React.memo<LocationCardProps>(({ currentLtp, amtResult, poc
                     })()}
                 </>
                 ) : (
-                    <div className="text-center text-[10px] text-glassy-text-disabled py-4 font-mono">Building Volume Profile...</div>
+                    <div className="text-center text-[10px] text-glassy-text-disabled py-4 font-mono">
+                        {amtResult?.ibComplete === false ? 'Forming Initial Balance...' : 'Building Volume Profile...'}
+                    </div>
                 )}
                 </div>
             </div>

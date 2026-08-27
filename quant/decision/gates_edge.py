@@ -79,6 +79,12 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
             return GateResult(3, True, "Initiative upside breakout confirmed")
         if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
             return GateResult(3, True, "Initiative downside breakdown confirmed")
+    # Squeeze Breakout Pullback (Fabio Playbook #4: trapped volume squeeze -> first retest pullback)
+    if getattr(ctx, "squeeze_detected", False) or getattr(ctx, "absorption_cluster", False):
+        if ctx.agent_direction == "LONG" and cvd_slope >= -0.1 and getattr(ctx, "pullback_confirmed", False):
+            return GateResult(3, True, "Squeeze breakout pullback LONG confirmed")
+        if ctx.agent_direction == "SHORT" and cvd_slope <= 0.1 and getattr(ctx, "pullback_confirmed", False):
+            return GateResult(3, True, "Squeeze breakdown pullback SHORT confirmed")
     return None
 
 
