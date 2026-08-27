@@ -209,7 +209,13 @@ class Position:
             ExitReason.SPREAD_BLOWOUT, ExitReason.ADVERSE_EXIT,
         }
         legacy_formats = {"Stop Loss", "Take Profit (Full)", "Take Profit", "SCRATCH", "TIME_STOP"}
-        if reason not in valid_reasons and reason not in legacy_formats:
+        journal_aliases = {
+            "BREAKEVEN": ExitReason.BREAK_EVEN,
+            "TP2": ExitReason.TAKE_PROFIT,
+        }
+        if reason in journal_aliases:
+            self.close_reason = journal_aliases[reason]
+        elif reason not in valid_reasons and reason not in legacy_formats:
             entry = float(self.entry_price)
             sl = float(self.stop_loss)
             tp = float(self.take_profit)

@@ -5,6 +5,7 @@ from quant.contracts.enums import (
     Side, SignalType, Source, SetupType, PositionStatus,
 )
 from quant.contracts.entities import Signal, Position
+from quant.execution.exit_rules import ExitReason
 
 
 class TestSignal:
@@ -97,6 +98,19 @@ class TestPosition:
         assert p.status == PositionStatus.CLOSED
         assert p.exit_price == 110
         assert p.pnl == 10.0
+
+    def test_close_classifies_breakeven_and_tp2_literals(self):
+        p = self._make_position(entry_price=100, stop_loss=95, take_profit=105)
+        # Exit exactly at the SL level: geometric classification would call this
+        # STOP_LOSS, but the journal truth is a breakeven scratch.
+        p.close(95, "t", "BREAKEVEN")
+        assert p.close_reason == ExitReason.BREAK_EVEN
+
+        p2 = self._make_position(entry_price=100, stop_loss=95, take_profit=102)
+        # Below TP minus tolerance and above entry: geometric classification
+        # falls through to SCRATCH, but a journaled TP2 is TAKE_PROFIT family.
+        p2.close(101.3, "t", "TP2")
+        assert p2.close_reason == ExitReason.TAKE_PROFIT
 
     def test_move_stop_to_breakeven(self):
         p = self._make_position(entry_price=100, stop_loss=95)
