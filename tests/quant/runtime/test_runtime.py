@@ -78,6 +78,14 @@ def test_engine_does_not_enter_without_named_setup():
     assert not any(isinstance(e, SignalApproved) for e in trace)
 
 
+def test_engine_wires_cvd_kill():
+    """The order-flow-aware CVD kill exit ships ENABLED (threshold 2.0),
+    symmetric to the proven cvd_be_threshold, on both engine call sites."""
+    eng = QuantEngine(SyntheticGateway(_ticks()), "SYM", interval_seconds=1)
+    assert eng._exits.cvd_kill_threshold == 2.0
+    assert eng._strategy._exit_engine.cvd_kill_threshold == 2.0
+
+
 def test_engine_emits_signal_event_for_long():
     opened = _run_with_signal(_healthy_stop_signal())
     assert opened.position.size > 0

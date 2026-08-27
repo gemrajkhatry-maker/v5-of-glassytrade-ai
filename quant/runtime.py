@@ -221,7 +221,8 @@ class QuantEngine:
         _interval_sec = max(1, int(interval_seconds))
         if time_stop_bars is None:
             time_stop_bars = max(1, int(time_stop_minutes) * 60 // _interval_sec)
-        self._exits = ExitEngine(time_stop_bars=time_stop_bars)
+        # ponytail: mirror BE constant; tune from journal replay later
+        self._exits = ExitEngine(time_stop_bars=time_stop_bars, cvd_kill_threshold=2.0)
         # Strategy — pluggable entry/exit logic. Defaults to the AMT scalping
         # playbook (Fabio Valentini). Swap for momentum, mean-reversion, etc.
         if strategy is not None:
@@ -762,8 +763,18 @@ class QuantEngine:
                 risk_st.equity,
             )
             self._emit(SignalApproved(symbol=self.symbol, time=bar.time, signal=signal))
+            # Mirror position_manager's is_expiry source of truth (the traded
+            # contract expires today) so entry sizing halves risk on expiry day.
+            _ist = _ist_dt(bar.time)
+            self._contract_is_expiry = bool(
+                self._contract_expiry is not None
+                and _ist is not None and _ist.date() == self._contract_expiry
+            )
             quantity = clamp_quantity(
-                self._risk.position_size(signal.entry, signal.sl, lot_size=self._oms.lot_size)
+                self._risk.position_size(
+                    signal.entry, signal.sl, lot_size=self._oms.lot_size,
+                    is_expiry=self._contract_is_expiry,
+                )
             )
             # Risk-budget guard: when the per-trade budget can't afford even
             # ONE lot (budget < lot_size * risk distance), sizing correctly
