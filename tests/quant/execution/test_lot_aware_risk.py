@@ -2,7 +2,15 @@
 """Tests for Whole-Lot Aware Risk and Expiry Caps (Task 6)."""
 
 import pytest
+from datetime import datetime
+
+from quant.bars import Bar
+from quant.contracts.timezones import IST
+from quant.decision.decision_service import QuantDecision
+from quant.decision.signal_builder import Signal
 from quant.execution.risk import SessionRisk
+from quant.runtime import QuantEngine
+from tests.helpers.synthetic import SyntheticGateway
 
 
 def test_position_size_rounds_to_whole_lots():
@@ -37,6 +45,40 @@ def test_expiry_day_uses_reduced_risk():
     expiry_qty = risk.position_size(entry=100.0, sl=90.0, lot_size=25, is_expiry=True)
     assert expiry_qty < normal_qty
     assert expiry_qty == normal_qty // 2
+
+
+def _approved(symbol="SYM"):
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=98.0, tp=102.0,
+                 rr=2.0, model_label="Triple-A", symbol=symbol, timestamp="t0")
+    return QuantDecision(approved=True, signal=sig, reason="Triple-A",
+                         phase="", gate_results=(), block_reasons=(), model_label="Triple-A")
+
+
+def _expiry_symbol(today):
+    return f"SYM {today.day:02d} {today.strftime('%b').upper()} 100 CALL"
+
+
+def test_position_size_honors_is_expiry_at_call_site():
+    """Entry sizing is reachable only through the private _decide, so drive it
+    directly and capture the is_expiry flag actually handed to SessionRisk."""
+    today = datetime.now(IST).date()
+    bar = Bar(time=f"{today.isoformat()}T12:00:00+05:30",
+              open=100.0, high=100.0, low=100.0, close=100.0, volume=10)
+
+    seen = []
+    eng = QuantEngine(SyntheticGateway([]), _expiry_symbol(today), interval_seconds=1)
+    eng._risk.position_size = lambda *a, **kw: seen.append(kw.get("is_expiry")) or 25.0
+    eng._strategy.should_enter = lambda ctx: _approved(_expiry_symbol(today))
+    eng._decide({}, bar)
+    assert seen == [True], "expiry-day contract must pass is_expiry=True into sizing"
+
+    seen2 = []
+    eng2 = QuantEngine(SyntheticGateway([]), "SYM", interval_seconds=1)
+    eng2._risk.position_size = lambda *a, **kw: seen2.append(kw.get("is_expiry")) or 25.0
+    eng2._strategy.should_enter = lambda ctx: _approved("SYM")
+    eng2._decide({}, Bar(time=f"{today.isoformat()}T12:00:00+05:30",
+                         open=100.0, high=100.0, low=100.0, close=100.0, volume=10))
+    assert seen2 == [False], "non-expiring contract must pass is_expiry=False into sizing"
 
 
 def test_max_lots_cap_enforced():
