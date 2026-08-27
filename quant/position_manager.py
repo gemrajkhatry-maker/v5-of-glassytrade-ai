@@ -288,17 +288,47 @@ class PositionManager:
             effective_sl = max(effective_sl, float(trail_stop)) if is_long else min(effective_sl, float(trail_stop))
         elif be_floor is not None:
             effective_sl = max(effective_sl, float(be_floor)) if is_long else min(effective_sl, float(be_floor))
-            
+
+        # Tier-aware tick targets: T1 tags at sig_tp; the runner (tier>=1)
+        # waits for TP2 — same geometry as ExitEngine Rule 4
+        # (check_take_profit_tiers: entry ± 2*|tp−entry|), else ticks kill
+        # the runner instantly at sig_tp.
+        tp2_level = 0.0
+        if sig_tp > 0:
+            entry_px = (
+                float(position.order.signal.entry)
+                if position.order and position.order.signal else 0.0
+            )
+            if entry_px > 0:
+                r = abs(sig_tp - entry_px)
+                tp2_level = entry_px + 2.0 * r if is_long else entry_px - 2.0 * r
+
         reason = None
         if is_long:
             if effective_sl > 0 and tick_price <= effective_sl:
                 reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
             elif sig_tp > 0 and tick_price >= sig_tp:
+                if self._exits._tp_tier.get(position._id, 0) >= 1:
+                    if tp2_level > 0 and tick_price >= tp2_level:
+                        return self._execute_full_close(
+                            position,
+                            ExitDecision(True, "TP2", float(tick_price)),
+                            tick_time,
+                        )
+                    return position          # runner keeps running
                 return self._tick_tp_touch(position, float(tick_price), tick_time)
         else:
             if effective_sl > 0 and tick_price >= effective_sl:
                 reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
             elif sig_tp > 0 and tick_price <= sig_tp:
+                if self._exits._tp_tier.get(position._id, 0) >= 1:
+                    if tp2_level > 0 and tick_price <= tp2_level:
+                        return self._execute_full_close(
+                            position,
+                            ExitDecision(True, "TP2", float(tick_price)),
+                            tick_time,
+                        )
+                    return position          # runner keeps running
                 return self._tick_tp_touch(position, float(tick_price), tick_time)
 
         if reason is not None:
