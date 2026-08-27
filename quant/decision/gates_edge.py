@@ -60,6 +60,9 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
     phase = getattr(ctx, "triple_a_phase", "") or ""
     tsignal = getattr(ctx, "triple_a_signal", "") or ""
     if phase == "AGGRESSION" and tsignal == ctx.agent_direction:
+        if not getattr(ctx, "allow_trend", True):
+            # ponytail: gate-1 owns evidence-gated paths; here we catch the evidence-free ones
+            return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
         return GateResult(3, True, f"Triple-A AGGRESSION {tsignal}")
     if ctx.drive_entry_valid:
         return GateResult(3, True, "Second Drive reclaim confirmed")
@@ -76,8 +79,12 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
     break_type = getattr(ctx, "break_type", "") or ""
     if break_type == "INITIATIVE":
         if break_dir == "UP" and ctx.agent_direction == "LONG" and cvd_slope > -0.2:
+            if not getattr(ctx, "allow_trend", True):
+                return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
             return GateResult(3, True, "Initiative upside breakout confirmed")
         if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
+            if not getattr(ctx, "allow_trend", True):
+                return GateResult(3, False, "Trend continuation blocked in reversion-only phase")
             return GateResult(3, True, "Initiative downside breakdown confirmed")
     # Fabio Playbook #4: trapped-volume squeeze -> enter on first retest of trapped level
     sq_dir = getattr(ctx, "squeeze_direction", "") or ""

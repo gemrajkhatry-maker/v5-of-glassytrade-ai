@@ -14,6 +14,7 @@ import pytest
 from quant.amt.session.context import get_session_info
 from quant.contracts.enums import MarketState
 from quant.decision.context import DecisionContext
+from quant.decision.gates_edge import gate_triple_a_edge
 from quant.decision.gates_session_position import gate_session_phase
 from quant.decision.result import GateResult  # noqa: F401  (re-export check)
 from quant.decision.setup_state import SetupEvidence
@@ -112,3 +113,57 @@ def test_phase_table_and_gate_agree_on_vocabulary():
 def test_closed_windows_block_everything(time_iso: str, expected: bool):
     info = get_session_info(time_iso, market="NSE")
     assert info.allow_entry is expected
+
+
+def _midday_ctx(direction="SHORT", break_type="", break_direction="",
+                triple_a_phase="", triple_a_signal="") -> DecisionContext:
+    """Midday (12:45 IST, Phase 3) context with NO setup_evidence — the raw
+    evidence-free momentum paths (Triple-A AGGRESSION / Initiative breakout)
+    must be blocked at Gate 3 because allow_trend=False."""
+    return DecisionContext(
+        bar=_make_bar("2026-08-19T12:45:00+05:30"),
+        symbol="NIFTY",
+        session_open=True,
+        warmup_complete=True,
+        position_open=False,
+        agent_direction=direction,
+        agent_probability=0.80,
+        market_state=MarketState.IMBALANCED,
+        setup_evidence=None,
+        vah=24650.0,
+        val=24550.0,
+        poc=24600.0,
+        vwap_upper_2=24750.0,
+        vwap_lower_2=24500.0,
+        tick_size=0.05,
+        cvd_slope=-0.3,
+        break_type=break_type,
+        break_direction=break_direction,
+        triple_a_phase=triple_a_phase,
+        triple_a_signal=triple_a_signal,
+        allow_trend=False,
+        allow_reversion=True,
+    )
+
+
+def test_initiative_breakout_blocked_midday_without_evidence():
+    """Gate 3: Initiative downside breakdown must be vetoed midday when
+    allow_trend=False and there is no evidence-gated path to bail it out."""
+    ctx = _midday_ctx(direction="SHORT", break_type="INITIATIVE",
+                      break_direction="DOWN")
+    r = gate_triple_a_edge(ctx)
+    assert not r.passed and "trend" in r.reason.lower()
+
+
+def test_triple_a_aggression_blocked_midday_without_evidence():
+    """Gate 3: raw Triple-A AGGRESSION must be vetoed midday (allow_trend=False)."""
+    ctx = _midday_ctx(direction="LONG", triple_a_phase="AGGRESSION",
+                      triple_a_signal="LONG")
+    r = gate_triple_a_edge(ctx)
+    assert not r.passed and "trend" in r.reason.lower()
+
+
+def test_evidence_gated_momentum_still_blocked_midday():
+    """Sanity: the evidence path (gate_session_phase) already vetoes momentum
+    midday — the Gate 3 guard complements it, it does not regress it."""
+    assert _midday_ctx().allow_trend is False
