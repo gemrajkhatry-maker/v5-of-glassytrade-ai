@@ -156,6 +156,7 @@ class QuantEngine:
         self._session_levels = session_levels or SessionLevelStore()
         self._last_depth: OrderBook | None = None
         self._crashed: bool = False
+        self._last_tick_wall: float = time.time()
         # S1 certification records (bounded; drained by cert harness)
         from collections import deque as _dq
         self.cert_records = _dq(maxlen=5_000)
@@ -450,6 +451,7 @@ class QuantEngine:
             if tick is None:
                 break
             steps += 1
+            self._last_tick_wall = time.time()
             # 0. Tick-level fast SL/TP protection (Fabio: exit immediately on stop breach, never wait 5m)
             if self._position is not None:
                 self._manage_tick_exit(float(tick.price), str(tick.time))

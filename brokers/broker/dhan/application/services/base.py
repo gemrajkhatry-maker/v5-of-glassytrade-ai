@@ -141,6 +141,18 @@ class BaseDhanService:
         for inst, sid, err in resolved:
             if err or not sid:
                 logger.warning(f"Failed to resolve {inst.symbol}: {err}")
+            elif sid in instrument_map:
+                logger.warning(
+                    "Duplicate security_id %s: both %r and %r resolve to it — "
+                    "keeping %r, dropping %r. This usually means a bare underlying "
+                    "root (e.g. 'CRUDEOIL') was subscribed alongside its futures "
+                    "contract and would silently hijack its tick packets.",
+                    sid,
+                    instrument_map[sid].symbol,
+                    inst.symbol,
+                    instrument_map[sid].symbol,
+                    inst.symbol,
+                )
             else:
                 security_ids.append(sid)
                 instrument_map[sid] = inst

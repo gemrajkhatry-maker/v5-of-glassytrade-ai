@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -304,6 +305,30 @@ class QuantCoordinator:
                 sym for sym, eng in self._engines.items()
                 if getattr(eng, "_crashed", False)
             )
+
+    def stale_engines(self, threshold_sec: float = 300.0) -> list[str]:
+        """Symbols whose engine has consumed no tick for ``threshold_sec``.
+
+        Exposed for the /health endpoint — complements ``crashed_engines``:
+        a starved-but-alive engine (thread running, feed silently not routing
+        its ticks) reports neither as crashed nor in any journal, so it hid
+        behind an "ok" health check. Only evaluated while that symbol's market
+        is open (ticks are expected), so it does not false-alarm after close.
+        """
+        from quant.amt.session.symbol_registry import is_market_open
+
+        now = time.time()
+        with self._lock:
+            engines = list(self._engines.items())
+        stale = []
+        for sym, eng in engines:
+            market = getattr(eng, "_market", None)
+            if not is_market_open(exchange=market):
+                continue
+            last = float(getattr(eng, "_last_tick_wall", now) or now)
+            if now - last > threshold_sec:
+                stale.append(sym)
+        return sorted(stale)
 
     def emergency_halt(self, reason: str = "emergency halt", *, force_close: bool = False) -> int:
         """Externally halt every engine's SessionRisk (SIGTERM flatten path).

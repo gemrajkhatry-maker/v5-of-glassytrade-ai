@@ -111,11 +111,18 @@ async def health_check(
                     crashed = coordinator.crashed_engines()
                 except Exception:
                     logger.exception("Health check: crashed_engines failed")
+            stale = []
+            if started and hasattr(coordinator, "stale_engines"):
+                try:
+                    stale = coordinator.stale_engines()
+                except Exception:
+                    logger.exception("Health check: stale_engines failed")
             checks["coordinator"] = {
                 "started": started,
                 "symbols": symbols,
                 "crashedEngines": crashed,
-                "status": "degraded" if crashed else ("ok" if started else "not_started"),
+                "staleEngines": stale,
+                "status": "degraded" if (crashed or stale) else ("ok" if started else "not_started"),
             }
         except Exception as e:
             logger.warning("Health check: coordinator check failed: %s", e)
@@ -138,7 +145,9 @@ async def health_check(
         if k not in {"coordinator"}
     ):
         coord_check = checks.get("coordinator")
-        if isinstance(coord_check, dict) and coord_check.get("crashedEngines"):
+        if isinstance(coord_check, dict) and (
+            coord_check.get("crashedEngines") or coord_check.get("staleEngines")
+        ):
             overall = "degraded"
         else:
             overall = "ok"

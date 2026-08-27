@@ -26,7 +26,7 @@ class LiveGateway:
         self._reader_queue = reader_queue
 
     def subscribe(self, symbol: str) -> None:
-        self._feed.subscribe(symbol)
+        self._feed.subscribe(self._symbol)
 
     def next_tick(self) -> Tick | None:
         return self._reader_queue.get() if self._reader_queue is not None else self._feed.next_tick(self._symbol)
