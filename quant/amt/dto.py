@@ -100,6 +100,8 @@ def amt_result_to_dto(r) -> dict:
         "priorVal": r.prior_val,
         "gapType": r.gap_type,
         "openingBias": r.opening_bias,
+        "squeezeDirection": getattr(r, "squeeze_direction", ""),
+        "squeezeTrappedLevel": float(getattr(r, "squeeze_trapped_level", 0.0)),
         # Acceptance / Rejection
         "acceptanceAbove": r.acceptance_above,
         "acceptanceBelow": r.acceptance_below,

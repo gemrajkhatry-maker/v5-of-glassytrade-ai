@@ -281,6 +281,8 @@ class AMTAnalyzer:
         # New modules (Phases 3-5)
         self._drive_tracker = DriveTracker()
         self._opening_classifier = OpeningTypeClassifier()
+        from quant.amt.market.regime import RegimeDetector
+        self._regime = RegimeDetector()  # ponytail: wire-up only; detector math already existed
         # MTFAnalyzer removed - uses MultiTimeframeAMTAnalyzer in configure() instead
         # self._mtf_analyzer = MTFAnalyzer()  # This class doesn't exist, causes NameError
         # Initialize LVN tracker here to avoid AttributeError if configure() not called
@@ -764,7 +766,7 @@ class AMTAnalyzer:
             cvd_slope=float(cvd_state.slope),
         )
 
-        return self._build_result(
+        result = self._build_result(
             current=current, data=data, symbol=symbol,
             profile=profile, poc=poc, vah=vah, val=val,
             lvns=lvns, hvns=hvns, aggression_score=aggression_score,
@@ -798,8 +800,19 @@ class AMTAnalyzer:
             _triple=_triple, _effective_market_state=_effective_market_state,
         )
 
+        # Squeeze detection (Fabio Playbook #4): runs on the assembled result
+        # because it needs the canonical session VA (val/vah) from above.
+        # AMTResult is frozen, so we rebuild it with the squeeze fields set.
+        from dataclasses import replace as _dc_replace
+        sq = self._regime.detect_squeeze(recent_data, result)
+        return _dc_replace(
+            result,
+            squeeze_direction=sq.direction if sq else "",
+            squeeze_trapped_level=sq.trapped_level if sq else 0.0,
+        )
+
     def _build_result(self, *, current, data, symbol, profile, poc, vah, val,
-                      lvns, hvns, aggression_score, signal, _setup, agg_prints,
+                  lvns, hvns, aggression_score, signal, _setup, agg_prints,
                       effective_profile_shape, cvd_state, cvd_div,
                       recent_vwap, session_vwap, vwap_upper_1, vwap_lower_1,
                       vwap_upper_2, vwap_lower_2, vwap_deviation_sigmas,

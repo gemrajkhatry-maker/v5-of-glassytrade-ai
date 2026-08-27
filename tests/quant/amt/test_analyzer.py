@@ -50,6 +50,30 @@ def _candle_time(minute_of_session: int) -> str:
     return f"2026-01-01T{total // 60:02d}:{total % 60:02d}:00Z"
 
 
+def _squeeze_dto() -> dict:
+    """Synthesize an inline squeeze-recovery session and return its DTO.
+
+    Mirrors the scenario asserted for RegimeDetector.detect_squeeze: a wide
+    low-volume expansion, a tight high-volume contraction into the VA, one
+    bar's low piercing VAL, then the last bar closing back above VAL.
+    """
+    from quant.amt.dto import amt_result_to_dto
+
+    data = []
+    for i in range(20):  # expansion: wide range, low volume
+        data.append(_make_candle(close=100.0, high=104.0, low=96.0, volume=100,
+                                 time=_candle_time(i)))
+    for i in range(20):  # contraction: tight range, high volume (VA anchor)
+        data.append(_make_candle(close=100.0 + (i % 2) * 0.02, high=100.1,
+                                 low=99.9, volume=5000, time=_candle_time(20 + i)))
+    data.append(_make_candle(close=99.6, high=99.9, low=99.0, volume=200,
+                             time=_candle_time(40)))  # pierce below VAL
+    data.append(_make_candle(close=100.1, high=100.3, low=99.8, volume=200,
+                             time=_candle_time(41)))  # recovery above VAL
+    result = AMTAnalyzer().analyze(data)
+    return amt_result_to_dto(result)
+
+
 def _candle_stream(start_min: int, end_min: int, high_boost: float = 0.0) -> list[OHLC]:
     """Candles every 5 minutes from 09:15, minutes [start_min, end_min] inclusive."""
     candles = []
@@ -946,3 +970,10 @@ class TestVWAPSigmaBounds:
             f"sigma {result.vwap_deviation_sigmas:.2f} must be small when price "
             f"is inside the same-window VA"
         )
+
+
+def test_dto_exposes_squeeze_fields():
+    """Task 2a: squeeze detection wired through analyzer -> AMTResult -> DTO."""
+    dto = _squeeze_dto()
+    assert dto["squeezeDirection"] == "LONG"
+    assert dto["squeezeTrappedLevel"] > 0

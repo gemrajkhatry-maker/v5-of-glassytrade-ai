@@ -285,6 +285,10 @@ class AMTResult:
     triple_a_signal: str = ""
     absorption_cluster_high: float = 0.0
     absorption_cluster_low: float = 0.0
+    # Squeeze (Fabio Playbook #4): trapped participants + recovery = entry
+    # catalyst. Populated by RegimeDetector.detect_squeeze in analyze().
+    squeeze_direction: str = ""   # "LONG" | "SHORT" | ""
+    squeeze_trapped_level: float = 0.0
 
 
 # ---------------------------------------------------------------------------
