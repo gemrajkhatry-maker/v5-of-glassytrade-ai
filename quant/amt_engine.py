@@ -272,6 +272,9 @@ class AMTEngine:
                                 "poc": float(prev_res.poc),
                                 "vah": float(prev_res.value_area_high),
                                 "val": float(prev_res.value_area_low),
+                                # parity with rollover/save_levels: seed close so
+                                # first analyze classifies gaps vs settlement.
+                                "close": float(prev_candles[-1].close),
                             }
                             self._last_underlying_close = float(prev_candles[-1].close)
                             self._session_levels.save_levels(

@@ -14,7 +14,10 @@ def test_levels_roundtrip_in_memory():
     assert store.load_levels("SYM")["poc"] == 0.0
     store.save_levels("SYM", "2026-08-10", 100.0, 102.0, 98.0)
     rec = store.load_levels("SYM")
-    assert rec == {"date": "2026-08-10", "poc": 100.0, "vah": 102.0, "val": 98.0}
+    # r2 regression (gap-close persistence, 2c99117): save/load now emits an
+    # additive "close" key; in-memory save without an explicit close persists
+    # the default 0.0 and load_levels always returns all five fields.
+    assert rec == {"date": "2026-08-10", "poc": 100.0, "vah": 102.0, "val": 98.0, "close": 0.0}
 
 
 def test_levels_persist_across_instances(tmp_path):
