@@ -18,10 +18,14 @@ from quant.decision.result import GateResult
 
 
 class GatePipeline:
-    def evaluate(self, ctx: DecisionContext) -> list[GateResult]:
+    def evaluate(
+        self, ctx: DecisionContext, *, allow_positioned: bool = False
+    ) -> list[GateResult]:
         steps = (
             (1, lambda: gate_session_phase(ctx)),
-            (2, lambda: gate_position_cooldown(ctx)),
+            # allow_positioned=True skips ONLY the open-position blocker
+            # (thesis-flip evaluation); real cooldown seconds still enforce.
+            (2, lambda: gate_position_cooldown(ctx, allow_positioned)),
             (3, lambda: gate_triple_a_edge(ctx)),
             (4, lambda: gate_risk_reward(ctx)),
         )

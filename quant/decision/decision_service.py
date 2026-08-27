@@ -53,7 +53,9 @@ class DecisionService:
     def __init__(self, min_rr: float = 0.0) -> None:
         self.min_rr = min_rr
 
-    def evaluate(self, ctx: DecisionContext) -> QuantDecision:
+    def evaluate(
+        self, ctx: DecisionContext, *, allow_positioned: bool = False
+    ) -> QuantDecision:
         if ctx.bar is None:
             return QuantDecision(False, None, "NO_EDGE", "", ())
 
@@ -61,7 +63,9 @@ class DecisionService:
         # the StateProjector clears any stale approved state from scanner rows.
         # (Defect 2 fix: previously runtime._decide() returned early without
         # emitting any DecisionProduced, leaving stale ENTER signals visible.)
-        if ctx.risk_halted:
+        # allow_positioned=True (thesis-flip exit check) bypasses this — a
+        # halt gates ENTRIES, never the opposing-signal EXIT.
+        if ctx.risk_halted and not allow_positioned:
             return QuantDecision(
                 approved=False,
                 signal=None,
@@ -72,7 +76,9 @@ class DecisionService:
                 model_label="",
             )
 
-        results = tuple(GatePipeline().evaluate(ctx))
+        results = tuple(
+            GatePipeline().evaluate(ctx, allow_positioned=allow_positioned)
+        )
         blocked = _block_reasons(results)
         if all(r.passed for r in results):
             label = _label_from_gate_results(results)

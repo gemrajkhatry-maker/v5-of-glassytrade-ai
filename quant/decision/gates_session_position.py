@@ -51,13 +51,22 @@ def gate_session_phase(ctx: DecisionContext) -> GateResult:
     return GateResult(gate=1, passed=True)
 
 
-def gate_position_cooldown(ctx: DecisionContext) -> GateResult:
-    if ctx.position_open:
-        return GateResult(gate=2, passed=False, reason="Position already open")
+def gate_position_cooldown(
+    ctx: DecisionContext, allow_positioned: bool = False
+) -> GateResult:
+    # Real cooldown seconds always enforce — allow_positioned bypasses only
+    # the open-position blocker below, never a live post-trade cooldown.
     if ctx.cooldown_remaining_sec > 0:
         return GateResult(
             gate=2,
             passed=False,
             reason=f"In cooldown — {ctx.cooldown_remaining_sec}s remaining",
         )
+    if ctx.position_open:
+        # Thesis-flip check (opposing-signal exit): while evaluating an open
+        # position for invalidation the position itself is EXPECTED — pass it
+        # through so gates 3-4 still qualify the contrary signal.
+        if allow_positioned:
+            return GateResult(gate=2, passed=True, reason="thesis-flip check")
+        return GateResult(gate=2, passed=False, reason="Position already open")
     return GateResult(gate=2, passed=True)
