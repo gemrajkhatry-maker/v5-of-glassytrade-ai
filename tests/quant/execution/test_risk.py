@@ -78,3 +78,13 @@ def test_scratch_exit_does_not_count_as_consecutive_loss():
     st = r.state()
     assert st.consecutive_losses == 0
     assert not st.halted
+
+def test_house_money_bonus_capped():
+    r = SessionRisk(starting_equity=1_000_000)
+    r._daily_pnl = 200_000      # huge winning day
+    r._consecutive_wins = 2
+    r._trades_today = 2         # past the 1-2 trade CONSERVATIVE warmup
+    pct = r._risk_per_trade_pct()
+    assert pct <= 0.005 + 1e-9, "never exceed 0.50% total"
+    bonus = pct - 0.004
+    assert bonus <= 0.30 * 200_000 / 1_000_000 + 1e-9, "addition never exceeds 30% of session profit"
