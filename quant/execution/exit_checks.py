@@ -53,12 +53,30 @@ def tp2_level(entry: float, tp: float) -> float:
     return entry + 2.0 * r if tp > entry else entry - 2.0 * r
 
 
+def is_terminal_tp_only(position: Position) -> bool:
+    """Regime gate (wave 4): VA_FADE (mean-reversion) trades exit TERMINAL
+    at the FIRST take-profit touch — no T1/T2 tiering. Derived from the
+    signal's canonical model_label (DecisionService builds fades with
+    "VA_Fade"); every other/legacy label keeps the ladder."""
+    sig = position.order.signal if position.order else None
+    return bool(
+        sig is not None
+        and str(getattr(sig, "model_label", "") or "").upper() == "VA_FADE"
+    )
+
+
 def check_take_profit_tiers(
     position: Position, high: float, low: float, tp_tier: int, entry: float,
 ) -> tuple[ExitDecision | None, int]:
     """Rule 4: tiered take-profit (§13.3). Returns (decision, new_tier)."""
     tp = float(position.order.signal.tp)
     long = position.size > 0
+
+    if is_terminal_tp_only(position):
+        # Mean-rev regime: first TP touch = full close, no partials.
+        if (long and high >= tp) or (not long and low <= tp):
+            return ExitDecision(True, "TP", tp), tp_tier
+        return None, tp_tier
 
     if tp_tier == 0:
         if (long and high >= tp) or (not long and low <= tp):

@@ -12,7 +12,8 @@ from quant.runtime import QuantEngine
 from tests.helpers.synthetic import SyntheticGateway
 
 
-def _make_signal(symbol="TEST", side="LONG", entry=100.0, sl=90.0, tp=120.0):
+def _make_signal(symbol="TEST", side="LONG", entry=100.0, sl=90.0, tp=120.0,
+                 model_label="Triple-A"):
     return Signal(
         type=side,
         reason="Triple-A setup",
@@ -20,7 +21,7 @@ def _make_signal(symbol="TEST", side="LONG", entry=100.0, sl=90.0, tp=120.0):
         sl=sl,
         tp=tp,
         rr=2.0,
-        model_label="Triple-A",
+        model_label=model_label,
         symbol=symbol,
         timestamp="1700000000",
     )
@@ -333,3 +334,78 @@ def test_short_runner_after_tp2_ignores_far_tp_ticks(pm, short_pm_after_tp2):
     out = pm.manage_tick_exit(pos, tick_price=far, tick_time="12:03:00")
     assert out is not None                  # no TP semantics left on ticks
     assert pm.last_fill is None             # nothing was closed
+
+# ---------------------------------------------------------------------------
+# Wave 4 — regime-aware terminals: a VA_FADE (mean-reversion) signal exits
+# TERMINAL at its FIRST TP touch on either path — no T1/T2 tiering, no tier
+# arming, size intact until the touch. Any other type (incl. legacy/absent)
+# keeps the exact ladder above.
+# ---------------------------------------------------------------------------
+
+def _fade_signal(side="LONG", entry=100.0, sl=90.0, tp=120.0):
+    """model_label matches production: DecisionService builds fades with
+    model_label="VA_Fade" (decision_service.py)."""
+    return _make_signal(side=side, entry=entry, sl=sl, tp=tp,
+                        model_label="VA_Fade")
+
+
+@pytest.fixture
+def pm_va_fade_position():
+    manager, oms = _make_pm()
+    pos = oms.submit(_fade_signal(), 4.0)
+    return manager, oms, pos
+
+
+@pytest.fixture
+def pm_trend_position():
+    manager, oms = _make_pm()
+    pos = oms.submit(_make_signal(), 4.0)
+    return manager, oms, pos
+
+
+def test_va_fade_signal_full_closes_at_first_tp_touch(pm_va_fade_position):
+    """Fade: size fully intact before the touch (no partials, no tier
+    arming); the FIRST sig_tp tick full-closes reason="TP"."""
+    pm, _oms, pos = pm_va_fade_position
+
+    out = pm.manage_tick_exit(pos, tick_price=110.0, tick_time="12:00:00")
+    assert out is not None and abs(out.size) == 4      # intact before TP
+    assert pm.last_fill is None and pm.last_partial_fill is None
+    assert pm._exits._tp_tier.get(pos._id, 0) == 0     # no tier ever armed
+
+    out = pm.manage_tick_exit(pos, tick_price=120.0, tick_time="12:01:00")
+    assert out is None                                 # terminal at first TP
+    assert pm.last_fill is not None and pm.last_fill.reason == "TP"
+    assert pm.last_fill.close_price == pytest.approx(120.0)
+    assert abs(pm.last_fill.position.size) == 4        # FULL size, one fill
+    assert pm._exits._tp_tier.get(pos._id, 0) == 0     # tiering never armed
+    assert pm.last_partial_fill is None                # no partial was booked
+
+
+def test_va_fade_short_full_closes_at_first_tp_touch():
+    """Short mirror: fade closes the FULL short at the first tp tag."""
+    pm, oms = _make_pm()
+    pos = oms.submit(_fade_signal(side="SHORT", entry=100.0, sl=110.0,
+                                  tp=80.0), 4.0)
+
+    out = pm.manage_tick_exit(pos, tick_price=80.0, tick_time="12:00:00")
+    assert out is None
+    assert pm.last_fill is not None and pm.last_fill.reason == "TP"
+    assert abs(pm.last_fill.position.size) == 4
+    assert pm._exits._tp_tier.get(pos._id, 0) == 0
+
+
+def test_trend_signal_still_ladders(pm_trend_position):
+    """Regression pin: a Triple-A position keeps today's tiered ladder —
+    TP1 touch books half + arms tier 1; the runner survives."""
+    pm, _oms, pos = pm_trend_position
+
+    out = pm.manage_tick_exit(pos, tick_price=110.0, tick_time="12:00:00")
+    assert out is not None and abs(out.size) == 4      # intact before TP
+
+    out = pm.manage_tick_exit(pos, tick_price=120.0, tick_time="12:01:00")
+    assert out is not None and abs(out.size) == 2      # TP1 partial, alive
+    assert pm._exits._tp_tier[pos._id] == 1            # tier armed
+    assert pm.last_partial_fill is not None
+    assert pm.last_partial_fill.reason == "TP1"
+    assert pm.last_fill is None                        # no full close

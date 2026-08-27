@@ -12,7 +12,7 @@ from typing import Callable
 
 from quant.contracts.enums import MarketState
 from quant.decision.stops import structural_stop
-from quant.execution.exit_checks import tp2_level
+from quant.execution.exit_checks import is_terminal_tp_only, tp2_level
 from quant.execution.exits import ExitDecision, ExitEngine
 from quant.execution.oms import PaperOMS
 from quant.execution.ports import IOMS
@@ -307,6 +307,7 @@ class PositionManager:
                 tp2_target = tp2_level(entry_px, sig_tp)
 
         reason = None
+        terminal_tp = sig_tp > 0 and is_terminal_tp_only(position)
         if is_long:
             if effective_sl > 0 and tick_price <= effective_sl:
                 if trail_stop is not None and effective_sl == float(trail_stop):
@@ -316,6 +317,13 @@ class PositionManager:
                 else:
                     reason = "SL"
             elif sig_tp > 0 and tick_price >= sig_tp:
+                if terminal_tp:
+                    # VA_FADE regime: first TP touch = terminal full close
+                    # (no tier arming, no partials) — replaces _tick_tp_touch.
+                    return self._execute_full_close(
+                        position, ExitDecision(True, "TP", float(tick_price)),
+                        tick_time,
+                    )
                 tier = self._exits._tp_tier.get(position._id, 0)
                 if tier >= 1:
                     # Strict bar parity with Rule 4: tiers stop at 2. The
@@ -336,6 +344,12 @@ class PositionManager:
                 else:
                     reason = "SL"
             elif sig_tp > 0 and tick_price <= sig_tp:
+                if terminal_tp:
+                    # Short mirror: fade terminal full close at first TP tag.
+                    return self._execute_full_close(
+                        position, ExitDecision(True, "TP", float(tick_price)),
+                        tick_time,
+                    )
                 tier = self._exits._tp_tier.get(position._id, 0)
                 if tier >= 1:
                     # Short mirror of the long-side TP2/tier>=2 handling above.
