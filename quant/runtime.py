@@ -866,6 +866,22 @@ class QuantEngine:
         pos = self._position
         if pos is None:
             return
+        exec_bar = bar  # close settles on the caller bar (premium scale)
+        # Basis parity: entries qualify on the UNDERLYING dto+bar whenever an
+        # underlying feed drives decisions — evaluating the flip on the
+        # option-side dto (what the positioned bar-exit path hands down)
+        # could approve on noise the entry qualification never saw. The
+        # executed close still settles on the caller bar (premium scale).
+        if self._underlying_gateway is not None:
+            amt_dto = self._underlying_amt_dto
+            bar = self._last_underlying_bar
+            if not amt_dto or bar is None:
+                logger.info(
+                    "🔄 [THESIS FLIP] %s: skipped — underlying context "
+                    "(entry basis) unavailable this bar",
+                    self.symbol,
+                )
+                return
         bars_since_close = (
             self._bar_index - self._last_close_bar_index
             if self._last_close_bar_index >= 0
@@ -894,8 +910,8 @@ class QuantEngine:
         pm = self._get_position_manager()
         pm._execute_full_close(
             pos,
-            ExitDecision(True, "OPPOSING_SIGNAL", float(bar.close)),
-            bar.time,
+            ExitDecision(True, "OPPOSING_SIGNAL", float(exec_bar.close)),
+            exec_bar.time,
         )
         self._position = None
         self._pyramid_positions = pm.pyramid_positions

@@ -17,6 +17,10 @@ Engine-driving pattern mirrors tests/quant/runtime/test_positive_approval.py
 (organic ticks -> analyzer -> Triple-A -> gates -> approval, no mocks).
 """
 
+from types import SimpleNamespace
+
+import pytest
+
 from quant.brokers.gateway import Tick
 from tests.helpers.synthetic import SyntheticGateway
 from quant.decision.context import DecisionContext
@@ -230,4 +234,103 @@ def _ctx(position_open: bool, cooldown_sec: float) -> DecisionContext:
         warmup_complete=True,
         position_open=position_open,
         cooldown_remaining_sec=cooldown_sec,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Underlying-basis parity (wave-4 T3): entries qualify on the UNDERLYING
+# dto+bar when an underlying feed drives decisions — the thesis-flip check
+# must consume the IDENTICAL context source, or skip if unavailable.
+# ---------------------------------------------------------------------------
+
+def _option_mode_engine(side="LONG", entry=100.0):
+    """Positioned engine wired like the live option mode: an underlying feed
+    is present (so entries qualify via the underlying dto/bar), while the
+    positioned bar-exit path hands the OPTION dto/bar to the flip check."""
+    sl = entry - 10.0 if side == "LONG" else entry + 10.0
+    eng = QuantEngine(
+        SyntheticGateway([Tick("t0", 100.0, 10, 5, 5)]), "OPT",
+        interval_seconds=1, cooldown_bars=3,
+        underlying_gateway=SyntheticGateway([Tick("u0", 50000.0, 10, 5, 5)]),
+    )
+    eng._exits.cvd_kill_threshold = float("inf")
+    eng._position = eng._oms.submit(_signal(side=side, entry=entry, sl=sl), 1.0)
+    eng._entry_bar_index = 0
+    return eng
+
+
+def _spy_pipeline(eng):
+    """Stub decision service that ALWAYS approves a fresh SHORT and records
+    the exact ctx object it was handed (and the builder's (bar, dto) args)."""
+    captured = {}
+
+    def fake_build(bar, amt_dto, cooldown_remaining_sec):
+        captured["bar"] = bar
+        captured["dto"] = amt_dto
+        return object()  # opaque ctx; the stub ignores it
+
+    eng._build_context = fake_build
+
+    def evaluate(ctx, allow_positioned=False):
+        captured["ctx"] = ctx
+        return SimpleNamespace(
+            approved=True, signal=_signal(side="SHORT"), gate_results=[],
+            reason="APPROVED", phase="", block_reasons=[], model_label="",
+        )
+
+    eng._decision_service = SimpleNamespace(evaluate=evaluate)
+    return captured
+
+
+def _opt_bar(time="opt1", close=99.75):
+    from quant.bars import Bar
+    return Bar(time=time, open=100.0, high=100.5, low=99.5, close=close,
+               volume=10)
+
+
+def test_flip_never_evaluates_on_option_side_context():
+    """Divergence: positioned in option mode, the positioned bar hands the
+    flip check an OPTION dto/bar that would approve SHORT — but the entry
+    basis (underlying) context is unavailable this bar. The flip must SKIP
+    (conservative), not act on context that never qualified anything."""
+    eng = _option_mode_engine()
+    captured = _spy_pipeline(eng)
+    opt_dto = {"marketState": "BALANCED", "note": "OPTION-SIDE NOISE"}
+
+    from quant.events import PositionClosed
+    eng._check_thesis_flip(opt_dto, _opt_bar())
+
+    assert eng._position is not None, (
+        "flip must not fire on option-side context (entry basis unavailable)"
+    )
+    assert not [e for e in eng.events if isinstance(e, PositionClosed)]
+    assert "ctx" not in captured, "guard must skip BEFORE any evaluation"
+
+
+def test_flip_consumes_identical_underlying_context_source():
+    """Happy path parity: when the underlying dto+bar the entry path uses ARE
+    available, the flip builds its context from EXACTLY those objects — not
+    the option dto/bar the exit path handed it — and still executes the close
+    at the caller bar's premium-scale price."""
+    eng = _option_mode_engine()
+    captured = _spy_pipeline(eng)
+    from quant.bars import Bar
+    und_bar = Bar(time="und1", open=50000.0, high=50100.0, low=49900.0,
+                  close=50050.0, volume=10)
+    eng._underlying_amt_dto = {"marketState": "BALANCED", "note": "UNDERLYING"}
+    eng._last_underlying_bar = und_bar
+    opt_bar = _opt_bar(close=99.75)
+
+    from quant.events import PositionClosed
+    eng._check_thesis_flip({"marketState": "BALANCED", "note": "OPTION"}, opt_bar)
+
+    assert eng._position is None, "contrary approval on entry basis must flip"
+    closes = [e for e in eng.events if isinstance(e, PositionClosed)]
+    assert closes[-1].fill.reason == "OPPOSING_SIGNAL"
+    # Context source == the EXACT objects entries qualify on:
+    assert captured["bar"] is und_bar, "flip ctx bar must be the underlying bar"
+    assert captured["dto"]["note"] == "UNDERLYING"
+    # Execution stays on the caller bar's premium-scale close (1 lot @ 100):
+    assert closes[-1].fill.pnl == pytest.approx((99.75 - 100.0) * 1.0), (
+        "close must execute at the traded instrument's price, not underlying scale"
     )
