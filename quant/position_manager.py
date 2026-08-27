@@ -294,17 +294,32 @@ class PositionManager:
             if effective_sl > 0 and tick_price <= effective_sl:
                 reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
             elif sig_tp > 0 and tick_price >= sig_tp:
-                reason = "TP"
+                return self._tick_tp_touch(position, float(tick_price), tick_time)
         else:
             if effective_sl > 0 and tick_price >= effective_sl:
                 reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
             elif sig_tp > 0 and tick_price <= sig_tp:
-                reason = "TP"
-                
+                return self._tick_tp_touch(position, float(tick_price), tick_time)
+
         if reason is not None:
             exit_dec = ExitDecision(True, reason, float(tick_price))
             return self._execute_full_close(position, exit_dec, tick_time)
         return position
+
+    def _tick_tp_touch(self, position, px: float, ts: str):
+        """Bar-parity TP handling on the tick path: T1 books half + arms BE;
+        T2 (runner tagged at TP) closes. Mirrors ExitEngine Rule 4."""
+        tier = self._exits._tp_tier.get(position._id, 0)
+        entry = float(position.order.signal.entry)
+        if tier == 0 and abs(position.size) >= 2:
+            dec = ExitDecision(True, "TP1", px, partial_fraction=0.5)
+            partial_fill, remaining = self._oms.close_partial(
+                position, 0.5, px, ts, dec.reason,
+            )
+            self._exits._tp_tier[position._id] = 1
+            self._exits._breakeven[position._id] = entry   # same effect as exits.py:160-161
+            return remaining
+        return self._execute_full_close(position, ExitDecision(True, "TP", px), ts)
 
     def check_pyramid(self, amt_dto: dict, bar, position, bar_index: int) -> None:
         """Spec §13.2 pyramid engine: add-on positions at Impulse Leg LVN retest.
@@ -404,14 +419,12 @@ class PositionManager:
             logger.error("🛑 [PYRAMID FAIL] %s P%d: %s", self.symbol, self.pyramid_count + 1, exc)
             raise
 
-        self.pyramid_count += 1
-        self.pyramid_positions.append(pyramid_pos)
-
         # E11 FIX — reserve aggregate portfolio risk for the add-on BEFORE we
         # commit. Without this, pyramids bypassed the cross-engine ceiling
         # (8 engines × 0.5% each would otherwise risk ~4% per engine on top of
         # the base). Reserve at fill time; release via record_close when the
-        # pyramid is closed in manage_exit().
+        # pyramid is closed in manage_exit(). Checked BEFORE the count/append
+        # so a refusal leaves no counted-but-unreserved ghost pyramid.
         add_risk = abs(float(pyramid_pos.order.signal.entry) - float(new_sl)) * max(1.0, abs(pyramid_size))
         if self._portfolio_risk is not None:
             ok, why = self._portfolio_risk.can_accept(add_risk)
@@ -422,6 +435,11 @@ class PositionManager:
                 logger.info("🛑 [PYRAMID RISK] %s refused at register", self.symbol)
                 return
             self._pyramid_open_risk[pyramid_pos._id] = add_risk
+
+        self.pyramid_count += 1
+        self.pyramid_positions.append(pyramid_pos)
+
+        if self._portfolio_risk is not None:
             logger.info(
                 "⚡ [PYRAMID RISK] %s P%d registered ₹%.2f open risk (total portfolio open: ₹%.2f)",
                 self.symbol, self.pyramid_count, add_risk, self._portfolio_risk.open_risk,
