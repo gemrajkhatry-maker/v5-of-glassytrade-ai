@@ -61,6 +61,17 @@ class TestAcceptanceRejectionEngine:
         )
         assert result.liquidity_sweep == "SWEEP_HIGH"
 
+    def test_no_double_credit_within_single_bar(self):
+        """Regression: analyzer called update() twice per bar, crediting the 60s fallback twice."""
+        engine = AcceptanceRejectionEngine(time_threshold=120.0)
+        # Same candle/timestamp handed to update() twice (what analyzer.analyze() did):
+        c = _candle("2024-01-01T09:15:00+00:00", 106, 107, 105.5, 106.5, v=2000)
+        engine.update(c, 105.0, 95.0, 1000.0)
+        acc_after_1 = engine._time_above_vah
+        engine.update(c, 105.0, 95.0, 1000.0)
+        acc_after_2 = engine._time_above_vah
+        assert acc_after_2 == acc_after_1, "same-bar repeat must be a no-op"
+
     def test_reset_clears_state(self):
         engine = AcceptanceRejectionEngine(time_threshold=100.0)
         engine.update(_candle("2024-01-01T09:15:00+00:00", 100, 101, 99, 100), 105.0, 95.0, 1000.0)
