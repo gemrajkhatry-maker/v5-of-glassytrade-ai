@@ -64,13 +64,21 @@ class TestAcceptanceRejectionEngine:
     def test_no_double_credit_within_single_bar(self):
         """Regression: analyzer called update() twice per bar, crediting the 60s fallback twice."""
         engine = AcceptanceRejectionEngine(time_threshold=120.0)
-        # Same candle/timestamp handed to update() twice (what analyzer.analyze() did):
-        c = _candle("2024-01-01T09:15:00+00:00", 106, 107, 105.5, 106.5, v=2000)
-        engine.update(c, 105.0, 95.0, 1000.0)
+        # Same candle/timestamp handed to update() twice (what analyzer.analyze() did).
+        # Candle sweeps VAH (high 105.6 > vah 105.0, close back below) so sweep/rejection
+        # flags are non-trivially computed and must survive the repeat.
+        c = _candle("2024-01-01T09:15:00+00:00", 104.5, 105.6, 104.0, 104.6, v=2000)
+        s1 = engine.update(c, 105.0, 95.0, 1000.0)
         acc_after_1 = engine._time_above_vah
-        engine.update(c, 105.0, 95.0, 1000.0)
+        s2 = engine.update(c, 105.0, 95.0, 1000.0)
         acc_after_2 = engine._time_above_vah
-        assert acc_after_2 == acc_after_1, "same-bar repeat must be a no-op"
+        assert acc_after_2 == acc_after_1, "same-bar repeat must add zero time credit"
+        assert s2.liquidity_sweep == s1.liquidity_sweep == "SWEEP_HIGH"
+        assert s2.rejection_at_high == s1.rejection_at_high
+        assert s2.rejection_at_low == s1.rejection_at_low
+        assert s2.acceptance_above == s1.acceptance_above
+        # ponytail fall-through: duration=0 kills velocity via its own duration>0 guard
+        assert s2.price_velocity == 0.0
 
     def test_reset_clears_state(self):
         engine = AcceptanceRejectionEngine(time_threshold=100.0)

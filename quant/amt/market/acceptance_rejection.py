@@ -66,22 +66,6 @@ class AcceptanceRejectionEngine:
         self._time_below_val = 0.0
         self._last_time = ""
 
-    def _state_snapshot(self, volume, baseline_vol: float) -> ARResult:
-        """Flags from current accumulated time without advancing it."""
-        vol_ok = (
-            float(volume) > baseline_vol * self._acceptance_vol_ratio
-            if baseline_vol > 0
-            else False
-        )
-        return ARResult(
-            acceptance_above=(
-                self._time_above_vah >= self._acceptance_time_threshold and vol_ok
-            ),
-            acceptance_below=(
-                self._time_below_val >= self._acceptance_time_threshold and vol_ok
-            ),
-        )
-
     def update(
         self,
         candle: OHLC,
@@ -101,10 +85,12 @@ class AcceptanceRejectionEngine:
                 curr_dt = datetime.fromisoformat(candle.time)
                 dt = (curr_dt - prev_dt).total_seconds()
                 if dt == 0:
-                    # ponytail: same-bar repeat must be a no-op — analyzer ran update()
-                    # twice per bar, double-crediting the 60s fallback vs the 120s threshold.
-                    return self._state_snapshot(candle.volume, baseline_vol)
-                if 0 < dt < 600:
+                    # ponytail: same-bar repeat (analyzer calls update() twice per
+                    # bar and consumes the 2nd result) falls through with duration=0:
+                    # +0 credit, -0.5*0 decay, and all flags recomputed fresh — so
+                    # sweep/rejection/velocity fields stay populated every bar.
+                    duration = 0.0
+                elif 0 < dt < 600:
                     duration = dt
             except (ValueError, TypeError):
                 pass
