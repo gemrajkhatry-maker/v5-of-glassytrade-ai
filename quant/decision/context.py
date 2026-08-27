@@ -113,5 +113,13 @@ class DecisionContext:
     triple_a_signal: str = ""
     absorption_cluster_high: float = 0.0
     absorption_cluster_low: float = 0.0
+    # Fabio Playbook #4 — trapped-volume squeeze (consumes Task 2a DTO keys).
+    # squeeze_direction / squeeze_trapped_level come from RegimeDetector via
+    # the AMT DTO; pullback_confirmed is a concrete retest of the trapped VA
+    # level (within 3 ticks) computed in context_builder.
+    squeeze_detected: bool = False
+    squeeze_direction: str = ""
+    squeeze_trapped_level: float = 0.0
+    pullback_confirmed: bool = False
     # Rolling history of recent decisions and rationales (last 3-5 bars)
     recent_decisions: Tuple[Dict[str, Any], ...] = ()

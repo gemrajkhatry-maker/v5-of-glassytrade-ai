@@ -301,6 +301,15 @@ class DecisionContextBuilder:
         _si_dir, _si_mag, _si_low, _si_high = _latest_stacked_imbalance(amt_dto)
         _buy_wall_below, _sell_wall_above = _print_levels_from_dto(amt_dto, bar)
 
+        # Squeeze (Fabio Playbook #4): direction + trapped level from Task 2a's
+        # DTO keys; pullback = a retest of the trapped VA level within 3 ticks.
+        squeeze_dir = str(amt_dto.get("squeezeDirection", ""))
+        trapped_lvl = float(amt_dto.get("squeezeTrappedLevel", 0.0))
+        pullback = False
+        if squeeze_dir and trapped_lvl > 0 and bar is not None:
+            tick = tick_size or 0.05
+            pullback = abs(float(bar.close) - trapped_lvl) <= 3.0 * tick  # ponytail: retest proxy; proper LVN-pullback when leg_lvn lands near trapped level
+
         # Market state + break info
         raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
         break_dir = str(amt_dto.get("breakDirection") or "").upper()
@@ -381,5 +390,9 @@ class DecisionContextBuilder:
             triple_a_signal=str(amt_dto.get("tripleASignal") or ""),
             absorption_cluster_high=float(amt_dto.get("absorptionClusterHigh") or 0.0),
             absorption_cluster_low=float(amt_dto.get("absorptionClusterLow") or 0.0),
+            squeeze_detected=bool(squeeze_dir and trapped_lvl > 0),
+            squeeze_direction=squeeze_dir,
+            squeeze_trapped_level=trapped_lvl,
+            pullback_confirmed=pullback,
             recent_decisions=tuple(recent_decisions or ()),
         )

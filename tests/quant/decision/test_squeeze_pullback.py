@@ -1,52 +1,66 @@
 # tests/quant/decision/test_squeeze_pullback.py
+"""Gate 3 Fabio Playbook #4 — squeeze breakout pullback.
+
+Previously these tests ran against phantom DecisionContext fields
+(``squeeze_detected`` / ``absorption_cluster`` / ``pullback_confirmed``) that
+were never populated, so they passed trivially. Task 2b replaced them with the
+real detector output (``squeeze_direction`` / ``squeeze_trapped_level``) and
+defined pullback concretely as a retest of the trapped VA level (within 3 ticks).
+"""
 import pytest
-from unittest.mock import MagicMock
-from quant.decision.gates_edge import gate_triple_a_edge
-from quant.decision.context_builder import DecisionContext
-from quant.contracts.enums import MarketState
+
 from quant.bars import Bar
+from quant.decision.context import DecisionContext
+from quant.decision.gates_edge import gate_triple_a_edge
 
 
-def _make_context(direction="LONG", squeeze=True, pullback=True, cvd_slope=0.1):
-    ctx = MagicMock(spec=DecisionContext)
-    ctx.contested_bubble_zone = False
-    ctx.agent_direction = direction
-    ctx.market_state = MarketState.IMBALANCED
-    ctx.bar = Bar(time="t1", open=100.0, high=105.0, low=99.0, close=104.0, volume=100, buy_volume=60, sell_volume=40, delta=20, oi=1000, vwap=102.0)
-    ctx.vwap_upper_2 = 110.0
-    ctx.vwap_lower_2 = 90.0
-    ctx.vwap_std = 1.0
-    ctx.drive_number = 1
-    ctx.drive_entry_valid = False
-    ctx.cvd_slope = cvd_slope
-    ctx.setup_evidence = None
-    ctx.triple_a_phase = ""
-    ctx.triple_a_signal = ""
-    ctx.leg_lvn = 0.0
-    ctx.break_direction = ""
-    ctx.break_type = ""
-    ctx.squeeze_detected = squeeze
-    ctx.absorption_cluster = False
-    ctx.pullback_confirmed = pullback
-    return ctx
+def _base_ctx(direction="LONG", cvd_slope=0.3, close=100.0, squeeze_dir="LONG",
+              trapped=100.0, tick_size=0.05) -> DecisionContext:
+    bar = Bar(time="t", open=close, high=close + 0.2, low=close - 0.2,
+              close=close, volume=100.0)
+    return DecisionContext(
+        state=None, bar=bar, symbol="SYM", time_str="t",
+        agent_direction=direction,
+        agent_probability=0.7,
+        market_state="IMBALANCED",
+        vwap_upper_2=110.0,
+        vwap_lower_2=90.0,
+        cvd_slope=cvd_slope,
+        tick_size=tick_size,
+        squeeze_detected=bool(squeeze_dir),
+        squeeze_direction=squeeze_dir or "",
+        squeeze_trapped_level=trapped,
+        pullback_confirmed=abs(close - trapped) <= 3.0 * tick_size,
+    )
 
 
-def test_squeeze_breakout_pullback_long_passes_gate_3():
-    ctx = _make_context(direction="LONG", squeeze=True, pullback=True, cvd_slope=0.2)
-    res = gate_triple_a_edge(ctx)
-    assert res.passed is True
-    assert "Squeeze breakout pullback LONG" in res.reason
+def test_squeeze_long_pullback_passes_gate3():
+    """LONG squeeze, bar retesting trapped level (2 ticks away) -> entry."""
+    ctx = _base_ctx(direction="LONG", cvd_slope=0.3, close=100.10,
+                    squeeze_dir="LONG", trapped=100.0)
+    r = gate_triple_a_edge(ctx)
+    assert r.passed and "Squeeze" in r.reason
 
 
-def test_squeeze_breakout_pullback_short_passes_gate_3():
-    ctx = _make_context(direction="SHORT", squeeze=True, pullback=True, cvd_slope=-0.2)
-    res = gate_triple_a_edge(ctx)
-    assert res.passed is True
-    assert "Squeeze breakdown pullback SHORT" in res.reason
+def test_squeeze_short_pullback_passes_gate3():
+    ctx = _base_ctx(direction="SHORT", cvd_slope=-0.3, close=99.90,
+                    squeeze_dir="SHORT", trapped=100.0)
+    r = gate_triple_a_edge(ctx)
+    assert r.passed and "Squeeze" in r.reason
 
 
-def test_squeeze_without_pullback_confirmation_fails_gate_3():
-    ctx = _make_context(direction="LONG", squeeze=True, pullback=False, cvd_slope=0.2)
-    res = gate_triple_a_edge(ctx)
-    assert res.passed is False
-    assert "No Triple-A edge" in res.reason
+def test_squeeze_direction_mismatch_fails_gate3():
+    """Squeeze signals LONG but agent is SHORT — no edge."""
+    ctx = _base_ctx(direction="SHORT", cvd_slope=0.3, close=100.10,
+                    squeeze_dir="LONG", trapped=100.0)
+    r = gate_triple_a_edge(ctx)
+    assert not r.passed
+
+
+def test_squeeze_without_pullback_confirmation_fails_gate3():
+    """Price far from the trapped level — no retest, no entry."""
+    ctx = _base_ctx(direction="LONG", cvd_slope=0.3, close=102.0,
+                    squeeze_dir="LONG", trapped=100.0)
+    r = gate_triple_a_edge(ctx)
+    assert not r.passed
+    assert "No Triple-A edge" in r.reason

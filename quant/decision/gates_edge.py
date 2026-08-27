@@ -79,12 +79,17 @@ def _check_setup_paths(ctx: DecisionContext, cvd_slope: float) -> GateResult | N
             return GateResult(3, True, "Initiative upside breakout confirmed")
         if break_dir == "DOWN" and ctx.agent_direction == "SHORT" and cvd_slope < 0.2:
             return GateResult(3, True, "Initiative downside breakdown confirmed")
-    # Squeeze Breakout Pullback (Fabio Playbook #4: trapped volume squeeze -> first retest pullback)
-    if getattr(ctx, "squeeze_detected", False) or getattr(ctx, "absorption_cluster", False):
-        if ctx.agent_direction == "LONG" and cvd_slope >= -0.1 and getattr(ctx, "pullback_confirmed", False):
-            return GateResult(3, True, "Squeeze breakout pullback LONG confirmed")
-        if ctx.agent_direction == "SHORT" and cvd_slope <= 0.1 and getattr(ctx, "pullback_confirmed", False):
-            return GateResult(3, True, "Squeeze breakdown pullback SHORT confirmed")
+    # Fabio Playbook #4: trapped-volume squeeze -> enter on first retest of trapped level
+    sq_dir = getattr(ctx, "squeeze_direction", "") or ""
+    if sq_dir and ctx.agent_direction == sq_dir:
+        trapped = float(getattr(ctx, "squeeze_trapped_level", 0.0) or 0.0)
+        tick = (ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else 0.05)
+        retested = ctx.bar and trapped > 0 and abs(float(ctx.bar.close) - trapped) <= 3.0 * tick
+        if retested or getattr(ctx, "pullback_confirmed", False):
+            if ctx.agent_direction == "LONG" and cvd_slope >= -0.1:
+                return GateResult(3, True, f"Squeeze {sq_dir} retest @{trapped:.2f}")
+            if ctx.agent_direction == "SHORT" and cvd_slope <= 0.1:
+                return GateResult(3, True, f"Squeeze {sq_dir} retest @{trapped:.2f}")
     return None
 
 
