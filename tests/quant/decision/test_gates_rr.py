@@ -40,3 +40,23 @@ def test_gate4_passes_stop_within_cap(monkeypatch):
     )
     result = gates_rr.gate_risk_reward(ctx)
     assert result.passed
+
+
+def test_gate4_detail_reports_stop_cap_not_synthetic_rr(monkeypatch):
+    from quant.decision import gates_rr
+    from quant.decision.context_builder import DecisionContextBuilder
+    from quant.bars import Bar
+    from quant.execution.risk import SessionRisk
+
+    monkeypatch.setattr(gates_rr, "structural_anchor", lambda ctx, direction: 99.5)
+
+    ctx = DecisionContextBuilder().build(
+        bar=Bar(time="t300", open=99.0, high=101.0, low=98.5, close=100.0, volume=10.0),
+        symbol="S", market="NSE", contract_expiry=None, tick_size=0.05,
+        bar_index=20, warm_bars=15, cooldown_remaining_sec=0,
+        risk_state=SessionRisk(storage=None, symbol="S").state(),
+        amt_dto={"absorptionSide": "SELL_ABSORBED"},
+    )
+    r = gates_rr.gate_risk_reward(ctx)
+    assert "RR=" not in r.extra or "synthetic" in r.extra
+    assert "risk" in r.extra.lower()

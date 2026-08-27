@@ -344,7 +344,9 @@ class SessionRisk:
 
         CONSERVATIVE: first 1-2 trades OR 2+ consecutive losses → 0.25% base risk
         CUSHION: session_pnl > 0 after 2+ trades → 0.35% + 40% of session profit
+                 (addition capped at 30% of session profit; total never above 0.50%)
         MOMENTUM: 2+ consecutive wins → 0.40% + 40% of session profit
+                  (addition capped at 30% of session profit; total never above 0.50%)
         """
         tier = self._cushion_tier()
         if tier == "CONSERVATIVE" or self._daily_pnl <= 0:
@@ -352,6 +354,10 @@ class SessionRisk:
 
         base = 0.004 if tier == "MOMENTUM" else 0.0035
         # Spec §12.2: Deploy 40% of earned cushion while ring-fencing core capital
-        cushion_bonus = (0.40 * self._daily_pnl) / self._equity if self._equity > 0 else 0.0
-        return base + cushion_bonus
+        # Fabio envelope: addition never exceeds 30% of session profit, total ≤ 0.50%
+        cushion_bonus = min(
+            (0.40 * self._daily_pnl) / self._equity,
+            0.30 * abs(self._daily_pnl) / self._equity,   # ≤30% of session profit
+        ) if self._equity > 0 else 0.0
+        return min(base + cushion_bonus, 0.005)           # hard ceiling 0.50%
 
