@@ -419,14 +419,12 @@ class PositionManager:
             logger.error("🛑 [PYRAMID FAIL] %s P%d: %s", self.symbol, self.pyramid_count + 1, exc)
             raise
 
-        self.pyramid_count += 1
-        self.pyramid_positions.append(pyramid_pos)
-
         # E11 FIX — reserve aggregate portfolio risk for the add-on BEFORE we
         # commit. Without this, pyramids bypassed the cross-engine ceiling
         # (8 engines × 0.5% each would otherwise risk ~4% per engine on top of
         # the base). Reserve at fill time; release via record_close when the
-        # pyramid is closed in manage_exit().
+        # pyramid is closed in manage_exit(). Checked BEFORE the count/append
+        # so a refusal leaves no counted-but-unreserved ghost pyramid.
         add_risk = abs(float(pyramid_pos.order.signal.entry) - float(new_sl)) * max(1.0, abs(pyramid_size))
         if self._portfolio_risk is not None:
             ok, why = self._portfolio_risk.can_accept(add_risk)
@@ -437,6 +435,11 @@ class PositionManager:
                 logger.info("🛑 [PYRAMID RISK] %s refused at register", self.symbol)
                 return
             self._pyramid_open_risk[pyramid_pos._id] = add_risk
+
+        self.pyramid_count += 1
+        self.pyramid_positions.append(pyramid_pos)
+
+        if self._portfolio_risk is not None:
             logger.info(
                 "⚡ [PYRAMID RISK] %s P%d registered ₹%.2f open risk (total portfolio open: ₹%.2f)",
                 self.symbol, self.pyramid_count, add_risk, self._portfolio_risk.open_risk,
