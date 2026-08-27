@@ -665,22 +665,7 @@ class QuantEngine:
                 "balance_ratio": amt_dto.get("balanceRatio"),
             },
         )
-        ctx = DecisionContextBuilder().build(
-            bar=bar,
-            symbol=self.symbol,
-            market=self._market,
-            contract_expiry=self._contract_expiry,
-            tick_size=self._tick_size,
-            bar_index=self._bar_index,
-            warm_bars=self._amt_engine.warm_bars,
-            cooldown_remaining_sec=cooldown_remaining_sec,
-            risk_state=risk_st,
-            amt_dto=amt_dto,
-            order_book=self._last_depth,
-            position=self._position,
-            entry_bar_index=self._entry_bar_index,
-            recent_decisions=list(self._recent_decisions),
-        )
+        ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
         decision = self._strategy.should_enter(ctx)
         # S1: record the decision itself — gates with pass/fail and reasons.
         try:
@@ -822,6 +807,80 @@ class QuantEngine:
                 decision.block_reasons,
             )
 
+    def _build_context(self, bar, amt_dto: dict, cooldown_remaining_sec: float):
+        """Single DecisionContext source shared by the flat-path ``_decide()``
+        and the positioned thesis-flip check — extracted, not duplicated."""
+        return DecisionContextBuilder().build(
+            bar=bar,
+            symbol=self.symbol,
+            market=self._market,
+            contract_expiry=self._contract_expiry,
+            tick_size=self._tick_size,
+            bar_index=self._bar_index,
+            warm_bars=self._amt_engine.warm_bars,
+            cooldown_remaining_sec=cooldown_remaining_sec,
+            risk_state=self._risk.state(),
+            amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
+            order_book=self._last_depth,
+            position=self._position,
+            entry_bar_index=self._entry_bar_index,
+            recent_decisions=list(self._recent_decisions),
+        )
+
+    def _check_thesis_flip(self, amt_dto: dict, bar) -> None:
+        """Opposing-signal exit (thesis invalidation).
+
+        Runs ONLY after manage_exit declined to close (SL/spread/CVD/TP/
+        trail/time priority preserved). Re-runs the unchanged decision
+        pipeline with one bypass — gate 2's open-position blocker — through
+        the existing DecisionService so SignalBuilder qualification holds.
+        A fully-approved signal OPPOSITE the held side flattens now; a halt
+        gates entries, not exits, so this still runs while risk-halted.
+        """
+        pos = self._position
+        if pos is None:
+            return
+        bars_since_close = (
+            self._bar_index - self._last_close_bar_index
+            if self._last_close_bar_index >= 0
+            else self._cooldown_bars  # no trade yet → no cooldown
+        )
+        cooldown_remaining_sec = max(0, self._cooldown_bars - bars_since_close) * int(
+            getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC) or DEFAULT_INTERVAL_SEC
+        )
+        ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
+        decision = self._decision_service.evaluate(ctx, allow_positioned=True)
+        self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
+        if not (decision.approved and decision.signal is not None):
+            return
+        signal = decision.signal
+        held_side = "LONG" if pos.size > 0 else "SHORT"
+        # Same-direction approvals (and NO_EDGE) do nothing.
+        if signal.type == held_side:
+            return
+        logger.info(
+            "🔄 [THESIS FLIP] %s: fresh %s approval (%s @ %.2f RR=%.2f) opposes "
+            "open %s @ %.2f — flattening (OPPOSING_SIGNAL)",
+            self.symbol, signal.type, signal.model_label,
+            float(signal.entry), float(signal.rr), held_side,
+            float(pos.open_price) if getattr(pos, "open_price", None) else 0.0,
+        )
+        pm = self._get_position_manager()
+        pm._execute_full_close(
+            pos,
+            ExitDecision(True, "OPPOSING_SIGNAL", float(bar.close)),
+            bar.time,
+        )
+        self._position = None
+        self._pyramid_positions = pm.pyramid_positions
+        self._pyramid_count = pm.pyramid_count
+        self._last_close_bar_index = self._bar_index
+        if self._portfolio_risk is not None:
+            self._portfolio_risk.record_close(
+                getattr(self, "_open_trade_risk", 0.0),
+                float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
+            )
+            self._open_trade_risk = 0.0
 
     def _get_position_manager(self) -> PositionManager:
         """Lazily create the PositionManager with the correct emit function."""
@@ -921,6 +980,11 @@ class QuantEngine:
                     self._advisor.on_context(advisor_ctx)
             except Exception:
                 pass
+
+        # Thesis invalidation: normal exits ran first and the position
+        # survived — evaluate a fresh contrary approval against it.
+        if remaining is not None:
+            self._check_thesis_flip(amt_dto, bar)
 
     def _check_pyramid(self, amt_dto: dict, bar) -> None:
         pm = self._get_position_manager()

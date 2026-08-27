@@ -131,7 +131,8 @@ def test_decision_service_fallback_uses_gate_numbers_not_positions(monkeypatch):
         GateResult(gate=1, passed=False, reason="session closed"),
     ]
     monkeypatch.setattr(
-        pipeline_mod.GatePipeline, "evaluate", lambda self, ctx: fake_results
+        pipeline_mod.GatePipeline, "evaluate",
+        lambda self, ctx, **kwargs: fake_results,
     )
 
     decision = DecisionService().evaluate(ctx)
