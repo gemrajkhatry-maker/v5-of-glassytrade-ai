@@ -104,7 +104,10 @@ def test_tick_tp_touch_books_first_partial_not_full_close():
 
 
 def test_tick_tp_second_touch_closes_remaining_runner():
-    """After TP1 books the half, a second TP tag closes the runner (size→0)."""
+    """After TP1 books the half, a TP2 tag closes the runner (size→0).
+
+    Runner parity with the bar path (Rule 4): tier>=1 waits for
+    TP2 = entry ± 2*(tp−entry), NOT another sig_tp tag."""
     pm, oms = _make_pm()
     sig = _make_signal(symbol="TEST", side="LONG", entry=100.0, sl=90.0, tp=120.0)
     open_position = oms.submit(sig, 4.0)
@@ -112,8 +115,9 @@ def test_tick_tp_second_touch_closes_remaining_runner():
     remaining = pm.manage_tick_exit(open_position, tick_price=120.0, tick_time="12:00:00")
     assert remaining is not None and remaining.size == 2
 
-    out = pm.manage_tick_exit(remaining, tick_price=120.0, tick_time="12:00:01")
-    assert out is None                           # runner closed
+    out = pm.manage_tick_exit(remaining, tick_price=140.0, tick_time="12:00:01")
+    assert out is None                           # runner closed at TP2
+    assert pm.last_fill is not None and pm.last_fill.reason == "TP2"
     assert pm._exits._tp_tier.get(open_position._id) is None  # state released
 
 
@@ -130,3 +134,108 @@ def test_tick_tp_touch_records_partial_pnl_in_risk():
     assert out is not None and out.size == 2
     assert pm.last_partial_fill is not None      # bar-path parity: partial is journaled
     assert pm._risk._daily_pnl == pytest.approx((120.0 - 100.0) * 2.0)
+
+
+# ---------------------------------------------------------------------------
+# Runner (tier>=1) TP geometry — bar parity (audit round 2, Task 2)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def pm():
+    manager, _oms = _make_pm()
+    return manager
+
+
+@pytest.fixture
+def open_position_after_tp1(pm):
+    """Long runner after TP1 booked on the tick path: tier==1, half size
+    left, BE floor armed at entry."""
+    sig = _make_signal(symbol="TEST", side="LONG", entry=100.0, sl=90.0, tp=120.0)
+    pos = pm._oms.submit(sig, 4.0)
+    remaining = pm.manage_tick_exit(pos, tick_price=120.0, tick_time="12:00:00")
+    assert remaining is not None and remaining.size == 2   # tier==1 state ready
+    return remaining
+
+
+def test_runner_not_killed_at_sig_tp_on_tick_path(pm, open_position_after_tp1):
+    pos = open_position_after_tp1           # tier==1, half booked, BE armed
+    out = pm.manage_tick_exit(pos, tick_price=120.05, tick_time="12:01:00")
+    assert out is not None                  # runner STILL ALIVE at sig_tp touch
+
+
+def test_runner_closes_at_tp2_on_tick_path(pm, open_position_after_tp1):
+    pos = open_position_after_tp1
+    entry = float(pos.order.signal.entry)
+    long = pos.size > 0
+    tp2 = entry + 2.0 * (float(pos.order.signal.tp) - entry) if long else \
+          entry - 2.0 * (entry - float(pos.order.signal.tp))
+    out = pm.manage_tick_exit(pos, tick_price=tp2, tick_time="12:02:00")
+    assert out is None                      # runner closes at the real TP2
+
+
+def test_be_floor_hit_journals_breakeven_not_sl(pm, open_position_after_tp1):
+    """A stop touched purely via the armed BE floor must journal as
+    BREAKEVEN (scratch), not SL — bar-path parity with exit_checks Rule 4b."""
+    pos = open_position_after_tp1           # tier==1 runner, BE floor armed at entry
+    out = pm.manage_tick_exit(
+        pos,
+        tick_price=float(pos.order.signal.entry) - 0.05,
+        tick_time="12:03:00",
+    )
+    assert out is None                                  # closed
+    assert pm.last_fill is not None and pm.last_fill.reason == "BREAKEVEN"
+
+
+# ---------------------------------------------------------------------------
+# Short-side mirror of the runner TP geometry + BREAKEVEN journaling above.
+# Each short test below flips ONLY the signal side vs its long mirror; the
+# price magnitudes are identical (entry=100, tp=80 mirrors tp=120 around
+# entry), so any behavioural divergence is direction logic, not thresholds.
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def open_short_position_after_tp1(pm):
+    """Short runner after TP1 booked on the tick path: tier==1, half size
+    left, BE floor armed at entry (mirror of open_position_after_tp1)."""
+    sig = _make_signal(symbol="TEST", side="SHORT", entry=100.0, sl=110.0, tp=80.0)
+    pos = pm._oms.submit(sig, 4.0)
+    remaining = pm.manage_tick_exit(pos, tick_price=80.0, tick_time="12:00:00")
+    assert remaining is not None and remaining.size == -2   # tier==1 state ready
+    return remaining
+
+
+def test_short_runner_not_killed_at_sig_tp_on_tick_path(pm, open_short_position_after_tp1):
+    pos = open_short_position_after_tp1     # tier==1, half booked, BE armed
+    # Mirror of the long test's sig_tp+0.05 nudge past the tag; on a short a
+    # sig_tp touch means trading BELOW tp (=80), so we probe 79.95.
+    out = pm.manage_tick_exit(pos, tick_price=79.95, tick_time="12:01:00")
+    assert out is not None                  # runner STILL ALIVE at sig_tp touch
+
+
+def test_short_runner_closes_at_tp2_on_tick_path(pm, open_short_position_after_tp1):
+    pos = open_short_position_after_tp1
+    entry = float(pos.order.signal.entry)
+    long = pos.size > 0
+    tp2 = entry + 2.0 * (float(pos.order.signal.tp) - entry) if long else \
+          entry - 2.0 * abs(float(pos.order.signal.tp) - entry)
+    assert not long                         # sanity: this is the short variant
+    assert tp2 == pytest.approx(entry - 2.0 * abs(80.0 - 100.0))  # = 60.0
+    out = pm.manage_tick_exit(pos, tick_price=tp2, tick_time="12:02:00")
+    assert out is None                      # runner closes at the real TP2
+    assert pm.last_fill is not None and pm.last_fill.reason == "TP2"
+    assert pm._exits._tp_tier.get(pos._id) is None   # state released
+
+
+def test_short_be_floor_hit_journals_breakeven_not_sl(pm, open_short_position_after_tp1):
+    """A short stop touched purely via the armed BE floor must journal as
+    BREAKEVEN (scratch), not SL — mirror of the long Rule 4b path."""
+    pos = open_short_position_after_tp1     # tier==1 runner, BE floor armed at entry
+    # Mirror of the long test's entry−0.05 breach; on a short a BE-floor hit
+    # means trading ABOVE entry, so we probe entry+0.05 with the same delta.
+    out = pm.manage_tick_exit(
+        pos,
+        tick_price=float(pos.order.signal.entry) + 0.05,
+        tick_time="12:03:00",
+    )
+    assert out is None                                  # closed
+    assert pm.last_fill is not None and pm.last_fill.reason == "BREAKEVEN"

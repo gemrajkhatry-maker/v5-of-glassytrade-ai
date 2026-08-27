@@ -235,22 +235,26 @@ class PositionManager:
         fill = self._oms.close(position, exit_dec.close_price, time_str, exit_dec.reason)
         self.last_fill = fill
         self._exits.pop_trail(position)
-        # Reset pyramid state: close all pyramid add-ons at the same price
+        # Reset pyramid state: close all pyramid add-ons at the same price.
+        # Collect (pyr_pos, its_fill) pairs — the E11 release below must pair
+        # each add-on with its OWN fill pnl, not a loop-leaked leftover.
+        closed_pyrs: list[tuple[object, object]] = []
         for pyr_pos in self.pyramid_positions:
             pyr_fill = self._oms.close(pyr_pos, exit_dec.close_price, time_str, exit_dec.reason + "_PYRAMID")
             self._exits.pop_trail(pyr_pos)
             self._risk.record_trade(pyr_fill.pnl, count_as_trade=False)
             self._emit(PositionClosed(symbol=self.symbol, time=time_str, fill=pyr_fill))
             self.last_pyramid_pnl += float(pyr_fill.pnl)
+            closed_pyrs.append((pyr_pos, pyr_fill))
             logger.info(
                 "🔒 [PYRAMID CLOSED] %s level=%d reason=%s pnl=₹%.2f",
                 self.symbol, pyr_pos.pyramid_level, exit_dec.reason, pyr_fill.pnl,
             )
 
         # E11 FIX — release the aggregate open risk reserved for these add-ons.
-        if self._portfolio_risk is not None and self.pyramid_positions:
+        if self._portfolio_risk is not None and closed_pyrs:
             released = 0.0
-            for pyr_pos in self.pyramid_positions:
+            for pyr_pos, pyr_fill in closed_pyrs:
                 risk_i = self._pyramid_open_risk.pop(pyr_pos._id, 0.0)
                 self._portfolio_risk.record_close(risk_i, float(pyr_fill.pnl))
                 released += risk_i
@@ -288,17 +292,57 @@ class PositionManager:
             effective_sl = max(effective_sl, float(trail_stop)) if is_long else min(effective_sl, float(trail_stop))
         elif be_floor is not None:
             effective_sl = max(effective_sl, float(be_floor)) if is_long else min(effective_sl, float(be_floor))
-            
+
+        # Tier-aware tick targets: T1 tags at sig_tp; the runner (tier>=1)
+        # waits for TP2 — same geometry as ExitEngine Rule 4
+        # (check_take_profit_tiers: entry ± 2*|tp−entry|), else ticks kill
+        # the runner instantly at sig_tp.
+        tp2_level = 0.0
+        if sig_tp > 0:
+            entry_px = (
+                float(position.order.signal.entry)
+                if position.order and position.order.signal else 0.0
+            )
+            if entry_px > 0:
+                r = abs(sig_tp - entry_px)
+                tp2_level = entry_px + 2.0 * r if is_long else entry_px - 2.0 * r
+
         reason = None
         if is_long:
             if effective_sl > 0 and tick_price <= effective_sl:
-                reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
+                if trail_stop is not None and effective_sl == float(trail_stop):
+                    reason = "TRAIL"
+                elif be_floor is not None and effective_sl == float(be_floor):
+                    reason = "BREAKEVEN"     # journal truth: scratch, not a stop-out
+                else:
+                    reason = "SL"
             elif sig_tp > 0 and tick_price >= sig_tp:
+                if self._exits._tp_tier.get(position._id, 0) >= 1:
+                    if tp2_level > 0 and tick_price >= tp2_level:
+                        return self._execute_full_close(
+                            position,
+                            ExitDecision(True, "TP2", float(tick_price)),
+                            tick_time,
+                        )
+                    return position          # runner keeps running
                 return self._tick_tp_touch(position, float(tick_price), tick_time)
         else:
             if effective_sl > 0 and tick_price >= effective_sl:
-                reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
+                if trail_stop is not None and effective_sl == float(trail_stop):
+                    reason = "TRAIL"
+                elif be_floor is not None and effective_sl == float(be_floor):
+                    reason = "BREAKEVEN"     # journal truth: scratch, not a stop-out
+                else:
+                    reason = "SL"
             elif sig_tp > 0 and tick_price <= sig_tp:
+                if self._exits._tp_tier.get(position._id, 0) >= 1:
+                    if tp2_level > 0 and tick_price <= tp2_level:
+                        return self._execute_full_close(
+                            position,
+                            ExitDecision(True, "TP2", float(tick_price)),
+                            tick_time,
+                        )
+                    return position          # runner keeps running
                 return self._tick_tp_touch(position, float(tick_price), tick_time)
 
         if reason is not None:
