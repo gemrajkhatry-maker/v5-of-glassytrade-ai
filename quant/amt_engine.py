@@ -171,6 +171,7 @@ class AMTEngine:
         
         # State for engine integration
         self._last_amt_dto: dict | None = None
+        self._last_underlying_close: float = 0.0
         self._warm_bars: int = 0
         self._amt_fail_logged: bool = False
 
@@ -272,8 +273,13 @@ class AMTEngine:
                                 "vah": float(prev_res.value_area_high),
                                 "val": float(prev_res.value_area_low),
                             }
+                            self._last_underlying_close = float(prev_candles[-1].close)
                             self._session_levels.save_levels(
-                                self.symbol, last_date, float(prev_res.poc), float(prev_res.value_area_high), float(prev_res.value_area_low)
+                                self.symbol, last_date,
+                                float(prev_res.poc),
+                                float(prev_res.value_area_high),
+                                float(prev_res.value_area_low),
+                                close=self._last_underlying_close,
                             )
                             self._npoc.add_session_poc(self._underlying(), last_date, float(prev_res.poc))
                             logger.info(
@@ -312,11 +318,13 @@ class AMTEngine:
                         prior_poc=self._prior["poc"],
                         prior_vah=self._prior["vah"],
                         prior_val=self._prior["val"],
+                        prior_close=self._prior.get("close", 0.0),
                         npoc_tracker=self._npoc,
                         option_tick=last_ohlc,
                         footprint_accumulator=self._footprint,
                     )
                     self._last_amt_dto = amt_result_to_dto(result)
+                    self._last_underlying_close = float(last_ohlc.close)
                 except Exception:
                     logger.warning("Initial AMT analyze after seed failed for %s", self.symbol, exc_info=True)
         logger.info(
@@ -355,6 +363,7 @@ class AMTEngine:
                     prev_poc,
                     float(prev.get("valueAreaHigh") or 0.0),
                     float(prev.get("valueAreaLow") or 0.0),
+                    close=self._last_underlying_close,
                 )
                 self._npoc.add_session_poc(
                     self._underlying(), self._session_date, prev_poc
@@ -397,6 +406,7 @@ class AMTEngine:
                 prior_poc=self._prior["poc"],
                 prior_vah=self._prior["vah"],
                 prior_val=self._prior["val"],
+                prior_close=self._prior.get("close", 0.0),
                 npoc_tracker=self._npoc,
                 option_tick=ohlc,
                 footprint_accumulator=self._footprint,
@@ -412,6 +422,7 @@ class AMTEngine:
         dto = amt_result_to_dto(result)
         with self._amt_lock:
             self._last_amt_dto = dto
+            self._last_underlying_close = float(ohlc.close)
         return dto
 
     @property

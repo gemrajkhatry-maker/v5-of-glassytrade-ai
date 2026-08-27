@@ -76,19 +76,23 @@ class SessionLevelStore:
     # Prior-session levels
     # ------------------------------------------------------------------
 
-    def save_levels(self, symbol: str, date: str, poc: float, vah: float, val: float) -> None:
-        """Record a completed session's POC/VAH/VAL for ``symbol``."""
+    def save_levels(
+        self, symbol: str, date: str, poc: float, vah: float, val: float,
+        close: float = 0.0,
+    ) -> None:
+        """Record a completed session's POC/VAH/VAL (and close) for ``symbol``."""
         with self._lock:
             self._levels[symbol] = {
                 "date": str(date),
                 "poc": float(poc),
                 "vah": float(vah),
                 "val": float(val),
+                "close": float(close),
             }
             self._flush()
 
     def load_levels(self, symbol: str) -> dict:
-        """Return ``{date, poc, vah, val}`` for ``symbol`` (zeros when absent)."""
+        """Return ``{date, poc, vah, val, close}`` for ``symbol`` (zeros when absent)."""
         with self._lock:
             rec = self._levels.get(symbol) or {}
         return {
@@ -96,6 +100,7 @@ class SessionLevelStore:
             "poc": float(rec.get("poc") or 0.0),
             "vah": float(rec.get("vah") or 0.0),
             "val": float(rec.get("val") or 0.0),
+            "close": float(rec.get("close") or 0.0),
         }
 
     # ------------------------------------------------------------------

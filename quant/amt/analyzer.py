@@ -360,6 +360,7 @@ class AMTAnalyzer:
         prior_poc: float = 0.0,
         prior_vah: float = 0.0,
         prior_val: float = 0.0,
+        prior_close: float = 0.0,
         developing_profile: IncrementalVolumeProfile | None = None,
         cushion_tier: str = "Conservative",
         session_pnl: float = 0.0,
@@ -780,7 +781,8 @@ class AMTAnalyzer:
             balance_ratio=balance_ratio, leg_data=leg_data,
             ib_complete=ib_complete, ib_high=ib_high, ib_low=ib_low,
             ib_state=ib_state, prior_poc=prior_poc, prior_vah=prior_vah,
-            prior_val=prior_val, session_open_price=session_open_price,
+            prior_val=prior_val, prior_close=prior_close,
+            session_open_price=session_open_price,
             ar_state=ar_state, poc_migration=poc_migration,
             lvn_play=lvn_play, break_state=break_state,
             ofi_result=ofi_result, obi=obi,
@@ -817,7 +819,7 @@ class AMTAnalyzer:
                       recent_vwap, session_vwap, vwap_upper_1, vwap_lower_1,
                       vwap_upper_2, vwap_lower_2, vwap_deviation_sigmas,
                       balance_ratio, leg_data, ib_complete, ib_high, ib_low,
-                      ib_state, prior_poc, prior_vah, prior_val,
+                      ib_state, prior_poc, prior_vah, prior_val, prior_close,
                       session_open_price, ar_state, poc_migration, lvn_play,
                       break_state, ofi_result, obi, dev_poc, dev_vah, dev_val,
                       cushion_tier, session_pnl, bubble_retests, npoc_above,
@@ -880,7 +882,7 @@ class AMTAnalyzer:
             gap_type=(
                 classify_gap(
                     open_price=session_open_price,
-                    prior_close=prior_poc,
+                    prior_close=(prior_close if prior_close > 0 else prior_poc),
                     prior_range=(
                         prior_vah - prior_val
                         if prior_vah > 0 and prior_val > 0
