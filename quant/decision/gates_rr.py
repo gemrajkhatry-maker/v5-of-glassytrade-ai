@@ -24,13 +24,7 @@ def gate_risk_reward(
     entry = float(ctx.bar.close)
     tick = ctx.tick_size if ctx.tick_size and ctx.tick_size > 0 else TICK_SIZE_NSE_OPTIONS
     anchor = structural_anchor(ctx, direction)
-    sl = structural_stop(direction, entry, anchor, tick)
-    if direction == "LONG":
-        tp = entry + (entry - sl) * DEFAULT_TP_MULTIPLIER
-    else:
-        tp = entry - (sl - entry) * DEFAULT_TP_MULTIPLIER
-    sl = float(sl)
-    tp = float(tp)
+    sl = float(structural_stop(direction, entry, anchor, tick))
     risk = abs(entry - sl)
     scaled_cap_ticks = max(max_distance_ticks, (entry * 0.0075) / tick)
     if risk > scaled_cap_ticks * tick:
@@ -39,7 +33,13 @@ def gate_risk_reward(
             f"Stop too wide ({risk / tick:.0f} > {scaled_cap_ticks:.0f} ticks)",
             f"SL={sl:.2f} entry={entry:.2f}",
         )
-    reward = abs(tp - entry)
-    rr = reward / risk if risk > 0 else 0.0
-    detail = f"RR={rr:.2f} SL={sl:.2f} TP={tp:.2f}"
-    return GateResult(4, rr >= min_rr, "RR pass" if rr >= min_rr else f"RR below {min_rr}", detail)
+    # Gate 4 is the stop-width authority only. The synthetic always-2R TP is
+    # dropped — it was a fake "RR pass" by construction. SignalBuilder is the
+    # sole R:R qualifier (structural targets >= 1.5 else 2R fallback). Report
+    # stop truth, not a measured RR we never took.
+    reward = risk * DEFAULT_TP_MULTIPLIER     # planning assumption, NOT measured RR
+    detail = (
+        f"stop risk={risk / tick:.0f} ticks (cap {scaled_cap_ticks:.0f}) "
+        f"| SL={sl:.2f} | RR enforced by SignalBuilder min_rr=1.5"
+    )
+    return GateResult(4, True, "Stop within cap", detail)

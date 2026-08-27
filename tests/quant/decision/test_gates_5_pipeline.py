@@ -31,10 +31,11 @@ def test_gate4_passes_good_rr():
     assert r.passed and r.gate == 4
 
 
-def test_gate4_rejects_poor_rr():
-    # Gate 4 enforces min_rr — poor RR is rejected
+def test_gate4_no_longer_gates_on_rr():
+    # Gate 4's pass/fail is stop-width only; R:R qualification is
+    # SignalBuilder's job (structural targets >= 1.5 else 2R fallback).
     r = gate_risk_reward(_ctx(val=99.9), min_rr=5.0)
-    assert not r.passed and r.gate == 4
+    assert r.passed and r.gate == 4
 
 
 def test_gate4_rejects_far_stop():
