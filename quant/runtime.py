@@ -544,10 +544,9 @@ class QuantEngine:
             release = getattr(self, "_open_trade_risk", 0.0) * fraction
             self._portfolio_risk.record_close(release, float(pm.last_partial_fill.pnl))
             self._open_trade_risk = getattr(self, "_open_trade_risk", 0.0) - release
-        if pm.last_pyramid_pnl:
-            # ponytail: pyramid add-ons never register open risk (they only
-            # fire on a risk-free base); book their pnl, release nothing.
-            self._portfolio_risk.record_close(0.0, float(pm.last_pyramid_pnl))
+        # Pyramid add-on PnL is NOT booked here: _execute_full_close's E11
+        # loop already pairs every add-on with its OWN fill pnl and risk_i —
+        # re-releasing the aggregate last_pyramid_pnl would double-book it.
 
     def _manage_tick_exit(self, tick_price: float, tick_time: str) -> None:
         """Tick-level fast stop-loss and take-profit breach check (Fabio)."""
