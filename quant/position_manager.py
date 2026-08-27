@@ -294,17 +294,32 @@ class PositionManager:
             if effective_sl > 0 and tick_price <= effective_sl:
                 reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
             elif sig_tp > 0 and tick_price >= sig_tp:
-                reason = "TP"
+                return self._tick_tp_touch(position, float(tick_price), tick_time)
         else:
             if effective_sl > 0 and tick_price >= effective_sl:
                 reason = "TRAIL" if (trail_stop is not None and effective_sl == float(trail_stop)) else "SL"
             elif sig_tp > 0 and tick_price <= sig_tp:
-                reason = "TP"
-                
+                return self._tick_tp_touch(position, float(tick_price), tick_time)
+
         if reason is not None:
             exit_dec = ExitDecision(True, reason, float(tick_price))
             return self._execute_full_close(position, exit_dec, tick_time)
         return position
+
+    def _tick_tp_touch(self, position, px: float, ts: str):
+        """Bar-parity TP handling on the tick path: T1 books half + arms BE;
+        T2 (runner tagged at TP) closes. Mirrors ExitEngine Rule 4."""
+        tier = self._exits._tp_tier.get(position._id, 0)
+        entry = float(position.order.signal.entry)
+        if tier == 0 and abs(position.size) >= 2:
+            dec = ExitDecision(True, "TP1", px, partial_fraction=0.5)
+            partial_fill, remaining = self._oms.close_partial(
+                position, 0.5, px, ts, dec.reason,
+            )
+            self._exits._tp_tier[position._id] = 1
+            self._exits._breakeven[position._id] = entry   # same effect as exits.py:160-161
+            return remaining
+        return self._execute_full_close(position, ExitDecision(True, "TP", px), ts)
 
     def check_pyramid(self, amt_dto: dict, bar, position, bar_index: int) -> None:
         """Spec §13.2 pyramid engine: add-on positions at Impulse Leg LVN retest.
