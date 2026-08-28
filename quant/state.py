@@ -155,21 +155,29 @@ def _risk_to_view(risk: RiskState) -> dict:
     }
 
 
-def _position_to_view(position: Position, fill: Fill | None = None) -> dict:
-    sig = position.order.signal
+def _position_to_view(position: Any, fill: Any | None = None) -> dict:
+    pos_id = str(getattr(position, "_id", None) or getattr(position, "id", "") or uuid.uuid4())
+    sig = getattr(position, "order", None) and getattr(position.order, "signal", None)
+    sym = getattr(position, "symbol", "") or (sig.symbol if sig else "")
+    side = getattr(position, "side", "") or (sig.type if sig else ("LONG" if getattr(position, "size", 0) > 0 else "SHORT"))
+    entry_px = float(getattr(position, "open_price", 0.0) or getattr(position, "entry_price", 0.0))
+    size_val = float(getattr(position, "size", 0.0))
+    sl = float(getattr(position, "stop_loss", 0.0) or (sig.sl if sig else 0.0))
+    tp = float(getattr(position, "take_profit", 0.0) or (sig.tp if sig else 0.0))
+    pnl_val = float(fill.pnl if fill is not None else getattr(position, "realized_pnl", 0.0))
+    open_t = getattr(position, "open_time", "") or getattr(position, "entry_time", "")
+
     dto = {
-        "id": position._id,
-        "symbol": sig.symbol,
-        "side": sig.type,
+        "id": pos_id,
+        "symbol": sym,
+        "side": side,
         "source": "AMT",
-        "entryPrice": float(position.open_price),
-        "size": float(position.size),
-        "stopLoss": float(sig.sl),
-        "takeProfit": float(sig.tp),
-        "pnl": float(fill.pnl if fill is not None else position.realized_pnl),
-        # Times are normalized to the WS ISO contract — chart markers parse
-        # entryTime/exitTime with new Date() and would NaN on epoch strings.
-        "entryTime": _epoch_to_iso(position.open_time),
+        "entryPrice": entry_px,
+        "size": size_val,
+        "stopLoss": sl,
+        "takeProfit": tp,
+        "pnl": pnl_val,
+        "entryTime": _epoch_to_iso(open_t),
         "status": "CLOSED" if fill is not None else "OPEN",
     }
     if fill is not None:
@@ -223,13 +231,15 @@ class StateProjector:
             elif isinstance(event, PositionClosed):
                 s["portfolio"] = self._portfolio(s["portfolio"])
                 fill = event.fill
-                self._remove_open(fill.position._id, s["portfolio"])
+                pos_id = str(getattr(fill.position, "_id", None) or getattr(fill.position, "id", ""))
+                self._remove_open(pos_id, s["portfolio"])
                 s["portfolio"]["closedTrades"].append(_position_to_view(fill.position, fill))
             elif isinstance(event, PositionReduced):
                 s["portfolio"] = self._portfolio(s["portfolio"])
                 reduced = event.remaining
+                red_id = str(getattr(reduced, "_id", None) or getattr(reduced, "id", ""))
                 for p in s["portfolio"]["positions"]:
-                    if p.get("id") == reduced._id:
+                    if str(p.get("id", "")) == red_id:
                         p["size"] = float(reduced.size)
                         p["pnl"] = float(event.fill.pnl)
                         break
@@ -324,8 +334,9 @@ class StateProjector:
 
     @staticmethod
     def _remove_open(position_id: str, portfolio: dict) -> None:
-        positions = portfolio["positions"]
-        for i, p in enumerate(positions):
-            if p.get("id") == position_id:
-                del positions[i]
-                break
+        if not position_id:
+            return
+        positions = portfolio.get("positions", [])
+        portfolio["positions"] = [
+            p for p in positions if str(p.get("id", "")) != str(position_id)
+        ]
