@@ -521,12 +521,14 @@ class PositionManager:
                 time=bar.time,
                 pyramid_level=self.pyramid_count + 1,
             )
-        except ValueError as exc:
-            # Hard error (e.g. E9: LiveOMS refuses ghost positions) — do NOT
-            # swallow it; a pyramid that cannot be created must fail loudly so
-            # the bar loop propagates the failure instead of silently skipping.
-            logger.error("🛑 [PYRAMID FAIL] %s P%d: %s", self.symbol, self.pyramid_count + 1, exc)
-            raise
+        except (ValueError, NotImplementedError, Exception) as exc:
+            # CRIT-01 FIX: Unsupported pyramid in LiveOMS or oms failure must
+            # log a warning and skip the pyramid instead of crashing QuantEngine.
+            logger.warning("⚠️ [PYRAMID UNSUPPORTED/FAILED] %s P%d: %s", self.symbol, self.pyramid_count + 1, exc)
+            return
+
+        if pyramid_pos is None:
+            return
 
         # E11 FIX — reserve aggregate portfolio risk for the add-on BEFORE we
         # commit. Without this, pyramids bypassed the cross-engine ceiling

@@ -120,6 +120,8 @@ class TestConfigValidator:
 
     def test_rule5_risk_per_trade_too_high(self):
         config = SystemConfig(
+            environment="live",
+            capital=2000000,
             risk=RiskConfig(risk_per_trade_pct=0.05),
             exchanges={
                 "NSE": ExchangeConfig(

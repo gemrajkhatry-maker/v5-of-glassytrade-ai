@@ -39,10 +39,10 @@ logger = logging.getLogger(__name__)
 # succeeds. Fix: stagger first-fetch starts across engines (fixed interval +
 # jitter) and retry failures with jittered exponential backoff, so the seed
 # is absorbed without ever opening the breaker.
-_SEED_STAGGER_SEC = 2.0      # spacing between per-engine first-fetch starts
-_SEED_STAGGER_JITTER = 0.5   # random noise so repeated restarts don't re-collide
-_SEED_FETCH_RETRIES = 3      # max attempts per symbol (1 + 2 backoff retries)
-_SEED_FETCH_BASE_DELAY = 1.5  # exponential backoff base between attempts (s)
+_SEED_STAGGER_SEC = 0.8      # spacing between per-engine first-fetch starts
+_SEED_STAGGER_JITTER = 0.2   # random noise so repeated restarts don't re-collide
+_SEED_FETCH_RETRIES = 4      # max attempts per symbol (1 + 3 backoff retries)
+_SEED_FETCH_BASE_DELAY = 1.0  # exponential backoff base between attempts (s)
 _SEED_GATE_LOCK = threading.Lock()
 _SEED_NEXT_START = 0.0
 
@@ -119,22 +119,7 @@ def to_bar(c) -> Bar:
 
 
 class AMTEngine:
-    """Owns the AMT candle ring, incremental profile, analyzer, and seed logic.
-    
-    The AMTEngine manages all state related to AMT analysis:
-    - Candle ring (rolling 1000-bar window)
-    - Incremental volume profile
-    - Session date tracking and rollover
-    - History seeding from REST
-    
-    Dependencies are injected via constructor:
-    - coordinator: AuctionCoordinator for seeding history
-    - session_levels: SessionLevelStore for persisting session POC/VAH/VAL
-    - history_source: IMarketData adapter for fetching history
-    - underlying_fn: Callable that returns the underlying symbol
-    - get_depth: Callable that returns the current order book
-    - get_risk_pnl: Callable that returns the current session PnL
-    """
+    """Owns the AMT candle ring, incremental profile, analyzer, and seed logic."""
 
     def __init__(
         self,
@@ -173,45 +158,70 @@ class AMTEngine:
         self._last_amt_dto: dict | None = None
         self._last_underlying_close: float = 0.0
         self._warm_bars: int = 0
+        self._gex: object | None = None
         self._amt_fail_logged: bool = False
+
+    def set_gex(self, gex: object | None) -> None:
+        """Update GEX snapshot for this symbol and sync the latest DTO."""
+        with self._amt_lock:
+            self._gex = gex
+            if self._last_amt_dto is not None and gex is not None:
+                self._last_amt_dto["gex"] = {
+                    "netGexCrores": getattr(gex, "net_gex_crores", 0.0),
+                    "regime": getattr(gex, "regime", "NEUTRAL_GAMMA"),
+                    "zeroFlipLevel": getattr(gex, "zero_flip_level", 0.0),
+                    "callWallStrike": getattr(gex, "call_wall_strike", 0.0),
+                    "putWallStrike": getattr(gex, "put_wall_strike", 0.0),
+                    "gammaPinStrike": getattr(gex, "gamma_pin_strike", 0.0),
+                    "strikeGex": [
+                        {
+                            "strike": s.strike,
+                            "callGex": s.call_gex,
+                            "putGex": s.put_gex,
+                            "netGex": s.net_gex,
+                        }
+                        for s in getattr(gex, "strike_gex", ())
+                    ],
+                }
 
     def _underlying(self) -> str:
         return self._underlying_fn()
 
-    def on_tick(self, tick, current_bar) -> None:
-        if current_bar is None:
-            return
-            
+    def on_tick(self, tick, forming_bar=None) -> None:
+        """Feed live tick to the footprint accumulator."""
+        price = getattr(tick, "price", 0.0)
+        vol = getattr(tick, "volume", 0.0)
         best_bid = 0.0
         best_ask = 0.0
-        if tick.depth:
-            bids = tick.depth.get("bids", [])
-            asks = tick.depth.get("asks", [])
-            if bids:
+        depth = getattr(tick, "depth", None)
+        if isinstance(depth, dict):
+            bids = depth.get("bids", [])
+            asks = depth.get("asks", [])
+            if bids and isinstance(bids[0], dict):
                 best_bid = float(bids[0].get("price", 0.0))
-            if asks:
+            if asks and isinstance(asks[0], dict):
                 best_ask = float(asks[0].get("price", 0.0))
-                
-        candle_time = _epoch_to_iso(current_bar.time)
-        with self._amt_lock:
+        candle_time = getattr(forming_bar, "time", "") if forming_bar else ""
+        if price > 0 and vol > 0 and candle_time:
             self._footprint.on_tick(
-                ltp=tick.price,
-                ltq=int(tick.volume),
+                ltp=float(price),
+                ltq=int(vol),
                 best_bid=best_bid,
                 best_ask=best_ask,
-                candle_time=candle_time
+                candle_time=str(candle_time),
             )
 
     def seed(self) -> None:
         """Best-effort: seed the AMT candle ring from REST history.
 
         Synchronous so spawn cannot start live bars before today's session
-        profile exists. Sequential coordinator spawn is the rate-limit stagger
-        (``_reserve_seed_slot`` remains for a future parallel seed).
+        profile exists. Staggered via _reserve_seed_slot to respect broker
+        rate limits.
         """
         if self._history_source is None:
             return
 
+        _reserve_seed_slot()
         candles: list = []
         seed_interval = self._seed_interval_str()
         for attempt in range(1, _SEED_FETCH_RETRIES + 1):
@@ -325,6 +335,7 @@ class AMTEngine:
                         npoc_tracker=self._npoc,
                         option_tick=last_ohlc,
                         footprint_accumulator=self._footprint,
+                        gex=self._gex,
                     )
                     self._last_amt_dto = amt_result_to_dto(result)
                     self._last_underlying_close = float(last_ohlc.close)
@@ -413,6 +424,7 @@ class AMTEngine:
                 npoc_tracker=self._npoc,
                 option_tick=ohlc,
                 footprint_accumulator=self._footprint,
+                gex=self._gex,
             )
         except Exception:
             if not self._amt_fail_logged:
@@ -443,6 +455,23 @@ class AMTEngine:
             if not self._amt_candles:
                 return None
             return to_bar(self._amt_candles[-1])
+
+    def set_prior_profile(
+        self,
+        poc: float,
+        vah: float,
+        val: float,
+        close: float = 0.0,
+    ) -> None:
+        """Explicitly set prior session profile levels (e.g. from storage/prior run)."""
+        self._prior = {
+            "poc": float(poc or 0.0),
+            "vah": float(vah or 0.0),
+            "val": float(val or 0.0),
+            "close": float(close or 0.0),
+        }
+        if close > 0:
+            self._last_underlying_close = float(close)
 
 
 

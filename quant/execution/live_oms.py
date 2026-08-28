@@ -61,7 +61,7 @@ class LiveOMS:
         and maps the broker Position back to the engine domain Position.
         """
         size = self._snap_to_lot(quantity, self._lot_size)
-        broker_signal = to_broker_signal(signal)
+        broker_signal = to_broker_signal(signal, size)
         broker_pos = self._broker.execute_order(broker_signal, self._portfolio, signal.symbol)
 
         if broker_pos is None:
@@ -129,6 +129,7 @@ class LiveOMS:
             side=close_side,
             quantity=qty,
             portfolio=self._portfolio,
+            reference_price=price,
         )
 
         if broker_pos is None:
@@ -222,6 +223,7 @@ class LiveOMS:
             side=close_side,
             quantity=qty,
             portfolio=self._portfolio,
+            reference_price=price,
         )
 
         if broker_pos is None:

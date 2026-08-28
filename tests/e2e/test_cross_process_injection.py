@@ -85,7 +85,7 @@ def test_leg_a_full_chain_http_to_ws():
         assert symbols, f"no active symbols in health: {list(health.get('checks', {}))[:8]}"
         # Inject into a FUTURES symbol whose ticks aggregate to bars; options
         # have thin synthetic volume. Prefer the futures contract of GOLDM.
-        symbol = next(s for s in symbols if s.startswith("GOLDM"))
+        symbol = next((s for s in symbols if s.startswith("GOLDM")), symbols[0])
 
         # Inject into the FIRST active symbol (sorted) so the WS subscription
         # observes it. Prices chosen at MCX-futures scale.

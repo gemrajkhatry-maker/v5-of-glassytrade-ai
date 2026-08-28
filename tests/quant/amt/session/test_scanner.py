@@ -315,17 +315,17 @@ class TestOptionScannerService:
 
 
 def test_silverm_mcx_mini_configured_like_silver_chain():
-    """SILVERM is a separate Dhan chain; must use 500 strike step and loose OI floor."""
+    """SILVERM is a separate Dhan chain; must use 500 strike step and min OI floor of 20."""
     assert "SILVERM" in OptionScannerService._SCAN_MCX_UNDERLYINGS
     assert OptionScannerService._STRIKE_INTERVALS["SILVERM"] == 500
-    assert OptionScannerService._MIN_OI["SILVERM"] == 0
+    assert OptionScannerService._MIN_OI["SILVERM"] == 20
 
 
 def test_goldm_mcx_mini_configured_like_gold_chain():
-    """GOLDM is a separate Dhan chain; same 100 strike step and loose OI as GOLD."""
+    """GOLDM is a separate Dhan chain; 100 strike step and min OI floor of 50."""
     assert "GOLDM" in OptionScannerService._SCAN_MCX_UNDERLYINGS
     assert OptionScannerService._STRIKE_INTERVALS["GOLDM"] == 100
-    assert OptionScannerService._MIN_OI["GOLDM"] == 0
+    assert OptionScannerService._MIN_OI["GOLDM"] == 50
 
 
 # ---------------------------------------------------------------------------
@@ -381,3 +381,143 @@ def test_big_move_mode_premium_band():
 
     assert len(kept) > 0
     assert dropped == []
+
+
+# ---------------------------------------------------------------------------
+# Near-ATM momentum detection & bias filtering tests
+# ---------------------------------------------------------------------------
+
+def test_detect_momentum_near_atm_only():
+    """Verify momentum is computed ONLY from strikes within 2 * interval of ATM.
+    
+    Far OTM/ITM volume skew should be ignored so it doesn't contaminate the signal.
+    """
+    atm = 24000.0
+    interval = 50.0
+    calls = {
+        24000.0: _make_option(ltp=100, volume=5000, strike=24000.0),
+        24050.0: _make_option(ltp=80, volume=5000, strike=24050.0),
+    }
+    puts = {
+        24000.0: _make_option(ltp=100, volume=1000, strike=24000.0),
+        23000.0: _make_option(ltp=5, volume=50000, strike=23000.0),  # Far OTM high vol
+    }
+    chain = _make_chain(atm=atm, calls=calls, puts=puts)
+    scanner = OptionScannerService(MagicMock())
+
+    bias, strength, reason = scanner._detect_momentum(chain, atm=atm, interval=interval)
+    # Near ATM: CE=10000 > PE=1000 * 1.5 -> BULLISH
+    assert bias == "BULLISH"
+    assert "Near-ATM CE vol 10000 > PE vol 1000" in reason
+
+
+def test_detect_momentum_oi_fallback_when_volume_zero():
+    """When near-ATM volume is zero, momentum falls back to near-ATM OI."""
+    atm = 6000.0
+    interval = 50.0
+    calls = {
+        6000.0: _make_option(ltp=100, volume=0, oi=5000, strike=6000.0),
+    }
+    puts = {
+        6000.0: _make_option(ltp=100, volume=0, oi=1000, strike=6000.0),
+    }
+    chain = _make_chain(atm=atm, calls=calls, puts=puts)
+    scanner = OptionScannerService(MagicMock())
+
+    bias, strength, reason = scanner._detect_momentum(chain, atm=atm, interval=interval)
+    assert bias == "BULLISH"
+    assert "Near-ATM CE vol 5000 > PE vol 1000" in reason
+
+
+def test_detect_momentum_neutral_balanced():
+    """When near-ATM CE and PE volumes are balanced, momentum is NEUTRAL."""
+    atm = 24000.0
+    interval = 50.0
+    calls = {24000.0: _make_option(ltp=100, volume=10000, strike=24000.0)}
+    puts = {24000.0: _make_option(ltp=100, volume=9000, strike=24000.0)}
+    chain = _make_chain(atm=atm, calls=calls, puts=puts)
+    scanner = OptionScannerService(MagicMock())
+
+    bias, strength, reason = scanner._detect_momentum(chain, atm=atm, interval=interval)
+    assert bias == "NEUTRAL"
+    assert strength == 0
+    assert "Balanced near-ATM" in reason
+
+
+def test_process_contract_filters_neutral_and_opposing_momentum():
+    """_process_contract must reject NEUTRAL contracts and opposing direction contracts."""
+    scanner = OptionScannerService(MagicMock())
+    atm = 24000.0
+    interval = 50.0
+    opt = _make_option(ltp=100.0, oi=100_000, volume=10_000, strike=24000.0)
+    option_map = {24000.0: opt}
+    chain = _make_chain(atm=atm, expiry_iso=_future_expiry())
+
+    # 1. NEUTRAL bias rejected
+    res_neutral = scanner._process_contract(
+        u="NIFTY", opt_type="CE", strike=24000, atm=atm, interval=interval,
+        option_map=option_map, bullish_only=False, bias="NEUTRAL",
+        bias_reason="Balanced", chain=chain, is_mcx=False,
+    )
+    assert res_neutral is None
+
+    # 2. BULLISH bias allows CE, rejects PE
+    res_bull_ce = scanner._process_contract(
+        u="NIFTY", opt_type="CE", strike=24000, atm=atm, interval=interval,
+        option_map=option_map, bullish_only=False, bias="BULLISH",
+        bias_reason="Bullish", chain=chain, is_mcx=False,
+    )
+    assert res_bull_ce is not None
+    assert res_bull_ce.option_type == "CE"
+
+    res_bull_pe = scanner._process_contract(
+        u="NIFTY", opt_type="PE", strike=24000, atm=atm, interval=interval,
+        option_map=option_map, bullish_only=False, bias="BULLISH",
+        bias_reason="Bullish", chain=chain, is_mcx=False,
+    )
+    assert res_bull_pe is None
+
+    # 3. BEARISH bias allows PE, rejects CE
+    res_bear_pe = scanner._process_contract(
+        u="NIFTY", opt_type="PE", strike=24000, atm=atm, interval=interval,
+        option_map=option_map, bullish_only=False, bias="BEARISH",
+        bias_reason="Bearish", chain=chain, is_mcx=False,
+    )
+    assert res_bear_pe is not None
+    assert res_bear_pe.option_type == "PE"
+
+    res_bear_ce = scanner._process_contract(
+        u="NIFTY", opt_type="CE", strike=24000, atm=atm, interval=interval,
+        option_map=option_map, bullish_only=False, bias="BEARISH",
+        bias_reason="Bearish", chain=chain, is_mcx=False,
+    )
+    assert res_bear_ce is None
+
+
+def test_score_contract_momentum_weights():
+    """_score_contract gives +25 for momentum alignment and -10 for opposing."""
+    scanner = OptionScannerService(MagicMock())
+    opt = _make_option(ltp=100.0, oi=500_000, volume=10_000, strike=24000.0, delta=0.50)
+
+    # Base score without bias
+    base_score, _, _ = scanner._score_contract(
+        strike=24000, atm=24000, interval=50, oi=500_000, vol=10_000,
+        opt=opt, ltp=100.0, bid=99.75, ask=100.25, underlying_upper="NIFTY",
+        bias=None, opt_type="CE", median_vol=10_000,
+    )
+
+    # Bullish aligned CE: base + 25
+    bull_ce_score, _, _ = scanner._score_contract(
+        strike=24000, atm=24000, interval=50, oi=500_000, vol=10_000,
+        opt=opt, ltp=100.0, bid=99.75, ask=100.25, underlying_upper="NIFTY",
+        bias="BULLISH", opt_type="CE", median_vol=10_000,
+    )
+    assert bull_ce_score == base_score + 25
+
+    # Bullish opposing PE: base - 10
+    bull_pe_score, _, _ = scanner._score_contract(
+        strike=24000, atm=24000, interval=50, oi=500_000, vol=10_000,
+        opt=opt, ltp=100.0, bid=99.75, ask=100.25, underlying_upper="NIFTY",
+        bias="BULLISH", opt_type="PE", median_vol=10_000,
+    )
+    assert bull_pe_score == base_score - 10

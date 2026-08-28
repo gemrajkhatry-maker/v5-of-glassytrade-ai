@@ -17,4 +17,6 @@ export { default as DiagnosticsPanel } from './DiagnosticsPanel';
 export { default as VaFreezeCard } from './VaFreezeCard';
 export { default as ThreeAIndicator } from './ThreeAIndicator';
 export { default as AIAdvisorCard } from './AIAdvisorCard';
+export { default as GammaExposureCard } from './GammaExposureCard';
+
 

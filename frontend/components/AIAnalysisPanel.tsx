@@ -21,6 +21,7 @@ import {
     VaFreezeCard,
     ThreeAIndicator,
     AIAdvisorCard,
+    GammaExposureCard,
 } from './ai';
 
 interface AIAnalysisPanelProps {
@@ -146,6 +147,8 @@ const AIAnalysisPanelInner: React.FC<AIAnalysisPanelProps> = ({
                 />
                 <LocationCard currentLtp={currentLtp} amtResult={amtResult} poc={poc} />
                 <VaFreezeCard auction={auction} />
+                <GammaExposureCard amtResult={amtResult} currentLtp={currentLtp} />
+
 
                 {/* Section 03: 1m / Tick Order Flow Trigger */}
                 <div className="flex items-center justify-between px-1 pt-2">

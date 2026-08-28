@@ -247,10 +247,10 @@ class TestOptionScannerService:
 
 
 def test_silverm_mcx_mini_configured_like_silver_chain():
-    """SILVERM is a separate Dhan chain; must use 500 strike step and loose OI floor."""
+    """SILVERM is a separate Dhan chain; must use 500 strike step and low OI floor."""
     assert "SILVERM" in OptionScannerService._SCAN_MCX_UNDERLYINGS
     assert OptionScannerService._STRIKE_INTERVALS["SILVERM"] == 500
-    assert OptionScannerService._MIN_OI["SILVERM"] == 0
+    assert OptionScannerService._MIN_OI["SILVERM"] == 20
 
 
 def test_goldm_mcx_mini_configured_like_gold_chain():
@@ -293,8 +293,10 @@ def test_preferred_option_type_filters():
     scanner = OptionScannerService(MagicMock())
     broker = MagicMock()
     chain = _chain_with_calls_puts()
-    for o in list(chain.calls.values()) + list(chain.puts.values()):
-        o.volume = 5000
+    # BEARISH bias (near-ATM PE vol > CE vol * 1.5) so the hard momentum
+    # filter allows PE and drops the opposing CE.
+    list(chain.calls.values())[0].volume = 1000
+    list(chain.puts.values())[0].volume = 5000
     broker.get_option_chain.return_value = chain
     scanner._broker = broker
 
@@ -303,4 +305,4 @@ def test_preferred_option_type_filters():
     )
     assert results
     assert all(r.option_type == "PE" for r in results)
-    assert OptionScannerService._MIN_OI["GOLDM"] == 0
+    assert OptionScannerService._MIN_OI["GOLDM"] == 50

@@ -68,6 +68,7 @@ class DhanMarketDataAdapter(IMarketData):
         # Short-TTL cache for historical candles (30s) to prevent API rate limits
         self._history_cache: dict[tuple[str, str], tuple[list[OHLC], float]] = {}
         self._history_cache_lock = threading.Lock()
+        self._history_fetch_lock = threading.Lock()
         self._history_cache_ttl = 30.0
         # Optional: serialize broker option-chain calls (set when broker is not thread-safe).
         self._serialize_option_chain_fetch = os.environ.get(
@@ -246,107 +247,115 @@ class DhanMarketDataAdapter(IMarketData):
                 if (time.time() - cached_ts) < self._history_cache_ttl:
                     return cached_data[-limit:]
 
-        try:
-            await self._ensure_initialized()
-            broker = self.get_broker()
+        with self._history_fetch_lock:
+            with self._history_cache_lock:
+                cached_entry = self._history_cache.get(cache_key)
+                if cached_entry:
+                    cached_data, cached_ts = cached_entry
+                    if (time.time() - cached_ts) < self._history_cache_ttl:
+                        return cached_data[-limit:]
 
-            instrument = self._make_instrument(symbol)
+            try:
+                await self._ensure_initialized()
+                broker = self.get_broker()
 
-            is_intraday = interval in (
-                "1m",
-                "5m",
-                "15m",
-                "25m",
-                "1h",
-                "60",
-                "1",
-                "5",
-                "15",
-                "25",
-            )
-            # FIX: Use 90 days for intraday (Dhan allows 90 days in one go)
-            days_back = 90 if is_intraday else 365
+                instrument = self._make_instrument(symbol)
 
-            end = datetime.now(IST)
-            start = end - timedelta(days=days_back)
+                is_intraday = interval in (
+                    "1m",
+                    "5m",
+                    "15m",
+                    "25m",
+                    "1h",
+                    "60",
+                    "1",
+                    "5",
+                    "15",
+                    "25",
+                )
+                # FIX: Use 90 days for intraday (Dhan allows 90 days in one go)
+                days_back = 90 if is_intraday else 365
 
-            # Map common interval names to Dhan format
-            interval_map = {
-                "1m": "1",
-                "5m": "5",
-                "15m": "15",
-                "25m": "25",
-                "1h": "60",
-                "60": "60",
-                "1d": "1d",
-            }
-            dhan_interval = interval_map.get(interval, interval)
+                end = datetime.now(IST)
+                start = end - timedelta(days=days_back)
 
-            logger.info(
-                "fetch_history: symbol=%s exchange=%s interval=%s from=%s to=%s",
-                instrument.symbol,
-                instrument.exchange,
-                dhan_interval,
-                start,
-                end,
-            )
-            df = broker.get_historical(
-                instrument=instrument,
-                from_date=start,
-                to_date=end,
-                interval=dhan_interval,
-            )
+                # Map common interval names to Dhan format
+                interval_map = {
+                    "1m": "1",
+                    "5m": "5",
+                    "15m": "15",
+                    "25m": "25",
+                    "1h": "60",
+                    "60": "60",
+                    "1d": "1d",
+                }
+                dhan_interval = interval_map.get(interval, interval)
 
-            if df is None or df.empty:
-                logger.warning("No historical data for %s", symbol)
+                logger.info(
+                    "fetch_history: symbol=%s exchange=%s interval=%s from=%s to=%s",
+                    instrument.symbol,
+                    instrument.exchange,
+                    dhan_interval,
+                    start,
+                    end,
+                )
+                df = broker.get_historical(
+                    instrument=instrument,
+                    from_date=start,
+                    to_date=end,
+                    interval=dhan_interval,
+                )
+
+                if df is None or df.empty:
+                    logger.warning("No historical data for %s", symbol)
+                    with self._history_cache_lock:
+                        if cache_key in self._history_cache:
+                            return self._history_cache[cache_key][0][-limit:]
+                    return []
+
+                result: list[OHLC] = []
+                for idx, row in df.tail(limit).iterrows():
+                    # Index is datetime; also try column names for robustness
+                    if isinstance(idx, datetime):
+                        ts = idx
+                    else:
+                        ts = row.get("timestamp") or row.get("date") or idx
+
+                    from quant.state import _epoch_to_iso
+                    time_str = _epoch_to_iso(ts)
+
+                    o = float(row["open"])
+                    h = float(row["high"])
+                    l = float(row["low"])
+                    c = float(row["close"])
+                    v = float(row.get("volume", 0))
+                    delta = estimate_tick_delta(o, h, l, c, v)
+                    vwap = compute_vwap_approx(h, l, c)
+
+                    result.append(
+                        OHLC(
+                            time=time_str,
+                            open=o,
+                            high=h,
+                            low=l,
+                            close=c,
+                            volume=v,
+                            vwap=vwap,
+                            taker_buy_volume=0.0,
+                            delta=delta,
+                        )
+                    )
+
+                logger.info("Fetched %d candles for %s (%s)", len(result), symbol, interval)
+                with self._history_cache_lock:
+                    self._history_cache[cache_key] = (result, time.time())
+                return result
+            except Exception:
+                logger.warning("Failed to fetch history for %s (interval=%s, limit=%d)", symbol, interval, limit, exc_info=True)
                 with self._history_cache_lock:
                     if cache_key in self._history_cache:
                         return self._history_cache[cache_key][0][-limit:]
                 return []
-
-            result: list[OHLC] = []
-            for idx, row in df.tail(limit).iterrows():
-                # Index is datetime; also try column names for robustness
-                if isinstance(idx, datetime):
-                    ts = idx
-                else:
-                    ts = row.get("timestamp") or row.get("date") or idx
-
-                from quant.state import _epoch_to_iso
-                time_str = _epoch_to_iso(ts)
-
-                o = float(row["open"])
-                h = float(row["high"])
-                l = float(row["low"])
-                c = float(row["close"])
-                v = float(row.get("volume", 0))
-                delta = estimate_tick_delta(o, h, l, c, v)
-                vwap = compute_vwap_approx(h, l, c)
-
-                result.append(
-                    OHLC(
-                        time=time_str,
-                        open=o,
-                        high=h,
-                        low=l,
-                        close=c,
-                        volume=v,
-                        vwap=vwap,
-                        taker_buy_volume=0.0,
-                        delta=delta,
-                    )
-                )
-
-            logger.info("Fetched %d candles for %s (%s)", len(result), symbol, interval)
-            with self._history_cache_lock:
-                self._history_cache[cache_key] = (result, time.time())
-            return result
-        except Exception:
-            logger.warning("Failed to fetch history for %s (interval=%s, limit=%d)", symbol, interval, limit, exc_info=True)
-            with self._history_cache_lock:
-                if cache_key in self._history_cache:
-                    return self._history_cache[cache_key][0][-limit:]
-            return []
 
     async def fetch_order_book(self, symbol: str) -> OrderBook | None:
         try:

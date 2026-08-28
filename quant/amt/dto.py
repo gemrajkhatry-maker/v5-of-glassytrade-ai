@@ -141,6 +141,23 @@ def amt_result_to_dto(r) -> dict:
         # Per-symbol delta (isolated per option contract)
         "deltaNormalizedOption": r.delta_normalized_option,
         "contestedZone": r.contested_zone,
+        "gex": {
+            "netGexCrores": getattr(r.gex, "net_gex_crores", 0.0) if getattr(r, "gex", None) else 0.0,
+            "regime": getattr(r.gex, "regime", "NEUTRAL_GAMMA") if getattr(r, "gex", None) else "NEUTRAL_GAMMA",
+            "zeroFlipLevel": getattr(r.gex, "zero_flip_level", 0.0) if getattr(r, "gex", None) else 0.0,
+            "callWallStrike": getattr(r.gex, "call_wall_strike", 0.0) if getattr(r, "gex", None) else 0.0,
+            "putWallStrike": getattr(r.gex, "put_wall_strike", 0.0) if getattr(r, "gex", None) else 0.0,
+            "gammaPinStrike": getattr(r.gex, "gamma_pin_strike", 0.0) if getattr(r, "gex", None) else 0.0,
+            "strikeGex": [
+                {
+                    "strike": s.strike,
+                    "callGex": s.call_gex,
+                    "putGex": s.put_gex,
+                    "netGex": s.net_gex,
+                }
+                for s in getattr(r.gex, "strike_gex", ())
+            ] if getattr(r, "gex", None) else [],
+        },
         "footprints": {
             k: {
                 "time": v.time,

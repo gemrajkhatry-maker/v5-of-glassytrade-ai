@@ -128,18 +128,31 @@ class BubbleDetector:
     def detect(self, candle: OHLC) -> BubbleResult:
         """Detect if current candle has a volume bubble."""
         vol = float(candle.volume)
-        self._history.append(vol)
 
+        # Reference distribution = PRIOR bars only. The previous version
+        # appended the current volume before computing mean/std, so the spike
+        # inflated its own reference std and capped the z-score (~4.4 for a
+        # 21-bar window) — a 5x and a 10x bubble were indistinguishable and
+        # moderate spikes fell below the threshold. Compute against history,
+        # then append the current candle for future detections.
         if len(self._history) < 5:
+            self._history.append(vol)
             return BubbleResult(
                 detected=False, direction="NEUTRAL", sigma=0.0, candle_time=candle.time
             )
 
-        # Compute mean and std over history
+        # Compute mean and std over prior history (current candle excluded)
         vols = list(self._history)
         mean_vol = sum(vols) / len(vols)
         variance = sum((v - mean_vol) ** 2 for v in vols) / len(vols)
         std_vol = math.sqrt(variance) if variance > 0 else 0.0
+        # Floor std at 10% of the mean (mirrors aggressive_prints): a perfectly
+        # flat baseline (std=0) would otherwise make any spike undetectable,
+        # and a near-flat baseline would inflate z-scores.
+        if mean_vol > 0:
+            std_vol = max(std_vol, mean_vol * 0.10)
+
+        self._history.append(vol)
 
         if std_vol <= 0:
             return BubbleResult(

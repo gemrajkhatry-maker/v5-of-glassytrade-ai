@@ -35,7 +35,12 @@ class IBroker(ABC):
 
     @abstractmethod
     def close_position(
-        self, symbol: str, side: str, quantity: int, portfolio: Portfolio
+        self,
+        symbol: str,
+        side: str,
+        quantity: int,
+        portfolio: Portfolio,
+        reference_price: float | None = None,
     ) -> Position | None:
         """Close (or reduce) an open position by placing an opposing order.
 
@@ -44,6 +49,9 @@ class IBroker(ABC):
             side: The CLOSING side — "SELL" to close a LONG, "BUY" to close a SHORT.
             quantity: Number of units to close.
             portfolio: Portfolio for cost model / tracking.
+            reference_price: Optional expected exit price. Live brokers may use it
+                to bound slippage (marketable-LIMIT collar); a close must still
+                fill, so implementations treat this as advisory, not a hard gate.
 
         Returns:
             Position with entry_price = actual fill price, or None on failure.

@@ -116,6 +116,7 @@ def test_health_includes_coordinator_check(client):
         "started": True,
         "symbols": ["SYM"],
         "crashedEngines": [],  # F1 liveness surface (engine crash guard)
+        "staleEngines": [],  # tick-starvation liveness surface
         "status": "ok",
     }
 

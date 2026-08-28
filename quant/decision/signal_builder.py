@@ -186,12 +186,14 @@ class SignalBuilder:
             if ctx.val and ctx.val < entry and ctx.val > 0:
                 candidates.append(ctx.val)
 
-        # Filter: must give R:R >= min_rr
+        # Filter: must give R:R >= min_rr and stay within reasonable price scale (prevent option-scale level leakage into futures)
         valid = []
         for target in candidates:
+            if not (0.70 * entry <= target <= 1.30 * entry):
+                continue
             reward = abs(target - entry)
             rr = reward / risk
-            if rr >= min_rr:
+            if min_rr <= rr <= 10.0:
                 valid.append((abs(target - entry), target))  # (distance, price)
 
         if valid:

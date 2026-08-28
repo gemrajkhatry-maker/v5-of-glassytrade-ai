@@ -33,3 +33,24 @@ def test_model_label_maps_to_setup_type():
 
 def test_unknown_model_label_defaults_to_trend_model():
     assert to_broker_signal(_engine_signal(model_label="Unknown")).setup == SetupType.TREND_MODEL
+
+
+# ---------------------------------------------------------------------------
+# C1: the engine-sized quantity must travel with the broker signal so the
+# adapter executes the exact size the risk layer approved (never re-sizes).
+# ---------------------------------------------------------------------------
+
+def test_quantity_carried_into_metadata():
+    broker_sig = to_broker_signal(_engine_signal("LONG"), quantity=130.0)
+    assert broker_sig.metadata is not None
+    assert broker_sig.metadata.get("order_quantity") == 130.0
+
+
+def test_no_quantity_omits_order_quantity():
+    broker_sig = to_broker_signal(_engine_signal("LONG"))
+    assert "order_quantity" not in (broker_sig.metadata or {})
+
+
+def test_zero_quantity_omits_order_quantity():
+    broker_sig = to_broker_signal(_engine_signal("LONG"), quantity=0.0)
+    assert "order_quantity" not in (broker_sig.metadata or {})

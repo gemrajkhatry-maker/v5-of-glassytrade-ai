@@ -283,6 +283,7 @@ export interface AMTAnalysis {
   cvdSlope?: number;
   cvdDivergence?: string;
   sessionVwap?: number;
+  underlyingPrice?: number;
   // Normalized delta score (AggressionCard) — sent by backend amt_result_to_dto
   deltaNormalizedOption?: number;
   // VWAP bands
@@ -343,7 +344,27 @@ export interface AMTAnalysis {
   absorptionRangeRatio?: number;
   absorptionVolRatio?: number;
   swingDelta?: number;
+  // Gamma Exposure (Dealer GEX)
+  gex?: GammaExposure;
 }
+
+export interface StrikeGEX {
+  strike: number;
+  callGex: number;
+  putGex: number;
+  netGex: number;
+}
+
+export interface GammaExposure {
+  netGexCrores: number;
+  regime: 'POSITIVE_GAMMA' | 'NEGATIVE_GAMMA' | 'NEUTRAL_GAMMA';
+  zeroFlipLevel: number;
+  callWallStrike: number;
+  putWallStrike: number;
+  gammaPinStrike: number;
+  strikeGex: StrikeGEX[];
+}
+
 
 /**
  * VolumeProfileLevel for Auction Market Theory analysis

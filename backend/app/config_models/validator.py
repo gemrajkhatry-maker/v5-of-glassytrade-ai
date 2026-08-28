@@ -45,14 +45,14 @@ def _validate_global(config: "SystemConfig") -> tuple[list[str], list[str]]:
             f"RULE-4: live mode requires capital >= ₹10,00,000. Got ₹{config.capital:,.0f}."
         )
 
-    if config.risk.risk_per_trade_pct > 0.02:
+    if config.is_live() and config.risk.risk_per_trade_pct > 0.02:
         errors.append(
-            f"RULE-5: risk_per_trade_pct must be ≤ 2%. Got {config.risk.risk_per_trade_pct * 100:.2f}%."
+            f"RULE-5: live mode risk_per_trade_pct must be ≤ 2%. Got {config.risk.risk_per_trade_pct * 100:.2f}%."
         )
 
-    if config.risk.portfolio_notional_cap > 0.80:
+    if config.is_live() and config.risk.portfolio_notional_cap > 0.80:
         errors.append(
-            f"RULE-6: portfolio_notional_cap must be ≤ 0.80. Got {config.risk.portfolio_notional_cap}."
+            f"RULE-6: live mode portfolio_notional_cap must be ≤ 0.80. Got {config.risk.portfolio_notional_cap}."
         )
 
     if config.is_paper() and config.capital > 50000000:

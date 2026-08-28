@@ -56,6 +56,21 @@ export const ProfileOverlayInfo: React.FC<ProfileOverlayInfoProps> = React.memo(
                 <span className="text-glassy-text-disabled">Auto-reset daily</span>
             </div>
             {amt?.valueMigration?.hasMigration && <ValueMigrationLine vm={amt.valueMigration} />}
+            {amt?.gex && (amt.gex.callWallStrike > 0 || amt.gex.zeroFlipLevel > 0) && (
+                <div className="text-glassy-text-tertiary flex items-center gap-1.5 flex-wrap">
+                    <span className={`px-1 py-0.5 rounded-sm text-[8px] font-bold ${
+                        amt.gex.regime === 'POSITIVE_GAMMA' ? 'text-emerald-400 bg-emerald-500/10' :
+                        amt.gex.regime === 'NEGATIVE_GAMMA' ? 'text-rose-400 bg-rose-500/10' : 'text-amber-400 bg-amber-500/10'
+                    }`}>
+                        {amt.gex.regime === 'POSITIVE_GAMMA' ? '+GEX' : amt.gex.regime === 'NEGATIVE_GAMMA' ? '-GEX' : '±GEX'} ({amt.gex.netGexCrores >= 0 ? `+₹${amt.gex.netGexCrores.toFixed(1)}Cr` : `-₹${Math.abs(amt.gex.netGexCrores).toFixed(1)}Cr`})
+                    </span>
+                    <span>Flip <strong className="text-amber-300">{amt.gex.zeroFlipLevel.toFixed(1)}</strong></span>
+                    <span className="text-glassy-text-disabled">·</span>
+                    <span>Call Wall <strong className="text-rose-300">{amt.gex.callWallStrike.toFixed(0)}</strong></span>
+                    <span className="text-glassy-text-disabled">·</span>
+                    <span>Put Wall <strong className="text-emerald-300">{amt.gex.putWallStrike.toFixed(0)}</strong></span>
+                </div>
+            )}
         </div>
     );
 });

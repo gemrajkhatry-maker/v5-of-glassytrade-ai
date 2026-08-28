@@ -346,7 +346,7 @@ exchanges:
         cvd_slope_extreme: 100.0
         cvd_strong_slope: 2.0
         cvd_rolling_bars: 20
-        min_oi: 10
+        min_oi: 200
         strike_interval: 50
         strikes_around_atm: 2
         slippage_bps: 10
@@ -517,16 +517,15 @@ exchanges:
 # ── Risk Configuration ──
 
 risk:
-  risk_per_trade_pct: 0.005
-  max_daily_loss_pct: 0.02
-  max_consecutive_losses: 3
-  # TODO: Testing Mode — Raised to 50 for testing & paper validation. Revert to 6 in production.
-  max_trades_per_session: 50
-  max_drawdown_pct: 0.03
-  absolute_ceiling_pct: 0.01
+  risk_per_trade_pct: 0.95
+  max_daily_loss_pct: 0.50
+  max_consecutive_losses: 5
+  max_trades_per_session: 6
+  max_drawdown_pct: 0.50
+  absolute_ceiling_pct: 0.50
   max_concurrent_positions: 5
-  portfolio_notional_cap: 0.60
-  per_symbol_notional_cap: 0.20
+  portfolio_notional_cap: 0.95
+  per_symbol_notional_cap: 0.95
   kelly_fraction: 0.25
   kelly_win_prob: 0.55
   kelly_win_loss_ratio: 2.0

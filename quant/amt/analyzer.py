@@ -373,6 +373,7 @@ class AMTAnalyzer:
         symbol: str = "",  # Fix 1: Full symbol name for option type detection
         prior_avg_volume: float = 0.0,  # Average volume from prior sessions
         footprint_accumulator: "TickFootprintAccumulator | None" = None,
+        gex: object | None = None,
     ) -> AMTResult:
         """Run the full AMT analysis pipeline.
 
@@ -803,6 +804,7 @@ class AMTAnalyzer:
             state_result=state_result, value_migration=value_migration,
             _footprints=_footprints, _contested_zone=_contested_zone,
             _triple=_triple, _effective_market_state=_effective_market_state,
+            gex=gex,
         )
 
         # Squeeze detection (Fabio Playbook #4): runs on the assembled result
@@ -833,7 +835,7 @@ class AMTAnalyzer:
                       _drive_number, _drive_entry_valid, cvd_source,
                       _bimodal_active_pole, state_result, value_migration,
                       _footprints, _contested_zone, _triple,
-                      _effective_market_state) -> AMTResult:
+                      _effective_market_state, gex=None) -> AMTResult:
         """Assemble AMTResult from computed pipeline outputs.
 
         Pure data mapping — extracted from analyze() for readability.
@@ -956,6 +958,7 @@ class AMTAnalyzer:
             triple_a_signal=_triple.signal,
             absorption_cluster_high=_triple.cluster_high,
             absorption_cluster_low=_triple.cluster_low,
+            gex=gex,
         )
 
     # -------------------------------------------------------------------

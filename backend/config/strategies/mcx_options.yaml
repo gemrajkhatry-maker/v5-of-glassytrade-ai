@@ -28,7 +28,7 @@ exchanges:
         tick_size: 1.0
         vp_bucket_size: 10.0
         strike_interval: 100
-        min_oi: 1
+        min_oi: 50
         imbalance_threshold: 50.0
         slippage_bps: 8
       SILVERM:
@@ -40,7 +40,7 @@ exchanges:
         tick_size: 1.0
         vp_bucket_size: 25.0
         strike_interval: 500
-        min_oi: 1
+        min_oi: 20
         imbalance_threshold: 100.0
         slippage_bps: 10
 

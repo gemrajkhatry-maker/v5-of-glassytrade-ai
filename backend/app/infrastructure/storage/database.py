@@ -87,6 +87,25 @@ CREATE TABLE IF NOT EXISTS open_positions (
     extra TEXT
 );
 
+CREATE TABLE IF NOT EXISTS orders (
+    order_id TEXT PRIMARY KEY,
+    signal_id TEXT,
+    symbol TEXT NOT NULL,
+    side TEXT NOT NULL,
+    quantity REAL,
+    order_type TEXT,
+    price REAL,
+    status TEXT NOT NULL,
+    broker_order_id TEXT,
+    filled_quantity REAL,
+    avg_fill_price REAL,
+    reason TEXT,
+    submitted_at TEXT,
+    updated_at TEXT,
+    extra TEXT,
+    created_at TEXT DEFAULT (datetime('now', '+330 minutes'))
+);
+
 CREATE TABLE IF NOT EXISTS position_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     position_id TEXT,
@@ -103,6 +122,8 @@ CREATE INDEX IF NOT EXISTS idx_perf_created ON performance_snapshots(created_at)
 CREATE INDEX IF NOT EXISTS idx_session_profiles ON session_profiles(symbol, market, session_date);
 CREATE INDEX IF NOT EXISTS idx_position_events_pos_time ON position_events(position_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_position_events_symbol_time ON position_events(symbol, created_at);
+CREATE INDEX IF NOT EXISTS idx_orders_symbol_status ON orders(symbol, status);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
 
 
 CREATE TABLE IF NOT EXISTS npoc_records (
@@ -155,6 +176,11 @@ CREATE TABLE IF NOT EXISTS kv_store (
 # Tick batch settings
 _TICK_BATCH_SIZE = 50
 _TICK_FLUSH_INTERVAL = 5.0  # seconds
+
+# Order state machine (C4). Terminal states mean the order reached a final
+# outcome; anything else is "in-flight" and must be reconciled on restart so a
+# crash between place_order and the fill ack cannot silently lose an order.
+ORDER_TERMINAL_STATES = {"FILLED", "REJECTED", "CANCELLED", "EXPIRED"}
 
 
 class SQLiteStorageAdapter(IStorage):
@@ -642,6 +668,117 @@ class SQLiteStorageAdapter(IStorage):
                 self._conn.rollback()
                 logger.error("Failed to clear open positions", exc_info=True)
                 return 0
+
+    # ------------------------------------------------------------------
+    # Order persistence (durable order state machine — C4 crash recovery)
+    # ------------------------------------------------------------------
+
+    def save_order(self, order: dict[str, Any]) -> None:
+        """Upsert a durable order row (a snapshot of the order state machine)."""
+        self._execute_write(
+            "INSERT OR REPLACE INTO orders "
+            "(order_id, signal_id, symbol, side, quantity, order_type, price, status, "
+            "broker_order_id, filled_quantity, avg_fill_price, reason, submitted_at, "
+            "updated_at, extra) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                str(order.get("order_id", "")),
+                str(order.get("signal_id", "")),
+                str(order.get("symbol", "")),
+                str(order.get("side", "")),
+                to_float(order.get("quantity")),
+                str(order.get("order_type", "")),
+                to_float(order.get("price")),
+                str(order.get("status", "")),
+                str(order.get("broker_order_id", "")),
+                to_float(order.get("filled_quantity")),
+                to_float(order.get("avg_fill_price")),
+                str(order.get("reason", "")),
+                str(order.get("submitted_at", "")),
+                str(order.get("updated_at", "")),
+                json.dumps(
+                    {
+                        k: v
+                        for k, v in order.items()
+                        if k
+                        not in (
+                            "order_id", "signal_id", "symbol", "side", "quantity",
+                            "order_type", "price", "status", "broker_order_id",
+                            "filled_quantity", "avg_fill_price", "reason",
+                            "submitted_at", "updated_at",
+                        )
+                    }
+                ),
+            ),
+        )
+
+    def update_order_status(
+        self,
+        order_id: str,
+        status: str,
+        *,
+        broker_order_id: str | None = None,
+        filled_quantity: float | None = None,
+        avg_fill_price: float | None = None,
+    ) -> None:
+        """Transition an order's state, recording fill details when provided."""
+        sets = ["status = ?", "updated_at = datetime('now', '+330 minutes')"]
+        params: list[Any] = [status]
+        if broker_order_id is not None:
+            sets.append("broker_order_id = ?")
+            params.append(broker_order_id)
+        if filled_quantity is not None:
+            sets.append("filled_quantity = ?")
+            params.append(to_float(filled_quantity))
+        if avg_fill_price is not None:
+            sets.append("avg_fill_price = ?")
+            params.append(to_float(avg_fill_price))
+        params.append(order_id)
+        self._execute_write(
+            f"UPDATE orders SET {', '.join(sets)} WHERE order_id = ?",
+            tuple(params),
+        )
+
+    def load_orders(
+        self,
+        status: str | None = None,
+        symbol: str | None = None,
+    ) -> list[dict[str, Any]]:
+        with self._lock:
+            query = "SELECT * FROM orders WHERE 1=1"
+            params: list[Any] = []
+            if status:
+                query += " AND status = ?"
+                params.append(status)
+            if symbol:
+                query += " AND symbol = ?"
+                params.append(symbol)
+            query += " ORDER BY created_at ASC"
+            rows = self._conn.execute(query, params).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                extra = json.loads(d.pop("extra", "{}") or "{}")
+                d.update(extra)
+                result.append(d)
+            return result
+
+    def load_inflight_orders(self) -> list[dict[str, Any]]:
+        """Orders not yet in a terminal state — must be reconciled on restart."""
+        with self._lock:
+            placeholders = ", ".join("?" for _ in ORDER_TERMINAL_STATES)
+            query = (
+                f"SELECT * FROM orders WHERE status NOT IN ({placeholders}) "
+                "ORDER BY created_at ASC"
+            )
+            rows = self._conn.execute(query, tuple(ORDER_TERMINAL_STATES)).fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                extra = json.loads(d.pop("extra", "{}") or "{}")
+                d.update(extra)
+                result.append(d)
+            return result
 
     def get_recent_trades(self, limit: int = 5) -> list[dict[str, Any]]:
         """Retrieve the most recent closed trades, newest first."""

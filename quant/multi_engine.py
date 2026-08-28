@@ -9,18 +9,20 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from quant.amt.session.scanner import OptionScannerService
 from quant.brokers.live_gateway import LiveGateway
 from quant.brokers.multiplexed_feed import MultiplexedMarketFeed
 from quant.contracts.aggregates import INITIAL_CAPITAL
+from quant.contracts.enums import MarketState
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY, is_futures_contract, root_token
 from quant.contracts.market_calendar import is_trading_day
-from quant.contracts.timezones import IST
+from quant.contracts.timezones import IST, MCX_SESSION_CLOSE, NSE_SESSION_CLOSE
 from quant.events import BarClosed
 from quant.execution.live_oms import LiveOMS
 from quant.execution.oms import PaperOMS
@@ -39,6 +41,78 @@ def _is_futures_symbol(symbol: str) -> bool:
 def _canonical_root(symbol: str) -> str:
     spec = DEFAULT_REGISTRY.try_resolve(symbol)
     return spec.root if spec is not None else root_token(symbol)
+
+
+_OPTION_SUFFIX_RE = re.compile(r"[\s\-_]*(?:CALL|PUT|CE|PE)$", re.IGNORECASE)
+_PREFIX_RE = re.compile(r"^(?:NSE|NFO|MCX|BSE|BFO):", re.IGNORECASE)
+_DELIMITED_STRIKE_RE = re.compile(
+    r"(?:[\s\-_])(\d+(?:\.\d+)?)\s*[\-_]?\s*(?:CALL|PUT|CE|PE)$",
+    re.IGNORECASE,
+)
+_MONTH_STRIKE_RE = re.compile(
+    r"(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[\s\-_]*(\d+(?:\.\d+)?)\s*[\-_]?\s*(?:CALL|PUT|CE|PE)$",
+    re.IGNORECASE,
+)
+_WEEKLY_COMPACT_RE = re.compile(
+    r"^\d{2}(?:[1-9]|10|11|12|[ONDond])\d{2}(\d+(?:\.\d+)?)\s*[\-_]?\s*(?:CE|PE|CALL|PUT)$",
+    re.IGNORECASE,
+)
+_TRAILING_DIGITS_RE = re.compile(
+    r"(\d+(?:\.\d+)?)\s*[\-_]?\s*(?:CALL|PUT|CE|PE)$",
+    re.IGNORECASE,
+)
+
+
+def extract_option_strike(symbol: str) -> float | None:
+    """Extract strike price from various option symbol formats.
+
+    Supports:
+    - Spaced: 'NIFTY 1 SEP 24200 CALL', 'CRUDEOIL 19 MAR 6800.0 PE', 'NIFTY 23500 CE'
+    - Hyphenated: 'NIFTY-27MAR24-23500-CE', 'CRUDEOIL_6800_CE'
+    - Compact monthly: 'NIFTY24AUG23500CE', 'CRUDEOIL24MAR6800PE'
+    - Compact weekly: 'NIFTY2482823500CE', 'BANKNIFTY24O2851000PE'
+    - Compact root+strike: 'NIFTY23500CE', 'RELIANCE2600CE'
+    """
+    if not symbol:
+        return None
+    clean = _PREFIX_RE.sub("", str(symbol).strip()).upper()
+    if not _OPTION_SUFFIX_RE.search(clean):
+        return None
+
+    m = _DELIMITED_STRIKE_RE.search(clean)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            pass
+
+    m = _MONTH_STRIKE_RE.search(clean)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            pass
+
+    root = _canonical_root(clean)
+    rem = clean
+    if root and clean.startswith(root):
+        rem = clean[len(root):].strip(" -_")
+
+    m = _WEEKLY_COMPACT_RE.search(rem)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            pass
+
+    m = _TRAILING_DIGITS_RE.search(rem if rem else clean)
+    if m:
+        try:
+            return float(m.group(1))
+        except ValueError:
+            pass
+
+    return None
 
 
 # Persist the coordinator's active contracts (JSON, stdlib-only) so a backend
@@ -117,9 +191,29 @@ _DEFAULT_CONFIG = {
     "strikes_around_atm": 2,
     "interval_seconds": 60,
     "include_futures": True,
+    # EOD square-off backstop: minutes before exchange close at which the
+    # watchdog force-flattens any still-open position (intraday-only book).
+    "eod_squareoff_minutes_before_close": 15,
     # First-listed roots get first claim on scanner slots (primary series).
     "underlying_priority": None,
 }
+
+
+def _signed_broker_qty(bp) -> float:
+    """Normalize a broker position to a signed quantity (C6).
+
+    The broker adapter reports ``size = abs(quantity)`` plus a ``side``
+    (LONG/SHORT), while the engine's persisted rows store SIGNED size
+    (+long / -short). Comparing the two directly made every open SHORT look
+    like a discrepancy (e.g. broker +10 vs DB -10), so a live restart with a
+    short book always failed strict reconciliation.
+    """
+    qty = abs(float(getattr(bp, "size", 0) or 0))
+    side = getattr(bp, "side", None)
+    side_str = str(getattr(side, "value", side) or "").upper()
+    if "SHORT" in side_str or "SELL" in side_str:
+        return -qty
+    return qty
 
 
 class QuantCoordinator:
@@ -146,6 +240,8 @@ class QuantCoordinator:
         self._underlying_gateways: dict[str, LiveGateway] = {}
         self._threads: dict[str, threading.Thread] = {}
         self._stop = threading.Event()
+        self._gex_by_root: dict[str, object] = {}
+        self._eod_thread: threading.Thread | None = None
         self._lock = threading.Lock()
         # Serializes LIFECYCLE TRANSITIONS (start/rescan/switch/stop). These
         # compose multiple steps over the shared dicts + threads above — a
@@ -191,9 +287,11 @@ class QuantCoordinator:
                 self.started = True
                 return
             symbols = self._scan()
+            self._refresh_gex()
             self._feed.set_symbols(symbols)
             for symbol in symbols:
                 self._spawn_engine(symbol)
+            self._start_eod_watchdog()
             self.started = True
 
     def rescan(self) -> list[str]:
@@ -207,9 +305,11 @@ class QuantCoordinator:
                 return []
             self._stop_engines()
             symbols = self._scan(force=True)
+            self._refresh_gex()
             self._feed.set_symbols(symbols)
             for symbol in symbols:
                 self._spawn_engine(symbol)
+            self._start_eod_watchdog()
             return symbols
 
     def switch_symbol(self, old: str, new: str) -> bool:
@@ -219,6 +319,14 @@ class QuantCoordinator:
             self._stop_engine(old)
             self._feed.subscribe(new)
             self._spawn_engine(new)
+            with self._lock:
+                symbols = list(self._engines.keys())
+            try:
+                save_persisted_contracts(
+                    symbols, self._contracts_file, exchange=self.config.get("exchange")
+                )
+            except Exception:
+                logger.debug("Failed to persist updated contracts after switch_symbol", exc_info=True)
             return True
 
     def check_and_migrate_drifted_strikes(self, max_drift_steps: float = 2.5) -> list[str]:
@@ -258,9 +366,8 @@ class QuantCoordinator:
             if spot <= 0:
                 continue
 
-            parts = symbol.split()
-            try:
-                strike = float(parts[-2])
+            strike = extract_option_strike(symbol)
+            if strike is not None and strike > 0:
                 drift = abs(spot - strike)
                 if drift > (max_drift_steps * step):
                     logger.info(
@@ -268,17 +375,127 @@ class QuantCoordinator:
                         symbol, strike, spot, drift, max_drift_steps * step,
                     )
                     migrated.append(symbol)
-            except Exception:
-                pass
 
         if migrated:
             logger.info("QuantCoordinator: migrating %d drifted contract(s): %s", len(migrated), migrated)
             self.rescan()
         return migrated
 
+    def check_and_rotate_dead_symbols(
+        self, max_drift_steps: float = 2.5, stale_sec: float = 600.0
+    ) -> list[tuple[str, str]]:
+        """Identify dead, drifted, or stagnant option contracts and auto-rotate them to active ATM contracts.
+
+        Guards:
+        - Never rotates futures underlyings.
+        - Never rotates an option with an active open position.
+        - Only rotates when a valid, liquid replacement contract is found.
+        """
+        from quant.amt.session.symbol_registry import is_market_open
+        from quant.amt.session.scanner import OptionScannerService
+
+        rotated: list[tuple[str, str]] = []
+        if self._stop.is_set():
+            return rotated
+
+        with self._lock:
+            active_symbols = list(self._engines.keys())
+
+        now = time.time()
+        for symbol in active_symbols:
+            if _is_futures_symbol(symbol):
+                continue
+            with self._lock:
+                engine = self._engines.get(symbol)
+            if engine is None or getattr(engine, "_position", None) is not None:
+                continue
+
+            market = getattr(engine, "_market", None) or self.config.get("exchange", "NSE")
+            if not is_market_open(exchange=market):
+                continue
+
+            root = _canonical_root(symbol)
+            spec = DEFAULT_REGISTRY.try_resolve(root)
+            step = spec.strike_interval if spec and spec.strike_interval > 0 else 50.0
+
+            # 1. Check Strike Drift
+            futures_symbol = next(
+                (s for s in active_symbols if _is_futures_symbol(s) and _canonical_root(s) == root),
+                None
+            )
+            futures_engine = self._engines.get(futures_symbol) if futures_symbol else None
+            spot = 0.0
+            if futures_engine and getattr(futures_engine, "_aggregator", None) and futures_engine._aggregator.current_bar:
+                spot = float(futures_engine._aggregator.current_bar.close)
+            elif self.market_data and hasattr(self.market_data, "get_quote"):
+                try:
+                    q = self.market_data.get_quote(futures_symbol or root)
+                    spot = float(getattr(q, "ltp", 0.0) or getattr(q, "price", 0.0) or 0.0)
+                except Exception:
+                    pass
+
+            is_drifted = False
+            drift_val = 0.0
+            if spot > 0:
+                strike = extract_option_strike(symbol)
+                if strike is not None and strike > 0:
+                    drift_val = abs(spot - strike)
+                    if drift_val > (max_drift_steps * step):
+                        is_drifted = True
+
+            # 2. Check Stale / Dead Market Stagnation
+            last_tick_wall = float(getattr(engine, "_last_tick_wall", now) or now)
+            is_stale = (now - last_tick_wall) > stale_sec
+            amt_dto = getattr(engine, "last_amt_dto", None) or {}
+            is_dead_state = str(amt_dto.get("marketState", "")).upper() in (MarketState.DEAD.value, "DEAD_MARKET")
+
+            reason = ""
+            if is_drifted:
+                reason = f"Strike drift ({drift_val:.1f} > limit {max_drift_steps * step:.1f})"
+            elif is_stale and is_dead_state:
+                reason = f"Dead market state and stale feed ({now - last_tick_wall:.0f}s)"
+
+            if not reason:
+                continue
+
+            # Find replacement contract using OptionScanner
+            try:
+                scanner = OptionScannerService(self.market_data)
+                exchange = spec.dhan_exchange if spec is not None else self.config.get("exchange", "NSE")
+                results = scanner.scan_top_n(
+                    n=4,
+                    underlyings=[root],
+                    exchange=exchange,
+                    expiry_index=int(self.config.get("expiry_index", 0)),
+                    strikes_around_atm=int(self.config.get("strikes_around_atm", 3)),
+                )
+                replacement = None
+                with self._lock:
+                    current_set = set(self._engines.keys())
+                for r in results:
+                    if r.symbol and r.symbol != symbol and r.symbol not in current_set and (r.ltp or 0) > 0:
+                        replacement = r.symbol
+                        break
+
+                if replacement:
+                    logger.info(
+                        "🔄 [DYNAMIC ROTATION] %s is idle/dead (%s) -> rotating to %s",
+                        symbol, reason, replacement,
+                    )
+                    if self.switch_symbol(symbol, replacement):
+                        rotated.append((symbol, replacement))
+            except Exception:
+                logger.exception("check_and_rotate_dead_symbols: error rotating %s", symbol)
+
+        return rotated
+
     def stop(self) -> None:
         with self._lifecycle_lock:
             self._stop.set()
+            eod_thread = getattr(self, "_eod_thread", None)
+            if eod_thread is not None:
+                eod_thread.join(timeout=5)
+                self._eod_thread = None
             self._stop_engines()
             self._feed.close()
             self.started = False
@@ -361,34 +578,176 @@ class QuantCoordinator:
 
             # Force-close open positions when requested (SIGTERM / panic).
             if force_close:
-                pos = getattr(eng, "_position", None)
-                oms = getattr(eng, "_oms", None)
-                if pos is not None and oms is not None:
-                    try:
-                        # Use last known price from the aggregator's current bar.
-                        agg = getattr(eng, "_aggregator", None)
-                        bar = getattr(agg, "current_bar", None) if agg else None
-                        close_price = float(bar.close) if bar and bar.close else float(pos.open_price)
-                        from datetime import datetime as _dt
-                        from quant.contracts.timezones import IST as _IST
-                        ts = _dt.now(tz=_IST).isoformat()
-                        fill = oms.close(pos, close_price, ts, f"EMERGENCY_HALT: {reason}")
-                        eng._position = None
-                        from quant.events import PositionClosed
-                        eng._emit(PositionClosed(symbol=eng.symbol, time=ts, fill=fill))
-                        if risk is not None and hasattr(risk, "record_trade"):
-                            risk.record_trade(float(fill.pnl))
+                try:
+                    # C5: route through the engine's own lock-serialized,
+                    # pyramid-aware flatten (the same path the EOD watchdog
+                    # uses). The previous inline oms.close() ran WITHOUT
+                    # engine._close_lock, so it could race the engine thread's
+                    # blocking close and double-submit an opposing MARKET order
+                    # (flipping the book), and it bypassed PositionManager so
+                    # pyramid add-ons were orphaned.
+                    if eng.force_close_position(f"EMERGENCY_HALT: {reason}"):
                         closed += 1
-                        logger.warning(
-                            "emergency_halt: force-closed %s @ %.2f (pnl=%.2f)",
-                            eng.symbol, close_price, float(fill.pnl),
-                        )
-                    except Exception:
-                        logger.exception("emergency_halt force_close failed for %s", eng.symbol)
+                except Exception:
+                    logger.exception("emergency_halt force_close failed for %s", eng.symbol)
 
         if closed:
             logger.warning("emergency_halt: force-closed %d position(s) across %d engine(s)", closed, halted)
         return halted
+
+    def _squareoff_deadline(self, market) -> datetime | None:
+        """IST datetime at which the EOD backstop fires (exchange close − N min)."""
+        try:
+            minutes = float(self.config.get("eod_squareoff_minutes_before_close", 15))
+        except (TypeError, ValueError):
+            minutes = 15.0
+        close_t = MCX_SESSION_CLOSE if str(market).upper() == "MCX" else NSE_SESSION_CLOSE
+        now = datetime.now(IST)
+        close_dt = datetime.combine(now.date(), close_t).replace(tzinfo=IST)
+        return close_dt - timedelta(minutes=minutes)
+
+    def eod_square_off(self, reason: str = "EOD_SQUARE_OFF") -> int:
+        """Force-flatten every engine whose market has passed its EOD backstop.
+
+        Intraday-only guarantee: the bar-driven SESSION_CLOSE (Phase 5) closes
+        positions while bars flow, but a dead/starved feed near the close could
+        carry a position overnight. This time-driven backstop is independent of
+        tick/bar flow — it fires on the wall clock. Flatten-only: it does NOT
+        persist a risk halt (session gates already block new entries in Phase 5,
+        and next-day trading must stay unaffected). Idempotent — safe to call
+        repeatedly; engines with no open position are skipped. Returns the
+        number of positions force-closed this pass.
+        """
+        closed = 0
+        now = datetime.now(IST)
+        with self._lock:
+            engines = list(self._engines.values())
+        for eng in engines:
+            market = getattr(eng, "_market", None) or self.config.get("exchange", "NSE")
+            deadline = self._squareoff_deadline(market)
+            if deadline is None or now < deadline:
+                continue
+            if getattr(eng, "_position", None) is None and not getattr(eng, "_pyramid_positions", None):
+                continue
+            try:
+                if eng.force_close_position(reason):
+                    closed += 1
+            except Exception:
+                logger.exception("eod_square_off: force-close failed for %s", eng.symbol)
+        if closed:
+            logger.warning("eod_square_off: force-closed %d position(s) (%s)", closed, reason)
+        return closed
+
+    def _intraday_reconcile(self) -> list[str]:
+        """C4: periodic broker-vs-engine book check during the session.
+
+        Detects drift between the broker's positions and the engines' positions
+        (a fill the engine missed, a manual broker-side intervention, or an
+        orphaned order). Detect-and-alert ONLY — it does not auto-halt or
+        auto-close, because an automatic reaction to a transient desync could be
+        worse than the drift itself. Entries/exits are synchronous (the engine
+        book updates only after the broker confirms), so a drift here is a real
+        discrepancy worth operator attention. Returns the list of drift
+        descriptions (empty when the books agree) so callers/tests can inspect.
+        """
+        if not self.config.get("live_oms_enabled") or self.broker is None:
+            return []
+        try:
+            broker_positions = self.broker.get_positions() or []
+        except Exception:
+            logger.debug("intraday reconcile: broker.get_positions() failed — skipping")
+            return []
+
+        broker_by_symbol: dict[str, float] = {}
+        for bp in broker_positions:
+            sym = str(getattr(bp, "symbol", "") or "").strip()
+            if sym:
+                broker_by_symbol[sym] = _signed_broker_qty(bp)
+
+        with self._lock:
+            engines = dict(self._engines)
+
+        engine_by_symbol: dict[str, float] = {}
+        for sym, eng in engines.items():
+            pos = getattr(eng, "_position", None)
+            pyramids = getattr(eng, "_pyramid_positions", None) or []
+            if pos is None and not pyramids:
+                continue
+            net = float(getattr(pos, "size", 0.0)) if pos is not None else 0.0
+            for pyr in pyramids:
+                net += float(getattr(pyr, "size", 0.0))
+            engine_by_symbol[sym] = net
+
+        drift = []
+        for sym, broker_qty in broker_by_symbol.items():
+            engine_qty = engine_by_symbol.get(sym)
+            if engine_qty is None:
+                drift.append(f"{sym}: broker={broker_qty} but no engine position (orphan?)")
+            elif abs(broker_qty - engine_qty) > 0.01:
+                drift.append(f"{sym}: broker={broker_qty} vs engine={engine_qty}")
+        for sym, engine_qty in engine_by_symbol.items():
+            if sym not in broker_by_symbol:
+                drift.append(f"{sym}: engine={engine_qty} but broker has none (desync?)")
+
+        if drift:
+            logger.warning(
+                "INTRADAY RECONCILE: %d book drift(s) detected (detect-only, no "
+                "auto-action): %s",
+                len(drift), "; ".join(drift),
+            )
+        return drift
+
+    def _eod_watchdog_loop(self, poll_sec: float = 30.0) -> None:
+        """Background EOD square-off and dynamic symbol rotation watchdog.
+
+        Polls every ``poll_sec``:
+        - Force-flattens any still-open position once its market passes square-off deadline.
+        - Automatically detects dead/drifted option symbols and rotates them to active ATM contracts.
+        Exits when coordinator stop event is set.
+        """
+        logger.info(
+            "Coordinator watchdog started (square-off %s min before close, auto-rotation enabled)",
+            self.config.get("eod_squareoff_minutes_before_close", 15),
+        )
+        rotation_counter = 0
+        recon_counter = 0
+        while not self._stop.is_set():
+            try:
+                self.eod_square_off()
+            except Exception:
+                logger.exception("EOD watchdog: square-off pass failed")
+
+            # Dynamic Contract Rotation: runs every ~60s (every 2nd pass)
+            rotation_counter += 1
+            if rotation_counter >= 2:
+                rotation_counter = 0
+                try:
+                    self.check_and_rotate_dead_symbols()
+                except Exception:
+                    logger.exception("Dynamic rotation watchdog: pass failed")
+
+            # C4: intraday broker-vs-engine book reconciliation, every ~60s.
+            # Detect-and-alert only (no auto-action) — see _intraday_reconcile.
+            recon_counter += 1
+            if recon_counter >= 2:
+                recon_counter = 0
+                try:
+                    self._intraday_reconcile()
+                except Exception:
+                    logger.exception("Intraday reconcile watchdog: pass failed")
+
+            self._stop.wait(poll_sec)
+        logger.info("Coordinator watchdog stopped")
+
+    def _start_eod_watchdog(self) -> None:
+        if self._eod_thread is not None and self._eod_thread.is_alive():
+            return
+        self._eod_thread = threading.Thread(
+            target=self._eod_watchdog_loop,
+            name="eod-squareoff-watchdog",
+            daemon=True,
+        )
+        self._eod_thread.start()
 
     def unhalt_all(self) -> int:
         """Clear external halt state on all running engines."""
@@ -424,10 +783,9 @@ class QuantCoordinator:
             if _is_futures_symbol(sym):
                 continue
             if sym.upper().startswith(underlying.upper()):
-                tokens = sym.split()
-                for tok in tokens:
-                    if tok.isdigit() and int(tok) > 1000:
-                        strikes.append(int(tok))
+                stk = extract_option_strike(sym)
+                if stk is not None and stk > 0:
+                    strikes.append(stk)
         if not strikes:
             return False
         mean_strike = sum(strikes) / len(strikes)
@@ -530,6 +888,33 @@ class QuantCoordinator:
             logger.info("QuantCoordinator: persisted active contracts: %s", symbols)
         return symbols
 
+    def _refresh_gex(self) -> None:
+        """Compute startup GEX per underlying root.
+
+        GEX needs option-chain data, so it runs its own lightweight scanner pass.
+        It is deliberately kept OUT of ``_scan()`` so that persisted-contract
+        reuse stays scanner-free and deterministic (guarded by
+        tests/quant/test_multi_engine_startup.py). Best-effort: a failure here
+        only means engines run without GEX enrichment, never a startup crash.
+        """
+        try:
+            scanner = OptionScannerService(self.market_data)
+            chains: dict[str, object] = {}
+            scanner.scan_top_n(
+                n=1,
+                underlyings=self.config["underlyings"],
+                exchange=self.config["exchange"],
+                expiry_index=self.config["expiry_index"],
+                strikes_around_atm=self.config["strikes_around_atm"],
+                chains_out=chains,
+            )
+            for root_k, chain_obj in chains.items():
+                gex_obj = getattr(chain_obj, "gex", None)
+                if gex_obj is not None:
+                    self._gex_by_root[root_k.upper()] = gex_obj
+        except Exception:
+            logger.debug("Failed computing startup GEX", exc_info=True)
+
     def _session_profile_for(self, symbol: str) -> str:
         """NSE/MCX session clock for *symbol* — never the coordinator's mode flag."""
         return DEFAULT_REGISTRY.resolve(symbol).session_profile
@@ -560,7 +945,20 @@ class QuantCoordinator:
                 if _is_futures_symbol(future)
             }
             futures_symbol = futures.get(root)
+            if not futures_symbol:
+                try:
+                    spec = DEFAULT_REGISTRY.try_resolve(root)
+                    exchange = spec.dhan_exchange if spec is not None else self.config.get("exchange", "NSE")
+                    if hasattr(self.market_data, "get_nearest_futures"):
+                        futures_symbol = self.market_data.get_nearest_futures(root, exchange=exchange)
+                    if not futures_symbol:
+                        now = datetime.now(tz=IST)
+                        month_str = now.strftime("%b").upper()
+                        futures_symbol = f"{root.upper()} {month_str} FUT"
+                except Exception:
+                    pass
             if futures_symbol:
+                self._feed.subscribe(futures_symbol)
                 reader = self._feed.add_reader(futures_symbol)
                 underlying_gateway = LiveGateway(self._feed, futures_symbol, reader_queue=reader)
         # Per-day event journal (fsync JSONL) — feeds the L1 nightly replay
@@ -588,11 +986,15 @@ class QuantCoordinator:
             portfolio_risk=self._portfolio_risk,
             max_trades_per_session=int(self.config.get("max_trades_per_session", 6)),
             advisor=advisor,
+            risk_per_trade_pct=float(self.config.get("risk_per_trade_pct", 0.005)),
         )
         if advisor is not None:
             # Route advisor emissions through the engine's own bus exactly as
             # the previous in-constructor wiring did.
             advisor.set_emit_fn(engine._emit)
+        root_upper = _canonical_root(symbol).upper()
+        if root_upper in self._gex_by_root and hasattr(engine, "_amt_engine"):
+            engine._amt_engine.set_gex(self._gex_by_root[root_upper])
         # OMS injection: live_oms_enabled + broker → LiveOMS, else PaperOMS.
         # The engine default is PaperOMS (set in QuantEngine.__init__); we
         # override only when the coordinator has a wired broker.
@@ -661,6 +1063,10 @@ class QuantCoordinator:
         # (or a broken shutdown) must never abort the gateway close.
         if engine is not None:
             try:
+                engine.persist_prior_profile()
+            except Exception:
+                pass
+            try:
                 advisor = getattr(engine, "_advisor", None)
                 if advisor is not None and callable(getattr(advisor, "shutdown", None)):
                     advisor.shutdown()
@@ -668,12 +1074,23 @@ class QuantCoordinator:
                 logger.exception(
                     "advisor shutdown failed during stop of %s (ignored)", symbol
                 )
+            try:
+                journal = getattr(engine, "_journal", None)
+                if journal is not None and callable(getattr(journal, "close", None)):
+                    journal.close()
+            except Exception:
+                logger.exception(
+                    "journal close failed during stop of %s (ignored)", symbol
+                )
         if gateway is not None:
             gateway.close()
         if underlying_gateway is not None:
             underlying_gateway.close()
         if thread is not None:
-            thread.join(timeout=1.0)
+            try:
+                thread.join(timeout=1.0)
+            except RuntimeError:
+                pass
 
     def _reconcile_on_startup(self) -> None:
         """Compare broker book vs engine book on startup.
@@ -693,6 +1110,28 @@ class QuantCoordinator:
             sym = str(getattr(bp, "symbol", "") or "").strip()
             if sym:
                 broker_by_symbol[sym] = bp
+
+        # C4: surface any durable orders left in-flight from a prior run. A
+        # crash between place_order and the fill ack leaves these without a
+        # terminal state — they are the prime candidates for orphaned broker
+        # positions, so they must be verified against the broker book.
+        if self._storage is not None and hasattr(self._storage, "load_inflight_orders"):
+            try:
+                inflight = self._storage.load_inflight_orders() or []
+            except Exception:
+                logger.exception("reconciliation: load_inflight_orders failed")
+                inflight = []
+            if inflight:
+                logger.warning(
+                    "reconciliation: %d in-flight order(s) from a prior run have no "
+                    "terminal state — verify against broker book: %s",
+                    len(inflight),
+                    [
+                        f"{o.get('symbol')}:{o.get('side')}:qty={o.get('quantity')}:"
+                        f"{o.get('status')}:broker={o.get('broker_order_id') or '?'}"
+                        for o in inflight
+                    ],
+                )
 
         if not broker_by_symbol:
             logger.info("reconciliation: broker has no open positions — clean start")
@@ -721,7 +1160,7 @@ class QuantCoordinator:
                     f"{sym}: broker has position but DB has none (orphaned)"
                 )
             else:
-                broker_qty = float(getattr(bp, "size", 0))
+                broker_qty = _signed_broker_qty(bp)
                 db_qty = float(db_row.get("size", 0))
                 if abs(broker_qty - db_qty) > 0.01:
                     discrepancies.append(

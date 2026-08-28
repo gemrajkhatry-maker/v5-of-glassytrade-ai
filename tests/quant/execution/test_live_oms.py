@@ -51,10 +51,11 @@ class MockBroker(IBroker):
             entry_time="2026-08-26T10:00:00+05:30",
         )
 
-    def close_position(self, symbol, side, quantity, portfolio):
+    def close_position(self, symbol, side, quantity, portfolio, reference_price=None):
         self.last_close_symbol = symbol
         self.last_close_side = side
         self.last_close_qty = quantity
+        self.last_close_reference_price = reference_price
         self.close_call_count += 1
         if self.should_reject:
             return None
@@ -189,6 +190,17 @@ class TestLiveOMSClose:
         assert broker.last_close_qty == 65
         assert fill.pnl == pytest.approx((95.0 - 100.0) * (-65.0))
 
+    def test_close_threads_exit_price_as_reference(self):
+        """C7: the exit price is passed to the broker as reference_price (collar)."""
+        broker = MockBroker(fill_price=105.0, fill_qty=130.0)
+        portfolio = MagicMock(spec=Portfolio)
+        oms = LiveOMS(broker=broker, portfolio=portfolio)
+
+        pos = _make_position(entry=100.0, size=130.0)
+        oms.close(pos, price=105.0, time="t1", reason="TP")
+
+        assert broker.last_close_reference_price == 105.0
+
     def test_close_broker_failure_raises(self):
         broker = MockBroker(should_reject=True)
         portfolio = MagicMock(spec=Portfolio)
@@ -270,3 +282,48 @@ class TestLiveOMSLotSnapping:
         assert LiveOMS._snap_to_lot(65.0, 65.0) == 65.0    # 1 lot
         assert LiveOMS._snap_to_lot(30.0, 65.0) == 65.0    # minimum 1 lot
         assert LiveOMS._snap_to_lot(200.0, 65.0) == 195.0  # 3 lots
+
+
+# ---------------------------------------------------------------------------
+# C1: submit must carry the engine-sized, lot-snapped quantity to the broker
+# signal. Before the fix the sized quantity was dropped at to_broker_signal and
+# the adapter re-derived it against a frozen phantom portfolio — the exchange
+# never received the size the risk layer approved.
+# ---------------------------------------------------------------------------
+
+class _CapturingBroker(MockBroker):
+    """MockBroker that records the broker signal handed to execute_order."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.last_signal = None
+
+    def execute_order(self, signal, portfolio, symbol):
+        self.last_signal = signal
+        return super().execute_order(signal, portfolio, symbol)
+
+
+class TestLiveOMSSubmitCarriesEngineQuantity:
+    def test_submit_passes_quantity_to_broker_signal(self):
+        broker = _CapturingBroker(fill_price=102.0, fill_qty=130.0)
+        portfolio = MagicMock(spec=Portfolio)
+        oms = LiveOMS(broker=broker, portfolio=portfolio, lot_size=65.0)
+
+        oms.submit(_make_signal(entry=100.0), quantity=130.0)
+
+        meta = broker.last_signal.metadata or {}
+        assert meta.get("order_quantity") == 130.0, (
+            "engine-sized quantity must be carried to the broker signal so the "
+            "adapter executes it instead of re-sizing"
+        )
+
+    def test_submit_snaps_quantity_to_lot_before_passing(self):
+        broker = _CapturingBroker(fill_price=102.0, fill_qty=130.0)
+        portfolio = MagicMock(spec=Portfolio)
+        oms = LiveOMS(broker=broker, portfolio=portfolio, lot_size=65.0)
+
+        # 100 units at lot 65 -> 2 lots = 130
+        oms.submit(_make_signal(entry=100.0), quantity=100.0)
+
+        meta = broker.last_signal.metadata or {}
+        assert meta.get("order_quantity") == 130.0

@@ -34,7 +34,7 @@ from quant.contracts.entities import Signal
 from quant.contracts.enums import SignalType, SetupType, Source
 from quant.contracts.aggregates import Portfolio
 from brokers.broker.dhan.domain.errors import DhanError
-from brokers.broker.types import OrderStatus
+from brokers.broker.types import OrderStatus, OrderType
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +188,219 @@ def test_order_carries_signal_id_for_broker_dedup():
 
     order = broker.place_order.call_args[0][0]
     assert getattr(order, "user_order_id", None) == signal_id
+
+
+# ---------------------------------------------------------------------------
+# C7: entry slippage collar (marketable LIMIT instead of naked MARKET)
+# ---------------------------------------------------------------------------
+
+
+def test_entry_buy_uses_marketable_limit_with_collar():
+    """C7: a default BUY entry becomes a marketable LIMIT bounded by the
+    slippage tolerance — never a naked MARKET order."""
+    from brokers.broker.types import OrderType
+
+    broker = _mock_broker_filled()
+    adapter = _make_adapter(broker)
+    adapter._entry_slippage_tol = 0.01
+    signal = _make_signal(price=100.0, is_buy=True, metadata={"order_quantity": 4})
+
+    adapter.execute_order(signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL")
+
+    order = broker.place_order.call_args[0][0]
+    assert order.order_type == OrderType.LIMIT
+    assert order.price == pytest.approx(101.0)  # 100 * (1 + 0.01)
+    assert order.trigger_price == pytest.approx(0.0)
+
+
+def test_entry_sell_uses_marketable_limit_with_collar():
+    """C7: a default SELL entry's collar sits below the signal price."""
+    from brokers.broker.types import OrderType
+
+    broker = _mock_broker_filled()
+    adapter = _make_adapter(broker)
+    adapter._entry_slippage_tol = 0.01
+    signal = _make_signal(price=100.0, is_buy=False, metadata={"order_quantity": 4})
+
+    adapter.execute_order(signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL")
+
+    order = broker.place_order.call_args[0][0]
+    assert order.order_type == OrderType.LIMIT
+    assert order.price == pytest.approx(99.0)  # 100 * (1 - 0.01)
+
+
+def test_entry_explicit_market_order_type_honored():
+    """An explicitly requested MARKET order opts out of the collar."""
+    from brokers.broker.types import OrderType
+
+    broker = _mock_broker_filled()
+    adapter = _make_adapter(broker)
+    adapter._entry_slippage_tol = 0.01
+    signal = _make_signal(price=100.0, is_buy=True,
+                          metadata={"order_quantity": 4, "order_type": "MARKET"})
+
+    adapter.execute_order(signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL")
+
+    order = broker.place_order.call_args[0][0]
+    assert order.order_type == OrderType.MARKET
+
+
+def test_marketable_limit_price_helper():
+    f = DhanBrokerAdapter._marketable_limit_price
+    assert f(100.0, True, 0.01) == pytest.approx(101.0)
+    assert f(100.0, False, 0.01) == pytest.approx(99.0)
+    assert f(100.0, True, 0.0) == pytest.approx(100.0)   # no tolerance -> unchanged
+    assert f(0.0, True, 0.01) == pytest.approx(0.0)      # invalid price -> unchanged
+
+
+# ---------------------------------------------------------------------------
+# C4: durable order state persistence
+# ---------------------------------------------------------------------------
+
+
+class _RecordingStorage:
+    def __init__(self):
+        self.saved = {}
+        self.updates = []
+
+    def save_order(self, order):
+        self.saved[order["order_id"]] = dict(order)
+
+    def update_order_status(self, order_id, status, **kw):
+        self.updates.append((order_id, status, kw))
+
+
+def test_execute_order_persists_submitted_then_filled():
+    """C4: with storage wired, execute_order persists SUBMITTED then FILLED."""
+    broker = _mock_broker_filled(quantity=4, fill_price=100.0)
+    adapter = _make_adapter(broker)
+    storage = _RecordingStorage()
+    adapter._storage = storage
+    signal = _make_signal(price=100.0, metadata={"order_quantity": 4})
+
+    pos = adapter.execute_order(signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert pos is not None
+    order_id = signal.signal_id
+    assert order_id in storage.saved
+    assert storage.saved[order_id]["status"] == "SUBMITTED"
+    statuses = [s for (_, s, _) in storage.updates]
+    assert "FILLED" in statuses
+    filled_kw = [kw for (_, s, kw) in storage.updates if s == "FILLED"][0]
+    assert filled_kw["filled_quantity"] == pytest.approx(4.0)
+    assert filled_kw["broker_order_id"] == "ORD-1"
+
+
+def test_execute_order_persists_rejected_on_broker_rejection():
+    """C4: a broker-rejected order persists a REJECTED terminal state."""
+    broker = _mock_broker_filled(quantity=4)
+    broker.get_order_status.return_value = _status(status=OrderStatus.REJECTED, filled_quantity=0)
+    adapter = _make_adapter(broker)
+    storage = _RecordingStorage()
+    adapter._storage = storage
+    signal = _make_signal(price=100.0, metadata={"order_quantity": 4})
+
+    pos = adapter.execute_order(signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert pos is None
+    statuses = [s for (_, s, _) in storage.updates]
+    assert "REJECTED" in statuses
+
+
+def test_execute_order_no_storage_is_noop():
+    """C4: without storage wired, persistence is a safe no-op (still executes)."""
+    broker = _mock_broker_filled(quantity=4)
+    adapter = _make_adapter(broker)  # no _storage attribute set
+    signal = _make_signal(price=100.0, metadata={"order_quantity": 4})
+
+    pos = adapter.execute_order(signal, Portfolio.create_default(), "CRUDEOIL 17 AUG 7200 CALL")
+
+    assert pos is not None
+
+
+# ---------------------------------------------------------------------------
+# C7 (close side): close slippage collar
+# ---------------------------------------------------------------------------
+
+
+def test_close_long_with_reference_price_uses_marketable_limit_sell():
+    """C7: closing a LONG (SELL) with a reference price -> LIMIT priced low."""
+    broker = _mock_broker_filled(quantity=4, fill_price=99.0)
+    adapter = _make_adapter(broker)
+    adapter._close_slippage_tol = 0.05
+
+    pos = adapter.close_position(
+        "CRUDEOIL 17 AUG 7200 CALL", "SELL", 4,
+        Portfolio.create_default(), reference_price=100.0,
+    )
+
+    assert pos is not None
+    order = broker.place_order.call_args[0][0]
+    assert order.order_type == OrderType.LIMIT
+    assert order.price == pytest.approx(95.0)  # 100 * (1 - 0.05): aggressive SELL
+
+
+def test_close_short_with_reference_price_uses_marketable_limit_buy():
+    """C7: closing a SHORT (BUY) with a reference price -> LIMIT priced high."""
+    broker = _mock_broker_filled(quantity=4, fill_price=101.0)
+    adapter = _make_adapter(broker)
+    adapter._close_slippage_tol = 0.05
+
+    pos = adapter.close_position(
+        "CRUDEOIL 17 AUG 7200 PUT", "BUY", 4,
+        Portfolio.create_default(), reference_price=100.0,
+    )
+
+    assert pos is not None
+    order = broker.place_order.call_args[0][0]
+    assert order.order_type == OrderType.LIMIT
+    assert order.price == pytest.approx(105.0)  # 100 * (1 + 0.05): aggressive BUY
+
+
+def test_close_without_reference_price_stays_market():
+    """C7: no reference price -> unchanged MARKET close (fill guarantee)."""
+    broker = _mock_broker_filled(quantity=4, fill_price=100.0)
+    adapter = _make_adapter(broker)
+    adapter._close_slippage_tol = 0.05
+
+    pos = adapter.close_position(
+        "CRUDEOIL 17 AUG 7200 CALL", "SELL", 4, Portfolio.create_default()
+    )
+
+    assert pos is not None
+    order = broker.place_order.call_args[0][0]
+    assert order.order_type == OrderType.MARKET
+
+
+def test_close_collar_disabled_when_tolerance_zero():
+    """C7: tolerance 0 disables the collar -> MARKET close."""
+    broker = _mock_broker_filled(quantity=4, fill_price=100.0)
+    adapter = _make_adapter(broker)
+    adapter._close_slippage_tol = 0.0
+
+    pos = adapter.close_position(
+        "CRUDEOIL 17 AUG 7200 CALL", "SELL", 4,
+        Portfolio.create_default(), reference_price=100.0,
+    )
+
+    assert pos is not None
+    order = broker.place_order.call_args[0][0]
+    assert order.order_type == OrderType.MARKET
+
+
+def test_close_unset_tolerance_attribute_defaults_to_market():
+    """C7: adapter built without __init__ (no _close_slippage_tol) -> MARKET."""
+    broker = _mock_broker_filled(quantity=4, fill_price=100.0)
+    adapter = _make_adapter(broker)  # no _close_slippage_tol attribute
+
+    pos = adapter.close_position(
+        "CRUDEOIL 17 AUG 7200 CALL", "SELL", 4,
+        Portfolio.create_default(), reference_price=100.0,
+    )
+
+    assert pos is not None
+    order = broker.place_order.call_args[0][0]
+    assert order.order_type == OrderType.MARKET
 
 
 def test_partial_fill_completes_within_poll_returns_position():

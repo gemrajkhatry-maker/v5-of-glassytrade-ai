@@ -246,6 +246,12 @@ async def _coordinator_viewer_loop(
     try:
         while True:
             symbols = coordinator.symbols()
+            if not symbols:
+                for _ in range(20):
+                    await asyncio.sleep(0.5)
+                    symbols = coordinator.symbols()
+                    if symbols:
+                        break
             resolved = _resolve_symbol(symbol, symbols)
             if resolved is None:
                 # Preserve the coordinator's engine-switch capability: a client

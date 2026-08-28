@@ -205,7 +205,7 @@ class SessionVWAP:
 
         # Sanity: clamp extreme deviations
         if vwap_deviation_sigmas is not None and abs(vwap_deviation_sigmas) > 4.0:
-            logger.warning(
+            logger.debug(
                 "VWAP deviation clamped: %.2fσ → ±4.0σ", vwap_deviation_sigmas,
             )
             vwap_deviation_sigmas = 4.0 if vwap_deviation_sigmas > 0 else -4.0

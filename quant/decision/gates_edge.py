@@ -42,9 +42,12 @@ def _check_guards(ctx: DecisionContext) -> GateResult | None:
     if getattr(ctx, "drive_number", 0) >= 3 and not getattr(ctx, "drive_entry_valid", False):
         return GateResult(3, False, f"Drive count exhausted ({ctx.drive_number})")
     cvd_slope = ctx.cvd_slope
-    if ctx.agent_direction == "LONG" and cvd_slope < -0.5:
+    market = getattr(ctx, "market", "NSE")
+    cvd_block_neg = -0.3 if str(market).upper() == "MCX" else -0.5
+    cvd_block_pos = 0.3 if str(market).upper() == "MCX" else 0.5
+    if ctx.agent_direction == "LONG" and cvd_slope < cvd_block_neg:
         return GateResult(3, False, f"CVD slope aggressively negative ({cvd_slope:.2f}) conflicts with LONG")
-    if ctx.agent_direction == "SHORT" and cvd_slope > 0.5:
+    if ctx.agent_direction == "SHORT" and cvd_slope > cvd_block_pos:
         return GateResult(3, False, f"CVD slope aggressively positive ({cvd_slope:.2f}) conflicts with SHORT")
     return None
 

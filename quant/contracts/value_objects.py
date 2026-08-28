@@ -289,6 +289,9 @@ class AMTResult:
     # catalyst. Populated by RegimeDetector.detect_squeeze in analyze().
     squeeze_direction: str = ""   # "LONG" | "SHORT" | ""
     squeeze_trapped_level: float = 0.0
+    # Gamma Exposure (Dealer GEX metrics)
+    gex: object | None = None
+
 
 
 # ---------------------------------------------------------------------------

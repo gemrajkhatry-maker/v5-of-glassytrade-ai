@@ -66,11 +66,13 @@ def test_e9_live_pyramid_never_ghosts():
     assert pm._exits.is_risk_free(pos), "breakeven should arm at 0.8R+"
 
     dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
-    # The fix: LiveOMS.add_pyramid raises instead of building a ghost position.
+    # LiveOMS.add_pyramid raises ValueError
     with pytest.raises(ValueError) as exc_info:
-        pm.check_pyramid(dto, _bar(100.05), pos, bar_index=5)
-
+        oms.add_pyramid(pos, 100.05, 99.0, 1.0, "2026-08-17T09:30:00+05:30", 1)
     assert "E9" in str(exc_info.value), f"expected E9 error, got {exc_info.value}"
+
+    # CRIT-01 Fix: check_pyramid catches the error and logs a warning instead of crashing
+    pm.check_pyramid(dto, _bar(100.05), pos, bar_index=5)
     assert pm.pyramid_count == 0, (
         "E9 VIOLATION: pyramid created under LiveOMS without broker order — "
         "ghost position that will fail on close"
@@ -92,8 +94,7 @@ def test_e9_live_close_does_not_send_broker_order_for_ghost():
     assert pm._exits.is_risk_free(pos)
 
     dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
-    with pytest.raises(ValueError):
-        pm.check_pyramid(dto, _bar(100.05), pos, bar_index=5)
+    pm.check_pyramid(dto, _bar(100.05), pos, bar_index=5)
 
     # No pyramid positions → the close loop has nothing to send to the broker.
     assert len(pm.pyramid_positions) == 0

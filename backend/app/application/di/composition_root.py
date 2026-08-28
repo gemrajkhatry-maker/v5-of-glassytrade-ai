@@ -102,7 +102,16 @@ def _create_broker_adapter(container: DIContainer, config: "Configuration"):
     live_mode = is_live_mode()
     if live_mode:
         from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter
-        return DhanBrokerAdapter(config)
+        from quant.contracts.ports.storage import IStorage
+        # C4: wire durable order storage so live order state transitions are
+        # persisted for crash recovery. Best-effort — a missing storage adapter
+        # must never block live execution.
+        try:
+            storage = container.resolve(IStorage)
+        except Exception:
+            logger.warning("No storage adapter available for durable order persistence")
+            storage = None
+        return DhanBrokerAdapter(config, storage=storage)
     from app.infrastructure.adapters.paper_broker import PaperBrokerAdapter
     return PaperBrokerAdapter()
 
@@ -143,6 +152,9 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         "underlying_priority": _settings.SCANNER_UNDERLYING_PRIORITY,
         "live_oms_enabled": is_live_mode(),
         "max_trades_per_session": int(getattr(config.risk, "max_trades_per_session", 6)),
+        # C2: the configured per-trade risk must reach the engines' SessionRisk.
+        # Omitting it made every engine fall back to an unsafe default.
+        "risk_per_trade_pct": float(getattr(config.risk, "risk_per_trade_pct", 0.005)),
     }
     logger.info(
         "QuantCoordinator config: underlyings=%s n=%d exchange=%s expiry_index=%d "

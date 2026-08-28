@@ -31,8 +31,8 @@ class RiskState:
 
 class SessionRisk:
     def __init__(self, starting_equity: float = float(INITIAL_CAPITAL),
-                 base_risk_pct: float = 0.005,          # 0.5% risk per trade (was 1%)
-                 max_daily_loss_pct: float = 0.02,       # 2% max daily loss (was 3%)
+                 base_risk_pct: float = 0.005,          # 0.5% default, aggressive when >= 0.05
+                 max_daily_loss_pct: float = 0.02,       # 2% default max daily loss
                  max_consecutive_losses: int = 3,
                  max_trades_per_session: int = 6,
                  *,
@@ -248,7 +248,7 @@ class SessionRisk:
         is_expiry: bool = False,
         max_lots: int | None = None,
     ) -> float:
-        if entry == sl:
+        if entry == sl or entry <= 0:
             return 0.0
         with self._lock:
             sizing_equity = self._equity
@@ -257,6 +257,27 @@ class SessionRisk:
                     self._starting_equity
                     + float(getattr(self._portfolio_risk, "realized_pnl", 0.0))
                 )
+            # If base_risk_pct is aggressive (>= 5%), size by deploying ~95% of available capital on premium
+            if self._base_risk_pct >= 0.05:
+                target_capital = sizing_equity * self._base_risk_pct
+                if is_expiry:
+                    target_capital *= 0.5
+                cost_per_unit = entry if entry > 0 else abs(entry - sl)
+                if lot_size and lot_size > 1.0:
+                    cost_per_lot = cost_per_unit * lot_size
+                    lots = int(target_capital // cost_per_lot) if cost_per_lot > 0 else 0
+                    if lots == 0 and cost_per_lot > 0 and target_capital >= cost_per_lot * 0.5:
+                        lots = 1
+                    if max_lots is not None and max_lots > 0:
+                        lots = min(lots, max_lots)
+                    return float(lots * lot_size)
+                else:
+                    qty = target_capital / cost_per_unit
+                    if max_lots is not None and max_lots > 0:
+                        qty = min(qty, float(max_lots))
+                    return qty
+
+            # Standard stop-loss fractional risk sizing
             risk_amount = sizing_equity * self._risk_per_trade_pct()
             if max_rupee_risk_cap is not None and max_rupee_risk_cap > 0:
                 risk_amount = min(risk_amount, max_rupee_risk_cap)
@@ -342,14 +363,9 @@ class SessionRisk:
         return "CONSERVATIVE"
 
     def _risk_per_trade_pct(self) -> float:
-        """Spec §12.2 Cushioning & House Money Protocol.
-
-        CONSERVATIVE: first 1-2 trades OR 2+ consecutive losses → 0.25% base risk
-        CUSHION: session_pnl > 0 after 2+ trades → 0.35% + 40% of session profit
-                 (addition capped at 30% of session profit; total never above 0.50%)
-        MOMENTUM: 2+ consecutive wins → 0.40% + 40% of session profit
-                  (addition capped at 30% of session profit; total never above 0.50%)
-        """
+        """Spec §12.2 Cushioning & House Money Protocol."""
+        if self._base_risk_pct >= 0.05:
+            return self._base_risk_pct
         tier = self._cushion_tier()
         if tier == "CONSERVATIVE" or self._daily_pnl <= 0:
             return 0.0025

@@ -12,6 +12,8 @@ label here when a new playbook needs a distinct SetupType.
 
 from __future__ import annotations
 
+from typing import Any
+
 from quant.contracts.decimal_utils import to_decimal
 from quant.contracts.entities import Signal as BrokerSignal
 from quant.contracts.enums import SetupType, SignalType, Source
@@ -24,8 +26,17 @@ _SETUP_BY_MODEL_LABEL: dict[str, SetupType] = {
 }
 
 
-def to_broker_signal(signal: EngineSignal) -> BrokerSignal:
-    """Map an approved engine ``Signal`` onto the ``IBroker`` contract."""
+def to_broker_signal(signal: EngineSignal, quantity: float | None = None) -> BrokerSignal:
+    """Map an approved engine ``Signal`` onto the ``IBroker`` contract.
+
+    ``quantity`` is the engine-sized, lot-snapped order size produced by the
+    risk layer. When provided it is carried in metadata as ``order_quantity``
+    so the broker adapter executes exactly that size — the adapter must never
+    re-derive quantity against its own portfolio view (C1).
+    """
+    metadata: dict[str, Any] = {"rr": signal.rr, "model_label": signal.model_label}
+    if quantity is not None and quantity > 0:
+        metadata["order_quantity"] = float(quantity)
     return BrokerSignal.create(
         type=SignalType.BUY if signal.type == "LONG" else SignalType.SELL,
         price=to_decimal(signal.entry),
@@ -35,5 +46,5 @@ def to_broker_signal(signal: EngineSignal) -> BrokerSignal:
         timestamp=signal.timestamp,
         setup=_SETUP_BY_MODEL_LABEL.get(signal.model_label, SetupType.TREND_MODEL),
         source=Source.AMT,
-        metadata={"rr": signal.rr, "model_label": signal.model_label},
+        metadata=metadata,
     )

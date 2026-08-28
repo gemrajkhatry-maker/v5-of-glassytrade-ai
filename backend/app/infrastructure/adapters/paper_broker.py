@@ -104,11 +104,17 @@ class PaperBrokerAdapter(IBroker):
         return position
 
     def close_position(
-        self, symbol: str, side: str, quantity: int, portfolio: Portfolio
+        self,
+        symbol: str,
+        side: str,
+        quantity: int,
+        portfolio: Portfolio,
+        reference_price: float | None = None,
     ) -> Position | None:
         """Close (or reduce) a paper position.
 
-        Simulates an opposing fill at the requested quantity.
+        Simulates an opposing fill at the requested quantity. ``reference_price``
+        is accepted for interface parity with live brokers but unused in paper.
         """
         if quantity <= 0:
             return None

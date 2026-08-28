@@ -77,7 +77,6 @@ describe('ChartScene Dual-Timeframe & Tick Isolation', () => {
     const config: ChartConfig = {
       symbol: 'TEST',
       interval: '1m',
-      theme: 'dark',
       bullColor: '#22c55e',
       bearColor: '#ef4444',
       showVolumeProfile: false,
@@ -90,6 +89,7 @@ describe('ChartScene Dual-Timeframe & Tick Isolation', () => {
         tickBus={tickBus}
         symbol="TEST"
         config={config}
+        positions={[]}
       />
     );
 
@@ -115,7 +115,6 @@ describe('ChartScene Dual-Timeframe & Tick Isolation', () => {
     const config: ChartConfig = {
       symbol: 'TEST',
       interval: '1m',
-      theme: 'dark',
       bullColor: '#22c55e',
       bearColor: '#ef4444',
       showVolumeProfile: false,
@@ -128,6 +127,7 @@ describe('ChartScene Dual-Timeframe & Tick Isolation', () => {
         tickBus={tickBus}
         symbol="TEST"
         config={config}
+        positions={[]}
       />
     );
 
@@ -153,7 +153,6 @@ describe('ChartScene Dual-Timeframe & Tick Isolation', () => {
     const config: ChartConfig = {
       symbol: 'TEST',
       interval: '5m',
-      theme: 'dark',
       bullColor: '#22c55e',
       bearColor: '#ef4444',
       showVolumeProfile: true,
@@ -166,6 +165,7 @@ describe('ChartScene Dual-Timeframe & Tick Isolation', () => {
         tickBus={tickBus}
         symbol="TEST"
         config={config}
+        positions={[]}
       />
     );
 

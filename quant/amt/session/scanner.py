@@ -15,6 +15,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
+from quant.amt.profile.gamma import compute_gamma_exposure
 from quant.contracts.instrument_registry import DEFAULT_REGISTRY, UnknownInstrumentError
 from quant.contracts.sync_boundary import ensure_sync_adapter_result
 from quant.contracts.timezones import today_ist
@@ -102,11 +103,11 @@ class OptionScannerService:
         if 0.40 <= delta_val <= 0.60:
             score += 10
 
-        # Momentum alignment (15 pts): CE with BULLISH bias, PE with BEARISH bias
+        # Momentum alignment (25 pts): CE with BULLISH bias, PE with BEARISH bias (-10 if opposing)
         if bias == "BULLISH":
-            score += 15 if opt_type == "CE" else -5
+            score += 25 if opt_type == "CE" else -10
         elif bias == "BEARISH":
-            score += 15 if opt_type == "PE" else -5
+            score += 25 if opt_type == "PE" else -10
 
         # Dynamic Spread Penalty (-20 pts max)
         if ltp > 0 and bid > 0 and ask > 0:
@@ -143,6 +144,17 @@ class OptionScannerService:
                 return None
             if opt_type == "PE" and strike < atm:
                 return None
+
+        # Hard momentum filter: only trade aligned contracts
+        # NEUTRAL = no directional edge = skip (will fall to fallback if needed)
+        if bias == "NEUTRAL":
+            return None
+
+        # Direction alignment: don't buy puts when momentum is bullish
+        if bias == "BULLISH" and opt_type == "PE":
+            return None
+        if bias == "BEARISH" and opt_type == "CE":
+            return None
 
         opt = option_map.get(float(strike))
         if opt is None:
@@ -212,6 +224,7 @@ class OptionScannerService:
         bullish_only: bool,
         preferred_option_type: str | None = None,
         big_move_mode: bool = False,
+        chains_out: dict[str, Any] | None = None,
     ) -> list[ScanResult]:
         """Fetch chain for one underlying and return scored contracts (CE+PE near ATM)."""
         out: list[ScanResult] = []
@@ -260,6 +273,34 @@ class OptionScannerService:
         if chain is None:
             logger.info("%s: option chain returned None — skipping", u)
             return out
+
+        try:
+            lot_size = DEFAULT_REGISTRY.resolve(u).lot_size
+        except Exception:
+            lot_size = 1
+
+        try:
+            spot_val = float(getattr(chain, "spot_price", 0) or chain.atm_strike or 0)
+            calls_oi = {float(k): getattr(v, "oi", 0) for k, v in getattr(chain, "calls", {}).items()}
+            puts_oi = {float(k): getattr(v, "oi", 0) for k, v in getattr(chain, "puts", {}).items()}
+            calls_iv = {float(k): getattr(v, "iv", 0.18) for k, v in getattr(chain, "calls", {}).items() if getattr(v, "iv", 0)}
+            puts_iv = {float(k): getattr(v, "iv", 0.18) for k, v in getattr(chain, "puts", {}).items() if getattr(v, "iv", 0)}
+            strikes = sorted(set(calls_oi.keys()) | set(puts_oi.keys()))
+            chain.gex = compute_gamma_exposure(
+                spot=spot_val,
+                strikes=strikes,
+                calls_oi=calls_oi,
+                puts_oi=puts_oi,
+                calls_iv=calls_iv,
+                puts_iv=puts_iv,
+                lot_size=lot_size,
+            )
+        except Exception:
+            logger.debug("Failed computing GEX for %s", u, exc_info=True)
+            chain.gex = None
+
+        if chains_out is not None:
+            chains_out[u] = chain
 
         atm = chain.atm_strike
         interval = self._STRIKE_INTERVALS.get(u.upper(), 50)
@@ -365,6 +406,7 @@ class OptionScannerService:
         bullish_only: bool = False,  # Allow both CE and PE by default
         big_move_mode: bool | None = None,
         underlying_priority: list[str] | None = None,
+        chains_out: dict[str, Any] | None = None,
     ) -> list[ScanResult]:
         """Select top N contracts based on momentum and liquidity.
 
@@ -376,6 +418,7 @@ class OptionScannerService:
                 premium is cheap: skip chains whose ATM straddle is a large % of
                 spot (IV rich), require >= big_move_min_dte DTE, and cap NSE
                 premium at 25-400 for scalping ROI.
+            chains_out: Optional dict to receive fetched option chains for GEX / levels.
         """
 
         results: list[ScanResult] = []
@@ -405,6 +448,7 @@ class OptionScannerService:
             ),
         )
 
+        cached_chains: dict[str, Any] = chains_out if chains_out is not None else {}
         if parallel and len(underlyings) > 1:
             merged: list[ScanResult] = []
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
@@ -418,6 +462,7 @@ class OptionScannerService:
                         bullish_only,
                         preferred_option_type,
                         big_move_mode,
+                        chains_out=cached_chains,
                     ): u
                     for u in underlyings
                 }
@@ -442,6 +487,7 @@ class OptionScannerService:
                             bullish_only,
                             preferred_option_type,
                             big_move_mode,
+                            chains_out=cached_chains,
                         )
                     )
                 except Exception as e:
@@ -460,7 +506,7 @@ class OptionScannerService:
         # Big-move mode is a strict filter: expensive premium means "no setup",
         # not "show me ATM monitors anyway" — those would get traded.
         if not final and not big_move_mode:
-            final = self._fallback_atm(underlyings, expiry_index)
+            final = self._fallback_atm(underlyings, expiry_index, chains=cached_chains)
 
         logger.info(
             "scan_top_n: %d contracts found, returning %d",
@@ -480,17 +526,25 @@ class OptionScannerService:
         return final
 
     def _detect_momentum(self, chain, atm, interval):
-        """Simple momentum detection from option chain."""
-        # CE vs PE volume ratio near ATM
-        ce_vol = sum(int(o.volume or 0) for o in chain.calls.values())
-        pe_vol = sum(int(o.volume or 0) for o in chain.puts.values())
+        """Momentum from near-ATM strikes only (the strikes that actually move)."""
+        interval = interval or 50
+        near = {s for s in chain.calls if abs(s - atm) <= 2 * interval} | {
+            s for s in chain.puts if abs(s - atm) <= 2 * interval
+        }
+        ce_vol = sum(int(chain.calls[s].volume or 0) for s in near if s in chain.calls)
+        pe_vol = sum(int(chain.puts[s].volume or 0) for s in near if s in chain.puts)
+
+        # OI-weighted tie-breaker: if vol is equal, check near-ATM OI
+        if ce_vol == pe_vol == 0:
+            ce_oi = sum(int(chain.calls[s].oi or 0) for s in near if s in chain.calls)
+            pe_oi = sum(int(chain.puts[s].oi or 0) for s in near if s in chain.puts)
+            ce_vol, pe_vol = ce_oi, pe_oi  # fall back to OI
 
         if ce_vol > pe_vol * 1.5:
-            return "BULLISH", 3, f"CE volume {ce_vol} > PE volume {pe_vol}"
+            return "BULLISH", 3, f"Near-ATM CE vol {ce_vol} > PE vol {pe_vol}"
         elif pe_vol > ce_vol * 1.5:
-            return "BEARISH", 3, f"PE volume {pe_vol} > CE volume {ce_vol}"
-        else:
-            return "NEUTRAL", 0, f"Balanced CE={ce_vol} PE={pe_vol}"
+            return "BEARISH", 3, f"Near-ATM PE vol {pe_vol} > CE vol {ce_vol}"
+        return "NEUTRAL", 0, f"Balanced near-ATM CE={ce_vol} PE={pe_vol}"
 
     def _rank_per_underlying(
         self,
@@ -573,6 +627,7 @@ class OptionScannerService:
         self,
         underlyings: list[str],
         expiry_index: int,
+        chains: dict[str, Any] | None = None,
     ) -> list[ScanResult]:
         """Fallback: select ATM CE+PE for monitoring when no momentum setups found."""
         final: list[ScanResult] = []
@@ -588,23 +643,32 @@ class OptionScannerService:
                 except UnknownInstrumentError:
                     continue
 
-                chain = ensure_sync_adapter_result(
-                    "broker.get_option_chain",
-                    self._broker.get_option_chain,
-                    underlying=u,
-                    exchange=_u_exchange,
-                    expiry_index=expiry_index,
-                )
+                chain = (chains or {}).get(u)
+                if chain is None:
+                    chain = ensure_sync_adapter_result(
+                        "broker.get_option_chain",
+                        self._broker.get_option_chain,
+                        underlying=u,
+                        exchange=_u_exchange,
+                        expiry_index=expiry_index,
+                    )
                 if chain is None:
                     continue
                 _fb_exp = (
                     chain.expiry.date()
                     if hasattr(chain.expiry, "date")
-                    else None
+                    else (date.fromisoformat(chain.expiry) if isinstance(chain.expiry, str) else chain.expiry)
                 )
                 if _fb_exp is not None and _fb_exp < today_ist():
                     continue
                 atm = chain.atm_strike
+
+                if hasattr(chain.expiry, "date"):
+                    expiry_str = chain.expiry.date().isoformat()
+                elif hasattr(chain.expiry, "isoformat"):
+                    expiry_str = chain.expiry.isoformat()
+                else:
+                    expiry_str = str(chain.expiry)
 
                 for opt_type, opt_map in [("CE", chain.calls), ("PE", chain.puts)]:
                     atm_opt = opt_map.get(float(atm))
@@ -615,9 +679,7 @@ class OptionScannerService:
                                 underlying=u,
                                 strike=int(atm),
                                 option_type=opt_type,
-                                expiry=chain.expiry.date().isoformat()
-                                if hasattr(chain.expiry, "date")
-                                else "",
+                                expiry=expiry_str,
                                 ltp=float(atm_opt.ltp),
                                 oi=int(atm_opt.oi or 0),
                                 volume=int(atm_opt.volume or 0),

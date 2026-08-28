@@ -13,6 +13,7 @@ class DecisionContext:
     state: Optional[AMTResult] = None
     bar: Optional[Bar] = None             # the bar that closed to produce state
     symbol: str = ""
+    market: str = "NSE"
     # session / risk facts
     session_open: bool = True
     warmup_complete: bool = True      # enough bars (> 15) for analysis

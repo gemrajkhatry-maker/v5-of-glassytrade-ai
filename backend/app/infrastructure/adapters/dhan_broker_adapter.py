@@ -53,8 +53,18 @@ class DhanBrokerAdapter(IBroker):
 
     _MCX_UNDERLYINGS = ExchangeConfig.for_exchange("MCX").underlyings
 
-    def __init__(self, config: Configuration):
+    # C7: default worst-case slippage bound for entry orders. A naked MARKET
+    # order on a thin option can fill arbitrarily far from the signal price;
+    # converting entries to a marketable LIMIT bounded by this tolerance caps
+    # the damage (a no-fill simply skips the entry, which is safe).
+    _DEFAULT_ENTRY_SLIPPAGE_TOLERANCE_PCT = 0.01
+
+    def __init__(self, config: Configuration, storage=None):
         self._config = config
+        # C4: optional durable order storage. When wired, every order state
+        # transition is persisted so a crash between place_order and the fill
+        # ack cannot silently lose an in-flight order. None in tests/paper.
+        self._storage = storage
         self._broker: DhanBroker | None = None
         self._broker_lock = threading.Lock()
         self._order_poll_interval = float(
@@ -62,6 +72,18 @@ class DhanBrokerAdapter(IBroker):
         )
         self._order_poll_timeout = float(
             os.environ.get("DHAN_ORDER_POLL_TIMEOUT_SEC", "30")
+        )
+        self._entry_slippage_tol = float(
+            os.environ.get(
+                "DHAN_ENTRY_SLIPPAGE_TOLERANCE_PCT",
+                str(self._DEFAULT_ENTRY_SLIPPAGE_TOLERANCE_PCT),
+            )
+        )
+        # C7 (close side): wide slippage bound for closing orders. A close MUST
+        # fill (stops/EOD), so this is deliberately wider than the entry collar
+        # and only caps extreme slippage; set to 0 to disable (plain MARKET).
+        self._close_slippage_tol = float(
+            os.environ.get("DHAN_CLOSE_SLIPPAGE_TOLERANCE_PCT", "0.05")
         )
         # Duplicate-order protection: signal_ids currently being executed (or
         # already executed). A duplicate submission of the same signal (e.g. a
@@ -143,24 +165,47 @@ class DhanBrokerAdapter(IBroker):
 
         try:
             instrument = self._make_instrument(signal, symbol)
+            meta = signal.metadata or {}
+            order_type = self._map_order_type(signal)
+            limit_price = float(entry_price)
+            trigger_price = to_float(signal.stop_loss)
+            tol = getattr(
+                self, "_entry_slippage_tol",
+                self._DEFAULT_ENTRY_SLIPPAGE_TOLERANCE_PCT,
+            )
+            # C7: when no explicit order_type was requested, the default MARKET
+            # entry becomes a marketable LIMIT bounded by the slippage tolerance
+            # so a thin contract cannot fill arbitrarily far from the signal
+            # price. An explicitly requested order_type is honored unchanged.
+            if "order_type" not in meta and order_type == OrderType.MARKET and tol > 0:
+                order_type = OrderType.LIMIT
+                limit_price = self._marketable_limit_price(
+                    float(entry_price), signal.is_buy, tol
+                )
+                trigger_price = 0.0
             order = Order(
                 instrument=instrument,
                 side="BUY" if signal.is_buy else "SELL",
                 quantity=qty,
-                order_type=self._map_order_type(signal),
-                price=float(entry_price),
-                trigger_price=to_float(signal.stop_loss),
-                product_type=self._resolve_product_type(signal.metadata or {}),
+                order_type=order_type,
+                price=limit_price,
+                trigger_price=trigger_price,
+                product_type=self._resolve_product_type(meta),
             )
             # Preserve source trace in in-memory object; Dhan converter sends
             # payload from known fields and ignores extra attrs.
             setattr(order, "user_order_id", str(signal.signal_id))
 
+            # C4: persist SUBMITTED before place_order so a crash mid-submit is
+            # recoverable; record the broker order id once we have it.
+            self._persist_order_submitted(signal, symbol, qty, order_type, limit_price)
             placed_order = broker.place_order(order)
             placed_order_id = str(getattr(placed_order, "order_id", ""))
             if not placed_order_id:
                 logger.error("Dhan place_order did not return order_id for %s", signal.signal_id)
+                self._persist_order_terminal(signal, "REJECTED")
                 return None
+            self._persist_order_terminal(signal, "SUBMITTED", broker_order_id=placed_order_id)
 
             final_order = self._poll_for_terminal_status(
                 placed_order_id, timeout=self._order_poll_timeout
@@ -172,15 +217,25 @@ class DhanBrokerAdapter(IBroker):
                     logger.info("Order %s cancelled after timeout", placed_order_id)
                 except Exception:
                     logger.debug("Failed to cancel timed-out order %s", placed_order_id, exc_info=True)
+                self._persist_order_terminal(signal, "CANCELLED", broker_order_id=placed_order_id)
                 return None
 
             if not self._is_filled(final_order):
+                terminal_status = str(
+                    getattr(final_order.status, "value", final_order.status)
+                ).upper()
                 logger.warning(
                     "Order %s terminal status=%s, filled=%s/%s",
                     placed_order_id,
-                    getattr(final_order.status, "value", final_order.status),
+                    terminal_status,
                     to_float(final_order.filled_quantity),
                     to_float(final_order.quantity),
+                )
+                self._persist_order_terminal(
+                    signal,
+                    "CANCELLED" if terminal_status in ("CANCELLED", "CLOSED") else terminal_status,
+                    broker_order_id=placed_order_id,
+                    filled_quantity=to_float(final_order.filled_quantity),
                 )
                 return None
 
@@ -215,6 +270,13 @@ class DhanBrokerAdapter(IBroker):
                 metadata["full_size"] = str(float(filled_quantity) / deployed_fraction)
                 metadata["deployed_fraction"] = str(deployed_fraction)
 
+            self._persist_order_terminal(
+                signal,
+                "FILLED",
+                broker_order_id=placed_order_id,
+                filled_quantity=filled_quantity,
+                avg_fill_price=fill_price,
+            )
             return Position(
                 symbol=str(getattr(final_order.instrument, "symbol", symbol)),
                 side=Side.LONG if signal.is_buy else Side.SHORT,
@@ -232,13 +294,20 @@ class DhanBrokerAdapter(IBroker):
             )
         except DhanError as exc:
             logger.error("Dhan API error executing signal %s: %s", signal.signal_id, exc)
+            self._persist_order_terminal(signal, "REJECTED")
             return None
         except Exception as exc:
             logger.exception("Unexpected error executing signal %s: %s", signal.signal_id, exc)
+            self._persist_order_terminal(signal, "REJECTED")
             return None
 
     def close_position(
-        self, symbol: str, side: str, quantity: int, portfolio: Portfolio
+        self,
+        symbol: str,
+        side: str,
+        quantity: int,
+        portfolio: Portfolio,
+        reference_price: float | None = None,
     ) -> Position | None:
         """Close (or reduce) an open position by placing an opposing order.
 
@@ -276,12 +345,27 @@ class DhanBrokerAdapter(IBroker):
                 security_id="",  # closing order — security_id not required
             )
 
+            # C7: close-side slippage collar. When a reference price is available
+            # and the collar is enabled (tol > 0), convert the naked MARKET close
+            # into a marketable LIMIT bounded by the wide close tolerance so a
+            # thin contract cannot fill arbitrarily far from the expected exit
+            # price. The limit stays marketable (priced to cross the spread)
+            # because a close must still fill; tol=0 disables it (plain MARKET).
+            tol = getattr(self, "_close_slippage_tol", 0.0)
+            order_type = OrderType.MARKET
+            limit_price = 0.0
+            if reference_price and float(reference_price) > 0 and tol > 0:
+                order_type = OrderType.LIMIT
+                limit_price = self._marketable_limit_price(
+                    float(reference_price), side.upper() == "BUY", tol
+                )
             order = Order(
                 instrument=instrument,
                 side=side.upper(),  # "SELL" to close LONG, "BUY" to close SHORT
                 quantity=quantity,
-                order_type=OrderType.MARKET,
-                price=0.0,  # market order
+                order_type=order_type,
+                price=limit_price,
+                trigger_price=0.0,
                 product_type="INTRADAY",
             )
 
@@ -469,6 +553,20 @@ class DhanBrokerAdapter(IBroker):
         return OrderType.MARKET
 
     @staticmethod
+    def _marketable_limit_price(price: float, is_buy: bool, tolerance_pct: float) -> float:
+        """Marketable limit price bounded by ``tolerance_pct`` (C7).
+
+        A BUY is willing to pay up to ``price * (1 + tol)``; a SELL accepts
+        down to ``price * (1 - tol)``. The order still crosses the spread and
+        fills at market when the market is near ``price``, but it can never
+        fill worse than the tolerance — unlike a naked MARKET order.
+        """
+        if price <= 0 or tolerance_pct <= 0:
+            return price
+        factor = 1.0 + tolerance_pct if is_buy else 1.0 - tolerance_pct
+        return round(price * factor, 2)
+
+    @staticmethod
     def _resolve_product_type(meta: dict[str, Any]) -> str:
         if "product_type" in meta:
             product_type = str(meta.get("product_type", "")).strip()
@@ -545,6 +643,71 @@ class DhanBrokerAdapter(IBroker):
                 qty_int = freeze_limit
 
         return qty_int
+
+    # ------------------------------------------------------------------
+    # C4: durable order state persistence (crash recovery)
+    # ------------------------------------------------------------------
+
+    def _persist_order_submitted(
+        self, signal: Signal, symbol: str, qty: int, order_type, price: float
+    ) -> None:
+        """Record SUBMITTED before place_order so a crash mid-submit still leaves
+        a durable record of the intended order. Best-effort: a persistence
+        failure must never block trading."""
+        storage = getattr(self, "_storage", None)
+        order_id = str(getattr(signal, "signal_id", "") or "").strip()
+        if storage is None or not order_id:
+            return
+        try:
+            from quant.contracts.timezones import IST
+
+            now = datetime.now(tz=IST).isoformat()
+            storage.save_order(
+                {
+                    "order_id": order_id,
+                    "signal_id": order_id,
+                    "symbol": symbol,
+                    "side": "BUY" if signal.is_buy else "SELL",
+                    "quantity": float(qty),
+                    "order_type": str(getattr(order_type, "value", order_type)),
+                    "price": float(price),
+                    "status": "SUBMITTED",
+                    "reason": str(getattr(signal, "reason", "") or ""),
+                    "submitted_at": now,
+                    "updated_at": now,
+                }
+            )
+        except Exception:
+            logger.exception(
+                "order persistence (SUBMITTED) failed for %s — trading continues", order_id
+            )
+
+    def _persist_order_terminal(
+        self,
+        signal: Signal,
+        status: str,
+        *,
+        broker_order_id: str | None = None,
+        filled_quantity: float | None = None,
+        avg_fill_price: float | None = None,
+    ) -> None:
+        """Transition the durable order row to a new state (best-effort)."""
+        storage = getattr(self, "_storage", None)
+        order_id = str(getattr(signal, "signal_id", "") or "").strip()
+        if storage is None or not order_id:
+            return
+        try:
+            storage.update_order_status(
+                order_id,
+                status,
+                broker_order_id=broker_order_id,
+                filled_quantity=filled_quantity,
+                avg_fill_price=avg_fill_price,
+            )
+        except Exception:
+            logger.exception(
+                "order persistence (%s) failed for %s — trading continues", status, order_id
+            )
 
     def _poll_for_terminal_status(
         self,

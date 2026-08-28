@@ -25,8 +25,8 @@ class PortfolioRiskAuthority:
     def __init__(
         self,
         starting_equity: float = float(INITIAL_CAPITAL),
-        max_portfolio_risk_pct: float = 0.04,   # max aggregate open risk: 4% of capital
-        max_portfolio_daily_loss_pct: float = 0.06,  # global kill: 6% realized daily loss
+        max_portfolio_risk_pct: float = 0.95,   # max aggregate open risk: 95% of capital (aggressive)
+        max_portfolio_daily_loss_pct: float = 0.95,  # global kill: 95% realized daily loss
     ) -> None:
         self._starting_equity = starting_equity
         self._max_open_risk = starting_equity * max_portfolio_risk_pct
@@ -38,6 +38,8 @@ class PortfolioRiskAuthority:
     def register_open(self, risk_rupees: float) -> bool:
         """Register a new position's rupee risk. False = rejected (would breach)."""
         with self._lock:
+            if self._realized_pnl <= -self._max_daily_loss:
+                return False
             if self._open_risk + max(0.0, risk_rupees) > self._max_open_risk:
                 return False
             self._open_risk += max(0.0, risk_rupees)
@@ -48,6 +50,17 @@ class PortfolioRiskAuthority:
         with self._lock:
             self._open_risk = max(0.0, self._open_risk - max(0.0, risk_rupees))
             self._realized_pnl += pnl
+
+    def release(self, risk_rupees: float) -> None:
+        """Unwind a reserved amount that never became an open position (C3).
+
+        Used when an entry's broker submission fails after ``register_open``
+        succeeded — the reservation must be returned so it does not leak for
+        the rest of the day. Unlike ``record_close`` it does not touch
+        realized P&L, because no trade happened.
+        """
+        with self._lock:
+            self._open_risk = max(0.0, self._open_risk - max(0.0, risk_rupees))
 
     def can_accept(self, risk_rupees: float) -> tuple[bool, str]:
         with self._lock:

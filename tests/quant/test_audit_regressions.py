@@ -386,6 +386,300 @@ def test_live_oms_enabled_with_broker_injects_live_oms(monkeypatch, tmp_path):
     assert not st.halted, "engine should not be halted when OMS is wired"
 
 
+def _spawn_coord(monkeypatch, tmp_path, extra_config):
+    """Spawn a single engine through QuantCoordinator with isolated files."""
+    import threading
+
+    import quant.multi_engine as multi_engine
+    from quant.multi_engine import QuantCoordinator
+
+    monkeypatch.setattr("quant.amt_engine.AMTEngine.seed", lambda self: None)
+
+    class _NoStart(threading.Thread):
+        def start(self):
+            return
+
+    monkeypatch.setattr(multi_engine.threading, "Thread", _NoStart)
+
+    class _MD:
+        def get_nearest_futures(self, *a, **k):
+            return None
+
+        def get_lot_size(self, symbol):
+            return 1.0
+
+        async def fetch_history(self, *a, **k):
+            return []
+
+    config = {
+        "underlyings": ["NIFTY"],
+        "n": 1,
+        "contracts_file": str(tmp_path / "c.json"),
+        "session_levels_file": str(tmp_path / "session_levels.json"),
+        "include_futures": False,
+    }
+    config.update(extra_config)
+    coord = QuantCoordinator(_MD(), config=config)
+    return coord._spawn_engine("NIFTY AUG FUT")
+
+
+def test_spawn_engine_uses_configured_risk_per_trade_pct(monkeypatch, tmp_path):
+    """C2: the configured risk_per_trade_pct must reach SessionRisk. Before the
+    fix the coordinator config never carried the key, so every engine fell back
+    to 0.95 and SessionRisk.position_size took the 'aggressive >=5%' branch —
+    deploying ~95% of capital per trade."""
+    eng = _spawn_coord(monkeypatch, tmp_path, {"risk_per_trade_pct": 0.002})
+    assert eng._risk._base_risk_pct == pytest.approx(0.002), (
+        f"expected configured 0.002, got {eng._risk._base_risk_pct}"
+    )
+    assert eng._risk._base_risk_pct < 0.05, "must not hit the aggressive branch"
+
+
+def test_spawn_engine_safe_default_risk_when_unset(monkeypatch, tmp_path):
+    """C2: when the key is absent the fallback must be a safe 0.5%, never the
+    previous 0.95 (which deployed ~95% of capital per trade)."""
+    eng = _spawn_coord(monkeypatch, tmp_path, {})
+    assert eng._risk._base_risk_pct == pytest.approx(0.005), (
+        f"safe default must be 0.005, got {eng._risk._base_risk_pct}"
+    )
+    assert eng._risk._base_risk_pct < 0.05, (
+        "default risk_per_trade_pct must stay below the 5% aggressive threshold"
+    )
+
+
+def test_portfolio_risk_release_unwinds_without_pnl():
+    """C3: release() returns a failed entry's reservation without booking PnL."""
+    from quant.execution.portfolio_risk import PortfolioRiskAuthority
+
+    prisk = PortfolioRiskAuthority(starting_equity=1_000_000.0)
+    assert prisk.register_open(5_000.0) is True
+    assert prisk.open_risk == pytest.approx(5_000.0)
+
+    prisk.release(5_000.0)
+    assert prisk.open_risk == pytest.approx(0.0)
+    assert prisk.realized_pnl == pytest.approx(0.0), "release must not book PnL"
+
+
+def test_entry_oms_failure_unwinds_risk_and_keeps_engine_alive(monkeypatch):
+    """C3: a raising OMS on entry must not kill the engine and must release the
+    reserved portfolio risk — the entry never happened. Before the fix the
+    RuntimeError propagated to run(), marked the engine crashed, and the
+    register_open reservation leaked for the rest of the day."""
+    from quant.bars import Bar
+    from quant.decision.decision_service import QuantDecision
+    from quant.decision.signal_builder import Signal
+    from quant.execution.portfolio_risk import PortfolioRiskAuthority
+    from quant.runtime import QuantEngine
+
+    eng = QuantEngine(_EmptyGw(), "SYM", interval_seconds=1)
+    prisk = PortfolioRiskAuthority(starting_equity=1_000_000.0)
+    eng._portfolio_risk = prisk
+
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=99.0, tp=102.0,
+                 rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
+    approved = QuantDecision(approved=True, signal=sig, reason="APPROVED",
+                             phase="", gate_results=(), block_reasons=(),
+                             model_label="Triple-A")
+
+    class _RaisingOMS:
+        lot_size = 1.0
+
+        def submit(self, signal, quantity):
+            raise RuntimeError("broker down")
+
+    eng._oms = _RaisingOMS()
+    monkeypatch.setattr(eng._strategy, "should_enter", lambda ctx: approved)
+
+    bar = Bar(time="2026-08-24T10:00:00+05:30",
+              open=100, high=101, low=99, close=100, volume=10)
+
+    eng._decide({}, bar)  # must not raise
+
+    assert eng._position is None, "no position may open on a failed submission"
+    assert prisk.open_risk == pytest.approx(0.0), (
+        "reserved portfolio risk must be unwound when entry submission fails"
+    )
+
+
+def test_exit_oms_failure_keeps_position_open_and_engine_alive():
+    """C3: a raising OMS during exit must not kill the engine; the position must
+    stay open so the exit is retried on the next tick/bar."""
+    from quant.decision.signal_builder import Signal
+    from quant.execution.order import Order, Position
+    from quant.runtime import QuantEngine
+
+    eng = QuantEngine(_EmptyGw(), "SYM", interval_seconds=1)
+    sig = Signal(type="LONG", reason="r", entry=100.0, sl=99.0, tp=102.0,
+                 rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
+    eng._position = Position(order=Order(sig, 10), open_price=100.0,
+                             open_time="t0", size=10)
+
+    class _RaisingPM:
+        last_partial_fill = None
+        last_pyramid_pnl = 0.0
+        pyramid_positions = {}
+        pyramid_count = 0
+
+        def manage_tick_exit(self, position, price, time):
+            raise RuntimeError("broker down")
+
+    eng._pos_mgr = _RaisingPM()
+
+    eng._manage_tick_exit(95.0, "t1")  # must not raise
+
+    assert eng._position is not None, (
+        "position must stay open after a failed exit so it is retried"
+    )
+
+
+def _broker_position(symbol, qty, side):
+    """Broker positions report abs(size) + a Side enum (see dhan_broker_adapter)."""
+    from types import SimpleNamespace
+
+    from quant.contracts.enums import Side
+
+    return SimpleNamespace(
+        symbol=symbol,
+        size=abs(qty),
+        side=Side.SHORT if side == "SHORT" else Side.LONG,
+    )
+
+
+def _reconcile_coord(broker_positions, db_rows):
+    from quant.multi_engine import QuantCoordinator
+
+    coord = QuantCoordinator.__new__(QuantCoordinator)
+    coord.config = {"strict_reconciliation": True}
+
+    class _Broker:
+        def get_positions(self):
+            return broker_positions
+
+    class _Storage:
+        def load_open_positions(self):
+            return db_rows
+
+    coord.broker = _Broker()
+    coord._storage = _Storage()
+    return coord
+
+
+def test_reconcile_short_position_matches_signed_db_row():
+    """C6: an open SHORT (broker abs size + SHORT side) must reconcile against
+    the DB's signed negative size — not flag a discrepancy. Before the fix the
+    abs-vs-signed comparison made every short look mismatched, so a live
+    restart with a short book always refused to boot."""
+    coord = _reconcile_coord(
+        [_broker_position("NIFTY AUG FUT", 10, "SHORT")],
+        [{"symbol": "NIFTY AUG FUT", "size": -10}],
+    )
+    coord._reconcile_on_startup()  # must not raise
+
+
+def test_reconcile_long_position_matches_signed_db_row():
+    """C6 sanity: LONG (broker abs size + LONG side) matches a positive DB size."""
+    coord = _reconcile_coord(
+        [_broker_position("NIFTY AUG FUT", 10, "LONG")],
+        [{"symbol": "NIFTY AUG FUT", "size": 10}],
+    )
+    coord._reconcile_on_startup()  # must not raise
+
+
+def test_reconcile_still_flags_genuine_size_mismatch():
+    """C6 guard: a real magnitude/direction mismatch still raises in strict mode."""
+    coord = _reconcile_coord(
+        [_broker_position("NIFTY AUG FUT", 10, "SHORT")],
+        [{"symbol": "NIFTY AUG FUT", "size": -5}],
+    )
+    with pytest.raises(RuntimeError, match="reconciliation failed"):
+        coord._reconcile_on_startup()
+
+
+def _recon_coord(broker_positions, engines):
+    import threading
+
+    from quant.multi_engine import QuantCoordinator
+
+    coord = QuantCoordinator.__new__(QuantCoordinator)
+    coord.config = {"live_oms_enabled": True}
+    coord._lock = threading.Lock()
+
+    class _Broker:
+        def get_positions(self):
+            return broker_positions
+
+    coord.broker = _Broker()
+    coord._engines = engines
+    return coord
+
+
+def _engine_with_position(size):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        _position=SimpleNamespace(size=size), _pyramid_positions=[]
+    )
+
+
+def test_intraday_reconcile_no_drift_when_books_match():
+    """C4: matching broker/engine books produce no drift."""
+    coord = _recon_coord(
+        [_broker_position("NIFTY AUG FUT", 10, "LONG")],
+        {"NIFTY AUG FUT": _engine_with_position(10.0)},
+    )
+    assert coord._intraday_reconcile() == []
+
+
+def test_intraday_reconcile_matches_signed_short():
+    """C4 reuses C6: a broker SHORT (abs size + side) matches a negative engine size."""
+    coord = _recon_coord(
+        [_broker_position("NIFTY AUG FUT", 10, "SHORT")],
+        {"NIFTY AUG FUT": _engine_with_position(-10.0)},
+    )
+    assert coord._intraday_reconcile() == []
+
+
+def test_intraday_reconcile_detects_size_drift():
+    """C4: a broker/engine size mismatch is reported as drift."""
+    coord = _recon_coord(
+        [_broker_position("NIFTY AUG FUT", 15, "LONG")],
+        {"NIFTY AUG FUT": _engine_with_position(10.0)},
+    )
+    drift = coord._intraday_reconcile()
+    assert len(drift) == 1
+    assert "NIFTY AUG FUT" in drift[0]
+
+
+def test_intraday_reconcile_detects_orphan_broker_position():
+    """C4: a broker position with no engine position is flagged (orphan)."""
+    coord = _recon_coord([_broker_position("NIFTY AUG FUT", 10, "LONG")], {})
+    drift = coord._intraday_reconcile()
+    assert len(drift) == 1
+    assert "orphan" in drift[0]
+
+
+def test_intraday_reconcile_detects_engine_position_missing_at_broker():
+    """C4: an engine position the broker doesn't have is flagged (desync)."""
+    coord = _recon_coord([], {"NIFTY AUG FUT": _engine_with_position(10.0)})
+    drift = coord._intraday_reconcile()
+    assert len(drift) == 1
+    assert "desync" in drift[0]
+
+
+def test_intraday_reconcile_skipped_when_not_live():
+    """C4: reconciliation is a no-op outside live mode."""
+    import threading
+
+    from quant.multi_engine import QuantCoordinator
+
+    coord = QuantCoordinator.__new__(QuantCoordinator)
+    coord.config = {"live_oms_enabled": False}
+    coord.broker = None
+    coord._engines = {}
+    coord._lock = threading.Lock()
+    assert coord._intraday_reconcile() == []
+
+
 def test_cooldown_emits_decision_produced():
     """Cooldown used to return with no event, leaving a stale ENTER on the WS."""
     from quant.bars import Bar

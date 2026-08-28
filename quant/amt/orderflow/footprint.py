@@ -217,14 +217,14 @@ class TickFootprintAccumulator:
             # Buy imbalance: ask[N] vs bid[N-1]
             if i > 0:
                 prev_bid = levels[sorted_prices[i-1]][0]
-                if prev_bid == 0 and ask_vol > 0:
-                    imb_dir = 1  # auto-imbalance (zero on weak side)
+                if prev_bid == 0 and ask_vol >= 5:
+                    imb_dir = 1  # auto-imbalance (zero on weak side with real volume)
                 elif prev_bid > 0 and ask_vol >= 3 * prev_bid:
                     imb_dir = 1
             # Sell imbalance: bid[N] vs ask[N+1]
             if i < len(sorted_prices) - 1 and imb_dir == 0:
                 next_ask = levels[sorted_prices[i+1]][1]
-                if next_ask == 0 and bid_vol > 0:
+                if next_ask == 0 and bid_vol >= 5:
                     imb_dir = -1
                 elif next_ask > 0 and bid_vol >= 3 * next_ask:
                     imb_dir = -1
@@ -232,14 +232,18 @@ class TickFootprintAccumulator:
             imbalance_dirs.append(imb_dir)
             raw.append((price, bid_vol, ask_vol, delta, imb_dir))
 
-        # Stacked imbalance: 3+ consecutive same-direction imbalances
+        # Stacked imbalance: 3+ consecutive same-direction imbalances with real volume
         stacked_flags = [False] * len(raw)
         for i in range(len(imbalance_dirs) - 2):
             d = imbalance_dirs[i]
             if d != 0 and imbalance_dirs[i+1] == d and imbalance_dirs[i+2] == d:
-                stacked_flags[i] = True
-                stacked_flags[i+1] = True
-                stacked_flags[i+2] = True
+                v0 = raw[i][2] if d > 0 else raw[i][1]
+                v1 = raw[i+1][2] if d > 0 else raw[i+1][1]
+                v2 = raw[i+2][2] if d > 0 else raw[i+2][1]
+                if v0 + v1 + v2 >= 15:
+                    stacked_flags[i] = True
+                    stacked_flags[i+1] = True
+                    stacked_flags[i+2] = True
 
         # Build FootprintLevels (descending price order for frontend)
         fp_levels: list[FootprintLevel] = []

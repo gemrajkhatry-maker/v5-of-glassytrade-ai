@@ -108,6 +108,7 @@ class QuantEngine:
         oms=None,
         max_trades_per_session: int = 6,
         advisor=None,
+        risk_per_trade_pct: float | None = None,
     ) -> None:
         self._gateway = gateway
         self._underlying_gateway = underlying_gateway
@@ -241,9 +242,11 @@ class QuantEngine:
         # is "daily_risk:SYMBOL:2026-08-17" — NOT "daily_risk:SYMBOL:None".
         # _session_date is always None at __init__ time (set on first bar), so
         # we pass None here and SessionRisk._today() fills it correctly.
+        base_risk = risk_per_trade_pct if risk_per_trade_pct is not None else 0.005
         self._risk = SessionRisk(storage=self._session_levels, symbol=self.symbol,
                                  portfolio_risk=self._portfolio_risk,
-                                 max_trades_per_session=max_trades_per_session)
+                                 max_trades_per_session=max_trades_per_session,
+                                 base_risk_pct=base_risk)
         self._bus = EventBus()
         self._projector = StateProjector(interval_sec=interval_seconds)
         self._journal_subscribed = False
@@ -288,6 +291,10 @@ class QuantEngine:
         self._entry_bar_index = 0
         self._subscribed = False
         self._emit_lock = threading.Lock()
+        # Serializes time-driven force-close (EOD watchdog / SIGTERM) against
+        # concurrent close attempts so the full position (base + pyramids) is
+        # flattened exactly once.
+        self._close_lock = threading.Lock()
         # Post-trade cooldown: after a fill, the engine waits this many bars
         # before evaluating a new entry. Prevents chasing consecutive signals.
         # Derived from wall-clock minutes so the wait stays ~5 minutes on ANY
@@ -373,12 +380,58 @@ class QuantEngine:
         """Project PositionOpened/Closed onto IStorage (restart book)."""
         from quant.persistence_bridge import PositionStorageBridge
         PositionStorageBridge(storage).attach(self._bus)
+        self._storage = storage
+        try:
+            from quant.amt.session.context import load_prior_profile
+            prior = load_prior_profile(storage, self.symbol)
+            if prior and prior.get("poc"):
+                if hasattr(self, "_amt_engine") and hasattr(self._amt_engine, "set_prior_profile"):
+                    self._amt_engine.set_prior_profile(
+                        poc=prior["poc"], vah=prior.get("vah", 0.0), val=prior.get("val", 0.0)
+                    )
+        except Exception:
+            logger.exception("Failed to load prior profile from storage for %s", self.symbol)
+
+    def persist_prior_profile(self) -> None:
+        """Persist current session POC/VAH/VAL to storage as prior profile."""
+        storage = getattr(self, "_storage", None)
+        if storage is None:
+            return
+        amt = getattr(self._amt_engine, "last_amt_dto", None) or {}
+        poc = float(amt.get("poc") or 0.0)
+        if poc > 0:
+            try:
+                from quant.amt.session.context import persist_prior_profile
+                persist_prior_profile(
+                    storage,
+                    self.symbol,
+                    poc=poc,
+                    vah=float(amt.get("valueAreaHigh") or 0.0),
+                    val=float(amt.get("valueAreaLow") or 0.0),
+                )
+            except Exception:
+                logger.exception("Failed to persist prior profile for %s", self.symbol)
 
     def restore_position(self, position) -> None:
         """Rehydrate the in-memory book after a process restart."""
         self._position = position
         self._entry_bar_index = self._bar_index
         self._entry_time_epoch = 0.0
+
+    def close(self) -> None:
+        """Cleanly release attached resources (advisor, journal)."""
+        advisor = getattr(self, "_advisor", None)
+        if advisor is not None and callable(getattr(advisor, "shutdown", None)):
+            try:
+                advisor.shutdown()
+            except Exception:
+                pass
+        journal = getattr(self, "_journal", None)
+        if journal is not None and callable(getattr(journal, "close", None)):
+            try:
+                journal.close()
+            except Exception:
+                pass
 
     def _cert_trace(self, bar=None, stage: str = "", **fields) -> None:
         """S1 decision traceability: append a certification record for this
@@ -494,6 +547,10 @@ class QuantEngine:
                 if self._underlying_aggregator is not None:
                     utick = self._underlying_gateway.try_next_tick()
                     while utick is not None:
+                        if self._micro_underlying_aggregator is not None:
+                            micro_ubar = self._micro_underlying_aggregator.add_tick(utick)
+                            if micro_ubar is not None:
+                                self._last_underlying_bar = micro_ubar
                         ubar = self._underlying_aggregator.add_tick(utick)
                         self._amt_engine.on_tick(utick, self._underlying_aggregator.current_bar)
                         if ubar is not None:
@@ -552,48 +609,70 @@ class QuantEngine:
 
     def _manage_tick_exit(self, tick_price: float, tick_time: str) -> None:
         """Tick-level fast stop-loss and take-profit breach check (Fabio)."""
-        if self._position is None:
-            return
-        pm = self._get_position_manager()
-        # manage_tick_exit does NOT reset these per call (unlike manage_exit);
-        # clear them so stale values from an earlier tick/bar can't trigger
-        # duplicate reserve releases below.
-        pm.last_partial_fill = None
-        pm.last_pyramid_pnl = 0.0
-        # Adopt the survivor: a tick-path partial returns a NEW Position with
-        # the reduced size — keeping the pre-partial object as self._position
-        # would re-book the ORIGINAL size at the eventual full close.
-        remaining = pm.manage_tick_exit(self._position, tick_price, tick_time)
-        self._position = remaining
-        self._pyramid_positions = pm.pyramid_positions
-        self._pyramid_count = pm.pyramid_count
-        self._release_partial_reserves(pm, remaining)
-        if remaining is None:
-            self._last_close_bar_index = self._bar_index
-            if self._portfolio_risk is not None:
-                self._portfolio_risk.record_close(
-                    getattr(self, "_open_trade_risk", 0.0),
-                    float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
+        with self._close_lock:
+            if self._position is None:
+                return
+            pm = self._get_position_manager()
+            # manage_tick_exit does NOT reset these per call (unlike manage_exit);
+            # clear them so stale values from an earlier tick/bar can't trigger
+            # duplicate reserve releases below.
+            pm.last_partial_fill = None
+            pm.last_pyramid_pnl = 0.0
+            # Adopt the survivor: a tick-path partial returns a NEW Position with
+            # the reduced size — keeping the pre-partial object as self._position
+            # would re-book the ORIGINAL size at the eventual full close.
+            try:
+                remaining = pm.manage_tick_exit(self._position, tick_price, tick_time)
+            except Exception:
+                # C3: a broker/OMS failure while exiting must not kill the engine
+                # thread. Keep the position open so the exit is retried on the
+                # next tick/bar; the failure is loud so ops can intervene.
+                logger.exception(
+                    "❌ [EXIT FAILED] %s: tick-exit OMS call raised — position kept "
+                    "open, will retry next tick (engine stays alive)",
+                    self.symbol,
                 )
-                self._open_trade_risk = 0.0
+                return
+            self._position = remaining
+            self._pyramid_positions = pm.pyramid_positions
+            self._pyramid_count = pm.pyramid_count
+            self._release_partial_reserves(pm, remaining)
+            if remaining is None:
+                self._last_close_bar_index = self._bar_index
+                if self._portfolio_risk is not None:
+                    self._portfolio_risk.record_close(
+                        getattr(self, "_open_trade_risk", 0.0),
+                        float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
+                    )
+                    self._open_trade_risk = 0.0
 
     def _emit_merged_amt(self, base_dto: dict, time_str: str) -> None:
         merged = dict(self._underlying_amt_dto or base_dto)
-        if self._option_amt_dto and self._option_amt_dto.get("profile"):
-            merged["profile"] = self._option_amt_dto["profile"]
-            if self._option_amt_dto.get("poc"):
-                merged["poc"] = self._option_amt_dto["poc"]
-            if self._option_amt_dto.get("valueAreaHigh"):
-                merged["valueAreaHigh"] = self._option_amt_dto["valueAreaHigh"]
-            if self._option_amt_dto.get("valueAreaLow"):
-                merged["valueAreaLow"] = self._option_amt_dto["valueAreaLow"]
-            merged["hvns"] = self._option_amt_dto.get("hvns", [])
-            merged["lvns"] = self._option_amt_dto.get("lvns", [])
-            if self._option_amt_dto.get("legProfile"):
-                merged["legProfile"] = self._option_amt_dto["legProfile"]
-                merged["legPoc"] = self._option_amt_dto.get("legPoc")
-                merged["legVah"] = self._option_amt_dto.get("legVah")
-                merged["legVal"] = self._option_amt_dto.get("legVal")
+        opt_dto = self._option_amt_dto or (self._option_amt_engine.last_amt_dto if self._option_amt_engine else None)
+        if opt_dto and opt_dto.get("profile"):
+            merged["profile"] = opt_dto["profile"]
+            if opt_dto.get("poc"):
+                merged["poc"] = opt_dto["poc"]
+            if opt_dto.get("valueAreaHigh"):
+                merged["valueAreaHigh"] = opt_dto["valueAreaHigh"]
+            if opt_dto.get("valueAreaLow"):
+                merged["valueAreaLow"] = opt_dto["valueAreaLow"]
+            merged["hvns"] = opt_dto.get("hvns", [])
+            merged["lvns"] = opt_dto.get("lvns", [])
+            if opt_dto.get("legProfile"):
+                merged["legProfile"] = opt_dto["legProfile"]
+                merged["legPoc"] = opt_dto.get("legPoc")
+                merged["legVah"] = opt_dto.get("legVah")
+                merged["legVal"] = opt_dto.get("legVal")
+        elif self._option_amt_engine is not None:
+            # Option contract: never leak futures-scale profile (24,000+) onto option chart (50-200)
+            merged["profile"] = []
+            merged["poc"] = 0.0
+            merged["valueAreaHigh"] = 0.0
+            merged["valueAreaLow"] = 0.0
+            merged["hvns"] = []
+            merged["lvns"] = []
+            merged["legProfile"] = []
         merged["barInterval"] = getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC)
         merged["microBarInterval"] = getattr(self._micro_aggregator, "interval_seconds", 60) if self._micro_aggregator is not None else None
         self._emit(AmtUpdated(symbol=self.symbol, time=time_str, amt=merged))
@@ -610,6 +689,9 @@ class QuantEngine:
 
         if self._position is not None:
             self._manage_exit(amt_dto, bar)
+            if hasattr(self, "_advisor") and self._advisor is not None and self._position is not None:
+                ctx = self._build_context(bar, amt_dto, 0.0)
+                self._advisor.on_context(ctx)
         elif self._micro_aggregator is None:
             self._decide(amt_dto, bar)
 
@@ -821,7 +903,24 @@ class QuantEngine:
                     )
                     return
                 self._open_trade_risk = trade_risk
-            position = self._oms.submit(signal, quantity)
+            try:
+                position = self._oms.submit(signal, quantity)
+            except Exception:
+                # C3: a broker/OMS submission failure must not kill the engine
+                # thread, and the portfolio risk reserved above must be unwound
+                # — the entry never happened, so leaving the reservation in
+                # place would leak aggregate headroom for the rest of the day.
+                logger.exception(
+                    "❌ [ENTRY FAILED] %s: OMS submit raised — skipping entry and "
+                    "unwinding risk reservation (engine stays alive)",
+                    self.symbol,
+                )
+                if self._portfolio_risk is not None:
+                    reserved = getattr(self, "_open_trade_risk", 0.0)
+                    if reserved > 0:
+                        self._portfolio_risk.release(reserved)
+                    self._open_trade_risk = 0.0
+                return
             self._entry_bar_index = self._bar_index
             self._position = position
             self._entry_time_epoch = _bar_epoch_ms(bar.time) / 1000.0
@@ -865,66 +964,67 @@ class QuantEngine:
         A fully-approved signal OPPOSITE the held side flattens now; a halt
         gates entries, not exits, so this still runs while risk-halted.
         """
-        pos = self._position
-        if pos is None:
-            return
-        exec_bar = bar  # close settles on the caller bar (premium scale)
-        # Basis parity: entries qualify on the UNDERLYING dto+bar whenever an
-        # underlying feed drives decisions — evaluating the flip on the
-        # option-side dto (what the positioned bar-exit path hands down)
-        # could approve on noise the entry qualification never saw. The
-        # executed close still settles on the caller bar (premium scale).
-        if self._underlying_gateway is not None:
-            amt_dto = self._underlying_amt_dto
-            bar = self._last_underlying_bar
-            if not amt_dto or bar is None:
-                logger.info(
-                    "🔄 [THESIS FLIP] %s: skipped — underlying context "
-                    "(entry basis) unavailable this bar",
-                    self.symbol,
-                )
+        with self._close_lock:
+            pos = self._position
+            if pos is None:
                 return
-        bars_since_close = (
-            self._bar_index - self._last_close_bar_index
-            if self._last_close_bar_index >= 0
-            else self._cooldown_bars  # no trade yet → no cooldown
-        )
-        cooldown_remaining_sec = max(0, self._cooldown_bars - bars_since_close) * int(
-            getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC) or DEFAULT_INTERVAL_SEC
-        )
-        ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
-        decision = self._decision_service.evaluate(ctx, allow_positioned=True)
-        self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
-        if not (decision.approved and decision.signal is not None):
-            return
-        signal = decision.signal
-        held_side = "LONG" if pos.size > 0 else "SHORT"
-        # Same-direction approvals (and NO_EDGE) do nothing.
-        if signal.type == held_side:
-            return
-        logger.info(
-            "🔄 [THESIS FLIP] %s: fresh %s approval (%s @ %.2f RR=%.2f) opposes "
-            "open %s @ %.2f — flattening (OPPOSING_SIGNAL)",
-            self.symbol, signal.type, signal.model_label,
-            float(signal.entry), float(signal.rr), held_side,
-            float(pos.open_price) if getattr(pos, "open_price", None) else 0.0,
-        )
-        pm = self._get_position_manager()
-        pm._execute_full_close(
-            pos,
-            ExitDecision(True, "OPPOSING_SIGNAL", float(exec_bar.close)),
-            exec_bar.time,
-        )
-        self._position = None
-        self._pyramid_positions = pm.pyramid_positions
-        self._pyramid_count = pm.pyramid_count
-        self._last_close_bar_index = self._bar_index
-        if self._portfolio_risk is not None:
-            self._portfolio_risk.record_close(
-                getattr(self, "_open_trade_risk", 0.0),
-                float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
+            exec_bar = bar  # close settles on the caller bar (premium scale)
+            # Basis parity: entries qualify on the UNDERLYING dto+bar whenever an
+            # underlying feed drives decisions — evaluating the flip on the
+            # option-side dto (what the positioned bar-exit path hands down)
+            # could approve on noise the entry qualification never saw. The
+            # executed close still settles on the caller bar (premium scale).
+            if self._underlying_gateway is not None:
+                amt_dto = self._underlying_amt_dto
+                bar = self._last_underlying_bar
+                if not amt_dto or bar is None:
+                    logger.info(
+                        "🔄 [THESIS FLIP] %s: skipped — underlying context "
+                        "(entry basis) unavailable this bar",
+                        self.symbol,
+                    )
+                    return
+            bars_since_close = (
+                self._bar_index - self._last_close_bar_index
+                if self._last_close_bar_index >= 0
+                else self._cooldown_bars  # no trade yet → no cooldown
             )
-            self._open_trade_risk = 0.0
+            cooldown_remaining_sec = max(0, self._cooldown_bars - bars_since_close) * int(
+                getattr(self._aggregator, "interval_seconds", DEFAULT_INTERVAL_SEC) or DEFAULT_INTERVAL_SEC
+            )
+            ctx = self._build_context(bar, amt_dto, cooldown_remaining_sec)
+            decision = self._decision_service.evaluate(ctx, allow_positioned=True)
+            self._emit(DecisionProduced(symbol=self.symbol, time=bar.time, decision=decision))
+            if not (decision.approved and decision.signal is not None):
+                return
+            signal = decision.signal
+            held_side = "LONG" if pos.size > 0 else "SHORT"
+            # Same-direction approvals (and NO_EDGE) do nothing.
+            if signal.type == held_side:
+                return
+            logger.info(
+                "🔄 [THESIS FLIP] %s: fresh %s approval (%s @ %.2f RR=%.2f) opposes "
+                "open %s @ %.2f — flattening (OPPOSING_SIGNAL)",
+                self.symbol, signal.type, signal.model_label,
+                float(signal.entry), float(signal.rr), held_side,
+                float(pos.open_price) if getattr(pos, "open_price", None) else 0.0,
+            )
+            pm = self._get_position_manager()
+            pm._execute_full_close(
+                pos,
+                ExitDecision(True, "OPPOSING_SIGNAL", float(exec_bar.close)),
+                exec_bar.time,
+            )
+            self._position = None
+            self._pyramid_positions = pm.pyramid_positions
+            self._pyramid_count = pm.pyramid_count
+            self._last_close_bar_index = self._bar_index
+            if self._portfolio_risk is not None:
+                self._portfolio_risk.record_close(
+                    getattr(self, "_open_trade_risk", 0.0),
+                    float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
+                )
+                self._open_trade_risk = 0.0
 
     def _get_position_manager(self) -> PositionManager:
         """Lazily create the PositionManager with the correct emit function."""
@@ -944,31 +1044,103 @@ class QuantEngine:
             )
         return self._pos_mgr
 
-    def _manage_exit(self, amt_dto: dict, bar) -> None:
-        pm = self._get_position_manager()
-        # manage_exit returns the surviving position (unchanged, or reduced by
-        # a tiered TP partial fill per spec §13.3), or None once fully closed.
-        was_open = self._position is not None
-        remaining = pm.manage_exit(
-            amt_dto=amt_dto,
-            bar=bar,
-            position=self._position,
-            bar_index=self._bar_index,
-            entry_bar_index=self._entry_bar_index,
-            entry_time_epoch=getattr(self, '_entry_time_epoch', 0.0),
-        )
-        self._position = remaining
-        self._pyramid_positions = pm.pyramid_positions
-        self._pyramid_count = pm.pyramid_count
-        self._release_partial_reserves(pm, remaining)
-        if was_open and remaining is None:
-            self._last_close_bar_index = self._bar_index
+    def force_close_position(self, reason: str) -> bool:
+        """Time-driven full close of the base position AND pyramid add-ons.
+
+        EOD square-off backstop: the bar-driven SESSION_CLOSE (Phase 5) only
+        fires when a bar closes. If bars stop flowing near the close (feed
+        dead / engine starved), an open position would otherwise be carried
+        overnight — unacceptable for an intraday book. The coordinator's EOD
+        watchdog invokes this on the engine's behalf; it routes through
+        PositionManager._execute_full_close so pyramid add-ons, risk release
+        and PositionClosed events are handled exactly as the bar-driven path.
+        Idempotent: returns False when nothing is open.
+        """
+        with self._close_lock:
+            pos = self._position
+            if pos is None and not self._pyramid_positions:
+                return False
+            pm = self._get_position_manager()
+            bar = getattr(self._aggregator, "current_bar", None)
+            if pos is not None:
+                price = (
+                    float(bar.close)
+                    if bar is not None and bar.close
+                    else float(pos.open_price)
+                )
+            else:
+                price = float(bar.close) if bar is not None and bar.close else 0.0
+            from quant.contracts.timezones import IST as _IST
+            ts = datetime.now(tz=_IST).isoformat()
+            if pos is not None:
+                pm._execute_full_close(pos, ExitDecision(True, reason, price), ts)
+            else:
+                # Base already gone but pyramid add-ons linger — close them
+                # at the same price and release their reserved risk.
+                for pyr_pos in list(pm.pyramid_positions):
+                    pyr_fill = pm._oms.close(pyr_pos, price, ts, reason + "_PYRAMID")
+                    pm._exits.pop_trail(pyr_pos)
+                    pm._risk.record_trade(pyr_fill.pnl, count_as_trade=False)
+                    self._emit(PositionClosed(symbol=self.symbol, time=ts, fill=pyr_fill))
+                    risk_i = pm._pyramid_open_risk.pop(pyr_pos._id, 0.0)
+                    if pm._portfolio_risk is not None:
+                        pm._portfolio_risk.record_close(risk_i, float(pyr_fill.pnl))
+                pm.pyramid_positions = []
+                pm.pyramid_count = 0
+            # Post-close bookkeeping mirrors _manage_exit's full-close branch.
+            self._position = None
+            self._pyramid_positions = pm.pyramid_positions
+            self._pyramid_count = pm.pyramid_count
             if self._portfolio_risk is not None:
                 self._portfolio_risk.record_close(
                     getattr(self, "_open_trade_risk", 0.0),
                     float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
                 )
                 self._open_trade_risk = 0.0
+            self._last_close_bar_index = self._bar_index
+            logger.warning(
+                "🔒 [EOD FORCE CLOSE] %s reason=%s price=%.2f",
+                self.symbol, reason, price,
+            )
+            return True
+
+    def _manage_exit(self, amt_dto: dict, bar) -> None:
+        with self._close_lock:
+            pm = self._get_position_manager()
+            # manage_exit returns the surviving position (unchanged, or reduced by
+            # a tiered TP partial fill per spec §13.3), or None once fully closed.
+            was_open = self._position is not None
+            try:
+                remaining = pm.manage_exit(
+                    amt_dto=amt_dto,
+                    bar=bar,
+                    position=self._position,
+                    bar_index=self._bar_index,
+                    entry_bar_index=self._entry_bar_index,
+                    entry_time_epoch=getattr(self, '_entry_time_epoch', 0.0),
+                )
+            except Exception:
+                # C3: a broker/OMS failure while exiting must not kill the engine
+                # thread. Keep the position open so the exit is retried on the
+                # next bar; the failure is loud so ops can intervene.
+                logger.exception(
+                    "❌ [EXIT FAILED] %s: bar-exit OMS call raised — position kept "
+                    "open, will retry next bar (engine stays alive)",
+                    self.symbol,
+                )
+                return
+            self._position = remaining
+            self._pyramid_positions = pm.pyramid_positions
+            self._pyramid_count = pm.pyramid_count
+            self._release_partial_reserves(pm, remaining)
+            if was_open and remaining is None:
+                self._last_close_bar_index = self._bar_index
+                if self._portfolio_risk is not None:
+                    self._portfolio_risk.record_close(
+                        getattr(self, "_open_trade_risk", 0.0),
+                        float(getattr(pm.last_fill, "pnl", 0.0) or 0.0),
+                    )
+                    self._open_trade_risk = 0.0
 
         # Run advisor on position management state so model reasons about open trade
         if hasattr(self, "_advisor") and self._advisor is not None:

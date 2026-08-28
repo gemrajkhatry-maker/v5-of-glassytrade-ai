@@ -1,8 +1,17 @@
 # tests/quant/amt/session/test_india_option_selection.py
 """Tests for Indian Option Contract Selection and Validation (Task 6)."""
 
+from datetime import timedelta
+
 import pytest
+
 from quant.amt.session.selector import OptionSelector, OptionSelection
+from quant.contracts.timezones import today_ist
+
+# Rolling future expiry so the DTE check stays valid whenever the suite runs.
+# A hardcoded date rolls into the past and the "liquid" contract below gets
+# rejected as expired (DTE < min_days_to_expiry) instead of accepted.
+_VALID_EXPIRY = (today_ist() + timedelta(days=7)).isoformat()
 
 
 def test_rejects_option_when_spread_exceeds_premium_limit():
@@ -11,7 +20,7 @@ def test_rejects_option_when_spread_exceeds_premium_limit():
         underlying="NIFTY",
         strike=24800,
         option_type="CE",
-        expiry="2026-08-27",
+        expiry=_VALID_EXPIRY,
         premium=100.0,
         delta=0.50,
         theta=-10.0,
@@ -32,7 +41,7 @@ def test_accepts_liquid_option_contract():
         underlying="NIFTY",
         strike=24800,
         option_type="CE",
-        expiry="2026-08-27",
+        expiry=_VALID_EXPIRY,
         premium=100.0,
         delta=0.50,
         theta=-10.0,

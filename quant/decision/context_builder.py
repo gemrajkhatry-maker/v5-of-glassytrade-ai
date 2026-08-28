@@ -97,7 +97,8 @@ class DecisionContextBuilder:
 
     def _resolve_direction(self, amt_dto: dict, close_px: float, vah: float,
                            val: float, obi: float, ofi: float,
-                           vwap_upper_1: float, vwap_lower_1: float) -> str | None:
+                           vwap_upper_1: float, vwap_lower_1: float,
+                           market: str = "NSE") -> str | None:
         """Determine agent direction from AMT state (hierarchy of intent)."""
         raw_ms = str(amt_dto.get("marketState") or "BALANCED").upper()
         break_dir = str(amt_dto.get("breakDirection") or "").upper()
@@ -115,9 +116,10 @@ class DecisionContextBuilder:
             return "LONG"
         if obi <= -0.20 and close_px < vwap_lower_1:
             return "SHORT"
-        if cvd_val > 0.5 and (close_px > vah or ofi > 0.10):
+        cvd_threshold = 0.3 if str(market).upper() == "MCX" else 0.5
+        if cvd_val > cvd_threshold and (close_px > vah or ofi > 0.10):
             return "LONG"
-        if cvd_val < -0.5 and (close_px < val or ofi < -0.10):
+        if cvd_val < -cvd_threshold and (close_px < val or ofi < -0.10):
             return "SHORT"
         if raw_ms == "IMBALANCED":
             if (vah > 0 and close_px > vah) or ofi > 0.10 or (close_px > vwap_upper_1):
@@ -129,9 +131,9 @@ class DecisionContextBuilder:
                 return "LONG"
             if vah > 0 and close_px >= vah and cvd_val <= 0.2:
                 return "SHORT"
-            if cvd_val > 0.5:
+            if cvd_val > cvd_threshold:
                 return "LONG"
-            if cvd_val < -0.5:
+            if cvd_val < -cvd_threshold:
                 return "SHORT"
         return None
 
@@ -294,7 +296,7 @@ class DecisionContextBuilder:
         is_expiry = (bar_dt.date() == contract_expiry) if (contract_expiry and bar_dt) else False
 
         # Direction, Setup, Position via extracted helpers
-        agent_direction = self._resolve_direction(amt_dto, close_px, vah, val, obi, ofi, vwap_upper_1, vwap_lower_1)
+        agent_direction = self._resolve_direction(amt_dto, close_px, vah, val, obi, ofi, vwap_upper_1, vwap_lower_1, market=market)
         nearest_leg_lvn = self._nearest_leg_lvn(amt_dto, close_px)
         setup_evidence = self._build_setup_evidence(amt_dto, agent_direction, nearest_leg_lvn)
         pos = self._extract_position(position, close_px, bar_index, entry_bar_index)
@@ -326,6 +328,7 @@ class DecisionContextBuilder:
             state=None,
             bar=bar,
             symbol=symbol,
+            market=market,
             session_open=session_allow_entry(
                 bar_time, market=market, contract_expiry=contract_expiry
             ) if bar_time else True,
