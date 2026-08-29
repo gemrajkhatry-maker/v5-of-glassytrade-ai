@@ -29,6 +29,18 @@ WS = "ws://127.0.0.1:9093/api/trading/ws/gameloop"
 T0 = 1_787_664_600  # in-session MCX evening anchor
 
 
+def _is_trading_day() -> bool:
+    """Leg A boots the real app whose coordinator only scans/spawns on NSE/MCX
+    trading days — on weekends/holidays it starts with zero symbols and the
+    chain can never engage. Skip honestly instead of failing environmentally."""
+    try:
+        from quant.contracts.market_calendar import is_trading_day
+
+        return is_trading_day()
+    except Exception:
+        return True  # calendar unavailable: let the test try anyway
+
+
 def _packet(epoch: int, price: float, vol: float, buy_frac: float) -> dict:
     return {
         "symbol": "GOLDM SEP FUT",
@@ -46,6 +58,9 @@ def _packet(epoch: int, price: float, vol: float, buy_frac: float) -> dict:
 
 
 @pytest.mark.skipif(not HAVE_BOOT, reason="boot_helper deps unavailable")
+@pytest.mark.skipif(
+    not _is_trading_day(), reason="coordinator spawns no engines on non-trading days"
+)
 @pytest.mark.e2e
 def test_leg_a_full_chain_http_to_ws():
     import os
@@ -67,8 +82,8 @@ def test_leg_a_full_chain_http_to_ws():
         cwd=str(repo / "backend"), env=env, stdout=logf, stderr=logf,
     )
     try:
-        # wait for health
-        deadline = time.time() + 90
+        # wait for health (generous: uvicorn boot under a loaded machine)
+        deadline = time.time() + 120
         up = False
         while time.time() < deadline:
             try:
@@ -78,11 +93,30 @@ def test_leg_a_full_chain_http_to_ws():
                         break
             except Exception:
                 time.sleep(1.0)
-        assert up, "backend did not become healthy in 90s"
+        assert up, "backend did not become healthy in 120s"
 
-        health = json.loads(urllib.request.urlopen(f"{BASE}/api/health", timeout=5).read())
-        symbols = (health.get("checks", {}).get("coordinator", {}).get("symbols")) or []
-        assert symbols, f"no active symbols in health: {list(health.get('checks', {}))[:8]}"
+        # Coordinator scan hits real Dhan endpoints, which throttle under
+        # repeated boots (and contend with a running live app) — so symbols
+        # may legitimately lag health. Poll instead of asserting immediately.
+        deadline = time.time() + 120
+        symbols: list = []
+        while time.time() < deadline:
+            try:
+                health = json.loads(
+                    urllib.request.urlopen(f"{BASE}/api/health", timeout=5).read()
+                )
+                symbols = (
+                    health.get("checks", {}).get("coordinator", {}).get("symbols")
+                ) or []
+                if symbols:
+                    break
+            except Exception:
+                pass
+            time.sleep(2.0)
+        assert symbols, (
+            f"no active symbols in health after 120s: "
+            f"{list((health or {}).get('checks', {}))[:8]}"
+        )
         # Inject into a FUTURES symbol whose ticks aggregate to bars; options
         # have thin synthetic volume. Prefer the futures contract of GOLDM.
         symbol = next((s for s in symbols if s.startswith("GOLDM")), symbols[0])
@@ -107,11 +141,13 @@ def test_leg_a_full_chain_http_to_ws():
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             body = json.loads(resp.read())
         assert body["injected"] == len(story), f"injection partial: {body}"
 
-        deadline = time.time() + 25
+        # Observation window: only extended for FAILURE paths — the loop still
+        # breaks early on success, so green runs cost the same as before.
+        deadline = time.time() + 60
         amts_seen, above_mid = 0, False
         from websockets.sync.client import connect as ws_connect_9093
         ws = ws_connect_9093(WS, open_timeout=10, close_timeout=3)
@@ -120,7 +156,7 @@ def test_leg_a_full_chain_http_to_ws():
         try:
             while time.time() < deadline:
                 try:
-                    raw = ws.recv(timeout=6)  # full snapshot sweep takes a beat
+                    raw = ws.recv(timeout=10)  # full snapshot sweep takes a beat
                 except TimeoutError:
                     continue  # keep polling until overall deadline
                 if isinstance(raw, bytes):

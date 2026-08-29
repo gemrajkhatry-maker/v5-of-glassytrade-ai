@@ -403,6 +403,118 @@ def test_close_unset_tolerance_attribute_defaults_to_market():
     assert order.order_type == OrderType.MARKET
 
 
+# ---------------------------------------------------------------------------
+# C7 completion: zero-fill MARKET guarantee for collared closes
+# ---------------------------------------------------------------------------
+
+
+def test_close_collared_miss_zero_fill_falls_back_to_market():
+    """C7: a collared close that misses with NOTHING filled (stale reference
+    price / gapped market) is re-placed as MPP-bounded MARKET — the EOD
+    backstop must not silently fail."""
+    placed_orders = []
+
+    def _place(order):
+        placed_orders.append(order)
+        return SimpleNamespace(order_id=f"ORD-{len(placed_orders)}", quantity=4)
+
+    broker = MagicMock()
+    broker.place_order.side_effect = _place
+    broker.get_order_status.side_effect = [
+        _status(status=OrderStatus.CANCELLED, filled_quantity=0),  # collar missed
+        _status(status=OrderStatus.FILLED, filled_quantity=4, average_fill_price=98.0),
+    ]
+    adapter = _make_adapter(broker)
+    adapter._close_slippage_tol = 0.02
+
+    pos = adapter.close_position(
+        "CRUDEOIL 17 AUG 7200 CALL", "SELL", 4,
+        Portfolio.create_default(), reference_price=100.0,
+    )
+
+    assert pos is not None
+    assert len(placed_orders) == 2
+    assert placed_orders[0].order_type == OrderType.LIMIT
+    assert placed_orders[1].order_type == OrderType.MARKET
+    assert placed_orders[1].price == 0.0
+
+
+def test_close_partial_fill_never_falls_back_to_market():
+    """C7: a PARTIALLY filled collar order must never trigger the MARKET
+    re-place — full-size MARKET on top of a partial fill would over-close."""
+    broker = MagicMock()
+    broker.place_order.return_value = SimpleNamespace(order_id="ORD-1", quantity=4)
+    broker.get_order_status.return_value = _status(
+        status=OrderStatus.CANCELLED, filled_quantity=2
+    )
+    adapter = _make_adapter(broker)
+    adapter._close_slippage_tol = 0.02
+
+    pos = adapter.close_position(
+        "CRUDEOIL 17 AUG 7200 CALL", "SELL", 4,
+        Portfolio.create_default(), reference_price=100.0,
+    )
+
+    assert pos is None
+    broker.place_order.assert_called_once()
+
+
+def test_close_timeout_fill_racing_cancel_is_honored():
+    """C7: a close that fills while the cancel is in flight must be honored —
+    previously the outcome was discarded and the close retried blind."""
+    broker = MagicMock()
+    broker.place_order.return_value = SimpleNamespace(order_id="ORD-1", quantity=4)
+    state = {"cancelled": False}
+
+    def _status_fn(order_id):
+        if state["cancelled"]:
+            return _status(status=OrderStatus.FILLED, filled_quantity=4, average_fill_price=99.0)
+        return _status(status=OrderStatus.OPEN, filled_quantity=0)
+
+    broker.get_order_status.side_effect = _status_fn
+    broker.cancel_order.side_effect = lambda oid: state.__setitem__("cancelled", True)
+
+    adapter = _make_adapter(broker)
+    adapter._close_slippage_tol = 0.02
+    adapter._order_poll_timeout = 0.12  # a few OPEN polls, then timeout
+
+    pos = adapter.close_position(
+        "CRUDEOIL 17 AUG 7200 CALL", "SELL", 4,
+        Portfolio.create_default(), reference_price=100.0,
+    )
+
+    assert pos is not None
+    broker.place_order.assert_called_once()  # no fallback — the fill won the race
+
+
+def test_close_uncollared_miss_has_no_fallback():
+    """C7: the MARKET guarantee is collar-specific. A plain MARKET close that
+    ends unfilled is a broker-side anomaly — the engine retry path handles it."""
+    broker = MagicMock()
+    broker.place_order.return_value = SimpleNamespace(order_id="ORD-1", quantity=4)
+    broker.get_order_status.return_value = _status(
+        status=OrderStatus.CANCELLED, filled_quantity=0
+    )
+    adapter = _make_adapter(broker)
+    adapter._close_slippage_tol = 0.02
+
+    pos = adapter.close_position(
+        "CRUDEOIL 17 AUG 7200 CALL", "SELL", 4, Portfolio.create_default()
+    )  # no reference price -> plain MARKET
+
+    assert pos is None
+    broker.place_order.assert_called_once()
+
+
+def test_slippage_tolerance_defaults():
+    """C7: entry collar 1%; close collar 2% — tightened from 5% once the WS
+    fill feed made a re-queue cost one tick instead of a 30s blind poll.
+    (Env overrides are read in __init__, which eagerly creates the broker and
+    is therefore covered in prod wiring, not here.)"""
+    assert DhanBrokerAdapter._DEFAULT_ENTRY_SLIPPAGE_TOLERANCE_PCT == 0.01
+    assert DhanBrokerAdapter._DEFAULT_CLOSE_SLIPPAGE_TOLERANCE_PCT == 0.02
+
+
 def test_partial_fill_completes_within_poll_returns_position():
     """A partially filled order that reaches FILLED within the poll window is
     accepted with the filled quantity."""

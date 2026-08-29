@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import time
+from types import SimpleNamespace
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -59,6 +60,13 @@ class DhanBrokerAdapter(IBroker):
     # the damage (a no-fill simply skips the entry, which is safe).
     _DEFAULT_ENTRY_SLIPPAGE_TOLERANCE_PCT = 0.01
 
+    # C7 (close side): worst-case slippage bound for closing orders. Tightened
+    # to 2% now that the WS fill feed detects a missed collar instantly and the
+    # C3 retry / EOD watchdog re-queue with a fresh reference price — the cost
+    # of a rare re-queue is one tick, not a 30s blind poll. Set to 0 to disable
+    # the collar entirely (plain MARKET close).
+    _DEFAULT_CLOSE_SLIPPAGE_TOLERANCE_PCT = 0.02
+
     def __init__(self, config: Configuration, storage=None):
         self._config = config
         # C4: optional durable order storage. When wired, every order state
@@ -79,12 +87,27 @@ class DhanBrokerAdapter(IBroker):
                 str(self._DEFAULT_ENTRY_SLIPPAGE_TOLERANCE_PCT),
             )
         )
-        # C7 (close side): wide slippage bound for closing orders. A close MUST
-        # fill (stops/EOD), so this is deliberately wider than the entry collar
-        # and only caps extreme slippage; set to 0 to disable (plain MARKET).
+        # C7 (close side): slippage bound for closing orders. A close MUST
+        # fill (stops/EOD), so this stays wider than the entry collar and only
+        # caps extreme slippage; set to 0 to disable (plain MARKET).
         self._close_slippage_tol = float(
-            os.environ.get("DHAN_CLOSE_SLIPPAGE_TOLERANCE_PCT", "0.05")
+            os.environ.get(
+                "DHAN_CLOSE_SLIPPAGE_TOLERANCE_PCT",
+                str(self._DEFAULT_CLOSE_SLIPPAGE_TOLERANCE_PCT),
+            )
         )
+        # C4: async fill feed — WS order updates with REST-poll fallback. The
+        # feed is started lazily on the first order poll; when it is disabled
+        # or unhealthy, waiting falls back to the proven REST loop unchanged.
+        self._order_feed_enabled = os.environ.get(
+            "DHAN_ORDER_WS", "1"
+        ).strip().lower() not in ("0", "false", "no")
+        self._order_feed = None
+        self._order_feed_lock = threading.Lock()
+        # Dhan broker order id -> our durable order row id (signal id), used by
+        # the WS callback to persist fill state even if the engine thread is
+        # blocked or dead.
+        self._broker_order_to_signal: dict[str, str] = {}
         # Duplicate-order protection: signal_ids currently being executed (or
         # already executed). A duplicate submission of the same signal (e.g. a
         # replay, a double-click, or a concurrent consumer) must never reach
@@ -347,10 +370,10 @@ class DhanBrokerAdapter(IBroker):
 
             # C7: close-side slippage collar. When a reference price is available
             # and the collar is enabled (tol > 0), convert the naked MARKET close
-            # into a marketable LIMIT bounded by the wide close tolerance so a
-            # thin contract cannot fill arbitrarily far from the expected exit
-            # price. The limit stays marketable (priced to cross the spread)
-            # because a close must still fill; tol=0 disables it (plain MARKET).
+            # into a marketable LIMIT bounded by the close tolerance so a thin
+            # contract cannot fill arbitrarily far from the expected exit price.
+            # The limit stays marketable (priced to cross the spread) because a
+            # close must still fill; tol=0 disables it (plain MARKET).
             tol = getattr(self, "_close_slippage_tol", 0.0)
             order_type = OrderType.MARKET
             limit_price = 0.0
@@ -359,6 +382,7 @@ class DhanBrokerAdapter(IBroker):
                 limit_price = self._marketable_limit_price(
                     float(reference_price), side.upper() == "BUY", tol
                 )
+            collared = order_type == OrderType.LIMIT
             order = Order(
                 instrument=instrument,
                 side=side.upper(),  # "SELL" to close LONG, "BUY" to close SHORT
@@ -384,14 +408,42 @@ class DhanBrokerAdapter(IBroker):
                     broker.cancel_order(placed_order_id)
                 except Exception:
                     logger.debug("Failed to cancel timed-out close order %s", placed_order_id, exc_info=True)
-                return None
+                # A fill can race the cancel — the post-cancel state decides.
+                final_order = self._safe_order_status(placed_order_id)
+                if final_order is not None and self._is_filled(final_order):
+                    pass  # honored below via the normal filled path
+                elif collared and (
+                    final_order is None or to_float(final_order.filled_quantity) <= 0
+                ):
+                    # C7 completion: the collared close missed (stale reference
+                    # price — e.g. the EOD backstop using the entry price after
+                    # the feed died — or a gap through the collar) and NOTHING
+                    # filled. Guarantee the flatten with Dhan's MPP-bounded
+                    # MARKET; a zero fill means re-placing full size cannot
+                    # over-close.
+                    final_order = self._market_fallback_close(
+                        symbol, side, quantity, instrument
+                    )
+                    if final_order is None:
+                        return None
+                else:
+                    return None
 
             if not self._is_filled(final_order):
-                logger.warning(
-                    "close_position: order %s terminal status=%s",
-                    placed_order_id, getattr(final_order.status, "value", final_order.status),
-                )
-                return None
+                if collared and to_float(final_order.filled_quantity) <= 0:
+                    # Same zero-fill guarantee for a terminal non-fill
+                    # (CANCELLED/REJECTED collar order with nothing done).
+                    final_order = self._market_fallback_close(
+                        symbol, side, quantity, instrument
+                    )
+                    if final_order is None:
+                        return None
+                else:
+                    logger.warning(
+                        "close_position: order %s terminal status=%s",
+                        placed_order_id, getattr(final_order.status, "value", final_order.status),
+                    )
+                    return None
 
             fill_price = (
                 to_float(getattr(final_order, "average_fill_price", None))
@@ -566,6 +618,75 @@ class DhanBrokerAdapter(IBroker):
         factor = 1.0 + tolerance_pct if is_buy else 1.0 - tolerance_pct
         return round(price * factor, 2)
 
+    def _safe_order_status(self, order_id: str):
+        """Best-effort order-status read (None on any failure)."""
+        broker = self._broker
+        if broker is None:
+            return None
+        try:
+            return broker.get_order_status(order_id)
+        except Exception:
+            logger.debug("close_position: status read failed for %s", order_id, exc_info=True)
+            return None
+
+    def _market_fallback_close(self, symbol: str, side: str, quantity: int, instrument):
+        """C7 completion: guarantee a collared close that missed with ZERO fill.
+
+        A collar can miss when its reference price went stale (the EOD backstop
+        uses the entry price once the feed dies) or the market gapped through
+        the band — and then the position would never flatten. Since nothing
+        filled, re-placing the full size as MARKET cannot over-close, and Dhan
+        itself bounds MARKET orders with MPP (market protection %). One attempt
+        only: if even this fails, the engine's retry path (C3) and the EOD
+        watchdog take over.
+        """
+        broker = self._broker
+        if broker is None:
+            return None
+        logger.warning(
+            "close_position: collared close missed for %s (%s, qty=%d) with zero "
+            "fill — re-placing as MPP-bounded MARKET",
+            symbol, side.upper(), quantity,
+        )
+        try:
+            fb_order = Order(
+                instrument=instrument,
+                side=side.upper(),
+                quantity=quantity,
+                order_type=OrderType.MARKET,
+                price=0.0,
+                trigger_price=0.0,
+                product_type="INTRADAY",
+            )
+            placed = broker.place_order(fb_order)
+            placed_id = str(getattr(placed, "order_id", ""))
+            if not placed_id:
+                logger.error("close_position: MARKET fallback place_order failed for %s", symbol)
+                return None
+            final = self._poll_for_terminal_status(placed_id, timeout=self._order_poll_timeout)
+            if final is None:
+                try:
+                    broker.cancel_order(placed_id)
+                except Exception:
+                    logger.debug("Failed to cancel MARKET fallback %s", placed_id, exc_info=True)
+                final = self._safe_order_status(placed_id)
+                if final is not None and self._is_filled(final):
+                    return final
+                return None
+            if not self._is_filled(final):
+                logger.warning(
+                    "close_position: MARKET fallback terminal status=%s for %s",
+                    getattr(final.status, "value", final.status), symbol,
+                )
+                return None
+            return final
+        except DhanError as exc:
+            logger.error("close_position: MARKET fallback Dhan error for %s: %s", symbol, exc)
+            return None
+        except Exception:
+            logger.exception("close_position: MARKET fallback failed for %s", symbol)
+            return None
+
     @staticmethod
     def _resolve_product_type(meta: dict[str, Any]) -> str:
         if "product_type" in meta:
@@ -696,6 +817,15 @@ class DhanBrokerAdapter(IBroker):
         order_id = str(getattr(signal, "signal_id", "") or "").strip()
         if storage is None or not order_id:
             return
+        if broker_order_id:
+            # C4: let the WS feed's callback locate this durable row when the
+            # broker pushes updates under its own order id. Lazy mapping so
+            # test-built adapters (no __init__) work unchanged.
+            mapping = getattr(self, "_broker_order_to_signal", None)
+            if mapping is None:
+                mapping = {}
+                self._broker_order_to_signal = mapping
+            mapping[str(broker_order_id)] = order_id
         try:
             storage.update_order_status(
                 order_id,
@@ -714,15 +844,192 @@ class DhanBrokerAdapter(IBroker):
         order_id: str,
         timeout: float | None = None,
     ):
+        """Wait for an order to reach a terminal state.
+
+        Interleaved dual path (C4 async fill feed):
+
+        - **Push**: a WS order update wakes the wait instantly and is honored
+          on the next loop pass — no REST call at all when the feed delivers.
+        - **Pull**: after every quiet slice (no push within one poll interval)
+          exactly one REST status poll fires, preserving the proven legacy
+          cadence as the safety net for missed/disconnected feeds.
+
+        When the feed is disabled the behaviour is byte-for-byte the pre-C4
+        REST polling loop.
+        """
         broker = self._broker
         if broker is None:
             return None
 
         timeout = float(timeout or self._order_poll_timeout)
+        feed = self._ensure_order_feed()
+        if feed is None:
+            return self._poll_rest_for_terminal_status(order_id, timeout)
+
+        started_at = time.monotonic()
+        last_error = None
+        while (time.monotonic() - started_at) < timeout:
+            if not feed.healthy:
+                remaining = timeout - (time.monotonic() - started_at)
+                logger.info("Order %s: WS feed down — REST polling takes over", order_id)
+                return self._poll_rest_for_terminal_status(order_id, max(remaining, 0.0))
+
+            # Push path: honor any buffered or just-arrived WS update instantly.
+            snap = feed.snapshot(order_id)
+            if snap is not None:
+                ws_order = self._ws_snapshot_to_order(snap)
+                if self._is_terminal(ws_order.status):
+                    logger.info(
+                        "Order %s terminal via WS update: %s",
+                        order_id, snap.get("raw_status"),
+                    )
+                    return ws_order
+
+            remaining = timeout - (time.monotonic() - started_at)
+            if remaining <= 0:
+                break
+            woke = feed.wait_for_update(
+                order_id, timeout=min(self._order_poll_interval, remaining)
+            )
+            if woke:
+                continue  # fresh push — re-check snapshot immediately, skip REST
+            # Pull path: one REST poll per quiet slice (legacy safety net).
+            try:
+                order_status = broker.get_order_status(order_id)
+                if self._is_terminal(order_status.status):
+                    return order_status
+            except DhanError as exc:
+                last_error = exc
+                logger.debug("Dhan get_order_status failed for %s: %s", order_id, exc)
+            except Exception as exc:
+                last_error = exc
+                logger.exception("Unexpected status poll error for %s", order_id)
+
+        logger.warning("Order status poll timed out for %s after %.1fs", order_id, timeout)
+        if last_error:
+            logger.debug("Last poll error for %s: %s", order_id, last_error)
+        return None
+
+    @staticmethod
+    def _ws_snapshot_to_order(snap: dict):
+        """Adapt a normalized WS snapshot to the shape _is_terminal/_is_filled
+        and the execute/close paths already consume (duck-typed order status)."""
+        return SimpleNamespace(
+            status=snap.get("status"),
+            quantity=to_float(snap.get("quantity")),
+            filled_quantity=to_float(snap.get("filled_quantity")),
+            average_fill_price=to_float(snap.get("average_fill_price")),
+            instrument=SimpleNamespace(symbol=str(snap.get("symbol") or "")),
+            timestamp=str(snap.get("timestamp") or ""),
+        )
+
+    def _ensure_order_feed(self):
+        """Return the WS order-update feed (None when disabled).
+
+        Lifecycle policy: the feed object is created once and reused while its
+        thread runs — whether connected or still connecting. A dead thread is
+        respawned at most once per minute; in between (and whenever the feed is
+        unhealthy) the poll loop's REST path covers order status. Test doubles
+        without ``is_running`` are treated as running so they are never
+        replaced by a real connection.
+        """
+        if not getattr(self, "_order_feed_enabled", False):
+            return None
+
+        def _usable(f) -> bool:
+            if f is None:
+                return False
+            if f.healthy:
+                return True
+            is_running = getattr(f, "is_running", None)
+            return is_running() if callable(is_running) else True
+
+        feed = self._order_feed
+        if _usable(feed):
+            return feed
+        if feed is not None and (time.monotonic() - getattr(self, "_last_feed_start", 0.0)) < 60.0:
+            return feed  # recently (re)started and dead — REST covers, no respawn spam
+
+        with self._order_feed_lock:
+            feed = self._order_feed
+            if _usable(feed):
+                return feed
+            if feed is not None and (
+                time.monotonic() - getattr(self, "_last_feed_start", 0.0)
+            ) < 60.0:
+                return feed
+            try:
+                from app.infrastructure.adapters.dhan_order_feed import (
+                    DhanOrderUpdateFeed,
+                )
+
+                feed = DhanOrderUpdateFeed(
+                    client_id=self._client_id,
+                    access_token=self._access_token,
+                    on_update=self._on_order_feed_update,
+                )
+                feed.start()
+                self._order_feed = feed
+                self._last_feed_start = time.monotonic()
+                logger.info("Dhan order-update WS feed started")
+                return feed
+            except Exception:
+                logger.exception(
+                    "Failed to start order-update WS feed — REST polling remains"
+                )
+                self._order_feed = None
+                return None
+
+    def _on_order_feed_update(self, snap: dict) -> None:
+        """WS callback: persist fill state for the durable order row.
+
+        Runs on the feed thread; must never raise into the feed. A crash
+        between place_order and the engine's fill handling is exactly the C4
+        scenario — persisting here keeps the durable row truthful even when
+        the engine thread is blocked or dead.
+        """
+        try:
+            broker_order_id = str(snap.get("order_id") or "")
+            if not broker_order_id:
+                return
+            signal_id = getattr(self, "_broker_order_to_signal", {}).get(broker_order_id)
+            storage = getattr(self, "_storage", None)
+            if signal_id is None or storage is None:
+                return
+            durable = {
+                OrderStatus.FILLED: "FILLED",
+                OrderStatus.COMPLETED: "FILLED",
+                OrderStatus.CLOSED: "FILLED",
+                OrderStatus.REJECTED: "REJECTED",
+                OrderStatus.CANCELLED: "CANCELLED",
+            }.get(snap.get("status"))
+            if durable is None:
+                # Non-terminal transition (PENDING/OPEN): the durable row stays
+                # in-flight, which is exactly what restart reconciliation wants.
+                return
+            filled = to_float(snap.get("filled_quantity"))
+            avg = to_float(snap.get("average_fill_price"))
+            storage.update_order_status(
+                signal_id,
+                durable,
+                filled_quantity=filled if filled > 0 else None,
+                avg_fill_price=avg if avg > 0 else None,
+            )
+        except Exception:
+            logger.exception("order-feed persistence failed — trading continues")
+
+    def _poll_rest_for_terminal_status(
+        self,
+        order_id: str,
+        timeout: float,
+    ):
         started_at = time.monotonic()
         last_error = None
         while (time.monotonic() - started_at) < timeout:
             try:
+                broker = self._broker
+                if broker is None:
+                    return None
                 order_status = broker.get_order_status(order_id)
                 if self._is_terminal(order_status.status):
                     return order_status
