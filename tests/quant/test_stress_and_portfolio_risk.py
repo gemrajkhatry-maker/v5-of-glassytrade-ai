@@ -43,6 +43,10 @@ def _make_coordinator(n_symbols: int) -> QuantCoordinator:
 def test_stress_12_engines_interleaved_ticks_no_contamination(monkeypatch):
     """12 engines, ticks from all symbols interleaved on one feed: each
     engine must only ever see its own symbol's ticks."""
+    import quant.multi_engine as multi_engine
+
+    # Stress is calendar-independent: bypass the weekend/holiday start gate.
+    monkeypatch.setattr(multi_engine, "is_trading_day", lambda: True, raising=True)
     n = 12
     roots = (
         "NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY",

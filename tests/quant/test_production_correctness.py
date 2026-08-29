@@ -149,7 +149,13 @@ def test_naive_iso_is_ist_not_utc():
 
 
 def test_expiry_is_the_contract_date_not_every_tuesday():
-    assert parse_contract_expiry("CRUDEOIL 28 AUG 7450 CALL") == date(2026, 8, 28)
+    # "28 AUG" must resolve to the real calendar date (next future occurrence
+    # of Aug 28 from today) — never snapped to an arbitrary weekday.
+    today = date.today()
+    expected = date(today.year, 8, 28)
+    if expected < today:
+        expected = date(today.year + 1, 8, 28)
+    assert parse_contract_expiry("CRUDEOIL 28 AUG 7450 CALL") == expected
     compact = parse_contract_expiry("NIFTY23FEB18000CE")
     assert compact is not None and compact.month == 2 and compact.day == 23
     hyphen = parse_contract_expiry("NIFTY-27FEB-25500-CE")

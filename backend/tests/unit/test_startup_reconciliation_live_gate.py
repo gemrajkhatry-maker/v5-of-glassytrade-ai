@@ -21,6 +21,26 @@ def _patch_reconcile_to_raise(monkeypatch):
     monkeypatch.setattr(StartupReconciliation, "reconcile", _boom)
 
 
+def _patch_live_broker_off_network(monkeypatch):
+    """The reconciliation gate — not Dhan auth — is the thing under test.
+
+    Boot resolves the broker adapter BEFORE the gate runs, so a stale/expired
+    DHAN_ACCESS_TOKEN in the environment would otherwise fail the test with
+    DhanAuthError before reconciliation is ever reached. Stub the broker
+    construction so the test's verdict depends only on the gate.
+    """
+    from unittest.mock import MagicMock
+
+    from app.infrastructure.adapters.dhan_broker_adapter import DhanBrokerAdapter
+
+    monkeypatch.setattr(
+        DhanBrokerAdapter,
+        "_create_broker",
+        lambda self: MagicMock(name="DhanBroker"),
+        raising=True,
+    )
+
+
 def _build_app_with_failing_reconciliation(monkeypatch):
     """Create the app with StartupReconciliation.reconcile patched to raise."""
     from app.main import create_application
@@ -35,6 +55,7 @@ def test_live_mode_refuses_boot_on_reconciliation_failure(monkeypatch):
 
     monkeypatch.setenv("GLASSYTRADE_ENV", "live")
     _patch_reconcile_to_raise(monkeypatch)
+    _patch_live_broker_off_network(monkeypatch)
 
     with pytest.raises(RuntimeError, match="Startup reconciliation failed in live mode"):
         create_application()

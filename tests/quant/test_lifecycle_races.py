@@ -7,7 +7,14 @@ spawn DUPLICATE engines for `new` (duplicate ticks -> duplicate orders).
 
 import threading
 
+import quant.multi_engine as multi_engine
 from quant.multi_engine import QuantCoordinator
+
+
+def _force_trading_day(monkeypatch):
+    """Lifecycle races are calendar-independent: bypass the weekend/holiday
+    gate in coordinator start/rescan (added with the EOD watchdog)."""
+    monkeypatch.setattr(multi_engine, "is_trading_day", lambda: True, raising=True)
 
 
 class _FakeMD:
@@ -41,6 +48,7 @@ def _make_coordinator(futures: dict[str, str]) -> QuantCoordinator:
 def test_concurrent_switch_spawns_exactly_one_engine(monkeypatch):
     """Two threads switching the same old symbol concurrently must yield
     exactly one engine for the new symbol."""
+    _force_trading_day(monkeypatch)
     coord = _make_coordinator({"GOLDM": "GOLDM SEP FUT", "SILVERM": "SILVERM AUG FUT"})
     # Deterministic scan: one future + one option per underlying.
     monkeypatch.setattr(
@@ -75,6 +83,7 @@ def test_concurrent_switch_spawns_exactly_one_engine(monkeypatch):
 def test_rescan_and_switch_do_not_interleave(monkeypatch):
     """A rescan running concurrently with a switch must serialize: the final
     state must be consistent (no orphaned/duplicated engines)."""
+    _force_trading_day(monkeypatch)
     coord = _make_coordinator({"GOLDM": "GOLDM SEP FUT"})
     scan_a = ["GOLDM SEP FUT", "GOLDM 28 AUG 159500 CALL"]
     monkeypatch.setattr(coord, "_scan", lambda force=False: list(scan_a), raising=True)

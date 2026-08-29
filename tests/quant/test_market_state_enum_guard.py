@@ -65,7 +65,11 @@ def test_tick_size_is_exchange_authoritative():
 def test_coordinator_resolves_per_symbol_tick_size(monkeypatch):
     """Engines spawned by the coordinator get the exchange-correct tick size,
     not the global default."""
+    import quant.multi_engine as multi_engine
     from quant.multi_engine import QuantCoordinator
+
+    # Calendar-independent: bypass the weekend/holiday coordinator start gate.
+    monkeypatch.setattr(multi_engine, "is_trading_day", lambda: True, raising=True)
 
     class _FakeMD:
         def get_nearest_futures(self, underlying, exchange=None):
