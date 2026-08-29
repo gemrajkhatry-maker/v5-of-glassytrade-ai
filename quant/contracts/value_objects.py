@@ -195,13 +195,11 @@ class AMTResult:
     leg_poc: float = 0.0
     leg_vah: float = 0.0
     leg_val: float = 0.0
-    leg_regime: str = ""  # Regime of the displacement leg (BALANCED/TRENDING/NO_TRADE)
     swing_delta: float = 0.0
     has_displacement: bool = False
     # Market structure classifier output
     market_structure: str = "BALANCE"
     structure_confidence: int = 0
-    day_type: str = "UNKNOWN"
     # Phase 1: Initial Balance + Prior Day Levels
     ib_high: float = 0.0
     ib_low: float = 0.0
@@ -256,24 +254,18 @@ class AMTResult:
     drive_number: int = 0          # 0 = no level tested yet, 1 = D1, 2 = D2, 3+ = exhausted
     drive_entry_valid: bool = False  # True only for D2 with D1 rejected
     # Phase 5: Multi-Timeframe (MTF) Alignment
-    mtf_alignment: str = ""  # "ALIGNED_BULLISH" / "ALIGNED_BEARISH" / "DIVERGENT" / ""
     opening_type: str = ""   # "OPEN_DRIVE" / "OPEN_TEST_REJECTION" / "OPEN_REJECTION_REVERSE" / "OPEN_AUCTION"
     # Higher Timeframe Levels
     daily_vah: float = 0.0
     daily_val: float = 0.0
     daily_poc: float = 0.0
-    hourly_vah: float = 0.0
-    hourly_val: float = 0.0
     hourly_poc: float = 0.0
     # Per-symbol delta (from option tick, not underlying) — ensures isolation across symbols
     delta_normalized_option: float = 0.0  # Normalized delta from option tick (per-symbol isolation)
     # CVD data source indicator — "underlying" when computed from futures, "option" when from option premium
     cvd_source: str = ""
-    # Bimodal active pole — "UPPER" or "LOWER" when profile shape is B-bimodal
-    bimodal_active_pole: str = ""
     # New: Extreme deviation escalation (> 3.0 sigma)
     is_extreme_deviation: bool = False
-    underlying_price: float = 0.0
     # Fix 1: Option type for direction labeling (CALL/PUT/UNKNOWN)
     option_type: str = "UNKNOWN"
     # Session VA development over successive 15-min windows (ValueMigration)

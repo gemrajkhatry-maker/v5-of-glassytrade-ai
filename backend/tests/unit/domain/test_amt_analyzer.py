@@ -492,51 +492,6 @@ class TestIncrementalProfile:
 # ---------------------------------------------------------------------------
 
 
-class TestDayTypeClassification:
-    def test_normal_day_type(self):
-        analyzer = AMTAnalyzer()
-        # Create an IB (60 mins = 12 5-min candles)
-        data = []
-        for i in range(12):
-            data.append(
-                _make_candle_timed(
-                    105 + i % 2, f"2026-01-01T09:{i * 5:02d}:00Z", high=110, low=100
-                )
-            )
-            analyzer.analyze(data)
-        # Add inside candles
-        for i in range(12, 20):
-            data.append(
-                _make_candle_timed(
-                    105, f"2026-01-01T10:{(i - 12) * 5:02d}:00Z", high=108, low=102
-                )
-            )
-            result = analyzer.analyze(data)
-
-        assert result.day_type == "NORMAL"
-
-    def test_trend_day_type(self):
-        analyzer = AMTAnalyzer()
-        data = []
-        # 13 candles span the full 60-min IB window (09:00 -> 10:00 inclusive;
-        # the boundary candle closes the window). Fabio: IB = first hour.
-        for i in range(13):
-            data.append(
-                _make_candle_timed(
-                    105 + i % 2,
-                    f"2026-01-01T{9 + (i * 5) // 60:02d}:{(i * 5) % 60:02d}:00Z",
-                    high=110, low=100,
-                )
-            )
-            analyzer.analyze(data)
-        # Add massive extension up AFTER the IB window (minute 65 = 10:05).
-        # IB range is 10, dist > 10 needs price above 120.
-        data.append(_make_candle_timed(125, "2026-01-01T10:05:00Z", high=125, low=115))
-        result = analyzer.analyze(data)
-
-        assert result.day_type == "TREND"
-
-
 class TestLiquiditySweepDetection:
     def test_liquidity_sweep_high(self):
         engine = AcceptanceRejectionEngine()

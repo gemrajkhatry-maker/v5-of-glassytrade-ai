@@ -18,26 +18,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def classify_day_type(data: list, ib_complete: bool, ib_high: float, ib_low: float) -> str:
-    """Classify day type: NORMAL, NEUTRAL, TREND, NORMAL_VARIATION."""
-    if not ib_complete or ib_high <= 0 or ib_low <= 0:
-        return "UNKNOWN"
-    session_high = max(d.high for d in data)
-    session_low = min(d.low for d in data)
-    ib_range = ib_high - ib_low
-    if ib_range <= 0:
-        return "UNKNOWN"
-    dist_above = max(0.0, session_high - ib_high)
-    dist_below = max(0.0, ib_low - session_low)
-    if dist_above == 0 and dist_below == 0:
-        return "NORMAL"
-    elif dist_above > 0 and dist_below > 0:
-        return "NEUTRAL"
-    elif dist_above > ib_range or dist_below > ib_range:
-        return "TREND"
-    return "NORMAL_VARIATION"
-
-
 def classify_market_structure(
     data: list,
     session_vwap: float,

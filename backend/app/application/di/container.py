@@ -6,10 +6,15 @@ hardcoded type checks.
 
 Usage:
     container = DIContainer()
-    container.register_singleton(IBrokerPort, lambda c: DhanBrokerAdapter(c.resolve(Config)))
+    container.register_singleton(IBroker, lambda c: DhanBrokerAdapter(c.resolve(Config)))
     container.register(ITradeRepository, lambda c: SQLiteStorageAdapter())
 
-    broker = container.resolve(IBrokerPort)  # Lazy, singleton
+    broker = container.resolve(IBroker)  # Lazy, singleton
+
+Note: the live broker binding is ``quant.contracts.ports.broker.IBroker`` (the
+quant application port implemented by the DI adapters); ``brokers.broker.
+ports.IBrokerPort`` is the broker-library-internal contract implemented by
+``DhanBroker`` beneath the adapter translation layer.
 """
 
 from __future__ import annotations

@@ -614,7 +614,6 @@ class AMTAnalyzer:
         # Profile shape and bimodal override
         shape = classify_shape(profile)
         effective_profile_shape = shape.shape
-        _bimodal_active_pole = shape.active_pole
 
         if shape.shape == "B" and market_state == MarketState.IMBALANCED:
             market_state = MarketState.BALANCED
@@ -709,7 +708,6 @@ class AMTAnalyzer:
         dev_poc, dev_vah, dev_val = _compute_developing_va(developing_profile)
         from quant.amt.session.structure import (
             extract_session_open as _extract_open,
-            classify_day_type as _classify_dt,
             compute_noc_targets as _compute_noc,
             compute_effective_market_state as _compute_eff,
             compute_per_symbol_delta as _compute_delta,
@@ -717,7 +715,6 @@ class AMTAnalyzer:
         from quant.amt.orderflow.compute import track_drives as _track_dr
 
         session_open_price = _extract_open(data, current)
-        day_type = _classify_dt(data, ib_complete, ib_high, ib_low)
 
         # NPOC targets
         npoc_above, npoc_below = _compute_noc(npoc_tracker, underlying, current, tick_size)
@@ -795,12 +792,12 @@ class AMTAnalyzer:
             bubble_retests=bubble_retests, npoc_above=npoc_above,
             npoc_below=npoc_below, opening_result=opening_result,
             mtf_result=mtf_result, structure=structure,
-            day_type=day_type, absorption_side=absorption_side,
+            absorption_side=absorption_side,
             absorption_range_ratio=absorption_range_ratio,
             absorption_vol_ratio=absorption_vol_ratio,
             delta_normalized_option=delta_normalized_option,
             _drive_number=_drive_number, _drive_entry_valid=_drive_entry_valid,
-            cvd_source=cvd_source, _bimodal_active_pole=_bimodal_active_pole,
+            cvd_source=cvd_source,
             state_result=state_result, value_migration=value_migration,
             _footprints=_footprints, _contested_zone=_contested_zone,
             _triple=_triple, _effective_market_state=_effective_market_state,
@@ -830,10 +827,10 @@ class AMTAnalyzer:
                       break_state, ofi_result, obi, dev_poc, dev_vah, dev_val,
                       cushion_tier, session_pnl, bubble_retests, npoc_above,
                       npoc_below, opening_result, mtf_result, structure,
-                      day_type, absorption_side, absorption_range_ratio,
+                      absorption_side, absorption_range_ratio,
                       absorption_vol_ratio, delta_normalized_option,
                       _drive_number, _drive_entry_valid, cvd_source,
-                      _bimodal_active_pole, state_result, value_migration,
+                      state_result, value_migration,
                       _footprints, _contested_zone, _triple,
                       _effective_market_state, gex=None) -> AMTResult:
         """Assemble AMTResult from computed pipeline outputs.
@@ -930,16 +927,12 @@ class AMTAnalyzer:
             npoc_above=npoc_above,
             npoc_below=npoc_below,
             opening_type=opening_result.type,
-            mtf_alignment=mtf_result.alignment if mtf_result else "",
             daily_vah=mtf_result.daily.vah if mtf_result else 0.0,
             daily_val=mtf_result.daily.val if mtf_result else 0.0,
             daily_poc=mtf_result.daily.poc if mtf_result else 0.0,
-            hourly_vah=mtf_result.hourly.vah if mtf_result else 0.0,
-            hourly_val=mtf_result.hourly.val if mtf_result else 0.0,
             hourly_poc=mtf_result.hourly.poc if mtf_result else 0.0,
             market_structure=structure.state,
             structure_confidence=structure.confidence_score,
-            day_type=day_type,
             absorption_side=absorption_side,
             absorption_range_ratio=absorption_range_ratio,
             absorption_vol_ratio=absorption_vol_ratio,
@@ -947,10 +940,8 @@ class AMTAnalyzer:
             drive_number=_drive_number,
             drive_entry_valid=_drive_entry_valid,
             cvd_source=cvd_source,
-            bimodal_active_pole=_bimodal_active_pole,
             is_extreme_deviation=state_result.is_extreme_deviation,
             value_migration=value_migration,
-            underlying_price=float(current.close) if data else 0.0,
             option_type=self._detect_option_type(symbol),
             footprints=_footprints,
             contested_zone=_contested_zone,
