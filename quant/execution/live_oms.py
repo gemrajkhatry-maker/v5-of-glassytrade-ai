@@ -54,21 +54,26 @@ class LiveOMS:
     def lot_size(self) -> float:
         return self._lot_size
 
-    def submit(self, signal: EngineSignal, quantity: float) -> Position:
+    def submit(self, signal: EngineSignal, quantity: float) -> Position | None:
         """Open a new position via the broker.
 
         Maps the engine signal to a broker signal, executes via IBroker,
         and maps the broker Position back to the engine domain Position.
+        Returns None if the broker rejected the signal (normal, not an error).
         """
         size = self._snap_to_lot(quantity, self._lot_size)
         broker_signal = to_broker_signal(signal, size)
         broker_pos = self._broker.execute_order(broker_signal, self._portfolio, signal.symbol)
 
         if broker_pos is None:
-            raise RuntimeError(
-                f"LiveOMS.submit: broker rejected signal for {signal.symbol} "
-                f"(side={signal.type}, entry={signal.entry}, qty={size})"
+            # Broker rejection is a normal trading event, not a system error.
+            # Log as warning and return None so the engine can skip the entry.
+            logger.warning(
+                "LiveOMS.submit: broker rejected signal for %s "
+                "(side=%s, entry=%s, qty=%s) — skipping entry",
+                signal.symbol, signal.type, signal.entry, size,
             )
+            return None
 
         # Map broker Position → engine Position
         fill_price = float(getattr(broker_pos, "entry_price", 0))
@@ -278,21 +283,77 @@ class LiveOMS:
     ) -> Position:
         """Create a pyramid add-on position anchored to the base trade (spec §13.2).
 
-        DISABLED UNDER LIVE OMS — E9 fix. Pyramids are additive and require an
-        end-to-end broker submission path (propose → submit → fill → linked
-        close) that does not yet exist for LiveOMS. Building in-memory positions
-        here creates GHOST orders: PositionOpened fires but no broker order is
-        ever placed, so the eventual full-close sends a broker.close_position()
-        against an unopened position — a guaranteed live failure with wrong PnL.
+        Per spec §13.2:
+          - Entry: price at the Impulse Leg LVN retest zone
+          - SL: 2 ticks behind the LVN shelf (passed as new_sl)
+          - TP: same as base trade's TP (structural target unchanged)
+          - Size: 50% of base (P1) or 25% of base (P2)
 
-        Until submit/linked-close is implemented for pyramids, this path refuses
-        to build ghost positions and logs why. PaperOMS remains the only place
-        pyramid add-ons are permitted (they are tracked in-memory there).
+        Routes through IBroker.execute_order() so the pyramid is a real broker
+        order, not a ghost position. The base position's SL must be ratcheted
+        to new_sl by the caller (runtime._check_pyramid) after this fills.
         """
-        raise ValueError(
-            "E9: pyramids disabled under LiveOMS until broker submission is "
-            f"implemented end-to-end (propose→submit→fill→linked-close); requested "
-            f"P{pyramid_level} @ {entry_price:.2f}"
+        size = self._snap_to_lot(abs(size), self._lot_size)
+        if size <= 0:
+            raise ValueError(f"Pyramid size {size} is too small (< 1 lot)")
+
+        base_signal = base.order.signal
+        long = base.size > 0
+        signed = size if long else -size
+
+        # Build a synthetic signal for the pyramid position: inherit direction
+        # and structural TP from the base trade, but update entry and SL.
+        from quant.decision.signal_builder import Signal
+        pyramid_signal = Signal(
+            type=base_signal.type,
+            reason=f"Pyramid-{pyramid_level} @ LVN {entry_price:.2f}",
+            entry=entry_price,
+            sl=new_sl,
+            tp=base_signal.tp,    # same structural target
+            rr=abs(base_signal.tp - entry_price) / max(abs(entry_price - new_sl), 0.01),
+            model_label=getattr(base_signal, "model_label", "Triple-A"),
+            symbol=base_signal.symbol,
+            timestamp=time,
+        )
+
+        # Submit to broker (same path as submit())
+        broker_signal = to_broker_signal(pyramid_signal, size)
+        broker_pos = self._broker.execute_order(broker_signal, self._portfolio, pyramid_signal.symbol)
+
+        if broker_pos is None:
+            logger.warning(
+                "LiveOMS.add_pyramid: broker rejected pyramid for %s "
+                "(side=%s, entry=%s, qty=%s) — skipping pyramid",
+                pyramid_signal.symbol, pyramid_signal.type, entry_price, size,
+            )
+            return None
+
+        fill_price = float(getattr(broker_pos, "entry_price", entry_price))
+        filled_qty = float(getattr(broker_pos, "size", size))
+        signed = filled_qty if long else -filled_qty
+
+        # Audit trail
+        if self._emit_fn is not None:
+            try:
+                self._emit_fn(OrderSubmitted(
+                    symbol=pyramid_signal.symbol, time=time,
+                    side="BUY" if long else "SELL",
+                    quantity=filled_qty, price=fill_price, reason=f"PYRAMID_{pyramid_level}",
+                ))
+                self._emit_fn(OrderFilled(
+                    symbol=pyramid_signal.symbol, time=time,
+                    fill_price=fill_price, filled_qty=filled_qty, reason=f"PYRAMID_{pyramid_level}",
+                ))
+            except Exception:
+                pass  # audit must never break trading
+
+        return Position(
+            order=Order(signal=pyramid_signal, quantity=abs(filled_qty)),
+            open_price=fill_price,
+            open_time=time,
+            size=signed,
+            pyramid_level=pyramid_level,
+            is_pyramid=True,
         )
 
     @staticmethod
