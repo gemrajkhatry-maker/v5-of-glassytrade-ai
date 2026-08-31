@@ -94,7 +94,13 @@ def check_trailing_stop(
     trail_giveback_pct: float, vwap_adverse_drift_pct: float,
     cvd_be_threshold: float, be_floor: float | None, trail_stop: float | None,
 ) -> tuple[ExitDecision | None, float | None, float | None]:
-    """Rule 4b: trailing stop + breakeven. Returns (decision, new_be_floor, new_trail_stop)."""
+    """Rule 4b: trailing stop + breakeven.
+
+    Auction-aware: the stop moves on favorable price movement OR on
+    acceptance (delta confirming the thesis). The stop holds on normal
+    pullbacks when the auction is still accepting — preventing premature
+    exits during healthy consolidation.
+    """
     long = position.size > 0
     profit = (close - entry) if long else (entry - close)
 
@@ -112,6 +118,10 @@ def check_trailing_stop(
     if be_floor is None and profit >= risk * 0.8:
         be_floor = entry
 
+    # Auction acceptance check: delta confirming the thesis
+    cvd_slope = float(dto.get("cvdSlope") or 0.0)
+    acceptance_confirms = (long and cvd_slope > 0.1) or (not long and cvd_slope < -0.1)
+
     # Trailing stop (armed at 1R)
     if profit >= risk:
         effective_giveback = trail_giveback_pct
@@ -126,6 +136,14 @@ def check_trailing_stop(
         candidate = max(candidate, sl) if long else min(candidate, sl)
         if be_floor is not None:
             candidate = max(candidate, be_floor) if long else min(candidate, be_floor)
+
+        # Auction-based: if acceptance confirms, move stop to breakeven + margin
+        # even if price hasn't moved the full giveback distance
+        if acceptance_confirms and be_floor is not None:
+            if long:
+                candidate = max(candidate, be_floor + risk * 0.1)
+            else:
+                candidate = min(candidate, be_floor - risk * 0.1)
 
         if trail_stop is None:
             trail_stop = candidate

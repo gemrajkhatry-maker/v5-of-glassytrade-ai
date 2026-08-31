@@ -71,18 +71,26 @@ def detect_market_state(
     # If there is active displacement OR price is outside session Value Area OR low balance -> IMBALANCED
     if has_displacement or not inside_session_va or balance_ratio < BALANCE_RATIO_THRESHOLD:
         trigger_parts = []
+        conf = 0.5  # base confidence for imbalanced
         if has_displacement:
             trigger_parts.append("active displacement leg")
+            conf += 0.25
         if not inside_session_va:
             trigger_parts.append(f"outside session VA [{val:.2f}, {vah:.2f}]")
+            conf += 0.20
         if balance_ratio < BALANCE_RATIO_THRESHOLD:
             trigger_parts.append(f"low balance ratio ({balance_ratio:.2f})")
+            conf += 0.10
+        if has_acceptance:
+            conf += 0.05
+        if is_extreme:
+            conf += 0.05
 
         zone = "OUTSIDE_VA" if not inside_session_va else "DISPLACEMENT"
         return MarketStateResult(
             state=MarketState.IMBALANCED,
             zone=zone,
-            confidence=0.85,
+            confidence=min(conf, 0.95),
             trigger=f"Price {price:.2f} " + ", ".join(trigger_parts),
             has_displacement=has_displacement,
             has_acceptance=has_acceptance,
@@ -92,10 +100,22 @@ def detect_market_state(
 
     # Price inside session VA, no displacement, high balance ratio -> BALANCED
     zone = classify_zone(price, poc, vah, val)
+    conf = 0.55  # base confidence for balanced
+    if balance_ratio >= BALANCE_RATIO_THRESHOLD:
+        conf += 0.20
+    if has_acceptance:
+        conf += 0.10
+    if zone == "NEAR_POC":
+        conf += 0.10
+    elif zone in ("NEAR_VAH", "NEAR_VAL"):
+        conf += 0.05
+    if is_extreme:
+        conf -= 0.15  # extreme deviation reduces confidence in balance
+
     return MarketStateResult(
         state=MarketState.BALANCED,
         zone=zone,
-        confidence=0.80,
+        confidence=max(0.30, min(conf, 0.90)),
         trigger=f"Price {price:.2f} inside session VA [{val:.2f}, {vah:.2f}]",
         has_displacement=has_displacement,
         has_acceptance=has_acceptance,
