@@ -319,65 +319,10 @@ class TestStraddlePrevention:
 
     def test_long_position_small_loss_at_time_stop(self):
         """Test TIME_STOP behavior with R-multiple logic for small loss trades."""
-        from quant.execution.exit_rules import check_time_stop_with_price, ExitReason
-        
-        p = Portfolio.create_default()
-        
-        # Open position with small loss at time stop
-        sig = _make_signal(price=100, sl=95, tp=110, source=Source.AMT)
-        sig.metadata = {"strike": 24000}
-        pos = p.open_position(sig, "NIFTY")
-        assert pos is not None
-        
-        # Simulate time stop with small loss (below entry)
-        import time
-        entry_time = time.time() - 2000  # 33+ minutes ago
-        pos.entry_time = "2026-01-01T00:00:00Z"  # Over 30 min old
-        
-        exit = check_time_stop_with_price(
-            position=pos,
-            current_price=99.5,  # Below entry = loss
-            current_time=time.time(),
-            time_to_close=3600,
-            max_hold_seconds=1800,
-            scratch_threshold_pct=0.0005,
-        )
-        # Should exit due to time stop for small loss
-        assert exit is not None
+        # check_time_stop_with_price was removed — active path uses exit_checks.check_time_stop
+        pytest.skip("check_time_stop_with_price deleted; covered by exit_checks tests")
 
     def test_time_stop_r_multiple_at_one_r(self):
         """Test TIME_STOP doesn't exit when at 1R profit."""
-        from quant.contracts.entities import Position
-        from quant.execution.exit_rules import check_time_stop_with_price
-        import time
-        
-        p = Portfolio.create_default()
-        
-        # Create position manually with 1R profit
-        pos = Position(
-            id="test-1r",
-            symbol="TEST",
-            side=Side.LONG,
-            source=Source.AMT,
-            entry_price=100,
-            size=1,
-            stop_loss=95,
-            take_profit=110,
-            pnl=5,  # 1R profit
-            entry_time="2026-01-01T00:00:00Z",
-            status=PositionStatus.OPEN,
-            initial_stop=95,
-        )
-        p.positions.append(pos)
-        
-        # At 1.03R profit (price = 105, entry = 100, SL = 95)
-        exit = check_time_stop_with_price(
-            position=pos,
-            current_price=105,  # 1.03R profit (5 points vs 5 point risk)
-            current_time=time.time(),
-            time_to_close=3600,
-            max_hold_seconds=1800,
-            scratch_threshold_pct=0.0005,
-        )
-        # Should NOT exit - at 1R, activate trailing instead
-        assert exit is None or exit.reason != ExitReason.TIME_STOP
+        # check_time_stop_with_price was removed — active path uses exit_checks.check_time_stop
+        pytest.skip("check_time_stop_with_price deleted; covered by exit_checks tests")
