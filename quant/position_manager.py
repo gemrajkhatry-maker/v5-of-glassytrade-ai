@@ -86,6 +86,11 @@ class PositionManager:
         self.last_fill = None
         self.last_partial_fill = None
         self.last_pyramid_pnl = 0.0
+        # Double-close guard: position _ids that have already been fully closed.
+        # Prevents the same position from being closed multiple times across
+        # tick/bar/thesis-flip/EOD paths (each close emits PositionClosed and
+        # books P&L — double-close overstates losses by 10-100x).
+        self._closed_ids: set[str] = set()
 
     def _emit_stop_moves(self, position, bar, prev_be, prev_trail,
                          be_floor, trail_stop) -> None:
@@ -233,6 +238,14 @@ class PositionManager:
 
     def _execute_full_close(self, position, exit_dec: ExitDecision, time_str: str):
         """Execute full position close and release risk/pyramid state."""
+        # Double-close guard: skip if this position was already closed.
+        if position._id in self._closed_ids:
+            logger.warning(
+                "⚠️ [DOUBLE-CLOSE GUARD] %s position %s already closed — skipping",
+                self.symbol, position._id[:8],
+            )
+            return None
+
         fill = self._oms.close(position, exit_dec.close_price, time_str, exit_dec.reason)
         self.last_fill = fill
         self._exits.pop_trail(position)
@@ -266,6 +279,7 @@ class PositionManager:
 
         self.pyramid_positions = []
         self.pyramid_count = 0
+        self._closed_ids.add(position._id)  # Mark as closed
         self._emit(PositionClosed(symbol=self.symbol, time=time_str, fill=fill))
         risk = self._risk.record_trade(fill.pnl)
         logger.info(
