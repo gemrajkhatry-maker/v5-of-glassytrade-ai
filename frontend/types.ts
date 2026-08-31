@@ -283,7 +283,6 @@ export interface AMTAnalysis {
   cvdSlope?: number;
   cvdDivergence?: string;
   sessionVwap?: number;
-  underlyingPrice?: number;
   // Normalized delta score (AggressionCard) — sent by backend amt_result_to_dto
   deltaNormalizedOption?: number;
   // VWAP bands

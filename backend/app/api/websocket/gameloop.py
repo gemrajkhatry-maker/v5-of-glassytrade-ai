@@ -1,9 +1,8 @@
 """WebSocket game-loop handler — thin read-only viewer over QuantCoordinator.
 
-The legacy engine path (TradingEngine + TradingSessionService) was deleted
-in the backend swap. The greenfield QuantCoordinator is the single decision
-brain, and this WS handler is a pure transport: it streams coordinator
-snapshots to the frontend with delta compression.
+The QuantCoordinator is the single decision brain, and this WS handler is a
+pure transport: it streams coordinator snapshots to the frontend with delta
+compression.
 
 Server-driven mode:
   1. Send config + history
@@ -70,6 +69,36 @@ def _compute_delta(prev: dict | None, current: dict) -> dict:
             delta[key] = value
             changed = True
     return delta if changed else {}
+
+
+def _build_initial_snapshots(
+    coordinator, ordered_symbols: list[str]
+) -> tuple[list[dict], dict[str, dict]]:
+    """Worker function to build initial full snapshots and deep copies off the event loop."""
+    initial_payloads = []
+    previous_states = {}
+    for s in ordered_symbols:
+        snap = coordinator.snapshot(s)
+        copied = copy.deepcopy(snap)
+        previous_states[s] = copied
+        initial_payloads.append({**copied, "_type": "full"})
+    return initial_payloads, previous_states
+
+
+def _collect_symbol_deltas(
+    coordinator, symbols: list[str], previous_states: dict[str, dict]
+) -> tuple[list[dict], dict[str, dict]]:
+    """Worker function offloaded from the event loop to sample snapshots, compute deltas, and update state copies."""
+    deltas = []
+    updated_states = dict(previous_states)
+    for s in symbols:
+        snap = coordinator.snapshot(s)
+        prev_s = updated_states.get(s)
+        delta = _compute_delta(prev_s, snap)
+        if delta:
+            deltas.append(delta)
+            updated_states[s] = copy.deepcopy(snap)
+    return deltas, updated_states
 
 
 @router.websocket("/ws/gameloop")
@@ -302,13 +331,13 @@ async def _coordinator_viewer_loop(
                 return
 
             # 2. Send current full snapshot for subscribed symbol first, then remaining symbols
-            previous_states: dict[str, dict] = {}
             symbols_list = coordinator.symbols()
             ordered_symbols = [symbol] + [s for s in symbols_list if s != symbol]
-            for s in ordered_symbols:
-                snap = coordinator.snapshot(s)
-                previous_states[s] = copy.deepcopy(snap)
-                if not await _safe_send(ws, {**previous_states[s], "_type": "full"}):
+            initial_payloads, previous_states = await asyncio.to_thread(
+                _build_initial_snapshots, coordinator, ordered_symbols
+            )
+            for payload in initial_payloads:
+                if not await _safe_send(ws, payload):
                     return
 
             # 3. Stream delta-compressed updates for all active symbols every 0.5s
@@ -339,15 +368,16 @@ async def _coordinator_viewer_loop(
                     ):
                         return
 
-                # Broadcast deltas for all active symbols continuously
-                for s in coordinator.symbols():
-                    snap = coordinator.snapshot(s)
-                    prev_s = previous_states.get(s)
-                    delta = _compute_delta(prev_s, snap)
-                    if delta:
-                        if not await _safe_send(ws, delta):
-                            return
-                        previous_states[s] = copy.deepcopy(snap)
+                # Broadcast deltas for all active symbols continuously (computed off the event loop)
+                deltas, previous_states = await asyncio.to_thread(
+                    _collect_symbol_deltas,
+                    coordinator,
+                    list(coordinator.symbols()),
+                    previous_states,
+                )
+                for delta in deltas:
+                    if not await _safe_send(ws, delta):
+                        return
     finally:
         listener.cancel()
         try:

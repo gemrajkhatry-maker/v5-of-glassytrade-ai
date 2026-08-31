@@ -5,7 +5,7 @@ implementations are imported. Everything else depends on ports.
 
 Usage:
     container = compose_container(config)
-    session = container.resolve(TradingSessionService)
+    coordinator = container.resolve(QuantCoordinator)
 """
 
 from __future__ import annotations

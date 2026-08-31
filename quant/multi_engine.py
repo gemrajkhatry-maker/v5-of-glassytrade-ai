@@ -270,11 +270,9 @@ class QuantCoordinator:
                     "Live execution is enabled but no broker adapter is wired. "
                     "Set live_oms_enabled=False or provide a broker adapter."
                 )
-            # Startup reconciliation: compare broker book vs engine book.
-            # In live mode, a mismatch means positions were orphaned by a crash
-            # or manual intervention — refuse to start until resolved.
-            if self.config.get("live_oms_enabled") and self.broker is not None:
-                self._reconcile_on_startup()
+            # Startup reconciliation is owned by backend/app/main.py
+            # (StartupReconciliation) — runs before coordinator start and is
+            # wired into startup contracts + telemetry. No duplicate here.
             # Phase 2: zero holiday awareness previously existed anywhere in
             # the coordinator — it would happily scan and spawn engines on
             # NSE/MCX holidays. A calendar-closed day means no contracts to
@@ -1091,104 +1089,6 @@ class QuantCoordinator:
                 thread.join(timeout=1.0)
             except RuntimeError:
                 pass
-
-    def _reconcile_on_startup(self) -> None:
-        """Compare broker book vs engine book on startup.
-
-        In live mode, orphaned positions from a prior crash or manual
-        intervention must be detected before engines start trading.
-        Mismatches are logged loudly; in strict mode they refuse to start.
-        """
-        try:
-            broker_positions = self.broker.get_positions() or []
-        except Exception:
-            logger.exception("reconciliation: broker.get_positions() failed — skipping")
-            return
-
-        broker_by_symbol = {}
-        for bp in broker_positions:
-            sym = str(getattr(bp, "symbol", "") or "").strip()
-            if sym:
-                broker_by_symbol[sym] = bp
-
-        # C4: surface any durable orders left in-flight from a prior run. A
-        # crash between place_order and the fill ack leaves these without a
-        # terminal state — they are the prime candidates for orphaned broker
-        # positions, so they must be verified against the broker book.
-        if self._storage is not None and hasattr(self._storage, "load_inflight_orders"):
-            try:
-                inflight = self._storage.load_inflight_orders() or []
-            except Exception:
-                logger.exception("reconciliation: load_inflight_orders failed")
-                inflight = []
-            if inflight:
-                logger.warning(
-                    "reconciliation: %d in-flight order(s) from a prior run have no "
-                    "terminal state — verify against broker book: %s",
-                    len(inflight),
-                    [
-                        f"{o.get('symbol')}:{o.get('side')}:qty={o.get('quantity')}:"
-                        f"{o.get('status')}:broker={o.get('broker_order_id') or '?'}"
-                        for o in inflight
-                    ],
-                )
-
-        if not broker_by_symbol:
-            logger.info("reconciliation: broker has no open positions — clean start")
-            return
-
-        logger.warning(
-            "reconciliation: broker has %d open position(s): %s",
-            len(broker_by_symbol), list(broker_by_symbol.keys()),
-        )
-
-        # Check if storage has matching positions to restore
-        if self._storage is not None:
-            try:
-                rows = self._storage.load_open_positions() or []
-            except Exception:
-                rows = []
-            db_by_symbol = {r.get("symbol"): r for r in rows if r.get("symbol")}
-        else:
-            db_by_symbol = {}
-
-        discrepancies = []
-        for sym, bp in broker_by_symbol.items():
-            db_row = db_by_symbol.get(sym)
-            if db_row is None:
-                discrepancies.append(
-                    f"{sym}: broker has position but DB has none (orphaned)"
-                )
-            else:
-                broker_qty = _signed_broker_qty(bp)
-                db_qty = float(db_row.get("size", 0))
-                if abs(broker_qty - db_qty) > 0.01:
-                    discrepancies.append(
-                        f"{sym}: broker qty={broker_qty} vs DB qty={db_qty}"
-                    )
-
-        for sym in db_by_symbol:
-            if sym not in broker_by_symbol:
-                discrepancies.append(
-                    f"{sym}: DB has position but broker has none (stale)"
-                )
-
-        if discrepancies:
-            logger.error(
-                "reconciliation: %d discrepancy(ies):",
-                len(discrepancies),
-            )
-            for d in discrepancies:
-                logger.error("  - %s", d)
-            # In strict mode, refuse to start on mismatch
-            if self.config.get("strict_reconciliation", True):
-                raise RuntimeError(
-                    f"Startup reconciliation failed: {len(discrepancies)} discrepancy(ies). "
-                    f"Broker and DB positions must match before live trading. "
-                    f"Details: {'; '.join(discrepancies[:3])}"
-                )
-        else:
-            logger.info("reconciliation: broker and DB positions match — OK")
 
     def _stop_engines(self) -> None:
         with self._lock:

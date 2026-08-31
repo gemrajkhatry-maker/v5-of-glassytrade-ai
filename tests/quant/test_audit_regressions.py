@@ -564,37 +564,6 @@ def _reconcile_coord(broker_positions, db_rows):
     return coord
 
 
-def test_reconcile_short_position_matches_signed_db_row():
-    """C6: an open SHORT (broker abs size + SHORT side) must reconcile against
-    the DB's signed negative size — not flag a discrepancy. Before the fix the
-    abs-vs-signed comparison made every short look mismatched, so a live
-    restart with a short book always refused to boot."""
-    coord = _reconcile_coord(
-        [_broker_position("NIFTY AUG FUT", 10, "SHORT")],
-        [{"symbol": "NIFTY AUG FUT", "size": -10}],
-    )
-    coord._reconcile_on_startup()  # must not raise
-
-
-def test_reconcile_long_position_matches_signed_db_row():
-    """C6 sanity: LONG (broker abs size + LONG side) matches a positive DB size."""
-    coord = _reconcile_coord(
-        [_broker_position("NIFTY AUG FUT", 10, "LONG")],
-        [{"symbol": "NIFTY AUG FUT", "size": 10}],
-    )
-    coord._reconcile_on_startup()  # must not raise
-
-
-def test_reconcile_still_flags_genuine_size_mismatch():
-    """C6 guard: a real magnitude/direction mismatch still raises in strict mode."""
-    coord = _reconcile_coord(
-        [_broker_position("NIFTY AUG FUT", 10, "SHORT")],
-        [{"symbol": "NIFTY AUG FUT", "size": -5}],
-    )
-    with pytest.raises(RuntimeError, match="reconciliation failed"):
-        coord._reconcile_on_startup()
-
-
 def _recon_coord(broker_positions, engines):
     import threading
 

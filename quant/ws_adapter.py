@@ -26,11 +26,12 @@ def view_state_to_ws(vs) -> dict:
     # frontend createInstrumentState (hooks/useServerTradingSystem.ts).
     # Paper account capital: ₹10 lakh (1M) — mirrors quant/state.py
     # StateProjector._portfolio and the frontend createInstrumentState.
+    # ponytail: explicit float conversion at WS edge for JSON serialization
     return {
         "_symbol": vs.symbol,
         "portfolio": {
-            "balance": portfolio.get("balance", float(INITIAL_CAPITAL)),
-            "equity": portfolio.get("equity", float(INITIAL_CAPITAL)),
+            "balance": float(portfolio.get("balance", INITIAL_CAPITAL)),
+            "equity": float(portfolio.get("equity", INITIAL_CAPITAL)),
             "leverage": portfolio.get("leverage", 10),
             "positions": portfolio.get("positions", []),
             "closedTrades": portfolio.get("closedTrades", []),

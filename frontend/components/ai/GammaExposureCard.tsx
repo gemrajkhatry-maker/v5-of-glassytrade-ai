@@ -29,9 +29,7 @@ const GammaExposureCard = React.memo<GammaExposureCardProps>(({ amtResult, curre
         : 'bg-amber-500/10 text-amber-400 border-amber-500/20';
 
     const effectiveSpot =
-        amtResult?.underlyingPrice && amtResult.underlyingPrice > 0
-            ? amtResult.underlyingPrice
-            : currentLtp > 500
+        currentLtp > 500
             ? currentLtp
             : amtResult?.poc && amtResult.poc > 0
             ? amtResult.poc

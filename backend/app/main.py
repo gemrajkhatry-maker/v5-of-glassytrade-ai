@@ -61,14 +61,15 @@ def _build_startup_contracts(
     broker,
     storage,
     active_symbols: list[str],
+    coordinator=None,
+    engine_start_failed: bool = False,
     reconciliation_result=None,
     reconciliation_executed: bool | None = None,
 ) -> dict[str, str]:
     """Minimal startup-readiness payload for the health router.
 
-    The legacy ``TradingSessionService``-based contract builder was removed
-    with the legacy pipeline; the QuantCoordinator is now the decision brain,
-    so this thin payload reports transport-shell readiness only.
+    The QuantCoordinator is the decision brain, so this thin payload
+    reports transport-shell readiness only.
     """
     checks: dict[str, str] = {}
     checks["active_symbols"] = (
@@ -92,8 +93,26 @@ def _build_startup_contracts(
         for attr in ("save_open_position", "delete_open_position", "save_trade", "kv_set")
     )
     checks["storage_runtime"] = "ok" if storage_ok else "error: storage runtime contract missing"
-    checks["strategy_runtime"] = "ok"  # QuantCoordinator owns the decision brain
-    checks["position_close_contract"] = "ok"  # delegated to the coordinator/broker
+
+    # ponytail: real probes for strategy_runtime and position_close_contract
+    if engine_start_failed:
+        checks["strategy_runtime"] = "error: strategy runtime failed to start"
+    elif coordinator is None and not broker_ok:
+        checks["strategy_runtime"] = "error: strategy runtime coordinator missing"
+    else:
+        checks["strategy_runtime"] = "ok"
+
+    broker_close_ok = callable(getattr(broker, "close_position", None)) or (
+        callable(getattr(broker, "execute_order", None)) and callable(getattr(broker, "cancel_order", None))
+    )
+    coord_close_ok = (
+        coordinator is None
+        or callable(getattr(coordinator, "emergency_halt", None))
+        or callable(getattr(coordinator, "force_close_position", None))
+    )
+    checks["position_close_contract"] = (
+        "ok" if (broker_close_ok and coord_close_ok) else "error: position close contract missing on broker or coordinator"
+    )
     if reconciliation_executed is None:
         reconciliation_executed = reconciliation_result is not None
     checks["reconciliation"] = (
@@ -238,9 +257,7 @@ def create_application() -> FastAPI:
                     f"Live startup refused: option scanner failed: {e}"
                 ) from e
 
-        # Boot the greenfield QuantCoordinator — the single decision brain.
-        # The legacy engine path (TradingEngine + TradingSessionService) was
-        # deleted in the backend-swap; the coordinator is the only brain now.
+        # Boot the QuantCoordinator — the single decision brain.
         startup_ok = True
         try:
             begin_phase("trading_engine")
@@ -422,10 +439,14 @@ def create_application() -> FastAPI:
 
         app.state.startup_reconciliation = reconciliation_result
         app.state.active_symbols = tuple(active_symbols)
+        app.state.broker = broker
+        app.state.storage = storage
         app.state.startup_contracts = _build_startup_contracts(
             broker=broker,
             storage=storage,
             active_symbols=active_symbols,
+            coordinator=getattr(app.state, "coordinator", None),
+            engine_start_failed=getattr(app.state, "engine_start_failed", False),
             reconciliation_result=reconciliation_result,
             reconciliation_executed=reconciliation_executed,
         )
