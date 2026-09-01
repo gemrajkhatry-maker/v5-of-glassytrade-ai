@@ -93,11 +93,12 @@ class SessionRisk:
             elif (
                 self._halted
                 and "SIGTERM shutdown" in self._halt_reason
-                and self._trades_today == 0
-                and self._daily_pnl == 0.0
+                and self._daily_pnl > -self._starting_equity * self._max_daily_loss_pct
+                and self._consecutive_losses < self._max_consecutive_losses
             ):
                 self._halted = False
                 self._halt_reason = ""
+                self._save()
 
             # Restore equity: starting capital adjusted by daily P&L
             # Sanity clamp: this system risks 0.5%/trade with a 2% daily-loss

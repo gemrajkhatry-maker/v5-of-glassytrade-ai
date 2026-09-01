@@ -1,5 +1,6 @@
 """_decide must abort the entry when register_open rejects (race backstop)."""
 
+from dataclasses import dataclass
 from unittest.mock import MagicMock
 
 from quant.bars import Bar
@@ -7,15 +8,15 @@ from quant.decision.signal_builder import Signal
 from quant.runtime import QuantEngine
 
 
+@dataclass
 class _ApprovedDecision:
-    def __init__(self, signal):
-        self.approved = True
-        self.signal = signal
-        self.reason = "test"
-        self.phase = ""
-        self.gate_results = ()
-        self.block_reasons = ()
-        self.model_label = ""
+    signal: Signal
+    approved: bool = True
+    reason: str = "test"
+    phase: str = ""
+    gate_results: tuple = ()
+    block_reasons: tuple = ()
+    model_label: str = ""
 
 
 def test_decide_aborts_when_register_open_rejects():
