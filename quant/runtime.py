@@ -68,6 +68,7 @@ from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.event_store import EventStore
 from quant.state_machine import EngineState
 from quant.reconciliation import PeriodicReconciliationResult
+from quant.transitions import apply_event
 
 logger = logging.getLogger(__name__)
 
@@ -283,13 +284,6 @@ class QuantEngine:
         # per bar covers a 6.5-hour NSE session; older events fall out of memory.
         # Full history still lands in the tick journal (quant/persistence.Journal).
         self._trace: deque[Event] = deque(maxlen=10_000)
-        self._position = None
-        self._bar_index = 0
-        # Pyramiding state (spec §13.2): tracks add-on positions for the base trade.
-        # _pyramid_count: number of pyramid add-ons opened (max 2: P1 + P2).
-        # _pyramid_positions: list of open pyramid Position objects.
-        self._pyramid_count: int = 0
-        self._pyramid_positions: list = []
         self._bar_index = 0
         # History bars seeded into the AMT engine count toward the warmup
         # requirement (accessed via self._amt_engine.warm_bars).
@@ -340,7 +334,7 @@ class QuantEngine:
             logging.getLogger(__name__).critical(
                 "ENGINE THREAD DIED — symbol %s stopped trading. "
                 "positions_open=%s last_bar_index=%s",
-                self.symbol, self._position is not None, self._bar_index,
+                self.symbol, self.state.position is not None, self._bar_index,
                 exc_info=True,
             )
             self._crashed = True
@@ -418,7 +412,8 @@ class QuantEngine:
 
     def restore_position(self, position) -> None:
         """Rehydrate the in-memory book after a process restart."""
-        self._position = position
+        pm = self._get_position_manager()
+        pm.current_position = position
         self._entry_bar_index = self._bar_index
         self._entry_time_epoch = 0.0
 
@@ -448,7 +443,7 @@ class QuantEngine:
             rec.update(fields)
             if bar is not None:
                 rec["bar_index"] = self._bar_index
-                rec["position_open"] = self._position is not None
+                rec["position_open"] = self.state.position is not None
             self.cert_records.append(rec)
         except Exception:
             pass  # certification must never break trading
@@ -509,7 +504,7 @@ class QuantEngine:
             steps += 1
             self._last_tick_wall = time.time()
             # 0. Tick-level fast SL/TP protection (Fabio: exit immediately on stop breach, never wait 5m)
-            if self._position is not None:
+            if self.state.position is not None:
                 self._manage_tick_exit(float(tick.price), str(tick.time))
 
             # When an underlying feed is present, option ticks aggregate into option candles,
@@ -518,7 +513,7 @@ class QuantEngine:
                 # 1. Micro-trigger: option's own ticks feed 1-min micro aggregator for fast entry decisions
                 if self._micro_aggregator is not None:
                     micro_bar = self._micro_aggregator.add_tick(tick)
-                    if micro_bar is not None and self._position is None:
+                    if micro_bar is not None and self.state.position is None:
                         if self._underlying_amt_dto and self._last_underlying_bar is not None:
                             self._decide(
                                 self._underlying_amt_dto,
@@ -536,7 +531,7 @@ class QuantEngine:
                     if self._option_amt_engine is not None:
                         self._option_amt_dto = self._option_amt_engine.analyze(option_bar)
                         self._emit_merged_amt(self._option_amt_dto, option_bar.time)
-                        if self._position is not None:
+                        if self.state.position is not None:
                             self._manage_exit(self._option_amt_dto, option_bar)
                         elif self._micro_aggregator is None:
                             if self._underlying_amt_dto and self._last_underlying_bar is not None:
@@ -565,7 +560,7 @@ class QuantEngine:
                 # Direct instrument / Futures: micro-trigger evaluation
                 if self._micro_aggregator is not None:
                     micro_bar = self._micro_aggregator.add_tick(tick)
-                    if micro_bar is not None and self._position is None:
+                    if micro_bar is not None and self.state.position is None:
                         amt_dto = self._amt_engine.last_amt_dto
                         if amt_dto:
                             self._decide(amt_dto, micro_bar)
@@ -613,19 +608,19 @@ class QuantEngine:
     def _manage_tick_exit(self, tick_price: float, tick_time: str) -> None:
         """Tick-level fast stop-loss and take-profit breach check (Fabio)."""
         with self._close_lock:
-            if self._position is None:
-                return
             pm = self._get_position_manager()
+            if pm.current_position is None:
+                return
             # manage_tick_exit does NOT reset these per call (unlike manage_exit);
             # clear them so stale values from an earlier tick/bar can't trigger
             # duplicate reserve releases below.
             pm.last_partial_fill = None
             pm.last_pyramid_pnl = 0.0
             # Adopt the survivor: a tick-path partial returns a NEW Position with
-            # the reduced size — keeping the pre-partial object as self._position
-            # would re-book the ORIGINAL size at the eventual full close.
+            # the reduced size — keeping the pre-partial object as the current
+            # position would re-book the ORIGINAL size at the eventual full close.
             try:
-                remaining = pm.manage_tick_exit(self._position, tick_price, tick_time)
+                remaining = pm.manage_tick_exit(pm.current_position, tick_price, tick_time)
             except Exception:
                 # C3: a broker/OMS failure while exiting must not kill the engine
                 # thread. Keep the position open so the exit is retried on the
@@ -636,9 +631,7 @@ class QuantEngine:
                     self.symbol,
                 )
                 return
-            self._position = remaining
-            self._pyramid_positions = pm.pyramid_positions
-            self._pyramid_count = pm.pyramid_count
+            pm.current_position = remaining
             self._release_partial_reserves(pm, remaining)
             if remaining is None:
                 self._last_close_bar_index = self._bar_index
@@ -690,9 +683,9 @@ class QuantEngine:
         amt_dto["microBarInterval"] = getattr(self._micro_aggregator, "interval_seconds", 60) if self._micro_aggregator is not None else None
         self._emit(AmtUpdated(symbol=self.symbol, time=bar.time, amt=amt_dto))
 
-        if self._position is not None:
+        if self.state.position is not None:
             self._manage_exit(amt_dto, bar)
-            if hasattr(self, "_advisor") and self._advisor is not None and self._position is not None:
+            if hasattr(self, "_advisor") and self._advisor is not None and self.state.position is not None:
                 ctx = self._build_context(bar, amt_dto, 0.0)
                 self._advisor.on_context(ctx)
         elif self._micro_aggregator is None:
@@ -818,7 +811,7 @@ class QuantEngine:
                     risk_state=risk_st,
                     amt_dto=self._option_amt_dto,
                     order_book=self._last_depth,
-                    position=self._position,
+                    position=self.state.position,
                     entry_bar_index=self._entry_bar_index,
                     recent_decisions=list(self._recent_decisions),
                 )
@@ -925,7 +918,8 @@ class QuantEngine:
                     self._open_trade_risk = 0.0
                 return
             self._entry_bar_index = self._bar_index
-            self._position = position
+            pm = self._get_position_manager()
+            pm.current_position = position
             self._entry_time_epoch = _bar_epoch_ms(bar.time) / 1000.0
             self._emit(PositionOpened(symbol=self.symbol, time=bar.time, position=position))
         else:
@@ -952,7 +946,7 @@ class QuantEngine:
             risk_state=self._risk.state(),
             amt_dto=amt_dto or self._amt_engine.last_amt_dto or {},
             order_book=self._last_depth,
-            position=self._position,
+            position=self.state.position,
             entry_bar_index=self._entry_bar_index,
             recent_decisions=list(self._recent_decisions),
         )
@@ -968,7 +962,8 @@ class QuantEngine:
         gates entries, not exits, so this still runs while risk-halted.
         """
         with self._close_lock:
-            pos = self._position
+            pm = self._get_position_manager()
+            pos = pm.current_position
             if pos is None:
                 return
             exec_bar = bar  # close settles on the caller bar (premium scale)
@@ -1012,15 +1007,11 @@ class QuantEngine:
                 float(signal.entry), float(signal.rr), held_side,
                 float(pos.open_price) if getattr(pos, "open_price", None) else 0.0,
             )
-            pm = self._get_position_manager()
             pm._execute_full_close(
                 pos,
                 ExitDecision(True, "OPPOSING_SIGNAL", float(exec_bar.close)),
                 exec_bar.time,
             )
-            self._position = None
-            self._pyramid_positions = pm.pyramid_positions
-            self._pyramid_count = pm.pyramid_count
             self._last_close_bar_index = self._bar_index
             if self._portfolio_risk is not None:
                 self._portfolio_risk.record_close(
@@ -1060,10 +1051,10 @@ class QuantEngine:
         Idempotent: returns False when nothing is open.
         """
         with self._close_lock:
-            pos = self._position
-            if pos is None and not self._pyramid_positions:
-                return False
             pm = self._get_position_manager()
+            pos = pm.current_position
+            if pos is None and not pm.pyramid_positions:
+                return False
             bar = getattr(self._aggregator, "current_bar", None)
             if pos is not None:
                 price = (
@@ -1091,9 +1082,6 @@ class QuantEngine:
                 pm.pyramid_positions = []
                 pm.pyramid_count = 0
             # Post-close bookkeeping mirrors _manage_exit's full-close branch.
-            self._position = None
-            self._pyramid_positions = pm.pyramid_positions
-            self._pyramid_count = pm.pyramid_count
             if self._portfolio_risk is not None:
                 self._portfolio_risk.record_close(
                     getattr(self, "_open_trade_risk", 0.0),
@@ -1112,12 +1100,13 @@ class QuantEngine:
             pm = self._get_position_manager()
             # manage_exit returns the surviving position (unchanged, or reduced by
             # a tiered TP partial fill per spec §13.3), or None once fully closed.
-            was_open = self._position is not None
+            current_pos = pm.current_position
+            was_open = current_pos is not None
             try:
                 remaining = pm.manage_exit(
                     amt_dto=amt_dto,
                     bar=bar,
-                    position=self._position,
+                    position=current_pos,
                     bar_index=self._bar_index,
                     entry_bar_index=self._entry_bar_index,
                     entry_time_epoch=getattr(self, '_entry_time_epoch', 0.0),
@@ -1132,9 +1121,7 @@ class QuantEngine:
                     self.symbol,
                 )
                 return
-            self._position = remaining
-            self._pyramid_positions = pm.pyramid_positions
-            self._pyramid_count = pm.pyramid_count
+            pm.current_position = remaining
             self._release_partial_reserves(pm, remaining)
             if was_open and remaining is None:
                 self._last_close_bar_index = self._bar_index
@@ -1162,7 +1149,7 @@ class QuantEngine:
                         risk_state=risk_st,
                         amt_dto=self._option_amt_dto if self._option_amt_dto else amt_dto,
                         order_book=self._last_depth,
-                        position=self._position,
+                        position=self.state.position,
                         entry_bar_index=self._entry_bar_index,
                         recent_decisions=list(self._recent_decisions),
                     )
@@ -1180,7 +1167,7 @@ class QuantEngine:
                         risk_state=risk_st,
                         amt_dto=amt_dto,
                         order_book=self._last_depth,
-                        position=self._position,
+                        position=self.state.position,
                         entry_bar_index=self._entry_bar_index,
                         recent_decisions=list(self._recent_decisions),
                     )
@@ -1195,13 +1182,10 @@ class QuantEngine:
 
     def _check_pyramid(self, amt_dto: dict, bar) -> None:
         pm = self._get_position_manager()
-        pm.check_pyramid(amt_dto, bar, self._position, self._bar_index)
-        # Sync pyramid state back
-        self._pyramid_positions = pm.pyramid_positions
-        self._pyramid_count = pm.pyramid_count
+        pm.check_pyramid(amt_dto, bar, pm.current_position, self._bar_index)
         # Consume the ratcheted base produced by check_pyramid (E10 / Task 8).
         if pm.base_override is not None:
-            self._position = pm.base_override
+            pm.current_position = pm.base_override
             pm.base_override = None
 
     def _emit(self, event: Event) -> None:
@@ -1212,6 +1196,9 @@ class QuantEngine:
 
         Guarded by a lock so concurrent emitters (depth updates) never race
         the engine thread's own emits.
+
+        Event sourcing: every emitted event is appended to the EventStore
+        (the source of truth) and folded into the cached EngineState.
         """
         with self._emit_lock:
             if isinstance(event, AgentDecisionProduced) and isinstance(event.decision, dict):
@@ -1231,6 +1218,9 @@ class QuantEngine:
             self._bus.publish(event)
             self._trace.append(event)
             self._projector.on_event(event)
+            # Event sourcing: append to EventStore and fold into state
+            self.event_store.append(event)
+            self.state = apply_event(self.state, event)
 
 
     def _underlying(self) -> str:

@@ -74,6 +74,10 @@ class PositionManager:
         # Pyramid state
         self.pyramid_count: int = 0
         self.pyramid_positions: list = []
+        # Current open position (None if flat). Used by OMS operations.
+        # The engine's state.position holds the immutable PositionState;
+        # this holds the live Position object for OMS calls.
+        self.current_position: Position | None = None
         # Ratcheted base position produced by the latest pyramid fill. Consumed
         # (and cleared) by manage_exit's return or runtime._check_pyramid so the
         # trail state keyed by _id stays consistent with ExitEngine.
@@ -87,9 +91,6 @@ class PositionManager:
         self.last_partial_fill = None
         self.last_pyramid_pnl = 0.0
         # Double-close guard: position _ids that have already been fully closed.
-        # Prevents the same position from being closed multiple times across
-        # tick/bar/thesis-flip/EOD paths (each close emits PositionClosed and
-        # books P&L — double-close overstates losses by 10-100x).
         self._closed_ids: set[str] = set()
 
     def _emit_stop_moves(self, position, bar, prev_be, prev_trail,
@@ -134,6 +135,13 @@ class PositionManager:
         self.last_fill = None
         self.last_partial_fill = None
         self.last_pyramid_pnl = 0.0
+        # Store current position for _manage_exit to access
+        self.current_position = position
+        # If position is None, nothing to evaluate
+        if position is None:
+            return None
+        # Double-close guard: position _ids that have already been fully closed.
+        self._closed_ids: set[str] = set()
         # Consume-and-clear any ratcheted base from the previous bar's pyramid fill.
         self.base_override = None
         held_bars = bar_index - entry_bar_index
@@ -237,12 +245,16 @@ class PositionManager:
             return survived
 
     def _execute_full_close(self, position, exit_dec: ExitDecision, time_str: str):
-        """Execute full position close and release risk/pyramid state."""
+        """Execute full position close and release risk/pyramid state.
+
+        Double-close is prevented by the _closed_ids guard.
+        """
         # Double-close guard: skip if this position was already closed.
-        if position._id in self._closed_ids:
+        pos_id = getattr(position, '_id', None) or getattr(position, 'id', None)
+        if pos_id and pos_id in self._closed_ids:
             logger.warning(
                 "⚠️ [DOUBLE-CLOSE GUARD] %s position %s already closed — skipping",
-                self.symbol, position._id[:8],
+                self.symbol, str(pos_id)[:8],
             )
             return None
 
@@ -279,7 +291,8 @@ class PositionManager:
 
         self.pyramid_positions = []
         self.pyramid_count = 0
-        self._closed_ids.add(position._id)  # Mark as closed
+        self.current_position = None
+        self._closed_ids.add(pos_id)  # Mark as closed
         self._emit(PositionClosed(symbol=self.symbol, time=time_str, fill=fill))
         risk = self._risk.record_trade(fill.pnl)
         logger.info(

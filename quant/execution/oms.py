@@ -49,6 +49,9 @@ class PaperOMS:
 
     def close(self, position: Position, price: float, time: str, reason: str) -> Fill:
         pnl = (price - position.open_price) * position.size
+        # Preserve the original position's _id so close events can be matched
+        # to the state's position (prevents double-close false positives)
+        original_id = getattr(position, '_id', None)
         closed = Position(
             order=position.order,
             open_price=position.open_price,
@@ -57,6 +60,7 @@ class PaperOMS:
             realized_pnl=pnl,
             pyramid_level=position.pyramid_level,
             is_pyramid=position.is_pyramid,
+            _id=original_id,  # Preserve original ID
         )
         return Fill(
             position=closed,
