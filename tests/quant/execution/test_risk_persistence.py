@@ -65,3 +65,42 @@ def test_corrupt_storage_falls_back_to_fresh_state():
     r = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10")
     assert r.state().daily_pnl == 0.0
     assert r.state().halted is False
+
+
+def test_sigterm_shutdown_halt_unhalts_on_restart_when_within_risk_limits():
+    """SIGTERM shutdown (e.g. process restart) should unhalt on next startup if
+    daily loss limit is not breached, even if trades were recorded today."""
+    kv = MemKV()
+    r1 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10",
+                     max_daily_loss_pct=0.03, starting_equity=1_000_000.0)
+    r1.record_trade(-500.0)  # 1 trade recorded, small loss well within 3% limit
+    assert r1.state().trades_today == 1
+    assert r1.state().halted is False
+
+    # Simulate SIGTERM shutdown
+    r1.halt("external/emergency: SIGTERM shutdown")
+    assert r1.state().halted is True
+    assert "SIGTERM shutdown" in r1.state().halt_reason
+
+    # On restart, r2 loads state and should be unhalted to allow new session trades
+    r2 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10",
+                     max_daily_loss_pct=0.03, starting_equity=1_000_000.0)
+    assert r2.state().trades_today == 1
+    assert r2.state().daily_pnl == -500.0
+    assert r2.state().halted is False
+    assert r2.can_trade()[0] is True
+
+
+def test_genuine_daily_loss_breach_remains_halted_across_restart():
+    """If a real daily loss breach occurred, restart must NOT clear the halt."""
+    kv = MemKV()
+    r1 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10",
+                     max_daily_loss_pct=0.01, starting_equity=1_000_000.0)
+    r1.record_trade(-15000.0)  # -1.5% loss exceeds 1.0% limit
+    assert r1.state().halted is True
+
+    # On restart, r2 must remain halted for money safety
+    r2 = SessionRisk(storage=kv, symbol="NIFTY", date="2026-08-10",
+                     max_daily_loss_pct=0.01, starting_equity=1_000_000.0)
+    assert r2.state().halted is True
+    assert r2.can_trade()[0] is False
