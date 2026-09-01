@@ -59,9 +59,12 @@ def _make_engine(ticks, **kw):
 def _open_long(eng):
     # Same injection pattern as tests/quant/runtime/test_tick_level_exits.py
     sig = _make_signal()
-    eng._position = eng._oms.submit(sig, _OPENED_SIZE)
+    position = eng._oms.submit(sig, _OPENED_SIZE)
+    from quant.transitions import _position_to_state
+    eng.state = eng.state.with_position(_position_to_state(position))
+    eng._get_position_manager().current_position = position
     eng._entry_bar_index = 0
-    return eng._position
+    return position
 
 
 def _fills(eng):
@@ -97,7 +100,7 @@ def test_engine_adopts_tick_partial_remainder_inventory_conserved():
     # full close books ONLY the adopted remainder — not the original size
     assert len(closed) == 1
     assert closed[0].fill.position.size == pytest.approx(2.0)
-    assert eng._position is None
+    assert eng.state.position is None
 
     total_closed = sum(abs(f.position.size) for f in _fills(eng))
     assert total_closed == pytest.approx(_OPENED_SIZE), (

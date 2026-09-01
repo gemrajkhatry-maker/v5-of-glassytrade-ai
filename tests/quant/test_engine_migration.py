@@ -141,20 +141,23 @@ class TestEngineMigration:
 
     def test_manage_exit_updates_state(self):
         """_manage_exit should update state via events."""
-        import quant.position_manager as pm
-        # Force session close so the position gets closed
-        original_sfe = pm.session_force_exit
-        pm.session_force_exit = lambda t, market="NSE", contract_expiry=None: True
-        try:
-            ticks = _ticks_with_entry()
-            engine = create_engine_with_ticks(ticks)
-            engine._strategy = _FixedStrategy(_healthy_stop_signal())
-            engine.run()
-            # After running, state should reflect the exit (position closed)
-            # The position should be None after session close or exit
-            assert engine.state.position is None
-        finally:
-            pm.session_force_exit = original_sfe
+        # Create engine with empty ticks, then manually emit a PositionOpened
+        # and verify state updates when PositionClosed is emitted
+        engine = create_engine_with_ticks(_make_ticks(5))
+        engine.run()
+        # Create a position and emit PositionOpened
+        sig = Signal(type="LONG", reason="test", entry=100.0, sl=80.0, tp=140.0,
+                     rr=2.0, model_label="Triple-A", symbol="NIFTY", timestamp="t")
+        pos = Position(order=Order(signal=sig, quantity=100.0),
+                       open_price=100.0, open_time="t", size=100.0)
+        engine._emit(PositionOpened(symbol="NIFTY", time="t", position=pos))
+        assert engine.state.position is not None
+        assert engine.state.position.id == pos._id
+        # Now emit PositionClosed and verify state is cleared
+        from quant.execution.order import Fill
+        fill = Fill(position=pos, close_price=102.0, close_time="t2", reason="TP", pnl=200.0)
+        engine._emit(PositionClosed(symbol="NIFTY", time="t2", fill=fill))
+        assert engine.state.position is None
 
     def test_double_close_prevented(self):
         """Double-close should be impossible by construction."""

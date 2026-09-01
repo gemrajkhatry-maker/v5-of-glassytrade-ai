@@ -68,7 +68,7 @@ from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.event_store import EventStore
 from quant.state_machine import EngineState
 from quant.reconciliation import PeriodicReconciliationResult
-from quant.transitions import apply_event
+from quant.transitions import apply_event, _position_to_state
 
 logger = logging.getLogger(__name__)
 
@@ -414,6 +414,7 @@ class QuantEngine:
         """Rehydrate the in-memory book after a process restart."""
         pm = self._get_position_manager()
         pm.current_position = position
+        self.state = self.state.with_position(_position_to_state(position))
         self._entry_bar_index = self._bar_index
         self._entry_time_epoch = 0.0
 
@@ -1238,7 +1239,15 @@ class QuantEngine:
 
         Replays all events in the event store to reconstruct the canonical
         EngineState. Called once before trading resumes after a restart.
+        Verifies checksum chain integrity to detect tampering.
         """
+        # Verify checksum chain integrity (tamper detection)
+        if not self.event_store.verify_chain():
+            logger.critical(
+                "STARTUP RECONCILE %s: event store checksum chain broken — "
+                "possible tampering or corruption",
+                self.symbol,
+            )
         rebuilt = self.event_store.fold()
         self.state = EngineState(
             symbol=self.symbol,

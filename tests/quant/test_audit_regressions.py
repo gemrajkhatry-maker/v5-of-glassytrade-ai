@@ -495,7 +495,7 @@ def test_entry_oms_failure_unwinds_risk_and_keeps_engine_alive(monkeypatch):
 
     eng._decide({}, bar)  # must not raise
 
-    assert eng._position is None, "no position may open on a failed submission"
+    assert eng.state.position is None, "no position may open on a failed submission"
     assert prisk.open_risk == pytest.approx(0.0), (
         "reserved portfolio risk must be unwound when entry submission fails"
     )
@@ -511,14 +511,18 @@ def test_exit_oms_failure_keeps_position_open_and_engine_alive():
     eng = QuantEngine(_EmptyGw(), "SYM", interval_seconds=1)
     sig = Signal(type="LONG", reason="r", entry=100.0, sl=99.0, tp=102.0,
                  rr=2.0, model_label="Triple-A", symbol="SYM", timestamp="t0")
-    eng._position = Position(order=Order(sig, 10), open_price=100.0,
+    position = Position(order=Order(sig, 10), open_price=100.0,
                              open_time="t0", size=10)
+    from quant.transitions import _position_to_state
+    eng.state = eng.state.with_position(_position_to_state(position))
+    eng._get_position_manager().current_position = position
 
     class _RaisingPM:
         last_partial_fill = None
         last_pyramid_pnl = 0.0
         pyramid_positions = {}
         pyramid_count = 0
+        current_position = None
 
         def manage_tick_exit(self, position, price, time):
             raise RuntimeError("broker down")
@@ -527,7 +531,7 @@ def test_exit_oms_failure_keeps_position_open_and_engine_alive():
 
     eng._manage_tick_exit(95.0, "t1")  # must not raise
 
-    assert eng._position is not None, (
+    assert eng.state.position is not None, (
         "position must stay open after a failed exit so it is retried"
     )
 
@@ -584,10 +588,16 @@ def _recon_coord(broker_positions, engines):
 
 def _engine_with_position(size):
     from types import SimpleNamespace
+    from quant.state_machine import EngineState, PositionState
 
-    return SimpleNamespace(
-        _position=SimpleNamespace(size=size), _pyramid_positions=[]
+    eng = SimpleNamespace(
+        state=EngineState(symbol="TEST", position=PositionState(
+            id="pos-1", entry=100.0, size=size, sl=90.0, tp=120.0,
+            side="LONG" if size > 0 else "SHORT"
+        )), _pyramid_positions=[]
     )
+    eng._get_position_manager = lambda: SimpleNamespace(pyramid_positions=[])
+    return eng
 
 
 def test_intraday_reconcile_no_drift_when_books_match():
@@ -817,7 +827,8 @@ def test_restore_position_sets_engine_book():
         10,
     )
     eng.restore_position(pos)
-    assert eng._position is pos
+    assert eng.state.position is not None
+    assert eng._get_position_manager().current_position is pos
 
 
 def test_paper_reconciliation_does_not_delete_db_positions(monkeypatch):

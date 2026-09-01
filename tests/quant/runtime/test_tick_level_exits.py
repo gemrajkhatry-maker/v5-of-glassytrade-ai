@@ -37,7 +37,10 @@ def test_tick_level_sl_breach_closes_position_immediately():
     eng = QuantEngine(gw, "TEST", interval_seconds=300)
     
     sig = _make_signal(symbol="TEST", side="LONG", entry=100.0, sl=90.0, tp=120.0)
-    eng._position = eng._oms.submit(sig, 1.0)
+    position = eng._oms.submit(sig, 1.0)
+    from quant.transitions import _position_to_state
+    eng.state = eng.state.with_position(_position_to_state(position))
+    eng._get_position_manager().current_position = position
     eng._entry_bar_index = 0
     
     events = eng.run()
@@ -47,7 +50,7 @@ def test_tick_level_sl_breach_closes_position_immediately():
     assert closed_events[0].time == "1700000010"
     assert closed_events[0].fill.reason == "SL"
     assert closed_events[0].fill.close_price == 89.0
-    assert eng._position is None
+    assert eng.state.position is None
 
 
 def test_tick_level_tp_hit_closes_position_immediately():
@@ -60,7 +63,10 @@ def test_tick_level_tp_hit_closes_position_immediately():
     eng = QuantEngine(gw, "TEST", interval_seconds=300)
     
     sig = _make_signal(symbol="TEST", side="LONG", entry=100.0, sl=90.0, tp=120.0)
-    eng._position = eng._oms.submit(sig, 1.0)
+    position = eng._oms.submit(sig, 1.0)
+    from quant.transitions import _position_to_state
+    eng.state = eng.state.with_position(_position_to_state(position))
+    eng._get_position_manager().current_position = position
     eng._entry_bar_index = 0
     
     events = eng.run()
@@ -70,7 +76,7 @@ def test_tick_level_tp_hit_closes_position_immediately():
     assert closed_events[0].time == "1700000010"
     assert closed_events[0].fill.reason == "TP"
     assert closed_events[0].fill.close_price == 121.0
-    assert eng._position is None
+    assert eng.state.position is None
 
 
 def _make_pm():

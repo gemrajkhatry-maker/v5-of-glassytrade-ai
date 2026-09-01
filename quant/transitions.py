@@ -71,12 +71,13 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
         # Guard: position must exist
         if state.position is None:
             raise ValueError("No position to close")
-        # Guard: position ID must match
+        # Guard: position ID must match (base position close)
+        # Pyramid closes have different IDs and are no-ops for state
+        # (pyramids are tracked separately in state.pyramids)
         if event.fill.position._id != state.position.id:
-            raise ValueError(
-                f"Position ID mismatch: event references {event.fill.position._id} "
-                f"but state has {state.position.id}"
-            )
+            # This is a pyramid close, not the base position close
+            # State is unchanged (pyramid tracking is separate)
+            return state
         return state.without_position()
 
     elif isinstance(event, RiskUpdated):

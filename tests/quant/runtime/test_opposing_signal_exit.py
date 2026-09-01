@@ -57,7 +57,11 @@ def _positioned_engine(ticks, symbol, side="LONG", entry=100.0):
     # (SESSION_CLOSE/SL/spread/TP/trail/time) keeps full priority ahead of
     # the flip check.
     eng._exits.cvd_kill_threshold = float("inf")
-    eng._position = eng._oms.submit(_signal(side=side, entry=entry, sl=sl), 1.0)
+    position = eng._oms.submit(_signal(side=side, entry=entry, sl=sl), 1.0)
+    # Set position in both state and position manager
+    from quant.transitions import _position_to_state
+    eng.state = eng.state.with_position(_position_to_state(position))
+    eng._get_position_manager().current_position = position
     eng._entry_bar_index = 0
     return eng
 
@@ -108,7 +112,7 @@ def test_contrary_approval_flattens_position():
 
     eng.run()
 
-    assert eng._position is None, "contrary approval must flatten the position"
+    assert eng.state.position is None, "contrary approval must flatten the position"
     closes = [e for e in eng.events if isinstance(e, PositionClosed)]
     assert closes, "flip must route through the base close path"
     assert closes[-1].fill.reason == "OPPOSING_SIGNAL"
@@ -156,7 +160,7 @@ def test_same_direction_approval_holds():
     ]
     assert approvals, "fixture sanity: same-direction approval must occur"
     assert approvals[-1].decision.signal.type == "LONG"
-    assert eng._position is not None, "same-direction approval must hold"
+    assert eng.state.position is not None, "same-direction approval must hold"
     assert not [e for e in eng.events if isinstance(e, PositionClosed)]
 
 
@@ -167,7 +171,7 @@ def test_gate_failure_no_flip():
 
     eng.run()
 
-    assert eng._position is not None, "gate failure must not flip"
+    assert eng.state.position is not None, "gate failure must not flip"
     assert not [e for e in eng.events if isinstance(e, PositionClosed)]
     decisions = [d for d in eng.events if isinstance(d, DecisionProduced)]
     assert decisions
@@ -254,7 +258,10 @@ def _option_mode_engine(side="LONG", entry=100.0):
         underlying_gateway=SyntheticGateway([Tick("u0", 50000.0, 10, 5, 5)]),
     )
     eng._exits.cvd_kill_threshold = float("inf")
-    eng._position = eng._oms.submit(_signal(side=side, entry=entry, sl=sl), 1.0)
+    position = eng._oms.submit(_signal(side=side, entry=entry, sl=sl), 1.0)
+    from quant.transitions import _position_to_state
+    eng.state = eng.state.with_position(_position_to_state(position))
+    eng._get_position_manager().current_position = position
     eng._entry_bar_index = 0
     return eng
 
@@ -300,7 +307,7 @@ def test_flip_never_evaluates_on_option_side_context():
     from quant.events import PositionClosed
     eng._check_thesis_flip(opt_dto, _opt_bar())
 
-    assert eng._position is not None, (
+    assert eng.state.position is not None, (
         "flip must not fire on option-side context (entry basis unavailable)"
     )
     assert not [e for e in eng.events if isinstance(e, PositionClosed)]
@@ -324,7 +331,7 @@ def test_flip_consumes_identical_underlying_context_source():
     from quant.events import PositionClosed
     eng._check_thesis_flip({"marketState": "BALANCED", "note": "OPTION"}, opt_bar)
 
-    assert eng._position is None, "contrary approval on entry basis must flip"
+    assert eng.state.position is None, "contrary approval on entry basis must flip"
     closes = [e for e in eng.events if isinstance(e, PositionClosed)]
     assert closes[-1].fill.reason == "OPPOSING_SIGNAL"
     # Context source == the EXACT objects entries qualify on:

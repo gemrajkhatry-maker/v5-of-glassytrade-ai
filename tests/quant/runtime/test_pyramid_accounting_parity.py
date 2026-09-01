@@ -59,12 +59,15 @@ def _inject_long_with_pyramids(eng, auth, pyr_specs):
     add-ons wired exactly like the live pyramid flow would: registered in
     the portfolio authority AND keyed in the PM's per-pyramid risk map."""
     base = eng._oms.submit(_signal(), 4.0)
-    eng._position = base
+    # Set position in both state and position manager
+    from quant.transitions import _position_to_state
+    eng.state = eng.state.with_position(_position_to_state(base))
+    pm = eng._get_position_manager()
+    pm.current_position = base
     eng._entry_bar_index = 0
     base_risk = (100.0 - 90.0) * 4.0
     assert auth.register_open(base_risk)
     eng._open_trade_risk = base_risk
-    pm = eng._get_position_manager()
     for i, (entry_px, size) in enumerate(pyr_specs, start=1):
         pyr = eng._oms.add_pyramid(
             base=base, entry_price=entry_px,
@@ -98,12 +101,12 @@ def test_natural_bar_close_books_each_addon_once():
     # Bar 1: high clips TP (120) -> Rule 4 TP1 partial closes half @ 120.
     eng._on_bar_closed(Bar(time="b1", open=100.0, high=121.0, low=99.5,
                            close=120.5, volume=10))
-    assert isinstance(eng._position, object) and eng._position is not None
+    assert eng.state.position is not None
     # Bar 2: low pierces the BE floor armed at TP1 -> full close of runner +
     # both add-ons at bar.close = 95.
     eng._on_bar_closed(Bar(time="b2", open=96.0, high=97.0, low=94.0,
                            close=95.0, volume=10))
-    assert eng._position is None
+    assert eng.state.position is None
 
     # Exact realized-pnl multiset: TP1 partial (@120, half), runner residual
     # close (@95, remaining half), and each add-on's OWN fill pnl ONCE.
@@ -137,7 +140,7 @@ def test_tick_path_close_books_each_addon_once():
 
     eng.run()
 
-    assert eng._position is None
+    assert eng.state.position is None
     reduced = [e for e in eng.events if isinstance(e, PositionReduced)]
     closed = [e for e in eng.events if isinstance(e, PositionClosed)]
     assert len(reduced) == 2 and closed  # sanity: partial, partial, full
@@ -180,7 +183,7 @@ def test_thesis_flip_close_books_each_addon_once():
             volume=10),
     )
 
-    assert eng._position is None, "contrary approval must flatten"
+    assert eng.state.position is None, "contrary approval must flatten"
     closes = [e for e in eng.events if isinstance(e, PositionClosed)]
     assert closes[-1].fill.reason == "OPPOSING_SIGNAL"
 

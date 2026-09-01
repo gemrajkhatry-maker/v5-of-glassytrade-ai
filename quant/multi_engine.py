@@ -676,11 +676,12 @@ class QuantCoordinator:
 
         engine_by_symbol: dict[str, float] = {}
         for sym, eng in engines.items():
-            pos = getattr(eng, "_position", None)
-            pyramids = getattr(eng, "_pyramid_positions", None) or []
+            pos = eng.state.position
+            pm = eng._get_position_manager()
+            pyramids = pm.pyramid_positions or []
             if pos is None and not pyramids:
                 continue
-            net = float(getattr(pos, "size", 0.0)) if pos is not None else 0.0
+            net = float(pos.size) if pos is not None else 0.0
             for pyr in pyramids:
                 net += float(getattr(pyr, "size", 0.0))
             engine_by_symbol[sym] = net

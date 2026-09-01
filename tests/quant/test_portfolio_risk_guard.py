@@ -34,7 +34,7 @@ def test_decide_aborts_when_register_open_rejects():
     eng._decide({}, bar)
 
     pra.register_open.assert_called_once()
-    assert eng._position is None, "entry proceeded despite register_open rejection"
+    assert eng.state.position is None, "entry proceeded despite register_open rejection"
 
 
 def test_manage_exit_partial_releases_proportional_portfolio_risk():
@@ -46,7 +46,10 @@ def test_manage_exit_partial_releases_proportional_portfolio_risk():
 
     sig = Signal(type="LONG", reason="t", entry=100.0, sl=99.0, tp=102.0, rr=2.0,
                  model_label="t", symbol="TEST FUT", timestamp="t0")
-    eng._position = eng._oms.submit(sig, 100.0)
+    position = eng._oms.submit(sig, 100.0)
+    from quant.transitions import _position_to_state
+    eng.state = eng.state.with_position(_position_to_state(position))
+    eng._get_position_manager().current_position = position
     eng._open_trade_risk = 500.0
 
     exits = MagicMock()
@@ -62,7 +65,7 @@ def test_manage_exit_partial_releases_proportional_portfolio_risk():
     released, pnl = pra.record_close.call_args[0]
     assert abs(released - 250.0) < 1e-6, f"expected half of 500 released, got {released}"
     assert pnl > 0
-    assert eng._position is not None  # runner remains
+    assert eng.state.position is not None  # runner remains
     assert abs(eng._open_trade_risk - 250.0) < 1e-6
 
 
@@ -75,9 +78,12 @@ def test_manage_exit_full_close_books_pyramid_pnl_to_portfolio():
 
     sig = Signal(type="LONG", reason="t", entry=100.0, sl=99.0, tp=102.0, rr=2.0,
                  model_label="t", symbol="TEST FUT", timestamp="t0")
-    eng._position = eng._oms.submit(sig, 100.0)
+    position = eng._oms.submit(sig, 100.0)
+    from quant.transitions import _position_to_state
+    eng.state = eng.state.with_position(_position_to_state(position))
+    eng._get_position_manager().current_position = position
     eng._open_trade_risk = 500.0
-    pyramid = eng._oms.add_pyramid(base=eng._position, entry_price=101.0,
+    pyramid = eng._oms.add_pyramid(base=position, entry_price=101.0,
                                    new_sl=100.0, size=50.0, time="t1", pyramid_level=1)
 
     exits = MagicMock()
@@ -94,4 +100,4 @@ def test_manage_exit_full_close_books_pyramid_pnl_to_portfolio():
     pnls = [c.args[1] for c in pra.record_close.call_args_list]
     assert any(abs(p - (103.0 - 101.0) * 50.0) < 1e-6 for p in pnls), \
         f"pyramid pnl not booked to portfolio authority: {pnls}"
-    assert eng._position is None
+    assert eng.state.position is None

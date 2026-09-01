@@ -238,8 +238,8 @@ class TestApplyEvent:
 class TestAtomicTransitions:
     """State transitions are atomic (all-or-nothing)."""
 
-    def test_position_id_mismatch_raises(self):
-        """Closing a position with wrong ID raises error."""
+    def test_closing_base_position_clears_state(self):
+        """Closing the base position (matching ID) clears state."""
         from quant.state_machine import EngineState, PositionState
         from quant.events import PositionClosed
         
@@ -253,12 +253,35 @@ class TestAtomicTransitions:
         )
         state = EngineState(symbol="NIFTY", position=pos)
         
-        # Fill references a different position ID
-        fill = MockFill(pos_id="wrong-id")
+        # Fill references the SAME position ID (base close)
+        fill = MockFill(pos_id="abc-123")
         event = PositionClosed(symbol="NIFTY", time="t0", fill=fill)
         
-        with pytest.raises(ValueError, match="Position ID mismatch"):
-            apply_event(state, event)
+        new_state = apply_event(state, event)
+        assert new_state.position is None  # Base position closed
+
+    def test_closing_pyramid_does_not_clear_base(self):
+        """Closing a pyramid (different ID) doesn't clear base position."""
+        from quant.state_machine import EngineState, PositionState
+        from quant.events import PositionClosed
+        
+        pos = PositionState(
+            id="abc-123",
+            entry=100.0,
+            size=100.0,
+            sl=95.0,
+            tp=110.0,
+            side="LONG",
+        )
+        state = EngineState(symbol="NIFTY", position=pos)
+        
+        # Fill references a DIFFERENT position ID (pyramid close)
+        fill = MockFill(pos_id="pyr-456")
+        event = PositionClosed(symbol="NIFTY", time="t0", fill=fill)
+        
+        # State should be unchanged (pyramid close doesn't affect base)
+        new_state = apply_event(state, event)
+        assert new_state.position == pos  # Base position preserved
 
     def test_opening_position_when_already_open_raises(self):
         """Opening a position when one is already open raises error."""

@@ -99,7 +99,10 @@ def test_emergency_halt_force_close_real_engine_flattens():
     eng._oms = PaperOMS(lot_size=1.0)
     sig = Signal(type="LONG", reason="t", entry=100.0, sl=99.0, tp=102.0,
                  rr=2.0, model_label="test", symbol="NIFTY 24800 CE", timestamp="t0")
-    eng._position = eng._oms.submit(sig, 10.0)
+    position = eng._oms.submit(sig, 10.0)
+    from quant.transitions import _position_to_state
+    eng.state = eng.state.with_position(_position_to_state(position))
+    eng._get_position_manager().current_position = position
     emitted = []
     eng._bus.subscribe(PositionClosed, emitted.append)
     coord._engines = {eng.symbol: eng}
@@ -107,7 +110,7 @@ def test_emergency_halt_force_close_real_engine_flattens():
     halted = coord.emergency_halt("SIGTERM", force_close=True)
 
     assert halted == 1
-    assert eng._position is None, "position must be flattened"
+    assert eng.state.position is None, "position must be flattened"
     closes = [e for e in emitted if isinstance(e, PositionClosed)]
     assert len(closes) == 1
     assert closes[0].symbol == eng.symbol
