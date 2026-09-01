@@ -89,9 +89,9 @@ def test_manage_exit_full_close_books_pyramid_pnl_to_portfolio():
     exits = MagicMock()
     exits.evaluate.return_value = ExitDecision(True, "TRAIL", 103.0)
     exits.stop_state.return_value = (None, None)
-    eng._exits = exits
-
+    # Set exits on the PositionManager (not the engine)
     pm = eng._get_position_manager()
+    pm._exits = exits
     pm.pyramid_positions = [pyramid]
 
     bar = Bar(time="t300", open=102.0, high=103.5, low=101.5, close=103.0, volume=10.0)

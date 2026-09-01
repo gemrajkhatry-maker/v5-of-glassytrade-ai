@@ -66,7 +66,9 @@ def _bar(close: float, open_: float = 100.0) -> Bar:
 def test_crit_01_check_pyramid_catches_value_error_under_live_oms():
     """LiveOMS raises ValueError for add_pyramid; check_pyramid must log warning and not crash."""
     portfolio = MagicMock()
-    oms = LiveOMS(broker=MagicMock(), portfolio=portfolio, lot_size=1.0)
+    broker = MagicMock()
+    broker.execute_order.return_value = None  # Broker rejects the order
+    oms = LiveOMS(broker=broker, portfolio=portfolio, lot_size=1.0)
     pm = _mk_pm(oms)
 
     pos = _mk_pos()
@@ -77,7 +79,7 @@ def test_crit_01_check_pyramid_catches_value_error_under_live_oms():
     dto = {"legLvn": 100.0, "absorptionSide": "SELL_ABSORBED"}
     bar = _bar(close=100.05, open_=100.0)
 
-    # Should not raise exception
+    # Should not raise exception (broker rejection returns None, not raise)
     pm.check_pyramid(dto, bar, pos, bar_index=5)
     assert pm.pyramid_count == 0
     assert len(pm.pyramid_positions) == 0
@@ -122,7 +124,10 @@ def test_crit_02_manage_exit_and_force_close_are_serialized():
 
     gw = MockGW()
     engine = QuantEngine(gateway=gw, symbol="CRUDEOIL 17 SEP 8300 CALL", interval_seconds=60)
-    engine._position = _mk_pos()
+    pos = _mk_pos()
+    from quant.transitions import _position_to_state
+    engine.state = engine.state.with_position(_position_to_state(pos))
+    engine._get_position_manager().current_position = pos
 
     # Verify lock exists
     assert hasattr(engine, "_close_lock")
@@ -147,7 +152,7 @@ def test_crit_02_manage_exit_and_force_close_are_serialized():
     t2.join()
 
     # Since t1 closed the position under the lock, t2 should observe position is None and return False
-    assert engine._position is None
+    assert engine.state.position is None
 
 
 # ---------------------------------------------------------------------------

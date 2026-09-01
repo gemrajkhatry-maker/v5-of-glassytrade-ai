@@ -49,8 +49,9 @@ def _open_engine(market: str = "NSE", has_position: bool = True) -> MagicMock:
     eng = MagicMock()
     eng.symbol = "NIFTY SEP FUT"
     eng._market = market
-    eng._position = MagicMock() if has_position else None
-    eng._pyramid_positions = []
+    eng.state = MagicMock()
+    eng.state.position = MagicMock() if has_position else None
+    eng._get_position_manager = MagicMock(return_value=MagicMock(pyramid_positions=[]))
     eng.force_close_position = MagicMock(return_value=True)
     return eng
 
@@ -122,7 +123,7 @@ def test_eod_square_off_idempotent_after_flatten():
 
     assert coord.eod_square_off() == 1
     # Simulate the flatten having cleared the position.
-    eng._position = None
+    eng.state.position = None
     eng.force_close_position.reset_mock()
 
     assert coord.eod_square_off() == 0
@@ -165,8 +166,16 @@ def test_eod_square_off_swallows_engine_errors():
 def _make_engine_stub() -> QuantEngine:
     eng = QuantEngine.__new__(QuantEngine)
     eng._close_lock = threading.Lock()
-    eng._position = None
-    eng._pyramid_positions = []
+    eng.state = MagicMock()
+    eng.state.position = None
+    pm_mock = MagicMock()
+    pm_mock.pyramid_positions = []
+    pm_mock.current_position = None
+    eng._get_position_manager = MagicMock(return_value=pm_mock)
+    eng._aggregator = MagicMock()
+    eng._portfolio_risk = None
+    eng._bar_index = 0
+    eng._last_close_bar_index = -1
     return eng
 
 
@@ -205,13 +214,14 @@ def test_force_close_position_closes_base_and_pyramids():
     pyr = oms.submit(pyr_sig, 5.0)
     pm.pyramid_positions = [pyr]
     pm.pyramid_count = 1
+    pm.current_position = base
 
     eng = QuantEngine.__new__(QuantEngine)
     eng.symbol = symbol
-    eng._position = base
-    eng._pyramid_positions = [pyr]
-    eng._pyramid_count = 1
-    eng._pos_mgr = pm
+    from quant.state_machine import EngineState, PositionState
+    eng.state = EngineState(symbol=symbol, position=PositionState(
+        id=base._id, entry=100.0, size=10.0, sl=99.0, tp=102.0, side="LONG"
+    ))
     eng._aggregator = MagicMock()
     eng._aggregator.current_bar = MagicMock(close=105.0)
     eng._portfolio_risk = None
@@ -219,14 +229,22 @@ def test_force_close_position_closes_base_and_pyramids():
     eng._bar_index = 5
     eng._last_close_bar_index = -1
     eng._close_lock = threading.Lock()
-    eng._emit = emitted.append
+    eng._bus = MagicMock()
+    eng._trace = emitted  # Use emitted list to capture events
+    eng._projector = MagicMock()
+    eng._emit_lock = threading.Lock()
+    eng.event_store = MagicMock()
+    eng.event_store.append = lambda e: None
+    eng._pos_mgr = pm
+    # Wire the PositionManager's emit to go through engine's _emit
+    pm._emit = eng._emit
 
     result = eng.force_close_position("EOD_SQUARE_OFF")
 
     assert result is True
-    assert eng._position is None
-    assert eng._pyramid_positions == []
-    assert eng._pyramid_count == 0
+    assert eng.state.position is None
+    assert pm.pyramid_positions == []
+    assert pm.pyramid_count == 0
     closes = [e for e in emitted if isinstance(e, PositionClosed)]
     # Base + 1 pyramid add-on = 2 PositionClosed events.
     assert len(closes) == 2
@@ -252,13 +270,14 @@ def test_force_close_position_falls_back_to_entry_price_without_bar():
     sig = Signal(type="LONG", reason="t", entry=100.0, sl=99.0, tp=102.0,
                  rr=2.0, model_label="test", symbol=symbol, timestamp="t0")
     base = oms.submit(sig, 10.0)
+    pm.current_position = base
 
     eng = QuantEngine.__new__(QuantEngine)
     eng.symbol = symbol
-    eng._position = base
-    eng._pyramid_positions = []
-    eng._pyramid_count = 0
-    eng._pos_mgr = pm
+    from quant.state_machine import EngineState, PositionState
+    eng.state = EngineState(symbol=symbol, position=PositionState(
+        id=base._id, entry=100.0, size=10.0, sl=99.0, tp=102.0, side="LONG"
+    ))
     eng._aggregator = MagicMock()
     eng._aggregator.current_bar = None  # no forming bar -> entry-price fallback
     eng._portfolio_risk = None
@@ -266,10 +285,18 @@ def test_force_close_position_falls_back_to_entry_price_without_bar():
     eng._bar_index = 1
     eng._last_close_bar_index = -1
     eng._close_lock = threading.Lock()
-    eng._emit = emitted.append
+    eng._bus = MagicMock()
+    eng._trace = emitted  # Use emitted list to capture events
+    eng._projector = MagicMock()
+    eng._emit_lock = threading.Lock()
+    eng.event_store = MagicMock()
+    eng.event_store.append = lambda e: None
+    eng._pos_mgr = pm
+    # Wire the PositionManager's emit to go through engine's _emit
+    pm._emit = eng._emit
 
     assert eng.force_close_position("EOD_SQUARE_OFF") is True
-    assert eng._position is None
+    assert eng.state.position is None
     # Closed at the entry price (100.0) since no forming bar was available.
     from quant.events import PositionClosed
     closes = [e for e in emitted if isinstance(e, PositionClosed)]

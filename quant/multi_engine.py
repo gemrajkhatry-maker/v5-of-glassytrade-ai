@@ -634,7 +634,14 @@ class QuantCoordinator:
             deadline = self._squareoff_deadline(market)
             if deadline is None or now < deadline:
                 continue
-            if getattr(eng, "_position", None) is None and not getattr(eng, "_pyramid_positions", None):
+            # Check if engine has an open position (via state or position manager)
+            has_position = (
+                getattr(eng, "state", None) is not None and eng.state.position is not None
+            ) or (
+                getattr(eng, "_get_position_manager", None) is not None
+                and eng._get_position_manager().pyramid_positions
+            )
+            if not has_position:
                 continue
             try:
                 if eng.force_close_position(reason):
