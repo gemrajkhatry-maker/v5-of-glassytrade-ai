@@ -27,21 +27,10 @@ if TYPE_CHECKING:
     from quant.execution.risk import RiskState
 
 
-# Monotonic counter for event IDs — avoids UUID overhead on the hot path.
-# Each event gets a unique, incrementing integer string.
-_event_id_counter = itertools.count(1)
-
-
-def _next_event_id() -> str:
-    """Generate the next monotonic event ID."""
-    return str(next(_event_id_counter))
-
-
 @dataclass(frozen=True, kw_only=True)
 class Event:
     symbol: str
     time: str
-    event_id: str = field(default_factory=_next_event_id, compare=False)
     correlation_id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False)
 
 
@@ -153,6 +142,12 @@ class EventBus:
     def __init__(self) -> None:
         # _handlers maps event type -> list of (priority, handler) tuples
         self._handlers: dict[type[Event], list[tuple[int, Handler]]] = {}
+        # Per-bus monotonic counter for event IDs (avoids UUID overhead)
+        self._event_id_counter = itertools.count(1)
+    
+    def next_event_id(self) -> str:
+        """Generate the next monotonic event ID (per-bus)."""
+        return str(next(self._event_id_counter))
 
     def subscribe(
         self,

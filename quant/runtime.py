@@ -73,10 +73,6 @@ logger = logging.getLogger(__name__)
 # threshold). The decision-critical path is 100% deterministic by design — no
 # model inference is involved, so _decide never waits on external calls.
 _DETERMINISTIC_CONVICTION = 0.7
-# One-shot startup warning when an option contract runs with no underlying
-# feed — Fabio's auction structure belongs on the most liquid futures; running
-# AMT on option premium is a deliberate fallback (Task 8).
-_UNDERLYING_WARNED = False
 # Minimum closed bars (live + seeded history) before the engine may decide.
 # The analysis kernel needs enough bars for a meaningful POC/VA/VWAP profile;
 # the AMT/decision design pins this at > 15 bars, which also keeps entries
@@ -158,6 +154,7 @@ class QuantEngine:
         self._last_depth: OrderBook | None = None
         self._crashed: bool = False
         self._last_tick_wall: float = time.time()
+        self._underlying_warned: bool = False  # Per-engine (no global state)
         # S1 certification records (bounded; drained by cert harness)
         from collections import deque as _dq
         self.cert_records = _dq(maxlen=5_000)
@@ -327,7 +324,6 @@ class QuantEngine:
         thread death into a loud, logged failure; the engine stays dead by
         design (fail-stop for trading state) but the coordinator's liveness
         check now sees it."""
-        global _UNDERLYING_WARNED
         try:
             return self._run_inner(max_steps)
         except Exception:
@@ -450,7 +446,6 @@ class QuantEngine:
             pass  # certification must never break trading
 
     def _run_inner(self, max_steps: int | None = None) -> list[Event]:
-        global _UNDERLYING_WARNED
         if not self._subscribed:
             self._gateway.subscribe(self.symbol)
             self._subscribed = True
@@ -458,10 +453,10 @@ class QuantEngine:
             # Fabio Task 8: auction structure belongs on the underlying futures.
             # Subscribe the second feed; its ticks feed AMT via the aggregator.
             self._underlying_gateway.subscribe(self._underlying())
-        elif not _UNDERLYING_WARNED and self._contract_expiry is not None:
+        elif not self._underlying_warned and self._contract_expiry is not None:
             # Option contract with no underlying feed — running AMT on the
             # option's own premium is a fallback, not the faithful setup.
-            _UNDERLYING_WARNED = True
+            self._underlying_warned = True
             logger.warning(
                 "No underlying feed for %s — running AMT on the option premium. "
                 "Pass underlying_gateway to compute auction structure on the futures.",
