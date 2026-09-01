@@ -255,5 +255,23 @@ describe('ExecutionMarkersManager', () => {
 
       expect(markers.length).toBeLessThanOrEqual(10);
     });
+
+    it('generates VARS bullish and bearish reclaim markers', () => {
+      const data = [{ time: '2024-01-01T09:15:00Z', close: 50000 }] as any[];
+      const amtBull = {
+        vars: {
+          bullishReclaim: true,
+          bearishReclaim: false,
+          signalSource: 'CVA',
+        },
+      } as any;
+
+      const markers = generateAllExecutionMarkers([], [], data, amtBull, { mode: 'STANDARD' });
+      const varsMarker = markers.find(m => m.text === 'CVA BUY');
+      expect(varsMarker).toBeDefined();
+      expect(varsMarker?.color).toBe('#089981');
+      expect(varsMarker?.shape).toBe('arrowUp');
+      expect(varsMarker?.position).toBe('belowBar');
+    });
   });
 });

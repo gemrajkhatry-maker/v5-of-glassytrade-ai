@@ -1,5 +1,6 @@
 import { TradePosition, OHLCData, AMTAnalysis } from '../../types';
 import { IST_OFFSET_SECONDS } from '../../constants';
+import { toISTTimestamp } from './CandleSeriesManager';
 
 /**
  * ExecutionMarkersManager - Pure data transformation for chart execution markers
