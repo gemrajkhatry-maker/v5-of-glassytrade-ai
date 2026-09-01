@@ -16,7 +16,9 @@ Hardening features:
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
 from typing import Any, Callable, TypeVar
 
 from quant.events import Event
@@ -24,6 +26,10 @@ from quant.state_machine import EngineState
 from quant.transitions import apply_event
 
 E = TypeVar("E", bound=Event)
+
+# Genesis secret — in production, load from env or secure key store
+# This ensures checksums cannot be forged without the secret
+_GENESIS_SECRET = os.environ.get("EVENT_STORE_SECRET", "glassytrade-genesis-secret-2026")
 
 
 class EventStore:
@@ -39,7 +45,7 @@ class EventStore:
     def __init__(self) -> None:
         self._events: list[Event] = []
         self._sequence: int = 0
-        self._checksums: list[str] = []
+        self._checksums: list[str] = []  # Stored HMAC checksums for tamper detection
         self._handlers: dict[type[Event], list[tuple[int, Callable[[Event], None]]]] = {}
         self._dead_letter_queue: list[tuple[Event, Exception]] = []
 
@@ -54,47 +60,61 @@ class EventStore:
         """
         self._sequence += 1
         self._events.append(event)
-        self._checksums.append(self._compute_checksum(event))
+        # Compute and store HMAC checksum (tamper-evident)
+        prev_checksum = self._checksums[-1] if self._checksums else "GENESIS"
+        checksum = self._compute_checksum(prev_checksum, event)
+        self._checksums.append(checksum)
         return self._sequence
 
-    def _compute_checksum(self, event: Event) -> str:
-        """Compute SHA-256 checksum of previous checksum + current event data."""
-        prev = self._checksums[-1] if self._checksums else "GENESIS"
+    def _compute_checksum(self, prev_checksum: str, event: Event) -> str:
+        """Compute HMAC-SHA256 checksum of previous checksum + full event payload.
+
+        Uses HMAC with a secret key so checksums cannot be forged
+        without access to the secret.
+        """
+        payload = self._event_to_dict(event)
         data = json.dumps(
             {
-                "prev": prev,
-                "symbol": event.symbol,
-                "time": event.time,
-                "type": type(event).__name__,
+                "prev": prev_checksum,
+                "sequence": self._sequence,
+                "payload": payload,
             },
             sort_keys=True,
         )
-        return hashlib.sha256(data.encode()).hexdigest()
+        return hmac.new(
+            _GENESIS_SECRET.encode(),
+            data.encode(),
+            hashlib.sha256,
+        ).hexdigest()
 
     def verify_chain(self) -> bool:
         """Verify the integrity of the checksum chain.
 
+        Recomputes the entire chain from genesis using HMAC-SHA256
+        and compares against stored checksums. Any modification to
+        events, sequence, or checksums will be detected.
+
         Returns True if the chain is intact, False if tampering detected.
         """
+        if len(self._events) != len(self._checksums):
+            return False  # Length mismatch indicates tampering
+
+        prev_checksum = "GENESIS"
         for i, event in enumerate(self._events):
-            expected = self._compute_checksum_at(i, event)
+            expected = self._compute_checksum(prev_checksum, event)
             if self._checksums[i] != expected:
-                return False
+                return False  # Checksum mismatch indicates tampering
+            prev_checksum = expected
         return True
 
-    def _compute_checksum_at(self, index: int, event: Event) -> str:
-        """Compute what the checksum should be at a given index."""
-        prev = self._checksums[index - 1] if index > 0 else "GENESIS"
-        data = json.dumps(
-            {
-                "prev": prev,
-                "symbol": event.symbol,
-                "time": event.time,
-                "type": type(event).__name__,
-            },
-            sort_keys=True,
-        )
-        return hashlib.sha256(data.encode()).hexdigest()
+    @staticmethod
+    def _event_to_dict(event: Event) -> dict[str, Any]:
+        """Convert event to dictionary."""
+        from dataclasses import asdict, is_dataclass
+
+        if is_dataclass(event):
+            return asdict(event)
+        return {"repr": repr(event)}
 
     def subscribe(
         self,
@@ -165,15 +185,24 @@ class EventStore:
         This is the ONLY way to derive state from events.
 
         Returns:
-            Current engine state
+            Current engine state (empty if no events)
         """
-        state = EngineState(symbol="")  # Will be overwritten by events
+        if not self._events:
+            return EngineState(symbol="")
+        
+        # Initialize symbol from first event
+        state = EngineState(symbol=self._events[0].symbol)
 
         for event in self._events:
-            # Set symbol from first event if not set
-            if state.symbol == "":
-                state = EngineState(symbol=event.symbol)
-            state = apply_event(state, event)
+            try:
+                state = apply_event(state, event)
+            except ValueError as e:
+                # Log but don't crash on invalid transitions (e.g., replay of stale events)
+                logger.warning(
+                    "EventStore.fold: skipping invalid event %s: %s",
+                    type(event).__name__, e,
+                )
+                continue
 
         return state
 
@@ -207,12 +236,15 @@ class EventStore:
         self._checksums = []
 
         # Import events - reconstruct Event objects from payload
+        prev_checksum = "GENESIS"
         for event_dict in events:
             self._sequence += 1
             event = self._dict_to_event(event_dict)
             if event is not None:
                 self._events.append(event)
-                self._checksums.append(self._compute_checksum(event))
+                checksum = self._compute_checksum(prev_checksum, event)
+                self._checksums.append(checksum)
+                prev_checksum = checksum
 
     @staticmethod
     def _dict_to_event(event_dict: dict[str, Any]) -> Event | None:

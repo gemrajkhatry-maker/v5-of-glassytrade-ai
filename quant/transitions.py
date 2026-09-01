@@ -57,27 +57,48 @@ def apply_event(state: EngineState, event: Event) -> EngineState:
         return state.with_bar(event.bar)
 
     elif isinstance(event, PositionOpened):
-        # Guard: no existing position
+        pos_state = _position_to_state(event.position)
+        
+        # Check if this is a pyramid add-on
+        if pos_state.is_pyramid:
+            # Pyramids are allowed when base position exists
+            if state.position is None:
+                raise ValueError(
+                    f"Cannot open pyramid {pos_state.id} — no base position open"
+                )
+            # Add to pyramids tuple (immutable)
+            new_pyramids = state.pyramids + (pos_state,)
+            from dataclasses import replace
+            return replace(state, pyramids=new_pyramids, sequence=state.sequence + 1)
+        
+        # Base position: no existing position allowed
         if state.position is not None:
-            pos_id = getattr(event.position, 'id', None) or getattr(event.position, '_id', None)
             raise ValueError(
-                f"Position already open: cannot open {pos_id} "
+                f"Position already open: cannot open {pos_state.id} "
                 f"while {state.position.id} is open"
             )
-        pos_state = _position_to_state(event.position)
         return state.with_position(pos_state)
 
     elif isinstance(event, PositionClosed):
         # Guard: position must exist
-        if state.position is None:
+        if state.position is None and not state.pyramids:
             raise ValueError("No position to close")
-        # Guard: position ID must match (base position close)
-        # Pyramid closes have different IDs and are no-ops for state
-        # (pyramids are tracked separately in state.pyramids)
-        if event.fill.position._id != state.position.id:
-            # This is a pyramid close, not the base position close
-            # State is unchanged (pyramid tracking is separate)
+        
+        # Check if this is a pyramid close (ID matches one of the pyramids)
+        pyramid_ids = {p.id for p in state.pyramids}
+        closed_id = getattr(event.fill.position, '_id', None) or getattr(event.fill.position, 'id', None)
+        
+        if closed_id in pyramid_ids:
+            # Remove the pyramid from the tuple
+            new_pyramids = tuple(p for p in state.pyramids if p.id != closed_id)
+            from dataclasses import replace
+            return replace(state, pyramids=new_pyramids, sequence=state.sequence + 1)
+        
+        # Base position close: ID must match
+        if state.position is not None and closed_id != state.position.id:
+            # Unknown ID — could be a stale pyramid close, ignore
             return state
+        
         return state.without_position()
 
     elif isinstance(event, RiskUpdated):

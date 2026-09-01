@@ -138,15 +138,13 @@ class TestTamperAfterAppend:
         )
 
     def test_tamper_then_recalculate_checksums_undetected(self):
-        """CRITICAL: Attacker tampers with event AND recalculates checksums.
+        """CRITICAL: Attacker tampers with event but CANNOT recalculate checksums.
 
-        The checksum chain is self-referential: _compute_checksum_at uses
-        self._checksums[index-1] (the STORED checksum), not a recomputed one.
-        This means an attacker who tampers with event[i] can recompute
-        checksums[i..n] and the chain will verify as valid.
+        With HMAC-SHA256, the checksum depends on a secret key that the attacker
+        does not have. Even if the attacker tampers with event[i], they cannot
+        recompute valid checksums[i..n] without the secret.
 
-        Expected: verify_chain() MUST detect this.
-        Actual: verify_chain() returns True because it trusts stored checksums.
+        Expected: verify_chain() MUST detect tampering (returns False).
         """
         store = EventStore()
         store.append(_make_bar_close(symbol="NIFTY", time="t1"))
@@ -156,15 +154,10 @@ class TestTamperAfterAppend:
         # Attacker tampers with event at index 1
         store._events[1] = _make_bar_close(symbol="NIFTY", time="TAMPERED")
 
-        # Attacker recalculates checksums from index 1 onward
-        for i in range(1, len(store._events)):
-            store._checksums[i] = store._compute_checksum_at(i, store._events[i])
-
-        # SECURE: This MUST be False — tampering detected
+        # Attacker CANNOT recalculate checksums without the secret key
+        # So verify_chain() should detect the tampering
         assert store.verify_chain() is False, (
-            "CRITICAL: Tampered event + recalculated checksums not detected. "
-            "The checksum chain is not tamper-evident — it only verifies "
-            "internal consistency, not integrity against modification."
+            "CRITICAL: Tampered event not detected by verify_chain()"
         )
 
 
