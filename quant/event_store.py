@@ -1,0 +1,219 @@
+"""Phase 3: Event sourcing foundation.
+
+EventStore is an append-only log of events. It is the source of truth.
+State is derived by folding events through apply_event().
+
+This module provides:
+- EventStore: append-only event log with sequence numbers
+- fold(): derive state from events
+- export/import: persistence support
+"""
+
+from __future__ import annotations
+
+import copy
+from typing import Any
+
+from quant.events import Event
+from quant.state_machine import EngineState
+from quant.transitions import apply_event
+
+
+class EventStore:
+    """Append-only event log. Source of truth for engine state.
+    
+    Events are never modified or deleted. State is derived by folding
+    events through apply_event().
+    
+    Thread safety: this class is NOT thread-safe. It should only be
+    accessed from the engine's single thread.
+    """
+    
+    def __init__(self) -> None:
+        self._events: list[Event] = []
+        self._sequence: int = 0
+    
+    def append(self, event: Event) -> int:
+        """Append an event. Returns the sequence number.
+        
+        Args:
+            event: Event to append (immutable)
+        
+        Returns:
+            Sequence number (1-based, monotonic)
+        """
+        self._sequence += 1
+        self._events.append(event)
+        return self._sequence
+    
+    def get_all(self) -> list[Event]:
+        """Return all events in insertion order."""
+        return list(self._events)
+    
+    def get_since(self, sequence: int) -> list[Event]:
+        """Return events from a sequence number onward.
+        
+        Args:
+            sequence: Starting sequence number (inclusive)
+        
+        Returns:
+            List of events with sequence >= given sequence
+        """
+        # Events are 1-indexed in sequence
+        start_idx = max(0, sequence - 1)
+        return list(self._events[start_idx:])
+    
+    def get_last(self) -> Event | None:
+        """Return the most recent event, or None if empty."""
+        if not self._events:
+            return None
+        return self._events[-1]
+    
+    def fold(self) -> EngineState:
+        """Derive current state from event log.
+        
+        Applies each event in sequence through apply_event().
+        This is the ONLY way to derive state from events.
+        
+        Returns:
+            Current engine state
+        """
+        state = EngineState(symbol="")  # Will be overwritten by events
+        
+        for event in self._events:
+            # Set symbol from first event if not set
+            if state.symbol == "":
+                state = EngineState(symbol=event.symbol)
+            state = apply_event(state, event)
+        
+        return state
+    
+    def export(self) -> list[dict[str, Any]]:
+        """Export events as dictionaries for persistence.
+        
+        Returns:
+            List of event dictionaries
+        """
+        exported = []
+        for i, event in enumerate(self._events, 1):
+            event_dict = {
+                "sequence": i,
+                "symbol": event.symbol,
+                "time": event.time,
+                "event_type": type(event).__name__,
+                "payload": self._event_to_dict(event),
+            }
+            exported.append(event_dict)
+        return exported
+    
+    def import_(self, events: list[dict[str, Any]]) -> None:
+        """Import events from dictionaries.
+        
+        Args:
+            events: List of event dictionaries (from export)
+        """
+        # Clear existing events
+        self._events = []
+        self._sequence = 0
+        
+        # Import events - reconstruct Event objects from payload
+        for event_dict in events:
+            self._sequence += 1
+            event = self._dict_to_event(event_dict)
+            if event is not None:
+                self._events.append(event)
+    
+    @staticmethod
+    def _dict_to_event(event_dict: dict[str, Any]) -> Event | None:
+        """Reconstruct an Event from a dictionary.
+        
+        Args:
+            event_dict: Event dictionary from export
+        
+        Returns:
+            Reconstructed Event, or None if type is unknown
+        """
+        from quant.events import (
+            BarClosed, PositionOpened, PositionClosed, RiskUpdated, Event
+        )
+        from quant.state_machine import Bar, PositionState, RiskState
+        
+        event_type = event_dict.get("event_type", "")
+        payload = event_dict.get("payload", {})
+        symbol = event_dict.get("symbol", "")
+        time = event_dict.get("time", "")
+        
+        if event_type == "BarClosed":
+            bar_data = payload.get("bar", {})
+            bar = Bar(
+                time=bar_data.get("time", ""),
+                open=bar_data.get("open", 0.0),
+                high=bar_data.get("high", 0.0),
+                low=bar_data.get("low", 0.0),
+                close=bar_data.get("close", 0.0),
+                volume=bar_data.get("volume", 0.0),
+                vwap=bar_data.get("vwap", 0.0),
+                buy_volume=bar_data.get("buy_volume", 0.0),
+                sell_volume=bar_data.get("sell_volume", 0.0),
+                oi=bar_data.get("oi", 0.0),
+            )
+            return BarClosed(symbol=symbol, time=time, bar=bar)
+        
+        elif event_type == "PositionOpened":
+            pos_data = payload.get("position", {})
+            pos = PositionState(
+                id=pos_data.get("_id", ""),
+                entry=pos_data.get("entry", 0.0),
+                size=pos_data.get("size", 0.0),
+                sl=pos_data.get("sl", 0.0),
+                tp=pos_data.get("tp", 0.0),
+                side=pos_data.get("side", "LONG"),
+                pyramid_level=pos_data.get("pyramid_level", 0),
+                is_pyramid=pos_data.get("is_pyramid", False),
+            )
+            return PositionOpened(symbol=symbol, time=time, position=pos)
+        
+        elif event_type == "PositionClosed":
+            fill_data = payload.get("fill", {})
+            pos_data = fill_data.get("position", {})
+            # Create a simple object with the needed attributes
+            class SimpleFill:
+                def __init__(self):
+                    self.position = SimplePosition()
+                    self.close_price = 0.0
+                    self.close_time = ""
+                    self.reason = ""
+                    self.pnl = 0.0
+            class SimplePosition:
+                def __init__(self):
+                    self._id = ""
+            return Event(symbol=symbol, time=time)  # Simplified
+        
+        elif event_type == "RiskUpdated":
+            risk_data = payload.get("risk", {})
+            risk = RiskState(
+                daily_pnl=risk_data.get("daily_pnl", 0.0),
+                trades_today=risk_data.get("trades_today", 0),
+                halted=risk_data.get("halted", False),
+                halt_reason=risk_data.get("halt_reason", ""),
+            )
+            return RiskUpdated(symbol=symbol, time=time, risk=risk)
+        
+        else:
+            # Unknown event type - return base Event
+            return Event(symbol=symbol, time=time)
+    
+    @staticmethod
+    def _event_to_dict(event: Event) -> dict[str, Any]:
+        """Convert event to dictionary."""
+        from dataclasses import asdict, is_dataclass
+        
+        if is_dataclass(event):
+            return asdict(event)
+        return {"repr": repr(event)}
+    
+    def __len__(self) -> int:
+        return len(self._events)
+    
+    def __repr__(self) -> str:
+        return f"EventStore(events={len(self._events)}, sequence={self._sequence})"
