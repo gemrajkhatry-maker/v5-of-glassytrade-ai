@@ -345,6 +345,18 @@ export interface AMTAnalysis {
   swingDelta?: number;
   // Gamma Exposure (Dealer GEX)
   gex?: GammaExposure;
+  // LuxAlgo Value Area Reversion Signals (VARS)
+  vars?: VARSState;
+}
+
+export interface VARSState {
+  bullishReclaimCva: boolean;
+  bearishReclaimCva: boolean;
+  bullishReclaimPva: boolean;
+  bearishReclaimPva: boolean;
+  bullishReclaim: boolean;
+  bearishReclaim: boolean;
+  signalSource: 'CVA' | 'PVA' | 'BOTH' | '';
 }
 
 export interface StrikeGEX {

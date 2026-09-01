@@ -238,6 +238,46 @@ export function generateAcceptanceRejectionMarkers(
 }
 
 /**
+ * Generate LuxAlgo Value Area Reversion Signal (VARS) reclaim markers
+ */
+export function generateVARSReclaimMarkers(
+  data: OHLCData[],
+  amt: AMTAnalysis | null
+): ChartMarker[] {
+  if (!amt?.vars || !data || data.length === 0) {
+    return [];
+  }
+
+  const markers: ChartMarker[] = [];
+  const lastTime = toISTTimestamp(data[data.length - 1].time);
+  const src = amt.vars.signalSource || 'VA';
+
+  if (amt.vars.bullishReclaim) {
+    markers.push({
+      time: lastTime,
+      position: 'belowBar',
+      color: '#089981',
+      shape: 'arrowUp',
+      text: `${src} BUY`,
+      size: 1 as const,
+    });
+  }
+
+  if (amt.vars.bearishReclaim) {
+    markers.push({
+      time: lastTime,
+      position: 'aboveBar',
+      color: '#f23645',
+      shape: 'arrowDown',
+      text: `${src} SELL`,
+      size: 1 as const,
+    });
+  }
+
+  return markers;
+}
+
+/**
  * Generate all execution markers for chart display
  * 
  * @param positions - Open positions
@@ -273,6 +313,9 @@ export function generateAllExecutionMarkers(
 
   // Acceptance/rejection markers
   markers.push(...generateAcceptanceRejectionMarkers(data, amt));
+
+  // LuxAlgo VARS Reclaim markers
+  markers.push(...generateVARSReclaimMarkers(data, amt));
 
   // Limit markers for performance (optional)
   const maxMarkers = options.maxMarkers || 100;

@@ -397,5 +397,6 @@ class DecisionContextBuilder:
             squeeze_direction=squeeze_dir,
             squeeze_trapped_level=trapped_lvl,
             pullback_confirmed=pullback,
+            vars_result=amt_dto.get("vars"),
             recent_decisions=tuple(recent_decisions or ()),
         )

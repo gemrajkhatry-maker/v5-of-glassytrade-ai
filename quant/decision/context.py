@@ -122,5 +122,7 @@ class DecisionContext:
     squeeze_direction: str = ""
     squeeze_trapped_level: float = 0.0
     pullback_confirmed: bool = False
+    # LuxAlgo Value Area Reversion Signals (VARS)
+    vars_result: Any | None = None
     # Rolling history of recent decisions and rationales (last 3-5 bars)
     recent_decisions: Tuple[Dict[str, Any], ...] = ()

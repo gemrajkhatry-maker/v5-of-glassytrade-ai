@@ -1,5 +1,6 @@
 import React from 'react';
 import { Settings } from 'lucide-react';
+import { VARSState } from '../../types';
 
 interface MarketStateCardProps {
     marketState: string;
@@ -10,10 +11,15 @@ interface MarketStateCardProps {
     legPoc?: number;
     legVah?: number;
     legVal?: number;
+    vars?: VARSState;
 }
 
 /** 01. STATE — session & leg market regime badge. */
-const MarketStateCard = React.memo<MarketStateCardProps>(({ marketState, isImbalanced, statusColor, statusBg, hasDisplacement, legPoc, legVah, legVal }) => {
+const MarketStateCard = React.memo<MarketStateCardProps>(({ marketState, isImbalanced, statusColor, statusBg, hasDisplacement, legPoc, legVah, legVal, vars }) => {
+    const hasVarsSignal = vars?.bullishReclaim || vars?.bearishReclaim;
+    const varsIsBuy = vars?.bullishReclaim;
+    const varsSrc = vars?.signalSource || 'VA';
+
     return (
         <div className="flex flex-col gap-2 relative">
             <div className="flex justify-between items-center text-[9px] text-glassy-text-tertiary uppercase tracking-wider absolute -top-2 right-1 z-10 bg-glassy-bg-tertiary px-1">
@@ -25,6 +31,13 @@ const MarketStateCard = React.memo<MarketStateCardProps>(({ marketState, isImbal
                 <div className="flex items-center justify-between ml-2">
                     <span className="text-[9px] text-glassy-text-tertiary uppercase tracking-wider font-bold">Session & Leg</span>
                     <div className="flex flex-wrap items-center gap-1.5 justify-end">
+                        {hasVarsSignal && (
+                            <div className={`px-2 py-0.5 rounded-sm text-[8px] font-bold tracking-wide flex items-center gap-1.5 ${varsIsBuy ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'}`}>
+                                <span className="text-glassy-text-tertiary font-normal">VARS</span>
+                                <div className={`w-1.5 h-1.5 rounded-full ${varsIsBuy ? 'bg-emerald-400' : 'bg-rose-400'} animate-pulse`} />
+                                {varsSrc} {varsIsBuy ? 'RECLAIM BUY' : 'RECLAIM SELL'}
+                            </div>
+                        )}
                         {marketState === 'DEAD' ? (
                             <div className="px-2 py-0.5 rounded-sm text-[8px] font-bold tracking-wide flex items-center gap-1.5 bg-glassy-regime-dead/20 text-glassy-bear-primary border border-glassy-bear-primary/30">
                                 <span className="text-glassy-text-tertiary font-normal">SESSION</span>

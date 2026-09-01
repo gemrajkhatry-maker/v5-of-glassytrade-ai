@@ -158,6 +158,15 @@ def amt_result_to_dto(r) -> dict:
                 for s in getattr(r.gex, "strike_gex", ())
             ] if getattr(r, "gex", None) else [],
         },
+        "vars": {
+            "bullishReclaimCva": getattr(r.vars_result, "bullish_reclaim_cva", False) if getattr(r, "vars_result", None) else False,
+            "bearishReclaimCva": getattr(r.vars_result, "bearish_reclaim_cva", False) if getattr(r, "vars_result", None) else False,
+            "bullishReclaimPva": getattr(r.vars_result, "bullish_reclaim_pva", False) if getattr(r, "vars_result", None) else False,
+            "bearishReclaimPva": getattr(r.vars_result, "bearish_reclaim_pva", False) if getattr(r, "vars_result", None) else False,
+            "bullishReclaim": getattr(r.vars_result, "bullish_reclaim", False) if getattr(r, "vars_result", None) else False,
+            "bearishReclaim": getattr(r.vars_result, "bearish_reclaim", False) if getattr(r, "vars_result", None) else False,
+            "signalSource": getattr(r.vars_result, "signal_source", "") if getattr(r, "vars_result", None) else "",
+        },
         "footprints": {
             k: {
                 "time": v.time,

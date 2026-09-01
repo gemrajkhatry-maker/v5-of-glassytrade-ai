@@ -45,9 +45,17 @@ def detect_va_fade(ctx: DecisionContext) -> VAFadeSignal | None:
     elif close > vah:
         zone = "ABOVE_VA"
 
-    # LONG: price probed below VAL and buyers are in control (positive CVD)
-    # Fabio: only fade back toward POC when order flow confirms the rejection
-    if zone == "BELOW_VA" and cvd > 0 and close < poc:
+    # Check VARS reclaim signals (LuxAlgo Value Area Reversion Signals)
+    vars_res = ctx.vars_result or {}
+    vars_bull = (
+        isinstance(vars_res, dict) and vars_res.get("bullishReclaim")
+    ) or getattr(vars_res, "bullish_reclaim", False)
+    vars_bear = (
+        isinstance(vars_res, dict) and vars_res.get("bearishReclaim")
+    ) or getattr(vars_res, "bearish_reclaim", False)
+
+    # LONG: price probed below VAL and buyers are in control (positive CVD or VARS Bullish Reclaim)
+    if (zone == "BELOW_VA" and cvd > 0 and close < poc) or (vars_bull and close < poc):
         entry = close
         probe_low = float(ctx.bar.low) if hasattr(ctx.bar, "low") else entry
         sl = min(entry - step, probe_low - step) if probe_low < entry else entry - step
@@ -56,11 +64,11 @@ def detect_va_fade(ctx: DecisionContext) -> VAFadeSignal | None:
         tp = poc
         risk = entry - sl
         rr = (tp - entry) / risk if risk > 0 else 0.0
-        return VAFadeSignal("LONG", entry, sl, tp, rr,
-                            "VAL bounce: below VA, buyer order flow")
+        reason = "VARS Bullish Reclaim" if vars_bull else "VAL bounce: below VA, buyer order flow"
+        return VAFadeSignal("LONG", entry, sl, tp, rr, reason)
 
-    # SHORT: price probed above VAH and sellers are in control (negative CVD)
-    if zone == "ABOVE_VA" and cvd < 0 and close > poc:
+    # SHORT: price probed above VAH and sellers are in control (negative CVD or VARS Bearish Reclaim)
+    if (zone == "ABOVE_VA" and cvd < 0 and close > poc) or (vars_bear and close > poc):
         entry = close
         probe_high = float(ctx.bar.high) if hasattr(ctx.bar, "high") else entry
         sl = max(entry + step, probe_high + step) if probe_high > entry else entry + step
@@ -69,6 +77,6 @@ def detect_va_fade(ctx: DecisionContext) -> VAFadeSignal | None:
         tp = poc
         risk = sl - entry
         rr = (entry - tp) / risk if risk > 0 else 0.0
-        return VAFadeSignal("SHORT", entry, sl, tp, rr,
-                            "VAH rejection: above VA, seller order flow")
+        reason = "VARS Bearish Reclaim" if vars_bear else "VAH rejection: above VA, seller order flow"
+        return VAFadeSignal("SHORT", entry, sl, tp, rr, reason)
     return None

@@ -298,6 +298,8 @@ class AMTAnalyzer:
         self._absorption_detector = AbsorptionDetector()
         self._persistent_agg_scorer = PersistentAggressionScorer()
         self._triple_a = TripleAMachine()
+        from quant.amt.market.vars_detector import VARSDetector
+        self._vars_detector = VARSDetector()
         self._session_market = "NSE"
         self._last_resolve_key = ""
 
@@ -319,14 +321,10 @@ class AMTAnalyzer:
             return "PUT"
         return "UNKNOWN"
 
-    def _update_session_vwap(self, current, typical_price) -> float:
-        """Update session VWAP with session boundary detection and accumulation.
-
-        Delegates accumulation to SessionVWAP; handles session-boundary
-        resets of non-VWAP trackers (IB, CVD, drives, etc.).
-
-        Returns the current session VWAP value.
-        """
+    def _update_session_vwap(
+        self, current: OHLC, typical_price: float
+    ) -> tuple[float, float, float, float, float]:
+        """Update session VWAP, resetting session state on day rollover."""
         _reset_session = False
         if self._vwap._last_time:
             from quant.state import session_date_key
@@ -345,6 +343,7 @@ class AMTAnalyzer:
             self._drive_tracker.reset()
             self._cvd_tracker.reset()
             self._triple_a.reset()
+            self._vars_detector.reset()
             self._vwap.reset()
         return self._vwap.update(current, typical_price)
 
@@ -767,6 +766,16 @@ class AMTAnalyzer:
             cvd_slope=float(cvd_state.slope),
         )
 
+        vars_result = self._vars_detector.update(
+            candle=current,
+            vah=vah,
+            val=val,
+            poc=poc,
+            prior_vah=prior_vah,
+            prior_val=prior_val,
+            prior_poc=prior_poc,
+        )
+
         result = self._build_result(
             current=current, data=data, symbol=symbol,
             profile=profile, poc=poc, vah=vah, val=val,
@@ -801,7 +810,7 @@ class AMTAnalyzer:
             state_result=state_result, value_migration=value_migration,
             _footprints=_footprints, _contested_zone=_contested_zone,
             _triple=_triple, _effective_market_state=_effective_market_state,
-            gex=gex,
+            gex=gex, vars_result=vars_result,
         )
 
         # Squeeze detection (Fabio Playbook #4): runs on the assembled result
@@ -832,7 +841,7 @@ class AMTAnalyzer:
                       _drive_number, _drive_entry_valid, cvd_source,
                       state_result, value_migration,
                       _footprints, _contested_zone, _triple,
-                      _effective_market_state, gex=None) -> AMTResult:
+                      _effective_market_state, gex=None, vars_result=None) -> AMTResult:
         """Assemble AMTResult from computed pipeline outputs.
 
         Pure data mapping — extracted from analyze() for readability.
@@ -950,6 +959,7 @@ class AMTAnalyzer:
             absorption_cluster_high=_triple.cluster_high,
             absorption_cluster_low=_triple.cluster_low,
             gex=gex,
+            vars_result=vars_result,
         )
 
     # -------------------------------------------------------------------

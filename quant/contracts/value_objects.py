@@ -283,6 +283,8 @@ class AMTResult:
     squeeze_trapped_level: float = 0.0
     # Gamma Exposure (Dealer GEX metrics)
     gex: object | None = None
+    # LuxAlgo Value Area Reversion Signals (VARS)
+    vars_result: object | None = None
 
 
 
