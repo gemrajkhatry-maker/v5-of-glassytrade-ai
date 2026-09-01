@@ -2,7 +2,8 @@
 
 The QuantCoordinator is the single decision brain, and this WS handler is a
 pure transport: it streams coordinator snapshots to the frontend with delta
-compression.
+compression. State derivation uses EventStore.fold() → project_state() →
+view_state_to_ws() (replaces the deprecated StateProjector).
 
 Server-driven mode:
   1. Send config + history

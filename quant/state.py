@@ -1,15 +1,20 @@
-"""StateProjector — folds the quant event stream into the frontend view-state.
+"""State derivation — folds the quant event stream into the frontend view-state.
 
-Pure and deterministic: feeding the same event sequence always produces the
-same per-symbol snapshot. The snapshot fields mirror the camelCase keys the
-WS adapter (``quant.ws_adapter``) emits, which is the contract the frontend
-reads.
+Two paths:
+1. ``project_state(EngineState)`` — the canonical path from ``EventStore.fold()``.
+2. ``StateProjector`` — deprecated, emits ``DeprecationWarning``.
+
+The snapshot fields mirror the camelCase keys the WS adapter emits.
 """
 
 from __future__ import annotations
 
+import threading
+import uuid
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.timezones import IST
@@ -28,6 +33,7 @@ from quant.events import (
 )
 from quant.execution.order import Fill, Position
 from quant.execution.risk import RiskState
+from quant.state_machine import EngineState
 
 
 @dataclass(frozen=True)
@@ -44,8 +50,60 @@ class ViewState:
     agent_decision: dict | None = None
 
 
+def project_state(state: EngineState) -> ViewState:
+    """Derive ViewState from a folded EngineState.
+
+    This is the canonical path: ``EventStore.fold()`` → ``project_state()``
+    → ``view_state_to_ws()``. Replaces the deprecated ``StateProjector``.
+    """
+    bar = state.last_bar
+    tick = _bar_to_tick(bar) if bar is not None else None
+    ltp = float(bar.close) if bar is not None else None
+    oi = float(bar.oi) if bar is not None else None
+    risk = _risk_to_view(state.risk) if state.risk else None
+    portfolio = _engine_portfolio(state)
+    return ViewState(
+        symbol=state.symbol,
+        tick=tick,
+        ltp=ltp,
+        oi=oi,
+        risk_state=risk,
+        portfolio=portfolio,
+    )
 
 
+def _engine_portfolio(state: EngineState) -> dict:
+    """Build the frontend portfolio DTO from a folded EngineState."""
+    base = {
+        "balance": float(INITIAL_CAPITAL),
+        "equity": float(INITIAL_CAPITAL),
+        "leverage": 10,
+        "positions": [],
+        "closedTrades": [],
+    }
+    if state.position is None:
+        return base
+    pos = state.position
+    entry = float(pos.entry)
+    size = float(pos.size)
+    ltp = float(state.last_bar.close) if state.last_bar else None
+    pnl = round((ltp - entry) * size, 2) if ltp else 0.0
+    position_dto = {
+        "id": pos.id,
+        "symbol": state.symbol,
+        "side": pos.side,
+        "source": "AMT",
+        "entryPrice": entry,
+        "size": size,
+        "stopLoss": float(pos.sl),
+        "takeProfit": float(pos.tp),
+        "pnl": pnl,
+        "entryTime": "",
+        "status": "OPEN",
+    }
+    if ltp is not None:
+        position_dto["currentPrice"] = ltp
+    return {**base, "positions": [position_dto]}
 
 
 _EPOCH_2000 = 946684800
@@ -107,8 +165,8 @@ def _bar_to_tick(bar, interval_sec: int = 60) -> dict:
         "close": float(bar.close),
         "volume": float(bar.volume),
         "vwap": float(getattr(bar, "vwap", 0.0) or 0.0),
-        "takerBuyVolume": float(bar.buy_volume),
-        "delta": float(bar.delta),
+        "takerBuyVolume": float(getattr(bar, "buy_volume", 0.0)),
+        "delta": float(getattr(bar, "delta", 0.0)),
         "barIntervalSec": interval_sec,
     }
 
@@ -144,7 +202,7 @@ def _risk_to_view(risk: RiskState) -> dict:
     return {
         "halted": risk.halted,
         "haltReason": risk.halt_reason,
-        "consecutiveLosses": risk.consecutive_losses,
+        "consecutiveLosses": getattr(risk, "consecutive_losses", 0),
         "dailyPnl": risk.daily_pnl,
         "tradesToday": getattr(risk, "trades_today", 0),
         "equity": getattr(risk, "equity", float(INITIAL_CAPITAL)),
@@ -187,13 +245,19 @@ def _position_to_view(position: Any, fill: Any | None = None) -> dict:
     return dto
 
 
-import threading
-
-
 class StateProjector:
-    """Fold events per symbol into the latest frontend view-state."""
+    """Fold events per symbol into the latest frontend view-state.
+
+    .. deprecated::
+        Use ``EventStore.fold()`` → ``project_state()`` instead.
+    """
 
     def __init__(self, interval_sec: int = 60) -> None:
+        warnings.warn(
+            "StateProjector is deprecated; use EventStore.fold() + project_state()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._state: dict[str, dict] = {}
         self._lock = threading.RLock()
         self._interval_sec = interval_sec
