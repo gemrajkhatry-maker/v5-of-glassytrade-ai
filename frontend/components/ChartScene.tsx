@@ -761,49 +761,92 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
 
       // Alpha and glow based on zone
       if (isP) {
-        baseAlpha = 0.85;
+        baseAlpha = 0.90;
       } else if (isHvn) {
-        baseAlpha = 0.65;
+        baseAlpha = 0.70;
       } else if (isLvn) {
-        baseAlpha = 0.18;
+        baseAlpha = 0.20;
       } else if (isVA) {
-        baseAlpha = 0.45;
+        baseAlpha = 0.55;
       } else {
         baseAlpha = 0.30;
       }
 
-      // Glassy gradient fill (left=transparent → right=color)
-      const grad = ctx.createLinearGradient(x, 0, x + barWidth, 0);
-      grad.addColorStop(0, hexToRgba(baseColor, baseAlpha * 0.3));
-      grad.addColorStop(0.4, hexToRgba(baseColor, baseAlpha * 0.7));
-      grad.addColorStop(1, hexToRgba(baseColor, baseAlpha));
-      ctx.fillStyle = grad;
-      ctx.fillRect(x, y - barHeight / 2, barWidth, barHeight);
+      const buyVol = level.buyVolume || 0;
+      const sellVol = level.sellVolume || 0;
+      const isInsignificant = maxVol > 0 && level.volume < maxVol * 0.20;
+
+      if (isInsignificant) {
+        // Insignificant volume profile rows (< 20% of max volume) -> muted grey
+        const greyGrad = ctx.createLinearGradient(x, 0, x + barWidth, 0);
+        greyGrad.addColorStop(0, hexToRgba('#9ca3af', baseAlpha * 0.2));
+        greyGrad.addColorStop(1, hexToRgba('#9ca3af', baseAlpha * 0.4));
+        ctx.fillStyle = greyGrad;
+        ctx.fillRect(x, y - barHeight / 2, barWidth, barHeight);
+      } else if (useDirectionColors && (buyVol > 0 || sellVol > 0)) {
+        const total = buyVol + sellVol || level.volume || 1;
+        const buyFraction = buyVol / total;
+        const buyW = barWidth * buyFraction;
+        const sellW = barWidth - buyW;
+
+        // Draw Up-Volume (Green #089981) segment attached to right edge
+        if (buyW > 0) {
+          const buyX = rightEdge - xOffset - buyW;
+          const buyGrad = ctx.createLinearGradient(buyX, 0, buyX + buyW, 0);
+          buyGrad.addColorStop(0, hexToRgba('#089981', baseAlpha * 0.4));
+          buyGrad.addColorStop(1, hexToRgba('#089981', baseAlpha * 0.9));
+          ctx.fillStyle = buyGrad;
+          ctx.fillRect(buyX, y - barHeight / 2, buyW, barHeight);
+        }
+
+        // Draw Down-Volume (Red #f23645) segment extended to the left
+        if (sellW > 0) {
+          const sellX = rightEdge - xOffset - barWidth;
+          const sellGrad = ctx.createLinearGradient(sellX, 0, sellX + sellW, 0);
+          sellGrad.addColorStop(0, hexToRgba('#f23645', baseAlpha * 0.4));
+          sellGrad.addColorStop(1, hexToRgba('#f23645', baseAlpha * 0.9));
+          ctx.fillStyle = sellGrad;
+          ctx.fillRect(sellX, y - barHeight / 2, sellW, barHeight);
+        }
+      } else {
+        // Single color glassy gradient fill
+        const grad = ctx.createLinearGradient(x, 0, x + barWidth, 0);
+        grad.addColorStop(0, hexToRgba(baseColor, baseAlpha * 0.3));
+        grad.addColorStop(0.4, hexToRgba(baseColor, baseAlpha * 0.7));
+        grad.addColorStop(1, hexToRgba(baseColor, baseAlpha));
+        ctx.fillStyle = grad;
+        ctx.fillRect(x, y - barHeight / 2, barWidth, barHeight);
+      }
 
       // Top highlight (glass refraction)
       ctx.fillStyle = `rgba(255,255,255,${baseAlpha * 0.12})`;
       ctx.fillRect(x, y - barHeight / 2, barWidth, Math.max(1, barHeight * 0.3));
 
-      // POC bar: bright edge + glow
+      // POC bar: bright electric blue edge + glow (#5b9cf6)
       if (isP) {
-        ctx.shadowColor = hexToRgba('#facc15', 0.6);
-        ctx.shadowBlur = 8;
-        ctx.fillStyle = hexToRgba('#facc15', 0.9);
-        ctx.fillRect(x, y - barHeight / 2, 2, barHeight);
+        ctx.shadowColor = hexToRgba('#5b9cf6', 0.85);
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = hexToRgba('#5b9cf6', 0.95);
+        ctx.fillRect(x, y - barHeight / 2, 2.5, barHeight);
         ctx.shadowBlur = 0;
       }
-      // HVN: bright left edge + subtle glow
+      // HVN: bright green left edge + subtle glow
       else if (isHvn) {
-        ctx.shadowColor = hexToRgba('#22c55e', 0.4);
+        ctx.shadowColor = hexToRgba('#089981', 0.4);
         ctx.shadowBlur = 6;
-        ctx.fillStyle = hexToRgba('#22c55e', 0.7);
+        ctx.fillStyle = hexToRgba('#089981', 0.7);
         ctx.fillRect(x, y - barHeight / 2, 2, barHeight);
         ctx.shadowBlur = 0;
       }
-      // LVN: thin dim edge
+      // LVN: thin orange edge
       else if (isLvn) {
         ctx.fillStyle = hexToRgba('#f97316', 0.5);
         ctx.fillRect(x, y - barHeight / 2, 1, barHeight);
+      }
+      // Value Area (VA) blue accent edge (#5b9cf6)
+      else if (isVA) {
+        ctx.fillStyle = hexToRgba('#5b9cf6', baseAlpha * 0.9);
+        ctx.fillRect(x, y - barHeight / 2, 1.5, barHeight);
       }
       // Normal edge
       else {
@@ -821,7 +864,7 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     ctx.fillStyle = color;
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
-    ctx.globalAlpha = 0.6;
+    ctx.globalAlpha = 0.75;
     ctx.fillText(text, 0, 0);
     ctx.restore();
   };
@@ -832,13 +875,13 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     const hasLeg = amt.legProfile && amt.legProfile.length > 0;
     const rightEdge = canvas.width - 50;
 
-    // Session profile (blue-tinted direction bars with HVN/LVN/VA zones)
+    // Session profile: Green (#089981) up-volume / Red (#f23645) down-volume with Blue (#5b9cf6) POC and VA
     if (mode === 'session' || mode === 'combined') {
       const sessionWidth = mode === 'session' ? 0.40 : 0.28;
       const sessionOffset = (hasLeg && mode === 'combined') ? canvas.width * 0.16 : 0;
-      drawProfileBars(ctx, canvas, series, amt.profile, sessionWidth, sessionOffset, '#4488cc', '#cc4444', true,
+      drawProfileBars(ctx, canvas, series, amt.profile, sessionWidth, sessionOffset, '#089981', '#f23645', true,
         amt.hvns, amt.lvns, amt.valueAreaHigh, amt.valueAreaLow, amt.poc);
-      drawVerticalLabel(ctx, canvas, 'SESSION PROFILE', rightEdge - sessionOffset - canvas.width * 0.14, '#6699cc');
+      drawVerticalLabel(ctx, canvas, 'SESSION PROFILE', rightEdge - sessionOffset - canvas.width * 0.14, '#5b9cf6');
     }
 
     // Leg profile (amber/orange bars with leg-specific levels)

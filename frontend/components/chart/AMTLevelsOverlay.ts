@@ -86,11 +86,11 @@ export function generateAMTPriceLines(
 
   // === Session Levels (session + combined modes) ===
   if (vpMode === 'session' || vpMode === 'combined') {
-    // Session POC (yellow solid)
+    // Session POC (electric blue solid #5b9cf6)
     if (amt.poc && amt.poc > 0) {
       lines.push({
         price: amt.poc,
-        color: '#facc15',
+        color: '#5b9cf6',
         lineWidth: 2,
         lineStyle: 'Solid',
         axisLabelVisible: true,
@@ -98,11 +98,11 @@ export function generateAMTPriceLines(
       });
     }
 
-    // Session VAH (blue dashed)
+    // Session VAH (teal-green dashed #089981)
     if (amt.valueAreaHigh && amt.valueAreaHigh > 0) {
       lines.push({
         price: amt.valueAreaHigh,
-        color: '#3b82f6',
+        color: '#089981',
         lineWidth: 1,
         lineStyle: 'Dashed',
         axisLabelVisible: true,
@@ -110,11 +110,11 @@ export function generateAMTPriceLines(
       });
     }
 
-    // Session VAL (blue dashed)
+    // Session VAL (crimson-red dashed #f23645)
     if (amt.valueAreaLow && amt.valueAreaLow > 0) {
       lines.push({
         price: amt.valueAreaLow,
-        color: '#3b82f6',
+        color: '#f23645',
         lineWidth: 1,
         lineStyle: 'Dashed',
         axisLabelVisible: true,

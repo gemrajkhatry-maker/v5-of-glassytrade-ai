@@ -53,7 +53,7 @@ describe('AMTLevelsOverlay', () => {
       
       expect(pocLine).toBeDefined();
       expect(pocLine?.price).toBe(50000);
-      expect(pocLine?.color).toBe('#facc15');
+      expect(pocLine?.color).toBe('#5b9cf6');
       expect(pocLine?.lineWidth).toBe(2);
       expect(pocLine?.lineStyle).toBe('Solid');
     });
@@ -64,7 +64,7 @@ describe('AMTLevelsOverlay', () => {
       
       expect(vahLine).toBeDefined();
       expect(vahLine?.price).toBe(50500);
-      expect(vahLine?.color).toBe('#3b82f6');
+      expect(vahLine?.color).toBe('#089981');
       expect(vahLine?.lineStyle).toBe('Dashed');
     });
 
@@ -74,7 +74,7 @@ describe('AMTLevelsOverlay', () => {
       
       expect(valLine).toBeDefined();
       expect(valLine?.price).toBe(49500);
-      expect(valLine?.color).toBe('#3b82f6');
+      expect(valLine?.color).toBe('#f23645');
       expect(valLine?.lineStyle).toBe('Dashed');
     });
 
