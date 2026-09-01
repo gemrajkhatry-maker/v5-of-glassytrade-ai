@@ -54,12 +54,18 @@ def _resolve_model_path(raw: str | None) -> str | None:
 def build_live_advisor(emit_fn) -> "LLMAdvisor | None":
     """Build an LLMAdvisor from MLX_* env vars for LIVE/Paper trading.
 
-    Returns a rule-based advisor (model_path=None) when the env vars are
-    unset or their paths don't exist. Never raises: a missing/broken MLX
-    install must not block engine startup.
+    Returns None when LLM_ADVISOR_ENABLED is false/0 or when disabled,
+    completely bypassing model loading and background worker threads.
     """
     if _ADVISOR_FACTORY is not None:
         return _ADVISOR_FACTORY(emit_fn)
+
+    # Check if advisor is explicitly disabled
+    enabled_val = os.getenv("LLM_ADVISOR_ENABLED", "false").strip().lower()
+    if enabled_val in ("0", "false", "no", "disable", "disabled"):
+        logger.info("LLM advisor is DISABLED (LLM_ADVISOR_ENABLED=%s)", enabled_val)
+        return None
+
     try:
         from quant.llm.advisor import LLMAdvisor
 
