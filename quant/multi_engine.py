@@ -260,6 +260,8 @@ class QuantCoordinator:
             starting_equity=float(self.config.get("starting_equity", float(INITIAL_CAPITAL))),
         )
         self.started = False
+        # Reconciliation service for startup recovery
+        self.reconciliation = None  # Set after broker is available
 
     def start(self) -> None:
         with self._lifecycle_lock:

@@ -65,6 +65,8 @@ from quant.execution.risk import SessionRisk
 from quant.persistence import Journal
 from quant.state import StateProjector, _epoch_to_iso
 from quant.bars import DEFAULT_INTERVAL_SEC
+from quant.event_store import EventStore
+from quant.state_machine import EngineState
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +170,11 @@ class QuantEngine:
         # signals/positions on this (option) engine. Futures-scale prices on
         # an option instrument produce crore-scale phantom P&L.
         self._last_option_close: float = 0.0
+        
+        # Event sourcing: EventStore is the source of truth
+        self.event_store = EventStore()
+        # State is derived from events (cached for performance)
+        self.state = EngineState(symbol=symbol)
 
         if self._underlying_gateway is not None:
             underlying_symbol = (
