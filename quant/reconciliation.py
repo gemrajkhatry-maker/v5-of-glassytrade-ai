@@ -33,6 +33,14 @@ class BrokerInterface(Protocol):
 
 
 @dataclass(frozen=True)
+class PeriodicReconciliationResult:
+    """Result of periodic state-vs-event-store reconciliation."""
+    has_drift: bool
+    risk_event_emitted: bool = False
+    discrepancies: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ReconciliationResult:
     """Result of reconciliation."""
     can_trade: bool

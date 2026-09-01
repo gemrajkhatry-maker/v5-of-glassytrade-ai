@@ -291,6 +291,13 @@ class QuantCoordinator:
             self._feed.set_symbols(symbols)
             for symbol in symbols:
                 self._spawn_engine(symbol)
+            # Startup reconciliation: rebuild each engine's state from its event store
+            with self._lock:
+                for eng in self._engines.values():
+                    try:
+                        eng.startup_reconcile()
+                    except Exception:
+                        logger.exception("startup_reconcile failed for %s", eng.symbol)
             self._start_eod_watchdog()
             self.started = True
 
@@ -697,6 +704,26 @@ class QuantCoordinator:
             )
         return drift
 
+    def _periodic_state_reconcile(self) -> None:
+        """Periodic state-vs-event-store reconciliation across all engines.
+
+        Delegates to each engine's ``periodic_reconcile()`` (runtime.QuantEngine).
+        Logs drift and risk-event emissions so ops can detect state desync
+        between the in-memory EngineState and the EventStore journal.
+        """
+        with self._lock:
+            engines = list(self._engines.values())
+        for eng in engines:
+            try:
+                result = eng.periodic_reconcile()
+                if result.has_drift:
+                    logger.warning(
+                        "PERIODIC RECONCILE %s: drift detected — %s",
+                        eng.symbol, "; ".join(result.discrepancies),
+                    )
+            except Exception:
+                logger.debug("periodic_reconcile skipped for %s", eng.symbol)
+
     def _eod_watchdog_loop(self, poll_sec: float = 30.0) -> None:
         """Background EOD square-off and dynamic symbol rotation watchdog.
 
@@ -711,6 +738,7 @@ class QuantCoordinator:
         )
         rotation_counter = 0
         recon_counter = 0
+        periodic_recon_counter = 0
         while not self._stop.is_set():
             try:
                 self.eod_square_off()
@@ -735,6 +763,15 @@ class QuantCoordinator:
                     self._intraday_reconcile()
                 except Exception:
                     logger.exception("Intraday reconcile watchdog: pass failed")
+
+            # Periodic state-vs-event-store reconciliation, every ~120s (every 4th pass).
+            periodic_recon_counter += 1
+            if periodic_recon_counter >= 4:
+                periodic_recon_counter = 0
+                try:
+                    self._periodic_state_reconcile()
+                except Exception:
+                    logger.exception("Periodic state reconcile watchdog: pass failed")
 
             self._stop.wait(poll_sec)
         logger.info("Coordinator watchdog stopped")

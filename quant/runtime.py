@@ -67,6 +67,7 @@ from quant.state import StateProjector, _epoch_to_iso
 from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.event_store import EventStore
 from quant.state_machine import EngineState
+from quant.reconciliation import PeriodicReconciliationResult
 
 logger = logging.getLogger(__name__)
 
@@ -1241,6 +1242,72 @@ class QuantEngine:
                 f"on market {self._market!r}"
             )
         return underlying
+
+    def startup_reconcile(self) -> None:
+        """Rebuild state from event store on startup.
+
+        Replays all events in the event store to reconstruct the canonical
+        EngineState. Called once before trading resumes after a restart.
+        """
+        rebuilt = self.event_store.fold()
+        self.state = EngineState(
+            symbol=self.symbol,
+            sequence=rebuilt.sequence,
+            last_bar=rebuilt.last_bar,
+            position=rebuilt.position,
+            pyramids=rebuilt.pyramids,
+            risk=rebuilt.risk,
+            last_close_bar=rebuilt.last_close_bar,
+        )
+
+    def periodic_reconcile(self) -> PeriodicReconciliationResult:
+        """Periodic reconciliation between cached state and event store.
+
+        Compares the in-memory EngineState against a fresh fold of the
+        EventStore. Detects drift (e.g., state desync, risk halt mismatch)
+        and emits a RiskUpdated event when a discrepancy is found.
+
+        Returns:
+            PeriodicReconciliationResult with drift details.
+        """
+        canonical = self.event_store.fold()
+        discrepancies: list[str] = []
+        risk_event_emitted = False
+
+        # Position drift
+        if canonical.position != self.state.position:
+            discrepancies.append(
+                f"position drift: state={self.state.position} vs store={canonical.position}"
+            )
+
+        # Risk drift (e.g., halt state mismatch)
+        if canonical.risk != self.state.risk:
+            discrepancies.append(
+                f"risk drift: state_halted={self.state.risk.halted} "
+                f"vs store_halted={canonical.risk.halted}"
+            )
+            # Emit RiskUpdated so downstream consumers see the correction.
+            # Convert state_machine.RiskState -> execution.risk.RiskState
+            # (the projector expects consecutive_losses/equity/cushion_tier).
+            from quant.execution import risk as _risk_mod
+            exec_risk = _risk_mod.RiskState(
+                daily_pnl=canonical.risk.daily_pnl,
+                trades_today=canonical.risk.trades_today,
+                halted=canonical.risk.halted,
+                halt_reason=canonical.risk.halt_reason,
+                consecutive_losses=0,
+                risk_per_trade_pct=0.005,
+                equity=0.0,
+                cushion_tier="CONSERVATIVE",
+            )
+            self._emit(RiskUpdated(symbol=self.symbol, time="", risk=exec_risk))
+            risk_event_emitted = True
+
+        return PeriodicReconciliationResult(
+            has_drift=bool(discrepancies),
+            risk_event_emitted=risk_event_emitted,
+            discrepancies=tuple(discrepancies),
+        )
 
     @staticmethod
     def _depth_to_book(depth: dict) -> OrderBook | None:
