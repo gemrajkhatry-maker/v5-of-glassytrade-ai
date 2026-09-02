@@ -259,6 +259,13 @@ class QuantCoordinator:
         self._portfolio_risk = PortfolioRiskAuthority(
             starting_equity=float(self.config.get("starting_equity", float(INITIAL_CAPITAL))),
         )
+        # One capital book is shared by every LiveOMS. Per-engine Portfolio
+        # instances otherwise each report the full account balance and allow
+        # aggregate sizing/exposure to diverge from the coordinator authority.
+        from quant.contracts.aggregates import Portfolio
+        self._portfolio = Portfolio.create_default(
+            capital=self.config.get("starting_equity", float(INITIAL_CAPITAL))
+        )
         self.started = False
         # Reconciliation service for startup recovery
         self.reconciliation = None  # Set after broker is available
@@ -1045,8 +1052,7 @@ class QuantCoordinator:
         # The engine default is PaperOMS (set in QuantEngine.__init__); we
         # override only when the coordinator has a wired broker.
         if self.config.get("live_oms_enabled") and self.broker is not None:
-            from quant.contracts.aggregates import Portfolio
-            portfolio = Portfolio()
+            portfolio = self._portfolio
             lot_size = self._resolve_lot_size(symbol)
             live_oms = LiveOMS(
                 broker=self.broker,
