@@ -392,6 +392,13 @@ class DhanBrokerAdapter(IBroker):
                 trigger_price=0.0,
                 product_type="INTRADAY",
             )
+            # Stable logical id lets broker-side correlation deduplicate a
+            # repeated close request after a lost response.
+            setattr(
+                order,
+                "user_order_id",
+                self._close_order_id(clean_symbol, side, quantity),
+            )
 
             placed_order = broker.place_order(order)
             placed_order_id = str(getattr(placed_order, "order_id", ""))
@@ -605,6 +612,17 @@ class DhanBrokerAdapter(IBroker):
         return OrderType.MARKET
 
     @staticmethod
+    def _close_order_id(
+        symbol: str, side: str, quantity: int, *, fallback: bool = False
+    ) -> str:
+        """Build a stable broker correlation id for one logical close."""
+        prefix = "close-fallback" if fallback else "close"
+        normalized = "".join(
+            char if char.isalnum() else "_" for char in str(symbol).upper()
+        ).strip("_")
+        return f"{prefix}:{normalized}:{side.upper()}:{int(quantity)}"[:36]
+
+    @staticmethod
     def _marketable_limit_price(price: float, is_buy: bool, tolerance_pct: float) -> float:
         """Marketable limit price bounded by ``tolerance_pct`` (C7).
 
@@ -657,6 +675,13 @@ class DhanBrokerAdapter(IBroker):
                 price=0.0,
                 trigger_price=0.0,
                 product_type="INTRADAY",
+            )
+            setattr(
+                fb_order,
+                "user_order_id",
+                self._close_order_id(
+                    symbol, side, quantity, fallback=True
+                ),
             )
             placed = broker.place_order(fb_order)
             placed_id = str(getattr(placed, "order_id", ""))
