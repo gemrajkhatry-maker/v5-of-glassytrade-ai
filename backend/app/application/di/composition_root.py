@@ -155,6 +155,8 @@ def _create_quant_coordinator(container: DIContainer, config: "Configuration"):
         # C2: the configured per-trade risk must reach the engines' SessionRisk.
         # Omitting it made every engine fall back to an unsafe default.
         "risk_per_trade_pct": float(getattr(config.risk, "risk_per_trade_pct", 0.005)),
+        "max_daily_loss_pct": float(getattr(config.risk, "max_daily_loss_pct", 0.02)),
+        "max_consecutive_losses": int(getattr(config.risk, "max_consecutive_losses", 3)),
     }
     logger.info(
         "QuantCoordinator config: underlyings=%s n=%d exchange=%s expiry_index=%d "

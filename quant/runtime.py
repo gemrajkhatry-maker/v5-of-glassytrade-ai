@@ -109,6 +109,8 @@ class QuantEngine:
         max_trades_per_session: int = 6,
         advisor=None,
         risk_per_trade_pct: float | None = None,
+        max_daily_loss_pct: float = 0.02,
+        max_consecutive_losses: int = 3,
     ) -> None:
         self._gateway = gateway
         self._underlying_gateway = underlying_gateway
@@ -249,10 +251,15 @@ class QuantEngine:
         # _session_date is always None at __init__ time (set on first bar), so
         # we pass None here and SessionRisk._today() fills it correctly.
         base_risk = risk_per_trade_pct if risk_per_trade_pct is not None else 0.005
-        self._risk = SessionRisk(storage=self._session_levels, symbol=self.symbol,
-                                 portfolio_risk=self._portfolio_risk,
-                                 max_trades_per_session=max_trades_per_session,
-                                 base_risk_pct=base_risk)
+        self._risk = SessionRisk(
+            storage=self._session_levels,
+            symbol=self.symbol,
+            portfolio_risk=self._portfolio_risk,
+            max_trades_per_session=max_trades_per_session,
+            max_daily_loss_pct=max_daily_loss_pct,
+            max_consecutive_losses=max_consecutive_losses,
+            base_risk_pct=base_risk,
+        )
         self._bus = EventBus()
         self._projector = StateProjector(interval_sec=interval_seconds)
         self._journal_subscribed = False

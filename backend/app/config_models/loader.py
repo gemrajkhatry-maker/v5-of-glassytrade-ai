@@ -212,6 +212,14 @@ def load_config(
     # STEP 5: Parse into typed objects
     sys_data = merged.get("system", {})
     risk_data = merged.get("risk", {})
+    if env_name == "live":
+        # Live safety limits are environment policy, not strategy preferences.
+        # Re-apply the live block after strategy merging so a strategy file
+        # cannot raise risk or position limits for a real-money process.
+        risk_data = {
+            **risk_data,
+            **env_data.get("risk", {}),
+        }
 
     exchanges = {}
     for ex_name, ex_data in merged.get("exchanges", {}).items():
