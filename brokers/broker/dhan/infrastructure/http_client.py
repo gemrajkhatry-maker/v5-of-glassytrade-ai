@@ -492,6 +492,11 @@ class DhanHttpClient(IHttpClient):
                 
             except DhanNetworkError as e:
                 last_error = e
+                # ponytail: non-idempotent requests cannot be replayed after a
+                # transport failure because the broker may have accepted them.
+                # Callers must reconcile the logical order instead.
+                if method not in {"GET", "HEAD", "OPTIONS", "PUT", "DELETE"}:
+                    raise
                 if attempt < self._retry_config.max_retries:
                     delay = self._retry_config.get_delay(attempt)
                     logger.warning(
@@ -504,6 +509,14 @@ class DhanHttpClient(IHttpClient):
                     
             except aiohttp.ClientError as e:
                 last_error = e
+                # POST/PATCH requests are ambiguous after a network error;
+                # never submit the same logical order a second time.
+                if method not in {"GET", "HEAD", "OPTIONS", "PUT", "DELETE"}:
+                    raise DhanConnectionError(
+                        message=f"Non-idempotent request outcome unknown: {e}",
+                        code=ERROR_CODE_CONNECTION_ERROR,
+                        details={"url": url, "method": method, "error": str(e)},
+                    ) from e
                 if attempt < self._retry_config.max_retries:
                     delay = self._retry_config.get_delay(attempt)
                     logger.warning(

@@ -18,7 +18,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
+from dataclasses import fields, is_dataclass
+from enum import Enum
 from typing import Any, Callable, TypeVar
 
 from quant.events import Event
@@ -30,6 +33,39 @@ E = TypeVar("E", bound=Event)
 # Genesis secret — in production, load from env or secure key store
 # This ensures checksums cannot be forged without the secret
 _GENESIS_SECRET = os.environ.get("EVENT_STORE_SECRET", "glassytrade-genesis-secret-2026")
+logger = logging.getLogger(__name__)
+
+
+def _json_value(value: Any) -> Any:
+    """Return a deterministic JSON-compatible representation of a payload."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Enum):
+        return value.value
+    if is_dataclass(value):
+        return {
+            field.name: _json_value(getattr(value, field.name))
+            for field in fields(value)
+        }
+    if isinstance(value, dict):
+        return {
+            str(key): _json_value(item)
+            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_value(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        # Sets have no stable iteration order; sort their serialized values so
+        # the checksum is reproducible across processes.
+        serialized = [_json_value(item) for item in value]
+        return sorted(serialized, key=lambda item: json.dumps(item, sort_keys=True))
+    if hasattr(value, "__dict__"):
+        return {
+            str(key): _json_value(item)
+            for key, item in sorted(vars(value).items())
+            if not key.startswith("__")
+        }
+    return repr(value)
 
 
 class EventStore:
@@ -59,14 +95,17 @@ class EventStore:
             Sequence number (1-based, monotonic)
         """
         self._sequence += 1
+        sequence = self._sequence
         self._events.append(event)
         # Compute and store HMAC checksum (tamper-evident)
         prev_checksum = self._checksums[-1] if self._checksums else "GENESIS"
-        checksum = self._compute_checksum(prev_checksum, event)
+        checksum = self._compute_checksum(prev_checksum, event, sequence)
         self._checksums.append(checksum)
         return self._sequence
 
-    def _compute_checksum(self, prev_checksum: str, event: Event) -> str:
+    def _compute_checksum(
+        self, prev_checksum: str, event: Event, sequence: int | None = None
+    ) -> str:
         """Compute HMAC-SHA256 checksum of previous checksum + full event payload.
 
         Uses HMAC with a secret key so checksums cannot be forged
@@ -76,7 +115,7 @@ class EventStore:
         data = json.dumps(
             {
                 "prev": prev_checksum,
-                "sequence": self._sequence,
+                "sequence": self._sequence if sequence is None else sequence,
                 "payload": payload,
             },
             sort_keys=True,
@@ -100,21 +139,18 @@ class EventStore:
             return False  # Length mismatch indicates tampering
 
         prev_checksum = "GENESIS"
-        for i, event in enumerate(self._events):
-            expected = self._compute_checksum(prev_checksum, event)
-            if self._checksums[i] != expected:
+        for i, event in enumerate(self._events, 1):
+            expected = self._compute_checksum(prev_checksum, event, i)
+            if self._checksums[i - 1] != expected:
                 return False  # Checksum mismatch indicates tampering
             prev_checksum = expected
         return True
 
     @staticmethod
     def _event_to_dict(event: Event) -> dict[str, Any]:
-        """Convert event to dictionary."""
-        from dataclasses import asdict, is_dataclass
-
-        if is_dataclass(event):
-            return asdict(event)
-        return {"repr": repr(event)}
+        """Convert an event and nested payloads to deterministic JSON data."""
+        value = _json_value(event)
+        return value if isinstance(value, dict) else {"value": value}
 
     def subscribe(
         self,
@@ -242,7 +278,7 @@ class EventStore:
             event = self._dict_to_event(event_dict)
             if event is not None:
                 self._events.append(event)
-                checksum = self._compute_checksum(prev_checksum, event)
+                checksum = self._compute_checksum(prev_checksum, event, self._sequence)
                 self._checksums.append(checksum)
                 prev_checksum = checksum
 
@@ -338,12 +374,9 @@ class EventStore:
 
     @staticmethod
     def _event_to_dict(event: Event) -> dict[str, Any]:
-        """Convert event to dictionary."""
-        from dataclasses import asdict, is_dataclass
-
-        if is_dataclass(event):
-            return asdict(event)
-        return {"repr": repr(event)}
+        """Convert an event and nested payloads to deterministic JSON data."""
+        value = _json_value(event)
+        return value if isinstance(value, dict) else {"value": value}
 
     def __len__(self) -> int:
         return len(self._events)
