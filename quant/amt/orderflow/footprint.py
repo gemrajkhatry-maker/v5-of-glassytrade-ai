@@ -320,10 +320,10 @@ def detect_absorption(candle: FootprintCandle, price_change_pct: float) -> dict 
     }
 
 
-def detect_contested_zone(candles: list[FootprintCandle], window: int = 5) -> bool:
-    """Detect contested zone: both BUY and SELL stacked imbalances in recent candles.
+def detect_contested_zone(candles: list[FootprintCandle], window: int = 2) -> bool:
+    """Detect contested zone: both BUY and SELL stacked imbalances in the latest active window.
 
-    When both sides show stacked imbalances, the market is contested —
+    When both sides show opposing stacked imbalances in recent candles, the market is contested —
     neither side has control. Best action is FLAT.
     """
     recent = candles[-window:] if len(candles) >= window else candles
