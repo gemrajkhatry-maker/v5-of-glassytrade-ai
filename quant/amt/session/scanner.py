@@ -494,6 +494,15 @@ class OptionScannerService:
                     logger.error("scan_top_n failed for %s: %s", u, e)
 
         per_u = self._rank_per_underlying(results, preferred_option_type, top_per_underlying)
+
+        # Ensure every underlying root has active contracts represented
+        if not big_move_mode:
+            for u in underlyings:
+                if u not in per_u or not per_u[u]:
+                    fb = self._fallback_atm([u], expiry_index, chains=cached_chains)
+                    if fb:
+                        per_u[u] = fb[:max(1, int(top_per_underlying))]
+
         final = self._round_robin(n, per_u, underlying_priority)
 
         logger.info(
@@ -502,9 +511,7 @@ class OptionScannerService:
             [r.underlying for r in final],
         )
 
-        # If no contracts found (no momentum), return ATM contracts for monitoring.
-        # Big-move mode is a strict filter: expensive premium means "no setup",
-        # not "show me ATM monitors anyway" — those would get traded.
+        # If still no contracts found, return ATM contracts for all underlyings
         if not final and not big_move_mode:
             final = self._fallback_atm(underlyings, expiry_index, chains=cached_chains)
 
