@@ -15,24 +15,28 @@ Payload: a single Dhan-shaped packet or a list of them:
 from __future__ import annotations
 
 import logging
-import os
 
 from fastapi import APIRouter, HTTPException, Request
+
+from app.shared.mode import resolve_runtime_mode
 
 router = APIRouter(tags=["testing"])
 logger = logging.getLogger(__name__)
 
 
-_ALLOWED_ENVS = {"development", "paper"}
+_ALLOWED_ENVS = {"development"}
 
 
 def _env_allows() -> tuple[bool, str]:
-    """Injection is for validating the paper loop; live mode stays blocked."""
-    env = os.environ.get("GLASSYTRADE_ENV", "").strip().lower()
-    if env not in _ALLOWED_ENVS:
+    """Allow synthetic feed injection only in development mode."""
+    try:
+        mode = resolve_runtime_mode()
+    except ValueError as exc:
+        return False, str(exc)
+    if mode not in _ALLOWED_ENVS:
         return False, (
-            f"tick injection requires GLASSYTRADE_ENV in {sorted(_ALLOWED_ENVS)} "
-            f"(current: {env or 'unset'})"
+            f"tick injection requires development runtime mode "
+            f"(current: {mode})"
         )
     return True, ""
 

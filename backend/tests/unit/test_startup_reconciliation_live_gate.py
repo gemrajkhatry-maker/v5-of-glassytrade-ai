@@ -54,6 +54,7 @@ def test_live_mode_refuses_boot_on_reconciliation_failure(monkeypatch):
     from app.main import create_application
 
     monkeypatch.setenv("GLASSYTRADE_ENV", "live")
+    monkeypatch.setenv("TRADING_MODE", "live")
     _patch_reconcile_to_raise(monkeypatch)
     _patch_live_broker_off_network(monkeypatch)
 

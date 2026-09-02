@@ -54,6 +54,7 @@ from quant.contracts.ports.broker import IBroker
 from quant.contracts.ports.storage import IStorage
 from quant.contracts.ports.market_data import IMarketData
 from app.domain.ops.startup_reconciliation import StartupReconciliation
+from app.shared.mode import resolve_runtime_mode
 
 
 def _build_startup_contracts(
@@ -173,7 +174,8 @@ def create_application() -> FastAPI:
     mark_startup_started()
     begin_phase("application_init")
     import os  # local: startup-only env read, keeps module import surface unchanged
-    
+    runtime_mode = resolve_runtime_mode()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator:
         """Application lifespan: startup and shutdown."""
@@ -249,7 +251,7 @@ def create_application() -> FastAPI:
             logger.error("Option scanner failed: %s — using default underlyings", e, exc_info=True)
             end_phase("option_scanner", "failed", str(e))
             mark_startup_failed("config", str(e))
-            if os.getenv("GLASSYTRADE_ENV", "paper").lower() == "live":
+            if runtime_mode == "live":
                 # In live mode, falling back to configured underlyings can
                 # spawn instruments that were never validated by the scanner.
                 # Refuse startup instead of silently changing the traded book.
@@ -389,6 +391,7 @@ def create_application() -> FastAPI:
         market_data = container.resolve(IMarketData)
 
         # Store in app state for backward compatibility
+        app.state.runtime_mode = runtime_mode
         app.state.container = container
         app.state.graph = container  # Alias for backward compatibility
         app.state.service_graph = container
@@ -410,7 +413,7 @@ def create_application() -> FastAPI:
                 f"db={reconciliation_result.db_positions} broker={reconciliation_result.broker_positions}",
             )
             if (
-                os.getenv("GLASSYTRADE_ENV", "paper").lower() == "live"
+                runtime_mode == "live"
                 and reconciliation_result.db_positions != reconciliation_result.broker_positions
             ):
                 # ponytail: refuse to boot on broker/DB position mismatch in live.
@@ -425,7 +428,7 @@ def create_application() -> FastAPI:
             record_startup_reconciliation(None)
             end_phase("startup_reconciliation", "failed", str(e))
             mark_startup_failed("startup_reconciliation", str(e))
-            if os.getenv("GLASSYTRADE_ENV", "paper").lower() == "live":
+            if runtime_mode == "live":
                 # ponytail: refuse to boot on unknown broker state in live mode.
                 # Raising kills startup; the operator must fix reconciliation first.
                 raise RuntimeError(
