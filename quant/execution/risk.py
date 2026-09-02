@@ -258,16 +258,18 @@ class SessionRisk:
                     self._starting_equity
                     + float(getattr(self._portfolio_risk, "realized_pnl", 0.0))
                 )
-            # If base_risk_pct is aggressive (>= 5%), size by deploying ~95% of available capital on premium
+            # If base_risk_pct is aggressive (>= 5%), size by deploying up to 95% of available capital on premium
             if self._base_risk_pct >= 0.05:
-                target_capital = sizing_equity * self._base_risk_pct
+                open_deployed = float(getattr(self._portfolio_risk, "open_risk", 0.0)) if self._portfolio_risk is not None else 0.0
+                available_capital = max(0.0, (sizing_equity * self._base_risk_pct) - open_deployed)
+                target_capital = available_capital if available_capital > (sizing_equity * 0.1) else (sizing_equity * self._base_risk_pct)
                 if is_expiry:
                     target_capital *= 0.5
                 cost_per_unit = entry if entry > 0 else abs(entry - sl)
                 if lot_size and lot_size > 1.0:
                     cost_per_lot = cost_per_unit * lot_size
                     lots = int(target_capital // cost_per_lot) if cost_per_lot > 0 else 0
-                    if lots == 0 and cost_per_lot > 0 and target_capital >= cost_per_lot * 0.5:
+                    if lots == 0 and cost_per_lot > 0 and target_capital >= cost_per_lot * 0.3:
                         lots = 1
                     if max_lots is not None and max_lots > 0:
                         lots = min(lots, max_lots)
