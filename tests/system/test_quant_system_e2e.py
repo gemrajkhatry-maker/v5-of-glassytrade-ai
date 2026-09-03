@@ -2,8 +2,9 @@
 (AGGRESSION/LONG) -> WS ``auction`` DTO via view_state_to_ws.
 
 The current architecture: QuantEngine aggregates ticks into bars, folds them
-through AuctionCoordinator (Triple-A state machine), and StateProjector
-serializes each AuctionState into the frontend's ``auction`` contract.
+through AuctionCoordinator (Triple-A state machine), and the EventStore fold
++ project_state() path serializes each AuctionState into the frontend's
+``auction`` contract.
 """
 
 import pathlib
@@ -64,9 +65,13 @@ def test_dto_has_ws_amt_contract_keys():
     eng.run()
     from quant.ws_adapter import view_state_to_ws
 
-    last = view_state_to_ws(eng.projector.snapshot(SYMBOL))
+    from quant.state import project_state
+    from dataclasses import replace
+    vs = project_state(eng.event_store.fold())
+    vs = replace(vs, amt=eng.latest_amt)
+    last = view_state_to_ws(vs)
     amt = last["amt"]
-    assert amt is not None, "projector must carry the final amt state"
+    assert amt is not None, "engine must carry the final amt state"
     assert {"poc", "valueAreaHigh", "valueAreaLow", "marketState", "sessionVwap", "profile"} <= set(amt)
 
 

@@ -61,8 +61,7 @@ def run_sanity():
     time.sleep(0.3)
     
     tracer.log("STATE_CHECK", "Extracting integrated state...")
-    projector = engine.projector
-    state = projector.snapshot(symbol)
+    state = engine.live_cache.snapshot(symbol)
     
     print("\n" + "="*50)
     print("      INTEGRATED QA PIPELINE ASSERTIONS      ")
@@ -72,12 +71,12 @@ def run_sanity():
     print(f"\n1. EXECUTION ORDER:")
     print("  [PASS] Data Ingestion -> AMT Analysis -> Decision Logic executed in strict deterministic order.")
         
-    # 2. State Projector
-    print(f"\n2. STATE PROJECTOR:")
+    # 2. Live Quote Cache
+    print(f"\n2. LIVE QUOTE CACHE:")
     print(f"  Symbol: {state.symbol}")
     print(f"  LTP: {state.ltp}")
     if state.ltp == 24540.0:
-        print("  [PASS] State projector accurately recorded live quotes.")
+        print("  [PASS] Live quote cache accurately recorded live quotes.")
     else:
         print(f"  [FAIL] Expected LTP 24540.0 but got {state.ltp}")
         

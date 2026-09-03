@@ -24,14 +24,15 @@ import pytest
 
 from quant.execution.order import Fill, Order, Position
 from quant.events import DepthUpdated
-from quant.state import StateProjector
+from quant.event_store import EventStore
+from quant.state import project_state, _decision_to_view
 from quant.ws_adapter import view_state_to_ws
 from quant.ws_contract import WS_SNAPSHOT_KEYS, WSPortfolio, WSSnapshot
+from dataclasses import replace
 
 
-def _projector_with_everything() -> StateProjector:
-    """Fold a representative event set so every ViewState field is non-default."""
-    proj = StateProjector()
+def _view_state_with_everything():
+    """Build a ViewState with every field non-default via fold + overrides."""
     from quant.bars import Bar
     from quant.decision.decision_service import QuantDecision
     from quant.decision.signal_builder import Signal
@@ -44,32 +45,41 @@ def _projector_with_everything() -> StateProjector:
     )
     from quant.execution.risk import RiskState
 
+    store = EventStore()
     bar = Bar(time="2026-08-21T09:15:00+05:30", open=100.0, high=101.0,
               low=99.0, close=100.5, volume=10)
-    proj.on_event(BarClosed(symbol="S", time=bar.time, bar=bar))
+    store.append(BarClosed(symbol="S", time=bar.time, bar=bar))
     sig = Signal(type="LONG", reason="All gates passed", entry=100.5, sl=99.0,
                  tp=102.5, rr=2.0, model_label="Triple-A", symbol="S",
                  timestamp=bar.time)
     dec = QuantDecision(approved=True, signal=sig, reason="Triple-A",
                         phase="AGGRESSION", gate_results=(), block_reasons=(),
                         model_label="Triple-A")
-    proj.on_event(DecisionProduced(symbol="S", time=bar.time, decision=dec))
+    store.append(DecisionProduced(symbol="S", time=bar.time, decision=dec))
     pos = Position(order=Order(sig, 10), open_price=100.5, open_time=bar.time, size=10,
                    _id="2026-08-21T09:15:00+05:30")
-    proj.on_event(PositionOpened(symbol="S", time=bar.time, position=pos))
-    proj.on_event(RiskUpdated(symbol="S", time=bar.time,
-                              risk=RiskState(daily_pnl=0.0,
-                                             consecutive_losses=0,
-                                             halted=False, halt_reason="",
-                                             risk_per_trade_pct=0.005)))
-    proj.on_event(AmtUpdated(symbol="S", time=bar.time, amt={"poc": 100.2}))
-    proj.on_event(DepthUpdated(symbol="S", time=bar.time,
-                               depth={"bids": [], "asks": []}))
-    return proj
+    store.append(PositionOpened(symbol="S", time=bar.time, position=pos))
+    store.append(RiskUpdated(symbol="S", time=bar.time,
+                             risk=RiskState(daily_pnl=0.0,
+                                            consecutive_losses=0,
+                                            halted=False, halt_reason="",
+                                            risk_per_trade_pct=0.005)))
+    store.append(AmtUpdated(symbol="S", time=bar.time, amt={"poc": 100.2}))
+    store.append(DepthUpdated(symbol="S", time=bar.time,
+                              depth={"bids": [], "asks": []}))
+    vs = project_state(store.fold())
+    # Extract latest values from the trace (engine does this inline)
+    amt, qd = None, None
+    for e in store.get_all():
+        if isinstance(e, AmtUpdated):
+            amt = e.amt
+        elif isinstance(e, DecisionProduced):
+            qd = _decision_to_view(e.decision)
+    return replace(vs, amt=amt, quant_decision=qd, depth={"bids": [], "asks": []})
 
 
 def test_adapter_emits_exact_contract_keys():
-    ws = view_state_to_ws(_projector_with_everything().snapshot("S"))
+    ws = view_state_to_ws(_view_state_with_everything())
     assert set(ws) == set(WS_SNAPSHOT_KEYS), (
         "ws_adapter drifted from WS_SNAPSHOT_KEYS: "
         f"extra={set(ws) - set(WS_SNAPSHOT_KEYS)} "
@@ -94,7 +104,7 @@ def test_wssnapshot_to_dict_emits_exact_contract_keys():
 def test_both_producers_agree_on_shape():
     """The two independent producers must produce identical key sets AND the
     same JSON-serializable types for shared keys (structural parity)."""
-    vs = view_state_to_ws(_projector_with_everything().snapshot("S"))
+    vs = view_state_to_ws(_view_state_with_everything())
     d = WSSnapshot(
         _symbol="S",
         portfolio=WSPortfolio(balance=1_000_000.0, equity=1_000_000.0,
@@ -110,7 +120,7 @@ def test_golden_fixture_matches_current_contract():
     """Pin the exact wire shape. Intentional contract changes must regenerate
     this fixture in the same commit (python -m tests.quant.regen_ws_fixture).
     Unintentional drift fails here."""
-    ws = view_state_to_ws(_projector_with_everything().snapshot("S"))
+    ws = view_state_to_ws(_view_state_with_everything())
     actual = json.dumps(ws, sort_keys=True, indent=1, default=str)
     if not GOLDEN_FIXTURE.exists():
         GOLDEN_FIXTURE.write_text(actual)

@@ -1,7 +1,7 @@
 """Structured block_reasons on every emitted decision (Task 11).
 
 When the gate pipeline rejects a setup, the emitted ``DecisionProduced`` (and
-the projector's ``quantDecision`` view) must enumerate every failed gate as
+the engine's ``latest_quant_decision`` view) must enumerate every failed gate as
 ``"NAME: reason"`` strings via ``GateResult.name`` — not just the first
 failing gate's reason.
 """
@@ -51,11 +51,11 @@ def test_block_reasons_use_symbolic_gate_names():
     )
 
 
-def test_block_reasons_reach_projector_view():
+def test_block_reasons_reach_engine_quant_decision_view():
     eng = QuantEngine(SyntheticGateway(_blocked_ticks()), "SYM", interval_seconds=1)
     eng.run()
 
-    view = eng.projector.snapshot("SYM").quant_decision
+    view = eng.latest_quant_decision
     assert view is not None
     br = view["blockReasons"]
     assert isinstance(br, list) and br

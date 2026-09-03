@@ -63,7 +63,7 @@ from quant.execution.oms import PaperOMS
 from quant.execution.ports import IOMS
 from quant.execution.risk import SessionRisk
 from quant.persistence import Journal
-from quant.state import StateProjector, _epoch_to_iso
+from quant.state import LiveQuoteCache, _decision_to_view, _epoch_to_iso
 from quant.bars import DEFAULT_INTERVAL_SEC
 from quant.event_store import EventStore
 from quant.state_machine import EngineState
@@ -281,7 +281,14 @@ class QuantEngine:
             base_risk_pct=base_risk,
         )
         self._bus = EventBus()
-        self._projector = StateProjector(interval_sec=interval_seconds)
+        self._live = LiveQuoteCache(interval_sec=interval_seconds)
+        # Latest event-derived values for the WS snapshot (amt, decisions).
+        # These are updated inline by _emit() so the coordinator can read
+        # them without replaying the event trace.
+        self._latest_amt: dict | None = None
+        self._latest_quant_decision: dict | None = None
+        self._latest_agent_decision: dict | None = None
+        self._latest_depth: dict | None = None
         self._journal_subscribed = False
         self._journal = None
         if journal_path:
@@ -610,7 +617,7 @@ class QuantEngine:
 
             # Per-tick live LTP/OI/depth and real-time forming live candle —
             # the option's own forming candle is self._aggregator.current_bar
-            self._projector.on_quote(
+            self._live.on_quote(
                 self.symbol, tick, current_bar=self._aggregator.current_bar
             )
             if tick.depth is not None:
@@ -622,8 +629,24 @@ class QuantEngine:
         return tuple(self._trace)
 
     @property
-    def projector(self) -> StateProjector:
-        return self._projector
+    def live_cache(self) -> LiveQuoteCache:
+        return self._live
+
+    @property
+    def latest_amt(self) -> dict | None:
+        return self._latest_amt
+
+    @property
+    def latest_quant_decision(self) -> dict | None:
+        return self._latest_quant_decision
+
+    @property
+    def latest_agent_decision(self) -> dict | None:
+        return self._latest_agent_decision
+
+    @property
+    def latest_depth(self) -> dict | None:
+        return self._latest_depth
 
     def _release_partial_reserves(self, pm: PositionManager, remaining) -> None:
         """Fractional portfolio-risk reserve release after a tiered partial
@@ -730,7 +753,7 @@ class QuantEngine:
                 self.symbol, no_trade_reason, self._risk.state().trades_today,
             )
             # Defect 2 fix: emit an explicit HALTED DecisionProduced so the
-            # StateProjector clears any stale approved/ENTER state that was
+            # WS snapshot clears any stale approved/ENTER state that was
             # carried over from before the halt was triggered.
             from quant.decision.decision_service import QuantDecision
             halted_decision = QuantDecision(
@@ -1269,7 +1292,15 @@ class QuantEngine:
                     self._recent_decisions[-1] = entry
             self._bus.publish(event)
             self._trace.append(event)
-            self._projector.on_event(event)
+            # Track latest event-derived values for the WS snapshot
+            if isinstance(event, AmtUpdated):
+                self._latest_amt = event.amt
+            elif isinstance(event, DecisionProduced):
+                self._latest_quant_decision = _decision_to_view(event.decision)
+            elif isinstance(event, AgentDecisionProduced):
+                self._latest_agent_decision = event.decision
+            elif isinstance(event, DepthUpdated):
+                self._latest_depth = event.depth
             # Event sourcing: append to EventStore and fold into state
             self.event_store.append(event)
             self.state = apply_event(self.state, event)

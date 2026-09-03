@@ -37,7 +37,8 @@ from quant.events import (
     PositionReduced,
 )
 from quant.runtime import QuantEngine
-from quant.state import StateProjector
+from quant.event_store import EventStore
+from quant.state import project_state, _decision_to_view
 from quant.ws_adapter import view_state_to_ws
 
 logger = logging.getLogger(__name__)
@@ -235,24 +236,27 @@ def test_no_fabricated_bars():
     assert all(isinstance(a, dict) and "poc" in a for a in amts.values())
 
 
-def test_projector_never_emits_zero_volume_or_fabricated_prices():
+def test_fold_never_emits_zero_volume_or_fabricated_prices():
     ticks = _session_ticks()
     feed_prices = {t.price for t in ticks}
     trace = _run_trace()
-    proj = StateProjector()
+    store = EventStore()
     seen_bars = 0
     for evt in trace:
-        proj.on_event(evt)
+        store.append(evt)
         if isinstance(evt, BarClosed):
             seen_bars += 1
-            snap = proj.snapshot(SYMBOL)
-            assert snap.tick is not None and snap.tick["volume"] > 0
-            assert snap.tick["close"] in feed_prices
+            vs = project_state(store.fold())
+            assert vs.tick is not None and vs.tick["volume"] > 0
+            assert vs.tick["close"] in feed_prices
     assert seen_bars == len(ticks) // 2
-    # the final projected tick/amt reflect the real last bar of the feed
-    snap = proj.snapshot(SYMBOL)
-    assert snap.tick["close"] in feed_prices
-    assert snap.amt is not None and "poc" in snap.amt
+    # the final folded tick reflects the real last bar of the feed
+    vs = project_state(store.fold())
+    assert vs.tick["close"] in feed_prices
+    # AMT is tracked by the engine inline; verify it exists in the trace
+    amt_events = [e for e in store.get_all() if isinstance(e, AmtUpdated)]
+    assert len(amt_events) > 0
+    assert "poc" in amt_events[-1].amt
 
 
 # ---------------------------------------------------------------------------
@@ -365,13 +369,23 @@ def test_each_position_closes_exactly_once():
 
 def test_ws_contract_carries_quant_decision_on_approved_bars():
     trace = _run_trace()
-    proj = StateProjector()
+    store = EventStore()
+    # Track latest amt/decision from the event stream (engine does this inline)
+    latest_amt = None
+    latest_qd = None
     checks = 0
     for evt in trace:
-        proj.on_event(evt)
+        store.append(evt)
+        if isinstance(evt, AmtUpdated):
+            latest_amt = evt.amt
+        elif isinstance(evt, DecisionProduced):
+            latest_qd = _decision_to_view(evt.decision)
         if not isinstance(evt, DecisionProduced) or not evt.decision.approved:
             continue
-        ws = view_state_to_ws(proj.snapshot(SYMBOL))
+        vs = project_state(store.fold())
+        from dataclasses import replace as _replace
+        vs = _replace(vs, amt=latest_amt, quant_decision=latest_qd)
+        ws = view_state_to_ws(vs)
         assert "amt" in ws and ws["amt"] is not None
         assert "quantDecision" in ws and ws["quantDecision"] is not None
         assert ws["quantDecision"]["approved"] is True

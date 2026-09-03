@@ -4,12 +4,10 @@ One position authority, one live cache:
 
 1. ``project_state(EngineState)`` — canonical: derives the book (positions,
    risk, ltp from the last closed bar) from ``EventStore.fold()``. This is
-   the state the engine's run-loop gates operate on.
-2. ``StateProjector`` — deprecated as a position authority; reduced to a
-   per-tick LIVE cache (ltp/oi/depth/forming candle between bar closes) and
-   a closed-trade/equity view accumulation. ``QuantCoordinator.snapshot()``
-   merges the fold-derived book with the projector's live fields — see
-   quant/multi_engine.py.
+   the sole source of truth for the trading state.
+2. ``LiveQuoteCache`` — per-tick live cache (ltp/oi/depth/forming candle
+   between bar closes). ``QuantCoordinator.snapshot()`` merges the
+   fold-derived book with this cache's live fields — see quant/multi_engine.py.
 
 The snapshot fields mirror the camelCase keys the WS adapter emits.
 """
@@ -18,7 +16,6 @@ from __future__ import annotations
 
 import threading
 import uuid
-import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -26,18 +23,6 @@ from typing import Any
 from quant.contracts.aggregates import INITIAL_CAPITAL
 from quant.contracts.timezones import IST
 from quant.decision.decision_service import QuantDecision
-from quant.events import (
-    AgentDecisionProduced,
-    AmtUpdated,
-    BarClosed,
-    DecisionProduced,
-    DepthUpdated,
-    Event,
-    PositionClosed,
-    PositionOpened,
-    PositionReduced,
-    RiskUpdated,
-)
 from quant.execution.order import Fill, Position
 from quant.execution.risk import RiskState
 from quant.state_machine import EngineState
@@ -61,7 +46,7 @@ def project_state(state: EngineState) -> ViewState:
     """Derive ViewState from a folded EngineState.
 
     This is the canonical path: ``EventStore.fold()`` → ``project_state()``
-    → ``view_state_to_ws()``. Replaces the deprecated ``StateProjector``.
+    → ``view_state_to_ws()``.
     """
     bar = state.last_bar
     tick = _bar_to_tick(bar) if bar is not None else None
@@ -84,8 +69,7 @@ def _engine_portfolio(state: EngineState) -> dict:
 
     ``equity`` reflects the paper starting capital plus realized P&L
     accumulated by the fold (PositionClosed events) plus the floating P&L of
-    any open position — parity with the StateProjector's portfolio formula so
-    the fold path and the live cache agree.
+    any open position.
     """
     realized = float(getattr(state, "realized_pnl", 0.0) or 0.0)
     base = {
@@ -263,28 +247,19 @@ def _position_to_view(position: Any, fill: Any | None = None) -> dict:
     return dto
 
 
-class StateProjector:
-    """Per-symbol live view cache — NOT a position authority.
+class LiveQuoteCache:
+    """Per-symbol per-tick live quote cache.
 
-    Kept for two jobs the event-fold cannot do without retaining closed-trade
-    history: per-tick live quotes/forming candles (``on_quote``) and the
-    closed-trade/equity accumulation (``PositionClosed``/``PositionReduced``
-    handling). ``QuantCoordinator.snapshot()`` composes the canonical book
-    from ``EventStore.fold() → project_state()`` with this cache's live
-    fields, so the projector's ``positions`` view is never the source of
-    truth for the book.
+    Holds ONLY the fields the event-fold cannot provide without retaining
+    closed-trade history or per-tick granularity: ltp, oi, depth, and the
+    forming candle between bar closes.
 
-    .. deprecated::
-        As a position/state authority. Use ``EventStore.fold()`` →
-        ``project_state()`` for the book; keep this only for live fields.
+    NOT a position authority — positions, risk, portfolio, amt, decisions
+    all come from ``EventStore.fold() → project_state()`` or the engine's
+    own ``latest_*`` attributes.
     """
 
     def __init__(self, interval_sec: int = 60) -> None:
-        warnings.warn(
-            "StateProjector is deprecated; use EventStore.fold() + project_state()",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         self._state: dict[str, dict] = {}
         self._lock = threading.RLock()
         self._interval_sec = interval_sec
@@ -305,43 +280,12 @@ class StateProjector:
             if current_bar is not None:
                 s["tick"] = _bar_to_tick(current_bar, interval_sec=self._interval_sec)
 
-    def on_event(self, event: Event) -> None:
-        with self._lock:
-            s = self._symbol_state(event.symbol)
-            if isinstance(event, BarClosed):
-                s["ltp"] = float(event.bar.close)
-                s["oi"] = float(getattr(event.bar, "oi", 0.0) or 0.0)
-                s["tick"] = _bar_to_tick(event.bar, interval_sec=self._interval_sec)
-            elif isinstance(event, DecisionProduced):
-                s["quant_decision"] = _decision_to_view(event.decision)
-            elif isinstance(event, RiskUpdated):
-                s["risk_state"] = _risk_to_view(event.risk)
-            elif isinstance(event, PositionOpened):
-                s["portfolio"] = self._portfolio(s["portfolio"])
-                s["portfolio"]["positions"].append(_position_to_view(event.position))
-            elif isinstance(event, PositionClosed):
-                s["portfolio"] = self._portfolio(s["portfolio"])
-                fill = event.fill
-                pos_id = str(getattr(fill.position, "_id", None) or getattr(fill.position, "id", ""))
-                self._remove_open(pos_id, s["portfolio"])
-                s["portfolio"]["closedTrades"].append(_position_to_view(fill.position, fill))
-            elif isinstance(event, PositionReduced):
-                s["portfolio"] = self._portfolio(s["portfolio"])
-                reduced = event.remaining
-                red_id = str(getattr(reduced, "_id", None) or getattr(reduced, "id", ""))
-                for p in s["portfolio"]["positions"]:
-                    if str(p.get("id", "")) == red_id:
-                        p["size"] = float(reduced.size)
-                        p["pnl"] = float(event.fill.pnl)
-                        break
-            elif isinstance(event, DepthUpdated):
-                s["depth"] = event.depth
-            elif isinstance(event, AmtUpdated):
-                s["amt"] = event.amt
-            elif isinstance(event, AgentDecisionProduced):
-                s["agent_decision"] = event.decision
-
     def snapshot(self, symbol: str) -> ViewState:
+        """Return a ViewState with only the live-cache fields populated.
+
+        The caller (QuantCoordinator.snapshot) merges this with the fold-derived
+        ViewState for positions/risk/portfolio.
+        """
         with self._lock:
             s = self._symbol_state(symbol)
             return ViewState(
@@ -349,12 +293,7 @@ class StateProjector:
                 tick=s["tick"],
                 ltp=s["ltp"],
                 oi=s["oi"],
-                quant_decision=s["quant_decision"],
-                risk_state=s["risk_state"],
-                portfolio=self._portfolio(s["portfolio"], ltp=s["ltp"]),
                 depth=s["depth"],
-                amt=s["amt"],
-                agent_decision=s.get("agent_decision"),
             )
 
     def _symbol_state(self, symbol: str) -> dict:
@@ -363,71 +302,16 @@ class StateProjector:
                 "tick": None,
                 "ltp": None,
                 "oi": None,
-                "quant_decision": None,
-                "risk_state": None,
-                "portfolio": None,
                 "depth": None,
-                "amt": None,
-                "agent_decision": None,
             }
         return self._state[symbol]
 
-    @staticmethod
-    def _portfolio(current: dict | None, ltp: float | None = None) -> dict:
-        """Portfolio DTO — ALWAYS the full frontend contract shape.
 
-        The WS snapshot protocol the frontend was built against guarantees
-        ``balance/equity/leverage`` plus ``positions``/``closedTrades`` arrays on
-        every message (legacy ``portfolio_to_dto``). The greenfield projector
-        only tracks positions; the monetary fields default to the paper-account
-        values until a real portfolio source exists.
-        """
-        # Contract defaults — MUST mirror quant/ws_adapter.view_state_to_ws and
-        # the frontend createInstrumentState (hooks/useServerTradingSystem.ts).
-        # Paper account capital: ₹1 crore (10M).
-        base = {
-            "balance": float(INITIAL_CAPITAL),
-            "equity": float(INITIAL_CAPITAL),
-            "leverage": 10,
-            "positions": [],
-            "closedTrades": [],
-        }
-        if current is None:
-            return base
-
-        raw_positions = current.get("positions", base["positions"])
-        positions = [dict(p) for p in raw_positions]
-        closed_trades = current.get("closedTrades", base["closedTrades"])
-
-        # Compute live floating unrealized P&L for open positions using latest LTP
-        if ltp is not None and ltp > 0:
-            for p in positions:
-                if p.get("status") == "OPEN":
-                    entry = float(p.get("entryPrice", 0.0))
-                    size = float(p.get("size", 0.0))
-                    # size is positive for LONG, negative for SHORT
-                    p["pnl"] = round((ltp - entry) * size, 2)
-                    p["currentPrice"] = float(ltp)
-
-        closed_pnl = sum(float(t.get("pnl", 0.0)) for t in closed_trades)
-        open_pnl = sum(float(p.get("pnl", 0.0)) for p in positions)
-        starting_capital = float(current.get("balance", base["balance"]))
-        equity = round(starting_capital + closed_pnl + open_pnl, 2)
-
-        return {
-            **base,
-            **current,
-            "balance": starting_capital,
-            "equity": equity,
-            "positions": positions,
-            "closedTrades": closed_trades,
-        }
-
-    @staticmethod
-    def _remove_open(position_id: str, portfolio: dict) -> None:
-        if not position_id:
-            return
-        positions = portfolio.get("positions", [])
-        portfolio["positions"] = [
-            p for p in positions if str(p.get("id", "")) != str(position_id)
-        ]
+def StateProjector(*args, **kwargs):
+    """Removed — use EventStore.fold() + project_state() for state,
+    LiveQuoteCache for per-tick live quotes."""
+    raise RuntimeError(
+        "StateProjector has been removed. Use EventStore.fold() + "
+        "project_state() for position/portfolio state, or LiveQuoteCache "
+        "for per-tick live quotes (ltp/oi/depth/forming candle)."
+    )

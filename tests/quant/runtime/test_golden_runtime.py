@@ -45,8 +45,7 @@ def test_projected_state_deterministic():
     e2 = _engine("SYM_G2")
     e1.run()
     e2.run()
-    assert view_state_to_ws(e1.projector.snapshot("SYM_G1"))["amt"]["poc"] == \
-        view_state_to_ws(e2.projector.snapshot("SYM_G2"))["amt"]["poc"]
+    assert e1.latest_amt["poc"] == e2.latest_amt["poc"]
 
 
 def test_journal_writes_and_replays(tmp_path):

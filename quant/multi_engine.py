@@ -650,18 +650,15 @@ class QuantCoordinator:
     def snapshot(self, symbol: str) -> dict:
         """Compose the WS snapshot for one symbol.
 
-        Single-authority composition (architectural review finding 3):
+        Single-authority composition:
 
-        - **Positions and risk** come from ``EventStore.fold() →
-          project_state()`` — the documented canonical path the run loop's
-          gates operate on (``engine.state`` is the same fold). A partial
-          (PositionReduced) now folds correctly, so the WS book can never
-          show a size the engine's gates disagree with.
-        - **Per-tick live fields** (ltp/oi/depth/AMT banner/decisions) and
-          **closed-trade history + equity math** come from the projector's
-          event view — values an event-fold cannot know without retaining
-          closed-trade history. StateProjector is reduced to a live cache;
-          it is never a position authority.
+        - **Positions, risk, portfolio** come from ``EventStore.fold() →
+          project_state()`` — the sole source of truth for trading state.
+        - **Per-tick live fields** (ltp/oi/depth/forming candle) come from
+          the engine's ``LiveQuoteCache`` — values an event-fold cannot know
+          between bar closes.
+        - **AMT, decisions** come from the engine's ``latest_*`` attributes —
+          updated inline by ``_emit()`` as events flow.
         """
         with self._lock:
             engine = self._engines.get(symbol)
@@ -675,10 +672,9 @@ class QuantCoordinator:
                 symbol, e,
             )
             vs = project_state(engine.state)
-        live = engine.projector.snapshot(symbol)
-        # Closed trades + balance/leverage from the projector's event view;
-        # positions OVERRIDDEN from the fold (single position authority).
-        portfolio = engine.projector._portfolio(live.portfolio, ltp=live.ltp)
+        # Live per-tick fields (ltp/oi/depth/forming candle)
+        live = engine.live_cache.snapshot(symbol)
+        # Patch live LTP into open positions for real-time floating P&L
         fold_positions = list((vs.portfolio or {}).get("positions", []))
         if live.ltp is not None and live.ltp > 0:
             patched = []
@@ -693,12 +689,9 @@ class QuantCoordinator:
                     p["currentPrice"] = float(live.ltp)
                 patched.append(p)
             fold_positions = patched
-        portfolio = {
-            **portfolio,
-            "positions": fold_positions,
-        }
-        # Recompute equity from the final position list (projector equity
-        # math used its own positions; ours may differ on drift).
+        portfolio = dict(vs.portfolio or {})
+        portfolio["positions"] = fold_positions
+        # Recompute equity with live P&L
         closed_pnl = sum(
             float(t.get("pnl", 0.0)) for t in portfolio.get("closedTrades", [])
         )
@@ -717,18 +710,10 @@ class QuantCoordinator:
             tick=live.tick if live.tick is not None else vs.tick,
             ltp=live.ltp if live.ltp is not None else vs.ltp,
             oi=live.oi if live.oi is not None else vs.oi,
-            depth=live.depth if live.depth is not None else vs.depth,
-            amt=live.amt if live.amt is not None else vs.amt,
-            quant_decision=(
-                live.quant_decision
-                if live.quant_decision is not None
-                else vs.quant_decision
-            ),
-            agent_decision=(
-                live.agent_decision
-                if live.agent_decision is not None
-                else vs.agent_decision
-            ),
+            depth=live.depth if live.depth is not None else (engine.latest_depth or vs.depth),
+            amt=engine.latest_amt,
+            quant_decision=engine.latest_quant_decision,
+            agent_decision=engine.latest_agent_decision,
         )
         return view_state_to_ws(vs)
 

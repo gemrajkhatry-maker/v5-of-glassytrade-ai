@@ -29,7 +29,11 @@ def test_engine_has_no_llm_machinery():
 def test_amt_populated_without_inference():
     eng = _engine()
     eng.run()
-    ws = view_state_to_ws(eng.projector.snapshot("SYM"))
+    from quant.state import project_state
+    from dataclasses import replace
+    vs = project_state(eng.event_store.fold())
+    vs = replace(vs, amt=eng.latest_amt)
+    ws = view_state_to_ws(vs)
     assert ws["amt"] is not None
     # Full AMTAnalysis contract — profile histogram, market state, VWAP bands.
     assert set(ws["amt"]) >= {

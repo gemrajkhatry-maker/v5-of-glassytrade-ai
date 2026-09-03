@@ -60,8 +60,12 @@ def test_engine_emits_agent_decision_in_ws_snapshot(monkeypatch):
     eng._advisor = build_live_advisor(eng._emit)
     eng.run()
 
-    snap = eng.projector.snapshot("NIFTY")
-    ws_data = view_state_to_ws(snap)
+    from quant.state import project_state
+    from dataclasses import replace
+    vs = project_state(eng.event_store.fold())
+    vs = replace(vs, amt=eng.latest_amt, quant_decision=eng.latest_quant_decision,
+                 agent_decision=eng.latest_agent_decision)
+    ws_data = view_state_to_ws(vs)
 
     assert "_symbol" in ws_data
     assert "agentDecision" in ws_data

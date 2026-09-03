@@ -1,4 +1,8 @@
-"""TDD tests for StateProjector replacement with EventStore.fold()."""
+"""Tests for the EventStore.fold() + project_state() path.
+
+Originally written as TDD for the StateProjector replacement. The replacement
+is now complete — EventStore.fold() + project_state() is the sole authority.
+"""
 
 import pytest
 
@@ -9,7 +13,7 @@ from quant.state_machine import Bar as StateBar, PositionState
 from quant.ws_adapter import view_state_to_ws
 
 
-class TestProjectorReplacement:
+class TestFoldIsSoleAuthority:
     def test_project_state_matches_events(self):
         """project_state() should match event store fold."""
         store = EventStore()
@@ -34,9 +38,8 @@ class TestProjectorReplacement:
         assert ws_snapshot["_symbol"] == "NIFTY"
         assert len(ws_snapshot["portfolio"]["positions"]) == 1
 
-    def test_projector_deprecated(self):
-        """StateProjector should be deprecated."""
-        with pytest.warns(DeprecationWarning):
-            from quant.state import StateProjector
-
-            projector = StateProjector()
+    def test_state_projector_removed(self):
+        """StateProjector has been removed — importing and calling it raises."""
+        from quant.state import StateProjector
+        with pytest.raises(RuntimeError, match="StateProjector has been removed"):
+            StateProjector()

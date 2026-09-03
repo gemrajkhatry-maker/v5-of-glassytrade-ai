@@ -60,7 +60,7 @@ class DecisionService:
             return QuantDecision(False, None, "NO_EDGE", "", ())
 
         # Hard safety: if risk is halted, emit an explicit HALTED decision so
-        # the StateProjector clears any stale approved state from scanner rows.
+        # the WS snapshot clears any stale approved state from scanner rows.
         # (Defect 2 fix: previously runtime._decide() returned early without
         # emitting any DecisionProduced, leaving stale ENTER signals visible.)
         # allow_positioned=True (thesis-flip exit check) bypasses this — a

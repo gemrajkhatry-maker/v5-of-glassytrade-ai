@@ -26,10 +26,10 @@ def view_state_to_ws(vs: ViewState | EngineState) -> dict:
     if isinstance(vs, EngineState):
         vs = project_state(vs)
     portfolio = vs.portfolio or {}
-    # Defaults MUST mirror quant/state.py StateProjector._portfolio and the
+    # Defaults MUST mirror quant/state.py _engine_portfolio and the
     # frontend createInstrumentState (hooks/useServerTradingSystem.ts).
     # Paper account capital: ₹10 lakh (1M) — mirrors quant/state.py
-    # StateProjector._portfolio and the frontend createInstrumentState.
+    # _engine_portfolio and the frontend createInstrumentState.
     # ponytail: explicit float conversion at WS edge for JSON serialization
     return {
         "_symbol": vs.symbol,

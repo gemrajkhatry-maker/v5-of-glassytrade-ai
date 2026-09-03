@@ -18,19 +18,20 @@ from quant.ws_contract import (
     validate_ws_snapshot,
 )
 from quant.ws_adapter import view_state_to_ws
-from quant.state import StateProjector
+from quant.event_store import EventStore
 from quant.events import BarClosed
 from quant.bars import Bar
+from quant.state import project_state
 
 
 def _make_view_state():
     """Create a minimal ViewState for testing."""
-    projector = StateProjector()
-    projector.on_event(BarClosed(
+    store = EventStore()
+    store.append(BarClosed(
         symbol="SYM", time="t0",
         bar=Bar(time="t0", open=100, high=101, low=99, close=100, volume=100),
     ))
-    return projector.snapshot("SYM")
+    return project_state(store.fold())
 
 
 class TestWSSnapshotKeys:

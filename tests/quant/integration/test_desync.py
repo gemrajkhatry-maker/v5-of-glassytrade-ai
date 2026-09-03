@@ -2,7 +2,7 @@
 
 These tests target the seams between:
   - EventStore.fold() <-> EngineState (state derivation)
-  - project_state() <-> StateProjector (view-state desync)
+  - project_state() (sole ViewState authority)
   - apply_event() guards (position ID matching, pyramid opens)
   - EventBus handler isolation (exception poisoning)
   - Concurrent emit (thread safety)
@@ -29,7 +29,7 @@ from quant.events import (
 )
 from quant.execution.order import Fill, Order, Position
 from quant.execution.risk import RiskState
-from quant.state import StateProjector, ViewState, project_state
+from quant.state import ViewState, project_state
 from quant.state_machine import Bar, EngineState, PositionState, RiskState
 from quant.transitions import apply_event, _position_to_state
 from quant.ws_adapter import view_state_to_ws
@@ -149,99 +149,53 @@ class TestPyramidPositionOpenedCrash:
 
 
 # ---------------------------------------------------------------------------
-# Attack 2: project_state() vs StateProjector equity desync
+# Attack 2: fold equity tracking
 # ---------------------------------------------------------------------------
 
-class TestProjectorVsFoldDesync:
-    """MAJOR: project_state() and StateProjector compute different equity.
+class TestFoldEquityTracking:
+    """Fold equity reflects realized P&L — the sole authority path.
 
-    project_state() always returns INITIAL_CAPITAL for balance/equity.
-    StateProjector._portfolio() computes live equity from P&L.
-
-    This means view_state_to_ws(engine_state) gives different portfolio values
-    than view_state_to_ws(projector.snapshot()) — the frontend sees different
-    equity depending on which path is used.
+    project_state() is the sole ViewState authority.
+    These tests verify equity correctly tracks realized P&L.
     """
 
-    def test_fold_should_track_equity_from_pnl(self):
-        """After a winning trade, fold() should reflect updated equity.
-
-        BUG: This test FAILS because project_state() always returns
-        INITIAL_CAPITAL for equity, ignoring realized P&L. The frontend
-        using the fold path never sees updated equity.
-        """
+    def test_fold_equity_reflects_realized_pnl(self):
+        """After a winning trade, fold equity > INITIAL_CAPITAL."""
         store = EventStore()
-        projector = StateProjector()
 
         base_pos = _make_position(pos_id="base-001", entry=100.0, size=10.0)
-        bar = _make_bar(close=105.0)  # Winning trade
+        bar = _make_bar(close=105.0)
 
-        # Open position
-        open_evt = PositionOpened(symbol="NIFTY", time="t0", position=base_pos)
-        store.append(open_evt)
-        projector.on_event(open_evt)
-
-        # Close position at profit
+        store.append(PositionOpened(symbol="NIFTY", time="t0", position=base_pos))
         fill = Fill(
             position=base_pos,
             close_price=105.0,
             close_time="t1",
             reason="TP",
-            pnl=50.0,  # (105 - 100) * 10
+            pnl=50.0,
         )
-        close_evt = PositionClosed(symbol="NIFTY", time="t1", fill=fill)
-        store.append(close_evt)
-        projector.on_event(close_evt)
+        store.append(PositionClosed(symbol="NIFTY", time="t1", fill=fill))
+        store.append(BarClosed(symbol="NIFTY", time="t2", bar=bar))
 
-        # Bar updates LTP
-        bar_evt = BarClosed(symbol="NIFTY", time="t2", bar=bar)
-        store.append(bar_evt)
-        projector.on_event(bar_evt)
+        fold_ws = view_state_to_ws(project_state(store.fold()))
+        assert fold_ws["portfolio"]["equity"] == 1_000_050.0
 
-        # Derive state via fold
-        engine_state = store.fold()
-        fold_view = project_state(engine_state)
-        fold_ws = view_state_to_ws(fold_view)
-
-        # Derive state via projector
-        proj_view = projector.snapshot("NIFTY")
-        proj_ws = view_state_to_ws(proj_view)
-
-        # EXPECTED: Both paths should show the same equity
-        # ACTUAL: fold shows INITIAL_CAPITAL, projector shows updated equity
-        assert fold_ws["portfolio"]["equity"] == proj_ws["portfolio"]["equity"], (
-            f"Equity desync: fold={fold_ws['portfolio']['equity']} "
-            f"vs projector={proj_ws['portfolio']['equity']}"
-        )
-
-    def test_fold_equity_should_reflect_realized_pnl(self):
-        """After a winning trade, fold equity should be > INITIAL_CAPITAL.
-
-        BUG: This test FAILS because project_state() always returns
-        INITIAL_CAPITAL, ignoring all realized P&L.
-        """
+    def test_fold_equity_accumulates_multiple_trades(self):
+        """After multiple winning trades, equity accumulates all P&L."""
         store = EventStore()
 
-        # Trade 1: Win 50.0
         pos1 = _make_position(pos_id="p1", entry=100.0, size=10.0)
         store.append(PositionOpened(symbol="NIFTY", time="t0", position=pos1))
         fill1 = Fill(position=pos1, close_price=105.0, close_time="t1", reason="TP", pnl=50.0)
         store.append(PositionClosed(symbol="NIFTY", time="t1", fill=fill1))
 
-        # Trade 2: Win 25.0
         pos2 = _make_position(pos_id="p2", entry=100.0, size=10.0)
         store.append(PositionOpened(symbol="NIFTY", time="t2", position=pos2))
         fill2 = Fill(position=pos2, close_price=102.5, close_time="t3", reason="TP", pnl=25.0)
         store.append(PositionClosed(symbol="NIFTY", time="t3", fill=fill2))
 
-        engine_state = store.fold()
-        fold_ws = view_state_to_ws(project_state(engine_state))
-
-        # EXPECTED: Equity should be INITIAL_CAPITAL + 75.0 (total P&L)
-        # ACTUAL: Equity is always INITIAL_CAPITAL
-        assert fold_ws["portfolio"]["equity"] > 1_000_000.0, (
-            f"Equity should reflect realized P&L, but got {fold_ws['portfolio']['equity']}"
-        )
+        fold_ws = view_state_to_ws(project_state(store.fold()))
+        assert fold_ws["portfolio"]["equity"] == 1_000_075.0
 
 
 # ---------------------------------------------------------------------------

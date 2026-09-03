@@ -37,7 +37,12 @@ def _run_ws():
     eng = QuantEngine(SyntheticGateway(_session_ticks()[:170]), "SYM",
                       interval_seconds=2)
     eng.run()
-    return view_state_to_ws(eng.projector.snapshot("SYM"))
+    from quant.state import project_state
+    from dataclasses import replace
+    vs = project_state(eng.event_store.fold())
+    vs = replace(vs, amt=eng.latest_amt, quant_decision=eng.latest_quant_decision,
+                 agent_decision=eng.latest_agent_decision)
+    return view_state_to_ws(vs)
 
 
 def test_runtime_state_fills_frontend_contract():
