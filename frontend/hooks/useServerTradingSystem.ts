@@ -7,7 +7,7 @@ import {
 } from '../types';
 import { NETWORK_CONFIG } from '../config';
 // HalfTrend is backend-computed; these helpers only upsert the display rows.
-import { halfTrendLivePoint, mergeHalfTrendPoint } from '../components/chart/ExecutionMarkersManager';
+import { halfTrendLivePoint, mergeHalfTrendPoint, pruneHalfTrendSeries } from '../components/chart/ExecutionMarkersManager';
 
 /**
  * Append a deterministic quantDecision to the per-symbol decision history.
@@ -342,7 +342,10 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                             ...prev,
                             [sym]: {
                                 ...inst,
-                                halfTrendSeries: rows.map((r: any) => ({
+                                // Prune pre-warm-up rows here too: a server_mode
+                                // refresh after a reconnect must not re-introduce
+                                // null/0-rail points the onopen sweep just removed.
+                                halfTrendSeries: pruneHalfTrendSeries(rows.map((r: any) => ({
                                     time: String(r.time),
                                     trend: r.trend === 1 ? 1 : 0,
                                     ht: Number(r.ht),
@@ -350,7 +353,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                                     atrLow: r.atrLow == null ? null : Number(r.atrLow),
                                     buy: !!r.buy,
                                     sell: !!r.sell,
-                                })),
+                                }))),
                             },
                         };
                     });
@@ -636,7 +639,27 @@ export const useServerTradingSystem = (config: ChartConfig) => {
             setConnected(true);
             setConnectionStatus('');
             lastPongRef.current = Date.now();
-            
+
+            // Reconnect: drop stale pre-warm-up HalfTrend rows (null/0 ATR
+            // rails) from the old connection so zero-value rails can never
+            // resurface in the series after a reconnect.
+            setInstruments(prev => {
+                let changed = false;
+                const next: Record<string, InstrumentState> = {};
+                for (const [sym, inst] of Object.entries(prev)) {
+                    if (!inst.halfTrendSeries || inst.halfTrendSeries.length === 0) {
+                        next[sym] = inst;
+                        continue;
+                    }
+                    const pruned = pruneHalfTrendSeries(inst.halfTrendSeries);
+                    if (pruned !== inst.halfTrendSeries) changed = true;
+                    next[sym] = pruned !== inst.halfTrendSeries
+                        ? { ...inst, halfTrendSeries: pruned }
+                        : inst;
+                }
+                return changed ? next : prev;
+            });
+
             // Send initial subscribe for current activeSymbol
             if (activeSymbolRef.current) {
                 if (pendingSubscribeRef.current) {
@@ -719,6 +742,17 @@ export const useServerTradingSystem = (config: ChartConfig) => {
         const gen = subscribeGenRef.current;
         activeSymbolRef.current = activeSymbol;
         if (!activeSymbol) return;
+
+        // Symbol switch: drop stale pre-warm-up HalfTrend rows for the newly
+        // active symbol so old zero-value rails never resurface on switch.
+        setInstruments(prev => {
+            const inst = prev[activeSymbol];
+            if (!inst?.halfTrendSeries?.length) return prev;
+            const pruned = pruneHalfTrendSeries(inst.halfTrendSeries);
+            if (pruned === inst.halfTrendSeries) return prev;
+            return { ...prev, [activeSymbol]: { ...inst, halfTrendSeries: pruned } };
+        });
+
         const timer = setTimeout(() => {
             if (subscribeGenRef.current !== gen) return;
             if (wsRef.current?.readyState === WebSocket.OPEN) {

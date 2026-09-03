@@ -286,6 +286,29 @@ export const HALF_TREND_DOWN_COLOR = '#f23645'; // Pine sellColor (red)
  * Normalize one live `amt.halfTrend` record (camelCase signal keys) into a
  * HalfTrendPoint compatible with the REST history rows.
  */
+/**
+ * Drop stale HalfTrend rows whose ATR channel rails are non-positive
+ * (0/negative) — the artifact of the old DTO that serialized pre-warm-up
+ * rails as 0.0. Called on WS reconnect and symbol switch so those
+ * zero-value rails can never resurface in the series.
+ *
+ * Null rails are deliberately KEPT: pre-warm-up rows carry the valid ht
+ * line (only the channel needs ATR), so dropping them would erase the
+ * trend line entirely for sessions shorter than ATR(period).
+ *
+ * Returns the same array reference when nothing is pruned, so React.memo
+ * comparators (ChartScene) don't trigger spurious re-renders.
+ */
+export function pruneHalfTrendSeries(
+  series: HalfTrendPoint[] | undefined
+): HalfTrendPoint[] {
+  const pts = series || [];
+  const pruned = pts.filter(
+    p => (p.atrHigh == null || p.atrHigh > 0) && (p.atrLow == null || p.atrLow > 0)
+  );
+  return pruned.length === pts.length ? pts : pruned;
+}
+
 export function halfTrendLivePoint(
   ht?: HalfTrendState
 ): HalfTrendPoint | null {
@@ -307,6 +330,12 @@ export function halfTrendLivePoint(
 /**
  * Upsert one point into the HalfTrend series (replace same-timestamp rows,
  * append newer ones), capped like the candle history.
+ *
+ * The replace/append decisions compare epoch milliseconds, NOT raw strings:
+ * the REST history rows are ISO-8601 IST and the WS live rows are the same
+ * after the DTO normalization — but a raw-string compare would silently
+ * duplicate (or drop, when one side parses invalid) the same bar across
+ * formats. epoch-ms is format-agnostic and strict for the pinned tests.
  */
 export function mergeHalfTrendPoint(
   series: HalfTrendPoint[] | undefined,
@@ -314,11 +343,16 @@ export function mergeHalfTrendPoint(
 ): HalfTrendPoint[] {
   const out = [...(series || [])];
   const last = out[out.length - 1];
-  if (last && last.time === point.time) {
+  const pointMs = new Date(point.time).getTime();
+  if (!isNaN(pointMs) && last && new Date(last.time).getTime() === pointMs) {
     out[out.length - 1] = point;
     return out;
   }
-  if (!last || new Date(point.time).getTime() > new Date(last.time).getTime()) {
+  if (
+    !last ||
+    (isNaN(pointMs) && last.time === point.time) ||
+    (!isNaN(pointMs) && pointMs > new Date(last.time).getTime())
+  ) {
     out.push(point);
     if (out.length > 500) out.shift();
   }

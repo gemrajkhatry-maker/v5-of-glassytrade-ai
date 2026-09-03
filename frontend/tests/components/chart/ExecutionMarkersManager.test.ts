@@ -10,6 +10,7 @@ import {
   mergeHalfTrendPoint,
   halfTrendSeriesData,
   halfTrendSignalMarkers,
+  pruneHalfTrendSeries,
   ChartMarker,
 } from '../../../components/chart/ExecutionMarkersManager';
 import { HalfTrendPoint } from '../../../types';
@@ -249,6 +250,23 @@ describe('ExecutionMarkersManager', () => {
       });
       expect(halfTrendLivePoint(undefined)).toBeNull();
       expect(halfTrendLivePoint({ ht: 5, trend: 0 } as any)).toBeNull();
+    });
+
+    it('prunes stale zero/negative rails but keeps null (pre-warm-up) rows', () => {
+      const warm: HalfTrendPoint = { time: '2024-01-01T09:30:00Z', trend: 0, ht: 8600, atrHigh: 8612, atrLow: 8588, buy: false, sell: false };
+      const preWarm: HalfTrendPoint = { time: '2024-01-01T09:25:00Z', trend: 0, ht: 8590, atrHigh: null, atrLow: null, buy: false, sell: false };
+      const staleZero: HalfTrendPoint = { time: '2024-01-01T09:20:00Z', trend: 0, ht: 8595, atrHigh: 0, atrLow: 0, buy: false, sell: false };
+      const staleNeg: HalfTrendPoint = { time: '2024-01-01T09:15:00Z', trend: 1, ht: 8580, atrHigh: -1, atrLow: -3, buy: false, sell: false };
+
+      const pruned = pruneHalfTrendSeries([staleNeg, staleZero, preWarm, warm]);
+      // zero/negative-rail rows dropped; null (pre-warm-up) and warm rows kept
+      expect(pruned).toHaveLength(2);
+      expect(pruned.map(p => p.time)).toEqual(['2024-01-01T09:25:00Z', '2024-01-01T09:30:00Z']);
+
+      // same reference when nothing to prune (no spurious re-render)
+      const clean = [preWarm, warm];
+      expect(pruneHalfTrendSeries(clean)).toBe(clean);
+      expect(pruneHalfTrendSeries(undefined)).toEqual([]);
     });
 
     it('treats 0 channel rails as null (no zero line stretching the scale)', () => {

@@ -532,4 +532,90 @@ describe('warm chart history via /api/market/history (Phase 2)', () => {
       restoreFetch();
     }
   });
+
+  it('keeps legit null-rail and warm HalfTrend rows across a WS reconnect (no line erasure)', async () => {
+    const { result, ws, restoreFetch } = await connectWithHistory([]);
+    try {
+      // Pre-warm-up row (null rails — the valid ht line segment) + warm row.
+      await pushMessage(ws, {
+        _type: 'full',
+        _symbol: 'NIFTY',
+        amt: { halfTrend: { time: '2026-08-07T14:50:00+05:30', trend: 0, ht: 127 } },
+      });
+      await pushMessage(ws, {
+        _type: 'full',
+        _symbol: 'NIFTY',
+        amt: { halfTrend: { time: '2026-08-07T14:55:00+05:30', trend: 0, ht: 128, atrHigh: 128.5, atrLow: 127.5 } },
+      });
+      expect(result.current.instruments['NIFTY'].halfTrendSeries).toHaveLength(2);
+
+      // Force a reconnect: non-1000 close -> backoff timer (1s) -> connect().
+      await act(async () => {
+        ws.close(4006);
+        await new Promise(r => setTimeout(r, 1200));
+      });
+
+      const series = result.current.instruments['NIFTY'].halfTrendSeries || [];
+      expect(series).toHaveLength(2);
+      expect(series[1].atrHigh).toBe(128.5);
+    } finally {
+      restoreFetch();
+    }
+  });
+
+  it('prunes stale zero-rail rows from REST halfTrend history on ingest', async () => {
+    const instances: MockWebSocket[] = [];
+    class TrackingWS extends MockWebSocket {
+      constructor(url: string) {
+        super(url);
+        instances.push(this);
+      }
+    }
+    const realFetch = global.fetch;
+    global.fetch = vi.fn(async (url: any) => {
+      const u = String(url);
+      if (u.includes('/api/system/config')) {
+        return { ok: true, json: async () => ({ activeSymbols: ['NIFTY'] }) } as any;
+      }
+      if (u.includes('/api/market/halftrend/')) {
+        // Old-bug artifact row (atrHigh/atrLow = 0) + a valid warmed row.
+        return {
+          ok: true,
+          json: async () => ({
+            data: [
+              { time: '2026-08-07T14:45:00+05:30', trend: 0, ht: 126, atrHigh: 0, atrLow: 0, buy: false, sell: false },
+              { time: '2026-08-07T14:50:00+05:30', trend: 0, ht: 127, atrHigh: 128, atrLow: 126, buy: false, sell: false },
+            ],
+          }),
+        } as any;
+      }
+      return { ok: false, json: async () => ({}) } as any;
+    }) as any;
+    global.WebSocket = TrackingWS as any;
+
+    const rendered = renderHook(() => useServerTradingSystem(DEFAULT_CONFIG));
+    try {
+      for (let i = 0; i < 3; i++) {
+        await act(async () => {
+          await new Promise(r => setTimeout(r, 20));
+        });
+      }
+      await act(async () => {
+        instances[0]?.onmessage?.({ data: JSON.stringify({
+          status: 'server_mode',
+          symbol: 'NIFTY',
+          activeSymbols: ['NIFTY'],
+          interval: '1m',
+        }) } as any);
+        await new Promise(r => setTimeout(r, 30));
+      });
+
+      const series = rendered.result.current.instruments['NIFTY'].halfTrendSeries || [];
+      // zero-rail artifact row pruned; warmed row kept
+      expect(series).toHaveLength(1);
+      expect(series[0].atrHigh).toBe(128);
+    } finally {
+      global.fetch = realFetch;
+    }
+  });
 });
