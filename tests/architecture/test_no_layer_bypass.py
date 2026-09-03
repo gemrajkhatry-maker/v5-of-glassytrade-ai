@@ -174,3 +174,72 @@ def test_new_code_logging_hygiene():
         if re.search(_BARE_EXCEPT_RE, src):
             bad.setdefault(rel, []).append("bare except Exception")
     assert bad == {}, bad
+
+
+# --- Engine-type boundary (ADR-0001, Plan E Task 2 deferred item) -----------
+#
+# DECISION (expressibility verdict, 2026-09-03): only the execution/order
+# half is gated. The entities half was measured and SKIPPED as too
+# diffuse: legit non-test runtime importers span three layers —
+# quant/contracts/aggregates.py (same bounded context), 
+# quant/contracts/ports/broker.py (port definition), and
+# backend/app/application/services/trading_query_service.py (read model) —
+# plus a TYPE_CHECKING-only use in quant/execution/exit_rules.py. An
+# allowlist covering all of those would be near-vacuous, so ADR-0001's
+# prose carries the entities rule instead. Evidence: grep
+# "from quant.contracts.entities import" (7 non-test .py importers).
+#
+# The order half IS stable: engine Order/Position/Fill may only be
+# imported at runtime by execution/*, state, event_store,
+# persistence_bridge, multi_engine, and tests. TYPE_CHECKING-only imports
+# (quant/events.py) are stripped before matching — they emit no runtime
+# crossing. Alternate spellings checked 2026-09-03: no
+# "from quant.execution import order" / "import quant.execution.order"
+# exists in the tree, so the single literal covers the idiom in use.
+_ORDER_IMPORT_RE = r"from quant\.execution\.order import"
+
+_ORDER_ALLOWED_FILES = frozenset({
+    "quant/state.py",
+    "quant/event_store.py",
+    "quant/persistence_bridge.py",
+    "quant/multi_engine.py",
+})
+
+_ORDER_ALLOWED_PREFIXES = ("quant/execution/",)
+
+_TEST_SCOPE_PREFIXES = ("tests/", "backend/tests/", "runtime_audit/")
+
+
+def _without_type_checking(src: str) -> str:
+    """Drop `if TYPE_CHECKING:` blocks (indent-delimited) from *src*."""
+    out = []
+    skipping = False
+    for line in src.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if re.match(r"if\s+TYPE_CHECKING\s*:", stripped):
+            skipping = True
+            continue
+        if skipping:
+            if stripped == "" or line[:1] in (" ", "\t"):
+                continue
+            skipping = False
+        out.append(line)
+    return "".join(out)
+
+
+def _order_importer_allowed(rel: str) -> bool:
+    if rel.startswith(_TEST_SCOPE_PREFIXES):
+        return True
+    if rel in _ORDER_ALLOWED_FILES:
+        return True
+    return rel.startswith(_ORDER_ALLOWED_PREFIXES)
+
+
+def test_engine_order_imports_stay_in_allowlist():
+    bad: list = []
+    for rel in _py_files():
+        if _order_importer_allowed(rel):
+            continue
+        if re.search(_ORDER_IMPORT_RE, _without_type_checking(_read(rel))):
+            bad.append(rel)
+    assert bad == [], bad
