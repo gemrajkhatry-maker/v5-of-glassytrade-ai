@@ -21,6 +21,11 @@ class Position:
     is_pyramid: bool = False   # True for add-on positions (P1, P2)
     _id: str = field(default_factory=lambda: str(uuid.uuid4()), compare=False, repr=False)
 
+    @property
+    def id(self) -> str:
+        """Public alias for ``_id`` — new code must use ``.id`` (SMELL-09)."""
+        return self._id
+
 
 @dataclass(frozen=True)
 class Fill:

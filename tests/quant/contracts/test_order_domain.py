@@ -57,3 +57,28 @@ def test_builder_happy_path_long():
     assert sig is not None and why == ""
     assert sig.type == "LONG" and sig.entry == 100.0
     assert sig.sl < sig.entry < sig.tp
+# append to tests/quant/contracts/test_order_domain.py
+from quant.decision.signal_builder import Signal as EngineSignal
+from quant.execution.order import Order, Position, Fill, position_to_row, row_to_position
+
+
+def _eng_position(pyramid=False, level=0):
+    sig = EngineSignal(type="LONG", reason="r", entry=100.0, sl=99.0, tp=102.0,
+                       rr=2.0, model_label="Triple-A", symbol="NIFTY", timestamp="t")
+    return Position(order=Order(signal=sig, quantity=65.0), open_price=100.0,
+                    open_time="t", size=65.0, pyramid_level=level, is_pyramid=pyramid)
+
+
+def test_id_alias_matches_private():
+    p = _eng_position()
+    assert p.id == p._id and len(p.id) > 0
+
+
+def test_row_roundtrip_base_and_pyramid():
+    for p in (_eng_position(), _eng_position(pyramid=True, level=1)):
+        row = position_to_row("NIFTY", p)
+        q = row_to_position(row)
+        assert q._id == p._id and q.size == p.size and q.open_price == p.open_price
+        assert q.order.signal.entry == 100.0 and q.order.quantity == 65.0
+        assert q.pyramid_level == p.pyramid_level and q.is_pyramid == p.is_pyramid
+        assert row["side"] == "LONG" and row["symbol"] == "NIFTY"
