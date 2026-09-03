@@ -1,5 +1,5 @@
 import { OHLCData } from '../../types';
-import { IST_OFFSET_SECONDS } from '../../constants';
+import { IST_OFFSET_SECONDS } from '../../time/ist';
 
 /**
  * VolumeSeriesManager - Data transformation for volume histogram series
@@ -26,11 +26,6 @@ export interface VolumeColorConfig {
   bullAlpha?: number;
   bearAlpha?: number;
 }
-
-/**
- * IST timezone offset in seconds (UTC+5:30)
- */
-const IST_OFFSET = IST_OFFSET_SECONDS;
 
 /**
  * Default volume colors (institutional style)
@@ -65,7 +60,7 @@ export function transformToVolumeData(
   return sortedData.map(d => {
     const isBullish = d.close >= d.open;
     return {
-      time: Math.floor(new Date(d.time as string).getTime() / 1000) + IST_OFFSET,
+      time: Math.floor(new Date(d.time as string).getTime() / 1000) + IST_OFFSET_SECONDS,
       value: d.volume,
       color: isBullish ? colors.bullColor : colors.bearColor,
     };

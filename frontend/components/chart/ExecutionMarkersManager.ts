@@ -1,5 +1,5 @@
 import { TradePosition, OHLCData, AMTAnalysis, HalfTrendPoint, HalfTrendState } from '../../types';
-import { IST_OFFSET_SECONDS } from '../../constants';
+import { IST_OFFSET_SECONDS } from '../../time/ist';
 import { toISTTimestamp } from './CandleSeriesManager';
 
 /**
@@ -28,11 +28,6 @@ export interface ExecutionMarkersOptions {
   mode: 'STANDARD';
   maxMarkers?: number; // Limit markers for performance
 }
-
-/**
- * IST timezone offset in seconds (UTC+5:30)
- */
-const IST_OFFSET = IST_OFFSET_SECONDS;
 
 /**
  * Generate entry markers from open positions

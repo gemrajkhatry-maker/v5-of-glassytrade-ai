@@ -158,7 +158,7 @@ def get_lot_size(symbol: str) -> int:
         symbol: Trading symbol (e.g., "NIFTY", "BANKNIFTY", "GOLD")
 
     Returns:
-        Lot size. Returns 1 if not found.
+        Lot size. Returns 1 if not found. Registry is consulted first; unknown -> 1.
     """
     canon = normalize_symbol(symbol)
     spec = DEFAULT_REGISTRY.try_resolve(canon)

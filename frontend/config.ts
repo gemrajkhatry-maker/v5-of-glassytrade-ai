@@ -182,7 +182,7 @@ export const VA_FREEZE_CONFIG = {
 // =============================================================================
 
 /** Network and connection settings */
-// Mirror of shared/net_policy.py — change both
+// NOTE: frontend-owned values; backend counterparts live in shared/net_policy.py — keep in sync conceptually (not 1:1).
 export const NETWORK_CONFIG = {
   /** WebSocket reconnection delay (seconds) */
   reconnectDelaySeconds: 5,

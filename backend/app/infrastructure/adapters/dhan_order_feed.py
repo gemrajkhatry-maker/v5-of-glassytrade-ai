@@ -44,6 +44,7 @@ import websockets
 
 from brokers.broker.dhan.application.order_converter import DHAN_ORDER_STATUS_MAP
 from brokers.broker.types import OrderStatus
+from shared.money import to_float as _to_float
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +60,6 @@ def _first(payload: dict, *keys: str, default: Any = None) -> Any:
         if value is not None and value != "":
             return value
     return default
-
-
-from shared.money import to_float as _to_float
 
 
 def normalize_order_update(payload: Any) -> dict | None:

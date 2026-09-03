@@ -193,8 +193,10 @@ DEFAULT_REGISTRY = InstrumentRegistry()
 
 
 def get_lot_size(root: str) -> int:
+    """Resolve-or-raise (UnknownInstrumentError). For fallback semantics use brokers.broker.market_info.get_lot_size."""
     return DEFAULT_REGISTRY.resolve(root).lot_size
 
 
 def get_tick_size(root: str) -> float:
+    """Resolve-or-raise (UnknownInstrumentError). For fallback semantics use brokers.broker.market_info.get_lot_size."""
     return DEFAULT_REGISTRY.resolve(root).tick_size

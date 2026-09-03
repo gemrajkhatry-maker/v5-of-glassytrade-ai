@@ -18,7 +18,7 @@ def to_decimal(value: Any) -> Decimal:
             raise ValueError(f"Cannot convert '{value}' to Decimal")
     raise ValueError(f"Unsupported type: {type(value)}")
 
-def to_float(value: Any, default: float = 0.0) -> float:
+def to_float(value: Any, default: float | None = 0.0) -> float | None:
     if value is None:
         return default
     if isinstance(value, float):

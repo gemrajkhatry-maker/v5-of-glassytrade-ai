@@ -28,9 +28,19 @@ def test_quant_shims_are_shared_money():
 def test_adapter_converters_match_shared_money():
     import pathlib
     adapter = pathlib.Path("backend/app/infrastructure/adapters/dhan_broker_adapter.py").read_text()
-    assert "def _to_decimal" not in adapter
+    assert "shared.money" in adapter
+    assert "Decimal(str(value))" not in adapter
     feed = pathlib.Path("backend/app/infrastructure/adapters/dhan_order_feed.py").read_text()
     assert "def _to_float" not in feed
+
+def test_adapter_lenient_wrapper_preserves_old_semantics():
+    from app.infrastructure.adapters.dhan_broker_adapter import _to_decimal
+    assert _to_decimal("abc") == Decimal("0")
+    assert _to_decimal(None) == Decimal("0")
+    assert _to_decimal(None, default="0.01") == Decimal("0.01")
+    assert _to_decimal("1.5") == Decimal("1.5")
+    assert _to_decimal([]) == Decimal("0")
+
 
 def test_registry_is_sole_lot_source():
     from quant.contracts.instrument_registry import (

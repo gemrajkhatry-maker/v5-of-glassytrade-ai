@@ -45,8 +45,11 @@ import threading
 import time
 
 from quant.brokers.gateway import Tick
+from quant.contracts.timezones import IST as _IST
 
 logger = logging.getLogger(__name__)
+
+_IST_OFFSET_SECONDS = float(_IST.utcoffset(None).total_seconds())
 
 
 class MultiplexedMarketFeed:
@@ -502,8 +505,7 @@ class MultiplexedMarketFeed:
             elif ts > time.time() + 10000:
                 # Dhan binary protocol sends LTT pre-shifted by +IST (IST epoch).
                 # Subtract one IST offset so ts is standard UTC epoch.
-                from quant.contracts.timezones import IST as _IST
-                ts -= _IST.utcoffset(None).total_seconds()
+                ts -= _IST_OFFSET_SECONDS
 
             # Monotonic timestamp guard — discard out-of-order/late ticks silently
             prev_ts = self._prev_ts.get(symbol, 0.0)

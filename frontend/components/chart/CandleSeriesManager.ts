@@ -1,5 +1,5 @@
 import { OHLCData } from '../../types';
-import { IST_OFFSET_SECONDS } from '../../constants';
+import { IST_OFFSET_SECONDS } from '../../time/ist';
 
 /**
  * CandleSeriesManager - Pure data transformation for candlestick series
@@ -30,11 +30,6 @@ export interface CandleValidationResult {
 }
 
 /**
- * IST timezone offset in seconds (UTC+5:30)
- */
-const IST_OFFSET = IST_OFFSET_SECONDS;
-
-/**
  * Convert timestamp to IST timezone
  * 
  * @param timeStr - ISO timestamp string
@@ -44,12 +39,12 @@ export function toISTTimestamp(timeStr: string | number): number {
   if (typeof timeStr === 'number') {
     if (!Number.isFinite(timeStr) || timeStr <= 0) return 0;
     const sec = timeStr > 1e11 ? Math.floor(timeStr / 1000) : timeStr;
-    return sec + IST_OFFSET;
+    return sec + IST_OFFSET_SECONDS;
   }
   if (!timeStr) return 0;
   const parsed = new Date(timeStr).getTime();
   if (isNaN(parsed) || parsed <= 0) return 0;
-  return Math.floor(parsed / 1000) + IST_OFFSET;
+  return Math.floor(parsed / 1000) + IST_OFFSET_SECONDS;
 }
 
 /**
