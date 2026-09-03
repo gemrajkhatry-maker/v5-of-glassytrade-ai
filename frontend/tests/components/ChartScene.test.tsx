@@ -21,6 +21,10 @@ vi.mock('lightweight-charts', () => ({
         applyOptions: vi.fn(),
       })),
     })),
+    addLineSeries: vi.fn(() => ({
+      setData: vi.fn(),
+      applyOptions: vi.fn(),
+    })),
     remove: vi.fn(),
     applyOptions: vi.fn(),
     timeScale: vi.fn(() => ({

@@ -1,4 +1,4 @@
-import { TradePosition, OHLCData, AMTAnalysis } from '../../types';
+import { TradePosition, OHLCData, AMTAnalysis, HalfTrendPoint, HalfTrendState } from '../../types';
 import { IST_OFFSET_SECONDS } from '../../constants';
 import { toISTTimestamp } from './CandleSeriesManager';
 
@@ -275,6 +275,111 @@ export function generateVARSReclaimMarkers(
     });
   }
 
+  return markers;
+}
+
+/** Pine HalfTrend colors. */
+export const HALF_TREND_UP_COLOR = '#2962ff'; // Pine buyColor (blue)
+export const HALF_TREND_DOWN_COLOR = '#f23645'; // Pine sellColor (red)
+
+/**
+ * Normalize one live `amt.halfTrend` record (camelCase signal keys) into a
+ * HalfTrendPoint compatible with the REST history rows.
+ */
+export function halfTrendLivePoint(
+  ht?: HalfTrendState
+): HalfTrendPoint | null {
+  if (!ht || !ht.time) return null;
+  return {
+    time: ht.time,
+    trend: ht.trend,
+    ht: ht.ht,
+    atrHigh: ht.atrHigh ?? null,
+    atrLow: ht.atrLow ?? null,
+    buy: !!ht.buySignal,
+    sell: !!ht.sellSignal,
+  };
+}
+
+/**
+ * Upsert one point into the HalfTrend series (replace same-timestamp rows,
+ * append newer ones), capped like the candle history.
+ */
+export function mergeHalfTrendPoint(
+  series: HalfTrendPoint[] | undefined,
+  point: HalfTrendPoint
+): HalfTrendPoint[] {
+  const out = [...(series || [])];
+  const last = out[out.length - 1];
+  if (last && last.time === point.time) {
+    out[out.length - 1] = point;
+    return out;
+  }
+  if (!last || new Date(point.time).getTime() > new Date(last.time).getTime()) {
+    out.push(point);
+    if (out.length > 500) out.shift();
+  }
+  return out;
+}
+
+/**
+ * Build lightweight-charts data for the HalfTrend overlay: the trend line
+ * (per-point colored) plus the ATR channel rails. Channel points are null
+ * before the ATR warms up -> whitespace rows so the rails skip those bars.
+ */
+export function halfTrendSeriesData(points: HalfTrendPoint[]) {
+  const ht: { time: number; value: number; color: string }[] = [];
+  const atrHigh: { time: number; value: number; color: string }[] = [];
+  const atrLow: { time: number; value: number; color: string }[] = [];
+
+  for (const p of points) {
+    const time = toISTTimestamp(p.time);
+    if (time <= 0) continue;
+    ht.push({
+      time,
+      value: p.ht,
+      color: p.trend === 1 ? HALF_TREND_DOWN_COLOR : HALF_TREND_UP_COLOR,
+    });
+    if (p.atrHigh != null) {
+      atrHigh.push({ time, value: p.atrHigh, color: HALF_TREND_DOWN_COLOR });
+    }
+    if (p.atrLow != null) {
+      atrLow.push({ time, value: p.atrLow, color: HALF_TREND_UP_COLOR });
+    }
+  }
+  return { ht, atrHigh, atrLow };
+}
+
+/**
+ * Buy/Sell label markers from the HalfTrend series. All signal detection
+ * happens in the backend; here we only place labels at the signal times.
+ */
+export function halfTrendSignalMarkers(points: HalfTrendPoint[]): ChartMarker[] {
+  const markers: ChartMarker[] = [];
+  for (const p of points) {
+    const time = toISTTimestamp(p.time);
+    if (time <= 0) continue;
+    if (p.buy) {
+      markers.push({
+        time,
+        position: 'belowBar',
+        color: HALF_TREND_UP_COLOR,
+        shape: 'arrowUp',
+        text: 'Buy',
+        size: 1 as const,
+      });
+    }
+    if (p.sell) {
+      markers.push({
+        time,
+        position: 'aboveBar',
+        color: HALF_TREND_DOWN_COLOR,
+        shape: 'arrowDown',
+        text: 'Sell',
+        size: 1 as const,
+      });
+    }
+  }
   return markers;
 }
 

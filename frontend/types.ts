@@ -139,6 +139,8 @@ export interface InstrumentState {
   runtimeSafety?: RuntimeSafetyState;
   ltp?: number;
   oi?: number;
+  // HalfTrend overlay series for the chart (history + live upserts)
+  halfTrendSeries?: HalfTrendPoint[];
   lastUpdate: number;
 }
 
@@ -347,6 +349,29 @@ export interface AMTAnalysis {
   gex?: GammaExposure;
   // LuxAlgo Value Area Reversion Signals (VARS)
   vars?: VARSState;
+  // HalfTrend indicator (backend-computed, display-only)
+  halfTrend?: HalfTrendState;
+}
+
+export interface HalfTrendState {
+  time?: string;
+  trend: 0 | 1;
+  ht: number;
+  atrHigh?: number;
+  atrLow?: number;
+  buySignal: boolean;
+  sellSignal: boolean;
+}
+
+/** HalfTrend overlay row (REST history + live upserts). */
+export interface HalfTrendPoint {
+  time: string;
+  trend: 0 | 1;
+  ht: number;
+  atrHigh: number | null;
+  atrLow: number | null;
+  buy: boolean;
+  sell: boolean;
 }
 
 export interface VARSState {

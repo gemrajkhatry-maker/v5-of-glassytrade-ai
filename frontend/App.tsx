@@ -170,6 +170,7 @@ function App() {
                                         closedTrades={activeInstrument.portfolio.closedTrades}
                                         agentDecision={activeInstrument.agentDecision}
                                         amtAnalysis={activeInstrument.amtAnalysis}
+                                        halfTrendSeries={activeInstrument.halfTrendSeries}
                                         mode={chartMode}
                                     />
                                 </div>
@@ -188,6 +189,7 @@ function App() {
                                         closedTrades={activeInstrument.portfolio.closedTrades}
                                         agentDecision={activeInstrument.agentDecision}
                                         amtAnalysis={activeInstrument.amtAnalysis}
+                                        halfTrendSeries={activeInstrument.halfTrendSeries}
                                         mode={chartMode}
                                     />
                                 </div>
@@ -203,6 +205,7 @@ function App() {
                                 closedTrades={activeInstrument.portfolio.closedTrades}
                                 agentDecision={activeInstrument.agentDecision}
                                 amtAnalysis={activeInstrument.amtAnalysis}
+                                halfTrendSeries={activeInstrument.halfTrendSeries}
                                 mode={chartMode}
                             />
                         )}

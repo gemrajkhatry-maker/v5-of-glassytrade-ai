@@ -6,8 +6,13 @@ import {
   generateCVDDivergenceMarkers,
   generateAcceptanceRejectionMarkers,
   generateAllExecutionMarkers,
+  halfTrendLivePoint,
+  mergeHalfTrendPoint,
+  halfTrendSeriesData,
+  halfTrendSignalMarkers,
   ChartMarker,
 } from '../../../components/chart/ExecutionMarkersManager';
+import { HalfTrendPoint } from '../../../types';
 
 describe('ExecutionMarkersManager', () => {
   describe('generateEntryMarkers', () => {
@@ -228,6 +233,65 @@ describe('ExecutionMarkersManager', () => {
       const amt = {} as any;
       const markers = generateAcceptanceRejectionMarkers(data, amt);
       expect(markers).toHaveLength(0);
+    });
+  });
+
+  describe('HalfTrend helpers (backend-computed, frontend renders)', () => {
+    it('normalizes a live amt.halfTrend record', () => {
+      const pt = halfTrendLivePoint({
+        time: '2024-01-01T09:30:00Z',
+        trend: 1, ht: 49990, atrHigh: 50020, atrLow: 49960,
+        buySignal: false, sellSignal: true,
+      } as any);
+      expect(pt).toEqual({
+        time: '2024-01-01T09:30:00Z', trend: 1, ht: 49990,
+        atrHigh: 50020, atrLow: 49960, buy: false, sell: true,
+      });
+      expect(halfTrendLivePoint(undefined)).toBeNull();
+      expect(halfTrendLivePoint({ ht: 5, trend: 0 } as any)).toBeNull();
+    });
+
+    it('upserts same timestamp and appends newer', () => {
+      const a: HalfTrendPoint = { time: '2024-01-01T09:30:00Z', trend: 0, ht: 10, atrHigh: null, atrLow: null, buy: false, sell: false };
+      const b: HalfTrendPoint = { time: '2024-01-01T09:30:00Z', trend: 1, ht: 12, atrHigh: 15, atrLow: 9, buy: false, sell: true };
+      const c: HalfTrendPoint = { time: '2024-01-01T09:35:00Z', trend: 1, ht: 11, atrHigh: null, atrLow: null, buy: false, sell: false };
+      let series = mergeHalfTrendPoint([], a);
+      series = mergeHalfTrendPoint(series, b); // same time -> replace
+      expect(series).toHaveLength(1);
+      expect(series[0].trend).toBe(1);
+      series = mergeHalfTrendPoint(series, c);
+      expect(series).toHaveLength(2);
+      expect(series[1].time).toBe(c.time);
+      // older rows are never appended
+      const old: HalfTrendPoint = { time: '2024-01-01T09:00:00Z', trend: 0, ht: 5, atrHigh: null, atrLow: null, buy: false, sell: false };
+      expect(mergeHalfTrendPoint(series, old)).toHaveLength(2);
+    });
+
+    it('builds colored series data with channel whitespace skipped', () => {
+      const { ht, atrHigh, atrLow } = halfTrendSeriesData([
+        { time: '2024-01-01T09:30:00Z', trend: 0, ht: 10, atrHigh: null, atrLow: null, buy: false, sell: false },
+        { time: '2024-01-01T09:35:00Z', trend: 1, ht: 9, atrHigh: 12, atrLow: 6, buy: false, sell: true },
+      ]);
+      expect(ht).toHaveLength(2);
+      expect(ht[0].color).toBe('#2962ff'); // trend 0 -> buy blue
+      expect(ht[1].color).toBe('#f23645'); // trend 1 -> sell red
+      expect(atrHigh).toHaveLength(1); // null channel skipped on first row
+      expect(atrLow).toHaveLength(1);
+    });
+
+    it('places Buy/Sell label markers at signal times', () => {
+      const markers = halfTrendSignalMarkers([
+        { time: '2024-01-01T09:30:00Z', trend: 0, ht: 10, atrHigh: null, atrLow: null, buy: true, sell: false },
+        { time: '2024-01-01T09:35:00Z', trend: 1, ht: 9, atrHigh: null, atrLow: null, buy: false, sell: true },
+        { time: '2024-01-01T09:40:00Z', trend: 1, ht: 9, atrHigh: null, atrLow: null, buy: false, sell: false },
+      ]);
+      expect(markers).toHaveLength(2);
+      expect(markers[0].text).toBe('Buy');
+      expect(markers[0].position).toBe('belowBar');
+      expect(markers[0].color).toBe('#2962ff');
+      expect(markers[1].text).toBe('Sell');
+      expect(markers[1].position).toBe('aboveBar');
+      expect(markers[1].color).toBe('#f23645');
     });
   });
 

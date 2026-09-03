@@ -70,6 +70,10 @@ vi.mock('lightweight-charts', () => {
         priceScale: vi.fn(() => ({ applyOptions: vi.fn() })),
         applyOptions: vi.fn(),
       })),
+      addLineSeries: vi.fn(() => ({
+        setData: vi.fn(),
+        applyOptions: vi.fn(),
+      })),
       remove: vi.fn(),
       applyOptions: vi.fn(),
       timeScale: makeLinearTimeScale,

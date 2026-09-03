@@ -6,6 +6,8 @@ import {
     LLMHistoryEntry,
 } from '../types';
 import { NETWORK_CONFIG } from '../config';
+// HalfTrend is backend-computed; these helpers only upsert the display rows.
+import { halfTrendLivePoint, mergeHalfTrendPoint } from '../components/chart/ExecutionMarkersManager';
 
 /**
  * Append a deterministic quantDecision to the per-symbol decision history.
@@ -59,6 +61,7 @@ const createInstrumentState = (symbol: string): InstrumentState => ({
     },
     aiAnalysis: null,
     amtAnalysis: null,
+    halfTrendSeries: [],
     auctionAnalysis: null,
     quantDecisionAnalysis: null,
     riskState: null,
@@ -322,6 +325,40 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                 .catch(() => {
                     inFlightHistoryRef.current.delete(flightKey);
                 });
+
+            // HalfTrend overlay series (backend-computed, REST history)
+            const htFlightKey = `${sym}:${intv}:halftrend`;
+            if (inFlightHistoryRef.current.has(htFlightKey)) continue;
+            inFlightHistoryRef.current.add(htFlightKey);
+            const htUrl = `${backendUrl(`/api/market/halftrend/${encodeURIComponent(sym)}`)}?interval=${encodeURIComponent(intv)}&limit=500`;
+            fetch(htUrl)
+                .then(res => (res.ok ? res.json() : null))
+                .then(body => {
+                    const rows = body?.data;
+                    if (!Array.isArray(rows) || rows.length === 0) return;
+                    setInstruments(prev => {
+                        const inst = prev[sym] || createInstrumentState(sym);
+                        return {
+                            ...prev,
+                            [sym]: {
+                                ...inst,
+                                halfTrendSeries: rows.map((r: any) => ({
+                                    time: String(r.time),
+                                    trend: r.trend === 1 ? 1 : 0,
+                                    ht: Number(r.ht),
+                                    atrHigh: r.atrHigh == null ? null : Number(r.atrHigh),
+                                    atrLow: r.atrLow == null ? null : Number(r.atrLow),
+                                    buy: !!r.buy,
+                                    sell: !!r.sell,
+                                })),
+                            },
+                        };
+                    });
+                })
+                .finally(() => inFlightHistoryRef.current.delete(htFlightKey))
+                .catch(() => {
+                    inFlightHistoryRef.current.delete(htFlightKey);
+                });
         }
     }, []);
 
@@ -473,6 +510,10 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     if (state.portfolio !== undefined) merged.portfolio = { ...existing.portfolio, ...state.portfolio };
                     if (state.amt !== undefined) {
                         merged.amtAnalysis = state.amt === null ? null : { ...existing.amtAnalysis, ...state.amt };
+                        const htPoint = halfTrendLivePoint(state.amt.halfTrend);
+                        if (htPoint) {
+                            merged.halfTrendSeries = mergeHalfTrendPoint(existing.halfTrendSeries, htPoint);
+                        }
                     }
                     if (state.auction !== undefined) merged.auctionAnalysis = { ...existing.auctionAnalysis, ...state.auction };
                     if (state.quantDecision !== undefined) {
@@ -530,6 +571,13 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                     ? (state.riskState ?? null)
                     : inst.riskState;
                 const newAgentDecision = state.agentDecision ?? inst.agentDecision;
+                let halfTrendSeries = inst.halfTrendSeries;
+                if (state.amt && state.amt !== null) {
+                    const htPoint = halfTrendLivePoint(state.amt.halfTrend);
+                    if (htPoint) {
+                        halfTrendSeries = mergeHalfTrendPoint(inst.halfTrendSeries, htPoint);
+                    }
+                }
 
                 return {
                     ...prev,
@@ -544,6 +592,7 @@ export const useServerTradingSystem = (config: ChartConfig) => {
                         riskState: newRiskState,
                         agentDecision: newAgentDecision,
                         orderBook: state.depth ?? inst.orderBook,
+                        halfTrendSeries,
                         ltp: state.ltp ?? inst.ltp,
                         oi: state.oi ?? inst.oi,
                         lastUpdate: Date.now(),

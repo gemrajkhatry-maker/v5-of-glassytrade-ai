@@ -24,9 +24,14 @@ vi.mock('lightweight-charts', () => ({
         applyOptions: vi.fn(),
       })),
     };
+    const lineSeriesMock = {
+      setData: vi.fn(),
+      applyOptions: vi.fn(),
+    };
     return {
       addCandlestickSeries: vi.fn(() => candleSeriesMock),
       addHistogramSeries: vi.fn(() => volumeSeriesMock),
+      addLineSeries: vi.fn(() => lineSeriesMock),
       remove: vi.fn(),
       applyOptions: vi.fn(),
       timeScale: vi.fn(() => ({

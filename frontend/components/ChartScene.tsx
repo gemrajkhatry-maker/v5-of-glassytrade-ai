@@ -11,7 +11,7 @@ import {
   IPriceLine,
   SeriesMarker,
 } from 'lightweight-charts';
-import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, ChartMode, AggressivePrint } from '../types';
+import { OHLCData, ChartConfig, TradePosition, AMTAnalysis, AgentDecision, ChartMode, AggressivePrint, HalfTrendPoint } from '../types';
 import { IST_OFFSET_SECONDS } from '../constants';
 import DecisionCard from './chart/DecisionCard';
 
@@ -22,6 +22,8 @@ import {
 } from './chart/AMTLevelsOverlay';
 import {
   generateAllExecutionMarkers,
+  halfTrendSeriesData,
+  halfTrendSignalMarkers,
   ExecutionMarkersOptions,
 } from './chart/ExecutionMarkersManager';
 import {
@@ -40,6 +42,7 @@ interface ChartSceneProps {
   closedTrades?: TradePosition[];
   agentDecision?: AgentDecision | null;
   amtAnalysis?: AMTAnalysis | null;
+  halfTrendSeries?: HalfTrendPoint[];
   mode?: ChartMode;
   tickBus?: EventTarget;
   symbol?: string;
@@ -87,6 +90,7 @@ const ChartScene: React.FC<ChartSceneProps> = ({
   closedTrades = [],
   agentDecision,
   amtAnalysis,
+  halfTrendSeries = [],
   mode = 'STANDARD',
   tickBus,
   symbol,
@@ -96,6 +100,9 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRef = useRef<IChartApi | null>(null);
     const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
     const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+    const htLineRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const atrHighRef = useRef<ISeriesApi<"Line"> | null>(null);
+    const atrLowRef = useRef<ISeriesApi<"Line"> | null>(null);
     const activePriceLinesRef = useRef<Map<string, IPriceLine[]>>(new Map());
     const amtLinesRef = useRef<IPriceLine[]>([]);
     const initializedRef = useRef(false);
@@ -229,9 +236,37 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       scaleMargins: { top: 0.8, bottom: 0 },
     });
 
+    // HalfTrend overlay: ht trend line + ATR channel rails (backend data).
+    const htLineSeries = chart.addLineSeries({
+      color: '#2962ff',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const atrHighSeries = chart.addLineSeries({
+      color: '#f23645',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+    const atrLowSeries = chart.addLineSeries({
+      color: '#2962ff',
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+    });
+
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
+    htLineRef.current = htLineSeries;
+    atrHighRef.current = atrHighSeries;
+    atrLowRef.current = atrLowSeries;
 
     chartRef.current.priceScale('right').applyOptions({
       scaleMargins: {
@@ -282,6 +317,9 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       cancelAnimationFrame(raf);
       resizeObserver.disconnect();
       chart.remove();
+      htLineRef.current = null;
+      atrHighRef.current = null;
+      atrLowRef.current = null;
       initializedRef.current = false;
     };
   }, []); // Only runs once on mount
@@ -1049,6 +1087,9 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       markerOptions
     );
 
+    // HalfTrend Buy/Sell labels (signals computed in the backend)
+    allMarkers.push(...halfTrendSignalMarkers(halfTrendSeries));
+
     // Convert to TradingView format and set markers
     const tvMarkers = allMarkers.map(m => ({
       time: m.time as any,
@@ -1106,7 +1147,16 @@ const chartContainerRef = useRef<HTMLDivElement>(null);
       activePriceLinesRef.current.set(pos.id, lines);
     });
 
-  }, [symbol, positions, closedTrades, stableAmtAnalysis, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
+  }, [symbol, positions, closedTrades, stableAmtAnalysis, halfTrendSeries, config.bullColor, config.bearColor, config.showVolumeProfile, config.vpMode, mode]);
+
+  // 6. HalfTrend overlay — ht trend line + ATR channel rails.
+  useEffect(() => {
+    if (!htLineRef.current || !atrHighRef.current || !atrLowRef.current) return;
+    const { ht, atrHigh, atrLow } = halfTrendSeriesData(halfTrendSeries || []);
+    htLineRef.current.setData(ht as any);
+    atrHighRef.current.setData(atrHigh as any);
+    atrLowRef.current.setData(atrLow as any);
+  }, [symbol, halfTrendSeries]);
 
   return (
     <div className="w-full h-full relative bg-[#0f172a] overflow-hidden">
