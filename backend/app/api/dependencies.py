@@ -2,6 +2,12 @@
 
 This module provides FastAPI dependencies using module-level singletons
 created at startup, eliminating the ServiceGraph service locator anti-pattern.
+
+Active-symbols ownership: this module owns the canonical snapshot
+(``_active_symbols``). ``main.py`` is the SOLE writer via its
+``_set_active_symbols()`` helper (lifespan scan wins; factory fallback only
+seeds when the scan is absent). Readers use ``get_active_symbols()`` (a
+``list`` copy — the stored snapshot is a tuple) or ``coordinator.symbols()``.
 """
 
 from __future__ import annotations
@@ -35,7 +41,7 @@ def init_singletons(
     _storage = storage
     _market_data = market_data
     _configuration = configuration
-    _active_symbols = active_symbols
+    _active_symbols = tuple(active_symbols or ())
     _coordinator = coordinator
 
 
@@ -43,6 +49,12 @@ def set_coordinator(coordinator) -> None:
     """Sync the coordinator singleton after lifespan boot (lifespan runs after factory init)."""
     global _coordinator
     _coordinator = coordinator
+
+
+def set_active_symbols(symbols) -> None:
+    """Sync the active-symbols singleton (called only by main._set_active_symbols)."""
+    global _active_symbols
+    _active_symbols = tuple(symbols or ())
 
 
 # FastAPI dependency functions

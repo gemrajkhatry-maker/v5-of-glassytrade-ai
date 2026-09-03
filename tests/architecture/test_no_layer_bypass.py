@@ -20,6 +20,16 @@ def test_no_import_of_app_main_in_routers():
         assert "import app.main" not in src, rel
 
 
+def test_active_symbols_single_writer():
+    src = _read("backend/app/main.py")
+    assert src.count("app.state.active_symbols =") <= 1, "two writers — unify first"
+
+
+def test_dependencies_owns_active_symbols():
+    src = _read("backend/app/api/dependencies.py")
+    assert "def get_active_symbols" in src
+
+
 def test_no_engine_privates_in_transport():
     import re
     for rel in (

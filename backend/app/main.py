@@ -37,7 +37,7 @@ from app.api.routers.observability import router as observability_router
 from app.api.routers.alerts import router as alerts_router
 from app.api.routers.analysis import router as analysis_router
 from app.api.websocket.gameloop import router as gameloop_router
-from app.api.dependencies import init_singletons
+from app.api.dependencies import init_singletons, set_active_symbols
 from app.core.correlation import CorrelationIdMiddleware
 from app.core.logging import setup_logging, get_logger
 from app.core.startup_telemetry import (
@@ -61,7 +61,7 @@ def _build_startup_contracts(
     *,
     broker,
     storage,
-    active_symbols: list[str],
+    active_symbols: list[str] | tuple[str, ...],
     coordinator=None,
     engine_start_failed: bool = False,
     reconciliation_result=None,
@@ -153,6 +153,20 @@ setup_logging()
 logger = get_logger(__name__)
 
 
+def _set_active_symbols(app, symbols) -> tuple:
+    """Single writer for active symbols (scan wins; fallback only when scan absent).
+
+    Normalizes to tuple once and mirrors the value into the dependencies
+    singleton so ``get_active_symbols()`` agrees with ``app.state``.
+    Returns the normalized tuple so callers pass the identical value on
+    (e.g. to ``init_singletons`` and the startup-contracts payload).
+    """
+    normalized = tuple(symbols or ())
+    app.state.active_symbols = normalized
+    set_active_symbols(normalized)
+    return normalized
+
+
 class WebSocketLogMiddleware:
     """Log WebSocket connection attempts for debugging."""
 
@@ -234,7 +248,7 @@ def create_application() -> FastAPI:
                     ]
 
             if selected_symbols:
-                app.state.active_symbols = selected_symbols
+                _set_active_symbols(app, selected_symbols)
                 logger.info(
                     "Option scanner selected %d contracts: %s",
                     len(selected_symbols),
@@ -448,7 +462,7 @@ def create_application() -> FastAPI:
             active_symbols = list(_settings.DHAN_SYMBOLS)
 
         app.state.startup_reconciliation = reconciliation_result
-        app.state.active_symbols = tuple(active_symbols)
+        active_symbols = _set_active_symbols(app, active_symbols)
         app.state.broker = broker
         app.state.storage = storage
         app.state.startup_contracts = _build_startup_contracts(
