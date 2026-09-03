@@ -24,6 +24,7 @@ from quant.contracts.ports.broker import IBroker
 from quant.decision.signal_builder import Signal as EngineSignal
 from quant.events import OrderFilled, OrderSubmitted
 from quant.execution.broker_mapper import to_broker_signal
+from quant.execution.fills import broker_position_to_fill
 from quant.execution.order import Fill, Order, Position
 
 if TYPE_CHECKING:
@@ -77,8 +78,8 @@ class LiveOMS:
             )
 
         # Map broker Position → engine Position
-        fill_price = float(getattr(broker_pos, "entry_price", 0))
-        filled_qty = float(getattr(broker_pos, "size", 0))
+        _fill = broker_position_to_fill(broker_pos, fallback_price=0.0, fallback_qty=0.0)
+        fill_price, filled_qty = _fill.fill_price, _fill.filled_qty
         signed = filled_qty if signal.type == "LONG" else -filled_qty
 
         # Audit trail: order was filled
@@ -145,8 +146,8 @@ class LiveOMS:
             )
 
         # The broker returns entry_price = actual fill price for close orders
-        fill_price = float(getattr(broker_pos, "entry_price", price))
-        filled_qty = float(getattr(broker_pos, "size", qty))
+        _fill = broker_position_to_fill(broker_pos, fallback_price=price, fallback_qty=qty)
+        fill_price, filled_qty = _fill.fill_price, _fill.filled_qty
 
         # Audit trail: close order was filled
         if self._emit_fn is not None:
@@ -238,8 +239,8 @@ class LiveOMS:
                 f"(fraction={fraction}, qty={qty})"
             )
 
-        fill_price = float(getattr(broker_pos, "entry_price", price))
-        filled_qty = float(getattr(broker_pos, "size", qty))
+        _fill = broker_position_to_fill(broker_pos, fallback_price=price, fallback_qty=qty)
+        fill_price, filled_qty = _fill.fill_price, _fill.filled_qty
 
         partial_pnl = (fill_price - position.open_price) * closed_size
 
@@ -341,8 +342,8 @@ class LiveOMS:
             )
             return None
 
-        fill_price = float(getattr(broker_pos, "entry_price", entry_price))
-        filled_qty = float(getattr(broker_pos, "size", size))
+        _fill = broker_position_to_fill(broker_pos, fallback_price=entry_price, fallback_qty=size)
+        fill_price, filled_qty = _fill.fill_price, _fill.filled_qty
         signed = filled_qty if long else -filled_qty
 
         # Audit trail

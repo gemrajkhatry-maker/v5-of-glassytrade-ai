@@ -82,3 +82,19 @@ def test_row_roundtrip_base_and_pyramid():
         assert q.order.signal.entry == 100.0 and q.order.quantity == 65.0
         assert q.pyramid_level == p.pyramid_level and q.is_pyramid == p.is_pyramid
         assert row["side"] == "LONG" and row["symbol"] == "NIFTY"
+# append to tests/quant/contracts/test_order_domain.py
+from types import SimpleNamespace
+from quant.execution.fills import BrokerFill, broker_position_to_fill
+
+
+def test_fill_mapping_exact_values():
+    bp = SimpleNamespace(entry_price=101.5, size=65)
+    f = broker_position_to_fill(bp, fallback_price=100.0, fallback_qty=65.0)
+    assert (f.fill_price, f.filled_qty, f.fill_quantity_assumed) == (101.5, 65.0, False)
+
+
+def test_fill_mapping_fallbacks_marked():
+    f = broker_position_to_fill(SimpleNamespace(), fallback_price=100.0, fallback_qty=65.0)
+    assert (f.fill_price, f.filled_qty, f.fill_quantity_assumed) == (100.0, 65.0, True)
+    g = broker_position_to_fill(SimpleNamespace(entry_price=101.5), fallback_price=100.0, fallback_qty=65.0)
+    assert (g.fill_price, g.filled_qty, g.fill_quantity_assumed) == (101.5, 65.0, True)
