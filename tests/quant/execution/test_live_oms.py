@@ -17,6 +17,7 @@ from quant.contracts.enums import Side, SignalType, Source, SetupType
 from quant.contracts.ports.broker import IBroker
 from quant.decision.signal_builder import Signal
 from quant.execution.live_oms import LiveOMS
+from quant.execution.lots import snap_to_lot
 from quant.execution.order import Position
 
 
@@ -278,10 +279,10 @@ class TestLiveOMSAddPyramid:
 
 class TestLiveOMSLotSnapping:
     def test_snaps_to_lot_multiple(self):
-        assert LiveOMS._snap_to_lot(100.0, 65.0) == 130.0  # 2 lots
-        assert LiveOMS._snap_to_lot(65.0, 65.0) == 65.0    # 1 lot
-        assert LiveOMS._snap_to_lot(30.0, 65.0) == 65.0    # minimum 1 lot
-        assert LiveOMS._snap_to_lot(200.0, 65.0) == 195.0  # 3 lots
+        assert snap_to_lot(100.0, 65.0) == 130.0  # 2 lots
+        assert snap_to_lot(65.0, 65.0) == 65.0    # 1 lot
+        assert snap_to_lot(30.0, 65.0) == 65.0    # minimum 1 lot
+        assert snap_to_lot(200.0, 65.0) == 195.0  # 3 lots
 
 
 # ---------------------------------------------------------------------------
