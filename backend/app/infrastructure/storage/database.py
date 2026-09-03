@@ -17,7 +17,7 @@ from typing import Any
 from uuid import uuid4
 
 from quant.contracts.ports.storage import IStorage
-from shared.conversion import to_float
+from shared.money import to_float
 
 logger = logging.getLogger(__name__)
 
